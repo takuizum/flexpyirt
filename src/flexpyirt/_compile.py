@@ -17,7 +17,7 @@ import pandas as pd
 
 from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock
 from flexpyirt.errors import FlexpyirtWarning, IdentificationError, SpecificationError
-from flexpyirt.items import ItemKernel
+from flexpyirt.items import FourPLKernel, ItemKernel
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -200,6 +200,18 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
         for name, item_model in model.items:
             lower, upper = item_model.bounds()
             free_default = item_model.default_free()
+            item_starts = starts[name].copy()
+            if isinstance(item_model.kernel, FourPLKernel):
+                g_free = free_default[2] and (name, "g") not in fixed
+                u_free = free_default[3] and (name, "u") not in fixed
+                if g_free and not u_free:
+                    u_val = fixed.get((name, "u"), float(item_starts[3]))
+                    if u_val > 0.0:
+                        item_starts[2] = min(float(item_starts[2]), 0.5 * u_val)
+                elif u_free and not g_free:
+                    g_val = fixed.get((name, "g"), float(item_starts[2]))
+                    if g_val < 1.0:
+                        item_starts[3] = max(float(item_starts[3]), 0.5 * (1.0 + g_val))
             for k, param in enumerate(item_model.kernel.param_names):
                 key = (name, param)
                 rows.append(
@@ -208,7 +220,7 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                         "item": name,
                         "model": item_model.name,
                         "param": param,
-                        "value": fixed.get(key, float(starts[name][k])),
+                        "value": fixed.get(key, float(item_starts[k])),
                         "free": free_default[k] and key not in fixed,
                         "lower": float(lower[k]),
                         "upper": float(upper[k]),
@@ -314,7 +326,7 @@ def validate_table(
             raise SpecificationError(f"Latent variance must be positive at {where}.")
 
     # Asymptote ordering g < u for 3PL / 4PL items.
-    fourpl_items = {name for name, m in model.items if m.kernel.param_names == ("a", "d", "g", "u")}
+    fourpl_items = {name for name, m in model.items if isinstance(m.kernel, FourPLKernel)}
     if fourpl_items:
         sub = t[t["item"].isin(fourpl_items) & t["param"].isin(["g", "u"])]
         for (grp, itm), rows in sub.groupby(["group", "item"], sort=False):

@@ -361,3 +361,50 @@ def test_edited_table_bounds_validated_against_model_domain() -> None:
     assert float(prepared.table.loc[row_g, "lower"].iloc[0]) == 0.05
     assert float(prepared.table.loc[row_u, "upper"].iloc[0]) == 0.99
     assert float(prepared.table.loc[row_var, "lower"].iloc[0]) == 0.1
+
+
+def test_fixed_asymptote_adjusts_free_asymptote_start_value() -> None:
+    a = np.array([1.4, 1.5, 1.3, 1.6, 1.4, 1.5])
+    d = np.array([0.0, -0.3, -0.5, -0.2, -0.4, -0.1])
+    df = _sim_4pl(a, d, np.full(6, 0.2), np.full(6, 0.9), n=500, seed=707)
+
+    # Fixing u below the default g start (~0.2) adjusts g's start strictly below u.
+    spec_3pl_u = Model.uniform(ThreePL(), items=df.columns).fix(item="q01", u=0.15)
+    t_3pl = spec_3pl_u.parameter_table(df).set_index(["item", "param"])
+    g0 = float(t_3pl["value"].loc[("q01", "g")])
+    assert 0.0 < g0 < 0.15
+    assert bool(t_3pl["free"].loc[("q01", "g")])
+    assert float(t_3pl["value"].loc[("q01", "u")]) == 0.15
+    assert not bool(t_3pl["free"].loc[("q01", "u")])
+
+    # Same for FourPL when u is fixed low.
+    spec_4pl_u = Model.uniform(FourPL(), items=df.columns).fix(item="q01", u=0.15)
+    t_4pl_u = spec_4pl_u.parameter_table(df).set_index(["item", "param"])
+    assert 0.0 < float(t_4pl_u["value"].loc[("q01", "g")]) < 0.15
+
+    # Fixing g above the default u start (~0.95) adjusts u's start strictly above g.
+    spec_4pl_g = Model.uniform(FourPL(), items=df.columns).fix(item="q01", g=0.96)
+    t_4pl_g = spec_4pl_g.parameter_table(df).set_index(["item", "param"])
+    u0 = float(t_4pl_g["value"].loc[("q01", "u")])
+    assert 0.96 < u0 < 1.0
+    assert bool(t_4pl_g["free"].loc[("q01", "u")])
+    assert float(t_4pl_g["value"].loc[("q01", "g")]) == 0.96
+    assert not bool(t_4pl_g["free"].loc[("q01", "g")])
+
+    # Fitting with adjusted starting values proceeds without SpecificationError.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res_u = fit(spec_3pl_u, df, method=BAEM(tol=1e-4, max_iter=10), se=None)
+        res_g = fit(spec_4pl_g, df, method=BAEM(tol=1e-4, max_iter=10), se=None)
+    assert np.isfinite(res_u.loglik)
+    assert float(res_u.items.set_index("item")["g"].loc["q01"]) < 0.15
+    assert np.isfinite(res_g.loglik)
+    assert float(res_g.items.set_index("item")["u"].loc["q01"]) > 0.96
+
+    # Boundary-infeasible single-asymptote fixes are still rejected.
+    with pytest.raises(SpecificationError, match="Lower asymptote"):
+        Model.uniform(ThreePL(), items=df.columns).fix(item="q01", u=0.0).parameter_table(df)
+    with pytest.raises(SpecificationError, match="Lower asymptote"):
+        Model.uniform(FourPL(), items=df.columns).fix(item="q01", g=1.0).parameter_table(df)
+    with pytest.raises(SpecificationError, match=r"outside.*'u'"):
+        Model.uniform(ThreePL(), items=df.columns).fix(item="q01", u=-0.1).parameter_table(df)
