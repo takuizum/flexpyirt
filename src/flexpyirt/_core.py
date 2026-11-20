@@ -30,6 +30,7 @@ __all__ = [
     "information_hessian",
     "information_oakes",
     "marginal_loglik",
+    "squarem",
 ]
 
 
@@ -297,7 +298,11 @@ def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: i
 
 
 class EMResult(NamedTuple):
-    """Output of :func:`em`. History arrays have length ``max_iter`` and are NaN past ``n_iter``."""
+    """Output of :func:`em` and :func:`squarem`.
+
+    History arrays have length ``max_iter``; entries past ``n_iter`` are NaN (for float arrays),
+    0 (for ``em_eval_history``), or False (for ``safeguard_history``).
+    """
 
     eta: Array
     n_iter: Array
@@ -305,6 +310,26 @@ class EMResult(NamedTuple):
     loglik: Array
     loglik_history: Array
     change_history: Array
+    n_em_evaluations: Array
+    em_eval_history: Array
+    safeguard_history: Array
+    n_safeguards: Array
+
+
+_SQUAREM_MAX_BACKTRACK = 10
+"""Maximum halvings of ``alpha`` towards ``-1`` before falling back to ``theta_2``."""
+
+
+def _eta_bounds(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
+    """Per-coordinate ``(lower, upper)`` bounds of ``eta`` from the M-step blocks (§15.13)."""
+    lo = jnp.full_like(eta, -jnp.inf)
+    hi = jnp.full_like(eta, jnp.inf)
+    for fam in prob.families:
+        lo = _scatter(lo, fam.slot_lower, fam.slot_free_index)
+        hi = _scatter(hi, fam.slot_upper, fam.slot_free_index)
+    lo = _scatter(lo, prob.latent.lower, prob.latent.free_index)
+    hi = _scatter(hi, prob.latent.upper, prob.latent.free_index)
+    return lo, hi
 
 
 def em(prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newton: int) -> EMResult:
@@ -314,22 +339,40 @@ def em(prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newto
     ``change_history[t]`` the maximum absolute parameter change made by iteration ``t``.
     """
     nan_hist = jnp.full((max_iter,), jnp.nan, dtype=eta0.dtype)
+    eval_hist = jnp.zeros((max_iter,), dtype=jnp.int32)
+    safe_hist = jnp.zeros((max_iter,), dtype=jnp.bool_)
+    one = jnp.asarray(1, dtype=jnp.int32)
 
-    def cond(state: tuple[Array, Array, Array, Array, Array]) -> Array:
-        _, it, change, _, _ = state
+    def cond(state: tuple[Array, Array, Array, Array, Array, Array]) -> Array:
+        _, it, change, _, _, _ = state
         return (it < max_iter) & (change >= tol)
 
     def body(
-        state: tuple[Array, Array, Array, Array, Array],
-    ) -> tuple[Array, Array, Array, Array, Array]:
-        eta, it, _, ll_hist, ch_hist = state
+        state: tuple[Array, Array, Array, Array, Array, Array],
+    ) -> tuple[Array, Array, Array, Array, Array, Array]:
+        eta, it, _, ll_hist, ch_hist, ev_hist = state
         counts, ll = e_step(prob, eta)
         new = m_step(prob, eta, counts, n_newton)
         change = jnp.max(jnp.abs(new - eta), initial=0.0)
-        return new, it + 1, change, ll_hist.at[it].set(ll), ch_hist.at[it].set(change)
+        next_it = it + one
+        return (
+            new,
+            next_it,
+            change,
+            ll_hist.at[it].set(ll),
+            ch_hist.at[it].set(change),
+            ev_hist.at[it].set(next_it),
+        )
 
-    init = (eta0, jnp.asarray(0), jnp.asarray(jnp.inf, eta0.dtype), nan_hist, nan_hist)
-    eta, n_iter, change, ll_hist, ch_hist = jax.lax.while_loop(cond, body, init)
+    init = (
+        eta0,
+        jnp.asarray(0, dtype=jnp.int32),
+        jnp.asarray(jnp.inf, eta0.dtype),
+        nan_hist,
+        nan_hist,
+        eval_hist,
+    )
+    eta, n_iter, change, ll_hist, ch_hist, ev_hist = jax.lax.while_loop(cond, body, init)
     return EMResult(
         eta=eta,
         n_iter=n_iter,
@@ -337,6 +380,157 @@ def em(prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newto
         loglik=marginal_loglik(prob, eta),
         loglik_history=ll_hist,
         change_history=ch_hist,
+        n_em_evaluations=n_iter,
+        em_eval_history=ev_hist,
+        safeguard_history=safe_hist,
+        n_safeguards=jnp.asarray(0, dtype=jnp.int32),
+    )
+
+
+def squarem(
+    prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newton: int
+) -> EMResult:
+    r"""SQUAREM-accelerated Bock–Aitkin EM (Varadhan & Roland, 2008, scheme S3; DESIGN §4.6).
+
+    Each iteration applies the EM map :math:`F` twice to obtain :math:`\theta_1=F(\theta_0)` and
+    :math:`\theta_2=F(\theta_1)`, forms :math:`r=\theta_1-\theta_0`,
+    :math:`s=\theta_2-\theta_1`, :math:`v=s-r`, and computes the S3 step length
+
+    .. math::
+        \alpha = \min\!\left(-\frac{\lVert r\rVert_2}{\lVert v\rVert_2},\,-1\right),
+        \qquad
+        \theta'(\alpha) = \theta_0 - 2\alpha r + \alpha^2 v
+        = \theta_2 - 2\delta s + \delta^2 v \quad (\delta=\alpha+1\le 0).
+
+    Monotonicity and feasibility safeguard: if :math:`\theta'(\alpha)` leaves the strict parameter
+    bounds ``(lower, upper)`` or gives a non-finite or lower marginal log-likelihood than
+    :math:`\max(\ell(\theta_2),\ell(\theta_0))`, :math:`\alpha` is stepped back towards :math:`-1`
+    via :math:`\alpha\leftarrow(\alpha-1)/2` (i.e. :math:`\delta\leftarrow\delta/2`) up to
+    ``_SQUAREM_MAX_BACKTRACK`` times. An accepted :math:`\theta'` is followed by one stabilizing
+    EM step :math:`\theta_{\text{new}}=F(\theta')` (3 EM map evaluations); if no backtracked
+    candidate is acceptable, :math:`\theta_{\text{new}}=\theta_2` is used directly (2 EM map
+    evaluations). Runs entirely inside ``lax.while_loop``.
+    """
+    lower, upper = _eta_bounds(prob, eta0)
+    nan_hist = jnp.full((max_iter,), jnp.nan, dtype=eta0.dtype)
+    eval_hist = jnp.zeros((max_iter,), dtype=jnp.int32)
+    safe_hist = jnp.zeros((max_iter,), dtype=jnp.bool_)
+    zero = jnp.asarray(0, dtype=jnp.int32)
+    one = jnp.asarray(1, dtype=jnp.int32)
+    two = jnp.asarray(2, dtype=jnp.int32)
+    three = jnp.asarray(3, dtype=jnp.int32)
+
+    def _is_acceptable(cand: Array, ll_ref: Array) -> Array:
+        in_bounds = jnp.all(jnp.isfinite(cand) & (cand > lower) & (cand < upper))
+
+        def _eval_ll(c: Array) -> Array:
+            ll_c = marginal_loglik(prob, c)
+            return jnp.isfinite(ll_c) & (ll_c >= ll_ref)
+
+        accepted: Array = jax.lax.cond(in_bounds, _eval_ll, lambda _: jnp.asarray(False), cand)
+        return accepted
+
+    def cond(
+        state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array],
+    ) -> Array:
+        _, it, change, _, _, _, _, _, _ = state
+        return (it < max_iter) & (change >= tol)
+
+    def body(
+        state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array],
+    ) -> tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array]:
+        eta, it, _, n_evals, n_safe, ll_hist, ch_hist, ev_hist, sf_hist = state
+        counts0, ll0 = e_step(prob, eta)
+        theta1 = m_step(prob, eta, counts0, n_newton)
+        counts1, _ = e_step(prob, theta1)
+        theta2 = m_step(prob, theta1, counts1, n_newton)
+
+        r = theta1 - eta
+        s = theta2 - theta1
+        v = s - r
+        r_norm = jnp.sqrt(jnp.sum(r * r))
+        v_norm = jnp.sqrt(jnp.sum(v * v))
+        has_v = v_norm > 0.0
+        raw_alpha = jnp.where(has_v, -r_norm / jnp.where(has_v, v_norm, 1.0), -1.0)
+        alpha = jnp.where(jnp.isfinite(raw_alpha), jnp.minimum(raw_alpha, -1.0), -1.0)
+
+        def _extrapolate(_unused: None) -> tuple[Array, Array, Array]:
+            ll2 = marginal_loglik(prob, theta2)
+            ll_ref = jnp.maximum(ll2, ll0)
+
+            def bt_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
+                k, _, ok, _ = bt
+                return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
+
+            def bt_body(bt: tuple[Array, Array, Array, Array]) -> tuple[Array, Array, Array, Array]:
+                k, delta, _, _ = bt
+                cand = theta2 - 2.0 * delta * s + (delta * delta) * v
+                ok = _is_acceptable(cand, ll_ref)
+                next_delta = jnp.where(ok, delta, 0.5 * delta)
+                next_k = jnp.where(ok, k, k + one)
+                return next_k, next_delta, ok, cand
+
+            init_bt = (zero, alpha + 1.0, jnp.asarray(False), theta2)
+            k_out, _, ok, cand = jax.lax.while_loop(bt_cond, bt_body, init_bt)
+            fired = k_out > zero
+            theta_p = jnp.where(ok, cand, theta2)
+            return theta_p, ok, fired
+
+        def _no_extrapolate(_unused: None) -> tuple[Array, Array, Array]:
+            return theta2, jnp.asarray(True), jnp.asarray(False)
+
+        theta_prime, do_stabilize, fired = jax.lax.cond(
+            alpha < -1.0, _extrapolate, _no_extrapolate, None
+        )
+
+        def _stabilize(t: Array) -> tuple[Array, Array]:
+            c, _ = e_step(prob, t)
+            return m_step(prob, t, c, n_newton), three
+
+        def _fallback(_unused: Array) -> tuple[Array, Array]:
+            return theta2, two
+
+        new, evals_added = jax.lax.cond(do_stabilize, _stabilize, _fallback, theta_prime)
+        change = jnp.max(jnp.abs(new - eta), initial=0.0)
+        next_evals = n_evals + evals_added
+        next_safe = n_safe + fired.astype(jnp.int32)
+        return (
+            new,
+            it + one,
+            change,
+            next_evals,
+            next_safe,
+            ll_hist.at[it].set(ll0),
+            ch_hist.at[it].set(change),
+            ev_hist.at[it].set(next_evals),
+            sf_hist.at[it].set(fired),
+        )
+
+    init = (
+        eta0,
+        zero,
+        jnp.asarray(jnp.inf, eta0.dtype),
+        zero,
+        zero,
+        nan_hist,
+        nan_hist,
+        eval_hist,
+        safe_hist,
+    )
+    eta, n_iter, change, n_evals, n_safe, ll_hist, ch_hist, ev_hist, sf_hist = jax.lax.while_loop(
+        cond, body, init
+    )
+    return EMResult(
+        eta=eta,
+        n_iter=n_iter,
+        converged=change < tol,
+        loglik=marginal_loglik(prob, eta),
+        loglik_history=ll_hist,
+        change_history=ch_hist,
+        n_em_evaluations=n_evals,
+        em_eval_history=ev_hist,
+        safeguard_history=sf_hist,
+        n_safeguards=n_safe,
     )
 
 

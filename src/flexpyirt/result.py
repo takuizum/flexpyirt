@@ -35,10 +35,17 @@ class FitResult:
     converged : bool
         Whether the EM convergence criterion was met.
     n_iter : int
-        Number of EM iterations.
+        Number of accepted EM (or SQUAREM) iterations.
+    n_em_evaluations : int
+        Total number of EM map evaluations (E-step + M-step). Equal to ``n_iter`` for plain EM,
+        and 2 or 3 per accepted iterate for SQUAREM.
+    n_safeguards : int
+        Number of SQUAREM iterations on which the monotonicity/feasibility safeguard fired (0 for
+        plain EM).
     history : DataFrame
-        Columns ``iter``, ``loglik`` (at the parameters entering the iteration) and
-        ``max_change``.
+        Columns ``iter``, ``loglik`` (at the parameters entering the iteration), ``max_change``,
+        ``em_evaluations`` (cumulative EM map evaluations through the iteration), and
+        ``safeguard`` (whether the SQUAREM safeguard fired on that iteration).
     vcov : ndarray or None
         Covariance matrix of the free parameters in ``free_id`` order (``None`` if ``se=None``).
     se_method : str or None
@@ -51,6 +58,8 @@ class FitResult:
     loglik: float
     converged: bool
     n_iter: int
+    n_em_evaluations: int
+    n_safeguards: int
     history: pd.DataFrame
     vcov: np.ndarray | None
     se_method: str | None
