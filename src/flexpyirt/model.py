@@ -149,9 +149,12 @@ class Model:
             One row per item with an ``item`` column and parameter columns: ``a``, ``d`` (or
             ``d1..``) for ``"slope-intercept"``; ``a``, ``b`` (or ``b1..``) for ``"irt"``,
             converted with :math:`d=-ab` (or :math:`d_k=-a\sum_{c=1}^{k} b_c` for GPCM/PCM step
-            difficulties). ``a`` may be omitted (or NaN) for Rasch and PCM items. Asymptotes ``g``
-            (3PL/4PL) and ``u`` (4PL) are given as they are in both parameterizations; ``u`` may be
-            omitted (or NaN) for 3PL items (it stays 1). NaN cells are treated as not given.
+            difficulties). ``a`` may be omitted (or NaN) for Rasch and PCM items, or when already
+            fixed on the model via :meth:`fix` (whose fixed slope is used to convert ``b`` to
+            ``d``). Asymptotes ``g`` (3PL/4PL) and ``u`` (4PL) are given as they are in both
+            parameterizations; ``u`` may be omitted (or NaN) for 3PL items (it stays 1), and any
+            asymptote already fixed via :meth:`fix` may also be omitted (or NaN). NaN cells are
+            treated as not given.
         items : list of str or callable, optional
             Items to fix (default: every bank item that is in the model).
         parameterization : {"slope-intercept", "irt"}
@@ -175,12 +178,13 @@ class Model:
             return f"Bank row for {item!r} has missing (NaN) value in column {key!r}."
 
         lookup = dict(self.items)
+        prior_fixed = {(i, p): v for i, p, v in self.fixed}
         model = self
         for item in chosen:
             row = rows[item]
             item_model = lookup[item]
             kernel = item_model.kernel
-            slope = float(row["a"]) if _has_value(row, "a") else 1.0
+            slope = float(row["a"]) if _has_value(row, "a") else prior_fixed.get((item, "a"), 1.0)
             is_gpcm = isinstance(kernel, GPCMKernel)
             cum_b = 0.0
             values: dict[str, float] = {}
@@ -188,7 +192,7 @@ class Model:
                 if p in kernel.slope_params:
                     if _has_value(row, p):
                         values[p] = float(row[p])
-                    elif free_default:
+                    elif free_default and (item, p) not in prior_fixed:
                         raise SpecificationError(_missing_message(item, row, p))
                     continue
                 if p in kernel.intercept_params:
@@ -210,10 +214,11 @@ class Model:
                         values[p] = -slope * value
                     continue
                 # Other parameters (asymptotes g, u) are the same in both parameterizations. A
-                # parameter that is fixed by default (u of a 3PL item) may be omitted or NaN.
+                # parameter fixed by default (u of a 3PL item) or already fixed via fix() may be
+                # omitted or NaN.
                 if _has_value(row, p):
                     values[p] = float(row[p])
-                elif free_default:
+                elif free_default and (item, p) not in prior_fixed:
                     raise SpecificationError(_missing_message(item, row, p))
             model = model.fix(item=item, **values)
         return model

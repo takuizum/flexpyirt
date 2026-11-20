@@ -12,7 +12,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from flexpyirt import BAEM, GPCM, GRM, PCM, Model, Normal, Rasch, TwoPL, fit
+from flexpyirt import BAEM, GPCM, GRM, PCM, FourPL, Model, Normal, Rasch, ThreePL, TwoPL, fit
 from flexpyirt.errors import HeywoodWarning, IdentificationError, SpecificationError
 from flexpyirt.items import DichotomousKernel, GPCMKernel, ItemModel
 
@@ -301,3 +301,113 @@ def test_fix_from_gpcm_and_pcm() -> None:
         assert rt_fixed[(name, "a")] == pytest.approx(float(items_df["a"].loc[name]))
         for k in (1, 2, 3):
             assert rt_fixed[(name, f"d{k}")] == pytest.approx(float(items_df[f"d{k}"].loc[name]))
+
+
+def test_fix_from_irt_uses_prior_fixed_slope() -> None:
+    """fix_from(parameterization='irt') uses a slope fixed via .fix() when 'a' is omitted."""
+    # Finding scenario 1: PCM / Rasch with overridden slope via .fix() and bank omitting 'a'.
+    bank_steps = pd.DataFrame([{"item": "q1", "b1": -0.5, "b2": 0.5}])
+    spec_pcm = (
+        Model.uniform(PCM(3), items=["q1", "q2"])
+        .fix(item="q1", a=1.5)
+        .fix_from(bank_steps, parameterization="irt")
+    )
+    assert {(i, p): v for i, p, v in spec_pcm.fixed} == {
+        ("q1", "a"): 1.5,
+        ("q1", "d1"): pytest.approx(-1.5 * (-0.5)),
+        ("q1", "d2"): pytest.approx(-1.5 * (-0.5 + 0.5)),
+    }
+
+    bank_dich = pd.DataFrame([{"item": "q1", "b": 0.4}])
+    spec_rasch = (
+        Model.uniform(Rasch(), items=["q1", "q2"])
+        .fix(item="q1", a=1.5)
+        .fix_from(bank_dich, parameterization="irt")
+    )
+    assert {(i, p): v for i, p, v in spec_rasch.fixed} == {
+        ("q1", "a"): 1.5,
+        ("q1", "d"): pytest.approx(-1.5 * 0.4),
+    }
+
+    # Finding scenario 2: GPCM with slope already fixed via .fix() and bank omitting 'a'.
+    spec_gpcm = (
+        Model.uniform(GPCM(3), items=["q1", "q2"])
+        .fix(item="q1", a=1.5)
+        .fix_from(bank_steps, parameterization="irt")
+    )
+    assert {(i, p): v for i, p, v in spec_gpcm.fixed} == {
+        ("q1", "a"): 1.5,
+        ("q1", "d1"): pytest.approx(-1.5 * (-0.5)),
+        ("q1", "d2"): pytest.approx(-1.5 * (-0.5 + 0.5)),
+    }
+
+    # Every other item model that converts b -> d (2PL, 3PL, 4PL, GRM), including NaN 'a'.
+    spec_2pl = (
+        Model.uniform(TwoPL(), items=["q1", "q2"])
+        .fix(item="q1", a=1.5)
+        .fix_from(pd.DataFrame([{"item": "q1", "a": np.nan, "b": 0.4}]), parameterization="irt")
+    )
+    assert {(i, p): v for i, p, v in spec_2pl.fixed} == {
+        ("q1", "a"): 1.5,
+        ("q1", "d"): pytest.approx(-1.5 * 0.4),
+    }
+
+    spec_3pl = (
+        Model.uniform(ThreePL(), items=["q1", "q2"])
+        .fix(item="q1", a=1.5)
+        .fix_from(pd.DataFrame([{"item": "q1", "b": 0.4, "g": 0.2}]), parameterization="irt")
+    )
+    assert {(i, p): v for i, p, v in spec_3pl.fixed} == {
+        ("q1", "a"): 1.5,
+        ("q1", "d"): pytest.approx(-1.5 * 0.4),
+        ("q1", "g"): 0.2,
+    }
+
+    spec_4pl = (
+        Model.uniform(FourPL(), items=["q1", "q2"])
+        .fix(item="q1", a=1.5, u=0.9)
+        .fix_from(pd.DataFrame([{"item": "q1", "b": 0.4, "g": 0.15}]), parameterization="irt")
+    )
+    assert {(i, p): v for i, p, v in spec_4pl.fixed} == {
+        ("q1", "a"): 1.5,
+        ("q1", "u"): 0.9,
+        ("q1", "d"): pytest.approx(-1.5 * 0.4),
+        ("q1", "g"): 0.15,
+    }
+
+    spec_grm = (
+        Model.uniform(GRM(3), items=["q1", "q2"])
+        .fix(item="q1", a=1.5)
+        .fix_from(pd.DataFrame([{"item": "q1", "b1": -0.5, "b2": 0.8}]), parameterization="irt")
+    )
+    assert {(i, p): v for i, p, v in spec_grm.fixed} == {
+        ("q1", "a"): 1.5,
+        ("q1", "d1"): pytest.approx(-1.5 * (-0.5)),
+        ("q1", "d2"): pytest.approx(-1.5 * 0.8),
+    }
+
+    # Explicit 'a' in the bank overrides a previously fixed slope and is used for b -> d.
+    spec_override = (
+        Model.uniform(GPCM(3), items=["q1", "q2"])
+        .fix(item="q1", a=1.5)
+        .fix_from(
+            pd.DataFrame([{"item": "q1", "a": 2.0, "b1": -0.5, "b2": 0.5}]),
+            parameterization="irt",
+        )
+    )
+    assert {(i, p): v for i, p, v in spec_override.fixed} == {
+        ("q1", "a"): 2.0,
+        ("q1", "d1"): pytest.approx(-2.0 * (-0.5)),
+        ("q1", "d2"): pytest.approx(-2.0 * (-0.5 + 0.5)),
+    }
+
+    # Without prior .fix(a=...), free-slope models still require 'a' in the bank.
+    for item_model, bank in (
+        (TwoPL(), bank_dich),
+        (ThreePL(), pd.DataFrame([{"item": "q1", "b": 0.4, "g": 0.2}])),
+        (FourPL(), pd.DataFrame([{"item": "q1", "b": 0.4, "g": 0.15, "u": 0.9}])),
+        (GRM(3), bank_steps),
+        (GPCM(3), bank_steps),
+    ):
+        with pytest.raises(SpecificationError, match=r"'q1'.*'a'"):
+            Model.uniform(item_model, items=["q1", "q2"]).fix_from(bank, parameterization="irt")
