@@ -160,4 +160,5 @@ def _invert_information(info: np.ndarray) -> np.ndarray:
         )
         return np.full_like(sym, np.nan)
     inv_chol = np.linalg.inv(chol)
-    return inv_chol.T @ inv_chol
+    vcov: np.ndarray = inv_chol.T @ inv_chol
+    return vcov
