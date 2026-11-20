@@ -102,6 +102,18 @@ res = fit(
 res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_change)
 ```
 
+## 6.1 M1 時点で実装済みの範囲
+- 項目モデル: `TwoPL`, `Rasch`。潜在分布: `Normal`（`Normal.standard()`, `Normal.free()`, `Normal(free_var=True)`）。
+  全項目 Rasch の単一群では既定で分散自由（DESIGN §4.5）。
+- `fit(spec, data, *, group=None, table=None, item_names=None, method=None, quadrature=None, se="oakes")`。
+  `se` は `"oakes" | "hessian" | None`。`group=` は M2 まで `NotImplementedError`。
+- `BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3)`（`squarem` は M3）。
+  `Quadrature.equispaced(n_points=61, lim=(-6, 6))`（Gauss–Hermite は未実装）。
+- `Model.uniform`, `Model.from_items`, `.fix(item=..., a=..., d=...)`, `.with_latent(...)`, `.parameter_table(data)`。
+- `FitResult`: `items`, `latent`, `parameters`（表 + `estimate`, `se`）, `vcov`, `loglik`, `aic`, `bic`,
+  `converged`, `n_iter`, `history`, `score(data, method="EAP")`。
+- 入力は 0/1 の pandas / polars DataFrame または numpy 配列（`item_names=`）。欠測は M2 まで `SpecificationError`。
+
 ## 7. 主なクラス・関数の一覧
 
 | 名前 | 種類 | 役割 |

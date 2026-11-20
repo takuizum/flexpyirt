@@ -10,10 +10,10 @@ dependencies = [
     "jax>=0.4.30",
     "numpy>=1.26",
     "scipy>=1.11",
+    "pandas>=2.1",
 ]
 
 [project.optional-dependencies]
-pandas = ["pandas>=2.1"]
 polars = ["polars>=1.0"]
 
 [dependency-groups]
@@ -22,7 +22,7 @@ dev = [
     "hypothesis>=6.100",
     "ruff>=0.6",
     "mypy>=1.11",
-    "pandas>=2.1",
+    "pandas-stubs>=2.1",
 ]
 
 [build-system]
@@ -61,5 +61,6 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 xfail_strict = true
