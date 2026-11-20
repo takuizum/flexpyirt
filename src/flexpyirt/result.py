@@ -80,8 +80,10 @@ class FitResult:
     def items(self) -> pd.DataFrame:
         """One row per item (per group in a multiple-group model).
 
-        Estimates and SEs by internal parameter, plus the IRT thresholds ``b = -d/a`` (``bk`` for
-        ``dk``), which are display-only; their SEs (delta method) arrive in M4.
+        Estimates and SEs by internal parameter, plus the display IRT thresholds: ``b = -d/a``
+        (2PL/Rasch/3PL/4PL), ``bk = -dk/a`` (GRM), and step difficulties
+        ``bk = -(dk - d{k-1})/a`` with ``d0 = 0`` (GPCM/PCM). Display-only; their SEs (delta
+        method) arrive in M4.
         """
         p = self.parameters[self.parameters["item"] != LATENT_ITEM]
         index = ["group", "item"]
@@ -94,9 +96,15 @@ class FitResult:
         models = p.drop_duplicates(index).set_index(index)["model"]
         out.insert(0, "model", models.loc[order])
         if "a" in params:
+            is_gpcm = out["model"].isin(("GPCM", "PCM"))
             for c in params:
                 if c.startswith("d"):
-                    out["b" + c[1:]] = -out[c] / out["a"]
+                    step = out[c]
+                    if c not in ("d", "d1"):
+                        prev = f"d{int(c[1:]) - 1}"
+                        if prev in out.columns:
+                            step = step.where(~is_gpcm, out[c] - out[prev])
+                    out["b" + c[1:]] = -step / out["a"]
         out.columns.name = None
         out = out.reset_index()
         if not self._model.is_multigroup:

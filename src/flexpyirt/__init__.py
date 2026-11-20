@@ -6,7 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from flexpyirt import errors
 from flexpyirt.fit import fit
-from flexpyirt.items import GRM, FourPL, Rasch, ThreePL, TwoPL
+from flexpyirt.items import GPCM, GRM, PCM, FourPL, Rasch, ThreePL, TwoPL
 from flexpyirt.latent import Normal
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
@@ -20,7 +20,9 @@ except PackageNotFoundError:  # pragma: no cover - only when running from an unb
 
 __all__ = [
     "BAEM",
+    "GPCM",
     "GRM",
+    "PCM",
     "FitResult",
     "FourPL",
     "Model",
