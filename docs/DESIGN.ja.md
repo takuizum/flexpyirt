@@ -151,6 +151,10 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   $a_j^{(0)}=\operatorname{clip}(1.7\,r_j/\sqrt{1-r_j^2},\,0.25,\,3)$（Rasch は 1）、
   $d_j^{(0)}=\operatorname{logit}(p_j)\sqrt{1+(a_j^{(0)}/1.7)^2}$（周辺確率を近似的に合わせるため）。
   分散の初期値は 1。初期値は収束点に影響しない前提で、照合テストもそれを確認する。
+- **決定（M3, 3PL/4PL）**: $[0.01,0.99]$ に丸めた正答率 $p_j$ から $g_j^{(0)}=\min(0.2,\,p_j/2)$、
+  $u_j^{(0)}=\max(0.95,\,(1+p_j)/2)$（4PL）または $1$（3PL）とし、$g_j^{(0)}<p_j<u_j^{(0)}$ を保つ。
+  $a_j^{(0)}$ は 2PL と同じ、$d_j^{(0)}$ は漸近線の幅で換算した正答率 $(p_j-g_j^{(0)})/(u_j^{(0)}-g_j^{(0)})$
+  から 2PL と同じ式で求める（§15.4）。
 - ユーザー指定の初期値は ParameterTable の `value` 列で上書き可能。
 
 ## 5. データ構造
@@ -214,7 +218,7 @@ class LatentDist(Protocol):
 | モデル | 内部パラメタ | マイルストーン |
 |---|---|---|
 | Rasch / 2PL | $a, d$（$P=\sigma(a\theta+d)$） | M1 |
-| 3PL / 4PL | $a,d,g,u$（$g,u$ は logit 尺度で最適化） | M3 |
+| 3PL / 4PL | $a, d, g, u$（自然尺度、$0<g<u\le 1$、§15.2） | M3 |
 | GRM | $a, d_1>\dots>d_{K-1}$ | M2 |
 | GPCM / PCM | $a, d_1..d_{K-1}$ | M3 |
 | Nominal | M5 以降（未定） | — |
@@ -234,7 +238,8 @@ class LatentDist(Protocol):
 - `SpecificationError`: 仕様の矛盾（存在しない項目名を固定、カテゴリ数不一致など）
 - `IdentificationError`: 識別不能（アンカーなしで焦点群自由など）
 - `ConvergenceWarning`: 最大反復到達、SQUAREM の安全装置多発
-- `HeywoodWarning`: 境界解（$g\to0$, $a$ 発散など）
+- `HeywoodWarning`: 境界解 — 推定後、自由な項目パラメタが有限の境界から `1e-4` 以内（$g\to 0$ や $u\to 1$ など）
+  または自由な傾きが $|a|>20$ になった場合に発する（§15.6）。
 
 ## 11. テスト方針（詳細は VALIDATION.md）
 - 単体: 各 `log_prob` の確率和 = 1、勾配の有限差分チェック、E-step の度数保存（$\sum_q\bar n_{gq}=N_g$）。
@@ -298,7 +303,44 @@ class LatentDist(Protocol):
 9. **照合の格子**: 潜在分布の平均・分散が自由な照合（V4, V5）は、VALIDATION.md の方針どおり mirt・flexpyirt とも
    81 点・$[-8,8]$（刻み 0.2 は既定と同じ）で行う。
 
+## 15. 実装上の決定（M3）
+1. **3PL・4PL 項目モデル**: `ThreePL()`（$P(y=1\mid\theta)=g+(1-g)\sigma(a\theta+d)$、Birnbaum, 1968）と
+   `FourPL()`（$P(y=1\mid\theta)=g+(u-g)\sigma(a\theta+d)$、Barton & Lord, 1981）は、内部パラメタ
+   `(a, d, g, u)`（mirt と同じ名前）を持つ 1 つの共通カーネル `FourPLKernel` を共有する。これにより 3PL と
+   4PL は 1 つの family にまとまる（Rasch と 2PL が `DichotomousKernel` を共有するのと同じ）。`ThreePL` は
+   既定で `u = 1` を固定し、`FourPL` は `u` を自由推定する。
+2. **自然尺度と有界アクティブセット Newton**: `g`, `u` は $\eta$ 上も自然尺度のままとし、自由パラメタの範囲は
+   `0 < g < 1`, `0 < u < 1`（固定値としての `g = 0` や `u = 1` は許可し、$g < u$ を課す）。標準誤差もそのまま
+   自然尺度で得られる（mirt の `coef(..., printSE=TRUE)` は `logit(g)` / `logit(u)` と logit 尺度の SE を
+   返すため、照合時はデルタ法 $SE_g = g(1-g)\,SE_{\mathrm{logit}(g)}$ で変換する）。マスク付き Newton
+   （`_newton.py`）では、箱 `(lower, upper)` の外に出る座標は他の座標のステップを縮める代わりに境界までの中点へ
+   進め、境界から $10^{-8}$ 以内で勾配が外側を向く自由座標はそのステップで固定する（$\varepsilon$-active set;
+   Bertsekas, 1982）。これにより、境界に張り付いた漸近線が `a`, `d` の収束を妨げず、目的関数の増加判定により
+   EM の単調性も保たれる。
+3. **$g=0$・$u=1$ での数値安定性**: 対数確率を
+   $$\log P_1 = \operatorname{logaddexp}\big(\log g,\ \log(u-g)+\log\sigma(z)\big),\qquad
+   \log P_0 = \operatorname{logaddexp}\big(\log(1-u),\ \log(u-g)+\log\sigma(-z)\big)$$
+   （$z=a\theta+d$）で計算する。二重 `where`（$g=0$ または $u=1$ では $\log$ の引数を $1$ に差し替えたうえで
+   本体分岐を選ぶ）により、`g = 0` や `u = 1` を固定しても 2PL と厳密に一致する対数確率と、全パラメタ
+   （固定座標を含む）に対する有限な勾配・Hessian を返す。不正な漸近線（$u\le g$、$g<0$、$u>1$）は NaN を
+   返して line search に棄却される（`validate_table` でも事前に拒否する）。
+4. **初期値**: $[0.01,0.99]$ に丸めた正答率 $p_j$ から $g_j^{(0)}=\min(0.2,\,p_j/2)$、
+   $u_j^{(0)}=\max(0.95,\,(1+p_j)/2)$（4PL）または $1$（3PL）として $g_j^{(0)}<p_j<u_j^{(0)}$ を満たすようにし、
+   $a_j^{(0)}$ は 2PL と同じ項目−残余相関の式（§4.10）、$d_j^{(0)}$ は漸近線の幅で換算した正答率
+   $(p_j-g_j^{(0)})/(u_j^{(0)}-g_j^{(0)})$ に 2PL の切片の式を適用する。
+5. **表示と FIPC**: `FitResult.items` は引き続き `b = -d/a` を追加し、`g`, `u`, `g_se`, `u_se` は
+   ParameterTable から自動的に現れる。`Model.fix_from()` は `"slope-intercept"`・`"irt"` のどちらでも
+   `g`, `u` をそのまま渡し、3PL 項目では `u` 列を省略できる。
+6. **HeywoodWarning**: 推定後、`fit()` はすべての自由な項目パラメタを検査し、有限の境界から `1e-4` 以内に
+   到達したパラメタ（0 や 1 に近い `g`, `u`）または $|a|>20$ の自由な傾きがあれば、該当する項目名を列挙した
+   `flexpyirt.errors.HeywoodWarning` を 1 回発する。
+7. **識別性**: `g`, `u` は潜在変数の尺度も位置も担わない（`slope_params=("a",)`, `intercept_params=("d",)`）。
+   したがって漸近線を固定しても潜在分布の平均や分散は識別されない。
+
 ## 参考文献
+- Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
+- Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
+- Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).

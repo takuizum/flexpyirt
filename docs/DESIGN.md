@@ -196,6 +196,10 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   $d_j^{(0)}=\operatorname{logit}(p_j)\sqrt{1+(a_j^{(0)}/1.7)^2}$ (to roughly match the marginal
   probability). The variance starts at 1. Starting values are assumed not to affect the converged
   point, and the validation tests check this.
+- **Decision (M3, 3PL/4PL)**: $g_j^{(0)}=\min(0.2,\,p_j/2)$ and $u_j^{(0)}=\max(0.95,\,(1+p_j)/2)$
+  (4PL) or $1$ (3PL) with $p_j$ clipped to $[0.01,0.99]$, so $g_j^{(0)}<p_j<u_j^{(0)}$; $a_j^{(0)}$
+  as for 2PL, and $d_j^{(0)}$ from the rescaled proportion $(p_j-g_j^{(0)})/(u_j^{(0)}-g_j^{(0)})$
+  (§15.4).
 - User starting values override these through the ParameterTable's `value` column.
 
 ## 5. Data structures
@@ -264,7 +268,7 @@ The design goal: writing `log_prob` is enough for a new item model to get the E-
 | Model | Internal parameters | Milestone |
 |---|---|---|
 | Rasch / 2PL | $a, d$ ($P=\sigma(a\theta+d)$) | M1 |
-| 3PL / 4PL | $a,d,g,u$ ($g,u$ optimized on the logit scale) | M3 |
+| 3PL / 4PL | $a, d, g, u$ (natural scale, $0<g<u\le 1$; §15.2) | M3 |
 | GRM | $a, d_1>\dots>d_{K-1}$ | M2 |
 | GPCM / PCM | $a, d_1..d_{K-1}$ | M3 |
 | Nominal | M5 or later (undecided) | — |
@@ -288,7 +292,8 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
   categories, ...)
 - `IdentificationError`: not identified (focal group free without anchors, ...)
 - `ConvergenceWarning`: maximum iterations reached, frequent SQUAREM safeguard
-- `HeywoodWarning`: boundary solution ($g\to0$, diverging $a$, ...)
+- `HeywoodWarning`: boundary solution — emitted after fitting when a free item parameter ends
+  within `1e-4` of a finite bound (e.g. $g\to 0$ or $u\to 1$) or a free slope has $|a|>20$ (§15.6).
 
 ## 11. Testing (details in VALIDATION.md)
 - Unit: probabilities of each `log_prob` sum to 1, finite-difference gradient checks, E-step count
@@ -372,7 +377,50 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
    81 points on $[-8,8]$ (the same 0.2 spacing as the default) in both mirt and flexpyirt, as set
    out in VALIDATION.md.
 
+## 15. Implementation decisions (M3)
+1. **3PL and 4PL item models**: `ThreePL()` ($P(y=1\mid\theta)=g+(1-g)\sigma(a\theta+d)$;
+   Birnbaum, 1968) and `FourPL()` ($P(y=1\mid\theta)=g+(u-g)\sigma(a\theta+d)$; Barton & Lord, 1981)
+   share one kernel, `FourPLKernel`, with internal parameters `(a, d, g, u)` (same names as mirt),
+   so 3PL and 4PL items form one family (like Rasch and 2PL share `DichotomousKernel`). `ThreePL`
+   fixes `u = 1` by default; `FourPL` frees `u`.
+2. **Natural scale and bounded active-set Newton**: `g` and `u` stay on the natural scale in $\eta$
+   with bounds `0 < g < 1`, `0 < u < 1` when free (fixed `g = 0` or `u = 1` is allowed, and
+   $g < u$ is enforced). Standard errors are therefore on the natural scale directly (when
+   comparing with mirt, whose `coef(..., printSE=TRUE)` reports `logit(g)` / `logit(u)` and
+   logit-scale SEs, convert mirt's SEs with the delta method $SE_g = g(1-g)\,SE_{\mathrm{logit}(g)}$).
+   In the masked Newton M-step (`_newton.py`), a coordinate whose step would leave `(lower, upper)`
+   moves halfway to its bound instead of shrinking the step of every other coordinate, and a free
+   coordinate within $10^{-8}$ of a bound whose gradient points outwards is held for that step
+   ($\varepsilon$-active set; Bertsekas, 1982) so a boundary asymptote does not block `a` and `d`
+   from converging. The objective-ascent check still guarantees EM monotonicity.
+3. **Numerical stability at $g=0$ and $u=1$**: log-probabilities are computed as
+   $$\log P_1 = \operatorname{logaddexp}\big(\log g,\ \log(u-g)+\log\sigma(z)\big),\qquad
+   \log P_0 = \operatorname{logaddexp}\big(\log(1-u),\ \log(u-g)+\log\sigma(-z)\big)$$
+   with $z=a\theta+d$. Using the double-`where` pattern (replacing the argument of $\log$ with $1$
+   where $g=0$ or $u=1$ and selecting the core branch), holding `g = 0` and/or `u = 1` fixed
+   returns exactly the 2PL log-probabilities and finite gradients and Hessians for every parameter,
+   so masked Newton never sees NaN/inf in a fixed coordinate. Invalid asymptotes ($u\le g$, $g<0$,
+   or $u>1$) yield NaN and are rejected by the line search (and rejected up front in
+   `validate_table`).
+4. **Starting values**: for proportion correct $p_j$ clipped to $[0.01,0.99]$,
+   $g_j^{(0)}=\min(0.2,\,p_j/2)$ and $u_j^{(0)}=\max(0.95,\,(1+p_j)/2)$ (4PL) or $1$ (3PL), ensuring
+   $g_j^{(0)}<p_j<u_j^{(0)}$; $a_j^{(0)}$ uses the same item–rest correlation formula as 2PL (§4.10),
+   and $d_j^{(0)}$ uses the 2PL intercept formula applied to the rescaled proportion
+   $(p_j-g_j^{(0)})/(u_j^{(0)}-g_j^{(0)})$.
+5. **Display**: `FitResult.items` keeps adding `b = -d/a`; `g`, `u`, `g_se`, `u_se` appear
+   automatically from the parameter table. `Model.fix_from()` passes `g` and `u` through unchanged
+   in both `"slope-intercept"` and `"irt"` parameterizations, and allows omitting `u` for 3PL items.
+6. **HeywoodWarning**: after fitting, `fit()` checks every free item parameter and emits one
+   `flexpyirt.errors.HeywoodWarning` naming all affected items whenever a free parameter ends within
+   `1e-4` of a finite bound (`g` or `u` near 0 or 1) or a free slope has $|a|>20$.
+7. **Identification**: `g` and `u` carry neither latent scale nor location
+   (`slope_params=("a",)`, `intercept_params=("d",)`), so fixing asymptotes alone does not identify
+   a free latent mean or variance.
+
 ## References
+- Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
+- Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
+- Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).

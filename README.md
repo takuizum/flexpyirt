@@ -21,7 +21,7 @@ calibration and fixed item parameter calibration (FIPC).
 
 | Feature | Details | mirt check |
 |---|---|---|
-| Item models | 2PL, Rasch (latent variance estimated), GRM (graded response model) | V1, V2, V3 |
+| Item models | 2PL, Rasch (latent variance estimated), 3PL, 4PL, GRM (graded response model) | V1, V2, V3, V11 |
 | Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | V4 |
 | FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | V5 |
 | Missing data | Responses missing at random (MAR) | V9 |
@@ -29,8 +29,8 @@ calibration and fixed item parameter calibration (FIPC).
 | Scoring | EAP and posterior SD, using each group's latent distribution as the prior | V1–V5, V9 |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
-Not yet available ([roadmap](docs/ROADMAP.md)): 3PL / 4PL / GPCM, empirical histogram (EH)
-latent distributions, priors and MAP estimation, SQUAREM acceleration (M3); MAP / ML / WLE /
+Not yet available ([roadmap](docs/ROADMAP.md)): GPCM, empirical histogram (EH) latent
+distributions, priors and MAP estimation, SQUAREM acceleration (M3); MAP / ML / WLE /
 plausible-value scoring and multidimensional models (M4).
 
 ## Installation

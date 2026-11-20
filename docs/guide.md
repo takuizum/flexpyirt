@@ -34,7 +34,7 @@ jax.config.update("jax_enable_x64", True)
 import numpy as np
 import pandas as pd
 
-from flexpyirt import BAEM, GRM, Model, Normal, Quadrature, Rasch, TwoPL, fit
+from flexpyirt import BAEM, GRM, FourPL, Model, Normal, Quadrature, Rasch, ThreePL, TwoPL, fit
 ```
 
 Simulate the data used in the examples below.
@@ -91,10 +91,27 @@ print(spec.item_names[:3], mixed.item_names)
 |---|---|---|---|
 | `TwoPL()` | $P(y=1)=\sigma(a\theta+d)$ | `a`, `d` | `b = -d/a` |
 | `Rasch()` | $P(y=1)=\sigma(\theta+d)$ ($a=1$ fixed) | `a` (fixed), `d` | `b = -d` |
+| `ThreePL()` | $P(y=1)=g+(1-g)\sigma(a\theta+d)$ ($u=1$ fixed) | `a`, `d`, `g`, `u` (fixed) | `b = -d/a` |
+| `FourPL()` | $P(y=1)=g+(u-g)\sigma(a\theta+d)$ | `a`, `d`, `g`, `u` | `b = -d/a` |
 | `GRM(n_cat=K)` | $P(y\ge k)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$ | `a`, `d1`…`d{K-1}` | `bk = -dk/a` |
 
-The parameterization is mirt's slope–intercept form (`itemtype = "2PL"`, `"Rasch"`, `"graded"`).
-GRM categories start at 0 (subtract 1 from data coded from 1, such as mirt's `Science`).
+The parameterization is mirt's slope–intercept form (`itemtype = "2PL"`, `"Rasch"`, `"3PL"`,
+`"4PL"`, `"graded"`). For 3PL and 4PL, `g` and `u` are estimated on the natural scale with
+$0 < g < u \le 1$ (mirt optimizes them on the logit scale; the interior ML estimates agree). GRM
+categories start at 0 (subtract 1 from data coded from 1, such as mirt's `Science`).
+
+```python
+theta3 = rng.normal(0, 1, 2000)
+a3 = np.array([1.6, 1.8, 1.7, 1.6, 1.9, 1.7])
+d3 = np.array([-1.0, -0.7, -1.2, -0.8, -0.9, -0.6])
+g3 = np.full(6, 0.2)
+p3 = g3 + (1.0 - g3) / (1.0 + np.exp(-(np.outer(theta3, a3) + d3)))
+df_3pl = pd.DataFrame(
+    (rng.random(p3.shape) < p3).astype(float), columns=[f"c{j}" for j in range(1, 7)]
+)
+res_3pl = fit(Model.uniform(ThreePL(), items=df_3pl.columns), df_3pl)
+print(res_3pl.items[["item", "a", "d", "g", "b"]].round(3))
+```
 
 ```python
 n_cat = 4
@@ -393,6 +410,7 @@ the grid makes them agree ([VALIDATION.md](VALIDATION.md)).
 | `SpecificationError` | The specification and data disagree (missing or extra columns, out-of-range values, unobserved categories, fixing an unknown item, invalid table edits, unknown group labels) |
 | `IdentificationError` | The scale is not identified ([section 8](#8-latent-distributions-and-identification)) |
 | `ConvergenceWarning` | EM did not converge within `max_iter` |
+| `HeywoodWarning` | A free item parameter ended within `1e-4` of a finite bound (e.g. `g` near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$ |
 | `FlexpyirtWarning` | The information matrix is not positive definite (SEs are NaN), or an anchor is a single parameter |
 
 Every exception derives from `flexpyirt.errors.FlexpyirtError` and every warning from

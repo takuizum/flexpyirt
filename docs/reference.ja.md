@@ -10,7 +10,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - モデル: [`Model`](#model)
-- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`GRM`](#grm)
+- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - 例外と警告: [`flexpyirt.errors`](#flexpyirterrors)
@@ -44,8 +44,7 @@ Bock–Aitkin EM による周辺最尤推定（Bock & Aitkin, 1981）。
 **例外**: `PrecisionError`（JAX の 64 ビットが無効）、`SpecificationError`（仕様やデータの誤り）、
 `IdentificationError`（識別不能）。いずれも推定を始める前に出る。
 
-**警告**: `ConvergenceWarning`（`max_iter` に到達）、`FlexpyirtWarning`（情報行列が正定値でない、
-アンカーが 1 パラメタだけ）。
+**警告**: `ConvergenceWarning`（`max_iter` に到達）、`HeywoodWarning`（自由な漸近線が境界から `1e-4` 以内、または自由な傾きが $|a| > 20$）、`FlexpyirtWarning`（情報行列が正定値でない、アンカーが 1 パラメタだけ）。
 
 ### `FitResult`
 
@@ -53,7 +52,7 @@ Bock–Aitkin EM による周辺最尤推定（Bock & Aitkin, 1981）。
 
 | 属性 | 型 | 説明 |
 |---|---|---|
-| `items` | DataFrame | 1 項目 1 行（多母集団では `group` 列つきで群 × 項目）。`model`、内部パラメタ（`a`, `d` / `d1`…）、`<param>_se`、表示用の `b` / `bk`（$= -d/a$, $-d_k/a$、SE なし） |
+| `items` | DataFrame | 1 項目 1 行（多母集団では `group` 列つきで群 × 項目）。`model`、内部パラメタ（`a`, `d` / `d1`…, `g`, `u`）、`<param>_se`、表示用の `b` / `bk`（$= -d/a$, $-d_k/a$、SE なし） |
 | `latent` | DataFrame | 1 群 1 行。`group`, `mean`, `var`, `mean_se`, `var_se`（固定値の SE は NaN） |
 | `parameters` | DataFrame | 検証済みの ParameterTable に `estimate`（推定値。固定なら固定値）と `se` を足したもの |
 | `loglik` | float | 推定値での周辺対数尤度 |
@@ -127,7 +126,7 @@ model.fix_from(bank, *, items=None, parameterization="slope-intercept") -> Model
 
 | 引数 | 説明 |
 |---|---|
-| `bank` | `item` 列と、パラメタの列を持つ DataFrame。`"slope-intercept"` なら `a`, `d`（GRM は `d1`, `d2`, …）、`"irt"` なら `a`, `b`（GRM は `b1`, …）。Rasch 項目は `a` 列がなくてよい |
+| `bank` | `item` 列と、パラメタの列を持つ DataFrame。`"slope-intercept"` なら `a`, `d`（GRM は `d1`, `d2`, …）、`"irt"` なら `a`, `b`（GRM は `b1`, …）。Rasch 項目は `a` 列がなくてよい。漸近線 `g`（3PL/4PL）・`u`（4PL）はどちらのパラメタ化でもそのまま渡す（3PL 項目では `u` 列を省略できる） |
 | `items` | 固定する項目（名前のリストか `str -> bool` の関数）。既定はバンクにあってモデルにもある項目すべて |
 | `parameterization` | `"slope-intercept"` または `"irt"`（$d = -ab$ に変換） |
 
@@ -198,6 +197,27 @@ Rasch()
 
 Rasch モデル $P(y=1\mid\theta)=\sigma(\theta+d)$（Rasch, 1960）。`a` は 1 に固定、`d` を推定。全項目が Rasch の
 単一群モデルでは、既定で潜在分布の分散を推定する（mirt の `itemtype = "Rasch"` と同じ）。
+
+### `ThreePL`
+
+```text
+ThreePL()
+```
+
+3 パラメタロジスティックモデル $P(y=1\mid\theta)=g+(1-g)\sigma(a\theta+d)$（Birnbaum, 1968）。
+内部パラメタは `a`, `d`, `g`（自由、自然尺度で $0 < g < 1$）と `u`（1 に固定）、表示用に $b=-d/a$。
+mirt の `itemtype = "3PL"` と同じモデル・パラメタ名（mirt は `g` を logit 尺度で推定するが、flexpyirt は
+自然尺度で推定する）。`FourPL` と `FourPLKernel` を共有する。`g = 0` に固定すると `TwoPL` と厳密に一致する。
+
+### `FourPL`
+
+```text
+FourPL()
+```
+
+4 パラメタロジスティックモデル $P(y=1\mid\theta)=g+(u-g)\sigma(a\theta+d)$（Barton & Lord, 1981）。
+内部パラメタ `a`, `d`, `g`, `u` をすべて自由推定（自然尺度で $0 < g < u < 1$）、表示用に $b=-d/a$。
+mirt の `itemtype = "4PL"` と同じ。`ThreePL` と `FourPLKernel` を共有する。
 
 ### `GRM`
 
@@ -296,5 +316,5 @@ flexpyirt が出すすべての警告の基底クラス（`UserWarning` を継�
 
 #### `HeywoodWarning`
 
-境界解（推測パラメタが 0 に近い、傾きが発散するなど）を知らせるための予約。現在の項目モデル（2PL / Rasch / GRM）
-では出ない。3PL / 4PL（M3）で使う予定。
+推定後、自由な項目パラメタが有限の境界から `1e-4` 以内に到達した（3PL / 4PL で `g` が 0 付近、`u` が 1 付近
+など）か、自由な傾きが $|a| > 20$ になった場合に出る。該当する項目名をすべて列挙する。

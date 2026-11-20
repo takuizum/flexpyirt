@@ -33,7 +33,7 @@ jax.config.update("jax_enable_x64", True)
 import numpy as np
 import pandas as pd
 
-from flexpyirt import BAEM, GRM, Model, Normal, Quadrature, Rasch, TwoPL, fit
+from flexpyirt import BAEM, GRM, FourPL, Model, Normal, Quadrature, Rasch, ThreePL, TwoPL, fit
 ```
 
 以下の例で使うデータをシミュレーションしておく。
@@ -88,10 +88,26 @@ print(spec.item_names[:3], mixed.item_names)
 |---|---|---|---|
 | `TwoPL()` | $P(y=1)=\sigma(a\theta+d)$ | `a`, `d` | `b = -d/a` |
 | `Rasch()` | $P(y=1)=\sigma(\theta+d)$（$a=1$ 固定） | `a`（固定）, `d` | `b = -d` |
+| `ThreePL()` | $P(y=1)=g+(1-g)\sigma(a\theta+d)$（$u=1$ 固定） | `a`, `d`, `g`, `u`（固定） | `b = -d/a` |
+| `FourPL()` | $P(y=1)=g+(u-g)\sigma(a\theta+d)$ | `a`, `d`, `g`, `u` | `b = -d/a` |
 | `GRM(n_cat=K)` | $P(y\ge k)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$ | `a`, `d1`…`d{K-1}` | `bk = -dk/a` |
 
-パラメタ化は mirt（`itemtype = "2PL"`, `"Rasch"`, `"graded"`）と同じ傾き・切片形式。
-GRM のカテゴリは 0 始まり（mirt の `Science` のように 1 始まりのデータは 1 を引く）。
+パラメタ化は mirt（`itemtype = "2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"graded"`）と同じ傾き・切片形式。
+3PL / 4PL の `g`, `u` は自然尺度（$0 < g < u \le 1$）で推定する（mirt は logit 尺度で最適化するが、内点の
+最尤推定値は一致する）。GRM のカテゴリは 0 始まり（mirt の `Science` のように 1 始まりのデータは 1 を引く）。
+
+```python
+theta3 = rng.normal(0, 1, 2000)
+a3 = np.array([1.6, 1.8, 1.7, 1.6, 1.9, 1.7])
+d3 = np.array([-1.0, -0.7, -1.2, -0.8, -0.9, -0.6])
+g3 = np.full(6, 0.2)
+p3 = g3 + (1.0 - g3) / (1.0 + np.exp(-(np.outer(theta3, a3) + d3)))
+df_3pl = pd.DataFrame(
+    (rng.random(p3.shape) < p3).astype(float), columns=[f"c{j}" for j in range(1, 7)]
+)
+res_3pl = fit(Model.uniform(ThreePL(), items=df_3pl.columns), df_3pl)
+print(res_3pl.items[["item", "a", "d", "g", "b"]].round(3))
+```
 
 ```python
 n_cat = 4
@@ -373,6 +389,7 @@ mirt は分散を閉形式のモーメントで更新するため、格子の端
 | `SpecificationError` | 仕様とデータの矛盾（列の過不足、範囲外の値、観測されないカテゴリ、存在しない項目の固定、表の不正な編集、群ラベルの不一致） |
 | `IdentificationError` | 尺度が識別できない（[8 節](#8-潜在分布と識別性)） |
 | `ConvergenceWarning` | `max_iter` までに収束しなかった |
+| `HeywoodWarning` | 自由な項目パラメタが有限の境界から `1e-4` 以内（3PL / 4PL で `g` が 0 付近、`u` が 1 付近など）、または自由な傾きが $|a| > 20$ |
 | `FlexpyirtWarning` | 情報行列が正定値でない（SE が NaN）、アンカーが 1 パラメタだけ |
 
 すべての例外は `flexpyirt.errors.FlexpyirtError`、警告は `flexpyirt.errors.FlexpyirtWarning` を継承する。

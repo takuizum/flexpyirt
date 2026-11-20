@@ -11,7 +11,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Model: [`Model`](#model)
-- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`GRM`](#grm)
+- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm)
 - Latent distribution: [`Normal`](#normal)
 - Settings: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - Exceptions and warnings: [`flexpyirt.errors`](#flexpyirterrors)
@@ -45,7 +45,8 @@ Marginal maximum likelihood estimation with the Bock–Aitkin EM algorithm (Bock
 **Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (invalid specification
 or data), `IdentificationError` (not identified). All are raised before estimation starts.
 
-**Warns**: `ConvergenceWarning` (`max_iter` reached), `FlexpyirtWarning` (information matrix not
+**Warns**: `ConvergenceWarning` (`max_iter` reached), `HeywoodWarning` (free asymptote within
+`1e-4` of its bound or free slope $|a| > 20$), `FlexpyirtWarning` (information matrix not
 positive definite, or an anchor that is a single parameter).
 
 ### `FitResult`
@@ -54,7 +55,7 @@ Returned by `fit()`. Immutable.
 
 | Attribute | Type | Description |
 |---|---|---|
-| `items` | DataFrame | One row per item (per group × item, with a `group` column, for multiple groups): `model`, internal parameters (`a`, `d` / `d1`…), `<param>_se`, display `b` / `bk` ($= -d/a$, $-d_k/a$; no SE) |
+| `items` | DataFrame | One row per item (per group × item, with a `group` column, for multiple groups): `model`, internal parameters (`a`, `d` / `d1`…, `g`, `u`), `<param>_se`, display `b` / `bk` ($= -d/a$, $-d_k/a$; no SE) |
 | `latent` | DataFrame | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` (SEs of fixed values are NaN) |
 | `parameters` | DataFrame | The validated ParameterTable plus `estimate` (the estimate, or the fixed value) and `se` |
 | `loglik` | float | Marginal log-likelihood at the estimates |
@@ -133,7 +134,7 @@ estimate the latent distribution.
 
 | Argument | Description |
 |---|---|
-| `bank` | A DataFrame with an `item` column and parameter columns: `a`, `d` (GRM: `d1`, `d2`, …) for `"slope-intercept"`; `a`, `b` (GRM: `b1`, …) for `"irt"`. Rasch items may omit `a` |
+| `bank` | A DataFrame with an `item` column and parameter columns: `a`, `d` (GRM: `d1`, `d2`, …) for `"slope-intercept"`; `a`, `b` (GRM: `b1`, …) for `"irt"`. Rasch items may omit `a`. Asymptotes `g` (3PL/4PL) and `u` (4PL) are passed unchanged in both parameterizations; `u` may be omitted for 3PL items |
 | `items` | Items to fix (a list of names or a `str -> bool` function). Default: every bank item that is also in the model |
 | `parameterization` | `"slope-intercept"` or `"irt"` (converted with $d = -ab$) |
 
@@ -208,6 +209,29 @@ Rasch()
 Rasch model $P(y=1\mid\theta)=\sigma(\theta+d)$ (Rasch, 1960). `a` is fixed at 1 and `d` is
 estimated. In a single-group model where every item is Rasch, the latent variance is estimated by
 default (same as mirt's `itemtype = "Rasch"`).
+
+### `ThreePL`
+
+```text
+ThreePL()
+```
+
+Three-parameter logistic model $P(y=1\mid\theta)=g+(1-g)\sigma(a\theta+d)$ (Birnbaum, 1968).
+Internal parameters `a`, `d`, `g` (free, $0 < g < 1$ on the natural scale) and `u` (fixed at 1);
+display $b=-d/a$. Same model and parameter names as mirt's `itemtype = "3PL"` (mirt estimates
+`g` on the logit scale; flexpyirt works on the natural scale). Shares `FourPLKernel` with
+`FourPL`. Fixing `g = 0` reproduces `TwoPL` exactly.
+
+### `FourPL`
+
+```text
+FourPL()
+```
+
+Four-parameter logistic model $P(y=1\mid\theta)=g+(u-g)\sigma(a\theta+d)$ (Barton & Lord, 1981).
+Internal parameters `a`, `d`, `g`, `u` (all free, $0 < g < u < 1$ on the natural scale); display
+$b=-d/a$. Same model and parameter names as mirt's `itemtype = "4PL"`. Shares `FourPLKernel`
+with `ThreePL`.
 
 ### `GRM`
 
@@ -312,5 +336,5 @@ EM did not converge within `max_iter`.
 
 #### `HeywoodWarning`
 
-Reserved for boundary solutions (guessing parameter near 0, diverging slope). Not emitted by the
-current item models (2PL / Rasch / GRM); planned for 3PL / 4PL (M3).
+Emitted after fitting when a free item parameter ends within `1e-4` of a finite bound (e.g. `g`
+near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$, naming every affected item.
