@@ -21,6 +21,7 @@ import pytest
 
 from flexpyirt import BAEM, GPCM, PCM, FitResult, Model, Quadrature, fit
 from flexpyirt.errors import HeywoodWarning
+from tests._reference import check_reference_meta
 
 REFERENCE_DIR = Path(__file__).parent / "reference"
 METHOD = BAEM(tol=1e-9, max_iter=20000)
@@ -64,6 +65,7 @@ class Case:
 def load(name: str) -> Case:
     raw = dict(json.loads((REFERENCE_DIR / f"{name}.json").read_text()))
     meta = raw["meta"]
+    check_reference_meta(meta, require_richardson=True, require_grid_check=True)
     items = raw["items"]
     n_cat = int(meta["n_cat"])
     item_model = PCM(n_cat=n_cat) if meta["itemtype"] == "Rasch" else GPCM(n_cat=n_cat)

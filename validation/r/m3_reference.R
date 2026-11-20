@@ -92,6 +92,12 @@ write_case <- function(case, description, dat, itemtype, truth, pars = NULL) {
     eap = list(theta = unname(sc[, "F1"]), se = unname(sc[, "SE_F1"])),
     truth = truth
   )
+  stopifnot(
+    isTRUE(res$meta$converged),
+    isTRUE(res$meta$converged_richardson),
+    all(res$meta$grid_check == quad$theta_lim),
+    all(range(m_rich@Model$Theta) == quad$theta_lim)
+  )
   path <- file.path(out_dir, paste0(case, ".json"))
   write_json(res, path, auto_unbox = TRUE, digits = NA, pretty = TRUE, na = "null")
   est <- res$estimates$all$params
