@@ -16,8 +16,8 @@ dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
 fit_mirt <- function(dat, itemtype, se_type) {
   mirt(dat, 1, itemtype = itemtype, SE = TRUE, SE.type = se_type,
-       TOL = 1e-10, accelerate = "none", optimizer = "NR", quadpts = 61, theta_lim = c(-6, 6),
-       technical = list(NCYCLES = 50000), verbose = FALSE)
+       TOL = 1e-10, accelerate = "none", optimizer = "NR", quadpts = 61,
+       technical = list(NCYCLES = 50000, theta_lim = c(-6, 6)), verbose = FALSE)
 }
 
 extract <- function(m) {
