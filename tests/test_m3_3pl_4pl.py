@@ -12,7 +12,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from flexpyirt import BAEM, FourPL, Model, Normal, ThreePL, TwoPL, fit
+from flexpyirt import BAEM, FourPL, Model, Normal, Rasch, ThreePL, TwoPL, fit
 from flexpyirt.errors import HeywoodWarning, IdentificationError, SpecificationError
 from flexpyirt.items import DichotomousKernel, FourPLKernel, ItemModel
 
@@ -238,6 +238,64 @@ def test_fix_from_3pl_and_4pl() -> None:
     # Missing u for a 4PL item raises SpecificationError.
     with pytest.raises(SpecificationError, match="no column 'u'"):
         Model.uniform(FourPL(), items=["q01", "q02"]).fix_from(bank_3pl, parameterization="irt")
+
+
+def test_fix_from_mixed_bank_nan_and_missing_slope() -> None:
+    # Mixed Rasch/3PL/4PL bank: NaN cells for omitted default-fixed parameters (Rasch a, 3PL u)
+    # are treated as not given.
+    spec = Model.from_items({"q01": ThreePL(), "q02": FourPL(), "q03": Rasch()})
+    bank = pd.DataFrame(
+        [
+            {"item": "q01", "a": 1.5, "d": -0.5, "g": 0.2},
+            {"item": "q02", "a": 1.4, "d": -0.3, "g": 0.15, "u": 0.9},
+            {"item": "q03", "d": 0.4},
+        ]
+    )
+    fixed = {(i, p): v for i, p, v in spec.fix_from(bank).fixed}
+    assert fixed == {
+        ("q01", "a"): 1.5,
+        ("q01", "d"): -0.5,
+        ("q01", "g"): 0.2,
+        ("q02", "a"): 1.4,
+        ("q02", "d"): -0.3,
+        ("q02", "g"): 0.15,
+        ("q02", "u"): 0.9,
+        ("q03", "d"): 0.4,
+    }
+
+    # NaN in a required parameter (4PL u, or any non-Rasch slope a) raises SpecificationError.
+    bank_nan_u = pd.DataFrame(
+        [
+            {"item": "q01", "a": 1.5, "d": -0.5, "g": 0.2, "u": np.nan},
+            {"item": "q02", "a": 1.4, "d": -0.3, "g": 0.15, "u": np.nan},
+        ]
+    )
+    with pytest.raises(SpecificationError, match=r"'q02'.*'u'"):
+        Model.from_items({"q01": ThreePL(), "q02": FourPL()}).fix_from(bank_nan_u)
+
+    bank_no_a = pd.DataFrame({"item": ["q01"], "d": [-0.5], "g": [0.2], "u": [0.9]})
+    for item_model in (TwoPL(), ThreePL(), FourPL()):
+        with pytest.raises(SpecificationError, match=r"'q01'.*'a'"):
+            Model.uniform(item_model, items=["q01", "q02"]).fix_from(bank_no_a)
+
+    bank_nan_a = pd.DataFrame(
+        [
+            {"item": "q01", "d": -0.5, "g": 0.2},
+            {"item": "q02", "a": 1.2, "d": 0.3, "g": 0.1},
+        ]
+    )
+    with pytest.raises(SpecificationError, match=r"'q01'.*'a'"):
+        Model.uniform(ThreePL(), items=["q01", "q02"]).fix_from(bank_nan_a)
+
+    # Rasch with omitted 'a' in IRT parameterization still converts b -> -b using slope 1.
+    bank_rasch_irt = pd.DataFrame({"item": ["q01"], "b": [0.4]})
+    fixed_rasch = {
+        (i, p): v
+        for i, p, v in Model.uniform(Rasch(), items=["q01", "q02"])
+        .fix_from(bank_rasch_irt, parameterization="irt")
+        .fixed
+    }
+    assert fixed_rasch == {("q01", "d"): pytest.approx(-0.4)}
 
 
 def test_asymptote_table_validation() -> None:
