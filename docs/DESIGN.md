@@ -1,0 +1,385 @@
+# flexpyirt design (DESIGN)
+
+English | [日本語](DESIGN.ja.md)
+
+> Status: draft v0.2 (2026-11-20, reflects the M1 implementation). Decisions are marked
+> "Decision"; open questions are in §12 "Open questions".
+
+## 1. Goals and non-goals
+
+### Goals
+- A Python IRT estimation library built around **marginal maximum likelihood estimation (MMLE) with
+  the Bock–Aitkin EM algorithm (BA-EM; Bock & Aitkin, 1981)**.
+- Provide, with a Pythonic API, what R `mirt` does in practice:
+  - multiple-group calibration (equality constraints across groups, partial anchors)
+  - fixed item parameter calibration (FIPC)
+  - flexible latent distributions (Normal / Empirical Histogram / later Davidian and normal
+    mixtures)
+  - priors on item parameters (Bayes modal = MAP estimation; EM finds the posterior mode)
+  - standard errors (Oakes' 1999 identity, via automatic differentiation)
+- jit, vmap and GPU support through JAX, and easy extension through autodiff (new item models and
+  linking criteria without hand-written derivatives).
+
+### Non-goals (at least for v1)
+- Covering every feature of R `mirt`. MHRM, MCEM, exploratory high-dimensional MIRT, CDM and CAT
+  are out of scope.
+- Reproducing R's `mirt.model` string syntax.
+- Beating mirt (C++) on speed for its own sake. Small problems may lose to jit compilation time.
+  The selling points are "verified correctness" and "differentiable, extensible".
+
+## 2. Layers
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ ① Spec layer (written by the user, immutable)                │
+│   Model, ItemSpec(TwoPL, GRM, ...), Group, LatentSpec(Normal, │
+│   EmpiricalHistogram), Prior, constraints (fix / equal)       │
+├──────────────────────────────────────────────────────────────┤
+│ ② Compile layer (Python, validation)                         │
+│   Spec + Data → ParameterTable (like mirt's pars='values')    │
+│   → FreeMap (free-parameter vector ⇄ all parameters)          │
+│   → response-pattern compression, padding, identification     │
+├──────────────────────────────────────────────────────────────┤
+│ ③ Core layer (pure JAX, jit)                                  │
+│   e_step, m_step_items, m_step_latent, em_loop(lax.while_loop) │
+│   squarem, oakes_information, scoring                         │
+├──────────────────────────────────────────────────────────────┤
+│ ④ Result layer (Python)                                       │
+│   FitResult: parameter tables (DataFrame), SE, logLik,        │
+│   AIC/BIC, convergence history, score(), summary(), repr_html │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Decision**: ③ knows nothing about names, strings or DataFrames. Its inputs and outputs are
+pytrees only (nested `jax.Array`s and our own frozen dataclasses registered with
+`@jax.tree_util.register_dataclass`, not `NamedTuple` / `flax.struct`).
+
+## 3. Notation
+
+| Symbol | Meaning |
+|---|---|
+| $g=1..G$ | Groups (populations); $g=1$ is the reference group |
+| $j=1..J$ | Items |
+| $p$ | Unique response patterns within a group; $c_p$ is its frequency |
+| $q=1..Q$ | Quadrature nodes $\theta_q$ |
+| $w_{gq}$ | Quadrature weights of group $g$'s latent distribution ($\sum_q w_{gq}=1$) |
+| $\xi_j^{(g)}$ | Parameters of item $j$ in group $g$ (identical across groups under equality constraints) |
+| $\eta$ | Free-parameter vector (expanded into the parameters of $\xi$ and $w$ by the FreeMap) |
+
+## 4. Algorithms
+
+### 4.1 Preprocessing: response-pattern compression
+- Make each group's response matrix (missing as `-1`) unique to get frequencies $c_p$.
+- To limit jit recompilation, **pad the number of patterns to a power-of-two bucket** (rows with
+  frequency 0).
+- Groups have different numbers of patterns, so all groups are concatenated into one array plus
+  a `group_index` (no per-group Python loop inside jit).
+
+### 4.2 E-step
+For each pattern and node,
+$$\ell_{pq}=\sum_j m_{pj}\log P_j(y_{pj}\mid\theta_q;\xi_j^{(g)}),\qquad m_{pj}=\mathbf 1[y_{pj}\ \text{observed}]$$
+$$h_{pq}=\operatorname{softmax}_q\big(\ell_{pq}+\log w_{g(p)q}\big)$$
+Expected counts ("artificial data"):
+$$\bar n_{gq}=\sum_{p\in g}c_p h_{pq},\qquad \bar r_{gjkq}=\sum_{p\in g}c_p h_{pq}\mathbf 1[y_{pj}=k]$$
+Marginal log-likelihood: $\ell(\eta)=\sum_p c_p\operatorname{logsumexp}_q(\ell_{pq}+\log w_{g(p)q})$.
+
+Implementation note: $\bar r$ is an einsum of `one_hot(y)` and $c_p h_{pq}$. To avoid
+$P\times J\times K\times Q$ memory, contract the `(P,Q)` weights with the `(P,J,K)` one-hot to get
+`(G,J,K,Q)` directly.
+
+### 4.3 M-step (items)
+The expected complete-data log-likelihood of item $j$ over groups, plus the log prior:
+$$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;+\;\log\pi(\xi_j)$$
+- Equality constraints across groups stay **within one item**, so the item-wise decomposition holds
+  (multiple groups can still be solved item by item).
+- **Decision (v1)**: item-wise Newton–Raphson (gradient and Hessian by autodiff,
+  $\dim\xi_j\le 5$ or so). Items of the same item model ("item family") are stacked and `vmap`ed.
+  A backtracking line search guarantees that $Q_j$ increases (monotone, as a generalized EM). The
+  M-step need not converge fully; a few Newton steps are enough.
+- Fixed parameters are not part of $\eta$ (they come from the ParameterTable as constants).
+- **Equality constraints across items** (e.g. one common $a$ for all items) break the
+  decomposition. Not supported in v1; M5 will add "joint Newton per component of items connected
+  by constraints".
+
+### 4.4 M-step (latent distribution)
+- **Normal** (when group $g$'s mean or variance is free):
+  **Decision (M1)**: the quadrature weights are the density normalized on the grid,
+  $w_{gq}(\mu_g,\sigma_g^2)=\phi(\theta_q;\mu_g,\sigma_g^2)/\sum_{q'}\phi(\theta_{q'};\mu_g,\sigma_g^2)$, so
+  the M-step maximizes the discretized expected log-likelihood
+  $Q_g^{\text{lat}}=\sum_q\bar n_{gq}\log w_{gq}(\mu_g,\sigma_g^2)$ with the same masked Newton as the
+  items (§4.3). The closed-form moments
+  $\mu_g=\frac{1}{N_g}\sum_q\bar n_{gq}\theta_q$, $\sigma_g^2=\frac{1}{N_g}\sum_q\bar n_{gq}(\theta_q-\mu_g)^2$
+  maximize over the continuous density and are not an exact EM step for the discretized marginal
+  likelihood (monotonicity is no longer guaranteed, and they are inconsistent with Oakes'
+  identity). The difference is negligible on 61 equally spaced points, but exactness comes first.
+  Parameters are kept on their natural scale (mean and **variance**); $\sigma^2>0$ is enforced by
+  the line search's feasibility check.
+  (Confirmed in M1: mirt uses the closed form, which gives Rasch variances up to ~8e-5 apart; see
+  VALIDATION.md.)
+  **Decision (2026-11-20, reviewed)**: keep only the exact M-step; the mirt-style closed-form
+  update is not offered even as an option. The difference comes from the grid cut-off
+  ($V_w(\sigma^2)<\sigma^2$); the stationary conditions are
+  exact: $V_w(\hat\sigma^2)=\hat m$, closed form: $\hat\sigma^2=\hat m$ ($\hat m$ is the second moment of
+  the expected counts). The reported `var` is the parameter of the normal distribution before the
+  grid cuts it off; the variance of the distribution on the grid is $V_w(\hat\sigma^2)$. For groups
+  with a large mean or variance (e.g. M2 focal groups) the cut-off also affects the mean, so the
+  grid width matters.
+- **Empirical Histogram (EH)**: $w_{gq}=\bar n_{gq}/N_g$.
+  For identification, the reference group's EH is standardized to mean 0 and variance 1 at every
+  iteration (Woods, 2007). How to standardize is open question 1 in §12.
+- Later: Davidian curves (Woods & Lin, 2009), normal mixtures. Both can be added without touching
+  the Core by following the `LatentDist` protocol (§6).
+
+### 4.5 Identification rules (checked in the Compile layer)
+- Default: the reference group is fixed at $N(0,1)$; focal groups' means and variances are free.
+  Freeing a focal group needs anchor items with all parameters equal across groups (for 2PL, one
+  item identifies in theory; several are recommended in practice, with a warning when there are
+  few).
+- **FIPC**: the fixed items set the scale, so every group's mean and variance may be free. With no
+  fixed items, the reference group is fixed. Estimating the non-fixed items with the latent
+  distribution held at $N(0,1)$ shifts the scale (Kim, 2006), so FIPC updates the latent
+  distribution (Normal mean and variance, or EH weights) at every EM iteration by default
+  (equivalent to Kim's MWU-MEM).
+- **Rasch (Decision, M1)**: Rasch fixes $a_j=1$ and frees $d_j$; the slopes set the scale, so the
+  **latent variance is estimated** and the mean is fixed at 0 (as mirt's `itemtype="Rasch"`:
+  `a1` fixed, `MEAN_1` fixed, `COV_11` free). In a single-group model without an explicit latent
+  distribution, **the default is $N(0,\sigma^2)$ (variance free) when every item is Rasch**, and
+  $N(0,1)$ fixed otherwise.
+- General rule (checked in M1): a free variance needs at least one item with a fixed slope
+  (nonzero value); a free mean needs at least one item with a fixed intercept.
+- Unidentified specifications raise `IdentificationError` before fitting.
+
+### 4.6 Convergence and acceleration
+- Convergence: largest absolute change of the free parameters (natural-scale $\eta$) $<$ `tol`
+  (default 1e-4, the same definition as mirt's `TOL`). The histories of the log-likelihood (log
+  posterior with MAP) and the largest change are both kept; monotonicity is checked by tests.
+  **Decision (M1)**: the stopping rule is the largest absolute change only (adding a
+  log-likelihood change condition would break the correspondence with mirt).
+- **SQUAREM** (Varadhan & Roland, 2008, scheme S3) as an option. If the objective decreases after
+  extrapolation, fall back to a plain EM step (a monotonicity safeguard).
+- The EM loop runs on device in `lax.while_loop`. Optional progress output with
+  `jax.debug.callback`.
+
+### 4.7 MAP (Bayes modal)
+- Priors are defined on the **natural parameter scale** ($a, b$ or $a, d$, $c$ and so on) without
+  a Jacobian term (the posterior mode on the natural scale, as in mirt's Bayes modal).
+- Even if the optimization runs on a transformed scale (e.g. $c$ on the logit scale), the
+  objective is evaluated with the natural-scale prior.
+- Results report `loglik` (likelihood only) and `log_posterior` separately. AIC/BIC come with a
+  warning when priors are present.
+
+### 4.8 Standard errors
+- **Decision**: the default is Oakes' (1999) identity
+  $$I(\hat\eta)=-\Big[\tfrac{\partial^2 Q(\eta\mid\eta')}{\partial\eta\,\partial\eta^\top}+\tfrac{\partial^2 Q(\eta\mid\eta')}{\partial\eta\,\partial\eta'^\top}\Big]_{\eta=\eta'=\hat\eta}$$
+  computed with `jax.hessian` and `jax.jacfwd(jax.grad(...))`. $Q$ is implemented as a
+  two-argument function: "E-step weights computed at $\eta'$, likelihood evaluated at $\eta$".
+- Alternatives: the observed information of the marginal log-likelihood by `jax.hessian` directly
+  (the simplest for small problems; also used to check Oakes), cross-product
+  ($\sum_p c_p s_p s_p^\top$), sandwich.
+- With MAP, add the prior's Hessian. Fixed parameters are not in $\eta$ and are excluded
+  automatically.
+
+### 4.9 Quadrature
+- **Decision**: the unidimensional default is 61 equally spaced points on $[-6,6]$ (the same grid
+  can be shared with EH; Normal weights come from the density).
+- Gauss–Hermite is available for Normal only (`Quadrature.gauss_hermite(n)`).
+- Multidimensional models (M4 and later) use product grids, up to 3 dimensions. More is out of
+  scope (non-goal).
+
+### 4.10 Starting values
+- $d_j$: logit of the proportion correct; $a_j$: converted from the item–total point-biserial
+  correlation (classical starting values as in mirt). GRM thresholds: logits of the cumulative
+  category proportions.
+- **Decision (M1, 2PL/Rasch)**: from the proportion correct $p_j$ (clipped to $[0.01,0.99]$) and
+  the item–rest point-biserial correlation $r_j$,
+  $a_j^{(0)}=\operatorname{clip}(1.7\,r_j/\sqrt{1-r_j^2},\,0.25,\,3)$ (1 for Rasch),
+  $d_j^{(0)}=\operatorname{logit}(p_j)\sqrt{1+(a_j^{(0)}/1.7)^2}$ (to roughly match the marginal
+  probability). The variance starts at 1. Starting values are assumed not to affect the converged
+  point, and the validation tests check this.
+- User starting values override these through the ParameterTable's `value` column.
+
+## 5. Data structures
+
+### 5.1 ParameterTable (Compile layer, also public)
+A long table like mirt's `pars='values'`. **Every constraint is expressed in its columns.**
+
+| Column | Type | Meaning |
+|---|---|---|
+| `group` | str | Group name |
+| `item` | str | Item name (`"__latent__"` for latent-distribution parameters) |
+| `param` | str | Internal parameter name such as `a`, `d`, `g`, `u`, `d1..dK` |
+| `value` | float | Starting value (the fixed value if not free) |
+| `free` | bool | Whether it is estimated |
+| `lower`, `upper` | float | Bounds |
+| `prior` | `Prior \| None` | Prior object |
+| `free_id` | int \| -1 | Free-parameter number. **Equality constraints are expressed by sharing a `free_id`** |
+
+- Users take the table out with `spec.parameter_table(data)`, edit it with pandas and pass it to
+  `fit(..., table=edited)` (keeping mirt's pars-editing workflow).
+- The `FreeMap` holds gather indices from `free_id` into "all parameters (group × family × item ×
+  parameter, padded)". $\eta\mapsto\xi$ is one line:
+  `xi = fixed_values.at[idx].set(eta[free_id])`.
+
+### 5.2 The pytree passed to the Core
+```python
+@register_dataclass
+@dataclass(frozen=True)
+class CompiledProblem:
+    y: Array  # (P, J) int, missing -1, padding rows have frequency 0
+    counts: Array  # (P,)
+    group: Array  # (P,) int
+    nodes: Array  # (Q, D)
+    families: tuple[FamilyBlock, ...]  # one block per item model (static)
+    free_map: FreeMap
+    latent: tuple[LatentBlock, ...]  # per-group latent distribution (static kind + dynamic params)
+```
+`families` and the latent distributions' kinds are static (jit static); parameter values are
+dynamic.
+
+## 6. Extension protocols
+
+```python
+class ItemModel(Protocol):
+    name: ClassVar[str]
+    param_names: tuple[str, ...]  # internal parameter names
+
+    def log_prob(self, theta: Array, params: Array) -> Array:
+        ...
+        # theta (Q, D), params (n_params,) -> (Q, K) log-probability of each category
+
+    def init(self, y: Array) -> Array: ...  # classical starting values
+    def to_irt(self, params: Array) -> dict[str, Array]: ...  # e.g. a, b display (display only)
+    def bounds(self) -> tuple[Array, Array]: ...
+
+
+class LatentDist(Protocol):
+    def log_weights(self, nodes: Array, params: Array) -> Array: ...  # (Q,)
+    def m_step(self, nodes: Array, n_bar: Array, params: Array) -> Array: ...
+    def n_params(self) -> int: ...
+```
+The design goal: writing `log_prob` is enough for a new item model to get the E-step, M-step
+(autodiff Newton), SEs and scoring.
+
+## 7. Item models (in stages)
+| Model | Internal parameters | Milestone |
+|---|---|---|
+| Rasch / 2PL | $a, d$ ($P=\sigma(a\theta+d)$) | M1 |
+| 3PL / 4PL | $a,d,g,u$ ($g,u$ optimized on the logit scale) | M3 |
+| GRM | $a, d_1>\dots>d_{K-1}$ | M2 |
+| GPCM / PCM | $a, d_1..d_{K-1}$ | M3 |
+| Nominal | M5 or later (undecided) | — |
+
+The display IRT parameterization ($b=-d/a$ and so on) is converted in the Result layer, with SEs
+by the delta method.
+
+## 8. Scoring
+`FitResult.score(data, method="EAP"|"MAP"|"ML"|"WLE"|"PV", group=...)`, using each group's
+estimated latent distribution as the prior. EAP also returns the posterior SD.
+
+## 9. Performance
+- Pattern compression and bucket padding limit recompilation.
+- `vmap` per item family. Mixed item types loop only over the (static) families.
+- The default target is "fast enough on CPU". GPU should help for large problems
+  (N ≥ 10^5, J ≥ 100).
+- Benchmarks: wall time against R mirt (`TOL=1e-4`, default settings) in `benchmarks/` (M3).
+
+## 10. Errors and warnings
+- `SpecificationError`: inconsistent specification (fixing an unknown item, wrong number of
+  categories, ...)
+- `IdentificationError`: not identified (focal group free without anchors, ...)
+- `ConvergenceWarning`: maximum iterations reached, frequent SQUAREM safeguard
+- `HeywoodWarning`: boundary solution ($g\to0$, diverging $a$, ...)
+
+## 11. Testing (details in VALIDATION.md)
+- Unit: probabilities of each `log_prob` sum to 1, finite-difference gradient checks, E-step count
+  conservation ($\sum_q\bar n_{gq}=N_g$).
+- Property: hypothesis generates random parameters and data; EM must increase monotonically.
+- Recovery: parameter recovery in simulations (bias, RMSE).
+- Agreement: estimates, SEs and log-likelihood match R mirt within tolerance.
+
+## 12. Open questions
+1. **Identification for EH**: either (a) at every iteration, affinely transform the nodes so the
+   weights have mean 0 and variance 1, and transform the item parameters back; or (b) standardize
+   the reference group's EH and re-interpolate. Decide after checking mirt's behaviour.
+2. Many groups (e.g. school × grade). Keep the per-group latent distributions `vmap`-able.
+3. ~~Missing-data design~~ → exclusion under MAR only (§14.8, 2026-11-20).
+4. ~~Package name~~ → `flexpyirt` (2026-11-20).
+5. How to implement the M-step with equality constraints across items (§4.3).
+
+## 13. Implementation decisions (M1)
+1. **Newton in the M-step**: every gradient and Hessian comes from JAX autodiff (`jax.grad` /
+   `jax.hessian`); there are no hand-written analytic derivatives. Only the loop (step update and
+   line search) is our own: Newton masked to the free coordinates. Fixed coordinates get Hessian
+   $-I$ and gradient 0 so they do not move. If the Newton direction is not an ascent direction
+   (the Hessian is not negative definite), switch to the gradient. Step sizes
+   $2^{-k}\ (k=0,\dots,29)$ are evaluated together with `vmap`, and the largest one that does not
+   decrease the objective and stays within bounds is taken (none: do not move). This shape keeps
+   Python branches out of jit.
+2. **FreeMap**: per family, `free_index (J_f, P_f)` (-1 if fixed) and `fixed_values`.
+   $\xi=\text{where}(\text{free\_index}\ge0,\ \eta[\text{free\_index}],\ \text{fixed})$.
+   After the M-step, write back with `eta.at[free_index].set(xi, mode="drop")`. In M1, sharing a
+   `free_id` between different items is a `SpecificationError` (§4.3; supported in M5).
+3. **Explicitly reject what M1 does not cover**: multiple groups (`group=`), missing data (NaN) and
+   non-equispaced quadrature come in M2 or later. The E-step itself is written with a missing-data
+   mask, but the data layer rejects missing data until validation (V9) is done. Items where
+   everyone gave the same response make the MLE diverge and raise `SpecificationError`.
+   (Multiple groups and missing data were enabled in M2, §14.)
+4. **Dependencies**: pandas is required (results are DataFrames); polars is optional.
+5. **SE**: the information matrix for $\eta$ (natural scale). Oakes differentiates
+   $Q(\eta\mid\eta')$ with `jax.jacfwd(jax.grad(Q, 0), argnums=(0, 1))`. The direct method is
+   `jax.hessian` of the marginal log-likelihood. The two agree as an identity, so the internal
+   consistency test compares them near machine precision (relative 1e-6).
+
+## 14. Implementation decisions (M2)
+1. **Per-group item parameters**: the ParameterTable has group × item × parameter rows, with a
+   separate `free_id` per group by default (as in mirt `multipleGroup`).
+   `equal_across_groups(items=..., params=None)` gives the selected items' rows the same `free_id`
+   across groups. In the Core, each family has `free_index (G, J_f, P_f)`.
+2. **Item-local parameters**: to solve item $j$ including its parameters shared across groups,
+   each item gets a local vector $u_j$ (padded to length $G\cdot P_f$), expanded with
+   `local_index (G, J_f, P_f)` as $\xi^{(g)}_j=u_j[\text{local}]$. The M-step maximizes
+   $\sum_g Q_{jg}(\xi_j^{(g)}(u_j))$ over $u_j$ with the masked Newton (§13.1), `vmap`ed. `free_id`s
+   do not cross items (until M5), so the local vector stays within the item.
+3. **Groups in the E-step**: $\ell_{pq}$ is computed for every group with
+   `einsum("pjk,gjqk->pgq")`, then each pattern's own group is selected (no
+   $P\times J\times Q\times K$ intermediate). $\bar r$ is `(G, J_f, K, Q)`.
+4. **Declaring groups**: `Model.with_groups(**latents)` defines the groups in keyword order; the
+   first is the reference group. The values of `fit(..., group=labels)` must match these group
+   names (missing or extra groups are a `SpecificationError`). Passing `group=` without
+   `with_groups` is also an error.
+5. **Identification (multiple groups)**: for the mean, build a graph with groups as nodes and
+   shared intercept `free_id`s as edges, and require every connected component to contain "a group
+   with a fixed mean" or "a fixed intercept" (likewise for the variance with slopes). This is a
+   necessary condition, not a sufficient one. Warn when a group with a free mean is connected by a
+   single anchor.
+6. **FIPC**: `Model.fix_from(bank, items=..., parameterization="slope-intercept" | "irt")` fixes the
+   item parameters, and the user frees the latent distribution with `with_latent(Normal.free())`
+   (the default does not change; the §4.5 identification check allows it). The IRT form ($b$) is
+   converted with $d=-ab$ (2PL; for GRM, $b_k$ → $d_k=-ab_k$).
+7. **GRM** (Samejima, 1969): $P(y\ge k\mid\theta)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$, categories
+   $0..K-1$. Log-probabilities are computed stably as $\log\sigma(-z_1)$ and $\log\sigma(z_{K-1})$ for
+   the end categories and
+   $\log\sigma(z_k)+\operatorname{log1mexp}(\log\sigma(z_{k+1})-\log\sigma(z_k))$ in between (log1mexp
+   clamps each branch's input to its safe domain with a double `where` so gradients have no NaN).
+   The ordering constraint is kept by the line search rejecting non-finite candidates. One family
+   per $K$ of `GRM(n_cat=K)`. Items with a category that never occurs in the data have a diverging
+   threshold and raise `SpecificationError`.
+8. **Missing data (MAR)**: NaN is coded as `-1` and the E-step's one-hot row is all zeros, which
+   drops it from the likelihood ($m_{pj}$ in §4.2). An item missing for everyone is an error.
+   Starting values use observed values only. Not-reached responses are not handled (this settles
+   §12-3).
+9. **Grid for validation**: validation cases with a free latent mean or variance (V4, V5) use
+   81 points on $[-8,8]$ (the same 0.2 spacing as the default) in both mirt and flexpyirt, as set
+   out in VALIDATION.md.
+
+## References
+- Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
+- Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
+- Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
+- Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
+- Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
+- Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
+- Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
