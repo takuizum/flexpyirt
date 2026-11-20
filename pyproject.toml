@@ -53,7 +53,7 @@ convention = "numpy"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src/flexpyirt", "tests"]
+files = ["src/flexpyirt", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
 module = ["scipy.*"]
