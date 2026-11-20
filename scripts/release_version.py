@@ -1,15 +1,16 @@
 """Release helper for the develop -> main flow (see CONTRIBUTING.md).
 
+The package version comes from git tags (hatch-vcs), so releasing means creating the next
+``vX.Y.Z`` tag on main; nothing is committed.
+
 Commands
 --------
 ``parse-title TITLE``
     Print the bump level (``major`` / ``minor`` / ``patch``) of a release PR title of the form
     ``release(<level>): <summary>``; exit 1 if the title does not match.
-``next --bump LEVEL [--initial]``
-    Print the version to release. With ``--initial`` (no ``v*`` tag exists yet) the current
-    version is released as is; otherwise it is bumped.
-``write VERSION``
-    Write ``VERSION`` into ``[project].version`` of pyproject.toml, keeping the rest of the file.
+``next --bump LEVEL [--latest vX.Y.Z]``
+    Print the version to release: ``--latest`` bumped at ``LEVEL``, or ``INITIAL_VERSION`` when
+    there is no release tag yet.
 """
 
 from __future__ import annotations
@@ -17,15 +18,13 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-import tomllib
-from pathlib import Path
 from typing import Literal
 
 Bump = Literal["major", "minor", "patch"]
 
+INITIAL_VERSION = "0.0.1"
 TITLE_RE = re.compile(r"^release\((major|minor|patch)\): \S.*$")
-VERSION_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
-PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
+VERSION_RE = re.compile(r"^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 
 def parse_title(title: str) -> Bump:
@@ -41,7 +40,7 @@ def parse_title(title: str) -> Bump:
 
 
 def bump_version(version: str, level: Bump) -> str:
-    """Return ``version`` bumped at ``level`` (semantic versioning, lower parts reset to 0)."""
+    """Return ``version`` (``X.Y.Z`` or ``vX.Y.Z``) bumped at ``level``, without the ``v``."""
     m = VERSION_RE.match(version)
     if m is None:
         raise ValueError(f"Version must be MAJOR.MINOR.PATCH, got {version!r}.")
@@ -53,48 +52,26 @@ def bump_version(version: str, level: Bump) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
-def read_version(path: Path = PYPROJECT) -> str:
-    """Return ``[project].version`` of a pyproject.toml."""
-    return str(tomllib.loads(path.read_text())["project"]["version"])
-
-
-def write_version(version: str, path: Path = PYPROJECT) -> None:
-    """Replace ``[project].version`` in a pyproject.toml, keeping formatting elsewhere."""
-    if VERSION_RE.match(version) is None:
-        raise ValueError(f"Version must be MAJOR.MINOR.PATCH, got {version!r}.")
-    text = path.read_text()
-    project = re.search(r"^\[project\]\s*$(.*?)(?=^\[|\Z)", text, flags=re.M | re.S)
-    if project is None:
-        raise ValueError("pyproject.toml has no [project] table.")
-    body, n = re.subn(
-        r'^version\s*=\s*"[^"]*"', f'version = "{version}"', project.group(1), count=1, flags=re.M
-    )
-    if n != 1:
-        raise ValueError("[project] table has no version line.")
-    path.write_text(text[: project.start(1)] + body + text[project.end(1) :])
+def next_version(level: Bump, latest: str | None) -> str:
+    """Return the next release version; the first release is ``INITIAL_VERSION``."""
+    return INITIAL_VERSION if not latest else bump_version(latest, level)
 
 
 def main(argv: list[str] | None = None) -> int:
     """Command-line entry point."""
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description="Release helper (see module docstring).")
     sub = parser.add_subparsers(dest="command", required=True)
     p_title = sub.add_parser("parse-title")
     p_title.add_argument("title")
     p_next = sub.add_parser("next")
     p_next.add_argument("--bump", choices=["major", "minor", "patch"], required=True)
-    p_next.add_argument("--initial", action="store_true")
-    p_write = sub.add_parser("write")
-    p_write.add_argument("version")
+    p_next.add_argument("--latest", default="")
     args = parser.parse_args(argv)
-
     try:
         if args.command == "parse-title":
             print(parse_title(args.title))
-        elif args.command == "next":
-            current = read_version()
-            print(current if args.initial else bump_version(current, args.bump))
         else:
-            write_version(args.version)
+            print(next_version(args.bump, args.latest or None))
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

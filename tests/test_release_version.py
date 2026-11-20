@@ -69,25 +69,17 @@ def test_bump_rejects_non_semver() -> None:
         rv.bump_version("1.0", "patch")
 
 
-def test_write_version_only_touches_project_table(tmp_path: Path) -> None:
-    path = tmp_path / "pyproject.toml"
-    path.write_text(
-        '[build-system]\nversion = "keep"\n\n[project]\nname = "x"\nversion = "0.0.1"\n'
-        'description = "y"\n\n[tool.other]\nversion = "keep-too"\n'
-    )
-    rv.write_version("0.2.0", path)
-    text = path.read_text()
-    assert 'version = "0.2.0"' in text
-    assert text.count('"keep"') == 1 and text.count('"keep-too"') == 1
-    assert rv.read_version(path) == "0.2.0"
+def test_bump_accepts_tag_prefix() -> None:
+    assert rv.bump_version("v0.0.1", "minor") == "0.1.0"
 
 
-def test_cli_next_initial_keeps_current(capsys: pytest.CaptureFixture[str]) -> None:
-    current = rv.read_version()
-    assert rv.main(["next", "--bump", "minor", "--initial"]) == 0
-    assert capsys.readouterr().out.strip() == current
-    assert rv.main(["next", "--bump", "patch"]) == 0
-    assert capsys.readouterr().out.strip() == rv.bump_version(current, "patch")
+def test_next_version_initial_and_bumped(capsys: pytest.CaptureFixture[str]) -> None:
+    assert rv.next_version("major", None) == rv.INITIAL_VERSION == "0.0.1"
+    assert rv.next_version("patch", "v0.0.1") == "0.0.2"
+    assert rv.main(["next", "--bump", "minor"]) == 0
+    assert capsys.readouterr().out.strip() == "0.0.1"
+    assert rv.main(["next", "--bump", "minor", "--latest", "v0.0.1"]) == 0
+    assert capsys.readouterr().out.strip() == "0.1.0"
 
 
 def test_cli_parse_title_error(capsys: pytest.CaptureFixture[str]) -> None:
