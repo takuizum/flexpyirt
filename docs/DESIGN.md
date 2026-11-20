@@ -87,7 +87,14 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 
 ### 4.4 M-step（潜在分布）
 - **Normal**（群 $g$ の平均・分散が自由な場合）:
-  $\mu_g=\frac{1}{N_g}\sum_q\bar n_{gq}\theta_q$、$\sigma_g^2=\frac{1}{N_g}\sum_q\bar n_{gq}(\theta_q-\mu_g)^2$（閉形式）。
+  **決定（M1）**: 求積重みは格子上の密度を正規化したもの
+  $w_{gq}(\mu_g,\sigma_g^2)=\phi(\theta_q;\mu_g,\sigma_g^2)/\sum_{q'}\phi(\theta_{q'};\mu_g,\sigma_g^2)$ なので、
+  M-step は離散化した期待対数尤度 $Q_g^{\text{lat}}=\sum_q\bar n_{gq}\log w_{gq}(\mu_g,\sigma_g^2)$ を
+  項目と同じマスク付き Newton（§4.3）で最大化する。閉形式のモーメント
+  $\mu_g=\frac{1}{N_g}\sum_q\bar n_{gq}\theta_q$、$\sigma_g^2=\frac{1}{N_g}\sum_q\bar n_{gq}(\theta_q-\mu_g)^2$
+  は連続密度に対する最大化であり、離散化した周辺尤度の EM としては厳密ではない（単調性の保証が崩れ、
+  Oakes の恒等式とも整合しない）。差は等間隔 61 点では無視できるほど小さいが、厳密さを優先する。
+  パラメタは自然尺度（平均・**分散**）で持ち、$\sigma^2>0$ は line search の実行可能性判定で守る。
 - **Empirical Histogram (EH)**: $w_{gq}=\bar n_{gq}/N_g$。
   識別のため参照群 EH は各反復で平均 0・分散 1 に標準化する（Woods, 2007）。標準化の方法は §12 未決事項 1。
 - 将来: Davidian 曲線（Woods & Lin, 2009）、混合正規。いずれも `LatentDist` プロトコル（§6）に従えば Core に手を入れずに追加できる。
@@ -98,10 +105,18 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - **FIPC**: 固定項目が尺度を決めるので、全群の平均・分散を自由にしてよい。固定項目が 0 なら参照群を固定。
   潜在分布を $N(0,1)$ に固定したまま固定項目以外を推定すると尺度がずれる（Kim, 2006）ので、
   FIPC では潜在分布（Normal の平均・分散、または EH の重み）を各 EM 反復で更新する方式（Kim の MWU-MEM に相当）を既定にする。
+- **Rasch（決定, M1）**: Rasch は $a_j=1$ 固定・$d_j$ 自由で、尺度は傾きで決まるので**潜在分布の分散を自由推定**し、
+  平均は 0 に固定する（mirt の `itemtype="Rasch"` と同じ: `a1` 固定、`MEAN_1` 固定、`COV_11` 自由）。
+  潜在分布を明示しない単一群モデルでは、**全項目が Rasch のとき既定を $N(0,\sigma^2)$（分散自由）**、
+  それ以外は $N(0,1)$ 固定とする。
+- 一般則（M1 で検査）: 分散を自由にするには傾きを固定した項目（値が 0 でない）が 1 つ以上、
+  平均を自由にするには切片を固定した項目が 1 つ以上必要。
 - 識別できない指定は `IdentificationError` を fit 前に投げる。
 
 ### 4.6 収束と加速
-- 収束判定: 自由パラメタの最大絶対変化 $<$ `tol`（既定 1e-4、mirt と同じ思想）かつ対数尤度（MAP 時は対数事後）の変化が小さいこと。両方の履歴を保存。
+- 収束判定: 自由パラメタ（自然尺度の $\eta$）の最大絶対変化 $<$ `tol`（既定 1e-4、mirt の `TOL` と同じ定義）。
+  対数尤度（MAP 時は対数事後）と最大変化の両方の履歴を保存し、単調性はテストで検査する。
+  **決定（M1）**: 停止条件は最大絶対変化のみとする（対数尤度の変化量を条件に足すと mirt との対応が崩れるため）。
 - **SQUAREM**（Varadhan & Roland, 2008, スキーム S3）をオプションで。外挿後に目的関数が減ったら通常の EM ステップに戻す（単調性の安全装置）。
 - EM ループは `lax.while_loop` でデバイス上に置く。進捗表示は `jax.debug.callback` を任意で。
 
@@ -124,6 +139,10 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 
 ### 4.10 初期値
 - $d_j$: 正答率の logit、$a_j$: 項目−合計の点双列相関から変換（mirt と同様の古典的初期値）。GRM の閾値はカテゴリ累積比率の logit。
+- **決定（M1, 2PL/Rasch）**: 正答率 $p_j$（$[0.01,0.99]$ に丸める）と項目−残余得点の点双列相関 $r_j$ から
+  $a_j^{(0)}=\operatorname{clip}(1.7\,r_j/\sqrt{1-r_j^2},\,0.25,\,3)$（Rasch は 1）、
+  $d_j^{(0)}=\operatorname{logit}(p_j)\sqrt{1+(a_j^{(0)}/1.7)^2}$（周辺確率を近似的に合わせるため）。
+  分散の初期値は 1。初期値は収束点に影響しない前提で、照合テストもそれを確認する。
 - ユーザー指定の初期値は ParameterTable の `value` 列で上書き可能。
 
 ## 5. データ構造
@@ -221,6 +240,24 @@ class LatentDist(Protocol):
 3. 欠測の設計（MAR 前提の除外のみで十分か、not-reached の扱いを入れるか）。
 4. ~~パッケージ名~~ → `flexpyirt` に決定（2026-11-20）。
 5. 項目をまたぐ等値制約の M-step（§4.3）の実装方式。
+
+## 13. 実装上の決定（M1）
+1. **M-step の Newton**: 勾配・Hessian はすべて JAX の自動微分（`jax.grad` / `jax.hessian`）で得て、手書きの解析微分は持たない。
+   ループ（ステップ更新と line search）だけ自前で書く: 自由座標のマスク付き Newton。固定座標は Hessian を $-I$・勾配 0 に置き換えて動かさない。
+   Newton 方向が上昇方向でない（Hessian が負定値でない）ときは勾配方向に切り替える。ステップ幅は
+   $2^{-k}\ (k=0,\dots,29)$ を `vmap` で一括評価し、目的関数が減らず範囲内に収まる最大のものを採る
+   （該当なしなら動かない）。jit 内に Python 分岐を持ち込まないための形。
+2. **FreeMap**: family ごとに `free_index (J_f, P_f)`（固定は -1）と `fixed_values`。
+   $\xi=\text{where}(\text{free\_index}\ge0,\ \eta[\text{free\_index}],\ \text{fixed})$。
+   M-step 後は `eta.at[free_index].set(xi, mode="drop")` で戻す。M1 では `free_id` を異なる項目間で共有すると
+   `SpecificationError`（§4.3、M5 で対応）。
+3. **M1 の範囲外は明示的に拒否**: 多母集団（`group=`）、欠測（NaN）、等間隔以外の求積は M2 以降。
+   E-step 自体は欠測マスクを持つ形で書くが、照合（V9）が済むまでデータ層で拒否する。
+   全員が同じ反応の項目は MLE が発散するので `SpecificationError`。
+4. **依存**: pandas は必須依存（結果は DataFrame で返す）、polars は任意依存。
+5. **SE**: $\eta$（自然尺度）に対する情報行列。Oakes は $Q(\eta\mid\eta')$ を
+   `jax.jacfwd(jax.grad(Q, 0), argnums=(0, 1))` で微分。直接法は周辺対数尤度の `jax.hessian`。
+   両者は恒等式として一致するので、内部整合テストは機械精度近く（相対 1e-6）で比較する。
 
 ## 参考文献
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
