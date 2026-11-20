@@ -9,7 +9,7 @@ import textwrap
 import pytest
 
 import flexpyirt
-from flexpyirt import FitResult, Model, errors, fit
+from flexpyirt import FitResult, Model, TwoPL, errors, fit
 from flexpyirt._precision import check_x64, x64_enabled
 
 
@@ -21,7 +21,7 @@ def test_public_api() -> None:
 def test_spec_and_result_are_frozen() -> None:
     assert dataclasses.is_dataclass(Model)
     assert dataclasses.is_dataclass(FitResult)
-    model = Model()
+    model = Model.uniform(TwoPL(), items=["i1", "i2"])
     with pytest.raises(dataclasses.FrozenInstanceError):
         model.foo = 1  # type: ignore[attr-defined]
 
@@ -45,11 +45,13 @@ def test_x64_check_passes_when_enabled() -> None:
     check_x64()
 
 
-def test_fit_is_keyword_only_and_not_implemented() -> None:
+def test_fit_is_keyword_only_and_rejects_groups_before_m2() -> None:
+    spec = Model.uniform(TwoPL(), items=["i1", "i2"])
+    data = [[0, 1], [1, 0]]
     with pytest.raises(TypeError):
-        fit(Model(), [[0, 1]], None)  # type: ignore[call-arg]
+        fit(spec, data, None)  # type: ignore[call-arg]
     with pytest.raises(NotImplementedError):
-        fit(Model(), [[0, 1]], group=None)
+        fit(spec, data, group=[0, 1])
 
 
 def _run_isolated(code: str, *, x64: str) -> subprocess.CompletedProcess[str]:
@@ -81,7 +83,7 @@ def test_fit_raises_precision_error_without_x64() -> None:
         import flexpyirt
         from flexpyirt.errors import PrecisionError
         try:
-            flexpyirt.fit(flexpyirt.Model(), [[0, 1]])
+            flexpyirt.fit(flexpyirt.Model.uniform(flexpyirt.TwoPL(), items=['i1', 'i2']), [[0, 1]])
         except PrecisionError as e:
             assert "jax_enable_x64" in str(e)
         else:

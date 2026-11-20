@@ -6,7 +6,11 @@ from importlib.metadata import PackageNotFoundError, version
 
 from flexpyirt import errors
 from flexpyirt.fit import fit
+from flexpyirt.items import Rasch, TwoPL
+from flexpyirt.latent import Normal
+from flexpyirt.method import BAEM
 from flexpyirt.model import Model
+from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
 
 try:
@@ -14,4 +18,15 @@ try:
 except PackageNotFoundError:  # pragma: no cover - only when running from an unbuilt source tree
     __version__ = "0.0.0+unknown"
 
-__all__ = ["FitResult", "Model", "__version__", "errors", "fit"]
+__all__ = [
+    "BAEM",
+    "FitResult",
+    "Model",
+    "Normal",
+    "Quadrature",
+    "Rasch",
+    "TwoPL",
+    "__version__",
+    "errors",
+    "fit",
+]

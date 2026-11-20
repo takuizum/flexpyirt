@@ -1,16 +1,155 @@
-"""Estimation result (Result layer, DESIGN.md §2 ④).
-
-M0 placeholder: only the type exists. Parameter tables, standard errors, log-likelihood and
-scoring are added from M1 on (API.md §7).
-"""
+"""Estimation result (Result layer, DESIGN.md §2 ④)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
+
+import jax
+import numpy as np
+import pandas as pd
+
+from flexpyirt import _core
+from flexpyirt._compile import LATENT_ITEM, coerce_responses, compile_problem, compress_patterns
+from flexpyirt.errors import SpecificationError
+from flexpyirt.quadrature import Quadrature
+
+if TYPE_CHECKING:
+    from flexpyirt.model import Model
 
 __all__ = ["FitResult"]
+
+_eap = jax.jit(_core.eap)
 
 
 @dataclass(frozen=True)
 class FitResult:
-    """Result of :func:`flexpyirt.fit`."""
+    """Result of :func:`flexpyirt.fit`.
+
+    Attributes
+    ----------
+    parameters : DataFrame
+        The parameter table (DESIGN.md §5.1) with ``estimate`` and ``se`` columns added.
+    loglik : float
+        Marginal log-likelihood at the estimates.
+    converged : bool
+        Whether the EM convergence criterion was met.
+    n_iter : int
+        Number of EM iterations.
+    history : DataFrame
+        Columns ``iter``, ``loglik`` (at the parameters entering the iteration) and
+        ``max_change``.
+    vcov : ndarray or None
+        Covariance matrix of the free parameters in ``free_id`` order (``None`` if ``se=None``).
+    se_method : str or None
+        How ``vcov`` was computed.
+    n_obs : int
+        Number of respondents.
+    """
+
+    parameters: pd.DataFrame
+    loglik: float
+    converged: bool
+    n_iter: int
+    history: pd.DataFrame
+    vcov: np.ndarray | None
+    se_method: str | None
+    n_obs: int
+    _model: Model = field(repr=False)
+    _eta: np.ndarray = field(repr=False)
+    _quadrature: Quadrature = field(repr=False)
+
+    # ---- summaries ---------------------------------------------------------------------------
+
+    @property
+    def n_params(self) -> int:
+        """Number of free parameters."""
+        return int(self._eta.shape[0])
+
+    @property
+    def aic(self) -> float:
+        r""":math:`-2\ell+2k`."""
+        return -2.0 * self.loglik + 2.0 * self.n_params
+
+    @property
+    def bic(self) -> float:
+        r""":math:`-2\ell+k\log N`."""
+        return -2.0 * self.loglik + self.n_params * float(np.log(self.n_obs))
+
+    @property
+    def items(self) -> pd.DataFrame:
+        """One row per item: estimates and SEs by internal parameter, plus ``b = -d/a``.
+
+        ``b`` is a display-only transformation; its SE (delta method) arrives in M4.
+        """
+        p = self.parameters[self.parameters["item"] != LATENT_ITEM]
+        est = p.pivot(index="item", columns="param", values="estimate")
+        se = p.pivot(index="item", columns="param", values="se").add_suffix("_se")
+        order = list(self._model.item_names)
+        params = list(dict.fromkeys(p["param"]))
+        out = pd.concat([est[params], se[[f"{c}_se" for c in params]]], axis=1).loc[order]
+        out.insert(0, "model", p.drop_duplicates("item").set_index("item").loc[order, "model"])
+        if {"a", "d"} <= set(params):
+            out["b"] = -out["d"] / out["a"]
+        out.columns.name = None
+        return out.reset_index()
+
+    @property
+    def latent(self) -> pd.DataFrame:
+        """One row per group: latent ``mean``, ``var`` and their SEs."""
+        p = self.parameters[self.parameters["item"] == LATENT_ITEM]
+        est = p.pivot(index="group", columns="param", values="estimate")[["mean", "var"]]
+        se = p.pivot(index="group", columns="param", values="se")[["mean", "var"]].add_suffix("_se")
+        out = pd.concat([est, se], axis=1)
+        out.columns.name = None
+        return out.reset_index()
+
+    # ---- scoring -----------------------------------------------------------------------------
+
+    def score(
+        self,
+        data: Any,
+        *,
+        method: Literal["EAP"] = "EAP",
+        item_names: list[str] | None = None,
+    ) -> pd.DataFrame:
+        r"""Score respondents.
+
+        Parameters
+        ----------
+        data : DataFrame or array-like
+            Responses on the fitted items.
+        method : {"EAP"}
+            Expected a posteriori with the estimated latent distribution as prior; ``se`` is the
+            posterior SD (Bock & Mislevy, 1982). Other methods arrive in M4.
+        item_names : list of str, optional
+            Column names when ``data`` is an array.
+
+        Returns
+        -------
+        DataFrame
+            Columns ``theta`` and ``se``, one row per respondent (index follows ``data`` when it
+            is a DataFrame).
+        """
+        if method != "EAP":
+            raise SpecificationError(f"Unsupported scoring method {method!r}; M1 supports 'EAP'.")
+        y = coerce_responses(
+            data, self._model.item_names, item_names=item_names, require_variation=False
+        )
+        compiled = compile_problem(self._model, y, self.parameters, self._quadrature)
+        patterns, _, inverse = compress_patterns(y)
+        theta, sd = _eap(compiled.problem, jax.numpy.asarray(self._eta))
+        n = patterns.shape[0]
+        index = data.index if isinstance(data, pd.DataFrame) else None
+        return pd.DataFrame(
+            {"theta": np.asarray(theta)[:n][inverse], "se": np.asarray(sd)[:n][inverse]},
+            index=index,
+        )
+
+    def __repr__(self) -> str:
+        """Short text summary."""
+        status = "converged" if self.converged else "NOT converged"
+        return (
+            f"FitResult(loglik={self.loglik:.4f}, n_params={self.n_params}, n_obs={self.n_obs}, "
+            f"{status} in {self.n_iter} iterations, se={self.se_method})"
+        )
