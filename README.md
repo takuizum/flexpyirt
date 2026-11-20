@@ -24,11 +24,18 @@ JAX による Bock–Aitkin EM の項目反応理論（IRT）推定ライブラ�
 |---|---|---|
 | M0 | 足場（パッケージ・CI） | 完了 |
 | M1 | 単一群 2PL / Rasch の BA-EM、Oakes / Hessian SE、EAP | R mirt 照合（V1, V2, V10）済み |
+| M2 | 多母集団（部分アンカー）、FIPC、GRM、欠測（MAR） | R mirt 照合（V3, V4, V5, V9）済み |
 
-M1 で使えるもの（すべて `tests/test_mirt_m1.py` で mirt と照合）:
+M1（すべて `tests/test_mirt_m1.py` で mirt と照合）:
 - 2PL・Rasch（Rasch は潜在分散を自由推定）の周辺最尤推定
 - 標準誤差（Oakes の恒等式／周辺対数尤度の Hessian、いずれも自動微分）
 - EAP スコア
+
+M2 で追加（`tests/test_mirt_m2.py` で mirt と照合）:
+- 多母集団の同時推定（群間等値のアンカー項目、焦点群の平均・分散を自由推定）
+- 固定項目パラメタ推定（FIPC）
+- GRM（段階反応モデル）
+- 欠測（MAR）を含むデータ
 
 ```python
 import jax

@@ -114,6 +114,14 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
   `converged`, `n_iter`, `history`, `score(data, method="EAP")`。
 - 入力は 0/1 の pandas / polars DataFrame または numpy 配列（`item_names=`）。欠測は M2 まで `SpecificationError`。
 
+## 6.2 M2 で追加された範囲
+- 項目モデル `GRM(n_cat=K)`（カテゴリ $0..K-1$）。欠測（NaN, MAR）を受け付ける。
+- 多母集団: `Model.with_groups(ref=Normal.standard(), focal=Normal.free())`（最初が参照群）、
+  `.equal_across_groups(items=..., params=None)`、`fit(..., group=labels)`。`FitResult.items` は `group` 列つき、
+  `score(data, group=labels)`。
+- FIPC: `Model.fix_from(bank, items=None, parameterization="slope-intercept" | "irt")` + `.with_latent(Normal.free())`。
+- 識別不能な仕様（アンカーなしで焦点群自由、固定項目なしで平均自由など）は fit 前に `IdentificationError`。
+
 ## 7. 主なクラス・関数の一覧
 
 | 名前 | 種類 | 役割 |
