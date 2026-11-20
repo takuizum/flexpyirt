@@ -89,7 +89,7 @@ def test_newton_reaches_interior_optimum_and_keeps_fixed_coordinates() -> None:
 
 
 def test_newton_stays_inside_bounds() -> None:
-    """Bounds are kept by the line search (not projection): iterates stay strictly inside."""
+    """Iterates stay strictly inside the bounds and approach a bound that holds the optimum."""
 
     def f(x: jax.Array) -> jax.Array:
         return -((x[0] - 5.0) ** 2)
@@ -97,7 +97,26 @@ def test_newton_stays_inside_bounds() -> None:
     x = newton_ascent(
         f, jnp.array([0.0]), jnp.array([True]), jnp.array([-1.0]), jnp.array([2.0]), 20
     )
-    assert 0.0 < float(x[0]) < 2.0
+    assert 2.0 - 1e-5 < float(x[0]) < 2.0
+
+
+def test_newton_bound_does_not_block_other_coordinates() -> None:
+    """A coordinate pressed against its bound is held while the others still converge."""
+
+    def f(x: jax.Array) -> jax.Array:
+        return -((x[0] + 1.0) ** 2) - (x[1] - 3.0) ** 2 - 0.5 * x[0] * x[1]
+
+    x = newton_ascent(
+        f,
+        jnp.array([0.5, 0.0]),
+        jnp.array([True, True]),
+        jnp.array([0.0, -jnp.inf]),
+        jnp.array([jnp.inf, jnp.inf]),
+        60,
+    )
+    assert 0.0 < float(x[0]) < 1e-7
+    # with x0 at its bound 0, the optimum in x1 is 3
+    assert float(x[1]) == pytest.approx(3.0, abs=1e-6)
 
 
 def test_newton_never_decreases_nonconcave_objective() -> None:
