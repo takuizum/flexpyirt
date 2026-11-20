@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -13,7 +15,7 @@ from hypothesis import strategies as st
 from flexpyirt import BAEM, Model, Normal, Quadrature, Rasch, TwoPL, _core, fit
 from flexpyirt._compile import compile_problem, prepare
 from flexpyirt._newton import newton_ascent
-from flexpyirt.errors import IdentificationError, SpecificationError
+from flexpyirt.errors import HeywoodWarning, IdentificationError, SpecificationError
 from flexpyirt.items import DichotomousKernel
 from tests._reference import load
 
@@ -179,7 +181,11 @@ def test_em_is_monotone(seed: int, rasch: bool) -> None:
     if (df.nunique() < 2).any():
         return
     spec = Model.uniform(Rasch() if rasch else TwoPL(), items=df.columns)
-    res = fit(spec, df, method=BAEM(tol=1e-7, max_iter=300), se=None)
+    with warnings.catch_warnings():
+        # Random small-N 2PL draws can legitimately hit a finite-sample Heywood slope; EM
+        # monotonicity must still hold.
+        warnings.simplefilter("ignore", HeywoodWarning)
+        res = fit(spec, df, method=BAEM(tol=1e-7, max_iter=300), se=None)
     ll = res.history["loglik"].to_numpy()
     assert np.all(np.diff(ll) >= -1e-9 * np.abs(ll[1:]))
     assert res.loglik >= ll[-1] - 1e-9 * abs(ll[-1])
