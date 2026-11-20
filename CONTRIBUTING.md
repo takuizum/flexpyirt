@@ -23,20 +23,35 @@
 
 ## リリース
 
+バージョンは **git タグ**（`vX.Y.Z`）から決まる（hatch-vcs）。`pyproject.toml` にはバージョンを書かず、
+リリースはタグを打つことで行う。タグのない開発中のコミットは `0.0.2.dev3+g1a2b3c4` のような開発版になる。
+
 1. `develop` → `main` の PR を作る。**タイトルでバージョンの上げ方を決める**:
    - `release(major): ...` / `release(minor): ...` / `release(patch): ...`
-   - PR は**マージコミット**でマージする（タイトルが `main` のマージコミットに残る）。
-2. マージされると `.github/workflows/release.yml` が自動で:
-   1. `pyproject.toml`（と `uv.lock`）のバージョンを上げて `main` にコミット（`chore(release): vX.Y.Z`）
-   2. タグ `vX.Y.Z` を作成
-   3. `uv build` して GitHub Release を作成（wheel / sdist を添付、リリースノートは自動生成）
-   4. `main` を `develop` にマージし戻す
-   5. このリリースに含まれる fix PR が `Closes` していた issue を閉じる
-3. **最初のリリース**（`v*` タグがまだない）は、タイトルの上げ方に関係なく `pyproject.toml` の現在の
-   バージョンをそのまま出す（v0.0.1）。
-4. 手動実行（`workflow_dispatch`）は dry run 専用で、何も push しない。
+   - PR は**マージコミット**でマージする（`main` のルールセットはマージコミットだけを許可）。
+2. マージされると `.github/workflows/release.yml` が動く:
+   1. `plan` ジョブ: PR タイトルと最新の `vX.Y.Z` タグから次のバージョンを決める。
+   2. `publish` ジョブ: **`release` 環境の承認待ちになる**。オーナーが Actions 画面で承認すると、
+      `main` にタグ `vX.Y.Z` を打って `uv build` し、GitHub Release を作成する（wheel / sdist 添付、
+      リリースノート自動生成）。このリリースに含まれる fix PR が `Closes` していた issue を閉じる。
+3. **最初のリリース**（`v*` タグがまだない）は、タイトルの上げ方に関係なく **v0.0.1**。
+4. 手動実行（`workflow_dispatch`）は dry run 専用で、次のバージョンの計算とビルドだけを行う。
+
+`main` へのマージコミットは `develop` に戻さない（`develop` は保護されていて、ボットは push できない）。
+このため `develop` 上の開発版の番号は直前のリリースタグを参照しないことがあるが、リリースには影響しない。
 
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。1.0.0 までは公開 API が変わりうる。
+
+## セキュリティ（誰がリリースできるか）
+
+- **`main` を更新できるのはリポジトリ管理者だけ**（ルールセット `main-release-gate`）。PR と CI の要件
+  （ルールセット `main`）は管理者にも適用される。リリースを起こせるのは develop → main を
+  マージできる管理者だけ。
+- **`publish` ジョブは `release` 環境で動き、指定レビュアー（オーナー）の承認が必要**。環境は `main` からしか
+  デプロイできないので、他のブランチやフォークからはタグも Release も作れない。
+- ワークフローの `GITHUB_TOKEN` は既定で読み取り専用（`permissions: contents: read`）。書き込みは
+  `publish` ジョブだけ。フォークからの PR は読み取り専用トークンで CI と PR rules だけが走る。
+- 協力者を追加するときは write 権限にとどめる。管理者を増やすとリリースできる人が増える。
 
 ## ローカル開発
 
