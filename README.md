@@ -32,6 +32,7 @@ M1 で使えるもの（すべて `tests/test_mirt_m1.py` で mirt と照合）:
 
 ```python
 import jax
+
 jax.config.update("jax_enable_x64", True)
 from flexpyirt import Model, Rasch, fit
 
