@@ -140,11 +140,12 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   distribution held at $N(0,1)$ shifts the scale (Kim, 2006), so FIPC updates the latent
   distribution (Normal mean and variance, or EH weights) at every EM iteration by default
   (equivalent to Kim's MWU-MEM).
-- **Rasch (Decision, M1)**: Rasch fixes $a_j=1$ and frees $d_j$; the slopes set the scale, so the
-  **latent variance is estimated** and the mean is fixed at 0 (as mirt's `itemtype="Rasch"`:
-  `a1` fixed, `MEAN_1` fixed, `COV_11` free). In a single-group model without an explicit latent
-  distribution, **the default is $N(0,\sigma^2)$ (variance free) when every item is Rasch**, and
-  $N(0,1)$ fixed otherwise.
+- **Rasch and PCM (Decision, M1/M3)**: Rasch and PCM fix $a_j=1$ and free $d_j$ ($d_{jk}$); the
+  slopes set the scale, so the **latent variance is estimated** and the mean is fixed at 0 (as
+  mirt's `itemtype="Rasch"`, which fits the Rasch model on dichotomous data and the PCM on
+  polytomous data: `a1` fixed, `MEAN_1` fixed, `COV_11` free). In a single-group model without an
+  explicit latent distribution, **the default is $N(0,\sigma^2)$ (variance free) when every item is
+  Rasch or PCM**, and $N(0,1)$ fixed otherwise.
 - General rule (checked in M1): a free variance needs at least one item with a fixed slope
   (nonzero value); a free mean needs at least one item with a fixed intercept.
 - Unidentified specifications raise `IdentificationError` before fitting.
@@ -200,6 +201,10 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   (4PL) or $1$ (3PL) with $p_j$ clipped to $[0.01,0.99]$, so $g_j^{(0)}<p_j<u_j^{(0)}$; $a_j^{(0)}$
   as for 2PL, and $d_j^{(0)}$ from the rescaled proportion $(p_j-g_j^{(0)})/(u_j^{(0)}-g_j^{(0)})$
   (§15.4).
+- **Decision (M3, GPCM/PCM)**: $a_j^{(0)}$ from the item–rest correlation as for 2PL (1 for PCM),
+  and $d_{jk}^{(0)}=\sum_{c=1}^{k}\operatorname{logit}(p_{jc})\sqrt{1+(a_j^{(0)}/1.7)^2}$ where
+  $p_{jc}=\operatorname{clip}(\hat P(y_j\ge c),\,0.01,\,0.99)$ (§15.9). Reduces identically to the
+  2PL/Rasch start when $K=2$.
 - User starting values override these through the ParameterTable's `value` column.
 
 ## 5. Data structures
@@ -416,6 +421,29 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
 7. **Identification**: `g` and `u` carry neither latent scale nor location
    (`slope_params=("a",)`, `intercept_params=("d",)`), so fixing asymptotes alone does not identify
    a free latent mean or variance.
+8. **GPCM and PCM item models**: `GPCM(n_cat)` (Muraki, 1992) and `PCM(n_cat)` (Masters, 1982)
+   share one kernel per `n_cat`, `GPCMKernel(n_cat)`, with categories `0..K-1` (`n_cat >= 2`
+   validated) and slope–intercept form matching mirt's `itemtype="gpcm"` (scoring coefficients
+   $\mathrm{ak}_k=k$ and $d_0=0$ fixed, not parameters):
+   $$P(y=k\mid\theta)=\frac{\exp(k\,a\theta+d_k)}{\sum_{c=0}^{K-1}\exp(c\,a\theta+d_c)},\qquad d_0=0.$$
+   Internal parameters are `(a, d1, ..., d{K-1})`. Log-probabilities are computed with
+   `jax.nn.log_softmax` (numerically stable, smooth derivatives, no ordering constraint on `d`).
+   `PCM(n_cat)` fixes `a = 1` by default, and the single-group default latent rule (§4.5) is
+   extended so that a model whose items are all `Rasch` or `PCM` gets $N(0,\sigma^2)$ with the
+   variance free (matching mirt's `itemtype="Rasch"` on polytomous data). With `n_cat = 2`,
+   `GPCM(2)` equals `TwoPL` and `PCM(2)` equals `Rasch` exactly.
+9. **GPCM/PCM starting values, identification, and estimability**: $a_j^{(0)}$ uses the item–rest
+   correlation as for 2PL (`1.0` for PCM); each step starts at
+   $\delta_{jc}^{(0)}=\operatorname{logit}(p_{jc})\sqrt{1+(a_j^{(0)}/1.7)^2}$ from the cumulative
+   proportion $p_{jc}=\operatorname{clip}(\hat P(y_j\ge c),\,0.01,\,0.99)$, summed to
+   $d_{jk}^{(0)}=\sum_{c=1}^{k}\delta_{jc}^{(0)}$. Identification uses `slope_params=("a",)` and
+   `intercept_params=("d1", ..., "d{K-1}")`. Every category `0..K-1` must be observed in the data
+   for items with free parameters (same rule as GRM, enforced in `_check_estimable`).
+10. **GPCM/PCM display and FIPC**: `FitResult.items` displays step difficulties
+    $b_k=-(d_k-d_{k-1})/a$ (with $d_0=0$) as `b1`…`b{K-1}` for GPCM/PCM items while leaving
+    2PL/Rasch/3PL/4PL (`b = -d/a`) and GRM (`bk = -dk/a`) unchanged, even when mixed in the same
+    model. `Model.fix_from(..., parameterization="irt")` inverts this via
+    $d_k=-a\sum_{c=1}^{k}b_c$, and allows omitting `a` for PCM items.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -425,6 +453,8 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
+- Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.

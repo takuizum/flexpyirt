@@ -34,7 +34,20 @@ jax.config.update("jax_enable_x64", True)
 import numpy as np
 import pandas as pd
 
-from flexpyirt import BAEM, GRM, FourPL, Model, Normal, Quadrature, Rasch, ThreePL, TwoPL, fit
+from flexpyirt import (
+    BAEM,
+    GPCM,
+    GRM,
+    PCM,
+    FourPL,
+    Model,
+    Normal,
+    Quadrature,
+    Rasch,
+    ThreePL,
+    TwoPL,
+    fit,
+)
 ```
 
 Simulate the data used in the examples below.
@@ -94,11 +107,14 @@ print(spec.item_names[:3], mixed.item_names)
 | `ThreePL()` | $P(y=1)=g+(1-g)\sigma(a\theta+d)$ ($u=1$ fixed) | `a`, `d`, `g`, `u` (fixed) | `b = -d/a` |
 | `FourPL()` | $P(y=1)=g+(u-g)\sigma(a\theta+d)$ | `a`, `d`, `g`, `u` | `b = -d/a` |
 | `GRM(n_cat=K)` | $P(y\ge k)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$ | `a`, `d1`…`d{K-1}` | `bk = -dk/a` |
+| `GPCM(n_cat=K)` | $P(y=k)\propto\exp(k\,a\theta+d_k)$, $d_0=0$ | `a`, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})/a` |
+| `PCM(n_cat=K)` | $P(y=k)\propto\exp(k\theta+d_k)$ ($a=1$ fixed, $d_0=0$) | `a` (fixed), `d1`…`d{K-1}` | `bk = -(dk - d{k-1})` |
 
 The parameterization is mirt's slope–intercept form (`itemtype = "2PL"`, `"Rasch"`, `"3PL"`,
-`"4PL"`, `"graded"`). For 3PL and 4PL, `g` and `u` are estimated on the natural scale with
-$0 < g < u \le 1$ (mirt optimizes them on the logit scale; the interior ML estimates agree). GRM
-categories start at 0 (subtract 1 from data coded from 1, such as mirt's `Science`).
+`"4PL"`, `"graded"`, `"gpcm"` — mirt's `"Rasch"` on polytomous data is `PCM`). For 3PL and 4PL,
+`g` and `u` are estimated on the natural scale with $0 < g < u \le 1$ (mirt optimizes them on the
+logit scale; the interior ML estimates agree). Polytomous categories start at 0 (subtract 1 from
+data coded from 1, such as mirt's `Science`).
 
 ```python
 theta3 = rng.normal(0, 1, 2000)
@@ -123,6 +139,11 @@ grm_df = pd.DataFrame(
 )
 grm = fit(Model.uniform(GRM(n_cat=n_cat), items=grm_df.columns), grm_df)
 print(grm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
+```
+
+```python
+gpcm = fit(Model.uniform(GPCM(n_cat=n_cat), items=grm_df.columns), grm_df)
+print(gpcm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
 ```
 
 ### Fixing parameters
@@ -246,8 +267,8 @@ Normal(mean=0.5, var=1.2)  # fixed values
 ```
 
 **Default**: in a single-group model without an explicit latent distribution, it is
-$N(0,\sigma^2)$ with the variance estimated when every item is Rasch, and $N(0,1)$ otherwise.
-Rasch slopes are fixed at 1, so the variance carries the scale (as in mirt).
+$N(0,\sigma^2)$ with the variance estimated when every item is Rasch or PCM, and $N(0,1)$
+otherwise. Rasch and PCM slopes are fixed at 1, so the variance carries the scale (as in mirt).
 
 ```python
 rasch = fit(Model.uniform(Rasch(), items=items), df)
@@ -339,7 +360,8 @@ print(fipc.latent[["mean", "var"]])  # generating values: mean 0.4, variance 1.3
 ```
 
 For a bank in IRT form ($a, b$), pass `parameterization="irt"` (converted with $d=-ab$; GRM uses
-columns `b1`, `b2`, …). A bank of Rasch items may omit the `a` column.
+columns `b1`, `b2`, … with $d_k=-ab_k$, and GPCM/PCM use step difficulties `b1`, `b2`, … with
+$d_k=-a\sum_{c=1}^{k}b_c$). A bank of Rasch or PCM items may omit the `a` column.
 
 ```python
 bank_irt = pd.DataFrame({"item": items[:6], "a": a_true[:6], "b": -d_true[:6] / a_true[:6]})
@@ -431,5 +453,7 @@ except SpecificationError as e:
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
+- Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.

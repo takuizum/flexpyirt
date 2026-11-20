@@ -10,7 +10,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - モデル: [`Model`](#model)
-- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm)
+- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - 例外と警告: [`flexpyirt.errors`](#flexpyirterrors)
@@ -52,7 +52,7 @@ Bock–Aitkin EM による周辺最尤推定（Bock & Aitkin, 1981）。
 
 | 属性 | 型 | 説明 |
 |---|---|---|
-| `items` | DataFrame | 1 項目 1 行（多母集団では `group` 列つきで群 × 項目）。`model`、内部パラメタ（`a`, `d` / `d1`…, `g`, `u`）、`<param>_se`、表示用の `b` / `bk`（$= -d/a$, $-d_k/a$、SE なし） |
+| `items` | DataFrame | 1 項目 1 行（多母集団では `group` 列つきで群 × 項目）。`model`、内部パラメタ（`a`, `d` / `d1`…, `g`, `u`）、`<param>_se`、表示用の `b` / `bk`（$-d/a$、GRM は $-d_k/a$、GPCM/PCM は $-(d_k-d_{k-1})/a$、$d_0=0$。SE なし） |
 | `latent` | DataFrame | 1 群 1 行。`group`, `mean`, `var`, `mean_se`, `var_se`（固定値の SE は NaN） |
 | `parameters` | DataFrame | 検証済みの ParameterTable に `estimate`（推定値。固定なら固定値）と `se` を足したもの |
 | `loglik` | float | 推定値での周辺対数尤度 |
@@ -126,9 +126,9 @@ model.fix_from(bank, *, items=None, parameterization="slope-intercept") -> Model
 
 | 引数 | 説明 |
 |---|---|
-| `bank` | `item` 列と、パラメタの列を持つ DataFrame。`"slope-intercept"` なら `a`, `d`（GRM は `d1`, `d2`, …）、`"irt"` なら `a`, `b`（GRM は `b1`, …）。Rasch 項目は `a` 列がなくてよい。漸近線 `g`（3PL/4PL）・`u`（4PL）はどちらのパラメタ化でもそのまま渡す（3PL 項目では `u` 列を省略できる） |
+| `bank` | `item` 列と、パラメタの列を持つ DataFrame。`"slope-intercept"` なら `a`, `d`（GRM/GPCM/PCM は `d1`, `d2`, …）、`"irt"` なら `a`, `b`（GRM/GPCM/PCM は `b1`, …）。Rasch・PCM 項目は `a` 列がなくてよい。漸近線 `g`（3PL/4PL）・`u`（4PL）はどちらのパラメタ化でもそのまま渡す（3PL 項目では `u` 列を省略できる） |
 | `items` | 固定する項目（名前のリストか `str -> bool` の関数）。既定はバンクにあってモデルにもある項目すべて |
-| `parameterization` | `"slope-intercept"` または `"irt"`（$d = -ab$ に変換） |
+| `parameterization` | `"slope-intercept"` または `"irt"`（$d = -ab$、GPCM/PCM は $d_k = -a\sum_{c=1}^{k} b_c$ に変換） |
 
 #### `Model.with_latent`
 
@@ -228,6 +228,30 @@ GRM(n_cat)
 段階反応モデル（Samejima, 1969）。カテゴリは `0..n_cat-1`。
 $P(y\ge k\mid\theta)=\sigma(a\theta+d_k)$、$d_1>\dots>d_{K-1}$。内部パラメタ `a`, `d1`…`d{K-1}`、
 表示用に $b_k=-d_k/a$。mirt の `itemtype = "graded"` と同じ。`n_cat` が同じ GRM 項目はまとめて推定される。
+
+### `GPCM`
+
+```text
+GPCM(n_cat)
+```
+
+一般化部分採点モデル（Muraki, 1992）。カテゴリは `0..n_cat-1`（`n_cat >= 2`）。
+$P(y=k\mid\theta)=\exp(k\,a\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\,a\theta+d_c)$（$d_0=0$ 固定）。
+内部パラメタ `a`, `d1`…`d{K-1}`（順序制約なし）、表示用にステップ困難度 $b_k=-(d_k-d_{k-1})/a$（$d_0=0$）。
+mirt の `itemtype = "gpcm"` と同じ。`n_cat = 2` では `TwoPL` と一致する。`n_cat` が同じ `PCM` と
+`GPCMKernel` を共有する。
+
+### `PCM`
+
+```text
+PCM(n_cat)
+```
+
+部分採点モデル（Masters, 1982）。カテゴリは `0..n_cat-1`（`n_cat >= 2`）。`a = 1` に固定した GPCM で、
+$P(y=k\mid\theta)=\exp(k\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\theta+d_c)$（$d_0=0$ 固定）。
+表示用にステップ困難度 $b_k=-(d_k-d_{k-1})$。全項目が `Rasch` または `PCM` の単一群モデルでは、既定で
+潜在分布の分散を推定する（多値データに対する mirt の `itemtype = "Rasch"` と同じ）。`n_cat = 2` では
+`Rasch` と一致する。`n_cat` が同じ `GPCM` と `GPCMKernel` を共有する。
 
 ---
 

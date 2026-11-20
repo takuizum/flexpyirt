@@ -33,7 +33,20 @@ jax.config.update("jax_enable_x64", True)
 import numpy as np
 import pandas as pd
 
-from flexpyirt import BAEM, GRM, FourPL, Model, Normal, Quadrature, Rasch, ThreePL, TwoPL, fit
+from flexpyirt import (
+    BAEM,
+    GPCM,
+    GRM,
+    PCM,
+    FourPL,
+    Model,
+    Normal,
+    Quadrature,
+    Rasch,
+    ThreePL,
+    TwoPL,
+    fit,
+)
 ```
 
 以下の例で使うデータをシミュレーションしておく。
@@ -91,10 +104,13 @@ print(spec.item_names[:3], mixed.item_names)
 | `ThreePL()` | $P(y=1)=g+(1-g)\sigma(a\theta+d)$（$u=1$ 固定） | `a`, `d`, `g`, `u`（固定） | `b = -d/a` |
 | `FourPL()` | $P(y=1)=g+(u-g)\sigma(a\theta+d)$ | `a`, `d`, `g`, `u` | `b = -d/a` |
 | `GRM(n_cat=K)` | $P(y\ge k)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$ | `a`, `d1`…`d{K-1}` | `bk = -dk/a` |
+| `GPCM(n_cat=K)` | $P(y=k)\propto\exp(k\,a\theta+d_k)$, $d_0=0$ | `a`, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})/a` |
+| `PCM(n_cat=K)` | $P(y=k)\propto\exp(k\theta+d_k)$（$a=1$ 固定、$d_0=0$） | `a`（固定）, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})` |
 
-パラメタ化は mirt（`itemtype = "2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"graded"`）と同じ傾き・切片形式。
-3PL / 4PL の `g`, `u` は自然尺度（$0 < g < u \le 1$）で推定する（mirt は logit 尺度で最適化するが、内点の
-最尤推定値は一致する）。GRM のカテゴリは 0 始まり（mirt の `Science` のように 1 始まりのデータは 1 を引く）。
+パラメタ化は mirt（`itemtype = "2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"graded"`, `"gpcm"`。多値に対する
+`"Rasch"` は `PCM`）と同じ傾き・切片形式。3PL / 4PL の `g`, `u` は自然尺度（$0 < g < u \le 1$）で推定する
+（mirt は logit 尺度で最適化するが、内点の最尤推定値は一致する）。多値項目のカテゴリは 0 始まり（mirt の
+`Science` のように 1 始まりのデータは 1 を引く）。
 
 ```python
 theta3 = rng.normal(0, 1, 2000)
@@ -119,6 +135,11 @@ grm_df = pd.DataFrame(
 )
 grm = fit(Model.uniform(GRM(n_cat=n_cat), items=grm_df.columns), grm_df)
 print(grm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
+```
+
+```python
+gpcm = fit(Model.uniform(GPCM(n_cat=n_cat), items=grm_df.columns), grm_df)
+print(gpcm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
 ```
 
 ### パラメタを固定する
@@ -234,8 +255,9 @@ Normal.free()  # 平均と分散を推定
 Normal(mean=0.5, var=1.2)  # 固定値
 ```
 
-**既定**: 単一群のモデルで潜在分布を指定しないとき、全項目が Rasch なら $N(0,\sigma^2)$（分散を推定）、
-それ以外は $N(0,1)$ 固定。Rasch は傾きが 1 に固定されているので、尺度は分散が担う（mirt と同じ）。
+**既定**: 単一群のモデルで潜在分布を指定しないとき、全項目が Rasch または PCM なら $N(0,\sigma^2)$
+（分散を推定）、それ以外は $N(0,1)$ 固定。Rasch と PCM は傾きが 1 に固定されているので、尺度は分散が担う
+（mirt と同じ）。
 
 ```python
 rasch = fit(Model.uniform(Rasch(), items=items), df)
@@ -321,8 +343,9 @@ fipc = fit(fipc_spec, fipc_df, quadrature=Quadrature.equispaced(81, lim=(-8, 8))
 print(fipc.latent[["mean", "var"]])  # 生成値は平均 0.4、分散 1.3225
 ```
 
-項目バンクが IRT 表記（$a, b$）なら `parameterization="irt"` を指定する（$d=-ab$ に変換。GRM は `b1`, `b2`, … 列）。
-Rasch 項目のバンクには `a` 列がなくてよい。
+項目バンクが IRT 表記（$a, b$）なら `parameterization="irt"` を指定する（$d=-ab$ に変換。GRM は `b1`, `b2`, …
+列を $d_k=-ab_k$、GPCM / PCM はステップ困難度 `b1`, `b2`, … を $d_k=-a\sum_{c=1}^{k}b_c$ で変換）。Rasch や
+PCM 項目のバンクには `a` 列がなくてよい。
 
 ```python
 bank_irt = pd.DataFrame({"item": items[:6], "a": a_true[:6], "b": -d_true[:6] / a_true[:6]})
@@ -409,5 +432,7 @@ except SpecificationError as e:
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
+- Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.

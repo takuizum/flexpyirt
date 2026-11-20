@@ -32,7 +32,7 @@ English | [日本語](VALIDATION.ja.md)
 | V5 | FIPC (fixed items + latent distribution estimated) | `pars='values'` with `est=FALSE` | M2 |
 | V6 | EH (single group, two groups) | `dentype="EH"` | M3 |
 | V7 | 3PL + priors (MAP) | equivalent of `PRIOR = (1-30, g, expbeta, ...)` in `mirt.model` | M3 |
-| V8 | GPCM | `"gpcm"` | M3 |
+| V8 | GPCM and PCM (Science + simulated) | `mirt(..., "gpcm")` / `mirt(..., "Rasch")` (polytomous) | M3 |
 | V9 | Missing data (MAR) | data with NA | M2 |
 | V10 | SE (Oakes / crossprod / sandwich) | `SE.type=` | M1–M3 |
 | V11 | 3PL and 4PL, single group (simulated) | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
@@ -92,6 +92,19 @@ English | [日本語](VALIDATION.ja.md)
   ~6e-4 (3PL: 6.8e-5, 4PL: 5.6e-4, reflecting Richardson's finite-difference error while flexpyirt's
   Oakes and Hessian agree to ~1e-11), and EAP to ~1e-15.
   Tests: `tests/test_mirt_m3.py`. Reference generator: `validation/r/m3_reference.R`.
+- **GPCM and PCM parameterization mapping and results (V8, M3)**: mirt's `itemtype = "gpcm"` (and
+  `itemtype = "Rasch"` on polytomous data, which is the PCM with `a1 = 1` fixed and `COV_11` free)
+  reports columns `a1`, `ak0..ak{K-1}` (fixed at `0..K-1`), `d0` (fixed at `0`), and `d1..d{K-1}`
+  (free). `validation/r/m3_gpcm_reference.R` verifies those fixed constants and maps `a1` → `a` and
+  `d1..d{K-1}` → `d1..d{K-1}`, omitting `ak*` and `d0`. Three cases are checked: V8a (`Science`
+  recoded `0..3`, GPCM, 61 points on $[-6,6]$), V8b (simulated GPCM, $J=10, K=4, N=3000$, including
+  an item with reversed step order, 61 points on $[-6,6]$), and V8c (simulated PCM with generating
+  latent variance $1.5$, mirt `itemtype = "Rasch"`, 81 points on $[-8,8]$ so grid truncation is
+  negligible as in V4/V5). All three agree with mirt well inside tolerance: item parameters to
+  ~1.4e-8 (latent variance in V8c to 6.1e-10), log-likelihood to ~3.7e-15, Oakes SEs to ~1.3e-8,
+  Hessian vs mirt Richardson SEs to ~1.1e-6 (flexpyirt Oakes vs Hessian to ~1.1e-11), and EAP to
+  ~8.0e-15.
+  Tests: `tests/test_mirt_m3_gpcm.py`. Reference generator: `validation/r/m3_gpcm_reference.R`.
 - **Comparing EAP**: so that differences in the estimates do not propagate into EAP, every
   parameter is fixed at mirt's estimates (`free=False` in the ParameterTable) and only the scoring
   is compared. Tolerance 1e-5.
