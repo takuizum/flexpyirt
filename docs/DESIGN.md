@@ -243,7 +243,7 @@ class LatentDist(Protocol):
 ## 12. 未決事項
 1. **EH の識別の取り方**: (a) 毎反復で重みの平均・分散を 0/1 に合わせて節点をアフィン変換し項目パラメタを逆変換、(b) 参照群の EH を標準化した後で補間し直す、のどちらか。mirt の挙動を確認したうえで決める。
 2. 多母集団で群の数が多いとき（例: 学校 × 学年）の扱い。群ごとの潜在分布を vmap できる形にしておく。
-3. 欠測の設計（MAR 前提の除外のみで十分か、not-reached の扱いを入れるか）。
+3. ~~欠測の設計~~ → MAR 前提の除外のみ（§14.8、2026-11-20）。
 4. ~~パッケージ名~~ → `flexpyirt` に決定（2026-11-20）。
 5. 項目をまたぐ等値制約の M-step（§4.3）の実装方式。
 
@@ -265,12 +265,43 @@ class LatentDist(Protocol):
    `jax.jacfwd(jax.grad(Q, 0), argnums=(0, 1))` で微分。直接法は周辺対数尤度の `jax.hessian`。
    両者は恒等式として一致するので、内部整合テストは機械精度近く（相対 1e-6）で比較する。
 
+## 14. 実装上の決定（M2）
+1. **群ごとの項目パラメタ**: ParameterTable は群 × 項目 × パラメタの行を持ち、既定では群ごとに別の `free_id`
+   （mirt `multipleGroup` の既定と同じ）。`equal_across_groups(items=..., params=None)` は指定項目の行を群間で
+   同じ `free_id` にする。Core では family ごとに `free_index (G, J_f, P_f)`。
+2. **項目内の局所パラメタ**: 項目 $j$ が群間で共有するパラメタを含めて解くため、項目ごとに局所ベクトル
+   $u_j$（長さ $G\cdot P_f$ のパディング付き）を作り、`local_index (G, J_f, P_f)` で $\xi^{(g)}_j=u_j[\text{local}]$ と展開する。
+   M-step は $\sum_g Q_{jg}(\xi_j^{(g)}(u_j))$ を $u_j$ についてマスク付き Newton で最大化し（§13.1）、`vmap` する。
+   `free_id` は項目をまたがない（M5 まで）ので、局所ベクトルは項目内で閉じる。
+3. **E-step の群**: $\ell_{pq}$ は全群ぶん `einsum("pjk,gjqk->pgq")` で計算してから各パターンの群を取り出す
+   （$P\times J\times Q\times K$ の中間配列を作らない）。$\bar r$ は `(G, J_f, K, Q)`。
+4. **群の指定**: `Model.with_groups(**latents)` のキーワード順で群を定義し、最初が参照群。`fit(..., group=labels)`
+   の値はこの群名と一致しなければならない（過不足は `SpecificationError`）。`with_groups` なしで `group=` を
+   渡すのもエラー。
+5. **識別性（多群）**: 平均について、群を節点・切片の共有 `free_id` を辺とするグラフを作り、各連結成分に
+   「平均が固定された群」または「固定された切片」が 1 つ以上あることを要求する（分散は傾きで同様）。
+   必要条件であり十分条件ではない。自由な平均を持つ群がアンカー 1 項目だけで連結している場合は警告する。
+6. **FIPC**: `Model.fix_from(bank, items=..., parameterization="slope-intercept" | "irt")` で項目パラメタを固定し、
+   潜在分布は利用者が `with_latent(Normal.free())` で自由にする（既定は変えない。§4.5 の識別性検査で許可される）。
+   IRT 表記（$b$）は $d=-ab$ で変換する（2PL のみ。GRM は $b_k$ → $d_k=-ab_k$）。
+7. **GRM**（Samejima, 1969）: $P(y\ge k\mid\theta)=\sigma(a\theta+d_k)$、$d_1>\dots>d_{K-1}$、カテゴリは $0..K-1$。
+   対数確率は端のカテゴリを $\log\sigma(-z_1)$、$\log\sigma(z_{K-1})$、中間を
+   $\log\sigma(z_k)+\operatorname{log1mexp}(\log\sigma(z_{k+1})-\log\sigma(z_k))$ で安定に計算する
+   （log1mexp は両分岐の入力を安全域に丸める二重 where で勾配の NaN を防ぐ）。順序制約は line search で
+   有限値でない候補を棄却することで守る。family は `GRM(n_cat=K)` の $K$ ごと。データに現れないカテゴリが
+   ある項目は閾値が発散するので `SpecificationError`。
+8. **欠測（MAR）**: NaN を `-1` に符号化し、E-step で one-hot を全 0 にして尤度から除く（§4.2 の $m_{pj}$）。
+   全員欠測の項目はエラー。初期値は観測値だけから計算する。not-reached は扱わない（§12-3 はこれで決着）。
+9. **照合の格子**: 潜在分布の平均・分散が自由な照合（V4, V5）は、VALIDATION.md の方針どおり mirt・flexpyirt とも
+   81 点・$[-8,8]$（刻み 0.2 は既定と同じ）で行う。
+
 ## 参考文献
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
+- Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
