@@ -38,6 +38,13 @@
 - jit 関数内で Python の分岐が shape に依存しないこと。可変長はパディング + マスク（DESIGN.md §5）。
 - 例外は `flexpyirt.errors` に定義した具体的なクラスで投げる（`SpecificationError`, `IdentificationError` など）。
 
+## 開発フロー（CONTRIBUTING.md）
+
+- `feature/<slug>` と `fix/<issue番号>-<slug>` を `develop` から切り、`develop` へ PR。fix は issue 必須（`Closes #N`）。
+- リリースは `develop` → `main` の PR。タイトル `release(major|minor|patch): ...` で上げ方を決め、マージ後にオーナーが `release` 環境を承認するとタグ `vX.Y.Z` と GitHub Release ができる。バージョンは git タグから（hatch-vcs、`pyproject.toml` に書かない）。
+- **PR はオーナーがレビューしてマージする。Claude は PR を作るまでで、マージしない。**
+- Python 環境は `uv` のみ（pip は使わない）。
+
 ## 作業開始時にやること
 
 1. `docs/ROADMAP.md` の M0（足場）から着手する。

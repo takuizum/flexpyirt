@@ -1,0 +1,29 @@
+name: バグ報告
+description: 推定結果の誤り、エラー、クラッシュなど（fix ブランチはこの issue に対応させます）
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: 何が起きたか
+      description: 実際の結果（エラーメッセージや推定値）
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待した結果
+      description: mirt など参照実装の値があれば添えてください
+  - type: textarea
+    id: repro
+    attributes:
+      label: 再現手順
+      description: 最小のコードとデータ（シミュレーションのシードなど）
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: バージョン
+      description: flexpyirt / jax / Python / OS

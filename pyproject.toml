@@ -1,6 +1,6 @@
 [project]
 name = "flexpyirt"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Bock–Aitkin EM estimation for item response theory models, built on JAX."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,8 +26,15 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+# The version comes from the latest vX.Y.Z git tag (CONTRIBUTING.md "リリース").
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+fallback_version = "0.0.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/flexpyirt"]
@@ -53,7 +60,7 @@ convention = "numpy"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src/flexpyirt", "tests"]
+files = ["src/flexpyirt", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
 module = ["scipy.*"]
