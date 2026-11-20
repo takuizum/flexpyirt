@@ -180,11 +180,10 @@ def _start_values(model: Model, y: np.ndarray) -> dict[str, np.ndarray]:
     out = {}
     for j, (name, item_model) in enumerate(model.items):
         rows = obs[:, j]
-        n_params = len(item_model.kernel.param_names)
         if rows.sum() < 2:
-            # Not estimable (reported later by _check_estimable); a finite placeholder keeps the
-            # table valid when the user fixes this item.
-            out[name] = np.r_[1.0, np.linspace(1.0, -1.0, n_params - 1) if n_params > 2 else 0.0]
+            # Not estimable (reported later by _check_estimable); finite placeholder values (the
+            # item model's starts for p = 0.5) keep the table valid when the user fixes this item.
+            out[name] = item_model.start_values(np.array([0.0, 1.0]), np.zeros(2))
             continue
         item = y[rows, j].astype(float)
         rest = (total - scores[:, j])[rows].astype(float)
@@ -300,8 +299,24 @@ def validate_table(
                 f"Starting value {value[i]} is not strictly inside ({lower[i]}, {upper[i]}) "
                 f"at {where}."
             )
+        if not free[i] and not (lower[i] <= value[i] <= upper[i]):
+            raise SpecificationError(
+                f"Fixed value {value[i]} is outside [{lower[i]}, {upper[i]}] at {where}."
+            )
         if item_col[i] == LATENT_ITEM and param_col[i] == "var" and not value[i] > 0:
             raise SpecificationError(f"Latent variance must be positive at {where}.")
+
+    # Asymptote ordering g < u for 3PL / 4PL items.
+    fourpl_items = {name for name, m in model.items if m.kernel.param_names == ("a", "d", "g", "u")}
+    if fourpl_items:
+        sub = t[t["item"].isin(fourpl_items) & t["param"].isin(["g", "u"])]
+        for (grp, itm), rows in sub.groupby(["group", "item"], sort=False):
+            vals = dict(zip(rows["param"], rows["value"], strict=True))
+            if not vals["g"] < vals["u"]:
+                raise SpecificationError(
+                    f"Lower asymptote g ({vals['g']}) must be < upper asymptote u ({vals['u']}) "
+                    f"at (group={grp!r}, item={itm!r})."
+                )
 
     ids = np.where(free, t["free_id"].fillna(-1).to_numpy(dtype=int), -1)
     next_id = int(ids.max()) + 1 if (ids >= 0).any() else 0

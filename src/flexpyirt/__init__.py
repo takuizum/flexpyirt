@@ -6,7 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from flexpyirt import errors
 from flexpyirt.fit import fit
-from flexpyirt.items import GRM, Rasch, TwoPL
+from flexpyirt.items import GRM, FourPL, Rasch, ThreePL, TwoPL
 from flexpyirt.latent import Normal
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
@@ -22,10 +22,12 @@ __all__ = [
     "BAEM",
     "GRM",
     "FitResult",
+    "FourPL",
     "Model",
     "Normal",
     "Quadrature",
     "Rasch",
+    "ThreePL",
     "TwoPL",
     "__version__",
     "errors",

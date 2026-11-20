@@ -15,14 +15,20 @@ from jax import Array
 __all__ = ["newton_ascent"]
 
 _N_HALVINGS = 30
+_ACTIVE_EPS = 1e-8
+"""A free coordinate this close to a bound, with the gradient pointing out of the box, is held."""
 
 
 def _newton_step(
     f: Callable[[Array], Array], x: Array, mask: Array, lower: Array, upper: Array
 ) -> Array:
     """One damped Newton step on the free coordinates ``mask`` that never decreases ``f``."""
-    m = mask.astype(x.dtype)
-    g = jax.grad(f)(x) * m
+    grad = jax.grad(f)(x)
+    # epsilon-active set (Bertsekas, 1982): coordinates pressed against a bound are held for this
+    # step so that they do not block the others (DESIGN.md §15.2).
+    active = ((x - lower <= _ACTIVE_EPS) & (grad < 0)) | ((upper - x <= _ACTIVE_EPS) & (grad > 0))
+    m = (mask & ~active).astype(x.dtype)
+    g = grad * m
     h = jax.hessian(f)(x)
     # Fixed coordinates: replace their rows/columns by -I so they do not move.
     h = h * jnp.outer(m, m) - jnp.diag(1.0 - m)
@@ -33,7 +39,14 @@ def _newton_step(
     direction = jnp.where(is_ascent, direction, g) * m
 
     steps = 0.5 ** jnp.arange(_N_HALVINGS, dtype=x.dtype)
-    candidates = x[None, :] + steps[:, None] * direction[None, :]
+    raw = x[None, :] + steps[:, None] * direction[None, :]
+    # A coordinate that would leave the box moves halfway to its bound instead (the others keep
+    # their step); the objective check below still guarantees ascent.
+    lo = jnp.where(jnp.isfinite(lower), lower, x)
+    hi = jnp.where(jnp.isfinite(upper), upper, x)
+    candidates = jnp.where(
+        raw <= lower, x + 0.5 * (lo - x), jnp.where(raw >= upper, x + 0.5 * (hi - x), raw)
+    )
     values = jax.vmap(f)(candidates)
     inside = (candidates > lower) & (candidates < upper)
     feasible = jnp.all(inside | ~mask[None, :], axis=1)
@@ -57,6 +70,11 @@ def newton_ascent(
     ascent direction, and takes the largest step :math:`2^{-k}\delta` (:math:`k<30`) that stays
     strictly inside ``(lower, upper)`` on the free coordinates and does not decrease ``f``. Hence
     :math:`f(x_{\text{out}})\ge f(x_0)` always holds, which keeps EM monotone.
+
+    Bounds (DESIGN.md §15.2): a coordinate whose step would leave the box moves halfway to the
+    bound instead, and a coordinate within ``1e-8`` of a bound whose gradient points outwards is
+    held for that step (an :math:`\varepsilon`-active set; Bertsekas, 1982), so a parameter that
+    converges to its bound does not stop the item's other parameters from moving.
 
     Parameters
     ----------
