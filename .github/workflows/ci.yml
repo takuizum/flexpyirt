@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked --all-extras --dev
+      - name: Ruff (lint)
+        run: uv run ruff check .
+      - name: Ruff (format)
+        run: uv run ruff format --check .
+      - name: Mypy
+        run: uv run mypy
+      - name: Pytest
+        run: uv run pytest
+      - name: Editable install smoke test (isolated env)
+        run: uv run --isolated --no-project --with-editable . python -c "import flexpyirt; print(flexpyirt.__version__)"
