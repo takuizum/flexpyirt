@@ -1,8 +1,10 @@
 # ユーザーガイド
 
+[English](guide.md) | 日本語
+
 flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめる。このページのコード例は上から順に実行でき、
 `tests/test_docs.py` が毎回すべて実行して動作を確かめている。関数ごとの引数は
-[API リファレンス](reference.md) を参照。
+[API リファレンス](reference.ja.md) を参照。
 
 1. [準備](#1-準備)
 2. [データの形式](#2-データの形式)
@@ -260,11 +262,10 @@ mg_df = pd.DataFrame(
 group = np.repeat(["ref", "focal"], n_per_group)
 
 anchors = items[:6]
+# キーワードの順で群を定義し、最初の群が参照群になる。
 mg_spec = (
     Model.uniform(TwoPL(), items=items)
-    .with_groups(
-        ref=Normal.standard(), focal=Normal.free()
-    )  # キーワードの順で群を定義、最初が参照群
+    .with_groups(ref=Normal.standard(), focal=Normal.free())
     .equal_across_groups(items=anchors)  # 全パラメタを群間で等値
 )
 mg = fit(mg_spec, mg_df, group=group, quadrature=Quadrature.equispaced(81, lim=(-8, 8)))
@@ -362,7 +363,7 @@ wide = Quadrature.equispaced(81, lim=(-8, 8))  # 刻み 0.2 のまま範囲を�
 
 報告される `var` は格子で切る前の正規分布のパラメタで、格子上の分布の分散はそれよりわずかに小さい。
 mirt は分散を閉形式のモーメントで更新するため、格子の端の影響が大きい条件では mirt と値がずれる。格子を
-広げると両者は一致する（[VALIDATION.md](VALIDATION.md)）。
+広げると両者は一致する（[VALIDATION.md](VALIDATION.ja.md)）。
 
 ## 13. エラーと警告
 

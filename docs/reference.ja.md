@@ -1,7 +1,9 @@
 # API リファレンス
 
+[English](reference.md) | 日本語
+
 flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の一覧。使い方の流れは
-[ユーザーガイド](guide.md)、数式とアルゴリズムは [設計書](DESIGN.md) を参照。
+[ユーザーガイド](guide.ja.md)、数式とアルゴリズムは [設計書](DESIGN.ja.md) を参照。
 各関数の docstring にも同じ内容と対応する式・出典がある（`help(flexpyirt.fit)` など）。
 
 公開関数の引数は、最初の 1〜2 個を除いてキーワード専用（`*` の後ろ）。
@@ -163,7 +165,7 @@ model.parameter_table(data, *, group=None, item_names=None) -> DataFrame
 ```
 
 `data` に対する既定の ParameterTable を返す。列は `group`, `item`, `model`, `param`, `value`, `free`,
-`lower`, `upper`, `free_id`。編集して `fit(..., table=...)` に渡す（[ガイド 11 節](guide.md#11-parametertable-を編集する)）。
+`lower`, `upper`, `free_id`。編集して `fit(..., table=...)` に渡す（[ガイド 11 節](guide.ja.md#11-parametertable-を編集する)）。
 
 #### その他の属性
 
@@ -229,7 +231,7 @@ Normal.free(*, mean=0.0, var=1.0)
 | `Normal.free()` | 平均・分散を推定 |
 
 `var` は正、`mean` は有限でなければ `SpecificationError`。推定した `var` は格子で切る前の正規分布の
-パラメタ（[ガイド 12 節](guide.md#12-求積格子の選び方)）。
+パラメタ（[ガイド 12 節](guide.ja.md#12-求積格子の選び方)）。
 
 ---
 

@@ -1,10 +1,12 @@
 # flexpyirt
 
+[English](README.md) | 日本語
+
 JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin EM による周辺最尤推定（MMLE）を中核に、
 多母集団の同時推定や固定項目パラメタ推定（FIPC）を Python から扱えるようにする。
 
 - **正しさを検証済み**: 対応済みの機能はすべて R `mirt` と数値照合している（パラメタ・対数尤度・標準誤差が
-  おおむね 1e-8 で一致。[検証の詳細](docs/VALIDATION.md)）。
+  おおむね 1e-8 で一致。[検証の詳細](docs/VALIDATION.ja.md)）。
 - **自動微分**: M-step の勾配・Hessian も標準誤差（Oakes の恒等式）も JAX の自動微分で計算する。
   新しい項目モデルは対数確率を書くだけで推定・SE・スコアリングが動く設計。
 - **ParameterTable**: mirt の `pars = "values"` に相当する表で、固定・等値・初期値を編集できる。
@@ -23,7 +25,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | スコアリング | EAP と事後標準偏差（群ごとの潜在分布を事前分布に使う） | V1–V5, V9 |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
 
-まだないもの（[ロードマップ](docs/ROADMAP.md)）: 3PL / 4PL / GPCM、経験ヒストグラム（EH）、事前分布と MAP 推定、
+まだないもの（[ロードマップ](docs/ROADMAP.ja.md)）: 3PL / 4PL / GPCM、経験ヒストグラム（EH）、事前分布と MAP 推定、
 SQUAREM 加速（M3）、MAP / ML / WLE / plausible values のスコアリング、多次元モデル（M4）。
 
 ## インストール
@@ -81,7 +83,7 @@ scores = res.score(df)  # 回答者ごとの EAP（theta）と事後標準偏差
 
 ## 使い方の例
 
-詳しくは [ユーザーガイド](docs/guide.md)、関数ごとの説明は [API リファレンス](docs/reference.md)。
+詳しくは [ユーザーガイド](docs/guide.ja.md)、関数ごとの説明は [API リファレンス](docs/reference.ja.md)。
 
 **Rasch モデル**（傾きは 1 に固定、潜在分布の分散を推定）
 
@@ -117,12 +119,14 @@ res3 = fit(spec3, df)
 
 ## ドキュメント
 
-- [ユーザーガイド](docs/guide.md) — モデルの指定、多母集団、FIPC、ParameterTable の編集、推定オプション
-- [API リファレンス](docs/reference.md) — 公開クラス・関数の一覧と引数
-- [検証](docs/VALIDATION.md) — R mirt との照合方法、許容誤差、判明した違い
-- [設計書](docs/DESIGN.md) — 数式とアルゴリズム、実装上の決定
-- [ロードマップ](docs/ROADMAP.md)
-- [開発フロー](CONTRIBUTING.md) — ブランチ運用、レビュー、リリース
+- [ユーザーガイド](docs/guide.ja.md) — モデルの指定、多母集団、FIPC、ParameterTable の編集、推定オプション
+- [API リファレンス](docs/reference.ja.md) — 公開クラス・関数の一覧と引数
+- [検証](docs/VALIDATION.ja.md) — R mirt との照合方法、許容誤差、判明した違い
+- [設計書](docs/DESIGN.ja.md) — 数式とアルゴリズム、実装上の決定
+- [ロードマップ](docs/ROADMAP.ja.md)
+- [開発フロー](CONTRIBUTING.ja.md) — ブランチ運用、レビュー、リリース
+
+すべての文書に英語版（`*.md`）がある。
 
 ## 開発
 
@@ -131,7 +135,7 @@ uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
 
-ブランチ運用とリリースの手順は [CONTRIBUTING.md](CONTRIBUTING.md) を参照。
+ブランチ運用とリリースの手順は [CONTRIBUTING.md](CONTRIBUTING.ja.md) を参照。
 
 ## ライセンス
 

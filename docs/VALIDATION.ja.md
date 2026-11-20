@@ -1,5 +1,7 @@
 # 検証計画（R mirt との数値照合）
 
+[English](VALIDATION.md) | 日本語
+
 ## 方針
 - 照合の参照値は R `mirt` で生成し、JSON で `tests/reference/` にコミットする。CI では R を実行しない。
 - 生成スクリプトは `validation/r/<case>.R`。各スクリプトの先頭に `sessionInfo()` 相当（R・mirt のバージョン）を JSON に書き出す。

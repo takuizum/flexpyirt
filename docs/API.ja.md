@@ -1,6 +1,8 @@
 # flexpyirt 公開 API スケッチ
 
-> **実装済みの API は [API リファレンス](reference.md) と [ユーザーガイド](guide.md) を参照。**
+[English](API.md) | 日本語
+
+> **実装済みの API は [API リファレンス](reference.ja.md) と [ユーザーガイド](guide.ja.md) を参照。**
 > このファイルは設計段階のスケッチで、未実装の機能（3PL、事前分布、EH など）も含む。
 
 > 目標: 「仕様（Spec）・推定（fit）・結果（FitResult）」を分ける。仕様は不変オブジェクトで、メソッドチェーンは新しい仕様を返す。

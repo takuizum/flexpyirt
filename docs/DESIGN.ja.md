@@ -1,5 +1,7 @@
 # flexpyirt 設計書（DESIGN）
 
+[English](DESIGN.md) | 日本語
+
 > 状態: ドラフト v0.2（2026-11-20、M1 実装を反映）。実装前の設計。決定事項は「決定」、未確定は §12「未決事項」に置く。
 
 ## 1. 目的と非目的
@@ -260,6 +262,7 @@ class LatentDist(Protocol):
 3. **M1 の範囲外は明示的に拒否**: 多母集団（`group=`）、欠測（NaN）、等間隔以外の求積は M2 以降。
    E-step 自体は欠測マスクを持つ形で書くが、照合（V9）が済むまでデータ層で拒否する。
    全員が同じ反応の項目は MLE が発散するので `SpecificationError`。
+   （多母集団と欠測は M2 で有効にした。§14。）
 4. **依存**: pandas は必須依存（結果は DataFrame で返す）、polars は任意依存。
 5. **SE**: $\eta$（自然尺度）に対する情報行列。Oakes は $Q(\eta\mid\eta')$ を
    `jax.jacfwd(jax.grad(Q, 0), argnums=(0, 1))` で微分。直接法は周辺対数尤度の `jax.hessian`。
