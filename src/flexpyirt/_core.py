@@ -108,6 +108,8 @@ class CompiledProblem:
 
 def _expand(eta: Array, fixed: Array, free_index: Array) -> Array:
     """Return ``eta[free_index]`` where free and ``fixed`` elsewhere (DESIGN.md §13.2)."""
+    if eta.shape[0] == 0:  # static: nothing is free
+        return fixed
     return jnp.where(free_index >= 0, eta[jnp.maximum(free_index, 0)], fixed)
 
 

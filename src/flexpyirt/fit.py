@@ -118,8 +118,12 @@ def fit(
     params = final_table.copy()
     free = params["free"].to_numpy()
     fid = params["free_id"].to_numpy()
-    params["estimate"] = np.where(free, eta[np.maximum(fid, 0)], params["value"])
-    params["se"] = np.where(free, se_values[np.maximum(fid, 0)], np.nan)
+    estimate = params["value"].to_numpy(dtype=float).copy()
+    se_column = np.full(len(params), np.nan)
+    estimate[free] = eta[fid[free]]
+    se_column[free] = se_values[fid[free]]
+    params["estimate"] = estimate
+    params["se"] = se_column
 
     history = pd.DataFrame(
         {
