@@ -37,6 +37,7 @@ def _compiled(spec: Model, df: pd.DataFrame) -> tuple[_core.CompiledProblem, jax
 # ---- kernels -------------------------------------------------------------------------------
 
 
+@settings(deadline=None)  # the first example includes JAX compilation
 @given(
     a=st.floats(-4, 4),
     d=st.floats(-6, 6),
