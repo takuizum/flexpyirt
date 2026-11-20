@@ -151,15 +151,19 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - Unidentified specifications raise `IdentificationError` before fitting.
 
 ### 4.6 Convergence and acceleration
-- Convergence: largest absolute change of the free parameters (natural-scale $\eta$) $<$ `tol`
-  (default 1e-4, the same definition as mirt's `TOL`). The histories of the log-likelihood (log
-  posterior with MAP) and the largest change are both kept; monotonicity is checked by tests.
+- Convergence: largest absolute change of the free parameters (natural-scale $\eta$) between
+  successive accepted iterates $<$ `tol` (default 1e-4, the same definition as mirt's `TOL`). The
+  histories of the log-likelihood (log posterior with MAP), largest change, cumulative EM map
+  evaluations and SQUAREM safeguard triggers are kept; monotonicity is checked by tests.
   **Decision (M1)**: the stopping rule is the largest absolute change only (adding a
   log-likelihood change condition would break the correspondence with mirt).
-- **SQUAREM** (Varadhan & Roland, 2008, scheme S3) as an option. If the objective decreases after
-  extrapolation, fall back to a plain EM step (a monotonicity safeguard).
-- The EM loop runs on device in `lax.while_loop`. Optional progress output with
-  `jax.debug.callback`.
+- **SQUAREM** (Varadhan & Roland, 2008, scheme S3) via `BAEM(squarem=True)` (default `False` in M3
+  until wall-time benchmarks against mirt are run; §15.13). If an extrapolated candidate leaves the
+  parameter bounds or yields a non-finite or lower marginal log-likelihood than $\theta_2$, $\alpha$
+  is stepped back towards $-1$ up to a fixed number of halvings; if still unacceptable, $\theta_2$
+  is used directly, guaranteeing monotone log-likelihood (§15.11–§15.12).
+- Both plain EM and SQUAREM run entirely on device in `lax.while_loop` (no Python iteration loop or
+  host callbacks). Optional progress output with `jax.debug.callback` is left for later.
 
 ### 4.7 MAP (Bayes modal)
 - Priors are defined on the **natural parameter scale** ($a, b$ or $a, d$, $c$ and so on) without
@@ -444,6 +448,38 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
     2PL/Rasch/3PL/4PL (`b = -d/a`) and GRM (`bk = -dk/a`) unchanged, even when mixed in the same
     model. `Model.fix_from(..., parameterization="irt")` inverts this via
     $d_k=-a\sum_{c=1}^{k}b_c$, and allows omitting `a` for PCM items.
+11. **SQUAREM scheme S3 (Varadhan & Roland, 2008)**: implemented as `_core.squarem` inside
+    `lax.while_loop`. Starting from accepted iterate $\theta_0$, two EM map applications give
+    $\theta_1=F(\theta_0)$ and $\theta_2=F(\theta_1)$, with $r=\theta_1-\theta_0$,
+    $s=\theta_2-\theta_1$, $v=s-r$, and step length $\alpha=\min(-\|r\|_2/\|v\|_2,\,-1)$
+    (falling back to $\alpha=-1$ when $\|v\|_2=0$ or $-\|r\|_2/\|v\|_2$ is non-finite). Writing
+    $\delta=\alpha+1\le 0$ turns $\theta'(\alpha)=\theta_0-2\alpha r+\alpha^2 v$ into the
+    algebraically identical $\theta'(\alpha)=\theta_2-2\delta s+\delta^2 v$, which equals
+    $\theta_2$ exactly at $\delta=0$ (no cancellation) and makes halving towards $-1$
+    ($\alpha\leftarrow(\alpha-1)/2$) simply $\delta\leftarrow\delta/2$.
+12. **SQUAREM monotonicity and feasibility safeguard**: when $\alpha<-1$, $\theta'(\alpha)$ is
+    checked against strict per-coordinate bounds `(lower, upper)` extracted once before the loop
+    from `FamilyBlock.slot_lower/upper` and `LatentBlock.lower/upper` (`_core._eta_bounds`), so
+    feasibility uses the exact same bounds as the M-step (including latent variance $>0$,
+    $0<g,u<1$, and any user-edited table bounds). If strictly inside bounds, `marginal_loglik` is
+    evaluated via `lax.cond` (skipped when out of bounds) and accepted iff finite and
+    $\ge\max(\ell(\theta_2),\ell(\theta_0))$ — this also rejects GRM disordered thresholds and
+    4PL $g\ge u$ because their kernels return NaN. On rejection, an inner `lax.while_loop` halves
+    $\delta$ up to 10 times. An accepted $\theta'$ takes one stabilizing EM step
+    $\theta_{\text{new}}=F(\theta')$ (3 EM map evaluations for the iteration); if all halvings
+    fail, $\theta_{\text{new}}=\theta_2$ is used directly (2 EM map evaluations). Because $F$ is
+    monotone, every accepted iterate satisfies $\ell(\theta_{\text{new}})\ge\ell(\theta_0)$.
+13. **SQUAREM API default, history, and warnings**: `BAEM(squarem: bool = False)` keeps plain EM
+    as the default in M3 because wall-time benchmarks against mirt (including JIT overhead and
+    small- vs. large-problem trade-offs) are scheduled later in M3. The stopping rule stays
+    $\max_i|\eta^{(t+1)}_i-\eta^{(t)}_i|<\text{tol}$. `FitResult` adds `n_em_evaluations` (total
+    calls to $F$; equals `n_iter` for plain EM) and `n_safeguards` (iterations on which the
+    safeguard stepped $\alpha$ back or fell back to $\theta_2$; 0 for plain EM). `history` keeps
+    a uniform schema (`iter`, `loglik`, `max_change`, `em_evaluations`, `safeguard`) regardless of
+    `squarem`. `ConvergenceWarning` reports safeguard/fallback counts when `max_iter` is reached,
+    and also fires on a converged SQUAREM fit when full fallbacks to $\theta_2$
+    (`3 * n_iter - n_em_evaluations`) are at least 5 and exceed 50% of iterations (partial
+    step-backs that still accelerate do not trigger spurious warnings).
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.

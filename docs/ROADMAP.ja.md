@@ -27,7 +27,7 @@
 - 事前分布と MAP、`log_posterior` の報告。
 - [x] 3PL / 4PL（`ThreePL`, `FourPL`, `HeywoodWarning`、V11 で照合済み）。
 - [x] GPCM / PCM（`GPCM`, `PCM`、V8 で照合済み）。
-- [ ] SQUAREM。
+- [x] SQUAREM（`BAEM(squarem=True)`、スキーム S3 と単調性・実行可能性の安全装置。全 mirt 照合スイートが SQUAREM あり・なしで通過）。
 - ベンチマーク（mirt との wall time）。
 - **受け入れ基準**: V6, V7, V8, V11 が許容誤差内。SQUAREM ありでも照合が通る。
 

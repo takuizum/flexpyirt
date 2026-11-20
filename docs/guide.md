@@ -161,20 +161,33 @@ spec_fixed = Model.uniform(TwoPL(), items=items).fix(item="q01", a=1.0, d=0.0)
 res = fit(
     spec,
     df,
-    method=BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3),  # defaults
+    method=BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False),  # defaults
     quadrature=Quadrature.equispaced(61, lim=(-6, 6)),  # default
     se="oakes",  # default
 )
 ```
 
-- **`method`**: EM settings. EM stops when the largest absolute change of the free parameters is
-  below `tol` (the same definition as mirt's `TOL`). Reaching `max_iter` gives a
-  `ConvergenceWarning`. Each M-step takes `m_step_newton_steps` Newton steps; none of them
-  decreases the expected log-likelihood, so EM stays monotone.
+- **`method`**: EM settings. EM stops when the largest absolute change of the free parameters
+  between successive accepted iterates is below `tol` (the same definition as mirt's `TOL`).
+  Reaching `max_iter` gives a `ConvergenceWarning`. Each M-step takes `m_step_newton_steps`
+  Newton steps; none of them decreases the expected log-likelihood, so EM stays monotone.
+- **`squarem=True`**: enables SQUAREM acceleration (scheme S3; Varadhan & Roland, 2008). Each
+  SQUAREM iteration performs two EM map evaluations, extrapolates along the step, and applies one
+  stabilizing EM step (3 EM evaluations per accepted iterate, or 2 if the monotonicity/feasibility
+  safeguard falls back to $\theta_2$). Turn it on for slow-converging models (Rasch/PCM with free
+  variance, multiple groups, 3PL/4PL, or tight `tol`). It converges to the same fixed point with
+  monotone `history["loglik"]` and far fewer EM evaluations. Plain EM (`squarem=False`) stays the
+  default in M3 until wall-time benchmarks against mirt are complete.
 - **`quadrature`**: the latent-variable grid. The default is 61 equally spaced points on
   $[-6, 6]$ (mirt's default). See [section 12](#12-choosing-the-quadrature-grid) for when to
   widen it.
 - **`se`**: `"oakes"` (default), `"hessian"`, or `None` (skip).
+
+```python
+res_sq = fit(spec, df, method=BAEM(tol=1e-6, squarem=True), se=None)
+print(res_sq.n_iter, res_sq.n_em_evaluations, res_sq.n_safeguards)
+print(res_sq.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeguard
+```
 
 The first fit includes JAX compilation time. Later fits of data with the same shape are faster.
 
@@ -187,8 +200,8 @@ print(res)  # FitResult(loglik=..., n_params=..., n_obs=..., converged in ... it
 print(res.items.head(3))  # estimates and SEs per item
 print(res.latent)  # latent distribution per group (mean, var and their SEs)
 print(res.loglik, res.aic, res.bic, res.n_params, res.n_obs)
-print(res.converged, res.n_iter)
-print(res.history.tail(3))  # iter, loglik, max_change
+print(res.converged, res.n_iter, res.n_em_evaluations, res.n_safeguards)
+print(res.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeguard
 ```
 
 | Attribute | Contents |
@@ -198,7 +211,8 @@ print(res.history.tail(3))  # iter, loglik, max_change
 | `parameters` | The ParameterTable ([section 11](#11-editing-the-parametertable)) plus `estimate` and `se` |
 | `loglik`, `aic`, `bic` | Marginal log-likelihood and information criteria ($-2\ell+2k$, $-2\ell+k\log N$) |
 | `n_params`, `n_obs` | Number of free parameters and respondents |
-| `converged`, `n_iter`, `history` | Whether EM converged, the number of iterations, log-likelihood and largest change per iteration |
+| `converged`, `n_iter`, `n_em_evaluations`, `n_safeguards` | Whether EM converged, accepted iterations, total EM map evaluations (equal to `n_iter` for plain EM), and SQUAREM safeguard interventions |
+| `history` | Per accepted iterate: `iter`, `loglik`, `max_change`, `em_evaluations` (cumulative), and `safeguard` (whether the SQUAREM safeguard fired) |
 | `vcov`, `se_method` | Covariance matrix of the free parameters (in `free_id` order) and how it was computed |
 
 `history.loglik` never decreases between iterations (EM is monotone). If it does, that is a bug;
@@ -431,7 +445,7 @@ the grid makes them agree ([VALIDATION.md](VALIDATION.md)).
 | `PrecisionError` | `fit()` was called with JAX's 64-bit floating point disabled |
 | `SpecificationError` | The specification and data disagree (missing or extra columns, out-of-range values, unobserved categories, fixing an unknown item, invalid table edits, unknown group labels) |
 | `IdentificationError` | The scale is not identified ([section 8](#8-latent-distributions-and-identification)) |
-| `ConvergenceWarning` | EM did not converge within `max_iter` |
+| `ConvergenceWarning` | EM did not converge within `max_iter`, or SQUAREM fell back to plain EM on > 50% of iterations (at least 5 times) |
 | `HeywoodWarning` | A free item parameter ended within `1e-4` of a finite bound (e.g. `g` near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$ |
 | `FlexpyirtWarning` | The information matrix is not positive definite (SEs are NaN), or an anchor is a single parameter |
 
@@ -457,3 +471,4 @@ except SpecificationError as e:
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.

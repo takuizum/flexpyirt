@@ -157,18 +157,29 @@ spec_fixed = Model.uniform(TwoPL(), items=items).fix(item="q01", a=1.0, d=0.0)
 res = fit(
     spec,
     df,
-    method=BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3),  # 既定値
+    method=BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False),  # 既定値
     quadrature=Quadrature.equispaced(61, lim=(-6, 6)),  # 既定値
     se="oakes",  # 既定値
 )
 ```
 
-- **`method`**: EM の設定。収束は「自由パラメタの最大絶対変化 < `tol`」（mirt の `TOL` と同じ定義）。
-  `max_iter` に達すると `ConvergenceWarning`。M-step は Newton 法を `m_step_newton_steps` 回だけ進める
-  （毎回の M-step で期待対数尤度が減らないので、EM の単調性は保たれる）。
+- **`method`**: EM の設定。収束は「採択された連続する反復間での自由パラメタの最大絶対変化 < `tol`」
+  （mirt の `TOL` と同じ定義）。`max_iter` に達すると `ConvergenceWarning`。M-step は Newton 法を
+  `m_step_newton_steps` 回だけ進める（毎回の M-step で期待対数尤度が減らないので、EM の単調性は保たれる）。
+- **`squarem=True`**: SQUAREM 加速（スキーム S3; Varadhan & Roland, 2008）を有効にする。1 回の SQUAREM 反復で
+  EM 写像を 2 回評価してステップ方向に外挿し、安定化の EM ステップを 1 回行う（採択 1 回あたり EM 評価 3 回。
+  単調性・実行可能性の安全装置が $\theta_2$ に戻した場合は 2 回）。収束の遅いモデル（分散を推定する Rasch / PCM、
+  多母集団、3PL / 4PL、厳しい `tol`）で有効にする。同じ不動点に収束し、`history["loglik"]` は単調で、
+  EM の評価回数が大きく減る。M3 では mirt との実行時間のベンチマークが済むまで、通常の EM（`squarem=False`）を既定とする。
 - **`quadrature`**: 潜在変数の求積格子。既定は等間隔 61 点・$[-6, 6]$（mirt の既定と同じ）。
   広げるべき場合は [12 節](#12-求積格子の選び方)。
 - **`se`**: `"oakes"`（既定）、`"hessian"`、`None`（計算しない）。
+
+```python
+res_sq = fit(spec, df, method=BAEM(tol=1e-6, squarem=True), se=None)
+print(res_sq.n_iter, res_sq.n_em_evaluations, res_sq.n_safeguards)
+print(res_sq.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeguard
+```
 
 初回の推定には JAX のコンパイル時間がかかる。同じ形のデータを続けて推定すると 2 回目以降は速い。
 
@@ -181,8 +192,8 @@ print(res)  # FitResult(loglik=..., n_params=..., n_obs=..., converged in ... it
 print(res.items.head(3))  # 項目ごとの推定値と SE
 print(res.latent)  # 群ごとの潜在分布（mean, var と SE）
 print(res.loglik, res.aic, res.bic, res.n_params, res.n_obs)
-print(res.converged, res.n_iter)
-print(res.history.tail(3))  # iter, loglik, max_change
+print(res.converged, res.n_iter, res.n_em_evaluations, res.n_safeguards)
+print(res.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeguard
 ```
 
 | 属性 | 内容 |
@@ -192,7 +203,8 @@ print(res.history.tail(3))  # iter, loglik, max_change
 | `parameters` | ParameterTable（[11 節](#11-parametertable-を編集する)）に `estimate` と `se` を足したもの |
 | `loglik`, `aic`, `bic` | 周辺対数尤度と情報量規準（$-2\ell+2k$, $-2\ell+k\log N$） |
 | `n_params`, `n_obs` | 自由パラメタ数、回答者数 |
-| `converged`, `n_iter`, `history` | 収束したか、反復回数、反復ごとの対数尤度と最大変化 |
+| `converged`, `n_iter`, `n_em_evaluations`, `n_safeguards` | 収束したか、採択された反復回数、EM 写像の評価回数の合計（通常の EM では `n_iter` と同じ）、SQUAREM の安全装置が働いた回数 |
+| `history` | 採択された反復ごとの `iter`, `loglik`, `max_change`, `em_evaluations`（累計）, `safeguard`（SQUAREM の安全装置が働いたか） |
 | `vcov`, `se_method` | 自由パラメタの共分散行列（`free_id` 順）と計算方法 |
 
 `history.loglik` は反復ごとに減らない（EM の単調性）。減っていたらバグなので報告してほしい。
@@ -411,7 +423,7 @@ mirt は分散を閉形式のモーメントで更新するため、格子の端
 | `PrecisionError` | JAX の 64 ビット浮動小数点が無効なまま `fit()` を呼んだ |
 | `SpecificationError` | 仕様とデータの矛盾（列の過不足、範囲外の値、観測されないカテゴリ、存在しない項目の固定、表の不正な編集、群ラベルの不一致） |
 | `IdentificationError` | 尺度が識別できない（[8 節](#8-潜在分布と識別性)） |
-| `ConvergenceWarning` | `max_iter` までに収束しなかった |
+| `ConvergenceWarning` | `max_iter` までに収束しなかった、または SQUAREM が反復の 50% 超（5 回以上）で通常の EM に戻った |
 | `HeywoodWarning` | 自由な項目パラメタが有限の境界から `1e-4` 以内（3PL / 4PL で `g` が 0 付近、`u` が 1 付近など）、または自由な傾きが $|a| > 20$ |
 | `FlexpyirtWarning` | 情報行列が正定値でない（SE が NaN）、アンカーが 1 パラメタだけ |
 
@@ -436,3 +448,4 @@ except SpecificationError as e:
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.

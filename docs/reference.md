@@ -45,9 +45,10 @@ Marginal maximum likelihood estimation with the Bock–Aitkin EM algorithm (Bock
 **Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (invalid specification
 or data), `IdentificationError` (not identified). All are raised before estimation starts.
 
-**Warns**: `ConvergenceWarning` (`max_iter` reached), `HeywoodWarning` (free asymptote within
-`1e-4` of its bound or free slope $|a| > 20$), `FlexpyirtWarning` (information matrix not
-positive definite, or an anchor that is a single parameter).
+**Warns**: `ConvergenceWarning` (`max_iter` reached, or SQUAREM fell back to plain EM frequently),
+`HeywoodWarning` (free asymptote within `1e-4` of its bound or free slope $|a| > 20$),
+`FlexpyirtWarning` (information matrix not positive definite, or an anchor that is a single
+parameter).
 
 ### `FitResult`
 
@@ -63,8 +64,10 @@ Returned by `fit()`. Immutable.
 | `n_params` | int | Number of free parameters (an equality constraint counts once) |
 | `n_obs` | int | Number of respondents |
 | `converged` | bool | Whether the convergence criterion was met |
-| `n_iter` | int | Number of EM iterations |
-| `history` | DataFrame | `iter`, `loglik` (at the parameters entering the iteration), `max_change` |
+| `n_iter` | int | Number of accepted EM (or SQUAREM) iterations |
+| `n_em_evaluations` | int | Total number of EM map evaluations (E-step + M-step); equals `n_iter` for plain EM, and 2 or 3 per accepted iterate for SQUAREM |
+| `n_safeguards` | int | Number of SQUAREM iterations on which the monotonicity/feasibility safeguard intervened (0 for plain EM) |
+| `history` | DataFrame | `iter`, `loglik` (at the parameters entering the iteration), `max_change`, `em_evaluations` (cumulative EM map evaluations), `safeguard` (whether the SQUAREM safeguard fired) |
 | `vcov` | ndarray / None | Covariance matrix of the free parameters (in `free_id` order); None if `se=None` |
 | `se_method` | str / None | `"oakes"` / `"hessian"` / None |
 
@@ -301,14 +304,15 @@ the parameter of the normal distribution before the grid cuts it off
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3)
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 ```
 
 | Argument | Description |
 |---|---|
-| `tol` | Converged when the largest absolute change of the free parameters is below this (same definition as mirt's `TOL`) |
-| `max_iter` | Maximum number of iterations; reaching it gives a `ConvergenceWarning` |
+| `tol` | Converged when the largest absolute change of the free parameters between successive accepted iterates is below this (same definition as mirt's `TOL`) |
+| `max_iter` | Maximum number of accepted iterations; reaching it gives a `ConvergenceWarning` |
 | `m_step_newton_steps` | Newton steps per M-step; no step decreases the expected log-likelihood |
+| `squarem` | Enable SQUAREM scheme S3 acceleration (Varadhan & Roland, 2008) with a monotonicity/feasibility safeguard (default `False`) |
 
 ### `Quadrature`
 
@@ -357,7 +361,8 @@ parameter.
 
 #### `ConvergenceWarning`
 
-EM did not converge within `max_iter`.
+EM did not converge within `max_iter`, or SQUAREM fell back to plain EM frequently (at least 5
+full fallbacks to $\theta_2$ and more than 50% of iterations).
 
 #### `HeywoodWarning`
 

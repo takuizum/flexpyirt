@@ -33,7 +33,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - Priors and MAP, reporting `log_posterior`.
 - [x] 3PL / 4PL (`ThreePL`, `FourPL`, `HeywoodWarning`, validated in V11).
 - [x] GPCM / PCM (`GPCM`, `PCM`, validated in V8).
-- [ ] SQUAREM.
+- [x] SQUAREM (`BAEM(squarem=True)`, scheme S3 with monotonicity/feasibility safeguard; all mirt agreement suites pass with and without SQUAREM).
 - Benchmarks (wall time against mirt).
 - **Acceptance**: V6, V7, V8, V11 within tolerance. Agreement also holds with SQUAREM.
 

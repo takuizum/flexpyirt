@@ -85,6 +85,14 @@
   ~3.7e-15、Oakes SE は ~1.3e-8、Hessian 対 mirt Richardson SE は ~1.1e-6（flexpyirt 内の Oakes と
   Hessian は ~1.1e-11）、EAP は ~8.0e-15。
   照合テスト: `tests/test_mirt_m3_gpcm.py`。参照値の生成: `validation/r/m3_gpcm_reference.R`。
+- **SQUAREM の照合結果（M3）**: すべての mirt 照合テスト（`tests/test_mirt_m1.py`, `tests/test_mirt_m2.py`,
+  `tests/test_mirt_m3.py`, `tests/test_mirt_m3_gpcm.py`）を `BAEM(squarem=False)` と `BAEM(squarem=True)`
+  の両方で実行し、同じ加速なし mirt 参照値と照合している。全 13 ケースが同一の不動点に許容誤差内で収束し
+  （2PL/GRM/GPCM/PCM/3PL/4PL/FIPC/2 群/欠測の項目パラメタ最大差 $\le 2.8\times 10^{-8}$、V2 シミュレーション
+  Rasch の潜在分散差は通常 EM と同じ打ち切り由来の $7.9\times 10^{-5}$）、対数尤度は単調非減少で、EM 写像の
+  評価回数を 1.3〜5.0 倍削減した（例: `v2_lsat7_rasch` 121 → 24、`v4_twogroup_2pl` 302 → 113、
+  `v8_science_gpcm` 251 → 96、`v11_4pl` 531 → 272）。単体・Hypothesis 単調性・安全装置・評価回数削減テスト:
+  `tests/test_m3_squarem.py`。
 - **EAP の照合**: 推定値の差が EAP に伝播しないよう、全パラメタを mirt の推定値に固定して
   （ParameterTable の `free=False`）スコアリングだけを照合する。許容誤差 1e-5。
 - 照合テスト: `tests/test_mirt_m1.py`（V1, V2, V10）。参照値の生成: `validation/r/m1_reference.R`。

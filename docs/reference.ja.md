@@ -44,7 +44,7 @@ Bock–Aitkin EM による周辺最尤推定（Bock & Aitkin, 1981）。
 **例外**: `PrecisionError`（JAX の 64 ビットが無効）、`SpecificationError`（仕様やデータの誤り）、
 `IdentificationError`（識別不能）。いずれも推定を始める前に出る。
 
-**警告**: `ConvergenceWarning`（`max_iter` に到達）、`HeywoodWarning`（自由な漸近線が境界から `1e-4` 以内、または自由な傾きが $|a| > 20$）、`FlexpyirtWarning`（情報行列が正定値でない、アンカーが 1 パラメタだけ）。
+**警告**: `ConvergenceWarning`（`max_iter` に到達、または SQUAREM が通常 EM へ頻繁に退避）、`HeywoodWarning`（自由な漸近線が境界から `1e-4` 以内、または自由な傾きが $|a| > 20$）、`FlexpyirtWarning`（情報行列が正定値でない、アンカーが 1 パラメタだけ）。
 
 ### `FitResult`
 
@@ -60,8 +60,10 @@ Bock–Aitkin EM による周辺最尤推定（Bock & Aitkin, 1981）。
 | `n_params` | int | 自由パラメタ数（等値制約は 1 つと数える） |
 | `n_obs` | int | 回答者数 |
 | `converged` | bool | 収束基準を満たしたか |
-| `n_iter` | int | EM の反復回数 |
-| `history` | DataFrame | `iter`, `loglik`（その反復に入るときの値）, `max_change` |
+| `n_iter` | int | 採択された EM（または SQUAREM）の反復回数 |
+| `n_em_evaluations` | int | EM 写像（E-step + M-step）の総評価回数。通常 EM では `n_iter` と同値、SQUAREM では採択 1 回あたり 2 または 3 |
+| `n_safeguards` | int | SQUAREM の単調性・実行可能性の安全装置が介入した反復数（通常 EM では 0） |
+| `history` | DataFrame | `iter`, `loglik`（その反復に入るときの値）, `max_change`, `em_evaluations`（累積 EM 写像評価回数）, `safeguard`（SQUAREM 安全装置が発動したか） |
 | `vcov` | ndarray / None | 自由パラメタの共分散行列（`free_id` 順）。`se=None` なら None |
 | `se_method` | str / None | `"oakes"` / `"hessian"` / None |
 
@@ -284,14 +286,15 @@ Normal.free(*, mean=0.0, var=1.0)
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3)
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 ```
 
 | 引数 | 説明 |
 |---|---|
-| `tol` | 自由パラメタの最大絶対変化がこれ未満で収束（mirt の `TOL` と同じ定義） |
-| `max_iter` | 最大反復回数。到達すると `ConvergenceWarning` |
+| `tol` | 連続する採択反復点の間での自由パラメタの最大絶対変化がこれ未満で収束（mirt の `TOL` と同じ定義） |
+| `max_iter` | 採択される最大反復回数。到達すると `ConvergenceWarning` |
 | `m_step_newton_steps` | 1 回の M-step で進める Newton 法のステップ数。各ステップで期待対数尤度は減らない |
+| `squarem` | SQUAREM スキーム S3 加速（Varadhan & Roland, 2008）と単調性・実行可能性の安全装置を有効にする（既定 `False`） |
 
 ### `Quadrature`
 
@@ -336,7 +339,7 @@ flexpyirt が出すすべての警告の基底クラス（`UserWarning` を継�
 
 #### `ConvergenceWarning`
 
-`max_iter` までに収束しなかった。
+`max_iter` までに収束しなかった、または SQUAREM が通常 EM（$\theta_2$）へ頻繁に退避した（5 回以上かつ全反復の 50% 超）。
 
 #### `HeywoodWarning`
 
