@@ -102,12 +102,12 @@ categories start at 0 (subtract 1 from data coded from 1, such as mirt's `Scienc
 
 ```python
 theta3 = rng.normal(0, 1, 2000)
-a3 = np.array([1.6, 1.8, 1.7, 1.6, 1.9, 1.7])
-d3 = np.array([-1.0, -0.7, -1.2, -0.8, -0.9, -0.6])
-g3 = np.full(6, 0.2)
+a3 = np.array([1.6, 1.8, 1.7, 1.6, 1.9, 1.7, 1.8, 1.6, 1.9, 1.7])
+d3 = np.array([-1.0, -0.7, -1.2, -0.8, -0.9, -0.6, -1.1, -0.8, -1.0, -0.7])
+g3 = np.full(len(a3), 0.2)
 p3 = g3 + (1.0 - g3) / (1.0 + np.exp(-(np.outer(theta3, a3) + d3)))
 df_3pl = pd.DataFrame(
-    (rng.random(p3.shape) < p3).astype(float), columns=[f"c{j}" for j in range(1, 7)]
+    (rng.random(p3.shape) < p3).astype(float), columns=[f"c{j}" for j in range(1, len(a3) + 1)]
 )
 res_3pl = fit(Model.uniform(ThreePL(), items=df_3pl.columns), df_3pl)
 print(res_3pl.items[["item", "a", "d", "g", "b"]].round(3))

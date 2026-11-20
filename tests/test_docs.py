@@ -48,6 +48,7 @@ def test_code_blocks_run(doc: str, capsys: pytest.CaptureFixture[str]) -> None:
     namespace: dict[str, object] = {"__name__": f"docs:{doc}"}
     with warnings.catch_warnings():
         warnings.simplefilter("error", errors.ConvergenceWarning)
+        warnings.simplefilter("error", errors.HeywoodWarning)
         for i, code in enumerate(blocks):
             try:
                 exec(compile(code, f"{doc}[block {i}]", "exec"), namespace)
