@@ -25,7 +25,7 @@ from flexpyirt.errors import HeywoodWarning
 from tests._reference import check_reference_meta
 
 REFERENCE_DIR = Path(__file__).parent / "reference"
-METHOD = BAEM(tol=1e-9, max_iter=20000)
+SQUAREM = (False, True)
 TOL_LOGLIK_REL = 1e-6
 TOL_PARAM = 1e-4
 TOL_SE_REL = 1e-3
@@ -73,14 +73,14 @@ def load(name: str) -> Case:
 
 
 @cache
-def _fit(name: str, se: str) -> FitResult:
+def _fit(name: str, se: str, squarem: bool = False) -> FitResult:
     case = load(name)
     with warnings.catch_warnings():
         warnings.simplefilter("error", HeywoodWarning)
         return fit(
             case.spec,
             case.data,
-            method=METHOD,
+            method=BAEM(tol=1e-9, max_iter=20000, squarem=squarem),
             quadrature=case.quadrature,
             se=se,  # type: ignore[arg-type]
         )
@@ -101,24 +101,27 @@ def _fixed_at_mirt(name: str) -> FitResult:
     return fit(case.spec, case.data, table=table, quadrature=case.quadrature, se=None)
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
-def test_loglik(name: str) -> None:
-    case, res = load(name), _fit(name, "oakes")
+def test_loglik(name: str, squarem: bool) -> None:
+    case, res = load(name), _fit(name, "oakes", squarem)
     assert res.converged
     ref = float(case.raw["loglik"])
     assert abs(res.loglik - ref) <= TOL_LOGLIK_REL * abs(ref)
     assert res.loglik >= _fixed_at_mirt(name).loglik - 1e-8
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
-def test_parameters(name: str) -> None:
-    case, res = load(name), _fit(name, "oakes")
+def test_parameters(name: str, squarem: bool) -> None:
+    case, res = load(name), _fit(name, "oakes", squarem)
     ref = case.params()
     ours = res.items.set_index("item").loc[ref.index]
     for p in ("a", "d", "g", "u"):
         np.testing.assert_allclose(ours[p], ref[p].astype(float), rtol=0, atol=TOL_PARAM)
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize(
     ("name", "se", "key"),
     [
@@ -126,9 +129,9 @@ def test_parameters(name: str) -> None:
         *[(n, "hessian", "se_richardson") for n in CASES],
     ],
 )
-def test_standard_errors(name: str, se: str, key: str) -> None:
+def test_standard_errors(name: str, se: str, key: str, squarem: bool) -> None:
     """V10/V11: Oakes vs mirt Oakes, direct Hessian vs mirt Richardson (natural scale)."""
-    case, res = load(name), _fit(name, se)
+    case, res = load(name), _fit(name, se, squarem)
     ref = case.params(key)
     ours = res.items.set_index("item").loc[ref.index]
     for col in ("a_se", "d_se", "g_se", "u_se"):
@@ -147,14 +150,16 @@ def test_eap_with_mirt_parameters(name: str) -> None:
     np.testing.assert_allclose(scores["se"], case.raw["eap"]["se"], rtol=0, atol=TOL_EAP)
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
-def test_em_monotone(name: str) -> None:
-    ll = _fit(name, "oakes").history["loglik"].to_numpy()
+def test_em_monotone(name: str, squarem: bool) -> None:
+    ll = _fit(name, "oakes", squarem).history["loglik"].to_numpy()
     assert np.all(np.diff(ll) >= -1e-9 * np.abs(ll[1:]))
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
-def test_oakes_equals_hessian(name: str) -> None:
-    oakes, hess = _fit(name, "oakes"), _fit(name, "hessian")
+def test_oakes_equals_hessian(name: str, squarem: bool) -> None:
+    oakes, hess = _fit(name, "oakes", squarem), _fit(name, "hessian", squarem)
     assert oakes.vcov is not None and hess.vcov is not None
     np.testing.assert_allclose(oakes.vcov, hess.vcov, rtol=1e-6, atol=1e-12)

@@ -15,7 +15,7 @@ from flexpyirt import BAEM, FitResult, Model, Rasch, TwoPL, fit
 from tests._reference import Case, check_reference_meta, load
 
 CASES = ["v1_lsat7_2pl", "v1_sim_2pl", "v2_lsat7_rasch", "v2_sim_rasch"]
-METHOD = BAEM(tol=1e-9, max_iter=20000)
+SQUAREM = (False, True)
 
 TOL_LOGLIK_REL = 1e-6
 TOL_PARAM = 1e-4
@@ -27,14 +27,16 @@ def _spec(case: Case) -> Model:
     return Model.uniform(TwoPL() if case.itemtype == "2PL" else Rasch(), items=case.items)
 
 
-_FITS: dict[tuple[str, str], FitResult] = {}
+_FITS: dict[tuple[str, str, bool], FitResult] = {}
 
 
-def _fit(name: str, se: str = "oakes") -> tuple[Case, FitResult]:
+def _fit(name: str, se: str = "oakes", squarem: bool = False) -> tuple[Case, FitResult]:
     case = load(name)
-    if (name, se) not in _FITS:
-        _FITS[(name, se)] = fit(_spec(case), case.data, method=METHOD, se=se)  # type: ignore[arg-type]
-    return case, _FITS[(name, se)]
+    key = (name, se, squarem)
+    if key not in _FITS:
+        method = BAEM(tol=1e-9, max_iter=20000, squarem=squarem)
+        _FITS[key] = fit(_spec(case), case.data, method=method, se=se)  # type: ignore[arg-type]
+    return case, _FITS[key]
 
 
 @pytest.mark.parametrize("name", CASES)
@@ -42,9 +44,10 @@ def test_reference_metadata(name: str) -> None:
     check_reference_meta(load(name).raw["meta"])
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
-def test_loglik(name: str) -> None:
-    case, res = _fit(name)
+def test_loglik(name: str, squarem: bool) -> None:
+    case, res = _fit(name, squarem=squarem)
     assert res.converged
     ref = float(case.raw["loglik"])
     assert abs(res.loglik - ref) <= TOL_LOGLIK_REL * abs(ref)
@@ -52,35 +55,39 @@ def test_loglik(name: str) -> None:
     assert res.loglik >= ref - 1e-8
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
-def test_item_parameters(name: str) -> None:
-    case, res = _fit(name)
+def test_item_parameters(name: str, squarem: bool) -> None:
+    case, res = _fit(name, squarem=squarem)
     items = res.items.set_index("item").loc[case.items]
     ref = case.params()
     np.testing.assert_allclose(items["a"], ref["a"], rtol=0, atol=TOL_PARAM)
     np.testing.assert_allclose(items["d"], ref["d"], rtol=0, atol=TOL_PARAM)
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
-def test_latent_parameters(name: str) -> None:
-    case, res = _fit(name)
+def test_latent_parameters(name: str, squarem: bool) -> None:
+    case, res = _fit(name, squarem=squarem)
     lat = res.latent.iloc[0]
     ref = case.latent()
     assert lat["mean"] == pytest.approx(ref["mean"], abs=TOL_PARAM)
     assert lat["var"] == pytest.approx(ref["var"], abs=TOL_PARAM)
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
-def test_oakes_se_matches_mirt_oakes(name: str) -> None:
+def test_oakes_se_matches_mirt_oakes(name: str, squarem: bool) -> None:
     """V10: Oakes SEs against mirt's SE.type = "Oakes"."""
-    case, res = _fit(name, "oakes")
+    case, res = _fit(name, "oakes", squarem=squarem)
     _check_se(case, res, key="params")
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
-def test_hessian_se_matches_mirt_richardson(name: str) -> None:
+def test_hessian_se_matches_mirt_richardson(name: str, squarem: bool) -> None:
     """V10: direct-Hessian SEs against mirt's numerical Hessian (SE.type = "Richardson")."""
-    case, res = _fit(name, "hessian")
+    case, res = _fit(name, "hessian", squarem=squarem)
     _check_se(case, res, key="se_richardson")
 
 
@@ -96,11 +103,12 @@ def _check_se(case: Case, res: FitResult, *, key: str) -> None:
         assert res.latent.iloc[0]["var_se"] == pytest.approx(var_se, rel=TOL_SE_REL)
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
-def test_oakes_equals_hessian(name: str) -> None:
+def test_oakes_equals_hessian(name: str, squarem: bool) -> None:
     """Oakes' identity is exact, so both information matrices agree to rounding."""
-    _, oakes = _fit(name, "oakes")
-    _, hess = _fit(name, "hessian")
+    _, oakes = _fit(name, "oakes", squarem=squarem)
+    _, hess = _fit(name, "hessian", squarem=squarem)
     assert oakes.vcov is not None and hess.vcov is not None
     np.testing.assert_allclose(oakes.vcov, hess.vcov, rtol=1e-6, atol=1e-12)
 
@@ -130,9 +138,10 @@ def test_eap_with_mirt_parameters(name: str) -> None:
     np.testing.assert_allclose(scores["se"], case.raw["eap"]["se"], rtol=0, atol=TOL_EAP)
 
 
+@pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
-def test_em_monotone(name: str) -> None:
-    _, res = _fit(name)
+def test_em_monotone(name: str, squarem: bool) -> None:
+    _, res = _fit(name, squarem=squarem)
     ll = res.history["loglik"].to_numpy()
     assert np.all(np.diff(ll) >= -1e-9 * np.abs(ll[1:]))
 
