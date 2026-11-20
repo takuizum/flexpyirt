@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from flexpyirt import _core
-from flexpyirt._compile import build_table, coerce_responses, compile_problem, validate_table
+from flexpyirt._compile import compile_problem, prepare
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import ConvergenceWarning, FlexpyirtWarning, SpecificationError
 from flexpyirt.method import BAEM
@@ -51,9 +51,10 @@ def fit(
     spec : Model
         Model specification.
     data : DataFrame or array-like
-        Responses (persons × items), 0/1. Columns must be exactly the model's items.
+        Responses (persons × items) coded ``0..n_cat-1``; NaN is missing (MAR). Columns must be
+        exactly the model's items.
     group : array-like, optional
-        Group labels for multiple-group estimation (not supported before M2).
+        Group label of each row for a multiple-group model (see ``Model.with_groups``).
     table : DataFrame, optional
         Edited parameter table from ``spec.parameter_table(data)``; takes precedence over
         ``spec``.
@@ -78,17 +79,14 @@ def fit(
         If the specification is invalid, before estimation starts.
     """
     check_x64()
-    if group is not None:
-        raise NotImplementedError("Multiple-group estimation is planned for milestone M2.")
     if se not in (None, "oakes", "hessian"):
         raise SpecificationError(f"Unknown se={se!r}; use 'oakes', 'hessian' or None.")
     method = BAEM() if method is None else method
     quadrature = Quadrature.equispaced() if quadrature is None else quadrature
 
-    y = coerce_responses(data, spec.item_names, item_names=item_names)
-    default = build_table(spec, y)
-    final_table = validate_table(default if table is None else table, default)
-    compiled = compile_problem(spec, y, final_table, quadrature)
+    prep = prepare(spec, data, group=group, item_names=item_names, table=table)
+    final_table = prep.table
+    compiled = compile_problem(spec, prep.y, prep.group, final_table, quadrature)
     problem = compiled.problem
 
     out = _em(
@@ -140,7 +138,7 @@ def fit(
         history=history,
         vcov=vcov,
         se_method=se,
-        n_obs=compiled.n_obs,
+        n_obs=int(prep.y.shape[0]),
         _model=spec,
         _eta=eta,
         _quadrature=quadrature,

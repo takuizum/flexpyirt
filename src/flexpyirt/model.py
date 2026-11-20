@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 
@@ -13,7 +13,11 @@ from flexpyirt.errors import SpecificationError
 from flexpyirt.items import ItemModel, Rasch
 from flexpyirt.latent import Normal
 
-__all__ = ["Model"]
+__all__ = ["SINGLE_GROUP", "Model"]
+
+SINGLE_GROUP = "all"
+
+ItemSelector = Iterable[Any] | Callable[[str], bool] | None
 
 
 @dataclass(frozen=True)
@@ -28,15 +32,23 @@ class Model:
     items : tuple of (name, ItemModel)
         Items in order.
     fixed : tuple of (item, param, value)
-        Parameters fixed by :meth:`fix`.
+        Parameters fixed in every group by :meth:`fix` or :meth:`fix_from`.
     latent : Normal or None
-        Latent distribution. ``None`` means the default: :math:`N(0,\sigma^2)` with the variance
-        estimated when every item is Rasch, otherwise :math:`N(0,1)` (DESIGN.md §4.5).
+        Latent distribution of a single-group model. ``None`` means the default:
+        :math:`N(0,\sigma^2)` with the variance estimated when every item is Rasch, otherwise
+        :math:`N(0,1)` (DESIGN.md §4.5).
+    groups : tuple of (group, Normal) or None
+        Groups and their latent distributions for a multiple-group model; the first is the
+        reference group (DESIGN.md §14.4).
+    equal : tuple of (items, params or None)
+        Across-group equality constraints from :meth:`equal_across_groups`.
     """
 
     items: tuple[tuple[str, ItemModel], ...]
     fixed: tuple[tuple[str, str, float], ...] = ()
     latent: Normal | None = None
+    groups: tuple[tuple[str, Normal], ...] | None = None
+    equal: tuple[tuple[tuple[str, ...], tuple[str, ...] | None], ...] = ()
 
     def __post_init__(self) -> None:
         """Validate item names."""
@@ -59,17 +71,50 @@ class Model:
         """Return a model from a mapping ``item name -> item model`` (order is kept)."""
         return cls(items=tuple((str(name), m) for name, m in items.items()))
 
-    # ---- builders ----------------------------------------------------------------------------
+    # ---- queries -----------------------------------------------------------------------------
 
     @property
     def item_names(self) -> tuple[str, ...]:
         """Item names in order."""
         return tuple(name for name, _ in self.items)
 
-    def fix(self, *, item: str, **values: float) -> Model:
-        """Return a model with parameters of ``item`` fixed, e.g. ``fix(item="q01", a=1.2)``.
+    @property
+    def is_multigroup(self) -> bool:
+        """Whether groups were declared with :meth:`with_groups`."""
+        return self.groups is not None
 
-        Values use the internal (slope–intercept) parameterization.
+    def resolved_latent(self) -> Normal:
+        """Return the single-group latent distribution, applying DESIGN.md §4.5's default rule."""
+        if self.latent is not None:
+            return self.latent
+        if all(isinstance(m, Rasch) for _, m in self.items):
+            return Normal(free_var=True)
+        return Normal.standard()
+
+    def resolved_groups(self) -> tuple[tuple[str, Normal], ...]:
+        """Return ``(group, latent)`` pairs; a single-group model has one group named ``"all"``."""
+        if self.groups is None:
+            return ((SINGLE_GROUP, self.resolved_latent()),)
+        return self.groups
+
+    def _select(self, items: ItemSelector) -> tuple[str, ...]:
+        if items is None:
+            return self.item_names
+        if callable(items):
+            return tuple(n for n in self.item_names if items(n))
+        chosen = tuple(str(i) for i in items)
+        unknown = [i for i in chosen if i not in self.item_names]
+        if unknown:
+            raise SpecificationError(f"Unknown items: {unknown}.")
+        return chosen
+
+    # ---- builders ----------------------------------------------------------------------------
+
+    def fix(self, *, item: str, **values: float) -> Model:
+        """Return a model with parameters of ``item`` fixed in every group.
+
+        Values use the internal (slope–intercept) parameterization, e.g.
+        ``fix(item="q01", a=1.2, d=0.3)``.
         """
         lookup = dict(self.items)
         if item not in lookup:
@@ -89,32 +134,116 @@ class Model:
             new[(item, param)] = float(value)
         return replace(self, fixed=tuple((i, p, v) for (i, p), v in new.items()))
 
+    def fix_from(
+        self,
+        bank: pd.DataFrame,
+        *,
+        items: ItemSelector = None,
+        parameterization: Literal["slope-intercept", "irt"] = "slope-intercept",
+    ) -> Model:
+        r"""Return a model with item parameters fixed from an item bank (FIPC, DESIGN.md §14.6).
+
+        Parameters
+        ----------
+        bank : DataFrame
+            One row per item with an ``item`` column and parameter columns: ``a``, ``d`` (or
+            ``d1..``) for ``"slope-intercept"``; ``a``, ``b`` (or ``b1..``) for ``"irt"``, converted
+            with :math:`d=-ab`. ``a`` may be omitted for Rasch items.
+        items : list of str or callable, optional
+            Items to fix (default: every bank item that is in the model).
+        parameterization : {"slope-intercept", "irt"}
+        """
+        if "item" not in bank.columns:
+            raise SpecificationError("The item bank needs an 'item' column.")
+        rows = {str(r["item"]): r for r in bank.to_dict("records")}
+        chosen = (
+            tuple(i for i in self.item_names if i in rows) if items is None else self._select(items)
+        )
+        missing = [i for i in chosen if i not in rows]
+        if missing:
+            raise SpecificationError(f"Items not found in the bank: {missing}.")
+        lookup = dict(self.items)
+        model = self
+        for item in chosen:
+            row = rows[item]
+            params = lookup[item].kernel.param_names
+            slope = float(row["a"]) if "a" in row else 1.0
+            values: dict[str, float] = {}
+            for p in params:
+                if p == "a":
+                    if "a" in row:
+                        values["a"] = slope
+                    continue
+                if parameterization == "slope-intercept":
+                    key = p
+                    if key not in row:
+                        raise SpecificationError(f"Bank row for {item!r} has no column {key!r}.")
+                    values[p] = float(row[key])
+                elif parameterization == "irt":
+                    key = "b" + p[1:]
+                    if key not in row:
+                        raise SpecificationError(f"Bank row for {item!r} has no column {key!r}.")
+                    values[p] = -slope * float(row[key])
+                else:
+                    raise SpecificationError(f"Unknown parameterization {parameterization!r}.")
+            model = model.fix(item=item, **values)
+        return model
+
     def with_latent(self, dist: Normal) -> Model:
-        """Return a model with latent distribution ``dist``."""
+        """Return a single-group model with latent distribution ``dist``."""
         if not isinstance(dist, Normal):
             raise SpecificationError(f"Unsupported latent distribution {dist!r}.")
+        if self.groups is not None:
+            raise SpecificationError("This model has groups; set latents with with_groups().")
         return replace(self, latent=dist)
 
-    def resolved_latent(self) -> Normal:
-        """Return the latent distribution, applying the default rule of DESIGN.md §4.5."""
+    def with_groups(self, **latents: Normal) -> Model:
+        """Return a multiple-group model; keyword order defines the groups, the first is reference.
+
+        Example: ``with_groups(ref=Normal.standard(), focal=Normal.free())``.
+        """
+        if len(latents) < 2:
+            raise SpecificationError("with_groups() needs at least two groups.")
+        for name, dist in latents.items():
+            if not isinstance(dist, Normal):
+                raise SpecificationError(f"Unsupported latent distribution for group {name!r}.")
         if self.latent is not None:
-            return self.latent
-        if all(isinstance(m, Rasch) for _, m in self.items):
-            return Normal(free_var=True)
-        return Normal.standard()
+            raise SpecificationError("Use with_groups() instead of with_latent() for groups.")
+        return replace(self, groups=tuple(latents.items()))
+
+    def equal_across_groups(
+        self, *, items: ItemSelector, params: Iterable[str] | None = None
+    ) -> Model:
+        """Return a model whose ``params`` (default: all) of ``items`` are equal across groups.
+
+        These are the anchor items that link the groups' scales (DESIGN.md §4.5, §14.1).
+        """
+        chosen = self._select(items)
+        if not chosen:
+            raise SpecificationError("equal_across_groups() selected no items.")
+        param_tuple = None if params is None else tuple(params)
+        if param_tuple is not None:
+            lookup = dict(self.items)
+            for item in chosen:
+                bad = [p for p in param_tuple if p not in lookup[item].kernel.param_names]
+                if bad:
+                    raise SpecificationError(f"Item {item!r} has no parameters {bad}.")
+        return replace(self, equal=(*self.equal, (chosen, param_tuple)))
 
     def parameter_table(
-        self, data: Any, *, item_names: Iterable[str] | None = None
+        self, data: Any, *, group: Any = None, item_names: Iterable[str] | None = None
     ) -> pd.DataFrame:
         """Return the default parameter table (DESIGN.md §5.1) for ``data``.
 
         Edit ``value``, ``free``, ``lower``, ``upper`` or ``free_id`` and pass it back with
         ``fit(..., table=edited)``.
         """
-        from flexpyirt._compile import build_table, coerce_responses, validate_table
+        from flexpyirt._compile import prepare
 
-        y = coerce_responses(
-            data, self.item_names, item_names=None if item_names is None else list(item_names)
-        )
-        table = build_table(self, y)
-        return validate_table(table, table)
+        return prepare(
+            self,
+            data,
+            group=group,
+            item_names=None if item_names is None else list(item_names),
+            table=None,
+        ).table

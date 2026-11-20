@@ -11,7 +11,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from flexpyirt import BAEM, Model, Normal, Quadrature, Rasch, TwoPL, _core, fit
-from flexpyirt._compile import build_table, coerce_responses, compile_problem, validate_table
+from flexpyirt._compile import compile_problem, prepare
 from flexpyirt._newton import newton_ascent
 from flexpyirt.errors import IdentificationError, SpecificationError
 from flexpyirt.items import DichotomousKernel
@@ -27,10 +27,8 @@ def _simulate(a: np.ndarray, d: np.ndarray, n: int, seed: int, sd: float = 1.0) 
 
 
 def _compiled(spec: Model, df: pd.DataFrame) -> tuple[_core.CompiledProblem, jax.Array]:
-    y = coerce_responses(df, spec.item_names)
-    table = build_table(spec, y)
-    table = validate_table(table, table)
-    comp = compile_problem(spec, y, table, Quadrature.equispaced())
+    prep = prepare(spec, df, group=None, item_names=None, table=None)
+    comp = compile_problem(spec, prep.y, prep.group, prep.table, Quadrature.equispaced())
     return comp.problem, jnp.asarray(comp.eta0)
 
 
@@ -60,7 +58,9 @@ def test_e_step_conserves_counts() -> None:
     counts, ll = _core.e_step(prob, eta)
     assert float(counts.n.sum()) == pytest.approx(len(df))
     # every respondent answered every item: sum over categories equals the node counts
-    np.testing.assert_allclose(counts.r[0].sum(axis=1), np.broadcast_to(counts.n, (5, 61)))
+    np.testing.assert_allclose(
+        counts.r[0].sum(axis=2), np.broadcast_to(counts.n[:, None, :], (1, 5, 61))
+    )
     assert float(ll) == pytest.approx(float(_core.marginal_loglik(prob, eta)))
 
 
@@ -214,13 +214,9 @@ def test_specification_errors(small: pd.DataFrame) -> None:
         fit(spec, small.assign(extra=0))
     with pytest.raises(SpecificationError, match="not in the data"):
         fit(spec, small.drop(columns="Item.1"))
-    with pytest.raises(SpecificationError, match="Missing responses"):
-        with_nan = small.astype(float)
-        with_nan.iloc[0, 0] = np.nan
-        fit(spec, with_nan)
-    with pytest.raises(SpecificationError, match="other than 0/1"):
+    with pytest.raises(SpecificationError, match=r"values 0\.\.1"):
         fit(spec, small.replace({1: 2}))
-    with pytest.raises(SpecificationError, match="every respondent"):
+    with pytest.raises(SpecificationError, match="never observed"):
         fit(spec, small.assign(**{"Item.1": 1}))
     with pytest.raises(SpecificationError, match="Duplicated"):
         Model.uniform(TwoPL(), items=["x", "x"])

@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from flexpyirt import _core
-from flexpyirt._compile import LATENT_ITEM, coerce_responses, compile_problem, compress_patterns
+from flexpyirt._compile import LATENT_ITEM, coerce_groups, coerce_responses, compile_problem
 from flexpyirt.errors import SpecificationError
 from flexpyirt.quadrature import Quadrature
 
@@ -78,29 +78,39 @@ class FitResult:
 
     @property
     def items(self) -> pd.DataFrame:
-        """One row per item: estimates and SEs by internal parameter, plus ``b = -d/a``.
+        """One row per item (per group in a multiple-group model).
 
-        ``b`` is a display-only transformation; its SE (delta method) arrives in M4.
+        Estimates and SEs by internal parameter, plus the IRT thresholds ``b = -d/a`` (``bk`` for
+        ``dk``), which are display-only; their SEs (delta method) arrive in M4.
         """
         p = self.parameters[self.parameters["item"] != LATENT_ITEM]
-        est = p.pivot(index="item", columns="param", values="estimate")
-        se = p.pivot(index="item", columns="param", values="se").add_suffix("_se")
-        order = list(self._model.item_names)
+        index = ["group", "item"]
+        est = p.pivot(index=index, columns="param", values="estimate")
+        se = p.pivot(index=index, columns="param", values="se").add_suffix("_se")
         params = list(dict.fromkeys(p["param"]))
+        groups = list(dict.fromkeys(p["group"]))
+        order = pd.MultiIndex.from_product([groups, list(self._model.item_names)], names=index)
         out = pd.concat([est[params], se[[f"{c}_se" for c in params]]], axis=1).loc[order]
-        out.insert(0, "model", p.drop_duplicates("item").set_index("item").loc[order, "model"])
-        if {"a", "d"} <= set(params):
-            out["b"] = -out["d"] / out["a"]
+        models = p.drop_duplicates(index).set_index(index)["model"]
+        out.insert(0, "model", models.loc[order])
+        if "a" in params:
+            for c in params:
+                if c.startswith("d"):
+                    out["b" + c[1:]] = -out[c] / out["a"]
         out.columns.name = None
-        return out.reset_index()
+        out = out.reset_index()
+        if not self._model.is_multigroup:
+            out = out.drop(columns="group")
+        return out
 
     @property
     def latent(self) -> pd.DataFrame:
         """One row per group: latent ``mean``, ``var`` and their SEs."""
         p = self.parameters[self.parameters["item"] == LATENT_ITEM]
+        groups = list(dict.fromkeys(p["group"]))
         est = p.pivot(index="group", columns="param", values="estimate")[["mean", "var"]]
         se = p.pivot(index="group", columns="param", values="se")[["mean", "var"]].add_suffix("_se")
-        out = pd.concat([est, se], axis=1)
+        out = pd.concat([est, se], axis=1).loc[groups]
         out.columns.name = None
         return out.reset_index()
 
@@ -111,6 +121,7 @@ class FitResult:
         data: Any,
         *,
         method: Literal["EAP"] = "EAP",
+        group: Any = None,
         item_names: list[str] | None = None,
     ) -> pd.DataFrame:
         r"""Score respondents.
@@ -118,10 +129,12 @@ class FitResult:
         Parameters
         ----------
         data : DataFrame or array-like
-            Responses on the fitted items.
+            Responses on the fitted items (NaN is missing).
         method : {"EAP"}
-            Expected a posteriori with the estimated latent distribution as prior; ``se`` is the
-            posterior SD (Bock & Mislevy, 1982). Other methods arrive in M4.
+            Expected a posteriori with the respondent's group's estimated latent distribution as
+            prior; ``se`` is the posterior SD (Bock & Mislevy, 1982). Other methods arrive in M4.
+        group : array-like, optional
+            Group labels (required for a multiple-group model).
         item_names : list of str, optional
             Column names when ``data`` is an array.
 
@@ -133,13 +146,12 @@ class FitResult:
         """
         if method != "EAP":
             raise SpecificationError(f"Unsupported scoring method {method!r}; M1 supports 'EAP'.")
-        y = coerce_responses(
-            data, self._model.item_names, item_names=item_names, require_variation=False
-        )
-        compiled = compile_problem(self._model, y, self.parameters, self._quadrature)
-        patterns, _, inverse = compress_patterns(y)
+        y = coerce_responses(data, self._model, item_names=item_names)
+        codes, _ = coerce_groups(group, self._model, y.shape[0], require_all=False)
+        compiled = compile_problem(self._model, y, codes, self.parameters, self._quadrature)
         theta, sd = _eap(compiled.problem, jax.numpy.asarray(self._eta))
-        n = patterns.shape[0]
+        n = compiled.n_patterns
+        inverse = compiled.inverse
         index = data.index if isinstance(data, pd.DataFrame) else None
         return pd.DataFrame(
             {"theta": np.asarray(theta)[:n][inverse], "se": np.asarray(sd)[:n][inverse]},

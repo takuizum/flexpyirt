@@ -45,12 +45,12 @@ def test_x64_check_passes_when_enabled() -> None:
     check_x64()
 
 
-def test_fit_is_keyword_only_and_rejects_groups_before_m2() -> None:
+def test_fit_is_keyword_only_and_rejects_undeclared_groups() -> None:
     spec = Model.uniform(TwoPL(), items=["i1", "i2"])
     data = [[0, 1], [1, 0]]
     with pytest.raises(TypeError):
         fit(spec, data, None)  # type: ignore[call-arg]
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(errors.SpecificationError, match="with_groups"):
         fit(spec, data, group=[0, 1])
 
 
