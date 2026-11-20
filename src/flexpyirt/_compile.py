@@ -180,6 +180,12 @@ def _start_values(model: Model, y: np.ndarray) -> dict[str, np.ndarray]:
     out = {}
     for j, (name, item_model) in enumerate(model.items):
         rows = obs[:, j]
+        n_params = len(item_model.kernel.param_names)
+        if rows.sum() < 2:
+            # Not estimable (reported later by _check_estimable); a finite placeholder keeps the
+            # table valid when the user fixes this item.
+            out[name] = np.r_[1.0, np.linspace(1.0, -1.0, n_params - 1) if n_params > 2 else 0.0]
+            continue
         item = y[rows, j].astype(float)
         rest = (total - scores[:, j])[rows].astype(float)
         out[name] = item_model.start_values(item, rest)

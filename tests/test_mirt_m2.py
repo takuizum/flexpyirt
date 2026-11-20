@@ -59,7 +59,8 @@ class Case:
         return np.repeat(np.asarray(self.raw["pattern_groups"]), self.counts)
 
     def params(self, group: str, key: str = "estimates") -> pd.DataFrame:
-        return pd.DataFrame(self.raw[key][group]["params"]).T.loc[self.raw["items"]]
+        frame: pd.DataFrame = pd.DataFrame(self.raw[key][group]["params"]).T
+        return frame.loc[list(self.raw["items"])]
 
     def latent(self, group: str, key: str = "estimates") -> dict[str, float | None]:
         return dict(self.raw[key][group]["latent"])
@@ -115,12 +116,11 @@ def _fixed_at_mirt(name: str) -> FitResult:
     """All parameters fixed at mirt's estimates (no EM step moves anything)."""
     case = load(name)
     table = case.spec.parameter_table(case.data, group=case.group)
-    for row in table.itertuples():
-        if row.item == "__latent__":
-            value = case.latent(str(row.group))[str(row.param)]
-        else:
-            value = case.params(str(row.group)).at[row.item, row.param]
-        table.loc[row.Index, "value"] = float(value)  # type: ignore[arg-type]
+    values = []
+    for g, item, param in zip(table["group"], table["item"], table["param"], strict=True):
+        est = case.raw["estimates"][g]
+        values.append(est["latent"][param] if item == "__latent__" else est["params"][item][param])
+    table["value"] = np.asarray(values, dtype=float)
     table["free"] = False
     return fit(
         case.spec, case.data, group=case.group, table=table, quadrature=case.quadrature, se=None
@@ -212,7 +212,8 @@ def test_anchor_items_are_equal_across_groups() -> None:
     for item in case.raw["anchors"]:
         assert items.loc[("ref", item), "a"] == items.loc[("focal", item), "a"]
         assert items.loc[("ref", item), "d"] == items.loc[("focal", item), "d"]
-    assert items.loc[("ref", "q10"), "d"] != items.loc[("focal", "q10"), "d"]
+    d = items["d"].to_dict()
+    assert d[("ref", "q10")] != d[("focal", "q10")]
 
 
 def test_fipc_keeps_bank_values() -> None:
