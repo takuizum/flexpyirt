@@ -287,6 +287,8 @@ def validate_table(
     value = t["value"].to_numpy(dtype=float)
     lower = t["lower"].to_numpy(dtype=float)
     upper = t["upper"].to_numpy(dtype=float)
+    ref_lower = reference["lower"].to_numpy(dtype=float)
+    ref_upper = reference["upper"].to_numpy(dtype=float)
     free = t["free"].to_numpy(dtype=bool)
     for i in range(len(t)):
         where = f"(group={group_col[i]!r}, item={item_col[i]!r}, param={param_col[i]!r})"
@@ -294,6 +296,11 @@ def validate_table(
             raise SpecificationError(f"Non-finite value {value[i]} at {where}.")
         if not lower[i] < upper[i]:
             raise SpecificationError(f"lower must be < upper at {where}.")
+        if lower[i] < ref_lower[i] or upper[i] > ref_upper[i]:
+            raise SpecificationError(
+                f"Bounds [{lower[i]}, {upper[i]}] exceed model domain "
+                f"[{ref_lower[i]}, {ref_upper[i]}] at {where}."
+            )
         if free[i] and not (lower[i] < value[i] < upper[i]):
             raise SpecificationError(
                 f"Starting value {value[i]} is not strictly inside ({lower[i]}, {upper[i]}) "

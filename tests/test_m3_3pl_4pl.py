@@ -309,3 +309,55 @@ def test_asymptote_table_validation() -> None:
         fit(spec.fix(item="q01", u=1.1), df, se=None)
     with pytest.raises(SpecificationError, match="Lower asymptote"):
         fit(spec.fix(item="q01", g=0.8, u=0.5), df, se=None)
+
+
+def test_edited_table_bounds_validated_against_model_domain() -> None:
+    a = np.array([1.2, 1.3, 1.1, 1.4])
+    d = np.array([-0.2, 0.1, -0.4, 0.3])
+    df = _sim_4pl(a, d, np.full(4, 0.15), np.full(4, 0.9), n=300, seed=606)
+    spec = Model.uniform(FourPL(), items=df.columns)
+    base = spec.parameter_table(df)
+
+    # Widening g lower below 0 (even with value updated inside the widened range) is rejected.
+    t_g_lo = base.copy()
+    row_g = (t_g_lo["item"] == "q01") & (t_g_lo["param"] == "g")
+    t_g_lo.loc[row_g, ["lower", "value"]] = [-0.5, -0.05]
+    with pytest.raises(SpecificationError, match=r"q01.*g"):
+        fit(spec, df, table=t_g_lo, se=None)
+
+    # Widening g upper above 1 is rejected.
+    t_g_hi = base.copy()
+    t_g_hi.loc[row_g, "upper"] = 1.2
+    with pytest.raises(SpecificationError, match=r"q01.*g"):
+        fit(spec, df, table=t_g_hi, se=None)
+
+    # Widening u lower below 0 or upper above 1 is rejected.
+    row_u = (base["item"] == "q02") & (base["param"] == "u")
+    t_u_lo = base.copy()
+    t_u_lo.loc[row_u, "lower"] = -0.1
+    with pytest.raises(SpecificationError, match=r"q02.*u"):
+        fit(spec, df, table=t_u_lo, se=None)
+
+    t_u_hi = base.copy()
+    t_u_hi.loc[row_u, "upper"] = 1.1
+    with pytest.raises(SpecificationError, match=r"q02.*u"):
+        fit(spec, df, table=t_u_hi, se=None)
+
+    # Widening latent variance lower below 0 is rejected.
+    t_var = base.copy()
+    row_var = (t_var["item"] == "__latent__") & (t_var["param"] == "var")
+    t_var.loc[row_var, "lower"] = -0.5
+    with pytest.raises(SpecificationError, match=r"__latent__.*var"):
+        fit(spec, df, table=t_var, se=None)
+
+    # Tightening bounds inside the model domain is allowed.
+    t_tight = base.copy()
+    t_tight.loc[row_g, ["lower", "upper", "value"]] = [0.05, 0.5, 0.2]
+    t_tight.loc[row_u, ["lower", "upper", "value"]] = [0.5, 0.99, 0.9]
+    t_tight.loc[row_var, ["lower", "upper"]] = [0.1, 10.0]
+    from flexpyirt._compile import prepare
+
+    prepared = prepare(spec, df, group=None, item_names=None, table=t_tight)
+    assert float(prepared.table.loc[row_g, "lower"].iloc[0]) == 0.05
+    assert float(prepared.table.loc[row_u, "upper"].iloc[0]) == 0.99
+    assert float(prepared.table.loc[row_var, "lower"].iloc[0]) == 0.1
