@@ -91,4 +91,5 @@ uv run python benchmarks/report.py
 ## Documentation
 
 Every document exists in English (`*.md`) and Japanese (`*.ja.md`) with the same content. Update
-both when you change one.
+both when you change one. The PR and issue templates under `.github/` are single bilingual files
+(English and Japanese side by side), because GitHub uses one default template.
