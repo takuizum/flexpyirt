@@ -153,8 +153,11 @@ def test_eap_with_mirt_parameters(name: str) -> None:
 @pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
 def test_em_monotone(name: str, squarem: bool) -> None:
-    ll = _fit(name, "oakes", squarem).history["loglik"].to_numpy()
+    res = _fit(name, "oakes", squarem)
+    ll = res.history["loglik"].to_numpy()
     assert np.all(np.diff(ll) >= -1e-9 * np.abs(ll[1:]))
+    # the step into the final accepted iterate as well
+    assert res.loglik >= ll[-1] - 1e-9 * abs(ll[-1])
 
 
 @pytest.mark.parametrize("squarem", SQUAREM)

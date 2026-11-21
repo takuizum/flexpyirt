@@ -308,3 +308,47 @@ def test_squarem_reduces_em_evaluations_on_slow_cases(case_id: str) -> None:
     assert sq.n_em_evaluations < 0.5 * plain.n_em_evaluations
     np.testing.assert_allclose(sq._eta, plain._eta, rtol=0, atol=1e-6)
     assert sq.loglik == pytest.approx(plain.loglik, rel=1e-10)
+
+
+def test_converged_fit_warns_when_squarem_falls_back_frequently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The converged-but-frequent-fallback ConvergenceWarning path of fit() (DESIGN §15.13).
+
+    Forcing the real algorithm to fall back on most iterations is fragile, so the jitted runner is
+    wrapped to report 6 accepted iterates with 12 EM evaluations, i.e. 3*6 - 12 = 6 fallbacks
+    (>= SQUAREM_FALLBACK_WARN_MIN and > SQUAREM_FALLBACK_WARN_RATE of the iterations).
+    """
+    import importlib
+
+    # `flexpyirt.fit` is also the name of the exported function, so look the module up directly.
+    fit_module = importlib.import_module("flexpyirt.fit")
+
+    real = fit_module._squarem
+
+    def fake(*args: object, **kwargs: object) -> object:
+        out = real(*args, **kwargs)
+        return out._replace(
+            n_iter=jnp.asarray(6, dtype=jnp.int32),
+            n_em_evaluations=jnp.asarray(12, dtype=jnp.int32),
+            converged=jnp.asarray(True),
+        )
+
+    monkeypatch.setattr(fit_module, "_squarem", fake)
+    case = load_m1("v1_lsat7_2pl")
+    with pytest.warns(ConvergenceWarning, match="SQUAREM fell back to plain EM frequently"):
+        res = fit(
+            Model.uniform(TwoPL(), items=case.items),
+            case.data,
+            method=BAEM(squarem=True),
+            se=None,
+        )
+    assert res.converged
+
+
+def test_converged_fit_does_not_warn_with_rare_fallbacks() -> None:
+    case = load_m1("v1_lsat7_2pl")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ConvergenceWarning)
+        res = fit(Model.uniform(TwoPL(), items=case.items), case.data, method=BAEM(squarem=True))
+    assert res.converged

@@ -144,6 +144,8 @@ def test_em_monotone(name: str, squarem: bool) -> None:
     _, res = _fit(name, squarem=squarem)
     ll = res.history["loglik"].to_numpy()
     assert np.all(np.diff(ll) >= -1e-9 * np.abs(ll[1:]))
+    # the step into the final accepted iterate as well
+    assert res.loglik >= ll[-1] - 1e-9 * abs(ll[-1])
 
 
 def test_rasch_defaults_free_variance() -> None:

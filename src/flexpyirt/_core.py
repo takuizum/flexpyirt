@@ -321,7 +321,7 @@ _SQUAREM_MAX_BACKTRACK = 10
 
 
 def _eta_bounds(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
-    """Per-coordinate ``(lower, upper)`` bounds of ``eta`` from the M-step blocks (§15.13)."""
+    """Per-coordinate ``(lower, upper)`` bounds of ``eta`` from the M-step blocks (§15.12)."""
     lo = jnp.full_like(eta, -jnp.inf)
     hi = jnp.full_like(eta, jnp.inf)
     for fam in prob.families:
