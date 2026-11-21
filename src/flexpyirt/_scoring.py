@@ -49,7 +49,7 @@ def _expand_items(prob: CompiledProblem, eta: Array) -> tuple[Array, ...]:
 
 
 def _expand_latent(prob: CompiledProblem, eta: Array) -> Array:
-    """``(G, 2)`` latent ``(mean, var)`` parameters expanded from ``eta``."""
+    """``(G, L_D)`` latent parameters (``(mean, var)`` for ``D = 1``) expanded from ``eta``."""
     return _expand(eta, prob.latent.fixed_values, prob.latent.free_index)
 
 
@@ -206,6 +206,125 @@ def _newton_1d(f: Callable[[Array], Array], x0: Array, lo: Array, hi: Array) -> 
     return x_fin
 
 
+def _mvn_mean_cov(params: Array, n_factors: int) -> tuple[Array, Array]:
+    r"""Mean vector and covariance :math:`\Sigma_{ij}=\rho_{ij}\sqrt{v_iv_j}` from latent params.
+
+    ``params`` follows :func:`~flexpyirt.latent.latent_param_names`:
+    ``(mean_1..D, var_1..D, cor_12, cor_13, .., cor_{D-1,D})``.
+    """
+    means = params[:n_factors]
+    sd = jnp.sqrt(params[n_factors : 2 * n_factors])
+    corr = jnp.eye(n_factors, dtype=params.dtype)
+    k = 2 * n_factors
+    for i in range(n_factors):
+        for j in range(i + 1, n_factors):
+            corr = corr.at[i, j].set(params[k]).at[j, i].set(params[k])
+            k += 1
+    return means, corr * sd[:, None] * sd[None, :]
+
+
+def _newton_nd(f: Callable[[Array], Array], x0: Array) -> Array:
+    r"""Safeguarded Newton ascent maximizing scalar ``f`` over :math:`\mathbb R^D` (§15.39).
+
+    Gradient and Hessian come from JAX autodiff. The Newton direction
+    :math:`-H^{-1}\nabla f` is used when :math:`H` is negative definite (all eigenvalues
+    :math:`<-10^{-12}`), otherwise the gradient; the step is capped at norm ``_MAX_STEP`` and the
+    step sizes :math:`2^{-k}` (:math:`k=0,\dots,29`) are evaluated in parallel so :math:`f`
+    never decreases (the D-dimensional analogue of ``_newton_1d``).
+    """
+    grad_fn = jax.grad(f)
+    hess_fn = jax.hessian(f)
+    zero = jnp.asarray(0, dtype=jnp.int32)
+    one = jnp.asarray(1, dtype=jnp.int32)
+    steps = 0.5 ** jnp.arange(_N_HALVINGS, dtype=x0.dtype)
+
+    def cond(state: tuple[Array, Array, Array]) -> Array:
+        _, it, done = state
+        return (~done) & (it < _MAX_ITER)
+
+    def body(state: tuple[Array, Array, Array]) -> tuple[Array, Array, Array]:
+        x, it, _ = state
+        fx = f(x)
+        g = grad_fn(x)
+        h = hess_fn(x)
+        finite_h = jnp.all(jnp.isfinite(h))
+        h_safe = jnp.where(finite_h, h, -jnp.eye(x.shape[0], dtype=x.dtype))
+        neg_def = finite_h & (jnp.max(jnp.linalg.eigvalsh(h_safe)) < -1e-12)
+        newton_dir = -jnp.linalg.solve(
+            jnp.where(neg_def, h_safe, -jnp.eye(x.shape[0], dtype=x.dtype)), g
+        )
+        direction = jnp.where(neg_def, newton_dir, g)
+        direction = jnp.where(jnp.all(jnp.isfinite(direction)), direction, 0.0)
+        norm = jnp.sqrt(jnp.sum(direction * direction))
+        direction = direction * jnp.minimum(1.0, _MAX_STEP / jnp.where(norm > 0.0, norm, 1.0))
+
+        cands = x[None, :] + steps[:, None] * direction[None, :]
+        vals = jax.vmap(f)(cands)
+        ok = jnp.isfinite(vals) & (vals >= fx)
+        any_ok = jnp.any(ok)
+        best = cands[jnp.argmax(ok)]
+        # Newton polish near the mode, where f is flat to rounding (see _newton_1d).
+        polish_ok = (
+            (~ok[0])
+            & neg_def
+            & jnp.isfinite(vals[0])
+            & (vals[0] >= fx - 1e-14 * (1.0 + jnp.abs(fx)))
+            & (jnp.max(jnp.abs(grad_fn(cands[0]))) < 0.5 * jnp.max(jnp.abs(g)))
+        )
+        moved = polish_ok | any_ok
+        x_next = jnp.where(polish_ok, cands[0], jnp.where(any_ok, best, x))
+        step_size = jnp.max(jnp.abs(x_next - x))
+        done = (
+            (~jnp.isfinite(fx))
+            | (~jnp.all(jnp.isfinite(g)))
+            | (jnp.max(jnp.abs(g)) < _GRAD_TOL)
+            | (~moved)
+            | (step_size < _STEP_TOL)
+        )
+        return x_next, it + one, done
+
+    x_fin, _, _ = jax.lax.while_loop(cond, body, (x0, zero, jnp.asarray(False)))
+    return x_fin
+
+
+def _map_scores_multidim(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
+    r"""MAP scores for :math:`D\in\{2,3\}` with the multivariate normal latent prior (§15.39).
+
+    .. math::
+        f(\boldsymbol\theta) = \log L(\boldsymbol\theta\mid y_p)
+            - \tfrac12(\boldsymbol\theta-\boldsymbol\mu)^\top\boldsymbol\Sigma^{-1}
+              (\boldsymbol\theta-\boldsymbol\mu),
+        \qquad \mathrm{SE}_m = \big[(-\nabla^2 f(\hat{\boldsymbol\theta}))^{-1}\big]_{mm}^{1/2}.
+
+    Starts from EAP. All-missing patterns return the prior mean and
+    :math:`\sqrt{\Sigma_{mm}}`.
+    """
+    n_factors = int(prob.nodes.shape[1])
+    theta0, _ = eap(prob, eta)  # (P, D)
+    xi_list = _expand_items(prob, eta)
+    lat = _expand_latent(prob, eta)
+
+    def solve_one(y_p: Array, g_p: Array, t0: Array) -> tuple[Array, Array]:
+        mu, cov = _mvn_mean_cov(lat[g_p], n_factors)
+        prec = jnp.linalg.inv(cov)
+
+        def obj(t: Array) -> Array:
+            dev = t - mu
+            quad: Array = dev @ prec @ dev
+            return _pattern_loglik(t, y_p, g_p, prob.families, xi_list) - 0.5 * quad
+
+        theta_hat = _newton_nd(obj, t0)
+        h = jax.hessian(obj)(theta_hat)
+        finite = jnp.all(jnp.isfinite(h))
+        h_safe = jnp.where(finite, h, -jnp.eye(n_factors, dtype=h.dtype))
+        neg_def = finite & (jnp.max(jnp.linalg.eigvalsh(h_safe)) < 0.0)
+        cov_hat = jnp.linalg.inv(-jnp.where(neg_def, h_safe, -jnp.eye(n_factors, dtype=h.dtype)))
+        se = jnp.where(neg_def, jnp.sqrt(jnp.diag(cov_hat)), jnp.nan)
+        return theta_hat, se
+
+    return jax.vmap(solve_one)(prob.y, prob.group, theta0)
+
+
 def map_scores(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
     r"""Bayes modal (MAP) ability estimates and SEs per unique pattern (DESIGN.md §8, §15.22).
 
@@ -219,8 +338,11 @@ def map_scores(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
     quadrature grid), starting from EAP. The standard error at the mode is
     :math:`\mathrm{SE} = (-f''_{\mathrm{MAP}}(\hat\theta))^{-1/2}`. Missing responses are dropped
     from :math:`\log L`; an all-missing pattern returns the prior mode :math:`\mu_g` and SD
-    :math:`\sigma_g`.
+    :math:`\sigma_g`. Multidimensional problems (:math:`D>1`) use the multivariate normal prior
+    (:func:`_map_scores_multidim`).
     """
+    if prob.nodes.ndim == 2 and prob.nodes.shape[1] > 1:
+        return _map_scores_multidim(prob, eta)
     theta0, _ = eap(prob, eta)
     xi_list = _expand_items(prob, eta)
     lat = _expand_latent(prob, eta)

@@ -36,7 +36,7 @@
   （`b_se` / `bk_se`、V12 で照合済み）。
 - [x] `FitResult` の JSON 入出力（`FitResult.to_json`, `FitResult.from_json`）。
 - [x] スコアリング（MAP, ML, WLE, plausible values。V13 で照合済み）。
-- [x] 確認的 2–3 次元 MIRT（`Model.with_factors()`、直積格子、多変量正規の因子間相関、Oakes/Hessian SE、EAP スコアリング。V14 で照合済み）。
+- [x] 確認的 2–3 次元 MIRT（`Model.with_factors()`、直積格子、多変量正規の因子間相関、Oakes/Hessian SE、EAP・MAP スコアリング。V14 で照合済み）。
 - **受け入れ基準**: mirt の `fscores` と EAP / MAP が一致。2 次元確認的モデルが mirt と一致。
 
 ## M5 以降（候補）
