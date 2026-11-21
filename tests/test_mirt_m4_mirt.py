@@ -215,3 +215,45 @@ def test_oakes_equals_hessian(name: str) -> None:
     oakes, hess = _fit(name, "oakes", True), _fit(name, "hessian", True)
     assert oakes.vcov is not None and hess.vcov is not None
     np.testing.assert_allclose(oakes.vcov, hess.vcov, rtol=1e-6, atol=1e-12)
+
+
+TOL_MAP_THETA = 1e-4
+TOL_MAP_SE_REL = 1e-3
+
+
+@cache
+def _map_reference() -> dict[str, Any]:
+    raw = json.loads((Path(__file__).parent / "reference" / "v14_mirt_map.json").read_text())
+    check_reference_meta(raw["meta"])
+    return dict(raw["cases"])
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_map_with_mirt_parameters(name: str) -> None:
+    """Multidimensional MAP (MVN prior) vs mirt's fscores(method = "MAP") (DESIGN §15.39)."""
+    case, ref = load(name), _map_reference()[name]
+    rows = [[np.nan if v is None else v for v in r] for r in ref["patterns"]]
+    pats = pd.DataFrame(np.asarray(rows, dtype=float), columns=ref["items"])
+    scores = _fixed_at_mirt(name).score(pats, method="MAP")
+    for f in case.raw["factors"]:
+        np.testing.assert_allclose(
+            scores[f"theta_{f}"], ref["theta"][f], rtol=0, atol=TOL_MAP_THETA
+        )
+        np.testing.assert_allclose(scores[f"se_{f}"], ref["se"][f], rtol=TOL_MAP_SE_REL)
+
+
+def test_map_multidim_all_missing_and_mode() -> None:
+    """All-missing rows return the prior mean and SDs; the MAP point is a stationary mode."""
+    name = "mirt2d_2pl_simple"
+    res, case = _fixed_at_mirt(name), load(name)
+    pats = case.patterns.iloc[:5].copy()
+    pats.iloc[0, :] = np.nan
+    scores = res.score(pats, method="MAP")
+    assert scores.loc[0, "theta_F1"] == pytest.approx(0.0, abs=1e-10)
+    assert scores.loc[0, "theta_F2"] == pytest.approx(0.0, abs=1e-10)
+    assert scores.loc[0, "se_F1"] == pytest.approx(1.0, abs=1e-10)
+    assert scores.loc[0, "se_F2"] == pytest.approx(1.0, abs=1e-10)
+    # MAP differs from EAP but both are finite for every observed pattern.
+    eap = res.score(pats, method="EAP")
+    assert np.all(np.isfinite(scores.to_numpy()))
+    assert not np.allclose(scores["theta_F1"].iloc[1:], eap["theta_F1"].iloc[1:])

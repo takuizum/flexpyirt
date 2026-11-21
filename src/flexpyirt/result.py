@@ -443,7 +443,9 @@ class FitResult:
           :math:`\log L(\theta\mid y) + \log\phi(\theta;\mu_g,\sigma_g^2)` with the group's
           estimated normal latent distribution as a continuous prior, and SE
           :math:`(-\partial^2/\partial\theta^2)^{-1/2}` at the mode. All-missing rows return
-          :math:`(\mu_g, \sigma_g)`.
+          :math:`(\mu_g, \sigma_g)`. For multidimensional models the prior is the estimated
+          multivariate normal and SEs are the square roots of the diagonal of
+          :math:`(-\nabla^2)^{-1}` at the mode.
         - ``"ML"``: maximum likelihood estimate maximizing :math:`\log L(\theta\mid y)`, with
           observed-information SE :math:`(-\partial^2\log L/\partial\theta^2)^{-1/2}`. Patterns
           with no finite maximum (all lowest / all highest observed categories, or diverging
@@ -482,9 +484,10 @@ class FitResult:
         DataFrame
             For unidimensional ``"EAP"``, ``"MAP"``, ``"ML"``, and ``"WLE"``: columns ``theta``
             and ``se``. For unidimensional ``"PV"``: columns ``pv1`` .. ``pv{n_draws}``. For
-            multidimensional ``"EAP"``: columns ``theta_<factor>`` and ``se_<factor>`` for each
-            declared factor (other scoring methods raise :class:`SpecificationError` for
-            ``D > 1``). One row per respondent; index follows ``data`` when it is a DataFrame.
+            multidimensional ``"EAP"`` and ``"MAP"``: columns ``theta_<factor>`` and
+            ``se_<factor>`` for each declared factor (``"ML"``, ``"WLE"`` and ``"PV"`` raise
+            :class:`SpecificationError` for ``D > 1``). One row per respondent; index follows
+            ``data`` when it is a DataFrame.
 
         Raises
         ------
@@ -504,10 +507,10 @@ class FitResult:
                 "method='MAP' requires a continuous latent prior and is not supported with "
                 "EmpiricalHistogram; use method='EAP', 'ML', 'WLE', or 'PV'."
             )
-        if self._model.is_multidimensional and method != "EAP":
+        if self._model.is_multidimensional and method not in ("EAP", "MAP"):
             raise SpecificationError(
                 f"Scoring method {method!r} is only implemented for unidimensional models; "
-                "use method='EAP' for multidimensional models."
+                "use method='EAP' or 'MAP' for multidimensional models."
             )
         if method == "PV":
             if key is None:
