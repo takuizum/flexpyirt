@@ -12,6 +12,7 @@
     "grid_check": [-6, 6],
     "accelerate": "none",
     "optimizer": "NR",
+    "reference_start": "gpcm_point",
     "converged": true,
     "iterations": 396,
     "converged_richardson": true
@@ -553,6 +554,56 @@
         0.77286425737081,
         0.680764374920363
       ]
+    },
+    "ml_scan": {
+      "index": [],
+      "theta": [],
+      "se": []
     }
-  }
+  },
+  "s_x2": {
+    "item": ["Comfort", "Work", "Future", "Benefit"],
+    "S_X2": [8.23532135900683, 10.2226422505174, 6.24639313292839, 12.4828259031135],
+    "df": [6, 9, 6, 9],
+    "RMSEA": [0.0308678214921093, 0.0186397492756685, 0.0102482637984034, 0.0314598211624632],
+    "p": [0.221365074225906, 0.332763689090586, 0.396162686555921, 0.187437458894431]
+  },
+  "alt_starts": [
+    {
+      "label": "gpcm_point_nr",
+      "loglik": -1608.45200230413,
+      "converged": true,
+      "max_abs_param_diff": null
+    },
+    {
+      "label": "default_nr",
+      "loglik": -1631.78757888691,
+      "converged": true,
+      "max_abs_param_diff": 14.6399925350789
+    },
+    {
+      "label": "default_bfgs",
+      "loglik": -1608.45200230414,
+      "converged": true,
+      "max_abs_param_diff": 1.04468167432259e-05
+    },
+    {
+      "label": "random_nr_seed1",
+      "loglik": -1636.48358872879,
+      "converged": true,
+      "max_abs_param_diff": 18.9983322895865
+    },
+    {
+      "label": "random_nr_seed2",
+      "loglik": -1690.72053715426,
+      "converged": true,
+      "max_abs_param_diff": 3.73965863755153
+    },
+    {
+      "label": "random_nr_seed3",
+      "loglik": -1631.78757888691,
+      "converged": true,
+      "max_abs_param_diff": 14.6399925351394
+    }
+  ]
 }
