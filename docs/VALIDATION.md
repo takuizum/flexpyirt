@@ -285,7 +285,8 @@ English | [日本語](VALIDATION.ja.md)
   - **V13f (`missing_2pl`, 2PL with 15% MCAR missing, 88 patterns, 61 pts $[-6,6]$)**:
     `loglik` rel `7.4e-16`; MAP $\theta$ `2.0e-6` / SE rel `4.6e-5`; ML $\theta$ `1.4e-6` / SE rel
     `1.1e-4` (8 `±inf`); WLE $\theta$ `2.0e-6` / SE rel `1.5e-4`.
-  Plausible values (`method="PV"`) are validated statistically in `tests/test_m4_scoring.py`
+  Plausible values (`method="PV"`; for $D > 1$ see `tests/test_mirt_m4_mirt.py`, DESIGN §15.42) are
+  validated statistically in `tests/test_m4_scoring.py`
   (reproducibility given `key`, independence across respondents sharing a pattern, and sample
   mean/SD matching EAP and posterior SD within Monte-Carlo error), alongside unit tests for
   flat-prior MAP $\approx$ ML, WLE Warm-equation stationarity across all seven item models, extreme
@@ -328,6 +329,13 @@ English | [日本語](VALIDATION.ja.md)
     (220 patterns per case; mirt 1.48, `validation/r/m4_mirt_map_reference.R` →
     `tests/reference/v14_mirt_map.json`): $\theta$ within `4.3e-6` and SEs within `3.8e-5`
     (relative) of mirt, at the level of mirt's `nlm` tolerance (tolerances `1e-4` / `1e-3`).
+  - **ML and WLE (all four cases)**: same setup as MAP plus the all-lowest, all-highest and a
+    one-factor-extreme pattern (223 patterns per case; `validation/r/m4_mirt_mlwle_reference.R` →
+    `tests/reference/v14_mirt_mlwle.json`). WLE agrees on all 892 rows ($\theta$ `5.0e-6`, SE
+    `1.7e-4` relative). ML agrees on the 644 rows that are interior in both programs ($\theta$
+    `6.5e-6`, SE `1.2e-4`); on the 242 rows where mirt returns `±Inf` on some dimension,
+    flexpyirt returns the same signed infinity, and on 22 rows where mirt stops a diverging
+    dimension near ±20 with SE 0, flexpyirt returns the signed infinity (DESIGN §15.41).
   Unit tests (kernels, MVN weights & PD guard, product grid shapes, 2D Rasch/mixed/priors/fix,
   Oakes == Hessian == reference Oakes, identification & specification errors):
   `tests/test_m4_mirt.py`.
