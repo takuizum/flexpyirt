@@ -53,7 +53,7 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 
 | 属性 | 型 | 説明 |
 |---|---|---|
-| `items` | DataFrame | 1 項目 1 行（多母集団では `group` 列つきで群 × 項目）。`model`、内部パラメタ（`a`, `d` / `d1`…, `g`, `u`）、`<param>_se`、表示用の `b` / `bk`（$-d/a$、GRM は $-d_k/a$、GPCM/PCM は $-(d_k-d_{k-1})/a$、$d_0=0$。SE なし） |
+| `items` | DataFrame | 1 項目 1 行（多母集団では `group` 列つきで群 × 項目）。`model`、内部パラメタ（`a`, `d` / `d1`…, `g`, `u`）、`<param>_se`、表示用の `b` / `bk`（$-d/a$、GRM は $-d_k/a$、GPCM/PCM は $-(d_k-d_{k-1})/a$、$d_0=0$）とデルタ法による `b_se` / `bk_se`（`vcov` と JAX 自動微分から計算。`se=None` または閾値に入るパラメタがすべて固定なら NaN） |
 | `latent` | DataFrame | 1 群 1 行。`group`, `mean`, `var`, `mean_se`, `var_se`（固定値の SE は NaN） |
 | `parameters` | DataFrame | 検証済みの ParameterTable に `estimate`（推定値。固定なら固定値）と `se` を足したもの |
 | `loglik` | float | 推定値での周辺対数尤度（尤度のみ、事前分布は含めない） |
@@ -77,6 +77,21 @@ res.log_posterior -> float
 
 自然尺度で評価した自由パラメタ全体の対数事後確率 $\ell(\hat\eta) + \sum_i \log\pi_i(\hat\eta_i)$
 （`free_id` ごとに 1 回計上、固定パラメタの事前分布は無視）。事前分布がないときは `res.loglik` と同値。
+
+#### `FitResult.summary`
+
+```text
+summary(*, digits=4) -> str
+```
+
+モデルと推定種別（`MMLE` / `MAP`）、回答者数・項目数・自由パラメタ数、群情報、収束状況と反復回数・EM 写像評価回数
+（SQUAREM 安全装置が働いた場合はその回数）、SE 計算方法、求積格子、周辺対数尤度・対数事後確率・AIC・BIC
+（事前分布が有効な場合は実行時警告を出さずに本文に注意文を記載）、潜在分布表、および標準誤差つきの項目パラメタ表
+（デルタ法 `b_se` / `bk_se` を含む）を読みやすいテキスト形式で返す。`digits` が非負整数でない場合は
+`SpecificationError` を送出する。
+
+Jupyter ノートブックでは `FitResult._repr_html_()` が同じ内容を外部リソースなしの素の HTML/CSS
+（項目名・群名は HTML エスケープ済み）で描画する。`repr(res)` は短い 1 行要約のまま保つ。
 
 #### `FitResult.score`
 

@@ -8,7 +8,14 @@ from typing import Any
 
 import pytest
 
-from tests import _reference, test_mirt_m2, test_mirt_m3, test_mirt_m3_gpcm, test_mirt_m3_priors
+from tests import (
+    _reference,
+    test_mirt_m2,
+    test_mirt_m3,
+    test_mirt_m3_gpcm,
+    test_mirt_m3_priors,
+    test_mirt_m4_irtpars,
+)
 from tests._reference import REFERENCE_DIR, check_reference_meta
 
 
@@ -90,3 +97,36 @@ def test_every_mirt_loader_rejects_bad_reference_meta(
     finally:
         if clear is not None:
             clear()
+
+
+@pytest.mark.parametrize(
+    ("target", "bad_patch"),
+    [
+        ("top", {"converged": False}),
+        ("top", {"grid_check": [-4, 4]}),
+        ("case", {"converged": False}),
+        ("case", {"grid_check": [-4, 4]}),
+    ],
+)
+def test_v12_irtpars_loader_rejects_bad_reference_meta(
+    target: str,
+    bad_patch: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = json.loads((REFERENCE_DIR / test_mirt_m4_irtpars.REFERENCE_FILE).read_text())
+    if target == "top":
+        raw["meta"].update(bad_patch)
+    else:
+        raw["cases"]["lsat7_2pl"]["meta"].update(bad_patch)
+    (tmp_path / test_mirt_m4_irtpars.REFERENCE_FILE).write_text(json.dumps(raw))
+
+    monkeypatch.setattr(test_mirt_m4_irtpars, "REFERENCE_DIR", tmp_path)
+    test_mirt_m4_irtpars._bundle.cache_clear()
+    test_mirt_m4_irtpars.load.cache_clear()
+    try:
+        with pytest.raises(AssertionError):
+            test_mirt_m4_irtpars.load("lsat7_2pl")
+    finally:
+        test_mirt_m4_irtpars._bundle.cache_clear()
+        test_mirt_m4_irtpars.load.cache_clear()

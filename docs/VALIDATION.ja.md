@@ -31,6 +31,7 @@
 | V9 | 欠測あり（MAR） | NA を含むデータ | M2 |
 | V10 | SE（Oakes / crossprod / sandwich） | `SE.type=` | M1–M3 |
 | V11 | 3PL・4PL 単一群（シミュレーション） | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
+| V12 | 表示用 IRT 閾値とデルタ法 SE（2PL・Rasch・GRM・GPCM・PCM・2 群 2PL） | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -131,6 +132,40 @@
     （Oakes 対 Hessian `5.7e-12`）、EAP `6.0e-15` で一致した。
   単体テスト（scipy `log_pdf` 照合、自動微分ガード、固定パラメタの事前分布無視、共有 `free_id` の重複なし、表編集、AIC/BIC 警告）:
   `tests/test_m3_priors.py`。
+- **表示用 IRT パラメタ化とデルタ法 SE（V12、M4）**: mirt 1.46.1 の
+  `coef(m, IRTpars = TRUE, printSE = TRUE)` は傾き・切片パラメタを $b = -d/a$（2PL / Rasch）、
+  $b_k = -d_k/a$（GRM / `graded`）、ステップ困難度 $b_k = -(d_k - d_{k-1})/a$（$d_0 = 0$、GPCM / PCM）
+  へ変換しており、flexpyirt の `FitResult.items` の定義と完全に一致する。一方で
+  `mirt:::mirt2traditional` の `cls == "gpcm"` 分岐を調べたところ、mirt 1.46.1 には **GPCM の `b1_se` のみ**
+  に影響する 1 つずれ（off-by-one）添字バグがあることが判明した:
+  - `delta_index[[nfact + 1L]]` が `c(which.a, ncat + nfact + 2L)`（`d0` を含む `opar` 中の `a1` と `d1` の位置）で
+    上書きされるのに対し、`fns` 内で返す `ret` は `d0` を除いているため `b1` は `ncat + nfact + 1L`、`b2` は
+    `ncat + nfact + 2L` に置かれる。
+  - その結果 `ret[index[2]]` は `b1 = -d1/a` ではなく `b2 = -(d2 - d1)/a` を取り出して `(a, d1)` のみで微分
+    （`d2` 固定）するため、真の勾配 $(d_1/a^2,\, -1/a)$ ではなく $((d_2 - d_1)/a^2,\, 1/a)$ を使ってしまう
+    （R 上で mirt の生 `b1_se` がこのバグ式と `< 1e-9` で一致し、`Science` では最大 268% ずれることを確認）。
+  - mirt の `gpcm` 出力における点推定値 `b1..b{K-1}` と `b2_se..b{K-1}_se` は正確である（`vcov(m)` からの厳密計算と
+    `< 1e-9` で一致）。PCM（`a = 1` 固定）では `a` の項が 0 で $|\partial b_2/\partial d_1| = 1 = |\partial b_1/\partial d_1|$
+    となるためバグが相殺し、`b1_se..b3_se` すべて正確になる。
+
+  以上を踏まえ、6 件のケースを `tests/test_mirt_m4_irtpars.py` で通常 EM と SQUAREM の両方で照合する
+  （参照値生成: `validation/r/m4_irtpars_reference.R` → `tests/reference/v12_irtpars.json`、
+  `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`, `SE.type = "Oakes"`）:
+  - **V12a（`lsat7_2pl`、2PL、61 点 $[-6,6]$）**: `loglik` 相対差 `3.4e-16`、`max |Δb| = 1.4e-8`、
+    `b_se` 相対差 `1.5e-8`。
+  - **V12b（`lsat7_rasch`、Rasch、61 点 $[-6,6]$）**: `loglik` 相対差 `3.1e-15`、`max |Δb| = 1.1e-7`、
+    `b_se`（`= d_se`）相対差 `6.9e-8`。
+  - **V12c（`science_grm`、GRM 0..3、61 点 $[-6,6]$）**: `loglik` 相対差 `3.7e-15`、
+    `max |Δbk| = 2.7e-8`、`bk_se` 相対差 `1.1e-8`。
+  - **V12d（`science_gpcm`、GPCM 0..3、61 点 $[-6,6]$）**: `loglik` 相対差 `3.1e-15`、
+    `max |Δbk| = 1.5e-9`、`b2_se` / `b3_se` は mirt `IRTpars` と直接照合で相対差 `9.7e-10`、`b1_se` は
+    R の `vcov(m)` による厳密デルタ法 SE と照合で相対差 `9.3e-10`。
+  - **V12e（`science_pcm`、PCM 0..3、81 点 $[-8,8]$）**: `loglik` 相対差 `8.4e-16`、
+    `max |Δbk| = 2.3e-9`、`bk_se`（3 列とも mirt `IRTpars` と直接照合）相対差 `3.4e-10`。
+  - **V12f（`mg_2pl`、2 群 2PL、アンカー 4 項目、焦点群自由、81 点 $[-8,8]$）**: `loglik` 相対差 `1.1e-15`、
+    `max |Δb| = 7.3e-9`、`b_se` 相対差 `1.5e-8`。
+  単体テスト（解析式照合、固定パラメタ、`se=None`、非正定値 `vcov`、部分等値、混在モデル、`summary()`、`_repr_html_()`）:
+  `tests/test_m4_result.py`。
 - **EAP の照合**: 推定値の差が EAP に伝播しないよう、全パラメタを mirt の推定値に固定して
   （ParameterTable の `free=False`）スコアリングだけを照合する。許容誤差 1e-5。
 - 照合テスト: `tests/test_mirt_m1.py`（V1, V2, V10）。参照値の生成: `validation/r/m1_reference.R`。

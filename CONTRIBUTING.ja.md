@@ -71,6 +71,18 @@ Rscript validation/r/m1_reference.R
 Rscript validation/r/m2_reference.R
 ```
 
+R `mirt` との wall time ベンチマークを再実行するとき（詳細と `--quick` モードは
+[benchmarks/README.ja.md](benchmarks/README.ja.md) を参照）:
+
+```bash
+uv run python benchmarks/data.py
+uv run python benchmarks/run_flexpyirt.py
+Rscript benchmarks/run_mirt.R
+uv run python benchmarks/report.py
+```
+
 ## ドキュメント
 
 すべての文書は英語版（`*.md`）と日本語版（`*.ja.md`）があり、内容は同じ。片方を変えたら両方を直す。
+`.github/` の PR・issue テンプレートは、GitHub が既定のテンプレートを 1 つしか使わないため、英日を併記した
+1 つのファイルにしている。

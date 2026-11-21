@@ -634,7 +634,7 @@ def information_hessian(prob: CompiledProblem, eta: Array) -> Array:
 
     Evaluates Hessian-vector products of :func:`log_posterior` in fixed-size batches of standard
     basis vectors via ``jax.linearize`` and ``lax.scan`` so peak memory stays bounded on large
-    problems (DESIGN.md §15.18). Reduces to :math:`-\nabla^2_\eta\ell(\eta)` when no priors are
+    problems (DESIGN.md §15.20). Reduces to :math:`-\nabla^2_\eta\ell(\eta)` when no priors are
     present.
     """
     n_free = eta.shape[0]
@@ -658,7 +658,7 @@ def information_hessian(prob: CompiledProblem, eta: Array) -> Array:
 
 
 def _oakes_own_hessian(prob: CompiledProblem, eta: Array, counts: ExpectedCounts) -> Array:
-    r"""Complete-data and prior Hessian block of Oakes' identity (DESIGN.md §15.18)."""
+    r"""Complete-data and prior Hessian block of Oakes' identity (DESIGN.md §15.20)."""
     n_free = eta.shape[0]
     h_own = jnp.zeros((n_free, n_free), dtype=eta.dtype)
     for fam, r in zip(prob.families, counts.r, strict=True):
@@ -707,7 +707,7 @@ def _oakes_cross_hessian(
 
     Writing :math:`Q(\eta\mid\eta')=\sum_p c_p\sum_q h_{pq}(\eta')\,\psi_{pq}(\eta)` with
     :math:`h_{pq}(\eta')=\mathrm{softmax}_q(\psi_{pq}(\eta'))`, differentiating through the
-    E-step gives (Oakes, 1999; Louis, 1982; DESIGN.md §15.18)
+    E-step gives (Oakes, 1999; Louis, 1982; DESIGN.md §15.20)
 
     .. math::
         \left.\frac{\partial^2 Q(\eta\mid\eta')}

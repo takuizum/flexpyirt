@@ -34,12 +34,13 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - [x] 3PL / 4PL (`ThreePL`, `FourPL`, `HeywoodWarning`, validated in V11).
 - [x] GPCM / PCM (`GPCM`, `PCM`, validated in V8).
 - [x] SQUAREM (`BAEM(squarem=True)`, scheme S3 with monotonicity/feasibility safeguard; all mirt agreement suites pass with and without SQUAREM).
-- Benchmarks (wall time against mirt).
+- [x] Benchmarks (wall time against mirt; see `benchmarks/`).
 - **Acceptance**: V6, V7, V8, V11 within tolerance. Agreement also holds with SQUAREM.
 
 ## M4 Results and first multidimensional models
-- A richer `FitResult` (summary, `_repr_html_`, JSON I/O, delta-method SEs for the IRT
-  parameterization).
+- [x] `FitResult.summary()`, `FitResult._repr_html_()`, and delta-method SEs for the display IRT
+  parameterization (`b_se` / `bk_se`, validated in V12).
+- `FitResult` JSON I/O.
 - Scoring (MAP, ML, WLE, plausible values).
 - Confirmatory 2–3 dimensional MIRT (product grids).
 - **Acceptance**: EAP / MAP agree with mirt's `fscores`. A two-dimensional confirmatory model

@@ -36,6 +36,7 @@ English | [日本語](VALIDATION.ja.md)
 | V9 | Missing data (MAR) | data with NA | M2 |
 | V10 | SE (Oakes / crossprod / sandwich) | `SE.type=` | M1–M3 |
 | V11 | 3PL and 4PL, single group (simulated) | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
+| V12 | Display IRT thresholds and delta-method SEs (2PL, Rasch, GRM, GPCM, PCM, 2-group 2PL) | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -159,6 +160,42 @@ English | [日本語](VALIDATION.ja.md)
     parameters `2.9e-9`, Oakes and Hessian SEs `5.7e-9` (Oakes vs Hessian `5.7e-12`), EAP `6.0e-15`.
   Unit tests (scipy `log_pdf`, autodiff guards, fixed ignores prior, shared `free_id` counted once,
   edited table priors, AIC/BIC warning): `tests/test_m3_priors.py`.
+- **Display IRT parameterization and delta-method SEs (V12, M4)**: `coef(m, IRTpars = TRUE, printSE = TRUE)`
+  in mirt 1.46.1 transforms slope–intercept parameters to $b = -d/a$ (2PL/Rasch), $b_k = -d_k/a$
+  (GRM / `graded`), and step difficulties $b_k = -(d_k - d_{k-1})/a$ with $d_0 = 0$ (GPCM / PCM),
+  matching flexpyirt's `FitResult.items` definitions identically. However, inspecting
+  `mirt:::mirt2traditional` for `cls == "gpcm"` uncovered an off-by-one indexing bug in mirt 1.46.1
+  affecting **only `b1_se` of GPCM**:
+  - `delta_index[[nfact + 1L]]` is overwritten with `c(which.a, ncat + nfact + 2L)` (indices of
+    `a1` and `d1` in `opar`, which includes `d0`), while inside `fns` the returned vector `ret`
+    omits `d0` so `b1` sits at position `ncat + nfact + 1L` and `b2` at `ncat + nfact + 2L`.
+  - Consequently `ret[index[2]]` selects `b2 = -(d2 - d1)/a` instead of `b1 = -d1/a` and
+    differentiates it with respect to `(a, d1)` only (holding `d2` fixed), giving gradient
+    $((d_2 - d_1)/a^2,\, 1/a)$ instead of $(d_1/a^2,\, -1/a)$ (confirmed in R to `< 1e-9` against
+    mirt's raw `b1_se`, which is off by up to 268% on `Science`).
+  - Point estimates `b1..b{K-1}` and delta-method SEs `b2_se..b{K-1}_se` in mirt's `gpcm` output
+    are exact (verified against `vcov(m)` to `< 1e-9`). For PCM (`a = 1` fixed), the `a` component
+    is zero and $|\partial b_2/\partial d_1| = 1 = |\partial b_1/\partial d_1|$, so the bug cancels
+    and mirt's `b1_se..b3_se` are all exact.
+
+  Six cases are validated in `tests/test_mirt_m4_irtpars.py` (with both plain EM and SQUAREM;
+  reference generator `validation/r/m4_irtpars_reference.R` → `tests/reference/v12_irtpars.json`,
+  `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`, `SE.type = "Oakes"`):
+  - **V12a (`lsat7_2pl`, 2PL, 61 pts $[-6,6]$)**: `loglik` rel `3.4e-16`, `max |Δb| = 1.4e-8`,
+    `b_se` rel `1.5e-8`.
+  - **V12b (`lsat7_rasch`, Rasch, 61 pts $[-6,6]$)**: `loglik` rel `3.1e-15`, `max |Δb| = 1.1e-7`,
+    `b_se` (`= d_se`) rel `6.9e-8`.
+  - **V12c (`science_grm`, GRM 0..3, 61 pts $[-6,6]$)**: `loglik` rel `3.7e-15`,
+    `max |Δbk| = 2.7e-8`, `bk_se` rel `1.1e-8`.
+  - **V12d (`science_gpcm`, GPCM 0..3, 61 pts $[-6,6]$)**: `loglik` rel `3.1e-15`,
+    `max |Δbk| = 1.5e-9`, `b2_se` / `b3_se` vs mirt `IRTpars` rel `9.7e-10`, `b1_se` vs exact delta
+    method from `vcov(m)` in R rel `9.3e-10`.
+  - **V12e (`science_pcm`, PCM 0..3, 81 pts $[-8,8]$)**: `loglik` rel `8.4e-16`,
+    `max |Δbk| = 2.3e-9`, `bk_se` (all three directly vs mirt `IRTpars`) rel `3.4e-10`.
+  - **V12f (`mg_2pl`, 2-group 2PL, 4 anchors, focal free, 81 pts $[-8,8]$)**: `loglik` rel
+    `1.1e-15`, `max |Δb| = 7.3e-9`, `b_se` rel `1.5e-8`.
+  Unit tests (analytic checks, fixed parameters, `se=None`, non-PD `vcov`, partial equality,
+  mixed models, `summary()`, `_repr_html_()`): `tests/test_m4_result.py`.
 - **Comparing EAP**: so that differences in the estimates do not propagate into EAP, every
   parameter is fixed at mirt's estimates (`free=False` in the ParameterTable) and only the scoring
   is compared. Tolerance 1e-5.

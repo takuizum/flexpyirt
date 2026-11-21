@@ -189,7 +189,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   where $Q_{\mathrm{post}}(\eta\mid\eta')=Q(\eta\mid\eta')+\log\pi(\eta)$ ("E-step weights computed
   at $\eta'$, complete-data likelihood plus log prior evaluated at $\eta$"). All derivatives come
   from JAX autodiff, exploiting the block structure of the first term and pattern-chunked category
-  co-occurrences for the cross term while reusing a single E-step (§15.18).
+  co-occurrences for the cross term while reusing a single E-step (§15.20).
 - Alternatives: the observed (posterior) information $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$ by
   chunked forward-over-reverse autodiff (`jax.linearize(jax.grad(...))` over basis batches; also
   used to check Oakes), cross-product ($\sum_p c_p s_p s_p^\top$), sandwich.
@@ -296,8 +296,10 @@ The design goal: writing `log_prob` is enough for a new item model to get the E-
 | GPCM / PCM | $a, d_1..d_{K-1}$ | M3 |
 | Nominal | M5 or later (undecided) | — |
 
-The display IRT parameterization ($b=-d/a$ and so on) is converted in the Result layer, with SEs
-by the delta method.
+The display IRT parameterization ($b=-d/a$ for 2PL/Rasch/3PL/4PL, $b_k=-d_k/a$ for GRM, and
+step difficulties $b_k=-(d_k-d_{k-1})/a$ with $d_0=0$ for GPCM/PCM) is computed in the Result layer
+(`FitResult.items`) with delta-method SEs (`b_se` / `bk_se`) using JAX forward-mode autodiff for
+the Jacobian (§15.18).
 
 ## 8. Scoring
 `FitResult.score(data, method="EAP"|"MAP"|"ML"|"WLE"|"PV", group=...)`, using each group's
@@ -308,7 +310,23 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
 - `vmap` per item family. Mixed item types loop only over the (static) families.
 - The default target is "fast enough on CPU". GPU should help for large problems
   (N ≥ 10^5, J ≥ 100).
-- Benchmarks: wall time against R mirt (`TOL=1e-4`, default settings) in `benchmarks/` (M3).
+- Benchmarks: wall time against R mirt (`TOL=1e-4`, default settings and validation settings) in
+  [benchmarks/](../benchmarks/README.md); committed Apple M5 CPU results are in
+  [benchmarks/results/2026-11-21-apple-m5.md](../benchmarks/results/2026-11-21-apple-m5.md).
+  Summary of that single-machine measurement (61 quadrature points on $[-6, 6]$, CPU only; XLA CPU
+  may use multiple threads while mirt is single-threaded by default):
+  - **Warm fits**: faster than mirt default across all six tested cases (`0.16×–0.60×` with plain
+    EM, `0.12×–0.46×` with `squarem=True`), with $|\Delta \log L| \le 1.5 \times 10^{-3}$ at
+    `TOL = 1e-4`.
+  - **Cold fits**: a first call including JAX/XLA compilation takes ~0.8–1.1 s for EM (more with
+    Oakes SE on `20000 × 40`), so mirt is faster for a single one-off fit without SEs (all six
+    cases); with Oakes SEs flexpyirt's cold fit is faster on four of the six.
+  - **Oakes SE at large `(N, J)`**: on `2PL (20000 × 40)`, `se="oakes"` takes ~3.1–3.5 s warm vs.
+    ~0.28–0.39 s for EM alone.
+  - **SQUAREM trade-off**: `BAEM(squarem=True)` reduces EM evaluations by 33–69% and warm EM time
+    (`0.38×–0.90×` of plain EM on every case, biggest gains on 2-group 2PL and 3PL), but adds
+    ~0.05–0.4 s of cold compilation overhead (more with Oakes SE on `20000 × 40`). The default (`squarem=False`) is kept unchanged pending a maintainer
+    decision on cold vs. warm/slow-model priority.
 
 ## 10. Errors and warnings
 - `SpecificationError`: inconsistent specification (fixing an unknown item, wrong number of
@@ -529,7 +547,32 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
     `FlexpyirtWarning` when at least one free parameter has a prior. `information_oakes` adds
     `log_prior(prob, e)` to $Q(\eta\mid\eta')$ and `information_hessian` differentiates
     `log_posterior(prob, e)`, adding $-\nabla^2_\eta\log\pi(\hat\eta)$ identically to both.
-18. **Structured Oakes and chunked Hessian performance (M3, §4.8, §9)**: the initial
+18. **Delta-method SEs for display IRT thresholds (M4, §7)**: each `ItemKernel` defines
+    `irt_names` (e.g. `("b",)` or `("b1", ..., "b{K-1}")`), `irt_dep_indices` (which internal
+    parameters enter each threshold), and pure JAX `irt_thresholds(params)` ($b = -d/a$ for
+    2PL/Rasch/3PL/4PL, $b_k = -d_k/a$ for GRM, and $b_k = -(d_k - d_{k-1})/a$ with $d_0 = 0$ via
+    `jnp.diff` for GPCM/PCM). In `FitResult.items`, a per-kernel cached jitted
+    `(irt_thresholds, jax.jacfwd(irt_thresholds))` evaluates both the display values and their
+    Jacobian $J = \partial g/\partial\xi$ without hand-written derivatives. For each threshold $m$,
+    $\operatorname{Var}(g_m(\hat\xi)) \approx J_m\Sigma_\xi J_m^\top$ (Casella & Berger, 2002;
+    Oehlert, 1992) is computed over the free parameters entering $g_m$ by indexing `FitResult.vcov`
+    with their `free_id`s. Fixed parameters contribute zero variance (so Rasch/PCM with $a=1$ fixed
+    give `b_se = d_se` / `b1_se = d1_se`, and PCM step differences include $\operatorname{Cov}(d_{k-1},d_k)$);
+    across-group equalities share `free_id` and automatically use the shared covariance entries
+    (including partial equalities such as shared `a` with group-specific `d`). When `vcov` is
+    `None`, non-PD (NaN), or no parameter entering a threshold is free (e.g. FIPC fixed items or
+    3PL with `a, d` fixed and `g` free), `b_se` / `bk_se` is NaN.
+19. **Result summaries (`FitResult.summary()` and `FitResult._repr_html_()`) (M4, §2 ④)**:
+    `FitResult.summary(*, digits=4)` returns a plain-text report with model/estimation type
+    (`MMLE` or `MAP`), data/parameter counts, groups, convergence/iterations/EM evaluations (and
+    SQUAREM safeguards when nonzero), SE method, quadrature, log-likelihood, log-posterior, AIC/BIC,
+    latent distribution table, and item parameter table (including `b_se` / `bk_se`). When priors
+    are active, an inline note warns that AIC/BIC use the marginal log-likelihood at the MAP
+    estimate rather than the MLE, without emitting duplicate runtime `FlexpyirtWarning`s.
+    `FitResult._repr_html_()` renders the same information in plain, self-contained HTML/CSS with
+    no external assets, light/dark-safe styling, and `html.escape()` on all names. `__repr__`
+    remains a concise single-line summary.
+20. **Structured Oakes and chunked Hessian performance (M3, §4.8, §9)**: the initial
     `information_oakes` ran `jax.jacfwd(jax.grad(q, argnums=0), argnums=(0, 1))(eta, eta)` over the
     full problem, pushing all $n_{\text{free}}$ tangents simultaneously through the E-step and
     materializing `(n_free, P, Q)` intermediates alongside dense $J$-item einsums per direction.
@@ -581,12 +624,14 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
+- Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
+- Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.

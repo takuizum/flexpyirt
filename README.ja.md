@@ -22,7 +22,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 多母集団 | 群ごとの項目パラメタ、アンカー項目の群間等値、焦点群の平均・分散の推定 | V4 |
 | FIPC | 項目バンクの値で一部の項目を固定し、残りの項目と潜在分布を推定 | V5 |
 | 欠測 | 欠測（MAR）を含むデータ | V9 |
-| 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度（MAP 時は対数事後）の Hessian | V7, V10 |
+| 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度（MAP 時は対数事後）の Hessian、表示用 IRT 閾値のデルタ法 SE（`b_se` / `bk_se`） | V7, V10, V12 |
 | スコアリング | EAP と事後標準偏差（群ごとの潜在分布を事前分布に使う） | V1–V5, V7–V9, V11 |
 | EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | V1–V5, V7–V9, V11 |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
@@ -75,7 +75,7 @@ spec = Model.uniform(TwoPL(), items=df.columns)
 res = fit(spec, df)
 
 print(res)  # 対数尤度・パラメタ数・収束状況
-print(res.items.head())  # item, model, a, d, a_se, d_se, b（= -d/a）
+print(res.items.head())  # item, model, a, d, a_se, d_se, b（= -d/a）, b_se
 print(res.loglik, res.aic, res.bic)
 scores = res.score(df)  # 回答者ごとの EAP（theta）と事後標準偏差（se）
 ```
@@ -118,6 +118,15 @@ bank = pd.DataFrame({"item": ["q01", "q02", "q03"], "a": a[:3], "d": d[:3]})
 spec3 = Model.uniform(TwoPL(), items=df.columns).fix_from(bank).with_latent(Normal.free())
 res3 = fit(spec3, df)
 ```
+
+## 性能
+
+R `mirt`（既定設定、`TOL = 1e-4`、CPU・61 点求積）との wall time ベンチマークを
+[benchmarks/](benchmarks/README.ja.md) に、Apple M5 での計測結果を
+[benchmarks/results/2026-11-21-apple-m5.md](benchmarks/results/2026-11-21-apple-m5.md) に
+置いている。初回の JAX/XLA コンパイル（cold の EM 推定で約 0.8–1.1 秒）以降は、テストした全ケースで
+warm の CPU 推定が `mirt` より速く（`mirt` 比 `0.12×–0.60×`）、標準誤差なしの 1 回限りの cold 推定では
+`mirt` の方が速い。
 
 ## ドキュメント
 

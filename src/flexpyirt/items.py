@@ -63,8 +63,26 @@ class ItemKernel(Protocol):
         """Parameters that carry the latent location (used by identification checks)."""
         ...
 
+    @property
+    def irt_names(self) -> tuple[str, ...]:
+        """Display IRT threshold/difficulty names, in order (e.g. ``("b",)``)."""
+        ...
+
+    @property
+    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+        """Indices into ``param_names`` that enter each display threshold in ``irt_names``."""
+        ...
+
+    def irt_thresholds(self, params: Array) -> Array:
+        """Return display IRT thresholds/difficulties of shape ``(len(irt_names),)``."""
+        ...
+
     def log_prob(self, theta: Array, params: Array) -> Array:
         """Return ``(Q, n_cat)`` log-probabilities for nodes ``theta`` of shape ``(Q,)``."""
+        ...
+
+    def __hash__(self) -> int:
+        """Kernels must be hashable (static arguments of jit)."""
         ...
 
 
@@ -99,6 +117,20 @@ class DichotomousKernel:
     def intercept_params(self) -> tuple[str, ...]:
         """``("d",)``."""
         return ("d",)
+
+    @property
+    def irt_names(self) -> tuple[str, ...]:
+        """``("b",)``."""
+        return ("b",)
+
+    @property
+    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+        """``((0, 1),)`` — ``b`` depends on ``(a, d)``."""
+        return ((0, 1),)
+
+    def irt_thresholds(self, params: Array) -> Array:
+        r"""Return IRT difficulty :math:`b = -d / a` (Birnbaum, 1968)."""
+        return jnp.array([-params[1] / params[0]])
 
     def log_prob(self, theta: Array, params: Array) -> Array:
         """Return ``(Q, 2)`` log-probabilities of responses 0 and 1."""
@@ -150,6 +182,20 @@ class FourPLKernel:
     def intercept_params(self) -> tuple[str, ...]:
         """``("d",)``; the asymptotes ``g`` and ``u`` carry neither scale nor location."""
         return ("d",)
+
+    @property
+    def irt_names(self) -> tuple[str, ...]:
+        """``("b",)``."""
+        return ("b",)
+
+    @property
+    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+        """``((0, 1),)`` — ``b`` depends on ``(a, d)`` only."""
+        return ((0, 1),)
+
+    def irt_thresholds(self, params: Array) -> Array:
+        r"""Return IRT difficulty :math:`b = -d / a` (Birnbaum, 1968; Barton & Lord, 1981)."""
+        return jnp.array([-params[1] / params[0]])
 
     def log_prob(self, theta: Array, params: Array) -> Array:
         """Return ``(Q, 2)`` log-probabilities of responses 0 and 1."""
@@ -223,6 +269,20 @@ class GradedKernel:
         """``("d1", ..., "d{K-1}")``."""
         return self.param_names[1:]
 
+    @property
+    def irt_names(self) -> tuple[str, ...]:
+        """``("b1", ..., "b{K-1}")``."""
+        return tuple(f"b{k}" for k in range(1, self.n_cat))
+
+    @property
+    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+        """Each ``bk`` depends on ``(a, dk)``."""
+        return tuple((0, k) for k in range(1, self.n_cat))
+
+    def irt_thresholds(self, params: Array) -> Array:
+        r"""Return IRT thresholds :math:`b_k = -d_k / a` (Samejima, 1969)."""
+        return -params[1:] / params[0]
+
     def log_prob(self, theta: Array, params: Array) -> Array:
         """Return ``(Q, n_cat)`` category log-probabilities."""
         z = params[0] * theta[:, None] + params[None, 1:]  # (Q, K-1)
@@ -268,6 +328,24 @@ class GPCMKernel:
     def intercept_params(self) -> tuple[str, ...]:
         """``("d1", ..., "d{K-1}")``."""
         return self.param_names[1:]
+
+    @property
+    def irt_names(self) -> tuple[str, ...]:
+        """``("b1", ..., "b{K-1}")``."""
+        return tuple(f"b{k}" for k in range(1, self.n_cat))
+
+    @property
+    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+        r"""``b1`` depends on ``(a, d1)``; ``bk`` (:math:`k\ge 2`) on ``(a, d{k-1}, dk)``."""
+        return ((0, 1), *((0, k - 1, k) for k in range(2, self.n_cat)))
+
+    def irt_thresholds(self, params: Array) -> Array:
+        r"""Return step difficulties :math:`b_k = -(d_k - d_{k-1}) / a` with :math:`d_0 = 0`.
+
+        Muraki (1992); Masters (1982).
+        """
+        intercepts = jnp.concatenate([jnp.zeros((1,), dtype=params.dtype), params[1:]])
+        return -jnp.diff(intercepts) / params[0]
 
     def log_prob(self, theta: Array, params: Array) -> Array:
         """Return ``(Q, n_cat)`` category log-probabilities."""

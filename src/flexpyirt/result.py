@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+import html
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+from jax import Array
 
 from flexpyirt import _core
 from flexpyirt._compile import LATENT_ITEM, coerce_groups, coerce_responses, compile_problem
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
+from flexpyirt.items import ItemKernel
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -21,6 +27,161 @@ if TYPE_CHECKING:
 __all__ = ["FitResult"]
 
 _eap = jax.jit(_core.eap)
+
+
+@cache
+def _irt_val_and_jac(kernel: ItemKernel) -> Callable[[Array], tuple[Array, Array]]:
+    """Return a jitted ``(irt_thresholds, jacfwd(irt_thresholds))`` pair for ``kernel``."""
+    jac_fn = jax.jacfwd(kernel.irt_thresholds)
+
+    @jax.jit
+    def fn(params: Array) -> tuple[Array, Array]:
+        return kernel.irt_thresholds(params), jac_fn(params)
+
+    return fn
+
+
+def _delta_irt_thresholds(
+    kernel: ItemKernel,
+    xi: np.ndarray,
+    fids: np.ndarray,
+    vcov: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    r"""Compute display IRT thresholds and delta-method SEs for one item (DESIGN.md §7).
+
+    For display transformation :math:`g(\xi)` with Jacobian :math:`J = \partial g / \partial\xi`
+    computed via JAX forward-mode automatic differentiation, the asymptotic variance of each
+    threshold is
+
+    .. math::
+        \operatorname{Var}\big(g_m(\hat\xi)\big) \approx J_m\,\Sigma_\xi\,J_m^\top,
+
+    restricted to the free parameters entering :math:`g_m` (fixed parameters contribute zero
+    variance; if no parameter entering :math:`g_m` is free, or ``vcov`` is ``None``, the SE is
+    NaN). Casella & Berger (2002); Oehlert (1992).
+    """
+    vals_j, jac_j = _irt_val_and_jac(kernel)(jnp.asarray(xi, dtype=jnp.float64))
+    b_vals = np.asarray(vals_j, dtype=float)
+    jac = np.asarray(jac_j, dtype=float)
+    b_ses = np.full(b_vals.shape, np.nan, dtype=float)
+    if vcov is None:
+        return b_vals, b_ses
+    for m, deps in enumerate(kernel.irt_dep_indices):
+        active = [p for p in deps if fids[p] >= 0]
+        if not active:
+            continue
+        active_fids = [int(fids[p]) for p in active]
+        j_m = jac[m, active]
+        v_m = vcov[np.ix_(active_fids, active_fids)]
+        var_m = float(j_m @ v_m @ j_m)
+        b_ses[m] = np.nan if np.isnan(var_m) else float(np.sqrt(max(var_m, 0.0)))
+    return b_vals, b_ses
+
+
+_PRIORS_IC_NOTE = (
+    "Note: Priors are active (MAP); AIC and BIC use the marginal log-likelihood evaluated at the "
+    "MAP estimate rather than the MLE."
+)
+
+_HTML_STYLE = """<style>
+.flexpyirt-result {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0.5em 0;
+}
+.flexpyirt-result h4 {
+  margin: 0.8em 0 0.35em 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.flexpyirt-result .flexpyirt-header {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 0.5em;
+}
+.flexpyirt-result .flexpyirt-meta {
+  border-collapse: collapse;
+  margin-bottom: 0.6em;
+}
+.flexpyirt-result .flexpyirt-meta th {
+  text-align: left;
+  font-weight: 600;
+  padding: 2px 12px 2px 0;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.flexpyirt-result .flexpyirt-meta td {
+  text-align: left;
+  padding: 2px 16px 2px 0;
+}
+.flexpyirt-result .flexpyirt-note {
+  margin: 0.4em 0 0.6em 0;
+  padding: 6px 10px;
+  border-left: 3px solid #d29922;
+  background: rgba(210, 153, 34, 0.12);
+  font-size: 12px;
+}
+.flexpyirt-result .flexpyirt-table-wrap {
+  overflow-x: auto;
+  max-height: 420px;
+  margin-bottom: 0.6em;
+}
+.flexpyirt-result table.flexpyirt-table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.flexpyirt-result table.flexpyirt-table th,
+.flexpyirt-result table.flexpyirt-table td {
+  padding: 3px 8px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+  white-space: nowrap;
+}
+.flexpyirt-result table.flexpyirt-table th {
+  background: rgba(127, 127, 127, 0.10);
+  font-weight: 600;
+  text-align: right;
+}
+.flexpyirt-result table.flexpyirt-table th.text,
+.flexpyirt-result table.flexpyirt-table td.text {
+  text-align: left;
+}
+.flexpyirt-result table.flexpyirt-table td.num {
+  text-align: right;
+}
+.flexpyirt-result table.flexpyirt-table td.na {
+  text-align: right;
+  opacity: 0.55;
+}
+</style>"""
+
+
+def _df_to_html_table(df: pd.DataFrame, *, digits: int = 4) -> str:
+    """Render a DataFrame as an escaped plain HTML table with tabular numeric formatting."""
+    is_num = [pd.api.types.is_numeric_dtype(df[col].dtype) for col in df.columns]
+    head_cells = [
+        f'<th class="{"num" if num else "text"}">{html.escape(str(col))}</th>'
+        for col, num in zip(df.columns, is_num, strict=True)
+    ]
+    body_rows: list[str] = []
+    for row in df.itertuples(index=False, name=None):
+        cells: list[str] = []
+        for val, num in zip(row, is_num, strict=True):
+            if num:
+                fval = float(val)
+                if np.isnan(fval):
+                    cells.append('<td class="na">NaN</td>')
+                else:
+                    cells.append(f'<td class="num">{fval:.{digits}f}</td>')
+            else:
+                cells.append(f'<td class="text">{html.escape(str(val))}</td>')
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+    return (
+        '<div class="flexpyirt-table-wrap"><table class="flexpyirt-table">'
+        f"<thead><tr>{''.join(head_cells)}</tr></thead>"
+        f"<tbody>{''.join(body_rows)}</tbody>"
+        "</table></div>"
+    )
 
 
 @dataclass(frozen=True)
@@ -88,6 +249,12 @@ class FitResult:
         """Number of free parameters."""
         return int(self._eta.shape[0])
 
+    def _aic_value(self) -> float:
+        return -2.0 * self.loglik + 2.0 * self.n_params
+
+    def _bic_value(self) -> float:
+        return -2.0 * self.loglik + self.n_params * float(np.log(self.n_obs))
+
     @property
     def aic(self) -> float:
         r""":math:`-2\ell+2k` (warns with ``FlexpyirtWarning`` under MAP)."""
@@ -98,7 +265,7 @@ class FitResult:
                 FlexpyirtWarning,
                 stacklevel=2,
             )
-        return -2.0 * self.loglik + 2.0 * self.n_params
+        return self._aic_value()
 
     @property
     def bic(self) -> float:
@@ -110,37 +277,55 @@ class FitResult:
                 FlexpyirtWarning,
                 stacklevel=2,
             )
-        return -2.0 * self.loglik + self.n_params * float(np.log(self.n_obs))
+        return self._bic_value()
 
     @property
     def items(self) -> pd.DataFrame:
-        """One row per item (per group in a multiple-group model).
+        r"""One row per item (per group in a multiple-group model).
 
-        Estimates and SEs by internal parameter, plus the display IRT thresholds: ``b = -d/a``
-        (2PL/Rasch/3PL/4PL), ``bk = -dk/a`` (GRM), and step difficulties
-        ``bk = -(dk - d{k-1})/a`` with ``d0 = 0`` (GPCM/PCM). Display-only; their SEs (delta
-        method) arrive in M4.
+        Estimates and SEs by internal parameter, plus the display IRT thresholds and their
+        delta-method SEs (DESIGN.md §7): :math:`b = -d/a` (2PL/Rasch/3PL/4PL),
+        :math:`b_k = -d_k/a` (GRM), and step difficulties :math:`b_k = -(d_k - d_{k-1})/a` with
+        :math:`d_0 = 0` (GPCM/PCM), with corresponding ``b_se`` / ``bk_se`` columns computed from
+        :attr:`vcov` using JAX automatic differentiation for the Jacobian. Fixed parameters
+        contribute no variance; when ``vcov`` is ``None`` or all parameters entering a threshold
+        are fixed, its SE is NaN.
         """
         p = self.parameters[self.parameters["item"] != LATENT_ITEM]
         index = ["group", "item"]
         est = p.pivot(index=index, columns="param", values="estimate")
         se = p.pivot(index=index, columns="param", values="se").add_suffix("_se")
+        fids_piv = p.pivot(index=index, columns="param", values="free_id")
         params = list(dict.fromkeys(p["param"]))
         groups = list(dict.fromkeys(p["group"]))
         order = pd.MultiIndex.from_product([groups, list(self._model.item_names)], names=index)
         out = pd.concat([est[params], se[[f"{c}_se" for c in params]]], axis=1).loc[order]
         models = p.drop_duplicates(index).set_index(index)["model"]
         out.insert(0, "model", models.loc[order])
-        if "a" in params:
-            is_gpcm = out["model"].isin(("GPCM", "PCM"))
-            for c in params:
-                if c.startswith("d"):
-                    step = out[c]
-                    if c not in ("d", "d1"):
-                        prev = f"d{int(c[1:]) - 1}"
-                        if prev in out.columns:
-                            step = step.where(~is_gpcm, out[c] - out[prev])
-                    out["b" + c[1:]] = -step / out["a"]
+
+        kernels = {name: m.kernel for name, m in self._model.items}
+        irt_cols = list(
+            dict.fromkeys(name for _, m in self._model.items for name in m.kernel.irt_names)
+        )
+        if irt_cols:
+            b_data: dict[str, np.ndarray] = {
+                col: np.full(len(order), np.nan, dtype=float)
+                for col in (*irt_cols, *(f"{c}_se" for c in irt_cols))
+            }
+            est_ord = est.loc[order]
+            fids_ord = fids_piv.loc[order]
+            for row_idx, (grp, itm) in enumerate(order):
+                kernel = kernels[itm]
+                p_names = list(kernel.param_names)
+                xi = est_ord.loc[(grp, itm), p_names].to_numpy(dtype=float)
+                fids = fids_ord.loc[(grp, itm), p_names].to_numpy(dtype=int)
+                b_vals, b_ses = _delta_irt_thresholds(kernel, xi, fids, self.vcov)
+                for name, val, se_val in zip(kernel.irt_names, b_vals, b_ses, strict=True):
+                    b_data[name][row_idx] = val
+                    b_data[f"{name}_se"][row_idx] = se_val
+            for col, arr in b_data.items():
+                out[col] = arr
+
         out.columns.name = None
         out = out.reset_index()
         if not self._model.is_multigroup:
@@ -200,6 +385,145 @@ class FitResult:
         return pd.DataFrame(
             {"theta": np.asarray(theta)[:n][inverse], "se": np.asarray(sd)[:n][inverse]},
             index=index,
+        )
+
+    def _model_label(self) -> str:
+        """Concise description of item models in the specification."""
+        counts: dict[str, int] = {}
+        for _, m in self._model.items:
+            tag = f"{m.name}({m.kernel.n_cat})" if m.name in ("GRM", "GPCM", "PCM") else m.name
+            counts[tag] = counts.get(tag, 0) + 1
+        if len(counts) == 1:
+            return next(iter(counts))
+        return ", ".join(f"{name} ({count})" for name, count in counts.items())
+
+    def _groups_label(self) -> str:
+        """Concise description of the model's groups."""
+        groups = [g for g, _ in self._model.resolved_groups()]
+        if self._model.is_multigroup:
+            return f"{len(groups)} ({', '.join(groups)})"
+        return "1 (single group)"
+
+    def _convergence_label(self) -> str:
+        """Concise description of convergence, iterations, and EM map evaluations."""
+        status = "Converged" if self.converged else "NOT converged"
+        evals = f"{self.n_em_evaluations} EM evaluations"
+        if self.n_safeguards > 0:
+            evals += f", {self.n_safeguards} SQUAREM safeguards"
+        return f"{status} ({self.n_iter} iterations, {evals})"
+
+    def summary(self, *, digits: int = 4) -> str:
+        """Return a readable plain-text summary of the fitted model.
+
+        Includes the model specification, sample/item/parameter counts, groups, convergence and
+        EM evaluation counts, log-likelihood, log-posterior, AIC and BIC (with a note when priors
+        are active), the latent distribution table, and the item parameter table with standard
+        errors (including delta-method ``b_se`` / ``bk_se``).
+
+        Parameters
+        ----------
+        digits : int, default 4
+            Number of decimal places for floating-point values.
+
+        Returns
+        -------
+        str
+        """
+        if isinstance(digits, bool) or not isinstance(digits, int) or digits < 0:
+            raise SpecificationError(f"digits must be a non-negative integer, got {digits!r}.")
+        est_kind = "MAP, priors active" if self._has_priors else "MMLE"
+        se_label = "None" if self.se_method is None else self.se_method
+        quad = self._quadrature
+        quad_label = f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
+        n_items = len(self._model.item_names)
+        aic_val = self._aic_value()
+        bic_val = self._bic_value()
+
+        def _fmt(v: float) -> str:
+            return f"{v:.{digits}f}"
+
+        latent_str = self.latent.to_string(index=False, float_format=_fmt, na_rep="NaN")
+        items_str = self.items.to_string(index=False, float_format=_fmt, na_rep="NaN")
+
+        lines = [
+            "flexpyirt FitResult",
+            "===================",
+            f"Model:          {self._model_label()} ({est_kind})",
+            f"Data:           {self.n_obs} observations, {n_items} items, "
+            f"{self.n_params} free parameters",
+            f"Groups:         {self._groups_label()}",
+            f"Convergence:    {self._convergence_label()}",
+            f"SE method:      {se_label}",
+            f"Quadrature:     {quad_label}",
+            "",
+            "Fit statistics",
+            "--------------",
+            f"Log-likelihood: {self.loglik:.{digits}f}",
+            f"Log-posterior:  {self.log_posterior:.{digits}f}",
+            f"AIC:            {aic_val:.{digits}f}",
+            f"BIC:            {bic_val:.{digits}f}",
+        ]
+        if self._has_priors:
+            lines.append(_PRIORS_IC_NOTE)
+        lines.extend(
+            [
+                "",
+                "Latent distribution",
+                "-------------------",
+                latent_str,
+                "",
+                "Item parameters",
+                "---------------",
+                items_str,
+            ]
+        )
+        return "\n".join(lines)
+
+    def _repr_html_(self) -> str:
+        """Return an HTML rendering of the summary for Jupyter notebooks (no external assets)."""
+        digits = 4
+        est_kind = "MAP, priors active" if self._has_priors else "MMLE"
+        se_label = "None" if self.se_method is None else self.se_method
+        quad = self._quadrature
+        quad_label = f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
+        n_items = len(self._model.item_names)
+
+        meta_rows = [
+            ("Model", f"{self._model_label()} ({est_kind})"),
+            (
+                "Data",
+                f"{self.n_obs} observations, {n_items} items, {self.n_params} free parameters",
+            ),
+            ("Groups", self._groups_label()),
+            ("Convergence", self._convergence_label()),
+            ("SE method", se_label),
+            ("Quadrature", quad_label),
+            ("Log-likelihood", f"{self.loglik:.{digits}f}"),
+            ("Log-posterior", f"{self.log_posterior:.{digits}f}"),
+            ("AIC", f"{self._aic_value():.{digits}f}"),
+            ("BIC", f"{self._bic_value():.{digits}f}"),
+        ]
+        meta_html = "".join(
+            f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>" for k, v in meta_rows
+        )
+        note_html = (
+            f'<div class="flexpyirt-note">{html.escape(_PRIORS_IC_NOTE)}</div>'
+            if self._has_priors
+            else ""
+        )
+        latent_html = _df_to_html_table(self.latent, digits=digits)
+        items_html = _df_to_html_table(self.items, digits=digits)
+        return (
+            f"{_HTML_STYLE}"
+            '<div class="flexpyirt-result">'
+            '<div class="flexpyirt-header">flexpyirt FitResult</div>'
+            f'<table class="flexpyirt-meta"><tbody>{meta_html}</tbody></table>'
+            f"{note_html}"
+            "<h4>Latent distribution</h4>"
+            f"{latent_html}"
+            "<h4>Item parameters</h4>"
+            f"{items_html}"
+            "</div>"
         )
 
     def __repr__(self) -> str:
