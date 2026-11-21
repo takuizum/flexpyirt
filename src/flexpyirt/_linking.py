@@ -31,10 +31,15 @@ __all__ = [
     "LinkingFamily",
     "LinkingProblem",
     "linking_criterion",
+    "linking_vcov",
+    "solve_linking",
     "transform_kernel_params",
 ]
 
 LinkMethod = Literal["haebara", "stocking-lord"]
+
+_N_HALVINGS = 40
+"""Number of backtracking step sizes ``2^-k`` evaluated in parallel during 2-D Newton."""
 
 
 @jax.tree_util.register_dataclass
@@ -277,3 +282,218 @@ def linking_criterion(
             prob.families, xi_s_list, xi_t_list, prob.src_nodes, bwd_nodes, prob.src_weights
         )
     return jnp.where(valid, val, jnp.nan)
+
+
+def solve_linking(
+    prob: LinkingProblem,
+    eta_s: Array,
+    eta_t: Array,
+    ab0: Array,
+    *,
+    method: LinkMethod,
+    symmetric: bool,
+    tol: float | Array = 1e-10,
+    max_iter: int | Array = 200,
+) -> tuple[Array, Array, Array, Array, Array]:
+    r"""Minimize :func:`linking_criterion` over :math:`A > 0, B \in \mathbb{R}` via Newton.
+
+    Uses ``jax.grad`` and ``jax.hessian`` inside ``lax.while_loop`` with shape-static arrays
+    (mirroring :mod:`flexpyirt._newton` and :mod:`flexpyirt._scoring`; DESIGN.md §16.5):
+
+    - If the :math:`2\times 2` Hessian is positive definite, takes the exact Newton step
+      :math:`\delta = -H^{-1}g`; otherwise adds Levenberg–Marquardt damping
+      :math:`(H + \lambda I)^{-1}g` (falling back to :math:`-g` if still not a finite descent
+      direction).
+    - Evaluates 40 step sizes :math:`2^{-k}` in parallel with ``vmap``, projecting any candidate
+      with :math:`A \le 0` halfway to the boundary (:math:`A/2`), and takes the largest step that
+      does not increase the criterion (monotone descent).
+    - Near the optimum where objective decrease hits float64 rounding, accepts a full interior
+      Newton polish step when it reduces :math:`\|g\|_\infty` by more than half within 1-ULP
+      objective noise.
+
+    Parameters
+    ----------
+    prob : LinkingProblem
+        Static-shape linking problem pytree.
+    eta_s, eta_t : Array
+        Common-item free parameter vectors for source and target.
+    ab0 : Array, shape (2,)
+        Initial ``[A, B]`` with ``A > 0``.
+    method : {"haebara", "stocking-lord"}
+        Static criterion selector.
+    symmetric : bool
+        Static flag for the symmetric criterion.
+    tol : float or Array, default 1e-10
+        Convergence tolerance on :math:`\|\nabla F(A, B)\|_\infty`.
+    max_iter : int or Array, default 200
+        Maximum number of Newton iterations.
+
+    Returns
+    -------
+    ab : Array, shape (2,)
+        Estimated ``[A, B]``.
+    criterion : Array, scalar
+        Criterion value at ``ab``.
+    grad_norm : Array, scalar
+        :math:`\|\nabla F(A, B)\|_\infty` at ``ab``.
+    n_iter : Array, scalar int32
+        Number of Newton iterations taken.
+    converged : Array, scalar bool
+        Whether ``grad_norm <= tol`` with finite criterion and gradient.
+    """
+    dtype = ab0.dtype
+    tol_arr = jnp.asarray(tol, dtype=dtype)
+    max_iter_arr = jnp.asarray(max_iter, dtype=jnp.int32)
+    steps = 0.5 ** jnp.arange(_N_HALVINGS, dtype=dtype)
+    eye2 = jnp.eye(2, dtype=dtype)
+
+    def obj(ab: Array) -> Array:
+        return linking_criterion(ab, eta_s, eta_t, prob, method=method, symmetric=symmetric)
+
+    grad_fn = jax.grad(obj)
+    hess_fn = jax.hessian(obj)
+
+    v0 = obj(ab0)
+    g0 = grad_fn(ab0)
+    g0_inf = jnp.max(jnp.abs(g0))
+    done0 = (~jnp.isfinite(v0)) | (~jnp.all(jnp.isfinite(g0))) | (g0_inf <= tol_arr)
+
+    def cond(state: tuple[Array, Array, Array, Array, Array]) -> Array:
+        _, _, _, it, done = state
+        return (~done) & (it < max_iter_arr)
+
+    def body(
+        state: tuple[Array, Array, Array, Array, Array],
+    ) -> tuple[Array, Array, Array, Array, Array]:
+        x, v, g, it, _ = state
+        g_inf = jnp.max(jnp.abs(g))
+        h = hess_fn(x)
+        h = 0.5 * (h + h.T)
+        h_finite = jnp.all(jnp.isfinite(h))
+        eigs = jnp.linalg.eigvalsh(jnp.where(h_finite, h, eye2))
+        is_pd = h_finite & (eigs[0] > 1e-12)
+        lam = jnp.where(is_pd, 0.0, jnp.maximum(0.0, -eigs[0]) + 1e-4)
+        h_reg = jnp.where(h_finite, h + lam * eye2, eye2)
+        d_newton = -jnp.linalg.solve(h_reg, g)
+        is_descent = jnp.all(jnp.isfinite(d_newton)) & (jnp.dot(g, d_newton) < 0.0)
+        neg_g = jnp.where(jnp.all(jnp.isfinite(g)), -g, jnp.zeros_like(g))
+        direction = jnp.where(is_descent, d_newton, neg_g)
+
+        raw = x[None, :] + steps[:, None] * direction[None, :]
+        a_cand = jnp.where(raw[:, 0] <= 0.0, 0.5 * x[0], raw[:, 0])
+        cands = raw.at[:, 0].set(a_cand)
+        vals = jax.vmap(obj)(cands)
+        inside = cands[:, 0] > 0.0
+        ok = inside & jnp.isfinite(vals) & (vals <= v)
+        any_ok = jnp.any(ok)
+        best = cands[jnp.argmax(ok)]
+
+        polish_x = cands[0]
+        polish_val = vals[0]
+        polish_g_inf = jnp.max(jnp.abs(grad_fn(polish_x)))
+        polish_ok = (
+            (~ok[0])
+            & is_pd
+            & inside[0]
+            & jnp.isfinite(polish_val)
+            & (polish_val <= v + 1e-14 * (1.0 + jnp.abs(v)))
+            & (polish_g_inf < 0.5 * g_inf)
+        )
+        moved = polish_ok | any_ok
+        x_next = jnp.where(polish_ok, polish_x, jnp.where(any_ok, best, x))
+        actually_moved = moved & (jnp.max(jnp.abs(x_next - x)) > 0.0)
+        v_next = obj(x_next)
+        g_next = grad_fn(x_next)
+        g_next_inf = jnp.max(jnp.abs(g_next))
+        done = (
+            (~jnp.isfinite(v_next))
+            | (~jnp.all(jnp.isfinite(g_next)))
+            | (g_next_inf <= tol_arr)
+            | (~actually_moved)
+        )
+        return x_next, v_next, g_next, it + jnp.int32(1), done
+
+    init = (ab0, v0, g0, jnp.int32(0), done0)
+    x_fin, v_fin, g_fin, it_fin, _ = jax.lax.while_loop(cond, body, init)
+    grad_norm = jnp.max(jnp.abs(g_fin))
+    converged = jnp.isfinite(v_fin) & jnp.all(jnp.isfinite(g_fin)) & (grad_norm <= tol_arr)
+    return x_fin, v_fin, grad_norm, it_fin, converged
+
+
+def linking_vcov(
+    ab_hat: Array,
+    eta_s: Array,
+    eta_t: Array,
+    vcov_s: Array,
+    vcov_t: Array,
+    prob: LinkingProblem,
+    *,
+    method: LinkMethod,
+    symmetric: bool,
+) -> tuple[Array, Array]:
+    r"""Asymptotic covariance of :math:`(\hat A, \hat B)` by the delta method (Ogasawara, 2001).
+
+    At the stationary point :math:`g(\hat c, \hat\eta_s, \hat\eta_t) = \nabla_c F = 0` with
+    :math:`c = (A, B)`, the implicit function theorem gives the Jacobians
+
+    .. math::
+        J_s = \frac{\partial \hat c}{\partial \eta_s^\top} = -H_{cc}^{-1} H_{c,\eta_s},
+        \qquad
+        J_t = \frac{\partial \hat c}{\partial \eta_t^\top} = -H_{cc}^{-1} H_{c,\eta_t},
+
+    where :math:`H_{cc} = \partial^2 F/\partial c\,\partial c^\top` (``jax.jacfwd``) and
+    :math:`H_{c,\eta_s}, H_{c,\eta_t}` (``jax.jacrev``) are computed via JAX autodiff. For two
+    independently calibrated forms with common-item free-parameter covariances
+    :math:`\Sigma_s, \Sigma_t` (treating the quadrature weights as fixed),
+
+    .. math::
+        \operatorname{Cov}(\hat A, \hat B) = J_s \Sigma_s J_s^\top + J_t \Sigma_t J_t^\top.
+
+    Parameters
+    ----------
+    ab_hat : Array, shape (2,)
+        Estimated linking constants ``[A, B]``.
+    eta_s, eta_t : Array, shapes (m_s,), (m_t,)
+        Common-item free parameters of source and target.
+    vcov_s, vcov_t : Array, shapes (m_s, m_s), (m_t, m_t)
+        Covariance matrices of ``eta_s`` and ``eta_t``.
+    prob : LinkingProblem
+        Static-shape linking problem pytree.
+    method : {"haebara", "stocking-lord"}
+        Static criterion selector.
+    symmetric : bool
+        Static flag for the symmetric criterion.
+
+    Returns
+    -------
+    vcov : Array, shape (2, 2)
+        Asymptotic covariance matrix of ``(A, B)`` (NaN if :math:`H_{cc}` is not positive
+        definite).
+    valid : Array, scalar bool
+        ``True`` iff :math:`H_{cc}` is finite and positive definite and ``vcov`` is finite.
+    """
+    dtype = ab_hat.dtype
+    eye2 = jnp.eye(2, dtype=dtype)
+
+    def grad_c(ab: Array, es: Array, et: Array) -> Array:
+        g: Array = jax.grad(
+            lambda x: linking_criterion(x, es, et, prob, method=method, symmetric=symmetric)
+        )(ab)
+        return g
+
+    h_cc = jax.jacfwd(grad_c, argnums=0)(ab_hat, eta_s, eta_t)
+    h_cc = 0.5 * (h_cc + h_cc.T)
+    h_finite = jnp.all(jnp.isfinite(h_cc))
+    eigs = jnp.linalg.eigvalsh(jnp.where(h_finite, h_cc, eye2))
+    is_pd = h_finite & (eigs[0] > 1e-14)
+    safe_h = jnp.where(is_pd, h_cc, eye2)
+
+    h_cs = jax.jacrev(grad_c, argnums=1)(ab_hat, eta_s, eta_t)
+    h_ct = jax.jacrev(grad_c, argnums=2)(ab_hat, eta_s, eta_t)
+    j_s = -jnp.linalg.solve(safe_h, h_cs)
+    j_t = -jnp.linalg.solve(safe_h, h_ct)
+
+    cov = j_s @ vcov_s @ j_s.T + j_t @ vcov_t @ j_t.T
+    cov = 0.5 * (cov + cov.T)
+    valid = is_pd & jnp.all(jnp.isfinite(cov))
+    return jnp.where(valid, cov, jnp.nan), valid
