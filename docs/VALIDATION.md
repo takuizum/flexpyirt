@@ -44,6 +44,7 @@ English | [日本語](VALIDATION.ja.md)
 | V16 | Equality constraints across items (LSAT7 common slope; 2PL + graded with cross-model constraints; two groups with anchors and a common slope) | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V17 | DIF likelihood-ratio tests on the V4 data (`add` for `a`+`d` and for `d`; `drop` for `a`+`d` from the fully invariant model) | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
+| V23 | Nominal response model (Science; simulated with unordered/negative scoring coefficients; nominal + 2PL mixed) | `mirt(..., "nominal")` with `pars` starting at the GPCM point | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -354,6 +355,28 @@ English | [日本語](VALIDATION.ja.md)
   Agreement (plain EM and SQUAREM): $X^2$ and the AIC/SABIC/HQ/BIC differences to $2.2\times10^{-11}$,
   `p` and `adj_p` to $3\times10^{-11}$. Tests: `tests/test_mirt_m5_dif.py`. Reference generator:
   `validation/r/m5_dif_reference.R`.
+- **Nominal response model (V23, M5)**: mirt's `itemtype = "nominal"` (`optimizer = "NR"`,
+  `TOL = 1e-10`, 61 points on $[-6,6]$). V23a: `Science` recoded to `0..3`. V23b: simulated
+  $J=10, K=4, N=3000$ with swapped interior scoring coefficients (`q09`: $\mathrm{ak}_1=2.2 >
+  \mathrm{ak}_2=0.7$) and a negative one (`q10`: $\mathrm{ak}_1=-0.4$). V23c: five nominal items
+  ($K=4$) and five 2PL items, $N=2500$. mirt's default nominal starting values
+  (`ak1 = ... = 0.5`, `d = 0`) make undamped NR stop at a saddle on `Science` (log-likelihood
+  $-1631.79$ with Comfort's `a1` $\approx 0$, versus the ML $-1608.452$), so the reference script
+  starts mirt at the GPCM point ($\mathrm{ak}_k=k$, $d_k=\log(p_k/p_0)$); flexpyirt fits from its
+  own default starting values (DESIGN §16.8). Agreement (plain EM and SQUAREM): log-likelihood to
+  $3.7\times10^{-11}$, parameters to $7.1\times10^{-8}$, Oakes SEs to $3.8\times10^{-8}$
+  (relative), Hessian vs mirt Richardson SEs to $5.6\times10^{-7}$, flexpyirt Oakes vs Hessian to
+  $1.8\times10^{-13}$, EAP to $8\times10^{-15}$, and MAP / ML / WLE on 40–43 patterns per case to
+  $3.7\times10^{-6}$ in $\theta$ and $1.9\times10^{-4}$ (relative) in SE. Known difference: mirt's
+  `fscores(method = "ML")` returns $-\infty$ / $+\infty$ for every all-category-0 /
+  all-top-category pattern regardless of the scoring coefficients. With an estimated
+  $\mathrm{ak}_1<0$ (V23b `q10`, V23c `q05`), category 1 has the lowest category slope, so the
+  all-0 pattern has an interior ML estimate; flexpyirt classifies extreme patterns by the category
+  slopes $a\,\mathrm{ak}_c$ and returns that interior maximum (the test checks it is a stationary
+  maximum above the $\theta\to-\infty$ limit). Unit tests (probabilities, gradients, reduction to
+  GPCM / 2PL, starting values, identification, `fix_from`, JSON, S-X2, scoring, priors, equality
+  constraints, multiple groups and DIF, EH, 2D): `tests/test_m5_nominal.py`. Tests:
+  `tests/test_mirt_m5_nominal.py`. Reference generator: `validation/r/m5_nominal_reference.R`.
 
 ## Validation beyond agreement
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number

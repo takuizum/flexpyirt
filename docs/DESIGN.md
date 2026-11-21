@@ -1050,7 +1050,14 @@ data-independent shapes (§15.21).
      highest-$\theta$ categories are determined from the effective category slopes
      $s_c=a\,\mathrm{ak}_c$ ($s_{y_j}=\min_c s_c$ and $s_{y_j}=\max_c s_c$ with $a\neq 0$), which
      handles non-monotone categories ($\mathrm{ak}_k<0$ or $\mathrm{ak}_k>K-1$) and reduces to
-     $0$ and $K-1$ when $0\le\mathrm{ak}_k\le K-1$.
+     $0$ and $K-1$ when $0\le\mathrm{ak}_k\le K-1$. This deliberately differs from mirt 1.46.1,
+     whose `fscores(method = "ML")` returns $\mp\infty$ for every all-category-0 /
+     all-top-category pattern regardless of $\mathrm{ak}$: with $\mathrm{ak}_1<0$ the all-0 pattern
+     has an interior ML estimate, which flexpyirt returns (VALIDATION.md V23).
+   - **Validation (V23)**: `validation/r/m5_nominal_reference.R` starts mirt's NR at the GPCM point
+     because mirt's default nominal starting values stop NR at a saddle on `Science`; flexpyirt
+     fits from its own defaults and reaches mirt's solution in all three cases (`Science`, simulated
+     with unordered / negative $\mathrm{ak}$, nominal + 2PL) within the VALIDATION.md tolerances.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.

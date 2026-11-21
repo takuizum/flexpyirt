@@ -698,7 +698,13 @@ class ItemKernel(Protocol):
      （`_scoring._pattern_flags`）では、各カテゴリの有効傾き $s_c=a\,\mathrm{ak}_c$ から最低・最高 $\theta$ カテゴリ
      （$a\neq 0$ のもとで $s_{y_j}=\min_c s_c$ および $s_{y_j}=\max_c s_c$）を判定し、非単調なカテゴリ
      （$\mathrm{ak}_k<0$ や $\mathrm{ak}_k>K-1$）を正しく扱いつつ $0\le\mathrm{ak}_k\le K-1$ では $0$ と $K-1$ に
-     帰着させる。
+     帰着させる。これは mirt 1.46.1 と意図的に異なる。mirt の `fscores(method = "ML")` は $\mathrm{ak}$ にかかわらず
+     全項目カテゴリ 0 / 全項目最上位カテゴリのパタンに $\mp\infty$ を返すが、$\mathrm{ak}_1<0$ では全 0 パタンの
+     ML 推定値は内点にあり、flexpyirt はその値を返す（VALIDATION.md V23）。
+   - **照合（V23）**: mirt の名義モデルの既定初期値では NR が `Science` で鞍点に止まるため、
+     `validation/r/m5_nominal_reference.R` は mirt の NR を GPCM の点から開始する。flexpyirt は自身の既定初期値から
+     推定し、3 ケース（`Science`、順序のない・負の $\mathrm{ak}$ を含むシミュレーション、名義 + 2PL）すべてで
+     VALIDATION.md の許容誤差内で mirt の解に到達する。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.

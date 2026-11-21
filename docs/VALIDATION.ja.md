@@ -39,6 +39,7 @@
 | V16 | 項目をまたぐ等値制約（LSAT7 の共通傾き、2PL + graded のモデル間制約、アンカーつき 2 群 + 共通傾き） | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V17 | V4 のデータでの尤度比検定による DIF（`a`+`d` と `d` の `add`、完全不変モデルからの `a`+`d` の `drop`） | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
+| V23 | 名義反応モデル（Science、順序のない・負の採点係数を含むシミュレーション、名義 + 2PL の混在） | GPCM の点から開始する `pars` を与えた `mirt(..., "nominal")` | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -295,6 +296,23 @@
   （`p.adjust = "holm"`）。mirt の `p` は `1 - pchisq(...)` なので非常に大きな $X^2$ では厳密に 0（flexpyirt は生存関数）。
   一致（通常の EM・SQUAREM とも）: $X^2$ と AIC/SABIC/HQ/BIC の差 $2.2\times10^{-11}$、`p`・`adj_p` $3\times10^{-11}$。
   テスト: `tests/test_mirt_m5_dif.py`。参照値生成: `validation/r/m5_dif_reference.R`。
+- **名義反応モデル（V23、M5）**: mirt の `itemtype = "nominal"`（`optimizer = "NR"`、`TOL = 1e-10`、$[-6,6]$ の
+  61 点）。V23a: `0..3` に符号化し直した `Science`。V23b: シミュレーション $J=10, K=4, N=3000$ で、内部の採点係数が
+  入れ替わった項目（`q09`: $\mathrm{ak}_1=2.2 > \mathrm{ak}_2=0.7$）と負の採点係数をもつ項目（`q10`:
+  $\mathrm{ak}_1=-0.4$）を含む。V23c: 名義 5 項目（$K=4$）と 2PL 5 項目、$N=2500$。mirt の名義モデルの既定初期値
+  （`ak1 = ... = 0.5`、`d = 0`）では減衰なしの NR が `Science` で鞍点に止まる（対数尤度 $-1631.79$、Comfort の
+  `a1` $\approx 0$。最尤解は $-1608.452$）ため、参照値スクリプトは mirt を GPCM の点（$\mathrm{ak}_k=k$、
+  $d_k=\log(p_k/p_0)$）から開始する。flexpyirt は自身の既定初期値から推定する（DESIGN §16.8）。一致（通常の EM・
+  SQUAREM とも）: 対数尤度 $3.7\times10^{-11}$、パラメタ $7.1\times10^{-8}$、Oakes SE（相対）$3.8\times10^{-8}$、
+  Hessian と mirt Richardson SE $5.6\times10^{-7}$、flexpyirt の Oakes と Hessian $1.8\times10^{-13}$、EAP
+  $8\times10^{-15}$、各ケース 40–43 パタンの MAP / ML / WLE で $\theta$ $3.7\times10^{-6}$・SE（相対）
+  $1.9\times10^{-4}$。既知の差: mirt の `fscores(method = "ML")` は採点係数にかかわらず、全項目カテゴリ 0 /
+  全項目最上位カテゴリのパタンに $-\infty$ / $+\infty$ を返す。推定された $\mathrm{ak}_1<0$（V23b の `q10`、V23c の
+  `q05`）ではカテゴリ 1 のカテゴリ傾きが最小なので、全 0 パタンの ML 推定値は内点にある。flexpyirt は極端パタンを
+  カテゴリ傾き $a\,\mathrm{ak}_c$ で判定してその内点の最大を返す（テストでは停留点の最大で、$\theta\to-\infty$ の
+  極限より大きいことを確認する）。単体テスト（確率・勾配・GPCM / 2PL への帰着・初期値・識別性・`fix_from`・JSON・
+  S-X2・スコアリング・事前分布・等値制約・多群と DIF・EH・2 次元）: `tests/test_m5_nominal.py`。テスト:
+  `tests/test_mirt_m5_nominal.py`。参照値生成: `validation/r/m5_nominal_reference.R`。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
