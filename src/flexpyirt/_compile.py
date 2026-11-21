@@ -1294,6 +1294,11 @@ def compile_problem(
 
     nodes = jnp.asarray(quad.grid(model.n_factors), dtype=jnp.float64)
     resolved = model.resolved_groups()
+    if model.is_eh and quad.kind != "equispaced":
+        raise SpecificationError(
+            "EmpiricalHistogram needs an equispaced quadrature grid (its weights are histogram "
+            "bins); Gauss-Hermite quadrature is for Normal latent distributions."
+        )
     if model.is_eh:
         min_w_list: list[float] = []
         for g_name, dist in resolved:
@@ -1361,6 +1366,7 @@ def compile_problem(
         counts=jnp.asarray(counts, dtype=jnp.float64),
         group=jnp.asarray(pat_groups, dtype=jnp.int32),
         nodes=nodes,
+        node_log_base=jnp.asarray(quad.base_log_weights(model.n_factors), dtype=jnp.float64),
         families=tuple(families),
         latent=latent,
         priors=priors_block,

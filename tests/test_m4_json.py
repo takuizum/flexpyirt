@@ -565,7 +565,7 @@ def test_malformed_registry_types(sample_payload: dict[str, Any]) -> None:
 
     # Unknown quadrature
     bad_quad = _clone(sample_payload)
-    bad_quad["quadrature"] = {"type": "gauss_hermite", "n_points": 41}
+    bad_quad["quadrature"] = {"type": "quasi_monte_carlo", "n_points": 41}
     with pytest.raises(SpecificationError, match="Unknown quadrature type"):
         FitResult.from_json(json.dumps(bad_quad))
 

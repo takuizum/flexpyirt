@@ -614,6 +614,17 @@ variance of the distribution on the grid is slightly smaller. mirt updates the v
 closed-form moments, so where the grid ends matter its values differ from flexpyirt's. Widening
 the grid makes them agree ([VALIDATION.md](VALIDATION.md)).
 
+**Gauss–Hermite.** For `Normal` latent distributions, `Quadrature.gauss_hermite(n)` places `n`
+Gauss–Hermite nodes per dimension and reweights them for the estimated mean and variance; it is
+usually more accurate than an equispaced grid with the same number of points near $N(0,1)$, but
+loses accuracy for variances well above 1. `EmpiricalHistogram` needs an equispaced grid.
+
+```python
+gh = Quadrature.gauss_hermite(41)
+res_gh = fit(spec, df, quadrature=gh)
+print(round(res_gh.loglik - res.loglik, 6))  # differs from the 61-point equispaced fit by < 1e-4
+```
+
 ## 14. Confirmatory multidimensional models
 
 Fit confirmatory 2- or 3-dimensional models with `.with_factors({...})`. Each entry maps a factor
