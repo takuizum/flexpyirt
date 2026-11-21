@@ -141,23 +141,25 @@ def _xi(m1: np.ndarray, m2: np.ndarray, w: np.ndarray, e: np.ndarray) -> np.ndar
     return np.asarray(0.5 * (xi + xi.T), dtype=float)
 
 
-def _quadratic_form(resid: np.ndarray, delta: np.ndarray, xi: np.ndarray) -> float:
-    r"""Evaluate :math:`e^\top \Delta_c (\Delta_c^\top \Xi_2 \Delta_c)^{-1} \Delta_c^\top e`.
+def _svd_complement(delta: np.ndarray) -> tuple[np.ndarray | None, int]:
+    r"""Return an orthonormal basis for :math:`\operatorname{col}(\Delta)^\perp` and SVD rank.
 
-    Uses an orthonormal basis :math:`\Delta_c` for the orthogonal complement of
-    :math:`\operatorname{col}(\Delta)` (numerical rank by SVD). Returns ``NaN`` when
-    :math:`\Delta_c` is empty.
+    Returns ``(None, rank)`` if :math:`\Delta` is rank-deficient (``rank < n_cols``) or has no
+    orthogonal complement (``rank >= n_margins``).
     """
     n_margins, n_cols = delta.shape
     if n_cols == 0:
-        comp = np.eye(n_margins, dtype=float)
-    else:
-        u, sv, _ = np.linalg.svd(delta, full_matrices=True)
-        tol = float(sv.max(initial=0.0)) * max(n_margins, n_cols) * float(np.finfo(float).eps)
-        rank = int(np.sum(sv > tol))
-        if rank >= n_margins:
-            return float("nan")
-        comp = u[:, rank:]
+        return np.eye(n_margins, dtype=float), 0
+    u, sv, _ = np.linalg.svd(delta, full_matrices=True)
+    tol = float(sv.max(initial=0.0)) * max(n_margins, n_cols) * float(np.finfo(float).eps)
+    rank = int(np.sum(sv > tol))
+    if rank < n_cols or rank >= n_margins:
+        return None, rank
+    return u[:, rank:], rank
+
+
+def _solve_quadratic_form(resid: np.ndarray, comp: np.ndarray, xi: np.ndarray) -> float:
+    r"""Evaluate :math:`e^\top \Delta_c (\Delta_c^\top \Xi_2 \Delta_c)^{-1} \Delta_c^\top e`."""
     proj = comp.T @ resid
     mid = comp.T @ xi @ comp
     mid = 0.5 * (mid + mid.T)
@@ -168,6 +170,19 @@ def _quadratic_form(resid: np.ndarray, delta: np.ndarray, xi: np.ndarray) -> flo
             "Could not invert the orthogonal complement covariance matrix for M2."
         ) from exc
     return float(abs(proj @ sol))
+
+
+def _quadratic_form(resid: np.ndarray, delta: np.ndarray, xi: np.ndarray) -> float:
+    r"""Evaluate :math:`e^\top \Delta_c (\Delta_c^\top \Xi_2 \Delta_c)^{-1} \Delta_c^\top e`.
+
+    Uses an orthonormal basis :math:`\Delta_c` for the orthogonal complement of
+    :math:`\operatorname{col}(\Delta)` (numerical rank by SVD). Returns ``NaN`` when
+    :math:`\Delta` is rank-deficient or :math:`\Delta_c` is empty.
+    """
+    comp, _ = _svd_complement(delta)
+    if comp is None:
+        return float("nan")
+    return _solve_quadratic_form(resid, comp, xi)
 
 
 def rmsea(x2: float, df: int, n: int) -> float:
@@ -184,25 +199,33 @@ def rmsea_ci(x2: float, df: int, n: int, level: float = 0.90) -> tuple[float, fl
     r"""Compute RMSEA confidence interval by inverting the noncentral :math:`\chi^2` CDF.
 
     MacCallum, Browne & Sugawara (1996): :math:`\sqrt{\lambda / (N\,df)}` matching mirt's
-    ``RMSEA.CI``. A bound whose root is not bracketed on :math:`[0, X^2]` (lower) or
-    :math:`[0, \max(N, 5 X^2)]` (upper) is 0.
+    ``RMSEA.CI``. Returns ``0.0`` for a bound when :math:`P(\chi^2_{df} \le X^2)` is already at or
+    below the target probability, and doubles the upper search bracket from
+    :math:`\max(N, 5 X^2)` if needed so a valid upper bound never collapses to 0.
     """
-    if df <= 0 or n <= 0 or not np.isfinite(x2):
+    if df <= 0 or n <= 1 or not np.isfinite(x2):
         return float("nan"), float("nan")
     alpha = (1.0 - level) / 2.0
 
-    def _root(target: float, upper: float) -> float:
+    def _root(target: float, initial_upper: float) -> float:
         def f(lam: float) -> float:
             cdf = float(stats.ncx2.cdf(x2, df, lam) if lam > 0.0 else stats.chi2.cdf(x2, df))
             return cdf - target
 
-        if upper <= 0.0 or f(0.0) * f(upper) > 0.0:
+        if f(0.0) <= 0.0:
             return 0.0
+        upper = max(initial_upper, 1.0)
+        while f(upper) > 0.0 and upper < 1e12:
+            upper *= 2.0
+        if f(upper) > 0.0:
+            return float("nan")
         return float(optimize.brentq(f, 0.0, upper, xtol=1e-12, rtol=1e-14))
 
     lam_l = _root(1.0 - alpha, x2)
     lam_u = _root(alpha, max(float(n), 5.0 * x2))
-    return float(np.sqrt(lam_l / (n * df))), float(np.sqrt(lam_u / (n * df)))
+    lo = float(np.sqrt(lam_l / (n * df))) if np.isfinite(lam_l) else float("nan")
+    hi = float(np.sqrt(lam_u / (n * df))) if np.isfinite(lam_u) else float("nan")
+    return lo, hi
 
 
 def null_m2(y: np.ndarray) -> tuple[float, int]:
@@ -275,9 +298,30 @@ def m2_statistic(
     yf = y.astype(float)
     obs = np.concatenate([yf.mean(axis=0), (yf[:, ii] * yf[:, jj]).mean(axis=0)])
     resid = np.sqrt(float(n_obs)) * (obs - margins)
-    xi = _xi(m1, m2, w, margins)
-    stat = _quadratic_form(resid, jac, xi)
     df = int(s - n_params)
+    if df <= 0:
+        warnings.warn(
+            f"M2 has non-positive degrees of freedom (df={df}); the model is not locally "
+            "identified with residual degrees of freedom from first- and second-order moments, "
+            "so M2 and derived fit indices are NaN.",
+            FlexpyirtWarning,
+            stacklevel=3,
+        )
+        stat = float("nan")
+    else:
+        comp, rank = _svd_complement(jac)
+        if comp is None:
+            warnings.warn(
+                f"M2 Jacobian is rank-deficient (rank {rank} < {jac.shape[1]} free parameters); "
+                "the model is not locally identified from first- and second-order moments, "
+                "so M2 and derived fit indices are NaN.",
+                FlexpyirtWarning,
+                stacklevel=3,
+            )
+            stat = float("nan")
+        else:
+            xi = _xi(m1, m2, w, margins)
+            stat = _solve_quadratic_form(resid, comp, xi)
 
     # SRMSR: root mean squared residual of item-score correlations.
     mean_e = margins[:n_items]

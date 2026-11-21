@@ -698,8 +698,10 @@ class FitResult:
         -------
         DataFrame
             One-row DataFrame with columns ``m2``, ``df``, ``p``, ``rmsea``, ``rmsea_<lo>``,
-            ``rmsea_<hi>``, ``srmsr``, ``tli``, ``cfi``. When ``df <= 0``, ``p``, RMSEA, its CI,
-            ``tli`` and ``cfi`` are ``NaN`` (and ``m2`` is ``NaN`` if :math:`\Delta_c` is empty).
+            ``rmsea_<hi>``, ``srmsr``, ``tli``, ``cfi``. When ``df <= 0`` or :math:`\Delta_2` is
+            rank-deficient (the model is not locally identified from first- and second-order
+            moments), a :class:`FlexpyirtWarning` is emitted and ``m2``, ``p``, RMSEA, its CI,
+            ``tli`` and ``cfi`` are ``NaN`` (``df`` and ``srmsr`` remain finite).
 
         Raises
         ------
