@@ -189,20 +189,23 @@ print(res_sq.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeg
 
 ## 5. 結果を読む
 
-`fit()` は `FitResult` を返す。
+`fit()` は `FitResult` を返す。`res.summary()` で読みやすいテキスト要約が得られる（Jupyter
+ノートブックでは `res` を評価すると `_repr_html_()` により同等の HTML 要約が表示される）。
 
 ```python
 print(res)  # FitResult(loglik=..., n_params=..., n_obs=..., converged in ... iterations, se=oakes)
-print(res.items.head(3))  # 項目ごとの推定値と SE
+print(res.summary())  # モデル・適合度・潜在分布・項目表の読みやすい要約
+print(res.items.head(3))  # 項目ごとの推定値と SE（b とデルタ法 b_se を含む）
 print(res.latent)  # 群ごとの潜在分布（mean, var と SE）
 print(res.loglik, res.aic, res.bic, res.n_params, res.n_obs)
 print(res.converged, res.n_iter, res.n_em_evaluations, res.n_safeguards)
 print(res.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeguard
 ```
 
-| 属性 | 内容 |
+| 属性・メソッド | 内容 |
 |---|---|
-| `items` | 1 項目 1 行（多母集団では群 × 項目）。`model`、内部パラメタ、`<param>_se`、表示用の `b` / `bk` |
+| `summary(digits=4)` | モデル・データ規模・群・収束情報・対数尤度・対数事後確率・AIC/BIC（MAP 時は注意文つき）・潜在分布表・項目表の読みやすい要約。Jupyter では `_repr_html_()` が HTML で表示する |
+| `items` | 1 項目 1 行（多母集団では群 × 項目）。`model`、内部パラメタ、`<param>_se`、表示用の `b` / `bk` とデルタ法による `b_se` / `bk_se` |
 | `latent` | 1 群 1 行。`group`, `mean`, `var`, `mean_se`, `var_se`（固定値の SE は NaN） |
 | `parameters` | ParameterTable（[12 節](#12-parametertable-を編集する)）に `estimate` と `se` を足したもの |
 | `loglik`, `log_posterior`, `aic`, `bic` | 周辺対数尤度、対数事後確率（事前分布なしでは `loglik` と同値）、情報量規準（$-2\ell+2k$, $-2\ell+k\log N$。MAP 時は `FlexpyirtWarning`） |
@@ -241,7 +244,10 @@ print(vcov.iloc[:2, :2])
 ```
 
 情報行列が正定値でない（推定値が境界にある、識別が弱いなど）と警告を出し、SE は NaN になる。
-表示用の `b` の SE（デルタ法）は M4 で追加予定。
+`FitResult.items` には、表示用の IRT 閾値（`b = -d/a`、GRM の `bk = -dk/a`、GPCM/PCM のステップ困難度
+`bk = -(dk - d{k-1})/a`）に対するデルタ法標準誤差（`b_se` / `bk_se`）も含まれる。ヤコビアンは JAX の自動微分で
+`vcov` から計算し、固定パラメタは分散に寄与しない（`a = 1` 固定の Rasch / PCM では `b_se = d_se` /
+`b1_se = d1_se`）。`se=None` のとき、または閾値に入るパラメタがすべて固定のときは NaN になる。
 
 ## 7. スコアリング
 

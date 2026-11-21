@@ -38,8 +38,9 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - **Acceptance**: V6, V7, V8, V11 within tolerance. Agreement also holds with SQUAREM.
 
 ## M4 Results and first multidimensional models
-- A richer `FitResult` (summary, `_repr_html_`, JSON I/O, delta-method SEs for the IRT
-  parameterization).
+- [x] `FitResult.summary()`, `FitResult._repr_html_()`, and delta-method SEs for the display IRT
+  parameterization (`b_se` / `bk_se`, validated in V12).
+- `FitResult` JSON I/O.
 - Scoring (MAP, ML, WLE, plausible values).
 - Confirmatory 2–3 dimensional MIRT (product grids).
 - **Acceptance**: EAP / MAP agree with mirt's `fscores`. A two-dimensional confirmatory model

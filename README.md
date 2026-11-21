@@ -26,7 +26,7 @@ calibration and fixed item parameter calibration (FIPC).
 | Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | V4 |
 | FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | V5 |
 | Missing data | Responses missing at random (MAR) | V9 |
-| Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior | V7, V10 |
+| Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior, plus delta-method SEs for display IRT thresholds (`b_se` / `bk_se`) | V7, V10, V12 |
 | Scoring | EAP and posterior SD, using each group's latent distribution as the prior | V1–V5, V7–V9, V11 |
 | EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | V1–V5, V7–V9, V11 |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
@@ -80,7 +80,7 @@ spec = Model.uniform(TwoPL(), items=df.columns)
 res = fit(spec, df)
 
 print(res)  # log-likelihood, number of parameters, convergence
-print(res.items.head())  # item, model, a, d, a_se, d_se, b (= -d/a)
+print(res.items.head())  # item, model, a, d, a_se, d_se, b (= -d/a), b_se
 print(res.loglik, res.aic, res.bic)
 scores = res.score(df)  # EAP (theta) and posterior SD (se) per respondent
 ```

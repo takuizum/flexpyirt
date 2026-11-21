@@ -197,20 +197,23 @@ The first fit includes JAX compilation time. Later fits of data with the same sh
 
 ## 5. Reading the results
 
-`fit()` returns a `FitResult`.
+`fit()` returns a `FitResult`. Call `res.summary()` for a readable plain-text report (in Jupyter
+notebooks, evaluating `res` renders an equivalent HTML summary via `_repr_html_()`).
 
 ```python
 print(res)  # FitResult(loglik=..., n_params=..., n_obs=..., converged in ... iterations, se=oakes)
-print(res.items.head(3))  # estimates and SEs per item
+print(res.summary())  # readable summary: model, fit statistics, latent and item tables
+print(res.items.head(3))  # estimates and SEs per item (including b and delta-method b_se)
 print(res.latent)  # latent distribution per group (mean, var and their SEs)
 print(res.loglik, res.aic, res.bic, res.n_params, res.n_obs)
 print(res.converged, res.n_iter, res.n_em_evaluations, res.n_safeguards)
 print(res.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeguard
 ```
 
-| Attribute | Contents |
+| Attribute / method | Contents |
 |---|---|
-| `items` | One row per item (per group × item with groups): `model`, internal parameters, `<param>_se`, display `b` / `bk` |
+| `summary(digits=4)` | Readable text summary of the model, sample/group/convergence info, log-likelihood, log-posterior, AIC/BIC (with an inline note under MAP), latent table and item table; Jupyter displays an HTML rendering via `_repr_html_()` |
+| `items` | One row per item (per group × item with groups): `model`, internal parameters, `<param>_se`, display `b` / `bk` and delta-method `b_se` / `bk_se` |
 | `latent` | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` (SEs of fixed values are NaN) |
 | `parameters` | The ParameterTable ([section 12](#12-editing-the-parametertable)) plus `estimate` and `se` |
 | `loglik`, `log_posterior`, `aic`, `bic` | Marginal log-likelihood, log posterior (equals `loglik` without priors), and information criteria ($-2\ell+2k$, $-2\ell+k\log N$; warn with `FlexpyirtWarning` under MAP) |
@@ -250,8 +253,12 @@ print(vcov.iloc[:2, :2])
 ```
 
 If the information matrix is not positive definite (estimates on a boundary, weak
-identification), flexpyirt warns and the SEs are NaN. SEs of the display `b` (delta method) are
-planned for M4.
+identification), flexpyirt warns and the SEs are NaN. `FitResult.items` also includes delta-method
+standard errors (`b_se` / `bk_se`) for the display IRT thresholds (`b = -d/a`, GRM `bk = -dk/a`,
+and GPCM/PCM step difficulties `bk = -(dk - d{k-1})/a`), computed from `vcov` with JAX autodiff
+Jacobians; fixed parameters contribute no variance (so Rasch/PCM with `a = 1` fixed has
+`b_se = d_se` / `b1_se = d1_se`), and the columns are NaN when `se=None` or every parameter
+entering a threshold is fixed.
 
 ## 7. Scoring
 
