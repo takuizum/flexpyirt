@@ -16,6 +16,8 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
@@ -257,3 +259,117 @@ def test_map_multidim_all_missing_and_mode() -> None:
     eap = res.score(pats, method="EAP")
     assert np.all(np.isfinite(scores.to_numpy()))
     assert not np.allclose(scores["theta_F1"].iloc[1:], eap["theta_F1"].iloc[1:])
+
+
+def _decode(values: list[Any]) -> np.ndarray:
+    special = {"Infinity": np.inf, "-Infinity": -np.inf, None: np.nan}
+    return np.asarray([special.get(v, v) for v in values], dtype=float)
+
+
+@cache
+def _mlwle_reference() -> dict[str, Any]:
+    raw = json.loads((Path(__file__).parent / "reference" / "v14_mirt_mlwle.json").read_text())
+    check_reference_meta(raw["meta"])
+    return dict(raw["cases"])
+
+
+def _ml_wle_scores(name: str, method: str) -> tuple[np.ndarray, ...]:
+    case, ref = load(name), _mlwle_reference()[name]
+    rows = [[np.nan if v is None else v for v in r] for r in ref["patterns"]]
+    pats = pd.DataFrame(np.asarray(rows, dtype=float), columns=ref["items"])
+    scores = _fixed_at_mirt(name).score(pats, method=method)  # type: ignore[arg-type]
+    fs = list(case.raw["factors"])
+    ours_t = np.column_stack([scores[f"theta_{f}"] for f in fs])
+    ours_s = np.column_stack([scores[f"se_{f}"] for f in fs])
+    ref_t = np.column_stack([_decode(ref[method]["theta"][f]) for f in fs])
+    ref_s = np.column_stack([_decode(ref[method]["se"][f]) for f in fs])
+    return ours_t, ours_s, ref_t, ref_s
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_wle_with_mirt_parameters(name: str) -> None:
+    """Multidimensional WLE (log L + 1/2 log det I) vs mirt on every pattern (DESIGN §15.41)."""
+    ours_t, ours_s, ref_t, ref_s = _ml_wle_scores(name, "WLE")
+    np.testing.assert_allclose(ours_t, ref_t, rtol=0, atol=TOL_MAP_THETA)
+    np.testing.assert_allclose(ours_s, ref_s, rtol=TOL_MAP_SE_REL)
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_ml_with_mirt_parameters(name: str) -> None:
+    """Multidimensional ML vs mirt (DESIGN §15.41).
+
+    Interior patterns (mirt finite with SE > 0 on every dimension) agree to the V13 tolerances.
+    Where mirt reports +/-Inf on a dimension, flexpyirt reports the same signed infinity. Where
+    mirt stops at the +/-20 bound with SE 0 (its sub-Hessian quirk), flexpyirt reports the
+    signed infinity.
+    """
+    ours_t, ours_s, ref_t, ref_s = _ml_wle_scores(name, "ML")
+    mirt_interior = np.all(np.isfinite(ref_t) & np.isfinite(ref_s) & (ref_s > 0), axis=1)
+    interior = mirt_interior & np.all(np.isfinite(ours_t), axis=1)
+    assert interior.sum() >= 0.3 * len(interior)
+    np.testing.assert_allclose(ours_t[interior], ref_t[interior], rtol=0, atol=TOL_MAP_THETA)
+    np.testing.assert_allclose(ours_s[interior], ref_s[interior], rtol=TOL_MAP_SE_REL)
+    mirt_inf = np.isinf(ref_t)
+    np.testing.assert_array_equal(ours_t[mirt_inf], ref_t[mirt_inf])
+    boundary = np.isfinite(ref_t) & (ref_s == 0)
+    np.testing.assert_array_equal(ours_t[boundary], np.sign(ref_t[boundary]) * np.inf)
+    assert np.isnan(ours_s[np.isinf(ours_t)]).all()
+
+
+def test_ml_multidim_extreme_and_missing_patterns() -> None:
+    res, case = _fixed_at_mirt("mirt2d_2pl_simple"), load("mirt2d_2pl_simple")
+    pats = case.patterns.iloc[:3].copy()
+    pats.iloc[0, :] = 0
+    pats.iloc[1, :] = 1
+    pats.iloc[2, :] = np.nan
+    ml = res.score(pats, method="ML")
+    assert (ml.iloc[0, :2] == -np.inf).all() and (ml.iloc[1, :2] == np.inf).all()
+    assert ml.iloc[2].isna().all()
+    wle = res.score(pats, method="WLE")
+    assert np.isfinite(wle.iloc[:2].to_numpy()).all() and wle.iloc[2].isna().all()
+
+
+@pytest.mark.parametrize("name", ["mirt2d_2pl_cross", "mirt3d_2pl"])
+def test_pv_multidim_matches_posterior_moments(name: str) -> None:
+    """PV mean, SD and correlations match the grid posterior within Monte Carlo error (§15.42)."""
+    from flexpyirt import _core
+    from flexpyirt._compile import coerce_groups, coerce_responses, compile_problem
+
+    res, case = _fixed_at_mirt(name), load(name)
+    pats = case.patterns.iloc[[0, 5, 17, 40]].reset_index(drop=True)
+    pats.iloc[3, :4] = np.nan
+    fs = list(case.raw["factors"])
+    n_draws = 4000
+    pv = res.score(pats, method="PV", key=jax.random.key(11), n_draws=n_draws)
+    assert list(pv.columns[: len(fs)]) == [f"pv1_{f}" for f in fs]
+    draws = np.stack(
+        [pv[[f"pv{m}_{f}" for m in range(1, n_draws + 1)]].to_numpy() for f in fs], axis=2
+    )  # (N, n_draws, D)
+
+    # Grid posterior moments on the fitted product grid.
+    y = coerce_responses(pats, res._model)
+    codes, _ = coerce_groups(None, res._model, y.shape[0], require_all=False)
+    comp = compile_problem(res._model, y, codes, res.parameters, res._quadrature)
+    h = np.asarray(jax.nn.softmax(_core._log_joint(comp.problem, jnp.asarray(res._eta)), axis=1))
+    nodes = np.asarray(comp.problem.nodes)
+    for r in range(len(pats)):
+        hp = h[comp.inverse[r]]
+        mean = hp @ nodes
+        cov = (nodes - mean).T @ ((nodes - mean) * hp[:, None])
+        sd = np.sqrt(np.diag(cov))
+        d = draws[r]
+        np.testing.assert_allclose(d.mean(axis=0), mean, atol=5 * sd.max() / np.sqrt(n_draws))
+        np.testing.assert_allclose(
+            d.std(axis=0, ddof=1), sd, atol=6 * sd.max() / np.sqrt(2 * n_draws) + 0.01 * sd.max()
+        )
+        corr = cov / np.outer(sd, sd)
+        np.testing.assert_allclose(np.corrcoef(d.T), corr, atol=0.05)
+
+
+def test_pv_multidim_reproducible_and_independent() -> None:
+    res, case = _fixed_at_mirt("mirt2d_2pl_simple"), load("mirt2d_2pl_simple")
+    pats = pd.concat([case.patterns.iloc[[3]]] * 2, ignore_index=True)
+    a = res.score(pats, method="PV", key=jax.random.key(1), n_draws=3)
+    b = res.score(pats, method="PV", key=jax.random.key(1), n_draws=3)
+    pd.testing.assert_frame_equal(a, b)
+    assert not np.allclose(a.iloc[0].to_numpy(), a.iloc[1].to_numpy())

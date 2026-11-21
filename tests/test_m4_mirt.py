@@ -351,12 +351,8 @@ def test_2d_2pl_monotone_oakes_equals_hessian_and_eap() -> None:
     assert abs(_cell(scores, "p1", "theta_verbal")) < 1e-12
     assert 0.99 < _cell(scores, "p1", "se_math") < 1.01
 
-    # ML and WLE scoring raise SpecificationError for D > 1 (MAP is supported, §15.39)
-    for m in ("ML", "WLE"):
-        with pytest.raises(SpecificationError, match="unidimensional"):
-            res_em.score(sub, method=m)
-    with pytest.raises(SpecificationError, match="unidimensional"):
-        res_em.score(sub, method="PV", key=jax.random.key(0))
+    pv = res_em.score(sub, method="PV", key=jax.random.key(0), n_draws=2)
+    assert list(pv.columns) == ["pv1_math", "pv1_verbal", "pv2_math", "pv2_verbal"]
 
     # Summary & HTML rendering
     txt = res_em.summary()
