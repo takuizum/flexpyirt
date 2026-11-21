@@ -21,7 +21,7 @@ calibration and fixed item parameter calibration (FIPC).
 
 | Feature | Details | mirt check |
 |---|---|---|
-| Item models | 2PL, Rasch (latent variance estimated), 3PL, 4PL, GRM (graded response model), GPCM, PCM (latent variance estimated) | V1, V2, V3, V8, V11 |
+| Item models | 2PL, Rasch (latent variance estimated), 3PL, 4PL, GRM (graded response model), GPCM, PCM (latent variance estimated), Nominal (nominal response model; validated for one and two factors, three factors unit-tested only) | V1, V2, V3, V8, V11, V23 |
 | Priors and MAP | `NormalPrior`, `LogNormal`, `Beta` on item parameters (`Model.prior()`), natural scale, `FitResult.log_posterior` | V7 |
 | Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | V4 |
 | Equality across items | Common parameters across items and item models (`Model.equal_across_items()`, e.g. one common slope), combined with across-group equalities | V16 |
@@ -31,9 +31,11 @@ calibration and fixed item parameter calibration (FIPC).
 | Scoring | EAP, MAP, ML and WLE (1–3 factors, with standard errors) and plausible values (`PV`, 1–3 factors, explicit JAX PRNG `key`), using each group's latent distribution as the prior where applicable | V1–V5, V7–V9, V11, V13, V14 |
 | Multidimensional models | Confirmatory 2–3 factor MIRT (`Model.with_factors()`) with cross-loadings, correlated or orthogonal MVN factors, product quadrature grids, Oakes/Hessian SEs, and EAP / MAP / ML / WLE scoring | V14 |
 | Empirical histogram | `EmpiricalHistogram()` latent distributions (Woods, 2007) for skewed or multimodal traits; reference group standardized to mean 0 / variance 1 by an exact constrained M-step, free under FIPC; weights reported with moments up to the 4th | V6 |
+| Davidian curves | `DavidianCurve(degree)` seminonparametric latent distributions (Zhang & Davidian, 2001; Woods & Lin, 2009) for single-group unidimensional models; analytically standardized to exact continuous `mean`/`var` (optional `free_mean`/`free_var` for Rasch, PCM, FIPC) with joint Oakes/Hessian SEs and EAP/PV scoring | V19 |
 | Saving results | `FitResult.to_json()` / `FitResult.from_json()` (strict schema, no pickle) | — |
 | EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | V1–V5, V7–V9, V11, V14 |
 | Item fit | Orlando–Thissen S-X2 (`FitResult.item_fit()`) with mirt's cell collapsing, df, RMSEA and p-values | V15 |
+| Limited-information fit | Maydeu-Olivares & Joe M2 / M2* (`FitResult.m2()`) with df, p-value, RMSEA + CI, SRMSR and dichotomous TLI / CFI | V18 |
 | DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | V17 |
 | Scale linking | Differentiable characteristic-curve linking (`link()`, `LinkResult`: Haebara and Stocking–Lord, non-symmetric and symmetric, Ogasawara delta-method SEs, transformed items and $\theta$ scores; validated for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items) | V20 |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |

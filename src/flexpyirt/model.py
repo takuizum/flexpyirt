@@ -10,8 +10,8 @@ from typing import Any, Literal
 import pandas as pd
 
 from flexpyirt.errors import SpecificationError
-from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, Rasch
-from flexpyirt.latent import EmpiricalHistogram, LatentSpec, Normal
+from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, NominalKernel, Rasch
+from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, LatentSpec, Normal
 from flexpyirt.priors import PRIOR_TYPES, Prior
 from flexpyirt.quadrature import MAX_FACTORS
 
@@ -80,6 +80,11 @@ class Model:
             raise SpecificationError(f"Duplicated item names: {dup}.")
         if self.groups is not None:
             kinds = {type(dist) for _, dist in self.groups}
+            if DavidianCurve in kinds:
+                raise SpecificationError(
+                    "DavidianCurve is only supported for single-group models; use "
+                    "Model.with_latent() instead of with_groups()."
+                )
             if EmpiricalHistogram in kinds and len(kinds) > 1:
                 raise SpecificationError(
                     "Cannot mix EmpiricalHistogram and Normal across groups; when "
@@ -114,6 +119,17 @@ class Model:
     def is_eh(self) -> bool:
         """Whether this model uses an :class:`~flexpyirt.EmpiricalHistogram` latent distribution."""
         return isinstance(self.resolved_groups()[0][1], EmpiricalHistogram)
+
+    @property
+    def is_davidian(self) -> bool:
+        """Whether this model uses a :class:`~flexpyirt.DavidianCurve` latent distribution."""
+        return isinstance(self.resolved_groups()[0][1], DavidianCurve)
+
+    @property
+    def davidian_degree(self) -> int:
+        """Polynomial degree of the Davidian curve, or ``0`` for non-Davidian models."""
+        dist = self.resolved_groups()[0][1]
+        return dist.degree if isinstance(dist, DavidianCurve) else 0
 
     @property
     def is_multidimensional(self) -> bool:
@@ -212,11 +228,19 @@ class Model:
             fixed on the model via :meth:`fix` (whose fixed slope is used to convert ``b`` to
             ``d``). Asymptotes ``g`` (3PL/4PL) and ``u`` (4PL) are given as they are in both
             parameterizations; ``u`` may be omitted (or NaN) for 3PL items (it stays 1), and any
-            asymptote already fixed via :meth:`fix` may also be omitted (or NaN). NaN cells are
-            treated as not given.
+            asymptote already fixed via :meth:`fix` may also be omitted (or NaN). ``Nominal``
+            items take ``a``, ``ak1..ak{K-2}``, and ``d1..d{K-1}`` and support only
+            ``"slope-intercept"`` (DESIGN.md §16.6). NaN cells are treated as not given.
         items : list of str or callable, optional
             Items to fix (default: every bank item that is in the model).
         parameterization : {"slope-intercept", "irt"}
+
+        Raises
+        ------
+        SpecificationError
+            If the bank lacks a needed column or item, if ``parameterization="irt"`` is used
+            with a multidimensional model, or if ``parameterization="irt"`` is used for a
+            ``Nominal`` item (the nominal model has no IRT thresholds).
         """
         if self.is_multidimensional and parameterization == "irt":
             raise SpecificationError(
@@ -248,6 +272,11 @@ class Model:
             row = rows[item]
             item_model = lookup[item]
             kernel = self.item_kernel(item_model)
+            if parameterization == "irt" and isinstance(kernel, NominalKernel):
+                raise SpecificationError(
+                    f"parameterization='irt' is not supported for Nominal item {item!r}; "
+                    "use parameterization='slope-intercept'."
+                )
             slope = float(row["a"]) if _has_value(row, "a") else prior_fixed.get((item, "a"), 1.0)
             is_gpcm = isinstance(kernel, GPCMKernel)
             cum_b = 0.0
@@ -401,7 +430,7 @@ class Model:
 
     def with_latent(self, dist: LatentSpec) -> Model:
         """Return a single-group model with latent distribution ``dist``."""
-        if not isinstance(dist, (Normal, EmpiricalHistogram)):
+        if not isinstance(dist, (Normal, EmpiricalHistogram, DavidianCurve)):
             raise SpecificationError(f"Unsupported latent distribution {dist!r}.")
         if self.groups is not None:
             raise SpecificationError("This model has groups; set latents with with_groups().")
@@ -417,6 +446,7 @@ class Model:
 
         Every group must use ``Normal`` or every group must use ``EmpiricalHistogram`` (mixing
         them across groups raises :class:`~flexpyirt.errors.SpecificationError`; DESIGN.md §4.4).
+        :class:`~flexpyirt.DavidianCurve` is single-group only.
 
         Examples
         --------
@@ -430,6 +460,11 @@ class Model:
         if len(latents) < 2:
             raise SpecificationError("with_groups() needs at least two groups.")
         for name, dist in latents.items():
+            if isinstance(dist, DavidianCurve):
+                raise SpecificationError(
+                    f"DavidianCurve is only supported for single-group models (group {name!r}); "
+                    "use Model.with_latent() instead of with_groups()."
+                )
             if not isinstance(dist, (Normal, EmpiricalHistogram)):
                 raise SpecificationError(f"Unsupported latent distribution for group {name!r}.")
         kinds = {type(dist) for dist in latents.values()}
@@ -524,7 +559,7 @@ class Model:
             raise SpecificationError(
                 f"Unsupported prior distribution {dist!r}; use NormalPrior, LogNormal or Beta."
             )
-        if param in ("mean", "var") or param.startswith(("mean_", "var_", "cor_")):
+        if param in ("mean", "var") or param.startswith(("mean_", "var_", "cor_", "phi_")):
             raise SpecificationError(
                 f"Priors on latent-distribution parameters ({param!r}) are not supported."
             )

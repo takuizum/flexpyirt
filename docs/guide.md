@@ -47,6 +47,7 @@ from flexpyirt import (
     FourPL,
     LogNormal,
     Model,
+    Nominal,
     Normal,
     NormalPrior,
     Quadrature,
@@ -116,12 +117,16 @@ print(spec.item_names[:3], mixed.item_names)
 | `GRM(n_cat=K)` | $P(y\ge k)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$ | `a`, `d1`…`d{K-1}` | `bk = -dk/a` |
 | `GPCM(n_cat=K)` | $P(y=k)\propto\exp(k\,a\theta+d_k)$, $d_0=0$ | `a`, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})/a` |
 | `PCM(n_cat=K)` | $P(y=k)\propto\exp(k\theta+d_k)$ ($a=1$ fixed, $d_0=0$) | `a` (fixed), `d1`…`d{K-1}` | `bk = -(dk - d{k-1})` |
+| `Nominal(n_cat=K)` | $P(y=k)\propto\exp(a\,\mathrm{ak}_k\,\theta+d_k)$, $\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$ | `a`, `ak1`…`ak{K-2}`, `d1`…`d{K-1}` | — |
 
 The parameterization is mirt's slope–intercept form (`itemtype = "2PL"`, `"Rasch"`, `"3PL"`,
-`"4PL"`, `"graded"`, `"gpcm"` — mirt's `"Rasch"` on polytomous data is `PCM`). For 3PL and 4PL,
+`"4PL"`, `"graded"`, `"gpcm"`, `"nominal"` — mirt's `"Rasch"` on polytomous data is `PCM`). For 3PL and 4PL,
 `g` and `u` are estimated on the natural scale with $0 < g < u \le 1$ (mirt optimizes them on the
 logit scale; the interior ML estimates agree). Polytomous categories start at 0 (subtract 1 from
-data coded from 1, such as mirt's `Science`).
+data coded from 1, such as mirt's `Science`). `Nominal` has no display `b` columns: its
+categories are not ordered, so adjacent-category thresholds on the $	heta$ scale are not defined
+in general (they are singular when $\mathrm{ak}_k=\mathrm{ak}_{k-1}$), and mirt's
+`coef(m, IRTpars = TRUE)` reports Bock's zero-sum slopes and intercepts instead.
 
 ```python
 theta3 = rng.normal(0, 1, 2000)
@@ -151,6 +156,11 @@ print(grm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
 ```python
 gpcm = fit(Model.uniform(GPCM(n_cat=n_cat), items=grm_df.columns), grm_df)
 print(gpcm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
+```
+
+```python
+nominal = fit(Model.uniform(Nominal(n_cat=n_cat), items=grm_df.columns), grm_df)
+print(nominal.items[["item", "a", "ak1", "ak2", "d1", "d2", "d3"]].round(3))
 ```
 
 ### Fixing parameters
@@ -270,6 +280,20 @@ fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
 print(fit_table.round(3))
 ```
 
+### Limited-information fit (M2)
+
+`m2(data)` computes the Maydeu-Olivares & Joe (2005, 2006) limited-information goodness-of-fit
+statistic on the item-score means and pairwise cross-products (mirt's default `M2(type = "M2*")`;
+identically $M_2$ for dichotomous items), together with RMSEA and its confidence interval
+(`ci=0.90` by default), SRMSR, and — for dichotomous models — TLI and CFI against the independence
+null model (polytomous models report `NaN` for `tli` and `cfi`; see [DESIGN §16.3](DESIGN.md)).
+It requires complete data and a single-group, unidimensional, `Normal` MLE fit (no priors).
+
+```python
+m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi
+print(m2_table.round(3))
+```
+
 ## 6. Standard errors
 
 - **`se="oakes"`** (default): the observed information from Oakes' (1999) identity. The second
@@ -317,7 +341,10 @@ entering a threshold is fixed.
   distribution as the prior; `"ML"` and `"WLE"` use the item likelihood only.
 - Missing responses are dropped from the likelihood (and from $I(\theta)$ in `"WLE"`) for every
   method. In 3PL/4PL models, low-score patterns whose likelihood increases monotonically toward
-  $-\infty$ due to guessing also return $-\infty$ with SE NaN under `"ML"`.
+  $-\infty$ due to guessing also return $-\infty$ with SE NaN under `"ML"`. For `Nominal` items,
+  "lowest" / "highest" means the category with the smallest / largest category slope
+  $a\,\mathrm{ak}_c$, which need not be category 0 / $K-1$ (e.g. with $\mathrm{ak}_1<0$ the all-0
+  pattern has a finite ML estimate; mirt returns $-\infty$ there, [VALIDATION.md](VALIDATION.md) V23).
 - **`method="PV"` requires an explicit JAX PRNG `key`** (e.g. `jax.random.key(0)`): flexpyirt
   never uses global random state, so results are fully deterministic given `key` while giving
   independent draws to respondents even when they share the same response pattern.
@@ -404,6 +431,49 @@ print(eh.latent_weights.head())  # group, node, weight
   `SpecificationError`.
 - Many histogram weights are only weakly determined, so EM converges slowly at tight tolerances;
   `BAEM(squarem=True)` helps.
+
+### Davidian curves
+
+`DavidianCurve(degree)` models a smooth non-normal unidimensional latent density
+$h_k(z;\boldsymbol\phi) = P_k(z;\boldsymbol\phi)^2\varphi(z)$ using $k \in \{1,\dots,10\}$ angle
+parameters `phi_1`…`phi_k` (Zhang & Davidian, 2001; Woods & Lin, 2009), analytically standardized
+so the continuous mean and variance equal `mean` (default `0`) and `var` (default `1`) for every
+$\boldsymbol\phi$. Unlike `EmpiricalHistogram`, it adds only $k$ latent parameters and provides
+joint Oakes and Hessian standard errors for both item and latent parameters.
+
+```python
+from flexpyirt import DavidianCurve
+
+theta_skew = (rng.chisquare(4.0, 1200) - 4.0) / np.sqrt(8.0)
+skew_df = pd.DataFrame(simulate_2pl(a_true, d_true, theta_skew, rng), columns=items)
+
+dc = fit(
+    Model.uniform(TwoPL(), items=items).with_latent(DavidianCurve(3)),
+    skew_df,
+    method=BAEM(squarem=True),
+)
+print(dc.latent.round(3))  # mean, var, phi_1..phi_3 and SEs
+print(dc.score(skew_df.iloc[:3], method="EAP").round(3))  # uses the fitted Davidian prior
+```
+
+- **Identification**: `mean` and `var` follow the same rules as `Normal` (fixed at `0` and `1` by
+  default; pass `free_var=True` for Rasch/PCM, or `DavidianCurve.free(degree)` under FIPC).
+- **Scope**: single-group unidimensional models only (`with_groups()` and `with_factors()` raise
+  `SpecificationError`).
+- **Scoring**: `"EAP"` and `"PV"` use the fitted Davidian density; `"ML"` and `"WLE"` are
+  likelihood-only; `"MAP"` raises `SpecificationError` because a Davidian density can be multimodal
+  and vanish at real roots of $P_k$.
+- **Near-normal traits and local maxima**: at $\boldsymbol\phi=\mathbf 0$ (the normal density) the
+  first-order effects of `phi_1` and `phi_2` are pure location / scale changes, which the
+  standardization removes, so the Fisher information is singular there (in `phi_1` for
+  `degree=1`). When the trait is close to normal, the angles are poorly determined, their
+  standard errors are unreliable, and a likelihood-ratio test of `DavidianCurve` against `Normal`
+  does not follow its usual $\chi^2$ distribution; compare degrees (and `Normal`) by AIC / BIC
+  instead (Woods & Lin, 2009). The likelihood can also have several local maxima (in a `degree=1`
+  example the default start reached `phi_1 = 0.50` while a start at `-1.0` reached a fit 2.2
+  log-likelihood points better), so for important analyses refit from a few starting angles
+  (edit `value` of the `phi_*` rows of `Model.parameter_table()` and pass `table=`) and keep the
+  fit with the highest `loglik`.
 
 ## 9. Multiple groups
 
@@ -618,7 +688,7 @@ the grid makes them agree ([VALIDATION.md](VALIDATION.md)).
 **Gauss–Hermite.** For `Normal` latent distributions, `Quadrature.gauss_hermite(n)` places `n`
 Gauss–Hermite nodes per dimension and reweights them for the estimated mean and variance; it is
 usually more accurate than an equispaced grid with the same number of points near $N(0,1)$, but
-loses accuracy for variances well above 1. `EmpiricalHistogram` needs an equispaced grid.
+loses accuracy for variances well above 1. `EmpiricalHistogram` and `DavidianCurve` need an equispaced grid.
 
 ```python
 gh = Quadrature.gauss_hermite(41)
@@ -754,6 +824,7 @@ except SpecificationError as e:
 
 ## References
 
+- Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
@@ -771,5 +842,9 @@ except SpecificationError as e:
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
+- Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
+- Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
+- Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.

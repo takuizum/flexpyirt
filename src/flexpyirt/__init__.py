@@ -6,8 +6,8 @@ from importlib.metadata import PackageNotFoundError, version
 
 from flexpyirt import errors
 from flexpyirt.fit import fit
-from flexpyirt.items import GPCM, GRM, PCM, FourPL, Rasch, ThreePL, TwoPL
-from flexpyirt.latent import EmpiricalHistogram, Normal
+from flexpyirt.items import GPCM, GRM, PCM, FourPL, Nominal, Rasch, ThreePL, TwoPL
+from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, Normal
 from flexpyirt.linking import LinkResult, link
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
@@ -26,12 +26,14 @@ __all__ = [
     "GRM",
     "PCM",
     "Beta",
+    "DavidianCurve",
     "EmpiricalHistogram",
     "FitResult",
     "FourPL",
     "LinkResult",
     "LogNormal",
     "Model",
+    "Nominal",
     "Normal",
     "NormalPrior",
     "Quadrature",

@@ -11,7 +11,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - モデル: [`Model`](#model)
-- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm)
+- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormal`](#lognormal), [`Beta`](#beta)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
@@ -117,8 +117,8 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 `"EAP"`, `"MAP"`, `"ML"`, `"WLE"` が `theta`, `se` 列、`"PV"` が `pv1`…`pv{n_draws}` 列。多次元モデルでは
 宣言した因子順に `theta_<factor>`, `se_<factor>` 列（`"PV"` は `pv<m>_<factor>`）。
 
-**例外**: 不正な `method`、`EmpiricalHistogram` で `method="MAP"` を指定した場合、`"PV"` で `key` が未指定・不正、決定的手法に
-`key` を渡した場合、または `n_draws` が正の整数でない場合に `SpecificationError`。
+**例外**: 不正な `method`、`EmpiricalHistogram` または `DavidianCurve` で `method="MAP"` を指定した場合、`"PV"` で
+`key` が未指定・不正、決定的手法に `key` を渡した場合、または `n_draws` が正の整数でない場合に `SpecificationError`。
 
 #### `FitResult.item_fit`
 
@@ -141,8 +141,36 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 **戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
 `df <= 0` になる項目は `df = 0` で統計量は NaN。
 
-**例外**: 多次元・多母集団・`EmpiricalHistogram` のモデル、欠測を含むデータ、観測されないカテゴリがある項目、
-正でない `mincell` の場合に `SpecificationError`。
+**例外**: 多次元・多母集団・`EmpiricalHistogram`・`DavidianCurve` のモデル、欠測を含むデータ、観測されないカテゴリがある
+項目、正でない `mincell` の場合に `SpecificationError`。
+
+#### `FitResult.m2`
+
+```text
+m2(data, *, item_names=None, ci=0.90) -> DataFrame
+```
+
+Maydeu-Olivares & Joe (2005, 2006) による限定情報の適合度統計量 $M_2$ / $M_2^*$
+（[ガイド 5 節](guide.ja.md#限定情報の適合度m2)）。$J$ 個の項目得点平均と $\binom{J}{2}$ 個の交差積から計算する
+（mirt の既定 `M2(type = "M2*")` に対応。2 値項目では厳密に $M_2$）。ヤコビ行列
+$\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、すべての自由な項目・潜在分布パラメタを含む
+（共有パラメタは 1 回）。
+
+| 引数 | 説明 |
+|---|---|
+| `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
+| `item_names` | `data` が配列のときの列名 |
+| `ci` | RMSEA 信頼区間の信頼水準（`(0, 1)` の開区間、既定 `0.90`） |
+
+**戻り値**: 1 行の `DataFrame`。列は `m2`, `df`（$J + \binom{J}{2} - k$）, `p`, `rmsea`,
+`rmsea_<lo>`, `rmsea_<hi>`（`ci` に従う。例: `0.90` で `rmsea_5`, `rmsea_95`）, `srmsr`,
+`tli`, `cfi`。`df <= 0` または $\Delta_2$ がランク落ちしているとき（1 次・2 次モーメントから局所識別できないとき）は
+`FlexpyirtWarning` を出し、`m2`・`p`・RMSEA・信頼区間・`tli`・`cfi` を `NaN` とする（`df` と `srmsr` は有限のまま）。
+多値モデルでは `tli` と `cfi` を `NaN` とする（DESIGN §16.3）。2 値モデルで帰無モデルの $M_2$ が当てはめモデルの $M_2$
+以下のときは `FlexpyirtWarning` を出し `tli`・`cfi` を `NaN` とする。
+
+**例外**: JAX 64 ビットが無効なとき `PrecisionError`。多次元・多母集団・`EmpiricalHistogram`・事前分布つきの
+MAP モデル、欠測を含むデータ、不正な `ci`、項目数または回答者数が 2 未満のとき `SpecificationError`。
 
 #### `FitResult.dif`
 
@@ -428,6 +456,21 @@ $P(y=k\mid\theta)=\exp(k\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\theta+d_c)$（$d_0=0$
 潜在分布の分散を推定する（多値データに対する mirt の `itemtype = "Rasch"` と同じ）。`n_cat = 2` では
 `Rasch` と一致する。`n_cat` が同じ `GPCM` と `GPCMKernel` を共有する。
 
+### `Nominal`
+
+```text
+Nominal(n_cat)
+```
+
+Thissen, Cai & Bock (2010) の全体傾き × 採点関数パラメタ化による名義反応モデル（Bock, 1972）。カテゴリは
+`0..n_cat-1`（`n_cat >= 2`）。
+$P(y=k\mid\theta)=\exp(a\,\mathrm{ak}_k\,\theta+d_k)/\sum_{c=0}^{K-1}\exp(a\,\mathrm{ak}_c\,\theta+d_c)$
+（$\mathrm{ak}_0=0$、$\mathrm{ak}_{K-1}=K-1$、$d_0=0$ 固定）。内部パラメタは `a`（多次元モデルでは
+`a1`…`aD`）、`ak1`…`ak{K-2}`、`d1`…`d{K-1}`（すべて自由推定・順序制約なし、表示用の `b` / `bk` 列はなし）。
+mirt の `itemtype = "nominal"` と同じ。$\mathrm{ak}_k=k$ に固定すると `GPCM(n_cat)` と厳密に一致する
+（`n_cat = 2` では自由な `ak` パラメタがなく、`Nominal(2)` は `GPCM(2)` / `TwoPL` と一致する）。
+`NominalKernel(n_cat)` を用いる。
+
 ---
 
 ## 事前分布
@@ -510,6 +553,32 @@ EmpiricalHistogram(*, min_weight=1e-10)
 
 **例外**: `min_weight` が不正、群間で `EmpiricalHistogram` と `Normal` を混在させた、または多次元モデルの場合に
 `SpecificationError`。切片を固定していて非ゼロの傾きを固定していない場合（分散のみの制約は未対応）は `IdentificationError`。
+
+### `DavidianCurve`
+
+```text
+DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)
+DavidianCurve.free(degree, *, mean=0.0, var=1.0)
+```
+
+次数 `degree`（`1..10`）の半ノンパラメトリック Davidian 曲線潜在密度（Zhang & Davidian, 2001; Woods & Lin, 2009;
+[ガイド 8 節](guide.ja.md#davidian-曲線)）。正規化確率論的 Hermite 多項式と $k$ 個の角度パラメタ `phi_1`…`phi_k`
+による単位球面係数で $h_k(z;\boldsymbol\phi) = P_k(z;\boldsymbol\phi)^2\varphi(z)$ を構成し
+（$\boldsymbol\phi = \mathbf 0$ で非特異に $N(\mu,\sigma^2)$ を再現）、$h_k$ の厳密な連続モーメントで解析的に標準化することで
+任意の $\boldsymbol\phi$ について連続平均・分散が `mean`・`var` に一致する。求積重みは格子上で正規化するため EM は
+単調（非減少）で、自由な項目パラメタ・潜在パラメタすべてに対して厳密な Oakes / Hessian 標準誤差が得られる。単一群の 1 次元モデルのみ。
+Fisher 情報行列は $\boldsymbol\phi = \mathbf 0$ で `phi_1`・`phi_2` 方向（`degree=1` では `phi_1`）に特異なため、正規に近い
+特性では角度の標準誤差が信頼できず、`Normal` に対する尤度比検定は標準的でなく（AIC / BIC を使う）、局所最大が複数ありうる
+（[ガイド 8 節](guide.ja.md#davidian-曲線)）。
+
+| 引数 | 説明 |
+|---|---|
+| `degree` | 整数の多項式次数 $k \in \{1,\dots,10\}$（角度パラメタ `phi_1`…`phi_k` の個数） |
+| `mean`, `var` | 連続平均と正の分散の値（自由推定時は初期値） |
+| `free_mean`, `free_var` | `mean`・`var` を推定するか（識別性の規則は `Normal` と同じ） |
+
+**例外**: `degree`・`mean`・`var`・フラグが不正、または `Model.with_groups()`・`Model.with_factors()` と組み合わせた場合に
+`SpecificationError`。`free_mean`・`free_var` に必要な固定切片・固定傾きがない場合は `IdentificationError`。
 
 ---
 
@@ -602,7 +671,7 @@ mirt の既定と同じく、1 因子で 61 点、2 因子で各軸 31 点（$31
 
 `Quadrature.gauss_hermite(n_points)` は `Normal` 潜在分布用に Gauss–Hermite 節点 $\sqrt2\,x_q$（次元あたり 3–200 点、
 2・3 次元では直積則）を使い、推定した平均・共分散に合わせて重みを付け直す（DESIGN §15.44）。`base_log_weights(n_factors)` は
-節点ごとの固定の対数重み（等間隔格子では 0）を返す。`EmpiricalHistogram` とは併用できない。
+節点ごとの固定の対数重み（等間隔格子では 0）を返す。`EmpiricalHistogram`・`DavidianCurve` とは併用できない。
 
 ---
 
