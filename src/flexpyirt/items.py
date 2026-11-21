@@ -1,11 +1,11 @@
 """Item response models (Spec layer) and their log-probability kernels (Core layer).
 
-An *item model* (``TwoPL``, ``Rasch``, ``ThreePL``, ``FourPL``, ``GRM``, ``GPCM``, ``PCM``) is
-what the user writes in a specification. It owns the default free/fixed pattern and starting
-values. Its *kernel* holds only the pure log-probability function used inside jit. Item models
-that share a kernel (``Rasch`` and ``TwoPL``; ``ThreePL`` and ``FourPL``; ``GRM`` with the same
-number of categories; ``GPCM`` and ``PCM`` with the same number of categories) are estimated
-together as one "family" (DESIGN.md §4.3, §6).
+An *item model* (``TwoPL``, ``Rasch``, ``ThreePL``, ``FourPL``, ``GRM``, ``GPCM``, ``PCM``,
+``Nominal``) is what the user writes in a specification. It owns the default free/fixed pattern and
+starting values. Its *kernel* holds only the pure log-probability function used inside jit. Item
+models that share a kernel (``Rasch`` and ``TwoPL``; ``ThreePL`` and ``FourPL``; ``GRM`` with the
+same number of categories; ``GPCM`` and ``PCM`` with the same number of categories; ``Nominal``
+with the same number of categories) are estimated together as one "family" (DESIGN.md §4.3, §6).
 """
 
 from __future__ import annotations
@@ -32,6 +32,8 @@ __all__ = [
     "GradedKernel",
     "ItemKernel",
     "ItemModel",
+    "Nominal",
+    "NominalKernel",
     "Rasch",
     "ThreePL",
     "TwoPL",
@@ -445,6 +447,86 @@ class GPCMKernel:
         return jax.nn.log_softmax(eta, axis=-1)
 
 
+@dataclass(frozen=True)
+class NominalKernel:
+    r"""Nominal response kernel (Bock, 1972; Thissen, Cai & Bock, 2010) in slope–intercept form.
+
+    .. math::
+        P(y=k\mid\boldsymbol\theta)
+        = \frac{\exp\big(\mathrm{ak}_k\,\mathbf a^\top\boldsymbol\theta + d_k\big)}
+               {\sum_{c=0}^{K-1}\exp\big(\mathrm{ak}_c\,\mathbf a^\top\boldsymbol\theta + d_c\big)},
+        \qquad k=0,\dots,K-1,\quad \mathrm{ak}_0=0,\ \mathrm{ak}_{K-1}=K-1,\ d_0=0,
+
+    with fixed boundary scoring coefficients :math:`\mathrm{ak}_0=0`,
+    :math:`\mathrm{ak}_{K-1}=K-1` and intercept :math:`d_0=0` (not parameters), matching mirt's
+    ``itemtype="nominal"`` (Chalmers, 2012). Computed with ``jax.nn.log_softmax``; there is no
+    ordering constraint on :math:`\mathrm{ak}_1,\dots,\mathrm{ak}_{K-2}` or
+    :math:`d_1,\dots,d_{K-1}` (DESIGN.md §16.8).
+    """
+
+    n_cat: int
+    n_factors: int = 1
+
+    def __post_init__(self) -> None:
+        """Validate the number of categories and factors."""
+        if self.n_cat < 2:
+            raise SpecificationError(f"Nominal needs at least 2 categories, got {self.n_cat}.")
+        _validate_n_factors(self.n_factors)
+
+    def with_factors(self, n_factors: int) -> NominalKernel:
+        """Return a nominal kernel with ``n_factors`` latent dimensions."""
+        return replace(self, n_factors=n_factors)
+
+    @property
+    def param_names(self) -> tuple[str, ...]:
+        """``("a", "ak1", ..., "ak{K-2}", "d1", ..., "d{K-1}")`` (or ``a1..aD`` for ``D > 1``)."""
+        return (
+            *_slope_names(self.n_factors),
+            *(f"ak{k}" for k in range(1, self.n_cat - 1)),
+            *(f"d{k}" for k in range(1, self.n_cat)),
+        )
+
+    @property
+    def slope_params(self) -> tuple[str, ...]:
+        """``("a",)`` for ``D == 1`` or ``("a1", ..., "aD")`` for ``D > 1``."""
+        return _slope_names(self.n_factors)
+
+    @property
+    def intercept_params(self) -> tuple[str, ...]:
+        """``("d1", ..., "d{K-1}")``; ``ak1..ak{K-2}`` carry relative category shape."""
+        return tuple(f"d{k}" for k in range(1, self.n_cat))
+
+    @property
+    def irt_names(self) -> tuple[str, ...]:
+        """Empty tuple (the nominal model has no theta-scale display thresholds; DESIGN §16.8)."""
+        return ()
+
+    @property
+    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+        """Empty tuple."""
+        return ()
+
+    def irt_thresholds(self, params: Array) -> Array:
+        """Return an empty 1-D array (no display thresholds for the nominal model)."""
+        return jnp.empty((0,), dtype=params.dtype)
+
+    def log_prob(self, theta: Array, params: Array) -> Array:
+        """Return ``(Q, n_cat)`` category log-probabilities."""
+        d = self.n_factors
+        n_ak = self.n_cat - 2
+        ak = jnp.concatenate(
+            [
+                jnp.zeros((1,), dtype=params.dtype),
+                params[d : d + n_ak],
+                jnp.array([float(self.n_cat - 1)], dtype=params.dtype),
+            ]
+        )
+        intercepts = jnp.concatenate([jnp.zeros((1,), dtype=params.dtype), params[d + n_ak :]])
+        lin = _linear_predictor(theta, params[:d], d)
+        eta = lin[:, None] * ak[None, :] + intercepts[None, :]
+        return jax.nn.log_softmax(eta, axis=-1)
+
+
 class ItemModel(Protocol):
     """An item model as used in a specification (Spec layer)."""
 
@@ -773,3 +855,50 @@ class PCM:
     def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
         """Unbounded."""
         return _unbounded(self.n_cat)
+
+
+@dataclass(frozen=True)
+class Nominal:
+    r"""Nominal response model (Bock, 1972) with ``n_cat`` categories ``0..n_cat-1``.
+
+    .. math::
+        P(y=k\mid\theta)
+        = \frac{\exp(a\,\mathrm{ak}_k\,\theta + d_k)}
+               {\sum_{c=0}^{K-1}\exp(a\,\mathrm{ak}_c\,\theta + d_c)},
+        \qquad \mathrm{ak}_0 = 0,\quad \mathrm{ak}_{K-1} = K - 1,\quad d_0 = 0.
+
+    Thissen, Cai & Bock (2010) overall-slope × scoring-function parameterization, matching
+    mirt's ``itemtype="nominal"`` (Chalmers, 2012; DESIGN.md §16.8). The overall slope :math:`a`
+    (or :math:`a_1,\dots,a_D` for multidimensional models), interior scoring coefficients
+    :math:`\mathrm{ak}_1,\dots,\mathrm{ak}_{K-2}`, and intercepts :math:`d_1,\dots,d_{K-1}` are
+    estimated with no ordering constraint. Fixing :math:`\mathrm{ak}_k=k` reproduces
+    :class:`GPCM` identically (and with ``n_cat=2`` there are no free ``ak`` parameters, so
+    ``Nominal(2)`` equals :class:`GPCM`\(2\) / :class:`TwoPL`).
+    """
+
+    n_cat: int
+    name: ClassVar[str] = "Nominal"
+
+    def __post_init__(self) -> None:
+        """Validate the number of categories."""
+        if self.n_cat < 2:
+            raise SpecificationError(f"Nominal needs at least 2 categories, got {self.n_cat}.")
+
+    @property
+    def kernel(self) -> NominalKernel:
+        """Nominal kernel with this number of categories."""
+        return NominalKernel(self.n_cat)
+
+    def default_free(self) -> tuple[bool, ...]:
+        """All parameters are free."""
+        return (True,) * (2 * self.n_cat - 2)
+
+    def start_values(self, item: np.ndarray, rest: np.ndarray) -> np.ndarray:
+        """Return starting values at the GPCM point ``ak_k = k`` (DESIGN.md §4.10, §16.8)."""
+        a = _slope_start(item, rest)
+        ak = [float(k) for k in range(1, self.n_cat - 1)]
+        return np.array([a, *ak, *_gpcm_intercept_starts(item, self.n_cat, a)])
+
+    def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
+        """Unbounded."""
+        return _unbounded(2 * self.n_cat - 2)
