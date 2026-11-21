@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from jax import Array
 
-from flexpyirt import _core
+from flexpyirt import _core, _scoring
 from flexpyirt._compile import LATENT_ITEM, coerce_groups, coerce_responses, compile_problem
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
 from flexpyirt.items import ItemKernel
@@ -26,7 +26,23 @@ if TYPE_CHECKING:
 
 __all__ = ["FitResult"]
 
+ScoreMethod = Literal["EAP", "MAP", "ML", "WLE", "PV"]
+_SCORE_METHODS: tuple[str, ...] = ("EAP", "MAP", "ML", "WLE", "PV")
+
 _eap = jax.jit(_core.eap)
+_map = jax.jit(_scoring.map_scores)
+_ml = jax.jit(_scoring.ml_scores)
+_wle = jax.jit(_scoring.wle_scores)
+_pv = jax.jit(_scoring.plausible_values, static_argnames=("n_draws",))
+
+
+def _is_prng_key(key: Any) -> bool:
+    """Return True iff ``key`` is a JAX PRNG key (``jax.random.key`` or ``PRNGKey``)."""
+    if not isinstance(key, jax.Array):
+        return False
+    if jnp.issubdtype(key.dtype, jax.dtypes.prng_key):
+        return key.ndim == 0
+    return bool(key.dtype == jnp.uint32 and key.shape == (2,))
 
 
 @cache
@@ -349,41 +365,111 @@ class FitResult:
         self,
         data: Any,
         *,
-        method: Literal["EAP"] = "EAP",
+        method: ScoreMethod = "EAP",
         group: Any = None,
         item_names: list[str] | None = None,
+        key: Array | None = None,
+        n_draws: int = 5,
     ) -> pd.DataFrame:
-        r"""Score respondents.
+        r"""Score respondents on the fitted model.
+
+        Supports five scoring methods (DESIGN.md §8, §15.21–§15.25), all dropping missing
+        responses from the likelihood:
+
+        - ``"EAP"``: expected a posteriori :math:`\hat\theta=\sum_q\theta_q h_{pq}` and posterior
+          SD on the fitted model's quadrature grid using the respondent's group's estimated latent
+          distribution as prior (Bock & Mislevy, 1982).
+        - ``"MAP"``: Bayes modal estimate maximizing
+          :math:`\log L(\theta\mid y) + \log\phi(\theta;\mu_g,\sigma_g^2)` with the group's
+          estimated normal latent distribution as a continuous prior, and SE
+          :math:`(-\partial^2/\partial\theta^2)^{-1/2}` at the mode. All-missing rows return
+          :math:`(\mu_g, \sigma_g)`.
+        - ``"ML"``: maximum likelihood estimate maximizing :math:`\log L(\theta\mid y)`, with
+          observed-information SE :math:`(-\partial^2\log L/\partial\theta^2)^{-1/2}`. Patterns
+          with no finite maximum (all lowest / all highest observed categories, or diverging
+          3PL/4PL tails) return ``-inf`` / ``+inf`` with SE ``NaN``; all-missing rows return
+          ``NaN`` with SE ``NaN``.
+        - ``"WLE"``: weighted likelihood estimate (Warm, 1989; Firth, 1993) solving
+          :math:`\partial\log L/\partial\theta + J(\theta)/(2I(\theta)) = 0` with observed-item
+          Fisher test information :math:`I(\theta)` and :math:`J(\theta)=\partial I/\partial\theta`
+          from JAX autodiff, equivalently maximizing
+          :math:`\log L(\theta\mid y) + \tfrac{1}{2}\log I(\theta)`. Finite on extreme patterns;
+          all-missing rows return ``NaN`` with SE ``NaN``. SE is the inverse square root of the
+          negative second derivative of the WLE objective (matching mirt's default).
+        - ``"PV"``: ``n_draws`` independent plausible values per respondent drawn from the
+          posterior on a fine equispaced grid with piecewise-linear inverse-CDF interpolation
+          (Mislevy, 1991). Requires an explicit JAX PRNG ``key`` and is deterministic given
+          ``key``.
 
         Parameters
         ----------
         data : DataFrame or array-like
             Responses on the fitted items (NaN is missing).
-        method : {"EAP"}
-            Expected a posteriori with the respondent's group's estimated latent distribution as
-            prior; ``se`` is the posterior SD (Bock & Mislevy, 1982). Other methods arrive in M4.
+        method : {"EAP", "MAP", "ML", "WLE", "PV"}, default "EAP"
+            Scoring method.
         group : array-like, optional
             Group labels (required for a multiple-group model).
         item_names : list of str, optional
             Column names when ``data`` is an array.
+        key : jax.Array, optional
+            JAX PRNG key (e.g. ``jax.random.key(0)``). Required when ``method="PV"``; must be
+            ``None`` for deterministic methods.
+        n_draws : int, default 5
+            Number of plausible values per respondent when ``method="PV"`` (must be ``>= 1``).
 
         Returns
         -------
         DataFrame
-            Columns ``theta`` and ``se``, one row per respondent (index follows ``data`` when it
-            is a DataFrame).
+            For ``"EAP"``, ``"MAP"``, ``"ML"``, and ``"WLE"``: columns ``theta`` and ``se``.
+            For ``"PV"``: columns ``pv1`` .. ``pv{n_draws}``. One row per respondent; index
+            follows ``data`` when it is a DataFrame.
+
+        Raises
+        ------
+        SpecificationError
+            If ``method`` is unknown, ``key`` is missing or invalid for ``"PV"``, ``key`` is
+            supplied for a non-PV method, or ``n_draws`` is not a positive integer.
         """
-        if method != "EAP":
-            raise SpecificationError(f"Unsupported scoring method {method!r}; M1 supports 'EAP'.")
+        if method not in _SCORE_METHODS:
+            raise SpecificationError(
+                f"Unsupported scoring method {method!r}; use one of {_SCORE_METHODS}."
+            )
+        if method == "PV":
+            if key is None:
+                raise SpecificationError(
+                    "method='PV' requires an explicit JAX PRNG key (e.g. key=jax.random.key(0))."
+                )
+            if not _is_prng_key(key):
+                raise SpecificationError(
+                    "key must be a JAX PRNG key from jax.random.key() or jax.random.PRNGKey()."
+                )
+            if isinstance(n_draws, bool) or not isinstance(n_draws, int) or n_draws < 1:
+                raise SpecificationError(f"n_draws must be a positive integer, got {n_draws!r}.")
+        elif key is not None:
+            raise SpecificationError(f"key= is only used with method='PV', not {method!r}.")
+
         y = coerce_responses(data, self._model, item_names=item_names)
         codes, _ = coerce_groups(group, self._model, y.shape[0], require_all=False)
         compiled = compile_problem(self._model, y, codes, self.parameters, self._quadrature)
-        theta, sd = _eap(compiled.problem, jax.numpy.asarray(self._eta))
+        eta = jnp.asarray(self._eta)
         n = compiled.n_patterns
         inverse = compiled.inverse
         index = data.index if isinstance(data, pd.DataFrame) else None
+
+        if method == "PV":
+            assert key is not None
+            n_obs = int(inverse.shape[0])
+            bucket = max(8, 1 << (n_obs - 1).bit_length())
+            inv_pad = np.zeros(bucket, dtype=np.int32)
+            inv_pad[:n_obs] = inverse
+            draws = _pv(compiled.problem, eta, jnp.asarray(inv_pad), key, n_draws=n_draws)
+            cols = [f"pv{m}" for m in range(1, n_draws + 1)]
+            return pd.DataFrame(np.asarray(draws)[:n_obs], columns=cols, index=index)
+
+        scorer = {"EAP": _eap, "MAP": _map, "ML": _ml, "WLE": _wle}[method]
+        theta, se = scorer(compiled.problem, eta)
         return pd.DataFrame(
-            {"theta": np.asarray(theta)[:n][inverse], "se": np.asarray(sd)[:n][inverse]},
+            {"theta": np.asarray(theta)[:n][inverse], "se": np.asarray(se)[:n][inverse]},
             index=index,
         )
 
