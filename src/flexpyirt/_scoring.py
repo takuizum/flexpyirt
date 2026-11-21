@@ -272,17 +272,20 @@ def ml_scores(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
         f_hat = obj(theta_hat)
         f_lo = obj(lo)
         f_hi = obj(hi)
+        lo_beats_hat = f_lo > f_hat + 1e-12
+        hi_beats_hat = f_hi > f_hat + 1e-12
+        endpoint_beats_hat = lo_beats_hat | hi_beats_hat
         diverged = (
             (~ok_h)
             | (se_raw > _ML_MAX_SE)
             | (jnp.abs(theta_hat) >= _MAX_THETA - 1e-2)
-            | (f_lo > f_hat + 1e-12)
-            | (f_hi > f_hat + 1e-12)
+            | endpoint_beats_hat
         )
+        sign_hat = jnp.where(theta_hat < 0.0, -jnp.inf, jnp.inf)
         div_val = jnp.where(
-            f_lo > f_hi,
-            -jnp.inf,
-            jnp.where(f_hi > f_lo, jnp.inf, jnp.where(theta_hat < 0.0, -jnp.inf, jnp.inf)),
+            endpoint_beats_hat,
+            jnp.where(f_lo > f_hi, -jnp.inf, jnp.where(f_hi > f_lo, jnp.inf, sign_hat)),
+            sign_hat,
         )
         theta_out = jnp.where(
             all_missing,

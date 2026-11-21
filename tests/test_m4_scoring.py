@@ -216,6 +216,65 @@ def test_ml_3pl_diverging_low_score_pattern_is_neg_inf() -> None:
     assert ml["theta"].iloc[3] == np.inf and np.isnan(ml["se"].iloc[3])
 
 
+def _fixed_3pl(a: list[float], d: list[float], g: list[float]) -> FitResult:
+    """Build a 3PL FitResult with exact fixed item and standard-normal latent parameters."""
+    items = [f"c{j}" for j in range(1, len(a) + 1)]
+    dummy = pd.DataFrame(np.vstack([np.zeros(len(a)), np.ones(len(a))]), columns=items)
+    spec = Model.uniform(ThreePL(), items=items)
+    table = spec.parameter_table(dummy)
+    vals = []
+    for item, param in zip(table["item"], table["param"], strict=True):
+        if item == "__latent__":
+            vals.append(0.0 if param == "mean" else 1.0)
+        else:
+            idx = items.index(item)
+            if param == "a":
+                vals.append(float(a[idx]))
+            elif param == "d":
+                vals.append(float(d[idx]))
+            elif param == "g":
+                vals.append(float(g[idx]))
+            else:
+                vals.append(1.0)
+    table["value"] = vals
+    table["free"] = False
+    return fit(spec, dummy, table=table, se=None)
+
+
+def test_ml_diverged_sign_uses_theta_hat_unless_endpoint_dominates() -> None:
+    """Diverged ML uses sign(theta_hat) unless an endpoint actually exceeds f(theta_hat).
+
+    Regression test: in 3PL, f(-20) > f(+20) holds for nearly every non-all-1 pattern because the
+    lower asymptote is finite while P(y=0) -> 0 as theta -> +inf. When a positive interior mode
+    diverges via SE > 30 with f(theta_hat) > max(f(-20), f(+20)), ML must return +inf (matching
+    mirt:::ML), not -inf. Conversely, when f(-20) strictly exceeds f(theta_hat), ML returns -inf.
+    """
+    a = [2.0, 2.0, 2.0, 2.0, 1.0]
+    g = [0.25] * 5
+    items = [f"c{j}" for j in range(1, 6)]
+    pats = pd.DataFrame(
+        [
+            [1, 1, 1, 1, 0],  # 4 easy items right, 1 very hard item wrong -> positive mode
+            [0, 0, 0, 0, 1],  # 4 easy items wrong, 1 very hard item right -> -inf dominates
+        ],
+        columns=items,
+        dtype=float,
+    )
+
+    # At d5 = -12, the positive mode is still finite (SE < 30).
+    res_fin = _fixed_3pl(a, [1.0, 1.0, 1.0, 1.0, -12.0], g)
+    ml_fin = res_fin.score(pats, method="ML")
+    assert ml_fin["theta"].iloc[0] > 4.0 and np.isfinite(ml_fin["se"].iloc[0])
+    assert ml_fin["theta"].iloc[1] == -np.inf and np.isnan(ml_fin["se"].iloc[1])
+
+    # At d5 = -13, the positive mode has SE > 30 with f(theta_hat) >> f(-20) > f(+20): expect +inf.
+    res_div = _fixed_3pl(a, [1.0, 1.0, 1.0, 1.0, -13.0], g)
+    ml_div = res_div.score(pats, method="ML")
+    assert ml_div["theta"].iloc[0] == np.inf and np.isnan(ml_div["se"].iloc[0])
+    # When the -inf endpoint genuinely dominates f(theta_hat), expect -inf.
+    assert ml_div["theta"].iloc[1] == -np.inf and np.isnan(ml_div["se"].iloc[1])
+
+
 # ---- WLE finite on extremes & stationary equation check ------------------------------------
 
 
