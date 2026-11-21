@@ -16,6 +16,8 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
@@ -325,3 +327,49 @@ def test_ml_multidim_extreme_and_missing_patterns() -> None:
     assert ml.iloc[2].isna().all()
     wle = res.score(pats, method="WLE")
     assert np.isfinite(wle.iloc[:2].to_numpy()).all() and wle.iloc[2].isna().all()
+
+
+@pytest.mark.parametrize("name", ["mirt2d_2pl_cross", "mirt3d_2pl"])
+def test_pv_multidim_matches_posterior_moments(name: str) -> None:
+    """PV mean, SD and correlations match the grid posterior within Monte Carlo error (§15.42)."""
+    from flexpyirt import _core
+    from flexpyirt._compile import coerce_groups, coerce_responses, compile_problem
+
+    res, case = _fixed_at_mirt(name), load(name)
+    pats = case.patterns.iloc[[0, 5, 17, 40]].reset_index(drop=True)
+    pats.iloc[3, :4] = np.nan
+    fs = list(case.raw["factors"])
+    n_draws = 4000
+    pv = res.score(pats, method="PV", key=jax.random.key(11), n_draws=n_draws)
+    assert list(pv.columns[: len(fs)]) == [f"pv1_{f}" for f in fs]
+    draws = np.stack(
+        [pv[[f"pv{m}_{f}" for m in range(1, n_draws + 1)]].to_numpy() for f in fs], axis=2
+    )  # (N, n_draws, D)
+
+    # Grid posterior moments on the fitted product grid.
+    y = coerce_responses(pats, res._model)
+    codes, _ = coerce_groups(None, res._model, y.shape[0], require_all=False)
+    comp = compile_problem(res._model, y, codes, res.parameters, res._quadrature)
+    h = np.asarray(jax.nn.softmax(_core._log_joint(comp.problem, jnp.asarray(res._eta)), axis=1))
+    nodes = np.asarray(comp.problem.nodes)
+    for r in range(len(pats)):
+        hp = h[comp.inverse[r]]
+        mean = hp @ nodes
+        cov = (nodes - mean).T @ ((nodes - mean) * hp[:, None])
+        sd = np.sqrt(np.diag(cov))
+        d = draws[r]
+        np.testing.assert_allclose(d.mean(axis=0), mean, atol=5 * sd.max() / np.sqrt(n_draws))
+        np.testing.assert_allclose(
+            d.std(axis=0, ddof=1), sd, atol=6 * sd.max() / np.sqrt(2 * n_draws) + 0.01 * sd.max()
+        )
+        corr = cov / np.outer(sd, sd)
+        np.testing.assert_allclose(np.corrcoef(d.T), corr, atol=0.05)
+
+
+def test_pv_multidim_reproducible_and_independent() -> None:
+    res, case = _fixed_at_mirt("mirt2d_2pl_simple"), load("mirt2d_2pl_simple")
+    pats = pd.concat([case.patterns.iloc[[3]]] * 2, ignore_index=True)
+    a = res.score(pats, method="PV", key=jax.random.key(1), n_draws=3)
+    b = res.score(pats, method="PV", key=jax.random.key(1), n_draws=3)
+    pd.testing.assert_frame_equal(a, b)
+    assert not np.allclose(a.iloc[0].to_numpy(), a.iloc[1].to_numpy())

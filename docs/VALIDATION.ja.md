@@ -238,7 +238,7 @@
   - **V13f（`missing_2pl`、15% MCAR 欠測 2PL、88 パターン、61 点 $[-6,6]$）**:
     `loglik` 相対差 `7.4e-16`、MAP $\theta$ `2.0e-6` / SE 相対 `4.6e-5`、ML $\theta$ `1.4e-6` / SE 相対 `1.1e-4`
     （`±inf` 8 件）、WLE $\theta$ `2.0e-6` / SE 相対 `1.5e-4`。
-  Plausible values（`method="PV"`）は `tests/test_m4_scoring.py` で統計的に検証する（同一 `key` の再現性、
+  Plausible values（`method="PV"`。$D > 1$ は `tests/test_mirt_m4_mirt.py`、DESIGN §15.42）は `tests/test_m4_scoring.py` で統計的に検証する（同一 `key` の再現性、
   同一パターンの回答者間での独立性、標本平均・標準偏差がモンテカルロ誤差内で EAP と事後 SD に一致すること）。
   あわせて平坦事前分布 MAP $\approx$ ML、全 7 項目モデルでの WLE 停留条件、極端パターン、多母集団、欠測、入力検証を
   単体テストで確認している。

@@ -825,8 +825,8 @@ data-independent shapes (§15.21).
     shape-static pytrees and autodiff only. `FitResult.items` displays `a1..aD`, `d` (`d1..`), and
     their SEs; `FitResult.latent` displays `mean_1..D`, `var_1..D`, `cor_ij`, and their SEs.
     `FitResult.score(data, method="EAP")` returns columns `theta_<factor>` and `se_<factor>` in
-    declared factor order; `"MAP"` (§15.39), `"ML"` and `"WLE"` (§15.41) are supported as well,
-    while `PV` raises `SpecificationError` for $D > 1$.
+    declared factor order; `"MAP"` (§15.39), `"ML"`, `"WLE"` (§15.41) and `"PV"` (§15.42) are
+    supported as well.
 33. **JSON I/O for multidimensional `FitResult` (schema version 2, M4)**: the model object in the
     JSON payload stores `"factors"` (`null`, or a list of `{"name", "items"}` in declared order)
     and `"correlated_factors"`, so `to_json()` / `from_json()` round-trip 2–3 dimensional results
@@ -929,7 +929,7 @@ data-independent shapes (§15.21).
     capped at 10; step sizes $2^{-k}$, $k=0..29$, evaluated together so $f$ never decreases).
     SEs are $\big[(-\nabla^2 f(\hat{\boldsymbol\theta}))^{-1}\big]_{mm}^{1/2}$, as in mirt's
     `fscores(method = "MAP")`; all-missing rows return the prior mean and $\sqrt{\Sigma_{mm}}$.
-    `ML` and `WLE` for $D > 1$ are in §15.41; `PV` still raises `SpecificationError`.
+    `ML` and `WLE` for $D > 1$ are in §15.41 and `PV` in §15.42.
 40. **S-X2 item fit (M5, `FitResult.item_fit`)**: Orlando and Thissen's (2000, 2003) S-X2 for
     single-group unidimensional models with a `Normal` latent distribution and complete data.
     Expected proportions
@@ -958,6 +958,19 @@ data-independent shapes (§15.21).
     mirt instead sometimes stops such a dimension at a finite value near $\pm20$ with SE 0 (its
     `diag(hessian) > 0` sub-selection); flexpyirt reports the signed infinity. WLE is finite on
     extreme patterns. All-missing rows return NaN.
+42. **Plausible values for multidimensional models (M4, §8)**: for $D \in \{2, 3\}$, each unique
+    pattern's posterior
+    $\log L(\boldsymbol\theta\mid y)-\tfrac12(\boldsymbol\theta-\boldsymbol\mu)^\top\boldsymbol\Sigma^{-1}(\boldsymbol\theta-\boldsymbol\mu)$
+    (continuous MVN prior) is evaluated on its own equispaced lattice of 61 (2D) or 25 (3D) points
+    per dimension spanning EAP $\pm 6$ posterior SD (clipped to the fitted grid's range). Each draw
+    picks a cell from the discrete posterior (`jax.random.categorical`) and adds uniform jitter
+    within the cell, so draws are continuous; the jitter inflates the variance by $\Delta_m^2/12$
+    (about 0.2% in 2D and 0.6% in 3D of the posterior variance). Per-respondent keys come from
+    `jax.random.split(key, N)`, so draws are independent across respondents sharing a pattern and
+    deterministic given `key`. Patterns and respondents are processed with `lax.map` in batches to
+    bound memory. Columns are `pv<m>_<factor>`. Validated statistically: with 4,000 draws the
+    sample mean, SD and correlations match the grid posterior within Monte Carlo error (mirt's
+    default plausible values use a normal approximation, so they are not a reference).
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
