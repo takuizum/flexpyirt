@@ -825,8 +825,8 @@ data-independent shapes (§15.21).
     shape-static pytrees and autodiff only. `FitResult.items` displays `a1..aD`, `d` (`d1..`), and
     their SEs; `FitResult.latent` displays `mean_1..D`, `var_1..D`, `cor_ij`, and their SEs.
     `FitResult.score(data, method="EAP")` returns columns `theta_<factor>` and `se_<factor>` in
-    declared factor order; `method="MAP"` is supported as well (§15.39), while `ML`, `WLE` and
-    `PV` raise `SpecificationError` for $D > 1$.
+    declared factor order; `"MAP"` (§15.39), `"ML"` and `"WLE"` (§15.41) are supported as well,
+    while `PV` raises `SpecificationError` for $D > 1$.
 33. **JSON I/O for multidimensional `FitResult` (schema version 2, M4)**: the model object in the
     JSON payload stores `"factors"` (`null`, or a list of `{"name", "items"}` in declared order)
     and `"correlated_factors"`, so `to_json()` / `from_json()` round-trip 2–3 dimensional results
@@ -929,8 +929,7 @@ data-independent shapes (§15.21).
     capped at 10; step sizes $2^{-k}$, $k=0..29$, evaluated together so $f$ never decreases).
     SEs are $\big[(-\nabla^2 f(\hat{\boldsymbol\theta}))^{-1}\big]_{mm}^{1/2}$, as in mirt's
     `fscores(method = "MAP")`; all-missing rows return the prior mean and $\sqrt{\Sigma_{mm}}$.
-    `ML`, `WLE` and `PV` still raise `SpecificationError` for $D > 1$ (ML/WLE need per-factor
-    handling of diverging directions).
+    `ML` and `WLE` for $D > 1$ are in §15.41; `PV` still raises `SpecificationError`.
 40. **S-X2 item fit (M5, `FitResult.item_fit`)**: Orlando and Thissen's (2000, 2003) S-X2 for
     single-group unidimensional models with a `Normal` latent distribution and complete data.
     Expected proportions
@@ -946,6 +945,19 @@ data-independent shapes (§15.21).
     dependent shapes, outside `jit`); category probabilities come from the JAX item kernels.
     Multidimensional, multiple-group, EH and missing-data cases raise `SpecificationError` until
     they are validated (mirt imputes missing data and ignores EH weights for S-X2).
+41. **ML and WLE scoring for multidimensional models (M4, §8)**: for $D \in \{2, 3\}$, `"ML"`
+    maximizes $\log L(\boldsymbol\theta\mid y)$ and `"WLE"` maximizes the Jeffreys/Firth penalized
+    $\log L(\boldsymbol\theta\mid y)+\tfrac12\log\det\mathbf I(\boldsymbol\theta)$ (`mirt:::WLE.mirt`;
+    Warm, 1989; Wang, 2015), where $\mathbf I$ is the expected test information matrix of the
+    observed items from autodiff, over the box $|\theta_m|<20$ (mirt's `max_theta`) by the bounded
+    `_newton_nd`, starting from EAP. SEs are square roots of the diagonal of the inverse negative
+    Hessian of the objective. ML: patterns whose observed responses are all in the lowest (highest)
+    raw category return $-\infty$ ($+\infty$) on every dimension (as mirt does before optimizing);
+    a dimension that reaches the bound or has SE $>30$ returns $\pm\infty$ with SE NaN, and the
+    remaining dimensions take SEs from the inverse of their own block of the negative Hessian.
+    mirt instead sometimes stops such a dimension at a finite value near $\pm20$ with SE 0 (its
+    `diag(hessian) > 0` sub-selection); flexpyirt reports the signed infinity. WLE is finite on
+    extreme patterns. All-missing rows return NaN.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -973,6 +985,7 @@ data-independent shapes (§15.21).
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
+- Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.

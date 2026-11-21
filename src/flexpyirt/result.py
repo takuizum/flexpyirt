@@ -507,10 +507,10 @@ class FitResult:
                 "method='MAP' requires a continuous latent prior and is not supported with "
                 "EmpiricalHistogram; use method='EAP', 'ML', 'WLE', or 'PV'."
             )
-        if self._model.is_multidimensional and method not in ("EAP", "MAP"):
+        if self._model.is_multidimensional and method == "PV":
             raise SpecificationError(
-                f"Scoring method {method!r} is only implemented for unidimensional models; "
-                "use method='EAP' or 'MAP' for multidimensional models."
+                "Scoring method 'PV' is only implemented for unidimensional models; "
+                "use method='EAP', 'MAP', 'ML' or 'WLE' for multidimensional models."
             )
         if method == "PV":
             if key is None:

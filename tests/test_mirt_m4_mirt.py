@@ -257,3 +257,71 @@ def test_map_multidim_all_missing_and_mode() -> None:
     eap = res.score(pats, method="EAP")
     assert np.all(np.isfinite(scores.to_numpy()))
     assert not np.allclose(scores["theta_F1"].iloc[1:], eap["theta_F1"].iloc[1:])
+
+
+def _decode(values: list[Any]) -> np.ndarray:
+    special = {"Infinity": np.inf, "-Infinity": -np.inf, None: np.nan}
+    return np.asarray([special.get(v, v) for v in values], dtype=float)
+
+
+@cache
+def _mlwle_reference() -> dict[str, Any]:
+    raw = json.loads((Path(__file__).parent / "reference" / "v14_mirt_mlwle.json").read_text())
+    check_reference_meta(raw["meta"])
+    return dict(raw["cases"])
+
+
+def _ml_wle_scores(name: str, method: str) -> tuple[np.ndarray, ...]:
+    case, ref = load(name), _mlwle_reference()[name]
+    rows = [[np.nan if v is None else v for v in r] for r in ref["patterns"]]
+    pats = pd.DataFrame(np.asarray(rows, dtype=float), columns=ref["items"])
+    scores = _fixed_at_mirt(name).score(pats, method=method)  # type: ignore[arg-type]
+    fs = list(case.raw["factors"])
+    ours_t = np.column_stack([scores[f"theta_{f}"] for f in fs])
+    ours_s = np.column_stack([scores[f"se_{f}"] for f in fs])
+    ref_t = np.column_stack([_decode(ref[method]["theta"][f]) for f in fs])
+    ref_s = np.column_stack([_decode(ref[method]["se"][f]) for f in fs])
+    return ours_t, ours_s, ref_t, ref_s
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_wle_with_mirt_parameters(name: str) -> None:
+    """Multidimensional WLE (log L + 1/2 log det I) vs mirt on every pattern (DESIGN §15.41)."""
+    ours_t, ours_s, ref_t, ref_s = _ml_wle_scores(name, "WLE")
+    np.testing.assert_allclose(ours_t, ref_t, rtol=0, atol=TOL_MAP_THETA)
+    np.testing.assert_allclose(ours_s, ref_s, rtol=TOL_MAP_SE_REL)
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_ml_with_mirt_parameters(name: str) -> None:
+    """Multidimensional ML vs mirt (DESIGN §15.41).
+
+    Interior patterns (mirt finite with SE > 0 on every dimension) agree to the V13 tolerances.
+    Where mirt reports +/-Inf on a dimension, flexpyirt reports the same signed infinity. Where
+    mirt stops at the +/-20 bound with SE 0 (its sub-Hessian quirk), flexpyirt reports the
+    signed infinity.
+    """
+    ours_t, ours_s, ref_t, ref_s = _ml_wle_scores(name, "ML")
+    mirt_interior = np.all(np.isfinite(ref_t) & np.isfinite(ref_s) & (ref_s > 0), axis=1)
+    interior = mirt_interior & np.all(np.isfinite(ours_t), axis=1)
+    assert interior.sum() >= 0.3 * len(interior)
+    np.testing.assert_allclose(ours_t[interior], ref_t[interior], rtol=0, atol=TOL_MAP_THETA)
+    np.testing.assert_allclose(ours_s[interior], ref_s[interior], rtol=TOL_MAP_SE_REL)
+    mirt_inf = np.isinf(ref_t)
+    np.testing.assert_array_equal(ours_t[mirt_inf], ref_t[mirt_inf])
+    boundary = np.isfinite(ref_t) & (ref_s == 0)
+    np.testing.assert_array_equal(ours_t[boundary], np.sign(ref_t[boundary]) * np.inf)
+    assert np.isnan(ours_s[np.isinf(ours_t)]).all()
+
+
+def test_ml_multidim_extreme_and_missing_patterns() -> None:
+    res, case = _fixed_at_mirt("mirt2d_2pl_simple"), load("mirt2d_2pl_simple")
+    pats = case.patterns.iloc[:3].copy()
+    pats.iloc[0, :] = 0
+    pats.iloc[1, :] = 1
+    pats.iloc[2, :] = np.nan
+    ml = res.score(pats, method="ML")
+    assert (ml.iloc[0, :2] == -np.inf).all() and (ml.iloc[1, :2] == np.inf).all()
+    assert ml.iloc[2].isna().all()
+    wle = res.score(pats, method="WLE")
+    assert np.isfinite(wle.iloc[:2].to_numpy()).all() and wle.iloc[2].isna().all()

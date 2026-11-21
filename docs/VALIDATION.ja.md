@@ -275,6 +275,11 @@
     20 パターン（ケースあたり 220 パターン。mirt 1.48、`validation/r/m4_mirt_map_reference.R` →
     `tests/reference/v14_mirt_map.json`）で `fscores(method = "MAP")` と比較: $\theta$ は `4.3e-6`、SE は相対 `3.8e-5`
     以内で一致（mirt の `nlm` の許容誤差の水準。許容誤差は `1e-4` / `1e-3`）。
+  - **ML と WLE（4 ケースすべて）**: MAP と同じ設定に、全最低・全最高と 1 因子だけ極端なパターンを加えた（ケースあたり 223
+    パターン。`validation/r/m4_mirt_mlwle_reference.R` → `tests/reference/v14_mirt_mlwle.json`）。WLE は 892 行すべてで一致
+    （$\theta$ `5.0e-6`、SE 相対 `1.7e-4`）。ML は両者とも内点の 644 行で一致（$\theta$ `6.5e-6`、SE `1.2e-4`）。mirt が
+    ある次元で `±Inf` を返す 242 行では flexpyirt も同じ符号の無限大を返し、mirt が発散する次元を ±20 近くで SE 0 として
+    止める 22 行では flexpyirt は符号付きの無限大を返す（DESIGN §15.41）。
   単体テスト（カーネル・多変量正規重みと正定値性ガード・直積格子形状・2 次元 Rasch / 混在 / 事前分布 / 固定・
   Oakes == Hessian == 参照 Oakes・識別性と仕様エラー）: `tests/test_m4_mirt.py`。
 - 照合テスト: `tests/test_mirt_m1.py`（V1, V2, V10）。参照値の生成: `validation/r/m1_reference.R`。

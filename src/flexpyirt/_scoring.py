@@ -223,17 +223,25 @@ def _mvn_mean_cov(params: Array, n_factors: int) -> tuple[Array, Array]:
     return means, corr * sd[:, None] * sd[None, :]
 
 
-def _newton_nd(f: Callable[[Array], Array], x0: Array) -> Array:
+def _newton_nd(f: Callable[[Array], Array], x0: Array, bound: float | None = None) -> Array:
     r"""Safeguarded Newton ascent maximizing scalar ``f`` over :math:`\mathbb R^D` (§15.39).
 
     Gradient and Hessian come from JAX autodiff. The Newton direction
     :math:`-H^{-1}\nabla f` is used when :math:`H` is negative definite (all eigenvalues
     :math:`<-10^{-12}`), otherwise the gradient; the step is capped at norm ``_MAX_STEP`` and the
     step sizes :math:`2^{-k}` (:math:`k=0,\dots,29`) are evaluated in parallel so :math:`f`
-    never decreases (the D-dimensional analogue of ``_newton_1d``).
+    never decreases (the D-dimensional analogue of ``_newton_1d``). With ``bound``, candidates
+    outside the open box :math:`|\theta_m| < \text{bound}` are rejected (mirt's ``max_theta``).
     """
     grad_fn = jax.grad(f)
     hess_fn = jax.hessian(f)
+
+    def f_box(x: Array) -> Array:
+        if bound is None:
+            return f(x)
+        inside = jnp.all(jnp.abs(x) < bound)
+        return jnp.where(inside, f(jnp.where(inside, x, 0.0)), -jnp.inf)
+
     zero = jnp.asarray(0, dtype=jnp.int32)
     one = jnp.asarray(1, dtype=jnp.int32)
     steps = 0.5 ** jnp.arange(_N_HALVINGS, dtype=x0.dtype)
@@ -259,7 +267,7 @@ def _newton_nd(f: Callable[[Array], Array], x0: Array) -> Array:
         direction = direction * jnp.minimum(1.0, _MAX_STEP / jnp.where(norm > 0.0, norm, 1.0))
 
         cands = x[None, :] + steps[:, None] * direction[None, :]
-        vals = jax.vmap(f)(cands)
+        vals = jax.vmap(f_box)(cands)
         ok = jnp.isfinite(vals) & (vals >= fx)
         any_ok = jnp.any(ok)
         best = cands[jnp.argmax(ok)]
@@ -365,6 +373,144 @@ def map_scores(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
     return jax.vmap(solve_one)(prob.y, prob.group, theta0)
 
 
+def _pattern_info_matrix(
+    theta: Array,
+    y_p: Array,
+    g_p: Array,
+    families: tuple[FamilyBlock, ...],
+    xi_list: tuple[Array, ...],
+) -> Array:
+    r"""Observed-item Fisher test information matrix :math:`\mathbf I(\boldsymbol\theta)` (D, D).
+
+    .. math::
+        \mathbf I(\boldsymbol\theta) = \sum_{j:\,y_{pj}\ge 0}\sum_{k}
+            P_{jk}(\boldsymbol\theta)\,\nabla\log P_{jk}(\boldsymbol\theta)\,
+            \nabla\log P_{jk}(\boldsymbol\theta)^\top,
+
+    the multidimensional analogue of :func:`_pattern_info`, via JAX autodiff.
+    """
+    n_factors = theta.shape[0]
+    total = jnp.zeros((n_factors, n_factors), dtype=theta.dtype)
+    for fam, xi in zip(families, xi_list, strict=True):
+        y_f = y_p[fam.columns]
+        xi_g = xi[g_p]
+
+        def _item_info(p: Array, k: ItemKernel = fam.kernel) -> Array:
+            def lp_fn(t: Array) -> Array:
+                return k.log_prob(t[None, :], p)[0]
+
+            prob_k = jnp.exp(lp_fn(theta))  # (K,)
+            jac = jax.jacfwd(lp_fn)(theta)  # (K, D)
+            info: Array = jnp.einsum("k,km,kn->mn", prob_k, jac, jac)
+            return info
+
+        infos = jax.vmap(_item_info)(xi_g)  # (J_f, D, D)
+        total = total + jnp.sum(jnp.where((y_f >= 0)[:, None, None], infos, 0.0), axis=0)
+    return total
+
+
+def _pattern_flags_multidim(
+    y_p: Array, families: tuple[FamilyBlock, ...]
+) -> tuple[Array, Array, Array]:
+    """``(all_missing, all_low, all_high)`` on raw categories, as mirt does for ``D > 1``."""
+    n_obs = jnp.asarray(0, dtype=jnp.int32)
+    n_low = jnp.asarray(0, dtype=jnp.int32)
+    n_high = jnp.asarray(0, dtype=jnp.int32)
+    for fam in families:
+        y_f = y_p[fam.columns]
+        obs = y_f >= 0
+        n_obs = n_obs + jnp.sum(obs, dtype=jnp.int32)
+        n_low = n_low + jnp.sum(obs & (y_f == 0), dtype=jnp.int32)
+        n_high = n_high + jnp.sum(obs & (y_f == fam.kernel.n_cat - 1), dtype=jnp.int32)
+    return n_obs == 0, (n_obs > 0) & (n_low == n_obs), (n_obs > 0) & (n_high == n_obs)
+
+
+def _inv_neg_hessian_se(h: Array, keep: Array) -> tuple[Array, Array]:
+    """SEs from the inverse negative Hessian restricted to ``keep`` dims; ``(se, neg_def)``."""
+    n = h.shape[0]
+    eye = jnp.eye(n, dtype=h.dtype)
+    mask = keep[:, None] & keep[None, :]
+    h_sub = jnp.where(mask, h, -eye)
+    finite = jnp.all(jnp.isfinite(h_sub))
+    h_safe = jnp.where(finite, h_sub, -eye)
+    neg_def = finite & (jnp.max(jnp.linalg.eigvalsh(h_safe)) < 0.0)
+    cov = jnp.linalg.inv(-jnp.where(neg_def, h_safe, -eye))
+    return jnp.sqrt(jnp.diag(cov)), neg_def
+
+
+def _ml_scores_multidim(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
+    r"""ML scores for :math:`D\in\{2,3\}` (DESIGN.md §15.41).
+
+    Maximizes :math:`\log L(\boldsymbol\theta\mid y_p)` over :math:`|\theta_m|<20` from EAP.
+    Patterns whose observed responses are all in the lowest (highest) category return
+    ``-inf`` (``+inf``) on every dimension; a dimension that reaches the bound or has
+    :math:`\mathrm{SE}>30` diverges and returns :math:`\pm\infty` with SE ``NaN``, and the
+    other dimensions take SEs from the inverse negative Hessian of their own block. All-missing
+    patterns return ``NaN``.
+    """
+    theta0_raw, _ = eap(prob, eta)
+    theta0 = jnp.clip(theta0_raw, -_MAX_THETA + 1e-3, _MAX_THETA - 1e-3)
+    xi_list = _expand_items(prob, eta)
+    n_factors = int(prob.nodes.shape[1])
+
+    def solve_one(y_p: Array, g_p: Array, t0: Array) -> tuple[Array, Array]:
+        all_missing, all_low, all_high = _pattern_flags_multidim(y_p, prob.families)
+
+        def obj(t: Array) -> Array:
+            return _pattern_loglik(t, y_p, g_p, prob.families, xi_list)
+
+        theta_hat = _newton_nd(obj, t0, bound=_MAX_THETA)
+        h = jax.hessian(obj)(theta_hat)
+        all_dims = jnp.ones((n_factors,), dtype=bool)
+        se_full, nd_full = _inv_neg_hessian_se(h, all_dims)
+        near = jnp.abs(theta_hat) >= _MAX_THETA - 1e-2
+        diverged = near | (nd_full & (se_full > _ML_MAX_SE))
+        se_kept, nd_kept = _inv_neg_hessian_se(h, ~diverged)
+        sign = jnp.where(theta_hat < 0.0, -jnp.inf, jnp.inf)
+        theta_out = jnp.where(diverged, sign, theta_hat)
+        se_out = jnp.where(diverged | ~nd_kept, jnp.nan, se_kept)
+        extreme = all_low | all_high
+        ext_val = jnp.where(all_low, -jnp.inf, jnp.inf)
+        theta_out = jnp.where(all_missing, jnp.nan, jnp.where(extreme, ext_val, theta_out))
+        se_out = jnp.where(all_missing | extreme, jnp.nan, se_out)
+        return theta_out, se_out
+
+    return jax.vmap(solve_one)(prob.y, prob.group, theta0)
+
+
+def _wle_scores_multidim(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
+    r"""WLE scores for :math:`D\in\{2,3\}` (DESIGN.md §15.41; Warm, 1989; Wang, 2015).
+
+    Maximizes the Jeffreys/Firth penalized log-likelihood
+    :math:`\log L(\boldsymbol\theta\mid y_p)+\tfrac12\log\det\mathbf I(\boldsymbol\theta)`
+    (``mirt:::WLE.mirt``) over :math:`|\theta_m|<20` from EAP; SEs are the square roots of the
+    diagonal of the inverse negative Hessian of that objective. All-missing patterns return
+    ``NaN``.
+    """
+    theta0_raw, _ = eap(prob, eta)
+    theta0 = jnp.clip(theta0_raw, -_MAX_THETA + 1e-3, _MAX_THETA - 1e-3)
+    xi_list = _expand_items(prob, eta)
+    n_factors = int(prob.nodes.shape[1])
+
+    def solve_one(y_p: Array, g_p: Array, t0: Array) -> tuple[Array, Array]:
+        all_missing, _, _ = _pattern_flags_multidim(y_p, prob.families)
+
+        def obj(t: Array) -> Array:
+            info = _pattern_info_matrix(t, y_p, g_p, prob.families, xi_list)
+            sign, logdet = jnp.linalg.slogdet(info)
+            log_det = jnp.where(sign > 0.0, logdet, jnp.nan)
+            return _pattern_loglik(t, y_p, g_p, prob.families, xi_list) + 0.5 * log_det
+
+        theta_hat = _newton_nd(obj, t0, bound=_MAX_THETA)
+        h = jax.hessian(obj)(theta_hat)
+        se, nd = _inv_neg_hessian_se(h, jnp.ones((n_factors,), dtype=bool))
+        ok = (~all_missing) & nd & jnp.all(jnp.isfinite(theta_hat))
+        theta_out = jnp.where(all_missing, jnp.nan, theta_hat)
+        return theta_out, jnp.where(ok, se, jnp.nan)
+
+    return jax.vmap(solve_one)(prob.y, prob.group, theta0)
+
+
 def ml_scores(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
     r"""Maximum likelihood (ML) ability estimates and SEs per unique pattern (DESIGN.md §8, §15.23).
 
@@ -374,7 +520,10 @@ def ml_scores(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
     default ``expected.info = FALSE``). Patterns with no finite maximum (all lowest / all highest
     observed categories, or non-concave 3PL/4PL tails where the supremum lies at :math:`\pm\infty`)
     return ``-inf`` / ``+inf`` with SE ``NaN``; all-missing patterns return ``NaN`` with SE ``NaN``.
+    Multidimensional problems use :func:`_ml_scores_multidim`.
     """
+    if prob.nodes.ndim == 2 and prob.nodes.shape[1] > 1:
+        return _ml_scores_multidim(prob, eta)
     theta0_raw, _ = eap(prob, eta)
     theta0 = jnp.clip(theta0_raw, -_MAX_THETA + 1e-3, _MAX_THETA - 1e-3)
     xi_list = _expand_items(prob, eta)
@@ -442,8 +591,11 @@ def wle_scores(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
     ``mirt:::WLE.mirt`` for every item family. Extreme patterns (all lowest / all highest
     categories) have finite estimates; all-missing patterns return ``NaN`` and SE ``NaN``. The
     standard error is :math:`(-f''_{\mathrm{WLE}}(\hat\theta))^{-1/2}`, matching mirt's default
-    ``fscores(..., method="WLE", full.scores.SE=TRUE)``.
+    ``fscores(..., method="WLE", full.scores.SE=TRUE)``. Multidimensional problems use
+    :func:`_wle_scores_multidim`.
     """
+    if prob.nodes.ndim == 2 and prob.nodes.shape[1] > 1:
+        return _wle_scores_multidim(prob, eta)
     theta0_raw, _ = eap(prob, eta)
     theta0 = jnp.clip(theta0_raw, -_MAX_THETA + 1e-3, _MAX_THETA - 1e-3)
     xi_list = _expand_items(prob, eta)
