@@ -125,6 +125,9 @@ def _pattern_flags(
         a = xi[g_p, :, 0]
         obs = (y_f >= 0) & (a != 0.0)
         if isinstance(fam.kernel, NominalKernel) and fam.kernel.n_cat > 2:
+            # ML / WLE scoring is unidimensional only (FitResult.score), so the slope is the
+            # single parameter at index 0 and ak1..ak{K-2} follow it.
+            assert fam.kernel.n_factors == 1, "nominal extreme-pattern flags are 1-D only"
             n_ak = fam.kernel.n_cat - 2
             n_j = xi.shape[1]
             ak = jnp.concatenate(

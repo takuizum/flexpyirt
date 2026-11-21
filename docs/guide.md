@@ -122,7 +122,10 @@ The parameterization is mirt's slope–intercept form (`itemtype = "2PL"`, `"Ras
 `"4PL"`, `"graded"`, `"gpcm"`, `"nominal"` — mirt's `"Rasch"` on polytomous data is `PCM`). For 3PL and 4PL,
 `g` and `u` are estimated on the natural scale with $0 < g < u \le 1$ (mirt optimizes them on the
 logit scale; the interior ML estimates agree). Polytomous categories start at 0 (subtract 1 from
-data coded from 1, such as mirt's `Science`).
+data coded from 1, such as mirt's `Science`). `Nominal` has no display `b` columns: its
+categories are not ordered, so adjacent-category thresholds on the $	heta$ scale are not defined
+in general (they are singular when $\mathrm{ak}_k=\mathrm{ak}_{k-1}$), and mirt's
+`coef(m, IRTpars = TRUE)` reports Bock's zero-sum slopes and intercepts instead.
 
 ```python
 theta3 = rng.normal(0, 1, 2000)
