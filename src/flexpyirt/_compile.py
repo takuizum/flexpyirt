@@ -19,6 +19,7 @@ import pandas as pd
 from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock, PriorBlock
 from flexpyirt.errors import FlexpyirtWarning, IdentificationError, SpecificationError
 from flexpyirt.items import FourPLKernel, GradedKernel, ItemKernel
+from flexpyirt.model import LATENT_ITEM
 from flexpyirt.priors import PRIOR_TYPES, Beta, LogNormal, NormalPrior, Prior, encode_prior
 from flexpyirt.quadrature import Quadrature
 
@@ -38,7 +39,6 @@ __all__ = [
     "validate_table",
 ]
 
-LATENT_ITEM = "__latent__"
 LATENT_PARAMS = ("mean", "var")
 TABLE_COLUMNS = (
     "group",

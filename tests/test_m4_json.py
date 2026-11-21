@@ -636,3 +636,15 @@ def test_malformed_internal_consistency(sample_payload: dict[str, Any]) -> None:
     bad_se["se_method"] = "bootstrap"
     with pytest.raises(SpecificationError, match="Unknown se_method"):
         FitResult.from_json(json.dumps(bad_se))
+
+    # Reserved sentinel item name "__latent__"
+    bad_latent_item = _clone(sample_payload)
+    bad_latent_item["model"]["items"][0]["name"] = "__latent__"
+    for p in bad_latent_item["model"]["priors"]:
+        if p["item"] == sample_payload["model"]["items"][0]["name"]:
+            p["item"] = "__latent__"
+    for row in bad_latent_item["parameters"]:
+        if row["item"] == sample_payload["model"]["items"][0]["name"]:
+            row["item"] = "__latent__"
+    with pytest.raises(SpecificationError, match="reserved"):
+        FitResult.from_json(json.dumps(bad_latent_item))
