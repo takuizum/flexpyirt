@@ -27,7 +27,7 @@ from flexpyirt._compile import LATENT_ITEM, LATENT_PARAMS, TABLE_COLUMNS
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import SpecificationError
 from flexpyirt.items import GPCM, GRM, PCM, FourPL, ItemModel, Rasch, ThreePL, TwoPL
-from flexpyirt.latent import Normal
+from flexpyirt.latent import EmpiricalHistogram, LatentSpec, Normal
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
 from flexpyirt.priors import Beta, LogNormal, NormalPrior, Prior
@@ -286,15 +286,33 @@ def _deserialize_normal_latent(obj: dict[str, Any], field_name: str) -> Normal:
     )
 
 
+def _serialize_eh_latent(dist: EmpiricalHistogram) -> dict[str, Any]:
+    return {
+        "type": "EmpiricalHistogram",
+        "min_weight": _encode_float(dist.min_weight),
+    }
+
+
+def _deserialize_eh_latent(obj: dict[str, Any], field_name: str) -> EmpiricalHistogram:
+    _check_keys(obj, required={"type", "min_weight"}, field_name=field_name)
+    return EmpiricalHistogram(
+        min_weight=_decode_float(
+            obj["min_weight"], field_name=f"{field_name}.min_weight", finite=True
+        )
+    )
+
+
 _LATENT_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
     Normal: _serialize_normal_latent,
+    EmpiricalHistogram: _serialize_eh_latent,
 }
-_LATENT_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], Normal]] = {
+_LATENT_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], LatentSpec]] = {
     "Normal": _deserialize_normal_latent,
+    "EmpiricalHistogram": _deserialize_eh_latent,
 }
 
 
-def _serialize_latent(dist: Normal) -> dict[str, Any]:
+def _serialize_latent(dist: LatentSpec) -> dict[str, Any]:
     """Serialize a registered latent distribution."""
     serializer = _LATENT_SERIALIZERS.get(type(dist))
     if serializer is None:
@@ -304,7 +322,7 @@ def _serialize_latent(dist: Normal) -> dict[str, Any]:
     return serializer(dist)
 
 
-def _deserialize_latent(raw: Any, *, field_name: str) -> Normal:
+def _deserialize_latent(raw: Any, *, field_name: str) -> LatentSpec:
     """Deserialize a latent distribution by its registered name."""
     obj = _require_dict(raw, field_name=field_name)
     if "type" not in obj:
@@ -584,12 +602,12 @@ def _deserialize_model(raw: Any) -> Model:
         if obj["latent"] is None
         else _deserialize_latent(obj["latent"], field_name="model.latent")
     )
-    groups: tuple[tuple[str, Normal], ...] | None = None
+    groups: tuple[tuple[str, LatentSpec], ...] | None = None
     if obj["groups"] is not None:
         groups_raw = _require_list(obj["groups"], field_name="model.groups")
         if len(groups_raw) < 2:
             raise SpecificationError("model.groups must contain at least two groups.")
-        groups_list: list[tuple[str, Normal]] = []
+        groups_list: list[tuple[str, LatentSpec]] = []
         seen_groups: set[str] = set()
         for idx, entry in enumerate(groups_raw):
             g_obj = _require_dict(entry, field_name=f"model.groups[{idx}]")
@@ -707,12 +725,13 @@ def _serialize_parameters(table: pd.DataFrame) -> list[dict[str, Any]]:
 def _expected_parameter_keys(model: Model) -> dict[tuple[str, str, str], str]:
     """Return expected ``(group, item, param) -> model_name`` entries for ``model``."""
     expected: dict[tuple[str, str, str], str] = {}
-    for group_name, _ in model.resolved_groups():
+    for group_name, latent in model.resolved_groups():
         for item_name, item_model in model.items:
             for param in item_model.kernel.param_names:
                 expected[(group_name, item_name, param)] = item_model.name
-        for param in LATENT_PARAMS:
-            expected[(group_name, LATENT_ITEM, param)] = "Normal"
+        if isinstance(latent, Normal):
+            for param in LATENT_PARAMS:
+                expected[(group_name, LATENT_ITEM, param)] = "Normal"
     return expected
 
 
@@ -935,6 +954,39 @@ def _deserialize_history(raw: Any, *, n_iter: int) -> pd.DataFrame:
     )
 
 
+def _serialize_eh_weights(eh_weights: np.ndarray) -> list[list[float | str]]:
+    """Serialize ``_eh_weights`` of shape ``(G, Q)`` as a nested JSON list."""
+    arr = np.asarray(eh_weights, dtype=np.float64)
+    return [[_encode_float(x) for x in row] for row in arr]
+
+
+def _deserialize_eh_weights(raw: Any, *, n_groups: int, n_nodes: int) -> np.ndarray:
+    """Deserialize and validate ``latent_weights`` of shape ``(n_groups, n_nodes)``."""
+    rows = _require_list(raw, field_name="latent_weights")
+    if len(rows) != n_groups:
+        raise SpecificationError(
+            f"latent_weights must have {n_groups} group rows, got {len(rows)}."
+        )
+    out = np.empty((n_groups, n_nodes), dtype=np.float64)
+    for g, row_raw in enumerate(rows):
+        row = _require_list(row_raw, field_name=f"latent_weights[{g}]")
+        if len(row) != n_nodes:
+            raise SpecificationError(
+                f"latent_weights[{g}] must have {n_nodes} nodes, got {len(row)}."
+            )
+        for q, val in enumerate(row):
+            w = _decode_float(val, field_name=f"latent_weights[{g}][{q}]", finite=True)
+            if not (w > 0.0):
+                raise SpecificationError(
+                    f"latent_weights[{g}][{q}] must be strictly positive, got {w}."
+                )
+            out[g, q] = w
+        total = float(np.sum(out[g]))
+        if not math.isclose(total, 1.0, rel_tol=0.0, abs_tol=1e-6):
+            raise SpecificationError(f"latent_weights[{g}] must sum to 1, got {total}.")
+    return out
+
+
 # --------------------------------------------------------------------------------------------
 # Top-level entry points
 # --------------------------------------------------------------------------------------------
@@ -972,6 +1024,8 @@ def dump_fit_result(
         "vcov": _serialize_vcov(result.vcov),
         "history": _serialize_history(result.history),
     }
+    if result._eh_weights is not None:
+        payload["latent_weights"] = _serialize_eh_weights(result._eh_weights)
     text = json.dumps(payload, indent=indent, allow_nan=False)
     if path is not None:
         Path(path).write_text(text, encoding="utf-8")
@@ -1030,11 +1084,33 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
             f"Unsupported FitResult schema_version {schema_version}; "
             f"supported version is {SCHEMA_VERSION}."
         )
-    _check_keys(obj, required=_TOP_LEVEL_KEYS, field_name="FitResult")
+    allowed_keys = _TOP_LEVEL_KEYS | {"latent_weights"}
+    keys = set(obj.keys())
+    missing_top = sorted(_TOP_LEVEL_KEYS - keys)
+    if missing_top:
+        raise SpecificationError(f"Missing required keys in FitResult: {missing_top}.")
+    extra_top = sorted(keys - allowed_keys)
+    if extra_top:
+        raise SpecificationError(f"Unexpected keys in FitResult: {extra_top}.")
     _require_str(obj["flexpyirt_version"], field_name="flexpyirt_version")
 
     model = _deserialize_model(obj["model"])
     quadrature = _deserialize_quadrature(obj["quadrature"], field_name="quadrature")
+    eh_weights: np.ndarray | None = None
+    if model.is_eh:
+        if "latent_weights" not in obj:
+            raise SpecificationError(
+                "Missing required key 'latent_weights' for an EmpiricalHistogram FitResult."
+            )
+        eh_weights = _deserialize_eh_weights(
+            obj["latent_weights"],
+            n_groups=len(model.resolved_groups()),
+            n_nodes=quadrature.n_points,
+        )
+    elif "latent_weights" in obj:
+        raise SpecificationError(
+            "Unexpected key 'latent_weights' for a Normal latent-distribution FitResult."
+        )
     method = _deserialize_method(obj["method"], field_name="method")
     n_obs = _require_int(obj["n_obs"], field_name="n_obs", min_value=1)
     se_method = obj["se_method"]
@@ -1073,4 +1149,5 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
         _eta=eta,
         _quadrature=quadrature,
         _method=method,
+        _eh_weights=eh_weights,
     )

@@ -19,6 +19,7 @@ import pandas as pd
 from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock, PriorBlock
 from flexpyirt.errors import FlexpyirtWarning, IdentificationError, SpecificationError
 from flexpyirt.items import FourPLKernel, GradedKernel, ItemKernel
+from flexpyirt.latent import EmpiricalHistogram, Normal, eh_project_floor
 from flexpyirt.priors import PRIOR_TYPES, Beta, LogNormal, NormalPrior, Prior, encode_prior
 from flexpyirt.quadrature import Quadrature
 
@@ -34,6 +35,8 @@ __all__ = [
     "coerce_groups",
     "coerce_responses",
     "compile_problem",
+    "eh_param_count",
+    "eh_standardization_flags",
     "prepare",
     "validate_table",
 ]
@@ -343,24 +346,25 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                         "prior": priors.get(key),
                     }
                 )
-        latent_rows: tuple[tuple[str, float, bool, float], ...] = (
-            ("mean", latent.mean, latent.free_mean, -np.inf),
-            ("var", latent.var, latent.free_var, 0.0),
-        )
-        for param, value, free, lat_lower in latent_rows:
-            rows.append(
-                {
-                    "group": group_name,
-                    "item": LATENT_ITEM,
-                    "model": "Normal",
-                    "param": param,
-                    "value": float(value),
-                    "free": bool(free),
-                    "lower": lat_lower,
-                    "upper": np.inf,
-                    "prior": None,
-                }
+        if isinstance(latent, Normal):
+            latent_rows: tuple[tuple[str, float, bool, float], ...] = (
+                ("mean", latent.mean, latent.free_mean, -np.inf),
+                ("var", latent.var, latent.free_var, 0.0),
             )
+            for param, value, free, lat_lower in latent_rows:
+                rows.append(
+                    {
+                        "group": group_name,
+                        "item": LATENT_ITEM,
+                        "model": "Normal",
+                        "param": param,
+                        "value": float(value),
+                        "free": bool(free),
+                        "lower": lat_lower,
+                        "upper": np.inf,
+                        "prior": None,
+                    }
+                )
     table = pd.DataFrame(rows)
     table["prior"] = table["prior"].astype(object)
     ids = np.full(len(table), -1)
@@ -534,6 +538,67 @@ def _check_estimable(t: pd.DataFrame, model: Model, y: np.ndarray, group: np.nda
             )
 
 
+def eh_standardization_flags(t: pd.DataFrame, model: Model) -> tuple[bool, bool]:
+    """Return ``(standardize_mean, standardize_var)`` for an EH model (DESIGN.md §4.4, §15.29).
+
+    The reference group's mean is standardized iff no intercept parameter is fixed in its connected
+    component; its variance is standardized iff no nonzero slope parameter is fixed in its
+    connected component. Under FIPC (fixed nonzero slopes and fixed intercepts), both are False.
+    """
+    if not model.is_eh:
+        return False, False
+    lookup = dict(model.items)
+    groups = [g for g, _ in model.resolved_groups()]
+    ref = groups[0]
+    items = t[t["item"] != LATENT_ITEM]
+    role = np.array(
+        [
+            "slope"
+            if p in lookup[i].kernel.slope_params
+            else ("intercept" if p in lookup[i].kernel.intercept_params else "other")
+            for i, p in zip(items["item"], items["param"], strict=True)
+        ]
+    )
+
+    flags: dict[str, bool] = {}
+    for key, kind in (("var", "slope"), ("mean", "intercept")):
+        rows = items[role == kind]
+        parent = {g: g for g in groups}
+
+        def find(g: str, parent: dict[str, str] = parent) -> str:
+            while parent[g] != g:
+                g = parent[g]
+            return g
+
+        for _, shared in rows[rows["free"]].groupby("free_id"):
+            gs = list(shared["group"].unique())
+            for other in gs[1:]:
+                parent[find(other)] = find(gs[0])
+        fixed_rows = rows[~rows["free"]]
+        if kind == "slope":
+            fixed_rows = fixed_rows[fixed_rows["value"] != 0]
+        fixed_roots = {find(g) for g in fixed_rows["group"]}
+        flags[key] = find(ref) not in fixed_roots
+    return flags["mean"], flags["var"]
+
+
+def eh_param_count(t: pd.DataFrame, model: Model, quad: Quadrature) -> int:
+    """Return the number of free EH latent-weight parameters for AIC/BIC (DESIGN.md §4.8, §15.30).
+
+    Reference group: ``Q - 1 - int(standardize_mean) - int(standardize_var)`` (``Q - 3`` when both
+    mean and variance are standardized, ``Q - 2`` for Rasch/PCM, ``Q - 1`` under FIPC). Every
+    focal group: ``Q - 1``. Returns ``0`` for ``Normal`` models.
+    """
+    if not model.is_eh:
+        return 0
+    std_mean, std_var = eh_standardization_flags(t, model)
+    n_groups = len(model.resolved_groups())
+    q = quad.n_points
+    ref_params = q - 1 - int(std_mean) - int(std_var)
+    focal_params = (n_groups - 1) * (q - 1)
+    return ref_params + focal_params
+
+
 def _check_identification(t: pd.DataFrame, model: Model) -> None:
     """Scale identification rules of DESIGN.md §4.5 and §14.5 (necessary conditions)."""
     lookup = dict(model.items)
@@ -547,11 +612,22 @@ def _check_identification(t: pd.DataFrame, model: Model) -> None:
             for i, p in zip(items["item"], items["param"], strict=True)
         ]
     )
-    lat_free = {
-        (g, p): bool(f)
-        for g, i, p, f in zip(t["group"], t["item"], t["param"], t["free"], strict=True)
-        if i == LATENT_ITEM
-    }
+    if model.is_eh:
+        std_mean, std_var = eh_standardization_flags(t, model)
+        lat_free: dict[tuple[str, str], bool] = {}
+        for idx, g in enumerate(groups):
+            if idx == 0:
+                lat_free[(g, "mean")] = not std_mean
+                lat_free[(g, "var")] = not std_var
+            else:
+                lat_free[(g, "mean")] = True
+                lat_free[(g, "var")] = True
+    else:
+        lat_free = {
+            (g, p): bool(f)
+            for g, i, p, f in zip(t["group"], t["item"], t["param"], t["free"], strict=True)
+            if i == LATENT_ITEM
+        }
 
     for latent_param, kind, what in (("var", "slope", "scale"), ("mean", "intercept", "location")):
         rows = items[role == kind]
@@ -644,7 +720,13 @@ class Compiled:
 
 
 def compile_problem(
-    model: Model, y: np.ndarray, group: np.ndarray, table: pd.DataFrame, quad: Quadrature
+    model: Model,
+    y: np.ndarray,
+    group: np.ndarray,
+    table: pd.DataFrame,
+    quad: Quadrature,
+    *,
+    eh_weights: np.ndarray | None = None,
 ) -> Compiled:
     """Turn a validated table and responses into a :class:`CompiledProblem` (§5.2, §14.1–14.2)."""
     patterns, pat_groups, counts, inverse = compress_patterns(y, group)
@@ -738,15 +820,57 @@ def compile_problem(
             )
         )
 
-    lat_vals = np.array(
-        [[lookup[(g, LATENT_ITEM, p)][:4] for p in LATENT_PARAMS] for g in groups], dtype=float
-    )
-    latent = LatentBlock(
-        fixed_values=jnp.asarray(lat_vals[:, :, 0], dtype=jnp.float64),
-        free_index=jnp.asarray(lat_vals[:, :, 1].astype(np.int32)),
-        lower=jnp.asarray(lat_vals[:, :, 2], dtype=jnp.float64),
-        upper=jnp.asarray(lat_vals[:, :, 3], dtype=jnp.float64),
-    )
+    nodes = jnp.asarray(quad.nodes(), dtype=jnp.float64)
+    resolved = model.resolved_groups()
+    if model.is_eh:
+        min_w_list: list[float] = []
+        for g_name, dist in resolved:
+            assert isinstance(dist, EmpiricalHistogram)
+            mw = float(dist.min_weight)
+            if mw * quad.n_points >= 1.0:
+                raise SpecificationError(
+                    f"EmpiricalHistogram min_weight ({mw}) for group {g_name!r} must satisfy "
+                    f"min_weight * n_points < 1 (n_points={quad.n_points})."
+                )
+            min_w_list.append(mw)
+        min_w_arr = jnp.asarray(min_w_list, dtype=jnp.float64)
+        if eh_weights is not None:
+            w_arr = np.asarray(eh_weights, dtype=np.float64)
+            if w_arr.shape != (n_groups, quad.n_points):
+                raise SpecificationError(
+                    f"eh_weights must have shape ({n_groups}, {quad.n_points}), got {w_arr.shape}."
+                )
+            eh_w = jnp.asarray(w_arr, dtype=jnp.float64)
+        else:
+            base = jnp.exp(-0.5 * nodes**2)
+            eh_w = jnp.stack([eh_project_floor(base, min_w_arr[g]) for g in range(n_groups)])
+        std_mean, std_var = eh_standardization_flags(table, model)
+        latent = LatentBlock(
+            fixed_values=jnp.zeros((n_groups, 2), dtype=jnp.float64),
+            free_index=jnp.full((n_groups, 2), -1, dtype=jnp.int32),
+            lower=jnp.full((n_groups, 2), -jnp.inf, dtype=jnp.float64),
+            upper=jnp.full((n_groups, 2), jnp.inf, dtype=jnp.float64),
+            eh_weights=eh_w,
+            eh_min_weight=min_w_arr,
+            is_eh=True,
+            standardize_mean=std_mean,
+            standardize_var=std_var,
+        )
+    else:
+        lat_vals = np.array(
+            [[lookup[(g, LATENT_ITEM, p)][:4] for p in LATENT_PARAMS] for g in groups], dtype=float
+        )
+        latent = LatentBlock(
+            fixed_values=jnp.asarray(lat_vals[:, :, 0], dtype=jnp.float64),
+            free_index=jnp.asarray(lat_vals[:, :, 1].astype(np.int32)),
+            lower=jnp.asarray(lat_vals[:, :, 2], dtype=jnp.float64),
+            upper=jnp.asarray(lat_vals[:, :, 3], dtype=jnp.float64),
+            eh_weights=jnp.ones((n_groups, 1), dtype=jnp.float64),
+            eh_min_weight=jnp.zeros((n_groups,), dtype=jnp.float64),
+            is_eh=False,
+            standardize_mean=False,
+            standardize_var=False,
+        )
     priors_block = PriorBlock(
         kind=jnp.asarray(prior_kind, dtype=jnp.int32),
         param1=jnp.asarray(prior_p1, dtype=jnp.float64),
@@ -756,7 +880,7 @@ def compile_problem(
         y=jnp.asarray(patterns, dtype=jnp.int32),
         counts=jnp.asarray(counts, dtype=jnp.float64),
         group=jnp.asarray(pat_groups, dtype=jnp.int32),
-        nodes=jnp.asarray(quad.nodes(), dtype=jnp.float64),
+        nodes=nodes,
         families=tuple(families),
         latent=latent,
         priors=priors_block,

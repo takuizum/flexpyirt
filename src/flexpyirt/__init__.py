@@ -7,7 +7,7 @@ from importlib.metadata import PackageNotFoundError, version
 from flexpyirt import errors
 from flexpyirt.fit import fit
 from flexpyirt.items import GPCM, GRM, PCM, FourPL, Rasch, ThreePL, TwoPL
-from flexpyirt.latent import Normal
+from flexpyirt.latent import EmpiricalHistogram, Normal
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
 from flexpyirt.priors import Beta, LogNormal, NormalPrior
@@ -25,6 +25,7 @@ __all__ = [
     "GRM",
     "PCM",
     "Beta",
+    "EmpiricalHistogram",
     "FitResult",
     "FourPL",
     "LogNormal",

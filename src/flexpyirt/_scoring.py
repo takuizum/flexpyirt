@@ -365,7 +365,16 @@ def plausible_values(
     independently. Deterministic given ``key``.
     """
     grid = jnp.linspace(prob.nodes[0], prob.nodes[-1], _PV_GRID_POINTS, dtype=prob.nodes.dtype)
-    prob_fine = replace(prob, nodes=grid)
+    if prob.latent.is_eh:
+
+        def _interp_w(w_g: Array) -> Array:
+            w_fine = jnp.interp(grid, prob.nodes, w_g)
+            return w_fine / jnp.sum(w_fine)
+
+        eh_fine = jax.vmap(_interp_w)(prob.latent.eh_weights)
+        prob_fine = replace(prob, nodes=grid, latent=replace(prob.latent, eh_weights=eh_fine))
+    else:
+        prob_fine = replace(prob, nodes=grid)
     post = jax.nn.softmax(_log_joint(prob_fine, eta), axis=1)  # (P_pad, Q_pv)
 
     seg = 0.5 * (post[:, :-1] + post[:, 1:])  # trapezoidal interval mass, (P_pad, Q_pv - 1)

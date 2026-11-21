@@ -81,6 +81,10 @@ class ItemKernel(Protocol):
         """Return ``(Q, n_cat)`` log-probabilities for nodes ``theta`` of shape ``(Q,)``."""
         ...
 
+    def affine_transform(self, params: Array, mean: Array, sd: Array) -> Array:
+        r"""Transform ``params`` under :math:`\theta^*=(\theta-m)/s`."""
+        ...
+
     def __hash__(self) -> int:
         """Kernels must be hashable (static arguments of jit)."""
         ...
@@ -136,6 +140,10 @@ class DichotomousKernel:
         """Return ``(Q, 2)`` log-probabilities of responses 0 and 1."""
         z = params[0] * theta + params[1]
         return jnp.stack([jax.nn.log_sigmoid(-z), jax.nn.log_sigmoid(z)], axis=-1)
+
+    def affine_transform(self, params: Array, mean: Array, sd: Array) -> Array:
+        r"""Return :math:`(a s,\; d + a m)` under :math:`\theta^* = (\theta - m) / s`."""
+        return jnp.stack([params[0] * sd, params[1] + params[0] * mean])
 
 
 @dataclass(frozen=True)
@@ -216,6 +224,10 @@ class FourPLKernel:
         out = jnp.stack([log_p0, log_p1], axis=-1)
         return jnp.where(valid, out, jnp.nan)
 
+    def affine_transform(self, params: Array, mean: Array, sd: Array) -> Array:
+        r"""Return :math:`(a s,\; d + a m,\; g,\; u)` under :math:`\theta^* = (\theta - m) / s`."""
+        return jnp.stack([params[0] * sd, params[1] + params[0] * mean, params[2], params[3]])
+
 
 def _log1mexp(x: Array) -> Array:
     r"""Return :math:`\log(1-e^{x})` for :math:`x<0`, stably and with NaN-free gradients.
@@ -292,6 +304,10 @@ class GradedKernel:
         middle = log_cum[:, :-1] + _log1mexp(log_cum[:, 1:] - log_cum[:, :-1])
         return jnp.concatenate([first, middle, last], axis=1)
 
+    def affine_transform(self, params: Array, mean: Array, sd: Array) -> Array:
+        r"""Return :math:`(a s,\; d_1 + a m, \dots, d_{K-1} + a m)`."""
+        return jnp.concatenate([params[:1] * sd, params[1:] + params[0] * mean])
+
 
 @dataclass(frozen=True)
 class GPCMKernel:
@@ -353,6 +369,11 @@ class GPCMKernel:
         intercepts = jnp.concatenate([jnp.zeros((1,), dtype=params.dtype), params[1:]])
         eta = params[0] * theta[:, None] * categories[None, :] + intercepts[None, :]
         return jax.nn.log_softmax(eta, axis=-1)
+
+    def affine_transform(self, params: Array, mean: Array, sd: Array) -> Array:
+        r"""Return :math:`(a s,\; d_1 + a m, \dots, d_{K-1} + (K-1) a m)`."""
+        ks = jnp.arange(1, self.n_cat, dtype=params.dtype)
+        return jnp.concatenate([params[:1] * sd, params[1:] + ks * params[0] * mean])
 
 
 class ItemModel(Protocol):

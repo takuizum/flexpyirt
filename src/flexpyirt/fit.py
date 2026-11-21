@@ -149,8 +149,10 @@ def fit(
 
     vcov = None
     se_values = np.full(eta.shape[0], np.nan)
+    eh_weights = np.asarray(out.eh_weights, dtype=np.float64) if spec.is_eh else None
+    problem_fin = _core._with_eh_weights(problem, out.eh_weights) if spec.is_eh else problem
     if se is not None and eta.shape[0] > 0:
-        info = np.asarray(_information[se](problem, out.eta))
+        info = np.asarray(_information[se](problem_fin, out.eta))
         vcov = _invert_information(info)
         se_values = np.sqrt(np.clip(np.diag(vcov), 0.0, None))
 
@@ -191,6 +193,7 @@ def fit(
         _eta=eta,
         _quadrature=quadrature,
         _method=method,
+        _eh_weights=eh_weights,
     )
 
 
