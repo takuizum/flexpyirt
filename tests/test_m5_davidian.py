@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from functools import cache
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any, Literal
 
 import jax
@@ -448,7 +447,7 @@ def _third_standardized_moment(params: list[float]) -> float:
     zn = np.asarray(z)
     m = float(np.sum(w * zn))
     v = float(np.sum(w * (zn - m) ** 2))
-    return float(np.sum(w * (zn - m) ** 3)) / v**1.5
+    return float(np.sum(w * (zn - m) ** 3)) / float(v**1.5)
 
 
 @pytest.mark.parametrize("degree", [1, 2, 3, 10])
@@ -510,19 +509,22 @@ def test_malformed_davidian_json() -> None:
     _, res = _fitted_dc3()
     payload = json.loads(res.to_json())
 
-    def load_with(mutate: Callable[[dict[str, Any]], None], match: str) -> None:
+    def load_with(match: str, *, drop: str | None = None, **update: Any) -> None:
         bad = json.loads(json.dumps(payload))
-        mutate(bad)
+        latent: dict[str, Any] = bad["model"]["latent"]
+        if drop is not None:
+            latent.pop(drop)
+        latent.update(update)
         with pytest.raises(SpecificationError, match=match):
             FitResult.from_json(json.dumps(bad))
 
     for key in ("degree", "mean", "var", "free_mean", "free_var"):
-        load_with(lambda p, k=key: p["model"]["latent"].pop(k), key)
-    load_with(lambda p: p["model"]["latent"].update(extra=1), "extra")
+        load_with(key, drop=key)
+    load_with("extra", extra=1)
     for bad_degree in (0, MAX_DAVIDIAN_DEGREE + 1, True, 2.5, "3"):
-        load_with(lambda p, d=bad_degree: p["model"]["latent"].update(degree=d), "degree")
-    load_with(lambda p: p["model"]["latent"].update(var=0.0), "var")
-    load_with(lambda p: p["model"]["latent"].update(free_mean="yes"), "free_mean")
+        load_with("degree", degree=bad_degree)
+    load_with("var", var=0.0)
+    load_with("free_mean", free_mean="yes")
     # phi rows must match the declared degree (3 phi rows in the payload).
-    load_with(lambda p: p["model"]["latent"].update(degree=2), "phi_3|parameter")
-    load_with(lambda p: p["model"]["latent"].update(degree=4), "phi_4|parameter")
+    load_with("phi_3|parameter", degree=2)
+    load_with("phi_4|parameter", degree=4)
