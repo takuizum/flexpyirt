@@ -6,6 +6,7 @@ group / item / parameter.
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -17,8 +18,8 @@ import pandas as pd
 
 from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock, PriorBlock
 from flexpyirt.errors import FlexpyirtWarning, IdentificationError, SpecificationError
-from flexpyirt.items import FourPLKernel, ItemKernel
-from flexpyirt.priors import PRIOR_TYPES, Prior, encode_prior
+from flexpyirt.items import FourPLKernel, GradedKernel, ItemKernel
+from flexpyirt.priors import PRIOR_TYPES, Beta, LogNormal, NormalPrior, Prior, encode_prior
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -203,6 +204,78 @@ def _start_values(model: Model, y: np.ndarray) -> dict[str, np.ndarray]:
     return out
 
 
+def _prior_center(pri: Prior) -> float | None:
+    """Return a representative interior point for ``pri``, or ``None`` if it overflows."""
+    if isinstance(pri, NormalPrior):
+        return pri.mean
+    if isinstance(pri, LogNormal):
+        try:
+            return math.exp(pri.meanlog)
+        except OverflowError:
+            return None
+    if isinstance(pri, Beta):
+        return pri.a / (pri.a + pri.b)
+    return None
+
+
+def _interior_point(lo: float, hi: float, candidate: float | None = None) -> float:
+    """Return a finite point strictly inside ``(lo, hi)`` (assuming ``lo < hi``)."""
+    if candidate is not None and math.isfinite(candidate) and lo < candidate < hi:
+        return candidate
+    if math.isfinite(lo) and math.isfinite(hi):
+        return 0.5 * (lo + hi)
+    if math.isfinite(lo):
+        return lo + 1.0
+    if math.isfinite(hi):
+        return hi - 1.0
+    return 0.0
+
+
+def _order_grm_intercepts(
+    d: np.ndarray,
+    is_free: Sequence[bool],
+    eff_lo: Sequence[float],
+    eff_hi: Sequence[float],
+) -> np.ndarray:
+    """Ensure GRM intercepts are strictly decreasing inside each free parameter's open bounds."""
+    m = len(d)
+    if m < 2 or all(float(d[j]) > float(d[j + 1]) for j in range(m - 1)):
+        return d
+    lb = [eff_lo[j] if is_free[j] else float(d[j]) for j in range(m)]
+    ub = [eff_hi[j] if is_free[j] else float(d[j]) for j in range(m)]
+    for j in range(m - 2, -1, -1):
+        if is_free[j]:
+            lb[j] = max(lb[j], lb[j + 1])
+    for j in range(1, m):
+        if is_free[j]:
+            ub[j] = min(ub[j], ub[j - 1])
+    if any(is_free[j] and not (lb[j] < ub[j]) for j in range(m)):
+        return d
+    out = d.copy()
+    j = 0
+    while j < m:
+        if not is_free[j]:
+            j += 1
+            continue
+        s = j
+        while j < m and is_free[j]:
+            j += 1
+        e = j - 1
+        for idx in range(s, e + 1):
+            rem = e - idx + 1
+            lo = lb[idx]
+            hi = ub[idx] if idx == 0 else min(ub[idx], float(out[idx - 1]))
+            if math.isfinite(lo) and math.isfinite(hi):
+                out[idx] = lo + (hi - lo) * (rem / (rem + 1.0))
+            elif math.isfinite(lo):
+                out[idx] = lo + 0.5 * rem
+            elif math.isfinite(hi):
+                out[idx] = hi - 0.5
+            else:
+                out[idx] = 0.5 * (rem - 0.5 * (e - s + 2))
+    return out
+
+
 def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
     """Build the default ParameterTable (DESIGN.md §5.1, §14.1) from the spec and responses."""
     rows: list[dict[str, Any]] = []
@@ -213,19 +286,49 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
         for name, item_model in model.items:
             lower, upper = item_model.bounds()
             free_default = item_model.default_free()
+            param_names = item_model.kernel.param_names
             item_starts = starts[name].copy()
+            is_free = [
+                free_default[k] and (name, param) not in fixed
+                for k, param in enumerate(param_names)
+            ]
+            eff_lo = [float(v) for v in lower]
+            eff_hi = [float(v) for v in upper]
+            for k, param in enumerate(param_names):
+                if not is_free[k]:
+                    item_starts[k] = fixed.get((name, param), float(item_starts[k]))
+                    continue
+                pri = priors.get((name, param))
+                if pri is not None:
+                    p_lo, p_hi = pri.support
+                    eff_lo[k] = max(eff_lo[k], p_lo)
+                    eff_hi[k] = min(eff_hi[k], p_hi)
+                lo_k, hi_k = eff_lo[k], eff_hi[k]
+                if lo_k < hi_k and not (lo_k < float(item_starts[k]) < hi_k):
+                    candidate = _prior_center(pri) if pri is not None else None
+                    item_starts[k] = _interior_point(lo_k, hi_k, candidate)
             if isinstance(item_model.kernel, FourPLKernel):
-                g_free = free_default[2] and (name, "g") not in fixed
-                u_free = free_default[3] and (name, "u") not in fixed
+                g_free = is_free[2]
+                u_free = is_free[3]
                 if g_free and not u_free:
-                    u_val = fixed.get((name, "u"), float(item_starts[3]))
-                    if u_val > 0.0:
-                        item_starts[2] = min(float(item_starts[2]), 0.5 * u_val)
+                    hi_g = min(eff_hi[2], float(item_starts[3]))
+                    if eff_lo[2] < hi_g and not (eff_lo[2] < float(item_starts[2]) < hi_g):
+                        item_starts[2] = _interior_point(eff_lo[2], hi_g)
                 elif u_free and not g_free:
-                    g_val = fixed.get((name, "g"), float(item_starts[2]))
-                    if g_val < 1.0:
-                        item_starts[3] = max(float(item_starts[3]), 0.5 * (1.0 + g_val))
-            for k, param in enumerate(item_model.kernel.param_names):
+                    lo_u = max(eff_lo[3], float(item_starts[2]))
+                    if lo_u < eff_hi[3] and not (lo_u < float(item_starts[3]) < eff_hi[3]):
+                        item_starts[3] = _interior_point(lo_u, eff_hi[3])
+                elif g_free and u_free and not (float(item_starts[2]) < float(item_starts[3])):
+                    ov_lo = max(eff_lo[2], eff_lo[3])
+                    ov_hi = min(eff_hi[2], eff_hi[3])
+                    if ov_lo < ov_hi and math.isfinite(ov_lo) and math.isfinite(ov_hi):
+                        item_starts[2] = ov_lo + (ov_hi - ov_lo) / 3.0
+                        item_starts[3] = ov_lo + 2.0 * (ov_hi - ov_lo) / 3.0
+            elif isinstance(item_model.kernel, GradedKernel):
+                item_starts[1:] = _order_grm_intercepts(
+                    item_starts[1:], is_free[1:], eff_lo[1:], eff_hi[1:]
+                )
+            for k, param in enumerate(param_names):
                 key = (name, param)
                 rows.append(
                     {
@@ -233,8 +336,8 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                         "item": name,
                         "model": item_model.name,
                         "param": param,
-                        "value": fixed.get(key, float(item_starts[k])),
-                        "free": free_default[k] and key not in fixed,
+                        "value": float(item_starts[k]),
+                        "free": is_free[k],
                         "lower": float(lower[k]),
                         "upper": float(upper[k]),
                         "prior": priors.get(key),

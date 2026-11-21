@@ -13,7 +13,9 @@ from scipy import stats
 
 from flexpyirt import (
     BAEM,
+    GRM,
     Beta,
+    FourPL,
     LogNormal,
     Model,
     Normal,
@@ -417,3 +419,126 @@ def test_map_3pl_monotone_and_prevents_heywood(squarem: bool) -> None:
     assert res.log_posterior >= lp_hist[-1] - 1e-9 * abs(lp_hist[-1])
     assert (res.items["a"] > 0).all()
     assert ((res.items["g"] > 0.01) & (res.items["g"] < 0.99)).all()
+
+
+def _simulate_grm(a: np.ndarray, d: np.ndarray, n: int, seed: int) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    theta = rng.normal(0.0, 1.0, size=(n, 1))
+    cols: dict[str, np.ndarray] = {}
+    for j in range(len(a)):
+        cum = 1.0 / (1.0 + np.exp(-(theta * a[j] + d[j])))
+        u = rng.random((n, 1))
+        cols[f"q{j + 1:02d}"] = (u < cum).sum(axis=1).astype(int)
+    return pd.DataFrame(cols)
+
+
+def test_default_starts_adjusted_into_prior_support() -> None:
+    """Default starts move strictly into (model bounds ∩ prior support) for 2PL, 3PL/4PL, GRM."""
+    # 1. Beta(2, 2) on 2PL slopes (heuristic a0 > 1 on LSAT7 Item.2).
+    df_lsat = load_m1("v1_lsat7_2pl").data
+    spec_beta_a = Model.uniform(TwoPL(), items=df_lsat.columns).prior(
+        param="a", dist=Beta(2.0, 2.0)
+    )
+    tbl_beta_a = spec_beta_a.parameter_table(df_lsat)
+    a_starts = tbl_beta_a.loc[tbl_beta_a["param"] == "a", "value"].to_numpy()
+    assert ((a_starts > 0.0) & (a_starts < 1.0)).all()
+    res_beta_a = fit(spec_beta_a, df_lsat, method=BAEM(tol=1e-7), se=None)
+    assert res_beta_a.converged
+    assert ((res_beta_a.items["a"] > 0.0) & (res_beta_a.items["a"] < 1.0)).all()
+
+    # 2. LogNormal(0, 0.5) on 2PL intercepts when items have proportion correct <= 0.5 (d0 <= 0).
+    df_hard = _simulate_2pl(
+        np.array([1.1, 1.3, 1.0, 1.2, 1.4]),
+        np.array([-1.2, -0.5, 0.0, 0.4, -0.8]),
+        n=400,
+        seed=42,
+    )
+    spec_ln_d = Model.uniform(TwoPL(), items=df_hard.columns).prior(
+        param="d", dist=LogNormal(0.0, 0.5)
+    )
+    tbl_ln_d = spec_ln_d.parameter_table(df_hard)
+    d_starts = tbl_ln_d.loc[tbl_ln_d["param"] == "d", "value"].to_numpy()
+    assert (d_starts > 0.0).all()
+    res_ln_d = fit(spec_ln_d, df_hard, method=BAEM(tol=1e-7), se=None)
+    assert res_ln_d.converged
+    assert (res_ln_d.items["d"] > 0.0).all()
+
+    # Extreme LogNormal meanlog (exp overflow / underflow) still yields a finite > 0 start.
+    for extreme_meanlog in (1000.0, -1000.0):
+        t_ext = (
+            Model.uniform(TwoPL(), items=df_hard.columns)
+            .prior(param="d", dist=LogNormal(extreme_meanlog, 1.0))
+            .parameter_table(df_hard)
+        )
+        d_ext = t_ext.loc[t_ext["param"] == "d", "value"].to_numpy()
+        assert (np.isfinite(d_ext) & (d_ext > 0.0)).all()
+
+    # 3. 3PL and 4PL keep 0 < g < u < 1 with priors and fixed asymptotes.
+    df_3pl = _simulate_3pl(
+        np.array([1.2, 1.4, 1.1, 1.3, 1.5]),
+        np.array([-0.4, 0.2, -0.6, 0.3, -0.1]),
+        np.full(5, 0.2),
+        n=400,
+        seed=77,
+    )
+    spec_3pl = (
+        Model.uniform(ThreePL(), items=df_3pl.columns)
+        .fix(item="q01", u=0.15)
+        .prior(param="g", dist=Beta(2.0, 2.0))
+    )
+    t_3pl = spec_3pl.parameter_table(df_3pl).set_index(["item", "param"])
+    assert 0.0 < float(t_3pl["value"].loc[("q01", "g")]) < 0.15
+
+    spec_4pl = (
+        Model.uniform(FourPL(), items=df_3pl.columns)
+        .fix(item="q01", g=0.96)
+        .prior(param="g", dist=Beta(2.0, 2.0))
+        .prior(param="u", dist=Beta(2.0, 2.0))
+    )
+    t_4pl = spec_4pl.parameter_table(df_3pl).set_index(["item", "param"])
+    for item in df_3pl.columns:
+        g0 = float(t_4pl["value"].loc[(item, "g")])
+        u0 = float(t_4pl["value"].loc[(item, "u")])
+        assert 0.0 < g0 < u0 < 1.0
+
+    # 4. GRM keeps d1 > d2 > ... > d(K-1) strictly inside prior support (LogNormal, Beta, fixed).
+    df_grm = _simulate_grm(
+        np.array([1.1, 1.3, 1.0, 1.2]),
+        np.array([[1.0, -0.2, -1.2], [0.8, 0.0, -1.0], [1.2, 0.1, -0.9], [0.6, -0.3, -1.4]]),
+        n=400,
+        seed=88,
+    )
+    spec_grm_ln = (
+        Model.uniform(GRM(n_cat=4), items=df_grm.columns)
+        .prior(param="d1", dist=LogNormal(0.0, 0.5))
+        .prior(param="d2", dist=LogNormal(0.0, 0.5))
+        .prior(param="d3", dist=LogNormal(0.0, 0.5))
+    )
+    t_grm_ln = spec_grm_ln.parameter_table(df_grm).set_index(["item", "param"])
+    for item in df_grm.columns:
+        ds = [float(t_grm_ln["value"].loc[(item, f"d{k}")]) for k in (1, 2, 3)]
+        assert ds[0] > ds[1] > ds[2] > 0.0
+    res_grm_ln = fit(spec_grm_ln, df_grm, method=BAEM(tol=1e-6), se=None)
+    assert res_grm_ln.converged
+    assert np.isfinite(res_grm_ln.log_posterior)
+    assert (res_grm_ln.items["d1"] > res_grm_ln.items["d2"]).all()
+    assert (res_grm_ln.items["d2"] > res_grm_ln.items["d3"]).all()
+    assert (res_grm_ln.items["d3"] > 0.0).all()
+
+    spec_grm_beta = (
+        Model.uniform(GRM(n_cat=4), items=df_grm.columns)
+        .fix(item="q01", d1=0.8)
+        .prior(param="d1", dist=Beta(2.0, 2.0))
+        .prior(param="d2", dist=Beta(2.0, 2.0))
+        .prior(param="d3", dist=Beta(2.0, 2.0))
+    )
+    t_grm_beta = spec_grm_beta.parameter_table(df_grm).set_index(["item", "param"])
+    for item in df_grm.columns:
+        ds = [float(t_grm_beta["value"].loc[(item, f"d{k}")]) for k in (1, 2, 3)]
+        assert 1.0 > ds[0] > ds[1] > ds[2] > 0.0
+    res_grm_beta = fit(spec_grm_beta, df_grm, method=BAEM(tol=1e-6), se=None)
+    assert res_grm_beta.converged
+    assert np.isfinite(res_grm_beta.log_posterior)
+    assert ((res_grm_beta.items["d1"] < 1.0) & (res_grm_beta.items["d3"] > 0.0)).all()
+    assert (res_grm_beta.items["d1"] > res_grm_beta.items["d2"]).all()
+    assert (res_grm_beta.items["d2"] > res_grm_beta.items["d3"]).all()
