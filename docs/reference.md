@@ -59,7 +59,8 @@ Returned by `fit()`. Immutable.
 | Attribute | Type | Description |
 |---|---|---|
 | `items` | DataFrame | One row per item (per group × item, with a `group` column, for multiple groups): `model`, internal parameters (`a` or `a1`…`aD`, `d` / `d1`…, `g`, `u`), `<param>_se`, and for unidimensional models display `b` / `bk` ($-d/a$, GRM $-d_k/a$, GPCM/PCM $-(d_k-d_{k-1})/a$ with $d_0=0$) and delta-method `b_se` / `bk_se` (from `vcov` via JAX autodiff; NaN when `se=None` or all parameters entering a threshold are fixed) |
-| `latent` | DataFrame | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` for 1 factor, or `group`, `mean_1`…`mean_D`, `var_1`…`var_D`, `cor_12`… and their `_se` columns for 2–3 factors (SEs of fixed values are NaN) |
+| `latent` | DataFrame | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` for 1 factor, or `group`, `mean_1`…`mean_D`, `var_1`…`var_D`, `cor_12`… and their `_se` columns for 2–3 factors (SEs of fixed values are NaN); for `EmpiricalHistogram`, `group`, `mean`, `var`, `sd`, `skewness`, `kurtosis` (excess) of each histogram |
+| `latent_weights` | DataFrame / None | `EmpiricalHistogram` only: `group`, `node`, `weight` (one row per group × quadrature node); None for `Normal` |
 | `parameters` | DataFrame | The validated ParameterTable plus `estimate` (the estimate, or the fixed value) and `se` |
 | `loglik` | float | Marginal log-likelihood at the estimates (likelihood only, excluding priors) |
 | `log_posterior` | float | Log posterior ($\ell(\hat\eta) + \log\pi(\hat\eta)$) at the estimates; equals `loglik` without priors |
@@ -126,7 +127,7 @@ and `pv1`…`pv{n_draws}` for `"PV"`; for multidimensional models (`method="EAP"
 `theta_<factor>` and `se_<factor>` in declared factor order.
 
 **Raises**: `SpecificationError` if `method` is unknown, `method != "EAP"` on a multidimensional
-model, `key` is missing or invalid for `"PV"`, `key` is supplied for a deterministic method, or
+model, `method="MAP"` with an `EmpiricalHistogram` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for a deterministic method, or
 `n_draws` is not a positive integer.
 
 #### `FitResult.to_json`
@@ -248,7 +249,8 @@ all items are `Rasch` or `PCM`), and correlations free when `correlated=True` (m
 model.with_latent(dist) -> Model
 ```
 
-Set the latent distribution of a single-group model to a `Normal`. Not available with groups
+Set the latent distribution of a single-group model to a `Normal` or an `EmpiricalHistogram`
+(unidimensional models only). Not available with groups
 (set them with `with_groups()`).
 
 #### `Model.with_groups`
@@ -460,6 +462,28 @@ grid. `mean` and `var` are fixed values, or starting values when estimated.
 `var` must be positive and `mean` finite (`SpecificationError` otherwise). An estimated `var` is
 the parameter of the normal distribution before the grid cuts it off
 ([guide section 13](guide.md#13-choosing-the-quadrature-grid)).
+
+### `EmpiricalHistogram`
+
+```text
+EmpiricalHistogram(*, min_weight=1e-10)
+```
+
+Empirical histogram (Woods, 2007): free weights $w_q \ge$ `min_weight` on the quadrature nodes,
+summing to 1, estimated at every EM iteration ([guide section 8](guide.md#8-latent-distributions-and-identification)).
+Unless fixed items set the scale (FIPC), the reference group's histogram is constrained to mean 0
+and variance 1 (mean only for Rasch/PCM). With multiple groups every group must use EH. The
+weights count as parameters in `n_params` ($Q-3$ for a standardized reference group, $Q-2$ for
+Rasch/PCM, $Q-1$ under FIPC and for each focal group). Standard errors are conditional on the
+fitted histogram. Unidimensional models only.
+
+| Argument | Description |
+|---|---|
+| `min_weight` | Floor on every node's weight; must be in $(0, 1)$ and below $1/Q$ for the grid used |
+
+**Raises**: `SpecificationError` for an invalid `min_weight`, for mixing `EmpiricalHistogram` and
+`Normal` across groups, or for a multidimensional model; `IdentificationError` when intercepts are
+fixed but no nonzero slope is (a variance-only constraint is not supported).
 
 ---
 

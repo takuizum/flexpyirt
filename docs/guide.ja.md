@@ -352,6 +352,26 @@ except IdentificationError as e:
     print("IdentificationError:", e)
 ```
 
+### 経験ヒストグラム（EH）
+
+`EmpiricalHistogram()` は正規分布の代わりに求積節点上の自由な重みを使う（Woods, 2007）。歪んだ分布や多峰の分布に
+向く。重みは毎 EM 反復で推定し直し、パラメタとして数える（`n_params`、AIC、BIC）。
+
+```python
+from flexpyirt import EmpiricalHistogram
+
+eh = fit(Model.uniform(TwoPL(), items=items).with_latent(EmpiricalHistogram()), df)
+print(eh.latent)  # group, mean, var, sd, skewness, kurtosis (excess)
+print(eh.latent_weights.head())  # group, node, weight
+```
+
+- **識別**: 固定項目が尺度を決めない限り（FIPC 以外）、参照群のヒストグラムは毎反復で平均 0・分散 1 に制約する
+  （Rasch / PCM は平均のみ）。FIPC ではヒストグラムは自由。多母集団では全群が EH を使い、焦点群はアンカー項目でつなぐ。
+- `min_weight`（既定 `1e-10`）は各節点の重みの下限で、空の節点でも対数重みが有限になる。
+- 標準誤差は、ヒストグラムを推定値に固定したときの項目パラメタの標準誤差（mirt と同じ）。
+- 採点: EAP・ML・WLE・PV はヒストグラムを使う。MAP は連続な事前分布が必要なので `SpecificationError`。
+- ヒストグラムの重みの多くは弱くしか決まらないため、厳しい収束基準では EM の収束が遅い。`BAEM(squarem=True)` が有効。
+
 ## 9. 多母集団
 
 複数の集団（学年、受験年度、言語版など）の回答を同時に推定する。アンカー項目のパラメタを群間で等しくして

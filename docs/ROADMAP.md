@@ -29,7 +29,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   `IdentificationError`.
 
 ## M3 EH, MAP, 3PL/4PL, GPCM, SQUAREM
-- EmpiricalHistogram (after deciding DESIGN §12-1).
+- [x] EmpiricalHistogram (`EmpiricalHistogram`, reference group standardized by a moment-constrained M-step, square-root-scale SQUAREM; validated in V6).
 - [x] Priors and MAP (`NormalPrior`, `LogNormal`, `Beta`, `Model.prior()`, `FitResult.log_posterior`, validated in V7).
 - [x] 3PL / 4PL (`ThreePL`, `FourPL`, `HeywoodWarning`, validated in V11).
 - [x] GPCM / PCM (`GPCM`, `PCM`, validated in V8).

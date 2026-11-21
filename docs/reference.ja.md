@@ -54,7 +54,8 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 | 属性 | 型 | 説明 |
 |---|---|---|
 | `items` | DataFrame | 1 項目 1 行（多母集団では `group` 列つきで群 × 項目）。`model`、内部パラメタ（`a` または `a1`…`aD`、`d` / `d1`…、`g`, `u`）、`<param>_se`、および 1 次元モデルでは表示用の `b` / `bk`（$-d/a$、GRM は $-d_k/a$、GPCM/PCM は $-(d_k-d_{k-1})/a$、$d_0=0$）とデルタ法による `b_se` / `bk_se`（`vcov` と JAX 自動微分から計算。`se=None` または閾値に入るパラメタがすべて固定なら NaN） |
-| `latent` | DataFrame | 1 群 1 行。1 因子では `group`, `mean`, `var`, `mean_se`, `var_se`、2–3 因子では `group`, `mean_1`…`mean_D`, `var_1`…`var_D`, `cor_12`… とその `_se` 列（固定値の SE は NaN） |
+| `latent` | DataFrame | 1 群 1 行。1 因子では `group`, `mean`, `var`, `mean_se`, `var_se`、2–3 因子では `group`, `mean_1`…`mean_D`, `var_1`…`var_D`, `cor_12`… とその `_se` 列（固定値の SE は NaN）。`EmpiricalHistogram` では各ヒストグラムの `group`, `mean`, `var`, `sd`, `skewness`, `kurtosis`（超過尖度） |
+| `latent_weights` | DataFrame / None | `EmpiricalHistogram` のみ: `group`, `node`, `weight`（群 × 求積節点ごとに 1 行）。`Normal` では None |
 | `parameters` | DataFrame | 検証済みの ParameterTable に `estimate`（推定値。固定なら固定値）と `se` を足したもの |
 | `loglik` | float | 推定値での周辺対数尤度（尤度のみ、事前分布は含めない） |
 | `log_posterior` | float | 推定値での対数事後確率（$\ell(\hat\eta) + \log\pi(\hat\eta)$）。事前分布なしでは `loglik` と同値 |
@@ -115,7 +116,7 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 `"EAP"`, `"MAP"`, `"ML"`, `"WLE"` が `theta`, `se` 列、`"PV"` が `pv1`…`pv{n_draws}` 列。多次元モデル（`method="EAP"`）では
 宣言した因子順に `theta_<factor>`, `se_<factor>` 列。
 
-**例外**: 不正な `method`、多次元モデルで `method != "EAP"` を指定した場合、`"PV"` で `key` が未指定・不正、決定的手法に
+**例外**: 不正な `method`、多次元モデルで `method != "EAP"` を指定した場合、`EmpiricalHistogram` で `method="MAP"` を指定した場合、`"PV"` で `key` が未指定・不正、決定的手法に
 `key` を渡した場合、または `n_draws` が正の整数でない場合に `SpecificationError`。
 
 #### `FitResult.to_json`
@@ -227,7 +228,7 @@ model.with_factors(factors, *, correlated=True) -> Model
 model.with_latent(dist) -> Model
 ```
 
-単一群モデルの潜在分布を `Normal` で指定する。多母集団モデルでは使えない（`with_groups()` で指定する）。
+単一群モデルの潜在分布を `Normal` または `EmpiricalHistogram`（1 次元モデルのみ）で指定する。多母集団モデルでは使えない（`with_groups()` で指定する）。
 
 #### `Model.with_groups`
 
@@ -427,6 +428,25 @@ Normal.free(*, mean=0.0, var=1.0)
 
 `var` は正、`mean` は有限でなければ `SpecificationError`。推定した `var` は格子で切る前の正規分布の
 パラメタ（[ガイド 13 節](guide.ja.md#13-求積格子の選び方)）。
+
+### `EmpiricalHistogram`
+
+```text
+EmpiricalHistogram(*, min_weight=1e-10)
+```
+
+経験ヒストグラム（Woods, 2007）。求積節点上の自由な重み $w_q \ge$ `min_weight`（和は 1）を毎 EM 反復で推定する
+（[ガイド 8 節](guide.ja.md#8-潜在分布と識別性)）。固定項目が尺度を決めない限り（FIPC 以外）、参照群のヒストグラムを
+平均 0・分散 1 に制約する（Rasch / PCM は平均のみ）。多母集団では全群が EH でなければならない。重みは `n_params` に
+パラメタとして数える（標準化する参照群は $Q-3$、Rasch / PCM は $Q-2$、FIPC と各焦点群は $Q-1$）。標準誤差は推定した
+ヒストグラムを固定した条件付きのもの。1 次元モデルのみ。
+
+| 引数 | 説明 |
+|---|---|
+| `min_weight` | 各節点の重みの下限。$(0, 1)$ の範囲で、使う格子について $1/Q$ 未満 |
+
+**例外**: `min_weight` が不正、群間で `EmpiricalHistogram` と `Normal` を混在させた、または多次元モデルの場合に
+`SpecificationError`。切片を固定していて非ゼロの傾きを固定していない場合（分散のみの制約は未対応）は `IdentificationError`。
 
 ---
 
