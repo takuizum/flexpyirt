@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from functools import cache
 from pathlib import Path
-from typing import Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 import jax
 import jax.numpy as jnp
@@ -24,6 +25,7 @@ from flexpyirt import (
     TwoPL,
     fit,
 )
+from flexpyirt._compile import _davidian_phi_starts
 from flexpyirt._core import information_hessian, information_oakes
 from flexpyirt.errors import IdentificationError, SpecificationError
 from flexpyirt.latent import (
@@ -433,3 +435,94 @@ def test_scoring_reporting_item_fit_and_json_roundtrip(tmp_path: Path) -> None:
         loaded.score(sub.iloc[:5], method="PV", key=jax.random.key(1), n_draws=5).to_numpy(),
         res.score(sub.iloc[:5], method="PV", key=jax.random.key(1), n_draws=5).to_numpy(),
     )
+
+
+# --------------------------------------------------------------------------------------------
+# Edge cases: start signs, degree 1 and 10 fits, polynomial root at a node, malformed JSON
+# --------------------------------------------------------------------------------------------
+
+
+def _third_standardized_moment(params: list[float]) -> float:
+    z = jnp.linspace(-12.0, 12.0, 2401, dtype=jnp.float64)
+    w = np.exp(np.asarray(davidian_log_weights(z, jnp.asarray(params, dtype=jnp.float64))))
+    zn = np.asarray(z)
+    m = float(np.sum(w * zn))
+    v = float(np.sum(w * (zn - m) ** 2))
+    return float(np.sum(w * (zn - m) ** 3)) / v**1.5
+
+
+@pytest.mark.parametrize("degree", [1, 2, 3, 10])
+def test_start_angles_match_total_score_skewness(degree: int) -> None:
+    df, _, _ = _skewed_2pl_data(n_obs=600, n_items=8)
+    y = df.to_numpy()
+    starts = _davidian_phi_starts(degree, y)
+    assert starts == _davidian_phi_starts(degree, y)  # deterministic
+    # Positively skewed data -> positive start skewness; reversed scores -> negative.
+    assert _third_standardized_moment([0.0, 1.0, *starts]) > 0.0
+    flipped = _davidian_phi_starts(degree, 1 - y)
+    assert _third_standardized_moment([0.0, 1.0, *flipped]) < 0.0
+    # The start is off the stationary point phi = 0.
+    assert any(abs(s) > 0.0 for s in starts)
+
+
+@pytest.mark.parametrize("degree", [1, 10])
+def test_fit_degree_extremes(degree: int) -> None:
+    df, _, _ = _skewed_2pl_data()
+    spec = Model.uniform(TwoPL(), items=df.columns).with_latent(DavidianCurve(degree))
+    res = fit(spec, df, method=BAEM(tol=1e-6, max_iter=3000, squarem=True), se="oakes")
+    assert res.converged
+    ll = res.history["loglik"].to_numpy()
+    assert np.all(np.diff(ll) >= -1e-9 * np.abs(ll[1:]))
+    assert res.vcov is not None
+    assert np.all(np.isfinite(res.vcov))
+    assert np.all(np.linalg.eigvalsh(res.vcov) > 0.0)
+    se = res.latent[[f"phi_{j}_se" for j in range(1, degree + 1)]].to_numpy()
+    assert np.all(np.isfinite(se)) and np.all(se > 0.0)
+    assert res.n_params == 2 * df.shape[1] + degree
+
+
+@pytest.mark.parametrize("free_phi", [False, True])
+def test_fit_with_polynomial_root_on_a_quadrature_node(free_phi: bool) -> None:
+    # degree=1, phi_1 = pi/2 -> P_1(z) = z, whose root z = 0 is the grid node theta = 0, so
+    # log w = -inf at a node while the data put positive likelihood there.
+    df, _, _ = _skewed_2pl_data()
+    spec = Model.uniform(TwoPL(), items=df.columns).with_latent(DavidianCurve(1))
+    tbl = spec.parameter_table(df)
+    is_phi = tbl["param"] == "phi_1"
+    tbl.loc[is_phi, "value"] = 0.5 * np.pi
+    tbl.loc[is_phi, "free"] = free_phi
+    res = fit(spec, df, table=tbl, method=BAEM(tol=1e-6, squarem=True), se="oakes")
+    assert res.converged
+    assert np.isfinite(res.loglik)
+    ll = res.history["loglik"].to_numpy()
+    assert np.all(np.isfinite(ll))
+    assert np.all(np.diff(ll) >= -1e-9 * np.abs(ll[1:]))
+    assert res.vcov is not None and np.all(np.isfinite(res.vcov))
+    if not free_phi:
+        assert float(res.latent["phi_1"].iloc[0]) == 0.5 * np.pi
+        sc = res.score(df.iloc[:10], method="EAP")
+        assert np.all(np.isfinite(sc.to_numpy()))
+    else:
+        assert float(res.latent["phi_1_se"].iloc[0]) > 0.0
+
+
+def test_malformed_davidian_json() -> None:
+    _, res = _fitted_dc3()
+    payload = json.loads(res.to_json())
+
+    def load_with(mutate: Callable[[dict[str, Any]], None], match: str) -> None:
+        bad = json.loads(json.dumps(payload))
+        mutate(bad)
+        with pytest.raises(SpecificationError, match=match):
+            FitResult.from_json(json.dumps(bad))
+
+    for key in ("degree", "mean", "var", "free_mean", "free_var"):
+        load_with(lambda p, k=key: p["model"]["latent"].pop(k), key)
+    load_with(lambda p: p["model"]["latent"].update(extra=1), "extra")
+    for bad_degree in (0, MAX_DAVIDIAN_DEGREE + 1, True, 2.5, "3"):
+        load_with(lambda p, d=bad_degree: p["model"]["latent"].update(degree=d), "degree")
+    load_with(lambda p: p["model"]["latent"].update(var=0.0), "var")
+    load_with(lambda p: p["model"]["latent"].update(free_mean="yes"), "free_mean")
+    # phi rows must match the declared degree (3 phi rows in the payload).
+    load_with(lambda p: p["model"]["latent"].update(degree=2), "phi_3|parameter")
+    load_with(lambda p: p["model"]["latent"].update(degree=4), "phi_4|parameter")
