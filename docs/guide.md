@@ -41,6 +41,7 @@ from flexpyirt import (
     GRM,
     PCM,
     Beta,
+    FitResult,
     FourPL,
     LogNormal,
     Model,
@@ -221,12 +222,38 @@ print(res.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeguar
 | `converged`, `n_iter`, `n_em_evaluations`, `n_safeguards` | Whether EM converged, accepted iterations, total EM map evaluations (equal to `n_iter` for plain EM), and SQUAREM safeguard interventions |
 | `history` | Per accepted iterate: `iter`, `loglik`, `log_posterior`, `max_change`, `em_evaluations` (cumulative), and `safeguard` (whether the SQUAREM safeguard fired) |
 | `vcov`, `se_method` | Covariance matrix of the free parameters (in `free_id` order) and how it was computed |
+| `to_json(path=None, *, indent=2)` / `FitResult.from_json(source)` | Save a fitted result to plain, strict JSON (optionally writing `path`) and reload it without refitting |
 
 `history.loglik` never decreases between iterations (EM is monotone). If it does, that is a bug;
 please report it.
 
 ```python
 assert (res.history["loglik"].diff().dropna() >= -1e-8).all()
+```
+
+### Saving and loading (JSON)
+
+Save a `FitResult` to plain, versioned JSON with `to_json()` and reload it later with
+`FitResult.from_json()` without refitting. No `pickle` or `eval` is used: finite float64 values are
+stored as `repr`-exact JSON numbers and non-finite values (`NaN`, `±inf`) are encoded explicitly so
+the output is valid strict JSON and round-trips bit-for-bit. A loaded result reproduces every
+attribute, `summary()`, `_repr_html_()`, and `score()` identically. Enable JAX 64-bit floating
+point before calling `from_json()` (`PrecisionError` otherwise).
+
+```python
+import tempfile
+from pathlib import Path
+
+json_str = res.to_json()  # returns a strict JSON string (pass indent=None for compact output)
+loaded_str = FitResult.from_json(json_str)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out_path = Path(tmp) / "fit_result.json"
+    res.to_json(out_path)  # writes UTF-8 JSON to disk and also returns the string
+    loaded = FitResult.from_json(out_path)
+
+assert loaded.summary() == res.summary()
+np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_numpy())
 ```
 
 ## 6. Standard errors

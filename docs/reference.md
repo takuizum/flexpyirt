@@ -127,6 +127,52 @@ for `"PV"`.
 **Raises**: `SpecificationError` if `method` is unknown, `key` is missing or invalid for `"PV"`,
 `key` is supplied for a deterministic method, or `n_draws` is not a positive integer.
 
+#### `FitResult.to_json`
+
+```text
+to_json(path=None, *, indent=2) -> str
+```
+
+Serialize the fitted result to a strict RFC 8259 JSON string, and also write it (UTF-8) to `path`
+(`str` or `os.PathLike`) when `path` is given. Uses plain, versioned JSON (no `pickle`) with
+top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 1`, and `"flexpyirt_version"`.
+Finite float64 values are written as `repr`-exact JSON numbers and non-finite values (`NaN`,
+`+inf`, `-inf`) are encoded explicitly as `"NaN"`, `"Infinity"`, and `"-Infinity"` in float-typed
+fields so every attribute round-trips bit-for-bit.
+
+| Argument | Type | Description |
+|---|---|---|
+| `path` | `str` / `os.PathLike`, optional | Output file path to write the UTF-8 JSON to (optional) |
+| `indent` | `int` / `None` | Indentation level for `json.dumps` (default `2`; `None` for compact JSON) |
+
+**Returns**: `str` (the JSON text).
+
+**Raises**: `SpecificationError` if `indent` is invalid or the result contains an unregistered
+model/prior type.
+
+#### `FitResult.from_json`
+
+```text
+FitResult.from_json(source) -> FitResult
+```
+
+Load a `FitResult` from a file path (`str` or `os.PathLike`) or a JSON string without refitting.
+Item models, latent distributions, priors, quadrature grids, and estimation settings are
+reconstructed through explicit name registries (never `eval` or `pickle`). The loaded result
+reproduces every attribute, `items`, `latent`, `summary()`, `_repr_html_()`, `aic`/`bic`, and
+`score()` identically. Calls `check_x64()` at entry because scoring requires 64-bit floating point.
+
+| Argument | Type | Description |
+|---|---|---|
+| `source` | `str` / `os.PathLike` | Path to a JSON file written by `to_json()`, or a JSON string |
+
+**Returns**: `FitResult`
+
+**Raises**: `PrecisionError` if JAX 64-bit floating point is disabled; `SpecificationError` if the
+JSON is malformed or non-strict (e.g. bare `NaN`/`Infinity` literals), the format tag, schema
+version, or a registered type name is unknown, or internal consistency checks fail;
+`FileNotFoundError` if `source` points to a nonexistent file.
+
 ---
 
 ## Model

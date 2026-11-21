@@ -117,6 +117,48 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 **例外**: 不正な `method`、`"PV"` で `key` が未指定・不正、決定的手法に `key` を渡した場合、または `n_draws` が
 正の整数でない場合に `SpecificationError`。
 
+#### `FitResult.to_json`
+
+```text
+to_json(path=None, *, indent=2) -> str
+```
+
+推定結果を厳格な RFC 8259 JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定されたときは
+UTF-8 ファイルにも書き出す。`pickle` を使わないバージョン付き JSON 形式で、最上位に
+`"format": "flexpyirt.FitResult"`、`"schema_version": 1`、`"flexpyirt_version"` を記録する。有限な
+float64 値は `repr` 厳密な JSON 数値として、非有限値（`NaN`, `+inf`, `-inf`）は浮動小数点型フィールドに
+`"NaN"`, `"Infinity"`, `"-Infinity"` として明示的に符号化するため、すべての属性がビット単位で正確に往復する。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `path` | `str` / `os.PathLike`（任意） | UTF-8 JSON を書き出すファイルパス（省略可） |
+| `indent` | `int` / `None` | `json.dumps` に渡すインデント幅（既定 `2`、`None` で整形なしのコンパクト出力） |
+
+**戻り値**: `str`（直列化された JSON 文字列）。
+
+**例外**: `indent` が不正、または未登録のモデル・事前分布型が含まれる場合に `SpecificationError`。
+
+#### `FitResult.from_json`
+
+```text
+FitResult.from_json(source) -> FitResult
+```
+
+ファイルパス（`str` または `os.PathLike`）または JSON 文字列から再推定なしで `FitResult` を復元する。項目モデル・
+潜在分布・事前分布・求積格子・推定設定は明示的な名前レジストリで復元する（`eval` や `pickle` は一切使わない）。
+復元した結果はすべての属性・`items`・`latent`・`summary()`・`_repr_html_()`・`aic`/`bic`・`score()` で完全に
+同一の結果を返す。スコアリングに 64 ビット浮動小数点が必要なため入口で `check_x64()` を呼ぶ。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `source` | `str` / `os.PathLike` | `to_json()` で書き出した JSON ファイルパス、または JSON 文字列 |
+
+**戻り値**: `FitResult`
+
+**例外**: JAX の 64 ビット浮動小数点が無効なら `PrecisionError`。不正・非厳格な JSON（生の `NaN`/`Infinity`
+リテラルなど）、未知の `format` タグ・スキーマ版・登録名、または内部整合性違反なら `SpecificationError`。存在しない
+ファイルパスなら `FileNotFoundError`。
+
 ---
 
 ## モデル
