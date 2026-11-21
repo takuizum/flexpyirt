@@ -148,7 +148,9 @@ class Model:
         bank : DataFrame
             One row per item with an ``item`` column and parameter columns: ``a``, ``d`` (or
             ``d1..``) for ``"slope-intercept"``; ``a``, ``b`` (or ``b1..``) for ``"irt"``, converted
-            with :math:`d=-ab`. ``a`` may be omitted for Rasch items.
+            with :math:`d=-ab`. ``a`` may be omitted (or NaN) for Rasch items. Asymptotes ``g``
+            (3PL/4PL) and ``u`` (4PL) are given as they are in both parameterizations; ``u`` may be
+            omitted (or NaN) for 3PL items (it stays 1). NaN cells are treated as not given.
         items : list of str or callable, optional
             Items to fix (default: every bank item that is in the model).
         parameterization : {"slope-intercept", "irt"}
@@ -162,30 +164,48 @@ class Model:
         missing = [i for i in chosen if i not in rows]
         if missing:
             raise SpecificationError(f"Items not found in the bank: {missing}.")
+
+        def _has_value(row: Mapping[Any, Any], key: str) -> bool:
+            return key in row and bool(pd.notna(row[key]))
+
+        def _missing_message(item: str, row: Mapping[Any, Any], key: str) -> str:
+            if key not in row:
+                return f"Bank row for {item!r} has no column {key!r}."
+            return f"Bank row for {item!r} has missing (NaN) value in column {key!r}."
+
         lookup = dict(self.items)
         model = self
         for item in chosen:
             row = rows[item]
-            params = lookup[item].kernel.param_names
-            slope = float(row["a"]) if "a" in row else 1.0
+            item_model = lookup[item]
+            kernel = item_model.kernel
+            slope = float(row["a"]) if _has_value(row, "a") else 1.0
             values: dict[str, float] = {}
-            for p in params:
-                if p == "a":
-                    if "a" in row:
-                        values["a"] = slope
+            for p, free_default in zip(kernel.param_names, item_model.default_free(), strict=True):
+                if p in kernel.slope_params:
+                    if _has_value(row, p):
+                        values[p] = float(row[p])
+                    elif free_default:
+                        raise SpecificationError(_missing_message(item, row, p))
                     continue
-                if parameterization == "slope-intercept":
-                    key = p
-                    if key not in row:
-                        raise SpecificationError(f"Bank row for {item!r} has no column {key!r}.")
-                    values[p] = float(row[key])
-                elif parameterization == "irt":
-                    key = "b" + p[1:]
-                    if key not in row:
-                        raise SpecificationError(f"Bank row for {item!r} has no column {key!r}.")
-                    values[p] = -slope * float(row[key])
-                else:
-                    raise SpecificationError(f"Unknown parameterization {parameterization!r}.")
+                if p in kernel.intercept_params:
+                    if parameterization == "slope-intercept":
+                        key = p
+                    elif parameterization == "irt":
+                        key = "b" + p[1:]
+                    else:
+                        raise SpecificationError(f"Unknown parameterization {parameterization!r}.")
+                    if not _has_value(row, key):
+                        raise SpecificationError(_missing_message(item, row, key))
+                    value = float(row[key])
+                    values[p] = value if parameterization == "slope-intercept" else -slope * value
+                    continue
+                # Other parameters (asymptotes g, u) are the same in both parameterizations. A
+                # parameter that is fixed by default (u of a 3PL item) may be omitted or NaN.
+                if _has_value(row, p):
+                    values[p] = float(row[p])
+                elif free_default:
+                    raise SpecificationError(_missing_message(item, row, p))
             model = model.fix(item=item, **values)
         return model
 

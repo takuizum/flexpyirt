@@ -17,7 +17,7 @@ import pandas as pd
 
 from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock
 from flexpyirt.errors import FlexpyirtWarning, IdentificationError, SpecificationError
-from flexpyirt.items import ItemKernel
+from flexpyirt.items import FourPLKernel, ItemKernel
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -180,11 +180,10 @@ def _start_values(model: Model, y: np.ndarray) -> dict[str, np.ndarray]:
     out = {}
     for j, (name, item_model) in enumerate(model.items):
         rows = obs[:, j]
-        n_params = len(item_model.kernel.param_names)
         if rows.sum() < 2:
-            # Not estimable (reported later by _check_estimable); a finite placeholder keeps the
-            # table valid when the user fixes this item.
-            out[name] = np.r_[1.0, np.linspace(1.0, -1.0, n_params - 1) if n_params > 2 else 0.0]
+            # Not estimable (reported later by _check_estimable); finite placeholder values (the
+            # item model's starts for p = 0.5) keep the table valid when the user fixes this item.
+            out[name] = item_model.start_values(np.array([0.0, 1.0]), np.zeros(2))
             continue
         item = y[rows, j].astype(float)
         rest = (total - scores[:, j])[rows].astype(float)
@@ -201,6 +200,18 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
         for name, item_model in model.items:
             lower, upper = item_model.bounds()
             free_default = item_model.default_free()
+            item_starts = starts[name].copy()
+            if isinstance(item_model.kernel, FourPLKernel):
+                g_free = free_default[2] and (name, "g") not in fixed
+                u_free = free_default[3] and (name, "u") not in fixed
+                if g_free and not u_free:
+                    u_val = fixed.get((name, "u"), float(item_starts[3]))
+                    if u_val > 0.0:
+                        item_starts[2] = min(float(item_starts[2]), 0.5 * u_val)
+                elif u_free and not g_free:
+                    g_val = fixed.get((name, "g"), float(item_starts[2]))
+                    if g_val < 1.0:
+                        item_starts[3] = max(float(item_starts[3]), 0.5 * (1.0 + g_val))
             for k, param in enumerate(item_model.kernel.param_names):
                 key = (name, param)
                 rows.append(
@@ -209,7 +220,7 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                         "item": name,
                         "model": item_model.name,
                         "param": param,
-                        "value": fixed.get(key, float(starts[name][k])),
+                        "value": fixed.get(key, float(item_starts[k])),
                         "free": free_default[k] and key not in fixed,
                         "lower": float(lower[k]),
                         "upper": float(upper[k]),
@@ -288,6 +299,8 @@ def validate_table(
     value = t["value"].to_numpy(dtype=float)
     lower = t["lower"].to_numpy(dtype=float)
     upper = t["upper"].to_numpy(dtype=float)
+    ref_lower = reference["lower"].to_numpy(dtype=float)
+    ref_upper = reference["upper"].to_numpy(dtype=float)
     free = t["free"].to_numpy(dtype=bool)
     for i in range(len(t)):
         where = f"(group={group_col[i]!r}, item={item_col[i]!r}, param={param_col[i]!r})"
@@ -295,13 +308,34 @@ def validate_table(
             raise SpecificationError(f"Non-finite value {value[i]} at {where}.")
         if not lower[i] < upper[i]:
             raise SpecificationError(f"lower must be < upper at {where}.")
+        if lower[i] < ref_lower[i] or upper[i] > ref_upper[i]:
+            raise SpecificationError(
+                f"Bounds [{lower[i]}, {upper[i]}] exceed model domain "
+                f"[{ref_lower[i]}, {ref_upper[i]}] at {where}."
+            )
         if free[i] and not (lower[i] < value[i] < upper[i]):
             raise SpecificationError(
                 f"Starting value {value[i]} is not strictly inside ({lower[i]}, {upper[i]}) "
                 f"at {where}."
             )
+        if not free[i] and not (lower[i] <= value[i] <= upper[i]):
+            raise SpecificationError(
+                f"Fixed value {value[i]} is outside [{lower[i]}, {upper[i]}] at {where}."
+            )
         if item_col[i] == LATENT_ITEM and param_col[i] == "var" and not value[i] > 0:
             raise SpecificationError(f"Latent variance must be positive at {where}.")
+
+    # Asymptote ordering g < u for 3PL / 4PL items.
+    fourpl_items = {name for name, m in model.items if isinstance(m.kernel, FourPLKernel)}
+    if fourpl_items:
+        sub = t[t["item"].isin(fourpl_items) & t["param"].isin(["g", "u"])]
+        for (grp, itm), rows in sub.groupby(["group", "item"], sort=False):
+            vals = dict(zip(rows["param"], rows["value"], strict=True))
+            if not vals["g"] < vals["u"]:
+                raise SpecificationError(
+                    f"Lower asymptote g ({vals['g']}) must be < upper asymptote u ({vals['u']}) "
+                    f"at (group={grp!r}, item={itm!r})."
+                )
 
     ids = np.where(free, t["free_id"].fillna(-1).to_numpy(dtype=int), -1)
     next_id = int(ids.max()) + 1 if (ids >= 0).any() else 0

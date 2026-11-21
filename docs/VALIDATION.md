@@ -35,6 +35,7 @@ English | [日本語](VALIDATION.ja.md)
 | V8 | GPCM | `"gpcm"` | M3 |
 | V9 | Missing data (MAR) | data with NA | M2 |
 | V10 | SE (Oakes / crossprod / sandwich) | `SE.type=` | M1–M3 |
+| V11 | 3PL and 4PL, single group (simulated) | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -67,6 +68,30 @@ English | [日本語](VALIDATION.ja.md)
   log-likelihood and SEs. This also confirms that with the same grid on both sides, the difference
   between the exact M-step and mirt's closed-form update (from the cut-off) is negligible.
   Tests: `tests/test_mirt_m2.py`. Reference generator: `validation/r/m2_reference.R`.
+- **3PL / 4PL asymptote scale and SE conversion (V11, found in M3)**: mirt optimizes $g$ and $u$
+  on the logit scale, and `coef(m, printSE = TRUE)` reports `logit(g)` / `logit(u)` with
+  logit-scale SEs (even with `rawug`). flexpyirt works on the natural scale (DESIGN §15.2), so
+  `validation/r/m3_reference.R` converts mirt's estimates with `plogis()` and its SEs with the
+  delta method, $SE_g = g(1-g)\,SE_{\mathrm{logit}(g)}$ (and likewise for $u$), while keeping the
+  raw logit-scale values under `raw_logit`. At an interior ML solution the observed information
+  transforms identically with the Jacobian.
+- **V11 simulation design and mirt `NR` starting-value trap (M3)**: unregularized ML for 3PL/4PL
+  easily produces finite-sample boundary solutions ($g\to 0$ or $u\to 1$, with a singular
+  information matrix) when items are too easy/hard or slopes are too low for the asymptote tails to
+  be observed in $N(0,1)$. In addition, on 4PL data, mirt's default starting slope (`a = 0.851`)
+  causes `optimizer = "NR"` on the logit scale to overshoot `logit(g) ≈ -15` on early iterations
+  and stay trapped at a strictly lower log-likelihood (because the logit-scale gradient
+  $g(1-g)\,\partial Q/\partial g$ vanishes near 0). To validate an interior, converged global ML
+  solution without loosening tolerances, V11a uses $J=15, N=5000$ with
+  $a\sim\mathrm{lognormal}(0.4,0.2)$, $d\sim U(-1.5,0.5)$, $g\sim U(0.12,0.25)$; V11b uses
+  $J=12, N=20000$ (at most $2^{12}=4096$ patterns) with $a\sim\mathrm{lognormal}(0.6,0.15)$,
+  $d\sim U(-0.5,0.5)$, $g\sim U(0.10,0.22)$, $u\sim U(0.78,0.90)$, starting mirt at $a=2.0$ while
+  flexpyirt runs from its own default starting values. Both cases converge cleanly with no
+  `HeywoodWarning`: parameters agree to ~1e-8 (3PL: 5.4e-9, 4PL: 7.2e-8), log-likelihood to
+  ~1e-15, Oakes SEs to ~1e-7 (3PL: 1.1e-8, 4PL: 1.9e-7), Hessian vs mirt Richardson SEs to
+  ~6e-4 (3PL: 6.8e-5, 4PL: 5.6e-4, reflecting Richardson's finite-difference error while flexpyirt's
+  Oakes and Hessian agree to ~1e-11), and EAP to ~1e-15.
+  Tests: `tests/test_mirt_m3.py`. Reference generator: `validation/r/m3_reference.R`.
 - **Comparing EAP**: so that differences in the estimates do not propagate into EAP, every
   parameter is fixed at mirt's estimates (`free=False` in the ParameterTable) and only the scoring
   is compared. Tolerance 1e-5.

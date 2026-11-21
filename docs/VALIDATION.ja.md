@@ -30,6 +30,7 @@
 | V8 | GPCM | `"gpcm"` | M3 |
 | V9 | 欠測あり（MAR） | NA を含むデータ | M2 |
 | V10 | SE（Oakes / crossprod / sandwich） | `SE.type=` | M1–M3 |
+| V11 | 3PL・4PL 単一群（シミュレーション） | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -54,6 +55,25 @@
   V9（15% MCAR）のいずれも、パラメタ・対数尤度・SE が mirt と ~1e-8 で一致。格子を両側で揃えれば、
   厳密な M-step と mirt の閉形式更新の差（打ち切り由来）は無視できることも確認された。
   照合テスト: `tests/test_mirt_m2.py`。参照値の生成: `validation/r/m2_reference.R`。
+- **3PL / 4PL の漸近線の尺度と SE の変換（V11、M3 で判明）**: mirt は $g, u$ を logit 尺度で最適化し、
+  `coef(m, printSE = TRUE)` も `logit(g)` / `logit(u)` と logit 尺度の SE を返す（`rawug` を変えても同じ）。
+  flexpyirt は自然尺度で推定するため（DESIGN §15.2）、`validation/r/m3_reference.R` では推定値を `plogis()`、
+  SE をデルタ法 $SE_g = g(1-g)\,SE_{\mathrm{logit}(g)}$（$u$ も同様）で自然尺度に変換して照合し、変換前の
+  logit 尺度の値も `raw_logit` に残している。内点の最尤解では観測情報行列がヤコビアンで厳密に変換される。
+- **V11 のシミュレーション設計と mirt `NR` の初期値問題（M3）**: 事前分布なしの 3PL / 4PL 最尤推定では、
+  項目が易しすぎ／難しすぎたり傾きが小さかったりして $N(0,1)$ の裾で漸近線が観測できないと、有限標本でも
+  境界解（$g\to 0$ や $u\to 1$、情報行列が特異）が生じやすい。さらに 4PL では、mirt 既定の傾き初期値
+  （`a = 0.851`）から logit 尺度で `optimizer = "NR"` を回すと初期反復で `logit(g) ≈ -15` に飛び、
+  logit 尺度の勾配 $g(1-g)\,\partial Q/\partial g$ が 0 付近で消えるため対数尤度が真に低い境界点に捕捉される。
+  許容誤差を緩めずに内点の収束した大域最尤解を照合するため、V11a は $J=15, N=5000$、
+  $a\sim\mathrm{lognormal}(0.4,0.2)$、$d\sim U(-1.5,0.5)$、$g\sim U(0.12,0.25)$ とし、V11b は
+  $J=12, N=20000$（パターン数は最大 $2^{12}=4096$）、$a\sim\mathrm{lognormal}(0.6,0.15)$、
+  $d\sim U(-0.5,0.5)$、$g\sim U(0.10,0.22)$、$u\sim U(0.78,0.90)$ として mirt 側の初期値のみ $a=2.0$ とした
+  （flexpyirt は既定の初期値のまま大域解に収束）。両ケースとも `HeywoodWarning` なしで収束し、パラメタは
+  ~1e-8（3PL: 5.4e-9、4PL: 7.2e-8）、対数尤度は ~1e-15、Oakes SE は ~1e-7（3PL: 1.1e-8、4PL: 1.9e-7）、
+  Hessian 対 mirt Richardson SE は ~6e-4（3PL: 6.8e-5、4PL: 5.6e-4。Richardson の数値微分誤差によるもので、
+  flexpyirt 内の Oakes と Hessian は ~1e-11 で一致）、EAP は ~1e-15 で一致した。
+  照合テスト: `tests/test_mirt_m3.py`。参照値の生成: `validation/r/m3_reference.R`。
 - **EAP の照合**: 推定値の差が EAP に伝播しないよう、全パラメタを mirt の推定値に固定して
   （ParameterTable の `free=False`）スコアリングだけを照合する。許容誤差 1e-5。
 - 照合テスト: `tests/test_mirt_m1.py`（V1, V2, V10）。参照値の生成: `validation/r/m1_reference.R`。

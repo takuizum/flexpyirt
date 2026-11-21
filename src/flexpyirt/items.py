@@ -1,10 +1,10 @@
 """Item response models (Spec layer) and their log-probability kernels (Core layer).
 
-An *item model* (``TwoPL``, ``Rasch``, ``GRM``) is what the user writes in a specification. It owns
-the default free/fixed pattern and starting values. Its *kernel* holds only the pure
-log-probability function used inside jit. Item models that share a kernel (``Rasch`` and
-``TwoPL``; ``GRM`` with the same number of categories) are estimated together as one "family"
-(DESIGN.md §4.3, §6).
+An *item model* (``TwoPL``, ``Rasch``, ``ThreePL``, ``FourPL``, ``GRM``) is what the user writes in
+a specification. It owns the default free/fixed pattern and starting values. Its *kernel* holds
+only the pure log-probability function used inside jit. Item models that share a kernel (``Rasch``
+and ``TwoPL``; ``ThreePL`` and ``FourPL``; ``GRM`` with the same number of categories) are
+estimated together as one "family" (DESIGN.md §4.3, §6).
 """
 
 from __future__ import annotations
@@ -22,10 +22,13 @@ from flexpyirt.errors import SpecificationError
 __all__ = [
     "GRM",
     "DichotomousKernel",
+    "FourPL",
+    "FourPLKernel",
     "GradedKernel",
     "ItemKernel",
     "ItemModel",
     "Rasch",
+    "ThreePL",
     "TwoPL",
 ]
 
@@ -97,6 +100,71 @@ class DichotomousKernel:
         """Return ``(Q, 2)`` log-probabilities of responses 0 and 1."""
         z = params[0] * theta + params[1]
         return jnp.stack([jax.nn.log_sigmoid(-z), jax.nn.log_sigmoid(z)], axis=-1)
+
+
+@dataclass(frozen=True)
+class FourPLKernel:
+    r"""Four-parameter logistic kernel in slope–intercept form, shared by 3PL and 4PL items.
+
+    .. math::
+        P(y=1\mid\theta) = g + (u-g)\,\sigma(a\theta+d),\qquad 0\le g<u\le 1,
+
+    computed in log space as (DESIGN.md §15.3)
+
+    .. math::
+        \log P(y=1) &= \operatorname{logaddexp}\big(\log g,\ \log(u-g)+\log\sigma(z)\big),\\
+        \log P(y=0) &= \operatorname{logaddexp}\big(\log(1-u),\ \log(u-g)+\log\sigma(-z)\big),
+        \qquad z=a\theta+d.
+
+    At :math:`g=0` the first log-probability is :math:`\log(u-g)+\log\sigma(z)` and at :math:`u=1`
+    the second is :math:`\log(u-g)+\log\sigma(-z)`, selected with a double ``where`` so that
+    neither :math:`\log 0` nor its infinite derivative is ever evaluated: with :math:`g=0`,
+    :math:`u=1` the kernel returns exactly the 2PL log-probabilities, and gradients and Hessians
+    with respect to every parameter (including the fixed boundary ones) are finite. A candidate
+    with :math:`u\le g` gives NaN, which the M-step line search rejects.
+
+    Birnbaum (1968) for the 3PL; Barton & Lord (1981) for the upper asymptote; slope–intercept
+    parameterization and parameter names as in mirt (Chalmers, 2012).
+    """
+
+    @property
+    def param_names(self) -> tuple[str, ...]:
+        """``("a", "d", "g", "u")``."""
+        return ("a", "d", "g", "u")
+
+    @property
+    def n_cat(self) -> int:
+        """Two categories."""
+        return 2
+
+    @property
+    def slope_params(self) -> tuple[str, ...]:
+        """``("a",)``."""
+        return ("a",)
+
+    @property
+    def intercept_params(self) -> tuple[str, ...]:
+        """``("d",)``; the asymptotes ``g`` and ``u`` carry neither scale nor location."""
+        return ("d",)
+
+    def log_prob(self, theta: Array, params: Array) -> Array:
+        """Return ``(Q, 2)`` log-probabilities of responses 0 and 1."""
+        a, d, g, u = params[0], params[1], params[2], params[3]
+        z = a * theta + d
+        log_span = jnp.log(u - g)
+        core1 = log_span + jax.nn.log_sigmoid(z)
+        core0 = log_span + jax.nn.log_sigmoid(-z)
+        # Double where: the log's argument is replaced by 1 where the asymptote term vanishes, so
+        # the unselected branch is finite and contributes a zero (not NaN) gradient.
+        has_g = g > 0
+        has_rest = u < 1
+        log_g = jnp.log(jnp.where(has_g, g, 1.0))
+        log_rest = jnp.log(jnp.where(has_rest, 1.0 - u, 1.0))
+        log_p1 = jnp.where(has_g, jnp.logaddexp(log_g, core1), core1)
+        log_p0 = jnp.where(has_rest, jnp.logaddexp(log_rest, core0), core0)
+        valid = (g >= 0) & (u <= 1) & (u > g)
+        out = jnp.stack([log_p0, log_p1], axis=-1)
+        return jnp.where(valid, out, jnp.nan)
 
 
 def _log1mexp(x: Array) -> Array:
@@ -263,6 +331,93 @@ class Rasch:
     def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
         """Unbounded."""
         return _unbounded(2)
+
+
+def _asymptote_starts(p: float, *, free_upper: bool) -> tuple[float, float]:
+    r"""Return starting :math:`(g^{(0)}, u^{(0)})` for proportion correct :math:`p` (DESIGN §15.4).
+
+    :math:`g^{(0)}=\min(0.2,\,p/2)` and :math:`u^{(0)}=\max(0.95,\,(1+p)/2)` (4PL) or 1 (3PL), so
+    that :math:`g^{(0)}<p<u^{(0)}` with :math:`p` clipped to :math:`[0.01, 0.99]`.
+    """
+    p = float(np.clip(p, 0.01, 0.99))
+    g = min(0.2, 0.5 * p)
+    u = max(0.95, 0.5 * (1.0 + p)) if free_upper else 1.0
+    return g, u
+
+
+def _guessing_start_values(item: np.ndarray, rest: np.ndarray, *, free_upper: bool) -> np.ndarray:
+    r"""Return starting :math:`(a, d, g, u)` for 3PL / 4PL items (DESIGN.md §4.10, §15.4).
+
+    :math:`a^{(0)}` as for the 2PL; :math:`d^{(0)}` as for the 2PL but from the proportion
+    correct rescaled to the span of the asymptotes, :math:`(p-g^{(0)})/(u^{(0)}-g^{(0)})`.
+    """
+    p = float(item.mean())
+    g, u = _asymptote_starts(p, free_upper=free_upper)
+    a = _slope_start(item, rest)
+    return np.array([a, _intercept_start((p - g) / (u - g), a), g, u])
+
+
+_ASYMPTOTE_BOUNDS = ((-np.inf, -np.inf, 0.0, 0.0), (np.inf, np.inf, 1.0, 1.0))
+
+
+@dataclass(frozen=True)
+class ThreePL:
+    r"""Three-parameter logistic model, :math:`P(y=1\mid\theta)=g+(1-g)\,\sigma(a\theta+d)`.
+
+    Birnbaum (1968). The slope :math:`a`, intercept :math:`d` and lower asymptote ("guessing")
+    :math:`g` are estimated on their natural scale with :math:`0<g<1`; the upper asymptote
+    :math:`u` is fixed at 1. Same model and parameter names as mirt's ``itemtype="3PL"`` (mirt
+    estimates :math:`g` on the logit scale; the maximum is the same). Shares
+    :class:`FourPLKernel` with :class:`FourPL`. The IRT difficulty is :math:`b=-d/a`.
+    """
+
+    name: ClassVar[str] = "3PL"
+
+    @property
+    def kernel(self) -> FourPLKernel:
+        """Shared four-parameter kernel."""
+        return FourPLKernel()
+
+    def default_free(self) -> tuple[bool, ...]:
+        """Return free flags: ``a``, ``d``, ``g`` free; ``u`` fixed (at 1)."""
+        return (True, True, True, False)
+
+    def start_values(self, item: np.ndarray, rest: np.ndarray) -> np.ndarray:
+        """Return starting values (DESIGN.md §15.4); ``u`` is 1."""
+        return _guessing_start_values(item, rest, free_upper=False)
+
+    def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
+        """Return parameter bounds: ``a``, ``d`` unbounded; ``g``, ``u`` in ``[0, 1]``."""
+        return _ASYMPTOTE_BOUNDS
+
+
+@dataclass(frozen=True)
+class FourPL:
+    r"""Four-parameter logistic model, :math:`P(y=1\mid\theta)=g+(u-g)\,\sigma(a\theta+d)`.
+
+    Barton & Lord (1981). All of :math:`a, d, g, u` are estimated on their natural scale with
+    :math:`0<g<1`, :math:`0<u<1` (and :math:`g<u`). Same model and parameter names as mirt's
+    ``itemtype="4PL"``. Shares :class:`FourPLKernel` with :class:`ThreePL`.
+    """
+
+    name: ClassVar[str] = "4PL"
+
+    @property
+    def kernel(self) -> FourPLKernel:
+        """Shared four-parameter kernel."""
+        return FourPLKernel()
+
+    def default_free(self) -> tuple[bool, ...]:
+        """All four parameters are free."""
+        return (True, True, True, True)
+
+    def start_values(self, item: np.ndarray, rest: np.ndarray) -> np.ndarray:
+        """Return starting values (DESIGN.md §15.4)."""
+        return _guessing_start_values(item, rest, free_upper=True)
+
+    def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
+        """Return parameter bounds: ``a``, ``d`` unbounded; ``g``, ``u`` in ``[0, 1]``."""
+        return _ASYMPTOTE_BOUNDS
 
 
 @dataclass(frozen=True)

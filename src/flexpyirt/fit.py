@@ -11,9 +11,14 @@ import numpy as np
 import pandas as pd
 
 from flexpyirt import _core
-from flexpyirt._compile import compile_problem, prepare
+from flexpyirt._compile import LATENT_ITEM, compile_problem, prepare
 from flexpyirt._precision import check_x64
-from flexpyirt.errors import ConvergenceWarning, FlexpyirtWarning, SpecificationError
+from flexpyirt.errors import (
+    ConvergenceWarning,
+    FlexpyirtWarning,
+    HeywoodWarning,
+    SpecificationError,
+)
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
 from flexpyirt.quadrature import Quadrature
@@ -22,6 +27,11 @@ from flexpyirt.result import FitResult
 __all__ = ["fit"]
 
 SEMethod = Literal["oakes", "hessian"]
+
+HEYWOOD_BOUND_TOL = 1e-4
+"""Distance to a finite bound below which a free parameter is reported as a boundary solution."""
+HEYWOOD_MAX_SLOPE = 20.0
+"""Absolute slope above which a free slope is reported as diverging."""
 
 _em = jax.jit(_core.em, static_argnames=("max_iter", "n_newton"))
 _information = {
@@ -122,6 +132,7 @@ def fit(
     se_column[free] = se_values[fid[free]]
     params["estimate"] = estimate
     params["se"] = se_column
+    _warn_heywood(params, spec)
 
     history = pd.DataFrame(
         {
@@ -142,6 +153,45 @@ def fit(
         _model=spec,
         _eta=eta,
         _quadrature=quadrature,
+    )
+
+
+def _warn_heywood(params: pd.DataFrame, spec: Model) -> None:
+    """Warn about boundary solutions among the free item parameters (DESIGN.md §15.6).
+
+    A free parameter within ``HEYWOOD_BOUND_TOL`` of a finite bound (``g``, ``u`` of 3PL/4PL
+    items) or a free slope with ``|a| > HEYWOOD_MAX_SLOPE`` triggers one ``HeywoodWarning``
+    naming every affected item.
+    """
+    items = params[(params["item"] != LATENT_ITEM) & params["free"]]
+    if items.empty:
+        return
+    kernels = {name: m.kernel for name, m in spec.items}
+    est = items["estimate"].to_numpy(dtype=float)
+    lower = items["lower"].to_numpy(dtype=float)
+    upper = items["upper"].to_numpy(dtype=float)
+    at_bound = (est - lower < HEYWOOD_BOUND_TOL) | (upper - est < HEYWOOD_BOUND_TOL)
+    is_slope = np.array(
+        [p in kernels[i].slope_params for i, p in zip(items["item"], items["param"], strict=True)],
+        dtype=bool,
+    )
+    steep = is_slope & (np.abs(est) > HEYWOOD_MAX_SLOPE)
+    flagged = items[at_bound | steep]
+    if flagged.empty:
+        return
+    labels = [
+        f"{i}.{p}={v:.4g}" + (f" (group {g!r})" if spec.is_multigroup else "")
+        for g, i, p, v in zip(
+            flagged["group"], flagged["item"], flagged["param"], flagged["estimate"], strict=True
+        )
+    ]
+    warnings.warn(
+        f"Boundary (Heywood) solution for items {sorted(set(flagged['item']))}: "
+        f"{', '.join(labels)}. A lower/upper asymptote within {HEYWOOD_BOUND_TOL} of its "
+        f"bound or a slope beyond ±{HEYWOOD_MAX_SLOPE} is weakly identified by the data; consider "
+        "fixing it (e.g. g=0 or u=1) or a simpler item model.",
+        HeywoodWarning,
+        stacklevel=3,
     )
 
 

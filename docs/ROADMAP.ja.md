@@ -25,9 +25,10 @@
 ## M3 EH・MAP・3PL/4PL・GPCM・SQUAREM
 - EmpiricalHistogram（DESIGN §12-1 を決めてから）。
 - 事前分布と MAP、`log_posterior` の報告。
-- 3PL / 4PL / GPCM。SQUAREM。
+- [x] 3PL / 4PL（`ThreePL`, `FourPL`, `HeywoodWarning`、V11 で照合済み）。
+- [ ] GPCM、SQUAREM。
 - ベンチマーク（mirt との wall time）。
-- **受け入れ基準**: V6, V7, V8 が許容誤差内。SQUAREM ありでも照合が通る。
+- **受け入れ基準**: V6, V7, V8, V11 が許容誤差内。SQUAREM ありでも照合が通る。
 
 ## M4 結果まわり・多次元の入口
 - `FitResult` の充実（summary, `_repr_html_`, JSON 入出力, デルタ法による IRT パラメタ化の SE）。

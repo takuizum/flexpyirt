@@ -31,9 +31,10 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 ## M3 EH, MAP, 3PL/4PL, GPCM, SQUAREM
 - EmpiricalHistogram (after deciding DESIGN §12-1).
 - Priors and MAP, reporting `log_posterior`.
-- 3PL / 4PL / GPCM. SQUAREM.
+- [x] 3PL / 4PL (`ThreePL`, `FourPL`, `HeywoodWarning`, validated in V11).
+- [ ] GPCM. SQUAREM.
 - Benchmarks (wall time against mirt).
-- **Acceptance**: V6, V7, V8 within tolerance. Agreement also holds with SQUAREM.
+- **Acceptance**: V6, V7, V8, V11 within tolerance. Agreement also holds with SQUAREM.
 
 ## M4 Results and first multidimensional models
 - A richer `FitResult` (summary, `_repr_html_`, JSON I/O, delta-method SEs for the IRT
