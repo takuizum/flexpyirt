@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import os
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
@@ -33,6 +33,7 @@ from flexpyirt.method import BAEM
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
+    from flexpyirt._dif import DIFScheme, PAdjust
     from flexpyirt.model import Model
 
 __all__ = ["FitResult"]
@@ -653,6 +654,74 @@ class FitResult:
             stat, df, rmsea, pval = _itemfit.s_x2(o, e, n_free_item, n_free_latent, y.shape[0])
             rows.append({"item": name, "s_x2": stat, "df": df, "rmsea": rmsea, "p": pval})
         return pd.DataFrame(rows)
+
+    def dif(
+        self,
+        data: Any,
+        *,
+        group: Any,
+        items: Iterable[str],
+        params: Sequence[str] | None = None,
+        scheme: DIFScheme = "add",
+        p_adjust: PAdjust = "holm",
+        item_names: list[str] | None = None,
+    ) -> pd.DataFrame:
+        r"""Likelihood-ratio DIF tests across the groups of a multiple-group model (§16.2).
+
+        For each item, refits the model with its ``params`` made equal across groups
+        (``scheme="add"``, from this fit as the baseline) or freed in every group
+        (``scheme="drop"``), with the same estimation settings and quadrature, and compares the
+        marginal log-likelihoods (Thissen, Steinberg & Wainer, 1993):
+
+        .. math::
+            X^2 = 2\,(\ell_{\text{free}} - \ell_{\text{constrained}}),\qquad
+            df = |k_{\text{base}} - k_{\text{new}}|,\qquad p = P(\chi^2_{df} > X^2).
+
+        Parameters
+        ----------
+        data : DataFrame or array-like
+            The responses this result was fitted to.
+        group : array-like
+            Group label of each row (as passed to :func:`~flexpyirt.fit`).
+        items : iterable of str
+            Items to test, one refit each.
+        params : sequence of str, optional
+            Internal parameters to test (default: every parameter of each item).
+        scheme : {"add", "drop"}, default "add"
+            ``"add"`` constrains the item's parameters to equality; ``"drop"`` frees them.
+        p_adjust : {"holm", "BH", "none"}, default "holm"
+            Multiple-testing adjustment of ``adj_p`` over the tested items (Holm, 1979;
+            Benjamini & Hochberg, 1995); ``"holm"`` is mirt's default.
+        item_names : list of str, optional
+            Column names when ``data`` is an array.
+
+        Returns
+        -------
+        DataFrame
+            One row per item: ``item``, ``converged``, ``aic``, ``sabic``, ``hq``, ``bic``
+            (information criteria of the model with the item free minus the constrained one, as
+            mirt's ``DIF()``; negative values favour DIF), ``x2``, ``df``, ``p`` and ``adj_p``.
+
+        Raises
+        ------
+        SpecificationError
+            For single-group models, MAP fits with priors, unknown items or parameters, or an
+            item with nothing to test under ``scheme``.
+        IdentificationError
+            If a refitted model is not identified (e.g. freeing the only anchors).
+        """
+        from flexpyirt._dif import dif_tests
+
+        return dif_tests(
+            self,
+            data,
+            group=group,
+            items=items,
+            params=params,
+            scheme=scheme,
+            p_adjust=p_adjust,
+            item_names=item_names,
+        )
 
     def _model_label(self) -> str:
         """Concise description of item models in the specification."""
