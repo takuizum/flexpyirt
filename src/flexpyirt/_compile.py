@@ -390,13 +390,14 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
 def model_parameter_schema(model: Model) -> pd.DataFrame:
     """Return canonical ``(group, item, param, model, lower, upper)`` bounds for ``model``."""
     rows: list[tuple[str, str, str, str, float, float]] = []
-    for group_name, _ in model.resolved_groups():
+    for group_name, latent in model.resolved_groups():
         for name, item_model in model.items:
             lower, upper = item_model.bounds()
             for param, lo, hi in zip(item_model.kernel.param_names, lower, upper, strict=True):
                 rows.append((group_name, name, param, item_model.name, float(lo), float(hi)))
-        rows.append((group_name, LATENT_ITEM, "mean", "Normal", -np.inf, np.inf))
-        rows.append((group_name, LATENT_ITEM, "var", "Normal", 0.0, np.inf))
+        if isinstance(latent, Normal):
+            rows.append((group_name, LATENT_ITEM, "mean", "Normal", -np.inf, np.inf))
+            rows.append((group_name, LATENT_ITEM, "var", "Normal", 0.0, np.inf))
     return pd.DataFrame(rows, columns=["group", "item", "param", "model", "lower", "upper"])
 
 

@@ -1064,15 +1064,24 @@ def _serialize_eh_weights(eh_weights: np.ndarray) -> list[list[float | str]]:
     return [[_encode_float(x) for x in row] for row in arr]
 
 
-def _deserialize_eh_weights(raw: Any, *, n_groups: int, n_nodes: int) -> np.ndarray:
+def _deserialize_eh_weights(raw: Any, *, model: Model, n_nodes: int) -> np.ndarray:
     """Deserialize and validate ``latent_weights`` of shape ``(n_groups, n_nodes)``."""
+    resolved = model.resolved_groups()
+    n_groups = len(resolved)
     rows = _require_list(raw, field_name="latent_weights")
     if len(rows) != n_groups:
         raise SpecificationError(
             f"latent_weights must have {n_groups} group rows, got {len(rows)}."
         )
     out = np.empty((n_groups, n_nodes), dtype=np.float64)
-    for g, row_raw in enumerate(rows):
+    for g, (row_raw, (g_name, dist)) in enumerate(zip(rows, resolved, strict=True)):
+        assert isinstance(dist, EmpiricalHistogram)
+        mw = float(dist.min_weight)
+        if mw * n_nodes >= 1.0:
+            raise SpecificationError(
+                f"EmpiricalHistogram min_weight ({mw}) for group {g_name!r} must satisfy "
+                f"min_weight * n_points < 1 (n_points={n_nodes})."
+            )
         row = _require_list(row_raw, field_name=f"latent_weights[{g}]")
         if len(row) != n_nodes:
             raise SpecificationError(
@@ -1083,6 +1092,11 @@ def _deserialize_eh_weights(raw: Any, *, n_groups: int, n_nodes: int) -> np.ndar
             if not (w > 0.0):
                 raise SpecificationError(
                     f"latent_weights[{g}][{q}] must be strictly positive, got {w}."
+                )
+            if w < mw - 1e-15:
+                raise SpecificationError(
+                    f"latent_weights[{g}][{q}] ({w}) is below min_weight ({mw}) "
+                    f"for group {g_name!r}."
                 )
             out[g, q] = w
         total = float(np.sum(out[g]))
@@ -1221,7 +1235,7 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
             )
         eh_weights = _deserialize_eh_weights(
             obj["latent_weights"],
-            n_groups=len(model.resolved_groups()),
+            model=model,
             n_nodes=quadrature.n_points,
         )
     elif "latent_weights" in obj:

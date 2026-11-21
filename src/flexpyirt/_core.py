@@ -564,13 +564,24 @@ def _eh_pack(eta: Array, eh_w: Array) -> Array:
 
 
 def _eh_unpack(
-    vec: Array, n_free: int, n_groups: int, n_nodes: int, min_weight: Array
+    prob: CompiledProblem, vec: Array, n_free: int, n_groups: int, n_nodes: int, min_weight: Array
 ) -> tuple[Array, Array]:
-    """Unpack logit-scale SQUAREM vector back onto the floored positive simplex."""
+    """Unpack logit-scale SQUAREM vector back onto the standardized, floored positive simplex."""
     eta = vec[:n_free]
     logits = vec[n_free:].reshape((n_groups, n_nodes))
     w_soft = jax.nn.softmax(logits, axis=1)
     w = jax.vmap(eh_project_floor)(w_soft, min_weight)
+    lat = prob.latent
+    if lat.standardize_mean or lat.standardize_var:
+        m, s = eh_standardize_params(
+            prob.nodes,
+            w[0],
+            min_weight[0],
+            standardize_mean=lat.standardize_mean,
+            standardize_var=lat.standardize_var,
+        )
+        w0 = eh_regrid_cdf(prob.nodes, w[0], m, s, min_weight[0])
+        w = w.at[0].set(w0)
     return eta, w
 
 
@@ -610,7 +621,7 @@ def _squarem_eh(
         in_bounds = items_ok & logits_ok
 
         def _eval_lp(c: Array) -> Array:
-            e_c, w_c = _eh_unpack(c, n_free, n_groups, n_nodes, min_w)
+            e_c, w_c = _eh_unpack(prob, c, n_free, n_groups, n_nodes, min_w)
             lp_c = _eval_lp_pair(e_c, w_c)
             return jnp.isfinite(lp_c) & (lp_c >= lp_ref)
 
@@ -672,7 +683,7 @@ def _squarem_eh(
         )
 
         def _stabilize(vp: Array) -> tuple[Array, Array, Array]:
-            e_p, w_p = _eh_unpack(vp, n_free, n_groups, n_nodes, min_w)
+            e_p, w_p = _eh_unpack(prob, vp, n_free, n_groups, n_nodes, min_w)
             e_n, w_n, _, _ = _em_once(e_p, w_p)
             return e_n, w_n, three
 
