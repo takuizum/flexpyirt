@@ -632,8 +632,8 @@ print(res_mirt.score(mirt_df.iloc[:3], method="EAP").round(3))  # theta_F1, thet
   slopes derived from factor-specific item–rest correlations.
 - **Scoring**: `"EAP"`, `"MAP"` (with the estimated multivariate normal as the prior), `"ML"`
   and `"WLE"` return `theta_<factor>` and `se_<factor>` per declared factor; ML gives $\pm\infty$
-  on a dimension whose estimate diverges. `PV` and multiple-group multidimensional models are not
-  yet implemented and raise `SpecificationError`.
+  on a dimension whose estimate diverges. `"PV"` returns `pv<m>_<factor>` columns. Multiple-group
+  multidimensional models are not yet implemented and raise `SpecificationError`.
 
 ## 15. Errors and warnings
 

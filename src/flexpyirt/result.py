@@ -507,11 +507,6 @@ class FitResult:
                 "method='MAP' requires a continuous latent prior and is not supported with "
                 "EmpiricalHistogram; use method='EAP', 'ML', 'WLE', or 'PV'."
             )
-        if self._model.is_multidimensional and method == "PV":
-            raise SpecificationError(
-                "Scoring method 'PV' is only implemented for unidimensional models; "
-                "use method='EAP', 'MAP', 'ML' or 'WLE' for multidimensional models."
-            )
         if method == "PV":
             if key is None:
                 raise SpecificationError(
@@ -542,9 +537,19 @@ class FitResult:
             bucket = max(8, 1 << (n_obs - 1).bit_length())
             inv_pad = np.zeros(bucket, dtype=np.int32)
             inv_pad[:n_obs] = inverse
-            draws = _pv(compiled.problem, eta, jnp.asarray(inv_pad), key, n_draws=n_draws)
+            draws = np.asarray(
+                _pv(compiled.problem, eta, jnp.asarray(inv_pad), key, n_draws=n_draws)
+            )[:n_obs]
+            if self._model.is_multidimensional:
+                fnames = self._model.factor_names
+                cols_md = {
+                    f"pv{m}_{f}": draws[:, m - 1, i]
+                    for m in range(1, n_draws + 1)
+                    for i, f in enumerate(fnames)
+                }
+                return pd.DataFrame(cols_md, index=index)
             cols = [f"pv{m}" for m in range(1, n_draws + 1)]
-            return pd.DataFrame(np.asarray(draws)[:n_obs], columns=cols, index=index)
+            return pd.DataFrame(draws, columns=cols, index=index)
 
         scorer = {"EAP": _eap, "MAP": _map, "ML": _ml, "WLE": _wle}[method]
         theta, se = scorer(compiled.problem, eta)

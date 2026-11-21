@@ -41,6 +41,10 @@ _ML_MAX_SE = 30.0
 """SE threshold above which a flat-tail ML solution is treated as diverging (mirt convention)."""
 _PV_GRID_POINTS = 501
 """Number of equispaced nodes for continuous piecewise-linear inverse-CDF PV sampling."""
+_PV_LATTICE_POINTS = {2: 61, 3: 25}
+"""Points per dimension of the per-pattern PV lattice for ``D = 2, 3`` (DESIGN.md §15.42)."""
+_PV_SPAN_SD = 6.0
+"""Half-width of the per-pattern PV lattice in posterior SDs around EAP."""
 
 
 def _expand_items(prob: CompiledProblem, eta: Array) -> tuple[Array, ...]:
@@ -636,8 +640,11 @@ def plausible_values(
     piecewise-linear CDF on :math:`[0, 1]`, and draws continuous samples per respondent by
     inverse-CDF linear interpolation against ``jax.random.uniform(key, (N_pad, n_draws))``
     (DESIGN.md §8, §15.25). Respondents sharing a response pattern reuse the same CDF but draw
-    independently. Deterministic given ``key``.
+    independently. Deterministic given ``key``. Multidimensional problems use
+    :func:`_plausible_values_multidim` and return shape ``(N, n_draws, D)``.
     """
+    if prob.nodes.ndim == 2 and prob.nodes.shape[1] > 1:
+        return _plausible_values_multidim(prob, eta, inverse, key, n_draws=n_draws)
     lo = prob.nodes[0, 0] if prob.nodes.ndim == 2 else prob.nodes[0]
     hi = prob.nodes[-1, 0] if prob.nodes.ndim == 2 else prob.nodes[-1]
     grid = jnp.linspace(lo, hi, _PV_GRID_POINTS, dtype=prob.nodes.dtype)
@@ -678,4 +685,74 @@ def plausible_values(
         return grid[left] + frac * (grid[right] - grid[left])
 
     draws: Array = jax.vmap(draw_one)(inverse, u)
+    return draws
+
+
+def _plausible_values_multidim(
+    prob: CompiledProblem,
+    eta: Array,
+    inverse: Array,
+    key: Array,
+    *,
+    n_draws: int,
+) -> Array:
+    r"""Plausible values for :math:`D\in\{2,3\}` from a per-pattern posterior lattice (§15.42).
+
+    For each unique pattern, an equispaced lattice of ``_PV_LATTICE_POINTS[D]`` points per
+    dimension spans :math:`\mathrm{EAP}_m \pm 6\,\mathrm{SD}_m` (clipped to the fitted grid's
+    range). The posterior
+    :math:`\log L(\boldsymbol\theta\mid y_p)-\tfrac12(\boldsymbol\theta-\boldsymbol\mu)^\top
+    \boldsymbol\Sigma^{-1}(\boldsymbol\theta-\boldsymbol\mu)` is evaluated on it, each draw
+    picks a lattice cell from that discrete posterior and adds uniform jitter within the cell
+    (width :math:`\Delta_m`), giving continuous draws whose variance exceeds the posterior's by
+    :math:`\Delta_m^2/12` (about 0.2% in 2D and 0.6% in 3D of the posterior variance). Draws are
+    independent across respondents and deterministic given ``key``.
+
+    Returns
+    -------
+    Array, shape (N_pad, n_draws, D)
+    """
+    n_factors = int(prob.nodes.shape[1])
+    n_pts = _PV_LATTICE_POINTS[n_factors]
+    lo = prob.nodes[0, 0]
+    hi = prob.nodes[-1, 0]
+    m_eap, sd_eap = eap(prob, eta)  # (P, D)
+    a = jnp.clip(m_eap - _PV_SPAN_SD * sd_eap, lo, hi)
+    b = jnp.clip(m_eap + _PV_SPAN_SD * sd_eap, lo, hi)
+    b = jnp.maximum(b, a + 1e-6)
+    xi_list = _expand_items(prob, eta)
+    lat = _expand_latent(prob, eta)
+    unit = jnp.linspace(0.0, 1.0, n_pts, dtype=prob.nodes.dtype)
+    grids = jnp.meshgrid(*([jnp.arange(n_pts)] * n_factors), indexing="ij")
+    cell_index = jnp.stack([g.ravel() for g in grids], axis=1)  # (n^D, D)
+
+    def pattern_logits(args: tuple[Array, Array, Array, Array]) -> Array:
+        y_p, g_p, a_p, b_p = args
+        mu, cov = _mvn_mean_cov(lat[g_p], n_factors)
+        prec = jnp.linalg.inv(cov)
+        nodes = a_p[None, :] + (b_p - a_p)[None, :] * unit[cell_index]  # (n^D, D)
+
+        def log_post(t: Array) -> Array:
+            dev = t - mu
+            quad: Array = dev @ prec @ dev
+            return _pattern_loglik(t, y_p, g_p, prob.families, xi_list) - 0.5 * quad
+
+        out: Array = jax.vmap(log_post)(nodes)
+        return out
+
+    logits = jax.lax.map(pattern_logits, (prob.y, prob.group, a, b), batch_size=8)
+    keys = jax.random.split(key, inverse.shape[0])
+
+    def draw_one(args: tuple[Array, Array]) -> Array:
+        pat, k = args
+        k_cell, k_jit = jax.random.split(k)
+        cells = jax.random.categorical(k_cell, logits[pat], shape=(n_draws,))
+        idx = cell_index[cells]  # (n_draws, D)
+        width = (b[pat] - a[pat]) / (n_pts - 1)
+        centers = a[pat][None, :] + width[None, :] * idx
+        jitter = (jax.random.uniform(k_jit, (n_draws, n_factors), dtype=width.dtype) - 0.5) * width
+        out: Array = centers + jitter
+        return out
+
+    draws: Array = jax.lax.map(draw_one, (inverse, keys), batch_size=256)
     return draws

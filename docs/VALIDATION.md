@@ -284,7 +284,8 @@ English | [日本語](VALIDATION.ja.md)
   - **V13f (`missing_2pl`, 2PL with 15% MCAR missing, 88 patterns, 61 pts $[-6,6]$)**:
     `loglik` rel `7.4e-16`; MAP $\theta$ `2.0e-6` / SE rel `4.6e-5`; ML $\theta$ `1.4e-6` / SE rel
     `1.1e-4` (8 `±inf`); WLE $\theta$ `2.0e-6` / SE rel `1.5e-4`.
-  Plausible values (`method="PV"`) are validated statistically in `tests/test_m4_scoring.py`
+  Plausible values (`method="PV"`; for $D > 1$ see `tests/test_mirt_m4_mirt.py`, DESIGN §15.42) are
+  validated statistically in `tests/test_m4_scoring.py`
   (reproducibility given `key`, independence across respondents sharing a pattern, and sample
   mean/SD matching EAP and posterior SD within Monte-Carlo error), alongside unit tests for
   flat-prior MAP $\approx$ ML, WLE Warm-equation stationarity across all seven item models, extreme
