@@ -58,6 +58,15 @@ def _as_float_array(x: ArrayLike) -> Array:
     return jnp.asarray(x, dtype=dtype)
 
 
+def _log_beta(a: Array, b: Array) -> Array:
+    """Log Beta function via ``gammaln`` (full float64 precision; ``betaln`` is ~1e-7 in JAX)."""
+    return (
+        jax.scipy.special.gammaln(a)
+        + jax.scipy.special.gammaln(b)
+        - jax.scipy.special.gammaln(a + b)
+    )
+
+
 @dataclass(frozen=True)
 class NormalPrior:
     r"""Normal prior distribution on the natural parameter scale.
@@ -186,7 +195,7 @@ class Beta:
         val = (
             (a_arr - 1.0) * jnp.log(safe_x)
             + (b_arr - 1.0) * jnp.log1p(-safe_x)
-            - jax.scipy.special.betaln(a_arr, b_arr)
+            - _log_beta(a_arr, b_arr)
         )
         return jnp.where(valid, val, -jnp.inf)
 
@@ -243,9 +252,7 @@ def eval_log_prior(x: Array, kind: Array, param1: Array, param2: Array) -> Array
     b_b = jnp.where(is_beta, param2, 1.0)
     safe_x_b = jnp.where(valid_beta, x, 0.5)
     lp_beta_val = (
-        (a_b - 1.0) * jnp.log(safe_x_b)
-        + (b_b - 1.0) * jnp.log1p(-safe_x_b)
-        - jax.scipy.special.betaln(a_b, b_b)
+        (a_b - 1.0) * jnp.log(safe_x_b) + (b_b - 1.0) * jnp.log1p(-safe_x_b) - _log_beta(a_b, b_b)
     )
     lp_beta = jnp.where(valid_beta, lp_beta_val, jnp.where(is_beta, -jnp.inf, 0.0))
 
