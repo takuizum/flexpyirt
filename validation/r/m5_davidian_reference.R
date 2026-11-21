@@ -14,6 +14,12 @@
 #      SE = TRUE, SE.type = "Oakes", fscores(..., use_dentype_estimate = TRUE), plus exact R
 #      central-difference Hessian SEs (mirt 1.46.1's BL.LL has a bug for customGroup that uses
 #      pars instead of pars2, making mirt's SE.type = "Richardson" singular).
+#      After mirt's EM stops, the estimates are polished by Newton steps on the exact R marginal
+#      log-likelihood (central-difference gradient and Hessian) until max|grad| < 2e-5, and mirt is
+#      re-run at the polished values with TOL = NaN (no EM cycles) for Oakes SEs, logLik and EAP.
+#   3. Independent checks of the closed-form Davidian moments (mu_z, var_z) by adaptive numerical
+#      integration of dcurver::ddc (stats::integrate), so the shared closed-form formula is not
+#      validated only against itself.
 suppressMessages({
   library(mirt)
   library(dcurver)
@@ -87,6 +93,20 @@ dc_moments_c <- function(cvec) {
                            cvec[seq_len(k - 1L)] * cvec[seq_len(k - 1L) + 2L])
   }
   c(mean = mu, var = e2 - mu^2)
+}
+
+# Independent check of the closed-form moments: integrate z * ddc and z^2 * ddc numerically.
+check_moments_integrate <- function(cvec, tol = 1e-8) {
+  phi_dc <- c_to_phi_dc(cvec)
+  m0 <- integrate(function(z) dcurver::ddc(z, phi_dc), -Inf, Inf, rel.tol = 1e-12)$value
+  m1 <- integrate(function(z) z * dcurver::ddc(z, phi_dc), -Inf, Inf, rel.tol = 1e-12)$value
+  m2 <- integrate(function(z) z^2 * dcurver::ddc(z, phi_dc), -Inf, Inf, rel.tol = 1e-12)$value
+  num <- c(mean = m1 / m0, var = m2 / m0 - (m1 / m0)^2)
+  cf <- dc_moments_c(cvec)
+  err <- max(abs(num - cf), abs(m0 - 1))
+  stopifnot(err < tol)
+  list(mean_integrate = unname(num["mean"]), var_integrate = unname(num["var"]),
+       mean_closed = unname(cf["mean"]), var_closed = unname(cf["var"]), max_abs_err = err)
 }
 
 # Standardized Davidian grid weights using dcurver::ddc (normalized on the quadrature grid so
@@ -231,28 +251,22 @@ solve_exact_case <- function(dat, itemtype, n_cat, degree, quad,
     isTRUE(extract.mirt(m_oakes, "converged")),
     all(range(m_oakes@Model$Theta) == quad$theta_lim)
   )
-  cf_o <- coef(m_oakes, printSE = TRUE)
-  # Extract mirt Oakes estimates and SEs, and build eta_hat for exact R Richardson Hessian.
-  est_o <- list(); se_o <- list()
-  eta_hat <- c()
-  for (j in free_items) {
-    nm <- items[j]
-    x <- cf_o[[nm]]
-    a_v <- unname(x["par", "a1"])
-    d_v <- unname(x["par", d_names])
-    eta_hat <- c(eta_hat, a_v, d_v)
-    est_o[[nm]] <- c(list(a = a_v), as.list(setNames(d_v, d_names)))
-    se_o[[nm]] <- c(list(a_se = unname(x["SE", "a1"])),
-                    as.list(setNames(unname(x["SE", d_names]), paste0(d_names, "_se"))))
-  }
-  gp_o <- cf_o$GroupPars
+  converged_em <- extract.mirt(m_oakes, "converged")
+  iterations_em <- extract.mirt(m_oakes, "iterations")
   phi_names <- paste0("phi_", seq_len(degree))
-  mu_val <- unname(gp_o["par", "mean"])
-  vr_val <- unname(gp_o["par", "var"])
-  phi_val <- unname(gp_o["par", phi_names])
-  if (free_mean) eta_hat <- c(eta_hat, mu_val)
-  if (free_var)  eta_hat <- c(eta_hat, vr_val)
-  eta_hat <- c(eta_hat, phi_val)
+  extract_eta <- function(mod) {
+    cf <- coef(mod)
+    eta <- c()
+    for (j in free_items) {
+      x <- cf[[items[j]]]
+      eta <- c(eta, unname(x["par", "a1"]), unname(x["par", d_names]))
+    }
+    gp <- cf$GroupPars
+    if (free_mean) eta <- c(eta, unname(gp["par", "mean"]))
+    if (free_var)  eta <- c(eta, unname(gp["par", "var"]))
+    c(eta, unname(gp["par", phi_names]))
+  }
+  eta_hat <- extract_eta(m_oakes)
 
   fixed_a <- if (!is.null(bank)) bank$a else numeric()
   fixed_d <- if (!is.null(bank)) lapply(bank$d, function(x) x) else list()
@@ -260,12 +274,65 @@ solve_exact_case <- function(dat, itemtype, n_cat, degree, quad,
                   fixed_items = fixed_items, fixed_a = fixed_a, fixed_d = fixed_d,
                   free_mean = free_mean, free_var = free_var)
   eps <- 1e-6
-  grad <- numeric(length(eta_hat))
-  for (i in seq_along(eta_hat)) {
-    e <- numeric(length(eta_hat)); e[i] <- eps
-    grad[i] <- (mll(eta_hat + e) - mll(eta_hat - e)) / (2 * eps)
+  grad_fn <- function(x) {
+    g <- numeric(length(x))
+    for (i in seq_along(x)) {
+      e <- numeric(length(x)); e[i] <- eps
+      g[i] <- (mll(x + e) - mll(x - e)) / (2 * eps)
+    }
+    g
+  }
+  # Newton polish of mirt's EM solution on the exact R marginal log-likelihood.
+  grad <- grad_fn(eta_hat)
+  max_grad_mirt <- max(abs(grad))
+  n_polish <- 0L
+  while (max(abs(grad)) > 2e-5 && n_polish < 10L) {
+    H <- -richardson_hessian(mll, eta_hat, h = 1e-4)
+    H <- 0.5 * (H + t(H))
+    step <- solve(H, grad)
+    t_step <- 1.0
+    ll0 <- mll(eta_hat)
+    while (mll(eta_hat + t_step * step) < ll0 - 1e-9 && t_step > 1e-4) t_step <- t_step / 2
+    eta_hat <- eta_hat + t_step * step
+    grad <- grad_fn(eta_hat)
+    n_polish <- n_polish + 1L
   }
   max_grad <- max(abs(grad))
+  stopifnot(max_grad < 1e-3)
+
+  # Re-run mirt at the polished values without EM cycles (TOL = NaN): Oakes SEs, logLik, EAP.
+  sv2 <- mod2values(m_oakes)
+  pos <- 1L
+  for (j in free_items) {
+    sel <- sv2$item == items[j]
+    sv2[sel & sv2$name == "a1", "value"] <- eta_hat[pos]; pos <- pos + 1L
+    for (dn in d_names) { sv2[sel & sv2$name == dn, "value"] <- eta_hat[pos]; pos <- pos + 1L }
+  }
+  gsel <- sv2$item == "GROUP"
+  if (free_mean) { sv2[gsel & sv2$name == "mean", "value"] <- eta_hat[pos]; pos <- pos + 1L }
+  if (free_var)  { sv2[gsel & sv2$name == "var", "value"] <- eta_hat[pos]; pos <- pos + 1L }
+  for (nm in phi_names) { sv2[gsel & sv2$name == nm, "value"] <- eta_hat[pos]; pos <- pos + 1L }
+  m_oakes <- mirt(dat, 1L, itemtype, customGroup = cg, pars = sv2, quadpts = quad$quadpts,
+                  TOL = NaN, SE = TRUE, SE.type = "Oakes",
+                  technical = list(theta_lim = quad$theta_lim), verbose = FALSE)
+  stopifnot(max(abs(extract_eta(m_oakes) - eta_hat)) < 1e-12)
+
+  cf_o <- coef(m_oakes, printSE = TRUE)
+  est_o <- list(); se_o <- list()
+  for (j in free_items) {
+    nm <- items[j]
+    x <- cf_o[[nm]]
+    est_o[[nm]] <- c(list(a = unname(x["par", "a1"])),
+                     as.list(setNames(unname(x["par", d_names]), d_names)))
+    se_o[[nm]] <- c(list(a_se = unname(x["SE", "a1"])),
+                    as.list(setNames(unname(x["SE", d_names]), paste0(d_names, "_se"))))
+  }
+  gp_o <- cf_o$GroupPars
+  mu_val <- unname(gp_o["par", "mean"])
+  vr_val <- unname(gp_o["par", "var"])
+  phi_val <- unname(gp_o["par", phi_names])
+  moments_check <- check_moments_integrate(phi_cos_to_c(phi_val))
+
   H <- -richardson_hessian(mll, eta_hat, h = 1e-4)
   H <- 0.5 * (H + t(H))
   se_hess <- sqrt(diag(solve(H)))
@@ -303,8 +370,11 @@ solve_exact_case <- function(dat, itemtype, n_cat, degree, quad,
     loglik = extract.mirt(m_oakes, "logLik"),
     loglik_r_opt = mll(eta_hat),
     max_grad_r = max_grad,
-    converged = extract.mirt(m_oakes, "converged"),
-    iterations = extract.mirt(m_oakes, "iterations"),
+    max_grad_r_mirt_em = max_grad_mirt,
+    newton_polish_steps = n_polish,
+    moments_check = moments_check,
+    converged = converged_em,
+    iterations = iterations_em,
     grid_check = range(m_oakes@Model$Theta),
     items = est_o,
     items_se_oakes = se_o,
@@ -329,6 +399,7 @@ extract_builtin_dc <- function(dat, itemtype, n_cat, degree, quad, eap_pats) {
   cvec <- phi_dc_to_c(phi_dc)
   mom <- dc_moments_c(cvec)
   phi_cos <- c_to_phi_cos(cvec)
+  moments_check <- check_moments_integrate(cvec)
   n_d <- n_cat - 1L
   d_names <- if (n_d == 1L) "d" else paste0("d", seq_len(n_d))
   items_out <- lapply(colnames(dat), function(nm) {
@@ -349,6 +420,7 @@ extract_builtin_dc <- function(dat, itemtype, n_cat, degree, quad, eap_pats) {
     phi_cos = phi_cos,
     mu_z = unname(mom["mean"]),
     var_z = unname(mom["var"]),
+    moments_check = moments_check,
     prior = as.numeric(m@Internals$Prior[[1L]]),
     eap = list(theta = unname(eap[, "F1"]), se = unname(eap[, "SE_F1"]))
   )

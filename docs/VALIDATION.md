@@ -361,48 +361,84 @@ English | [日本語](VALIDATION.ja.md)
   1. Built-in `mirt(..., dentype = "Davidian-k")` applies Woods' linear-interpolation
      `standardizeQuadrature` to expected counts at every EM cycle before running `nlminb` on
      unnormalized `dcurver::ddc`, which breaks EM monotonicity (mirt disables its monotonicity
-     check for `"Davidian"`) and converges to a non-stationary point with strictly lower
-     marginal log-likelihood (by `21.5` points on V19a's 2PL $k=3$, and by `139.3` points on
-     V19b's GRM $k=2$, where mirt's sine-first starting angle `1.570789` traps it at the polar
-     singularity $\phi_1=\pi/2$, i.e. $N(0,1)$).
+     check for `"Davidian"`) and ends with a strictly lower marginal log-likelihood (by `21.47`
+     points on V19a's 2PL $k=3$, and by `139.32` points on V19b's GRM $k=2$). On V19a mirt's end
+     point is not stationary even for its own discretized likelihood ($\sum\log\sum_q L_q\,
+     \mathrm{ddc}(\theta_q)/\sum_q\mathrm{ddc}(\theta_q)$): the score in `PHI_1..3` is
+     $(-0.54, -3.40, 56.7)$, and maximizing over `PHI` alone with mirt's item parameters gains
+     `4.67`. On V19b mirt stalls at the stationary point $N(0,1)$ (`PHI_1 = 1.5707963`, score
+     $(3.6\times10^{-4}, 0)$, no gain from re-optimizing `PHI`): the score in `PHI_2` vanishes
+     because of the sine-first chart's polar singularity at $\phi_1=\pi/2$, and the score in
+     `PHI_1` vanishes because its first-order direction is a pure location/scale change, which the
+     free items absorb. (The second reason applies to any chart; flexpyirt leaves
+     $\boldsymbol\phi=\mathbf 0$ through its perturbed default starts, DESIGN §16.4.)
   2. Built-in `dentype = "Davidian-k"` forbids `SE = TRUE` (`"No standard error method currently
      supported for Davidian curves"`) and forbids freeing `MEAN_1` / `COV_11` (`"Estimating
-     Davidian mean-variance hyper-parameters is not currently supported"`).
+     Davidian mean-variance hyper-parameters is not currently supported"`), both in
+     `mirt:::EM.group`.
   3. In `fscores()`, mirt defaults to an $N(0,1)$ prior unless `use_dentype_estimate = TRUE` is
      passed (which supports `EAP` and plausible values, and rejects `MAP`).
   4. When validating the exact standardized Davidian MMLE inside `mirt` via `createGroup()`
      (calling `dcurver::ddc` normalized on the grid, `TOL = 1e-10`, `accelerate = "none"`,
      `SE.type = "Oakes"`), `createGroup`'s default `derivType = "Richardson"` uses a coarse
-     second-derivative step `delta = 0.01` (`2*delta = 0.02`) that corrupts `k = 3` Oakes SEs by
-     up to 25.6%, so `derivType = "central"` (`delta = 1e-5`) is used; and `mirt:::BL.LL` reads
-     `pars` instead of `pars2` for `dentype == "custom"`, so Richardson Hessian SEs are computed
-     directly on the exact R marginal log-likelihood (`h = 1e-4`).
+     second-derivative step (`mirt:::numerical_deriv` uses `delta * 1000 = 0.01`, and
+     `2*delta = 0.02` on the diagonal) that corrupts `k = 3` Oakes SEs by up to 25.6%, so
+     `derivType = "central"` (`delta = 1e-5`) is used; and `mirt:::BL.LL` reads `pars` instead of
+     `pars2` for `dentype == "custom"` (the latent density is not perturbed), so Richardson
+     Hessian SEs are computed directly on the exact R marginal log-likelihood (`h = 1e-4`).
+
+  **What the V19 references validate.** The `exact` block is the standardized Davidian MMLE
+  of DESIGN §16.4, re-coded in R: the chart, the closed-form moments $(\mu_Z,\sigma_Z^2)$ and the
+  standardization $z_q=\mu_Z+\sigma_Z(\theta_q-\mu)/\sigma$ are the same definitions as
+  flexpyirt's (written separately in R), while the density values come from `dcurver::ddc`, the
+  E-step, EM, Oakes SEs and EAP from `mirt` (`createGroup()`), and the Hessian SEs from a
+  separately written R marginal log-likelihood. It therefore validates flexpyirt's estimation
+  machinery (E-step, latent M-step, convergence, Oakes/Hessian SEs, scoring) for that model, and
+  the density against `dcurver`. The closed-form moments are checked independently: the R script
+  integrates $z\,\mathrm{ddc}(z)$ and $z^2\,\mathrm{ddc}(z)$ with `stats::integrate` at every
+  fitted and built-in solution (max abs error `1.2e-9`, stored as `moments_check`; it stops if
+  the error exceeds `1e-8`), and `tests/test_m5_davidian.py` checks them by trapezoidal
+  integration. The `mirt_builtin` block checks the density, `Prior`, `logLik` and EAP against
+  mirt's own Davidian implementation at mirt's parameters.
+  **Convergence of the reference.** mirt's EM (BFGS M-step, `TOL = 1e-10`) stops with a gradient
+  of the exact marginal log-likelihood of up to `1.7e-3` (V19c; `3.8e-5` and `5.8e-5` for V19a/b,
+  stored as `max_grad_r_mirt_em`). The R script therefore polishes mirt's solution by Newton
+  steps on the exact R marginal log-likelihood (central-difference gradient and Hessian) until
+  max|grad| < `2e-5` (one step in each case, final `1.8e-6`–`3.6e-6`, `max_grad_r`) and re-runs
+  `mirt` at the polished values with `TOL = NaN` (no EM cycles) to obtain Oakes SEs, `logLik` and
+  EAP there. Before this polish the V19c item and latent differences were `8.5e-6` and `7.3e-6`,
+  with flexpyirt's log-likelihood `1.8e-8` above the reference, i.e. the residual was in the
+  reference, not in flexpyirt.
 
   Three simulated cases with skewed standardized $\chi^2_4$ traits ($N = 3000$) are validated
   in `tests/test_mirt_m5_davidian.py` (plain EM and SQUAREM, `validation/r/m5_davidian_reference.R`
-  → `tests/reference/v19_davidian_*.json`):
+  → `tests/reference/v19_davidian_*.json`; maxima over plain EM and SQUAREM):
   - **V19a (`v19_davidian_2pl_k3`, 2PL, $J=20, k=3$, 61 pts $[-6,6]$)**: exact MMLE vs R
-    `mirt(customGroup)` / R Hessian: `loglik` rel `2.3e-16`, item params `9.8e-8`, `phi_1..3`
-    `6.3e-9`, Oakes SE vs mirt Oakes `3.8e-6` (items `7.7e-7`), Hessian SE vs R Richardson
-    `1.8e-6` (latent `3.7e-7`), flexpyirt Oakes vs Hessian `7.6e-16`, EAP `5.3e-15` (SQUAREM
+    `mirt(customGroup)` / R Hessian: `loglik` rel `2.3e-16`, item params `5.7e-8`, `phi_1..3`
+    `1.3e-8`, Oakes SE vs mirt Oakes `4.6e-6` (items `6.3e-7`), Hessian SE vs R Richardson
+    `2.8e-6` (latent `3.8e-7`), flexpyirt Oakes vs Hessian `9.7e-16`, EAP `6.2e-15` (SQUAREM
     reduces EM evaluations `113 → 39`). At built-in `mirt(..., dentype="Davidian-3")` parameters
     (with `mean = mu_z`, `var = var_z`), flexpyirt reproduces mirt's `Prior`, `logLik` (`1.4e-15`
     rel), and `fscores(..., use_dentype_estimate=TRUE)` (`8.2e-15`), while exact MMLE gains
     `+21.47` log-likelihood points.
   - **V19b (`v19_davidian_grm_k2`, GRM $K=4$, $J=10, k=2$, 61 pts $[-6,6]$)**: exact MMLE:
-    `loglik` rel `1.9e-16`, item params `3.6e-8`, `phi_1..2` `1.3e-9`, Oakes SE vs mirt Oakes
-    `1.3e-6`, Hessian SE vs R Richardson `2.6e-6`, flexpyirt Oakes vs Hessian `7.0e-16`, EAP
-    `6.2e-15` (SQUAREM `111 → 33`). At built-in `mirt(..., dentype="Davidian-2")` parameters,
+    `loglik` rel `1.9e-16`, item params `4.9e-8`, `phi_1..2` `9.1e-9`, Oakes SE vs mirt Oakes
+    `3.6e-7`, Hessian SE vs R Richardson `1.9e-6`, flexpyirt Oakes vs Hessian `1.1e-15`, EAP
+    `6.0e-15` (SQUAREM `111 → 33`). At built-in `mirt(..., dentype="Davidian-2")` parameters,
     `logLik` (`1.9e-16` rel) and EAP (`6.7e-15`) match identically, while exact MMLE gains
     `+139.32` log-likelihood points.
   - **V19c (`v19_davidian_fipc_k3`, FIPC 2PL, `q01–q10` fixed, $J=20, k=3$, free `mean`/`var`,
     shifted/scaled trait $0.4 + 1.2\cdot\text{skewed}$, 81 pts $[-8,8]$)**: exact MMLE: `loglik`
-    rel `5.6e-13`, item params `8.5e-6`, latent params (`mean, var, phi_1..3`) `7.3e-6`, Oakes SE
-    vs mirt Oakes `7.0e-6`, Hessian SE vs R Richardson `8.3e-6`, flexpyirt Oakes vs Hessian
-    `2.9e-15`, EAP `4.0e-15` (SQUAREM `107 → 33`).
+    rel `1.6e-15`, item params `7.5e-8`, latent params (`mean, var, phi_1..3`) `1.4e-7`, Oakes SE
+    vs mirt Oakes `6.0e-6`, Hessian SE vs R Richardson `1.8e-6`, flexpyirt Oakes vs Hessian
+    `2.9e-15`, EAP `5.3e-15` (SQUAREM `107 → 33`).
+  The remaining `~1e-6` SE differences come from mirt's and R's finite-difference derivatives
+  (`delta = 1e-5`, `h = 1e-4`); flexpyirt's SEs use exact autodiff. Tolerances are those of the
+  table above (`1e-4` parameters, `1e-3` relative SEs).
   Unit tests (unit sphere, moments, zero-angle $N(0,1)$ equivalence, polynomial-root autodiff
-  guard, Rasch/FIPC, identification/spec errors, scoring, JSON round trip):
-  `tests/test_m5_davidian.py`.
+  guard and fits with a root on a quadrature node, start-angle signs, fits with `degree` 1 and
+  10, Rasch/FIPC, identification/spec errors, scoring, JSON round trip and malformed
+  `DavidianCurve` JSON): `tests/test_m5_davidian.py`.
 
 ## Validation beyond agreement
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
