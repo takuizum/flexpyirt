@@ -19,7 +19,8 @@ function, see the [API reference](reference.md).
 11. [Priors and MAP estimation](#11-priors-and-map-estimation)
 12. [Editing the ParameterTable](#12-editing-the-parametertable)
 13. [Choosing the quadrature grid](#13-choosing-the-quadrature-grid)
-14. [Errors and warnings](#14-errors-and-warnings)
+14. [Confirmatory multidimensional models](#14-confirmatory-multidimensional-models)
+15. [Errors and warnings](#15-errors-and-warnings)
 
 ## 1. Setup
 
@@ -512,7 +513,63 @@ variance of the distribution on the grid is slightly smaller. mirt updates the v
 closed-form moments, so where the grid ends matter its values differ from flexpyirt's. Widening
 the grid makes them agree ([VALIDATION.md](VALIDATION.md)).
 
-## 14. Errors and warnings
+## 14. Confirmatory multidimensional models
+
+Fit confirmatory 2- or 3-dimensional models with `.with_factors({...})`. Each entry maps a factor
+name to the items loading on it; an item may load on several factors (cross-loading), and slopes on
+unloaded factors are fixed at `0`. Item parameters become `a1`…`aD` and `d` (`d1`… for GRM / GPCM /
+PCM), matching mirt's slope–intercept form $z = \mathbf a^\top\boldsymbol\theta + d$.
+
+The latent distribution is multivariate normal with means fixed at `0`, variances fixed at `1` (or
+variances free when all items are `Rasch` or `PCM`), and correlations free by default (matching
+mirt's `COV = F1*F2`; pass `correlated=False` for orthogonal factors). Product quadrature defaults
+to mirt's `select_quadpts` (31 points per dimension for 2 factors, 15 per dimension for 3 factors
+on $[-6, 6]$).
+
+```python
+a_mirt = np.array(
+    [
+        [1.3, 0.0],
+        [1.1, 0.0],
+        [1.4, 0.0],
+        [1.0, 0.0],
+        [1.2, 0.0],
+        [0.7, 0.8],  # cross-loading on both factors
+        [0.0, 1.2],
+        [0.0, 1.5],
+        [0.0, 1.0],
+        [0.0, 1.3],
+    ]
+)
+d_mirt = np.linspace(-0.8, 0.8, a_mirt.shape[0])
+theta_mirt = rng.multivariate_normal([0.0, 0.0], [[1.0, 0.5], [0.5, 1.0]], size=1200)
+p_mirt = 1.0 / (1.0 + np.exp(-(theta_mirt @ a_mirt.T + d_mirt)))
+mirt_items = [f"m{j:02d}" for j in range(1, a_mirt.shape[0] + 1)]
+mirt_df = pd.DataFrame((rng.random(p_mirt.shape) < p_mirt).astype(float), columns=mirt_items)
+
+mirt_spec = Model.uniform(TwoPL(), items=mirt_items).with_factors(
+    {"F1": mirt_items[:6], "F2": mirt_items[5:]}
+)
+res_mirt = fit(
+    mirt_spec,
+    mirt_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(21, lim=(-6, 6)),
+)
+print(res_mirt.latent[["mean_1", "mean_2", "var_1", "var_2", "cor_12", "cor_12_se"]].round(3))
+print(res_mirt.items[["item", "a1", "a2", "d", "a1_se", "a2_se"]].round(3))
+print(res_mirt.score(mirt_df.iloc[:3], method="EAP").round(3))  # theta_F1, theta_F2, se_F1, se_F2
+```
+
+- **Identification and sign orientation**: confirmatory models need zero (or fixed) loadings to
+  prevent rotational indeterminacy (`IdentificationError` if all items load freely on every
+  factor). Factor orientation is anchored to the positive direction by strictly positive starting
+  slopes derived from factor-specific item–rest correlations.
+- **Scoring**: `method="EAP"` returns `theta_<factor>` and `se_<factor>` per declared factor.
+  Other scoring methods (`MAP`, `ML`, `WLE`, `PV`) and multiple-group multidimensional models are
+  not yet implemented and raise `SpecificationError`.
+
+## 15. Errors and warnings
 
 | Type | When |
 |---|---|

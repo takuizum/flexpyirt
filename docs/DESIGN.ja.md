@@ -161,8 +161,8 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 
 ### 4.9 求積
 - **決定**: 1 次元の既定は等間隔 61 点、$[-6,6]$（EH と同じ格子を共有でき、Normal でも重みを密度から作る）。
-- Normal 専用に Gauss–Hermite も選べる（`Quadrature.gauss_hermite(n)`）。
-- 多次元（M4 以降）は直積格子、次元 3 まで。それ以上は対象外（非目的）。
+- Normal 専用に Gauss–Hermite も選べる（`Quadrature.gauss_hermite(n)`、未実装）。
+- **多次元直積格子（M4, §15.27）**: 2・3 次元モデルは 1 次元等間隔格子の直積（`Quadrature.grid(n_factors)` → `(Q, D)`）を使う。次元あたりの既定節点数は `Quadrature.default(n_factors)` により mirt の `select_quadpts` に合わせ、1 次元で 61 点、2 次元で 31 点（$31^2 = 961$）、3 次元で 15 点（$15^3 = 3{,}375$）、区間 $[-6, 6]$ とする。4 次元以上は対象外（非目的）。
 
 ### 4.10 初期値
 - $d_j$: 正答率の logit、$a_j$: 項目−合計の点双列相関から変換（mirt と同様の古典的初期値）。GRM の閾値はカテゴリ累積比率の logit。
@@ -208,35 +208,31 @@ class CompiledProblem:
     y: Array  # (P, J) int, 欠測 -1, パディング行は度数 0
     counts: Array  # (P,)
     group: Array  # (P,) int
-    nodes: Array  # (Q, D)
-    families: tuple[FamilyBlock, ...]  # 項目モデルごとの塊（静的）
-    free_map: FreeMap
-    latent: tuple[LatentBlock, ...]  # 群ごとの潜在分布（静的な種類 + 動的なパラメタ）
+    nodes: Array  # (Q, D) float, D in {1, 2, 3}
+    families: tuple[FamilyBlock, ...]  # 項目カーネルごとの塊（静的）
+    latent: LatentBlock  # (G, L_D): L_1=2 (mean, var), L_2=5, L_3=9 (平均・分散・相関)
+    priors: PriorBlock  # free_id ごとの事前分布パラメタ
+    n_groups: int  # 静的
 ```
-`families` と潜在分布の「種類」は静的（jit の static）、パラメタ値は動的。
+`families`（各カーネルの `n_factors`・`n_cat` を含む）と `n_groups` は静的（jit の static）、パラメタ値と配列は動的。
 
 ## 6. 拡張プロトコル
 
 ```python
-class ItemModel(Protocol):
-    name: ClassVar[str]
-    param_names: tuple[str, ...]  # 内部パラメタ名
+class ItemKernel(Protocol):
+    n_factors: int  # 1, 2, または 3
+    param_names: tuple[str, ...]  # ("a", "d") または ("a1", ..., "aD", "d")
+    n_cat: int
+    slope_params: tuple[str, ...]
+    intercept_params: tuple[str, ...]
+    irt_names: tuple[str, ...]  # 表示用閾値（D > 1 では空）
+    irt_dep_indices: tuple[tuple[int, ...], ...]
 
-    def log_prob(self, theta: Array, params: Array) -> Array:
-        ...
-        # theta (Q, D), params (n_params,) -> (Q, K) 各カテゴリの対数確率
-
-    def init(self, y: Array) -> Array: ...  # 古典的初期値
-    def to_irt(self, params: Array) -> dict[str, Array]: ...  # a,b 表示などへの変換（表示専用）
-    def bounds(self) -> tuple[Array, Array]: ...
-
-
-class LatentDist(Protocol):
-    def log_weights(self, nodes: Array, params: Array) -> Array: ...  # (Q,)
-    def m_step(self, nodes: Array, n_bar: Array, params: Array) -> Array: ...
-    def n_params(self) -> int: ...
+    def with_factors(self, n_factors: int) -> ItemKernel: ...
+    def irt_thresholds(self, params: Array) -> Array: ...
+    def log_prob(self, theta: Array, params: Array) -> Array: ...  # theta (Q, D) -> (Q, K)
 ```
-新しい項目モデルは `log_prob` を書くだけで、E-step・M-step（自動微分 Newton）・SE・スコアリングが全部動くことを設計目標にする。
+新しい項目カーネルは `(Q, D)` 節点に対する `log_prob` を書くだけで、$D \in \{1, 2, 3\}$ の E-step・M-step（自動微分 Newton）・Oakes/Hessian SE・EAP スコアリングがすべて動くことを設計目標にする。
 
 ## 7. 対応する項目モデル（段階的）
 | モデル | 内部パラメタ | マイルストーン |
@@ -516,6 +512,16 @@ class LatentDist(Protocol):
 23. **ML スコアリング（`method="ML"`、M4, §8）**: 同じ `vmap` 済み安全装置つき 1 次元 Newton（初期値 EAP）で $[-20, 20]$ 上（mirt の既定 `max_theta = 20` に対応）において $f_{\mathrm{ML}}(\theta)=\log L(\theta\mid y)$ を最大化し、観測情報量から $\mathrm{SE}=(-f''_{\mathrm{ML}}(\hat\theta))^{-1/2}$ を求める（mirt 既定の `expected.info = FALSE` に一致）。極端パターンの規約: 全欠測は `(NaN, NaN)`、全観測項目が低 $\theta$ 側の端カテゴリ（$a_j>0$ なら `0`、$a_j<0$ なら `K_j-1`）のときは `(-inf, NaN)`、高 $\theta$ 側の端カテゴリのときは `(+inf, NaN)`。非凹モデル（3PL / 4PL）で全端カテゴリ以外でも有限の内部最大値を持たないパターン（当て推量により低得点パターンで $\log L(\theta)$ が $\theta\to -\infty$ へ単調増加する場合など）も検出し、$|\hat\theta|$ が `±20` の上限に達した・$f''(\hat\theta)\ge 0$・$\mathrm{SE}>30$（`mirt:::ML` の閾値）・$f(\pm 20) > f(\hat\theta)$ のいずれかで `±inf` と SE NaN を返す。`±inf` の符号は、$f(\pm 20) > f(\hat\theta)$ が成り立つときにのみ優越する端点から決め、それ以外は $\operatorname{sign}(\hat\theta)$ に従う（`mirt:::ML` の `Inf * sign(est)` に一致）。特に、3PL の二峰性対数尤度で $-\infty$ の下側漸近線が厳密に凹な内部の局所最頻値を上回る場合、flexpyirt は真の大域上限である `(-inf, NaN)`（本来の最尤推定）を意図的に返すのに対し、mirt 1.46.1 の EAP 出発の局所 `nlm` 探索は内部の局所最頻値で停止するため両者は異なる（`v11_3pl` の 3,790 ユニークパターン中 25 件。この判定により、`nlm` 有限差分 Hessian が `SEest > 30` 判定をすり抜ける境界ケースもあわせて正しく扱える。VALIDATION.ja.md V13 参照）。
 24. **WLE スコアリング（`method="WLE"`、M4, §8）**: Warm (1989) の重み付き最尤推定を、Jeffreys / Firth (1993) の罰則付き対数尤度 $f_{\mathrm{WLE}}(\theta)=\log L(\theta\mid y)+\tfrac{1}{2}\log I(\theta)$ の $[-20, 20]$ 上での最大化として同じ `vmap` 済み安全装置つき 1 次元 Newton（初期値 EAP）で解く。ここで $I(\theta)=\sum_{j:\,y_j\ge 0}\sum_k P_{jk}(\theta)\,(\partial\log P_{jk}/\partial\theta)^2$ は観測項目にわたる Fisher テスト情報量であり、各カーネルの `log_prob` に対する `jax.jacfwd` のみで計算する（手書き微分なし、全項目ファミリーで動作）。停留条件は $\partial\log L/\partial\theta + J(\theta)/(2I(\theta)) = 0$（$J(\theta)=\partial I/\partial\theta$）と恒等的に一致し、2PL・Rasch・GRM・GPCM・PCM・3PL・4PL のすべてで `mirt:::WLE.mirt` と一致する（指数型分布族では $J=\partial I/\partial\theta$ が Warm の $\sum P'P''/P$ と恒等的に一致し、3PL / 4PL / GRM では Firth の Jeffreys 事前分布バイアス補正および mirt と一致する）。極端パターン（全最低・全最高）でも有限の推定値を与え、全欠測パターンは $I(\theta)=0$ のため `(NaN, NaN)` を返す。SE は JAX 自動微分による $(-f''_{\mathrm{WLE}}(\hat\theta))^{-1/2}$ であり、mirt の既定 `fscores(..., method="WLE", full.scores.SE=TRUE)` と一致する（Warm の漸近式 $I(\hat\theta)^{-1/2}$ は mirt の `expected.info=TRUE` に対応し、短いテストや極端パターンで差が出る。VALIDATION.ja.md V13 参照）。
 25. **Plausible values（`method="PV"`、M4, §8）**: 回答者ごとに事後分布 $p(\theta\mid y_i;\mu_{g(i)},\sigma_{g(i)}^2)$ から独立な `n_draws` 個（既定 `5`）の標本を抽出し、`pv1..pvM` 列の DataFrame を返す。求積格子による離散化を避けて連続な標本を得つつ `jit` 内で静的形状・高速動作を保つため、圧縮・2 のべき乗パディングしたユニークパターンごとに推定済みモデルの求積区間 `[quad.lower, quad.upper]` 上の細かい等間隔格子（`501` 点）で事後密度を評価し、台形則で $[0, 1]$ 上の区分線形 CDF を構成したうえで、`jax.random.uniform(key, (N_pad, n_draws))`（回答者数 `N` も 2 のべき乗 `N_pad` へパディングして `N` にスライス）に対し分岐なしの `searchsorted(..., side="right")` 線形補間で逆 CDF 抽出を行う。同じ反応パターンの回答者は事後 CDF を共有しつつ独立な一様乱数を用いるため独立な標本となり、全欠測行は群の事前分布から抽出される。明示的な JAX PRNG の `key`（`jax.random.key` または `jax.random.PRNGKey`、未指定・不正は `SpecificationError`）が必須で、`key` に対して完全に決定的。
+26. **確認的 2–3 次元 MIRT の仕様とカーネル（M4, §4.9, §6）**:
+    `Model.with_factors(factors, *, correlated=True)` で 2 または 3 個の名前つき因子と負荷項目の確認的パターン（`Mapping[str, ItemSelector]`）を指定する。1 項目が複数因子に負荷すること（交差負荷）を許し、各因子には 1 項目以上が必要で、すべてのモデル項目がいずれか 1 因子以上に負荷しなければならない。負荷しない因子の傾きは 0 に固定する。`with_factors()` を呼ばない `Model.uniform(...)` / `Model.from_items(...)` は厳密に 1 次元（`n_factors=1`）のままビット単位で挙動を変えない。4 つのカーネル（`DichotomousKernel`, `FourPLKernel`, `GradedKernel`, `GPCMKernel`）はすべて静的な `n_factors: int = 1` と `with_factors(n_factors)` を持ち、線形予測子 $z = \mathbf a^\top\boldsymbol\theta + d$（$D=1$ は `params[0] * theta[:, 0]`、$D \in \{2, 3\}$ は `theta @ params[:D]`）を評価するため、既存の 7 項目モデル（`TwoPL`, `Rasch`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`）がすべて 2・3 次元でそのまま動作する。$D > 1$ では内部パラメタ名が mirt に合わせて `a1..aD`, `d`（GRM / GPCM / PCM は `d1..d{K-1}`）となり、1 次元用の表示閾値（`b` / `bk`）は省略する。$D > 1$ での多母集団、`with_latent()`、`fix_from(..., parameterization="irt")` は M4 では対象外とし `SpecificationError` を送出する。
+27. **直積求積と多変量正規潜在分布の厳密 M-step（M4, §4.4, §4.9）**:
+    `Quadrature.default(n_factors)` は mirt の `select_quadpts` に合わせた既定値（1 次元 `61`、2 次元 `31` → $961$ 点、3 次元 `15` → $3{,}375$ 点、区間 $[-6, 6]$）を返し、`Quadrature.grid(n_factors)` が `(Q, D)` の直積格子を返す（`nodes()` は 1 次元の `(n_points,)` のまま）。`CompiledProblem.nodes` の形状は `(Q, D)`。$D \in \{2, 3\}$ の多変量正規潜在分布は `ParameterTable` と `LatentBlock` 上で自然尺度の `(mean_1..D, var_1..D, cor_ij...)`（$L_2 = 5$, $L_3 = 9$、$1 \le i < j \le D$）としてパラメタ化する: $\Sigma_{ii} = v_i > 0$（`lower = 0`）、$\Sigma_{ij} = \rho_{ij}\sqrt{v_i v_j}$ かつ $\rho_{ij} \in (-1, 1)$（`lower = -1, upper = 1`）。分散が 1 固定（2PL / GRM / 3PL / 4PL / GPCM の既定）では `cor_ij` が $\Sigma_{ij}$ と一致するため mirt の `COV_ji` およびその SE と直接一致し、全項目が `Rasch` または `PCM` の場合は `cor_ij` に加えて `var_1..var_D` も既定で自由推定とする。`mvn_log_weights(nodes, params)` は $D = 1$ では従来の `normal_log_weights` にそのまま振り分け、$D \in \{2, 3\}$ では相関行列の正定値性を Sylvester の判定法（主座小行列式 $> 0$）と二重 `where` で保護しつつ、閉形式二次形式（$D = 2$）または Cholesky + `solve_triangular`（$D = 3$）と `log_softmax` で格子上の正規化対数重みを計算する。正定値領域内部では滑らかで NaN のない微分を与え、非正定値候補は NaN を返して境界つき Newton の直線探索および SQUAREM の安全装置で棄却される。1 次元（§4.4）と同様、潜在 M-step は離散化後の厳密な $Q_g^{\text{lat}} = \sum_q \bar n_{gq}\log w_{gq}$ を最大化する（EM の単調性と Oakes 恒等式の厳密性を保つ）。
+28. **$D > 1$ の識別性・符号不定性・初期値（M4, §4.5, §4.10）**:
+    `_check_identification_mirt` が推定前に必要条件を検査する: 各因子に有効な負荷（自由または非ゼロ固定）が 1 つ以上あること、自由な `var_m` には非ゼロ固定の `a{m}` が 1 つ以上あること、自由な `mean_m` にはその因子に負荷する項目のうち切片が固定されたものが 1 つ以上あること、確認的な回転識別のため $c_m$ 個の自由な相関に関わる因子 $m$ は少なくとも $c_m$ 個の固定負荷（通常は 0 固定）を持ち、非ゼロ固定負荷のない 2 因子が同一の自由負荷集合を共有しないこと（Bollen, 1989; Reckase, 2009）。**符号不定性**: $\theta_m$ とすべての $a_{jm}$・$\mu_m$・$\rho_{mm'}$（$m' \neq m$）の符号反転で周辺尤度は不変（1 次元と同様）。逆転項目や自然尺度 SE を不自然な境界で歪めないよう傾き自体は非有界（`(-inf, inf)`）のまま保ち、各因子の向きは因子別項目−残余相関から $1/\sqrt{L_j}$（$L_j$ は項目 $j$ が負荷する因子数。切片・漸近線には $\|\mathbf a_j^{(0)}\|$ を使用）で計算する厳密に正の既定初期傾き $a_{jm}^{(0)} \in [0.25, 3.0]$ と、常に正定値な相関初期値 `0.0`（$R^{(0)} = I_D$）によって正の方向に揃える。編集済み表である因子の初期傾きがすべて 0 の場合は `SpecificationError` で弾く。
+29. **多次元の結果・Oakes SE・EAP スコアリング（M4, §4.8, §8）**:
+    Core 層の E-step・M-step・SQUAREM・構造化 Oakes（`_oakes_own_hessian`, `_oakes_cross_hessian`）・チャンク分割 Hessian はすべて `(Q, D)` 節点と `(G, L_D)` 潜在ブロックに対して静的形状・自動微分のみでそのまま動作する。`FitResult.items` は `a1..aD`, `d`（`d1..`）とその SE を表示し、`FitResult.latent` は `mean_1..D`, `var_1..D`, `cor_ij` とその SE を表示する。`FitResult.score(data, method="EAP")` は宣言した因子順に `theta_<factor>`, `se_<factor>` 列を返す。$D > 1$ に対する EAP 以外の採点手法（`MAP`, `ML`, `WLE`, `PV`）は `SpecificationError` を送出する（今後のマイルストーンで対応予定）。
+30. **TODO — 多次元 `FitResult` の JSON 入出力対応（M4）**:
+    `FitResult` の JSON シリアライズ（`to_json` / `from_json`）は別ブランチで開発中。確認的 MIRT と統合する際には、`Model.factors`・`Model.correlated_factors` および直積 `Quadrature`・多次元 `ParameterTable` の往復保存に対応する。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -524,6 +530,7 @@ class LatentDist(Protocol):
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
+- Bollen, K. A. (1989). *Structural Equations with Latent Variables*. Wiley.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
@@ -535,6 +542,7 @@ class LatentDist(Protocol):
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
+- Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.

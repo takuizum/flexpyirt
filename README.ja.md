@@ -22,13 +22,14 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 多母集団 | 群ごとの項目パラメタ、アンカー項目の群間等値、焦点群の平均・分散の推定 | V4 |
 | FIPC | 項目バンクの値で一部の項目を固定し、残りの項目と潜在分布を推定 | V5 |
 | 欠測 | 欠測（MAR）を含むデータ | V9 |
-| 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度（MAP 時は対数事後）の Hessian、表示用 IRT 閾値のデルタ法 SE（`b_se` / `bk_se`） | V7, V10, V12 |
-| スコアリング | EAP・MAP・ML・WLE（標準誤差つき）および plausible values（`PV`、明示的な JAX PRNG `key`）。ベイズ手法は群ごとの潜在分布を事前分布に使う | V1–V5, V7–V9, V11, V13 |
-| EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | V1–V5, V7–V9, V11 |
+| 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度（MAP 時は対数事後）の Hessian、表示用 IRT 閾値のデルタ法 SE（`b_se` / `bk_se`） | V7, V10, V12, V14 |
+| スコアリング | EAP（1–3 因子）・MAP・ML・WLE（標準誤差つき）および plausible values（`PV`、明示的な JAX PRNG `key`）。ベイズ手法は群ごとの潜在分布を事前分布に使う | V1–V5, V7–V9, V11, V13, V14 |
+| 多次元モデル | 確認的 2–3 因子 MIRT（`Model.with_factors()`）。交差負荷、相関／直交の多変量正規因子、直積求積格子、Oakes/Hessian SE、EAP スコアリング | V14 |
+| EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | V1–V5, V7–V9, V11, V14 |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
 
 まだないもの（[ロードマップ](docs/ROADMAP.ja.md)）: 経験ヒストグラム（EH）（M3）、`FitResult` の JSON
-入出力、多次元モデル（M4）。
+入出力（M4）。
 
 ## インストール
 

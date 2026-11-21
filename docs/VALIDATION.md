@@ -40,6 +40,7 @@ English | [日本語](VALIDATION.ja.md)
 | V11 | 3PL and 4PL, single group (simulated) | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 | V12 | Display IRT thresholds and delta-method SEs (2PL, Rasch, GRM, GPCM, PCM, 2-group 2PL) | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | Ability scoring: MAP, ML, WLE (2PL, GRM, GPCM, 3PL, 2-group, missing) | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
+| V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -268,6 +269,32 @@ English | [日本語](VALIDATION.ja.md)
   mean/SD matching EAP and posterior SD within Monte-Carlo error), alongside unit tests for
   flat-prior MAP $\approx$ ML, WLE Warm-equation stationarity across all seven item models, extreme
   patterns, multiple groups, missing data, and input validation.
+- **Confirmatory 2–3 dimensional MIRT (V14, M4)**: four simulated cases are validated in
+  `tests/test_mirt_m4_mirt.py` (with both plain EM and SQUAREM; reference generator
+  `validation/r/m4_mirt_reference.R` → `tests/reference/v14_mirt2d.json`, `accelerate = "none"`,
+  `TOL = 1e-10`, `SE.type = "Oakes"`, mirt's default product grids on $[-6, 6]$: $31^2 = 961$ nodes
+  for 2D and $15^3 = 3{,}375$ nodes for 3D). The three 2D cases use `optimizer = "NR"`; the 3D case
+  uses `optimizer = "BFGS"` with `control = list(reltol = 1e-13, maxit = 500L)` because mirt's
+  `NR` falls back to slow numerical Hessians on 3D `GroupPars` with 3,375 nodes. In all four cases
+  `flexpyirt.loglik >= fixed_at_mirt.loglik` holds, EM and SQUAREM are strictly monotone (with
+  2.2×–2.8× fewer EM map evaluations under SQUAREM), and Oakes agrees with direct Hessian to
+  $\le 1.2\times 10^{-14}$:
+  - **V14a (`mirt2d_2pl_simple`, 2D 2PL, $J=12, N=2000$, `F1=1-6`, `F2=7-12`, $\rho=0.5$, $31^2$ pts)**:
+    `loglik` rel `2.1e-15`, item params `3.3e-9`, `cor_12` `1.0e-8`, item Oakes SE rel `3.7e-9`,
+    `cor_12_se` rel `1.1e-8`, Oakes vs Hessian `7.5e-15`, EAP $\theta$ `7.3e-15` / SD `8.0e-15`.
+  - **V14b (`mirt2d_2pl_cross`, 2D 2PL with cross-loading `q07`, $J=12, N=2500$, $\rho=0.45$, $31^2$ pts)**:
+    `loglik` rel `1.8e-15`, item params `4.0e-9`, `cor_12` `7.3e-9`, item Oakes SE rel `4.9e-9`,
+    `cor_12_se` rel `2.9e-9`, Oakes vs Hessian `5.6e-15`, EAP $\theta$ `6.9e-15` / SD `7.0e-15`.
+  - **V14c (`mirt2d_grm`, 2D GRM $K=4$, $J=10, N=2000$, `F1=1-5`, `F2=6-10`, $\rho=0.55$, $31^2$ pts)**:
+    `loglik` rel `1.7e-15`, item params `2.0e-9`, `cor_12` `4.6e-9`, item Oakes SE rel `2.2e-9`,
+    `cor_12_se` rel `3.0e-9`, Oakes vs Hessian `4.4e-15`, EAP $\theta$ `8.0e-15` / SD `1.2e-14`.
+  - **V14d (`mirt3d_2pl`, 3D 2PL, $J=9, N=2000$, `F1=1-3`, `F2=4-6`, `F3=7-9`, $\rho=(0.45, 0.25, 0.50)$, $15^3$ pts)**:
+    `loglik` rel `4.7e-15`, item params `1.9e-8`, correlations `4.9e-8`, item Oakes SE rel
+    `9.0e-7`, correlation Oakes SE rel `7.3e-5` (mirt's 3D finite-difference Oakes step; flexpyirt
+    Oakes vs Hessian `1.2e-14`), EAP $\theta$ `1.1e-14` / SD `1.1e-14`.
+  Unit tests (kernels, MVN weights & PD guard, product grid shapes, 2D Rasch/mixed/priors/fix,
+  Oakes == Hessian == reference Oakes, identification & specification errors):
+  `tests/test_m4_mirt.py`.
 - Tests: `tests/test_mirt_m1.py` (V1, V2, V10). Reference generator: `validation/r/m1_reference.R`.
 
 ## Validation beyond agreement

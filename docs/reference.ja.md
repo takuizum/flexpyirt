@@ -37,7 +37,7 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 | `table` | DataFrame, 任意 | `Model.parameter_table()` を編集した表。指定すると `spec` の固定・等値・事前分布・初期値より優先 |
 | `item_names` | list[str], 任意 | `data` が配列のときの列名 |
 | `method` | `BAEM`, 任意 | EM の設定（既定 `BAEM()`） |
-| `quadrature` | `Quadrature`, 任意 | 求積格子（既定 61 点・$[-6, 6]$） |
+| `quadrature` | `Quadrature`, 任意 | 求積格子（既定: 1 因子は 61 点、2 因子は各軸 31 点、3 因子は各軸 15 点、いずれも $[-6, 6]$） |
 | `se` | `"oakes"` / `"hessian"` / `None` | 標準誤差の計算方法（MAP 時は事前分布の Hessian を含む）。`None` なら計算しない |
 
 **戻り値**: [`FitResult`](#fitresult)
@@ -53,8 +53,8 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 
 | 属性 | 型 | 説明 |
 |---|---|---|
-| `items` | DataFrame | 1 項目 1 行（多母集団では `group` 列つきで群 × 項目）。`model`、内部パラメタ（`a`, `d` / `d1`…, `g`, `u`）、`<param>_se`、表示用の `b` / `bk`（$-d/a$、GRM は $-d_k/a$、GPCM/PCM は $-(d_k-d_{k-1})/a$、$d_0=0$）とデルタ法による `b_se` / `bk_se`（`vcov` と JAX 自動微分から計算。`se=None` または閾値に入るパラメタがすべて固定なら NaN） |
-| `latent` | DataFrame | 1 群 1 行。`group`, `mean`, `var`, `mean_se`, `var_se`（固定値の SE は NaN） |
+| `items` | DataFrame | 1 項目 1 行（多母集団では `group` 列つきで群 × 項目）。`model`、内部パラメタ（`a` または `a1`…`aD`、`d` / `d1`…、`g`, `u`）、`<param>_se`、および 1 次元モデルでは表示用の `b` / `bk`（$-d/a$、GRM は $-d_k/a$、GPCM/PCM は $-(d_k-d_{k-1})/a$、$d_0=0$）とデルタ法による `b_se` / `bk_se`（`vcov` と JAX 自動微分から計算。`se=None` または閾値に入るパラメタがすべて固定なら NaN） |
+| `latent` | DataFrame | 1 群 1 行。1 因子では `group`, `mean`, `var`, `mean_se`, `var_se`、2–3 因子では `group`, `mean_1`…`mean_D`, `var_1`…`var_D`, `cor_12`… とその `_se` 列（固定値の SE は NaN） |
 | `parameters` | DataFrame | 検証済みの ParameterTable に `estimate`（推定値。固定なら固定値）と `se` を足したもの |
 | `loglik` | float | 推定値での周辺対数尤度（尤度のみ、事前分布は含めない） |
 | `log_posterior` | float | 推定値での対数事後確率（$\ell(\hat\eta) + \log\pi(\hat\eta)$）。事前分布なしでは `loglik` と同値 |
@@ -111,11 +111,12 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 | `key` | `jax.Array`（任意） | 明示的な JAX PRNG キー（`jax.random.key()` または `jax.random.PRNGKey()`）。`method="PV"` では必須、他の手法では `None` |
 | `n_draws` | int | `method="PV"` で回答者ごとに抽出する plausible values の個数（既定 `5`、1 以上の整数） |
 
-**戻り値**: 回答者 1 行ずつの `DataFrame`（`data` が DataFrame ならその index を引き継ぐ）。`"EAP"`, `"MAP"`,
-`"ML"`, `"WLE"` では `theta`, `se` 列、`"PV"` では `pv1`…`pv{n_draws}` 列。
+**戻り値**: 回答者 1 行ずつの `DataFrame`（`data` が DataFrame ならその index を引き継ぐ）。1 次元モデルでは
+`"EAP"`, `"MAP"`, `"ML"`, `"WLE"` が `theta`, `se` 列、`"PV"` が `pv1`…`pv{n_draws}` 列。多次元モデル（`method="EAP"`）では
+宣言した因子順に `theta_<factor>`, `se_<factor>` 列。
 
-**例外**: 不正な `method`、`"PV"` で `key` が未指定・不正、決定的手法に `key` を渡した場合、または `n_draws` が
-正の整数でない場合に `SpecificationError`。
+**例外**: 不正な `method`、多次元モデルで `method != "EAP"` を指定した場合、`"PV"` で `key` が未指定・不正、決定的手法に
+`key` を渡した場合、または `n_draws` が正の整数でない場合に `SpecificationError`。
 
 ---
 
@@ -163,6 +164,20 @@ model.fix_from(bank, *, items=None, parameterization="slope-intercept") -> Model
 | `bank` | `item` 列と、パラメタの列を持つ DataFrame。`"slope-intercept"` なら `a`, `d`（GRM/GPCM/PCM は `d1`, `d2`, …）、`"irt"` なら `a`, `b`（GRM/GPCM/PCM は `b1`, …）。Rasch・PCM 項目は `a` 列がなくてよい。漸近線 `g`（3PL/4PL）・`u`（4PL）はどちらのパラメタ化でもそのまま渡す（3PL 項目では `u` 列を省略できる） |
 | `items` | 固定する項目（名前のリストか `str -> bool` の関数）。既定はバンクにあってモデルにもある項目すべて |
 | `parameterization` | `"slope-intercept"` または `"irt"`（$d = -ab$、GPCM/PCM は $d_k = -a\sum_{c=1}^{k} b_c$ に変換） |
+
+#### `Model.with_factors`
+
+```text
+model.with_factors(factors, *, correlated=True) -> Model
+```
+
+2 または 3 次の確認的因子負荷パターンを宣言する（[ガイド 14 節](guide.ja.md#14-確認的多次元モデル)）。
+`factors` は因子名（順序つき、2 または 3 因子）から各因子に負荷する項目（項目名の列または `str -> bool` 関数）への
+辞書。交差負荷を許し、各因子は 1 項目以上を持ち、すべてのモデル項目が 1 因子以上に負荷する必要がある。負荷しない因子の
+傾きは `0` に固定され、項目パラメタ名は `a1`…`aD`, `d`（または `d1`…）になる。潜在分布は多変量正規分布（平均 `0` 固定、
+分散 `1` 固定。全項目が `Rasch` / `PCM` の場合は分散も自由）で、`correlated=True` のとき既定で因子間相関を自由推定
+（mirt の `COV = F1*F2` 相当）、`correlated=False` で `0` に固定する。多次元モデルでの多母集団（`with_groups()`）と
+`with_latent()` は未対応（`SpecificationError`）。
 
 #### `Model.with_latent`
 
@@ -223,9 +238,12 @@ model.parameter_table(data, *, group=None, item_names=None) -> DataFrame
 |---|---|
 | `item_names` | 項目名のタプル |
 | `is_multigroup` | `with_groups()` で群を宣言したか |
+| `is_multidimensional` | `with_factors()` で確認的因子を宣言したか |
+| `n_factors` | 潜在因子数（`1`, `2`, または `3`） |
+| `factor_names` | 因子名のタプル（1 次元モデルでは空タプル） |
 | `resolved_latent()` | 単一群モデルの潜在分布（既定則を適用したもの） |
 | `resolved_groups()` | `(群名, Normal)` のタプル。単一群なら `(("all", ...),)` |
-| `items`, `fixed`, `latent`, `groups`, `equal`, `priors` | 指定の中身（通常は直接使わない） |
+| `items`, `fixed`, `latent`, `groups`, `equal`, `priors`, `factors`, `correlated_factors` | 指定の中身（通常は直接使わない） |
 
 ---
 
@@ -389,10 +407,13 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 
 ```text
 Quadrature.equispaced(n_points=61, *, lim=(-6.0, 6.0))
+Quadrature.default(n_factors=1, *, lim=(-6.0, 6.0))
 ```
 
-1 次元の等間隔の求積格子（両端を含む）。既定は mirt の既定と同じ 61 点・$[-6, 6]$。
-`nodes()` で格子点の配列を返す。点数は 3 以上、範囲は有限で `lower < upper`。
+等間隔の求積格子（両端を含む）。2・3 次元では直積格子として使う。`Quadrature.default(n_factors)` は
+mirt の既定と同じく、1 因子で 61 点、2 因子で各軸 31 点（$31^2 = 961$）、3 因子で各軸 15 点
+（$15^3 = 3{,}375$）、区間 $[-6, 6]$ を返す。`nodes()` は 1 次元軸 `(n_points,)`、`grid(n_factors)` は
+直積格子 `(n_points**n_factors, n_factors)` を返す。軸あたり点数は 3 以上、範囲は有限で `lower < upper`。
 
 ---
 

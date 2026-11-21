@@ -19,7 +19,8 @@ flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめ�
 11. [事前分布と MAP 推定](#11-事前分布と-map-推定)
 12. [ParameterTable を編集する](#12-parametertable-を編集する)
 13. [求積格子の選び方](#13-求積格子の選び方)
-14. [エラーと警告](#14-エラーと警告)
+14. [確認的多次元モデル](#14-確認的多次元モデル)
+15. [エラーと警告](#15-エラーと警告)
 
 ## 1. 準備
 
@@ -486,7 +487,59 @@ wide = Quadrature.equispaced(81, lim=(-8, 8))  # 刻み 0.2 のまま範囲を�
 mirt は分散を閉形式のモーメントで更新するため、格子の端の影響が大きい条件では mirt と値がずれる。格子を
 広げると両者は一致する（[VALIDATION.md](VALIDATION.ja.md)）。
 
-## 14. エラーと警告
+## 14. 確認的多次元モデル
+
+`.with_factors({...})` で 2 または 3 次元の確認的モデルを指定できる。辞書の各項目で因子名と負荷する項目を指定する。
+1 項目が複数因子に負荷すること（交差負荷）もでき、負荷しない因子の傾きは `0` に固定される。項目パラメタ名は
+mirt と同じ傾き・切片形式 $z = \mathbf a^\top\boldsymbol\theta + d$ の `a1`…`aD`, `d`（GRM / GPCM / PCM は `d1`…）
+になる。
+
+潜在分布は多変量正規分布で、平均は `0` 固定、分散は `1` 固定（全項目が `Rasch` / `PCM` のときは分散も自由）、
+因子間相関は既定で自由推定（mirt の `COV = F1*F2` 相当。直交因子にするには `correlated=False`）となる。
+直積求積の既定は mirt の `select_quadpts` に合わせた 2 因子で各軸 31 点、3 因子で各軸 15 点（区間 $[-6, 6]$）。
+
+```python
+a_mirt = np.array(
+    [
+        [1.3, 0.0],
+        [1.1, 0.0],
+        [1.4, 0.0],
+        [1.0, 0.0],
+        [1.2, 0.0],
+        [0.7, 0.8],  # 両因子に交差負荷する項目
+        [0.0, 1.2],
+        [0.0, 1.5],
+        [0.0, 1.0],
+        [0.0, 1.3],
+    ]
+)
+d_mirt = np.linspace(-0.8, 0.8, a_mirt.shape[0])
+theta_mirt = rng.multivariate_normal([0.0, 0.0], [[1.0, 0.5], [0.5, 1.0]], size=1200)
+p_mirt = 1.0 / (1.0 + np.exp(-(theta_mirt @ a_mirt.T + d_mirt)))
+mirt_items = [f"m{j:02d}" for j in range(1, a_mirt.shape[0] + 1)]
+mirt_df = pd.DataFrame((rng.random(p_mirt.shape) < p_mirt).astype(float), columns=mirt_items)
+
+mirt_spec = Model.uniform(TwoPL(), items=mirt_items).with_factors(
+    {"F1": mirt_items[:6], "F2": mirt_items[5:]}
+)
+res_mirt = fit(
+    mirt_spec,
+    mirt_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(21, lim=(-6, 6)),
+)
+print(res_mirt.latent[["mean_1", "mean_2", "var_1", "var_2", "cor_12", "cor_12_se"]].round(3))
+print(res_mirt.items[["item", "a1", "a2", "d", "a1_se", "a2_se"]].round(3))
+print(res_mirt.score(mirt_df.iloc[:3], method="EAP").round(3))  # theta_F1, theta_F2, se_F1, se_F2
+```
+
+- **識別性と符号の向き**: 確認的モデルでは回転の不定性を除くために 0 固定（または既知値固定）の負荷が必要
+  （全項目が全因子に自由負荷するような指定は `IdentificationError`）。各因子の符号の向きは、因子別の項目−残余相関から
+  計算する厳密に正の初期傾きによって正の方向へ揃える。
+- **スコアリング**: `method="EAP"` が宣言した因子ごとの `theta_<factor>`, `se_<factor>` 列を返す。その他の採点手法
+  （`MAP`, `ML`, `WLE`, `PV`）および多次元の多母集団モデルは未対応で `SpecificationError` を送出する。
+
+## 15. エラーと警告
 
 | 種類 | いつ出るか |
 |---|---|

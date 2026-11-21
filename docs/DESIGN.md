@@ -200,9 +200,12 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 ### 4.9 Quadrature
 - **Decision**: the unidimensional default is 61 equally spaced points on $[-6,6]$ (the same grid
   can be shared with EH; Normal weights come from the density).
-- Gauss–Hermite is available for Normal only (`Quadrature.gauss_hermite(n)`).
-- Multidimensional models (M4 and later) use product grids, up to 3 dimensions. More is out of
-  scope (non-goal).
+- Gauss–Hermite is available for Normal only (`Quadrature.gauss_hermite(n)` — not yet implemented).
+- **Multidimensional product grids (M4, §15.27)**: 2- and 3-dimensional models use the Cartesian
+  product of the 1-D equispaced grid (`Quadrature.grid(n_factors)` → `(Q, D)`). Default points per
+  dimension match mirt's `select_quadpts` via `Quadrature.default(n_factors)`: 61 for 1D, 31 per
+  dimension ($31^2 = 961$) for 2D, and 15 per dimension ($15^3 = 3{,}375$) for 3D on $[-6, 6]$.
+  More than 3 dimensions is out of scope (non-goal).
 
 ### 4.10 Starting values
 - $d_j$: logit of the proportion correct; $a_j$: converted from the item–total point-biserial
@@ -255,37 +258,33 @@ class CompiledProblem:
     y: Array  # (P, J) int, missing -1, padding rows have frequency 0
     counts: Array  # (P,)
     group: Array  # (P,) int
-    nodes: Array  # (Q, D)
-    families: tuple[FamilyBlock, ...]  # one block per item model (static)
-    free_map: FreeMap
-    latent: tuple[LatentBlock, ...]  # per-group latent distribution (static kind + dynamic params)
+    nodes: Array  # (Q, D) float, D in {1, 2, 3}
+    families: tuple[FamilyBlock, ...]  # one block per item kernel (static)
+    latent: LatentBlock  # (G, L_D): L_1=2 (mean, var), L_2=5, L_3=9 (means, vars, cors)
+    priors: PriorBlock  # per free_id prior parameters
+    n_groups: int  # static
 ```
-`families` and the latent distributions' kinds are static (jit static); parameter values are
-dynamic.
+`families` (including each kernel's `n_factors` and `n_cat`) and `n_groups` are static (jit
+static); parameter values and arrays are dynamic.
 
 ## 6. Extension protocols
 
 ```python
-class ItemModel(Protocol):
-    name: ClassVar[str]
-    param_names: tuple[str, ...]  # internal parameter names
+class ItemKernel(Protocol):
+    n_factors: int  # 1, 2, or 3
+    param_names: tuple[str, ...]  # ("a", "d") or ("a1", ..., "aD", "d")
+    n_cat: int
+    slope_params: tuple[str, ...]
+    intercept_params: tuple[str, ...]
+    irt_names: tuple[str, ...]  # display thresholds (empty for D > 1)
+    irt_dep_indices: tuple[tuple[int, ...], ...]
 
-    def log_prob(self, theta: Array, params: Array) -> Array:
-        ...
-        # theta (Q, D), params (n_params,) -> (Q, K) log-probability of each category
-
-    def init(self, y: Array) -> Array: ...  # classical starting values
-    def to_irt(self, params: Array) -> dict[str, Array]: ...  # e.g. a, b display (display only)
-    def bounds(self) -> tuple[Array, Array]: ...
-
-
-class LatentDist(Protocol):
-    def log_weights(self, nodes: Array, params: Array) -> Array: ...  # (Q,)
-    def m_step(self, nodes: Array, n_bar: Array, params: Array) -> Array: ...
-    def n_params(self) -> int: ...
+    def with_factors(self, n_factors: int) -> ItemKernel: ...
+    def irt_thresholds(self, params: Array) -> Array: ...
+    def log_prob(self, theta: Array, params: Array) -> Array: ...  # theta (Q, D) -> (Q, K)
 ```
-The design goal: writing `log_prob` is enough for a new item model to get the E-step, M-step
-(autodiff Newton), SEs and scoring.
+The design goal: writing `log_prob` on `(Q, D)` nodes is enough for a new item kernel to get the
+E-step, M-step (autodiff Newton), Oakes/Hessian SEs, and EAP scoring for $D \in \{1, 2, 3\}$.
 
 ## 7. Item models (in stages)
 | Model | Internal parameters | Milestone |
@@ -705,6 +704,68 @@ data-independent shapes (§15.21).
     independent draws; all-missing rows draw from the group's prior. Requires an explicit JAX PRNG
     `key` (`jax.random.key` or `jax.random.PRNGKey`, `SpecificationError` if absent or invalid) and
     is fully deterministic given `key`.
+26. **Confirmatory 2–3 dimensional MIRT specification and kernels (M4, §4.9, §6)**:
+    `Model.with_factors(factors, *, correlated=True)` declares a confirmatory loading pattern over
+    2 or 3 named factors (`Mapping[str, ItemSelector]`). An item may load on multiple factors
+    (cross-loading); every factor requires at least one item, every item must load on at least one
+    factor, and slopes on unloaded factors are fixed at 0. Calling `Model.uniform(...)` or
+    `Model.from_items(...)` without `with_factors()` stays strictly unidimensional (`n_factors=1`)
+    and bit-for-bit unchanged. All four kernels (`DichotomousKernel`, `FourPLKernel`,
+    `GradedKernel`, `GPCMKernel`) take a static `n_factors: int = 1` and `with_factors(n_factors)`
+    and evaluate the linear predictor $z = \mathbf a^\top\boldsymbol\theta + d$ (using `params[0] *
+    theta[:, 0]` for $D=1$ and `theta @ params[:D]` for $D \in \{2, 3\}$), so all seven item models
+    (`TwoPL`, `Rasch`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`) work in 2D and 3D automatically.
+    For $D > 1$, internal item parameters are named `a1..aD` and `d` (`d1..d{K-1}` for GRM / GPCM /
+    PCM), matching mirt, and unidimensional display thresholds (`b` / `bk`) are omitted. Multiple
+    groups for $D > 1$, `with_latent()` for $D > 1$, and `fix_from(..., parameterization="irt")`
+    for $D > 1$ raise `SpecificationError`.
+27. **Product quadrature and exact MVN latent M-step (M4, §4.4, §4.9)**:
+    `Quadrature.default(n_factors)` selects mirt's `select_quadpts` defaults (`61` for 1D, `31` per
+    dimension for 2D → $961$ nodes, `15` per dimension for 3D → $3{,}375$ nodes on $[-6, 6]$), and
+    `Quadrature.grid(n_factors)` returns the `(Q, D)` Cartesian product grid (while `nodes()` stays
+    the 1-D `(n_points,)` axis). `CompiledProblem.nodes` has shape `(Q, D)`. For $D \in \{2, 3\}$,
+    the multivariate normal latent distribution is parameterized on the natural scale in
+    `ParameterTable` and `LatentBlock` as `(mean_1..D, var_1..D, cor_ij...)` ($L_2 = 5$, $L_3 = 9$,
+    pairs $1 \le i < j \le D$): $\Sigma_{ii} = v_i > 0$ (`lower = 0`) and
+    $\Sigma_{ij} = \rho_{ij}\sqrt{v_i v_j}$ with $\rho_{ij} \in (-1, 1)$ (`lower = -1, upper = 1`).
+    When variances are fixed at 1 (default for 2PL / GRM / 3PL / 4PL / GPCM), `cor_ij` equals
+    $\Sigma_{ij}$ identically (matching mirt's `COV_ji` and its SE); when every item is `Rasch` or
+    `PCM`, `var_1..var_D` are free by default alongside `cor_ij`. `mvn_log_weights(nodes, params)`
+    dispatches to the unchanged 1D `normal_log_weights` for $D = 1$, and for $D \in \{2, 3\}$
+    computes normalized grid log-weights via `log_softmax` using the closed-form quadratic form
+    ($D = 2$) or Cholesky + `solve_triangular` ($D = 3$), checking positive definiteness of the
+    correlation matrix via Sylvester's criterion (leading principal minors $> 0$) with double-`where`
+    guards so derivatives at valid PD points are smooth and NaN-free while non-PD candidates return
+    NaN and are rejected by bounded Newton line search and the SQUAREM safeguard. As in 1D (§4.4),
+    the latent M-step maximizes the exact discretized $Q_g^{\text{lat}} = \sum_q \bar n_{gq}\log w_{gq}$
+    (keeping EM strictly monotone and Oakes' identity exact).
+28. **Identification, sign indeterminacy, and starting values for $D > 1$ (M4, §4.5, §4.10)**:
+    `_check_identification_mirt` checks necessary conditions before fitting: every factor must have
+    at least one active loading (free or fixed nonzero); a free `var_m` requires at least one fixed
+    nonzero slope `a{m}`; a free `mean_m` requires at least one item loading on factor $m$ with a
+    fixed intercept; for confirmatory rotational identification, each factor with $c_m$ free
+    correlations must have at least $c_m$ fixed slopes (typically 0s) and no two factors may share
+    identical free loading sets without fixed nonzero slopes (Bollen, 1989; Reckase, 2009).
+    **Sign indeterminacy**: negating $\theta_m$, all $a_{jm}$, $\mu_m$, and $\rho_{mm'}$ ($m' \neq m$)
+    leaves the marginal likelihood invariant (as in 1D). Slopes remain unbounded (`(-inf, inf)`) so
+    reverse-scored items and natural-scale SEs are unaffected by artificial bounds; orientation is
+    anchored to the positive direction by computing strictly positive default starting slopes
+    $a_{jm}^{(0)} \in [0.25, 3.0]$ from factor-specific item–rest correlations scaled by
+    $1/\sqrt{L_j}$ ($L_j$ = number of factors item $j$ loads on; intercepts and asymptotes use
+    $\|\mathbf a_j^{(0)}\|$), starting free correlations at `0.0` ($R^{(0)} = I_D$, always PD), and
+    rejecting edited tables where all starting slopes on a factor are 0 (`SpecificationError`).
+29. **Multidimensional results, Oakes SEs, and EAP scoring (M4, §4.8, §8)**:
+    The Core E-step, M-step, SQUAREM, structured Oakes (`_oakes_own_hessian`,
+    `_oakes_cross_hessian`), and chunked Hessian work identically for $D \in \{1, 2, 3\}$ with
+    shape-static pytrees and autodiff only. `FitResult.items` displays `a1..aD`, `d` (`d1..`), and
+    their SEs; `FitResult.latent` displays `mean_1..D`, `var_1..D`, `cor_ij`, and their SEs.
+    `FitResult.score(data, method="EAP")` returns columns `theta_<factor>` and `se_<factor>` in
+    declared factor order; non-EAP scoring methods (`MAP`, `ML`, `WLE`, `PV`) raise
+    `SpecificationError` for $D > 1$ (planned for a later milestone).
+30. **TODO — JSON I/O compatibility for multidimensional `FitResult` (M4)**:
+    `FitResult` JSON serialization (`to_json` / `from_json`) is developed on a separate branch; when
+    integrating with confirmatory MIRT, ensure `Model.factors`, `Model.correlated_factors`, and the
+    product `Quadrature` / multidimensional `ParameterTable` round-trip cleanly.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -713,6 +774,7 @@ data-independent shapes (§15.21).
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
+- Bollen, K. A. (1989). *Structural Equations with Latent Variables*. Wiley.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
@@ -724,6 +786,7 @@ data-independent shapes (§15.21).
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
+- Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.

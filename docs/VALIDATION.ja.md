@@ -35,6 +35,7 @@
 | V11 | 3PL・4PL 単一群（シミュレーション） | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 | V12 | 表示用 IRT 閾値とデルタ法 SE（2PL・Rasch・GRM・GPCM・PCM・2 群 2PL） | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | 能力値スコアリング: MAP・ML・WLE（2PL・GRM・GPCM・3PL・2 群・欠測） | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
+| V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -226,6 +227,30 @@
   同一パターンの回答者間での独立性、標本平均・標準偏差がモンテカルロ誤差内で EAP と事後 SD に一致すること）。
   あわせて平坦事前分布 MAP $\approx$ ML、全 7 項目モデルでの WLE 停留条件、極端パターン、多母集団、欠測、入力検証を
   単体テストで確認している。
+- **確認的 2–3 次元 MIRT（V14, M4）**: 4 つのシミュレーションケースを `tests/test_mirt_m4_mirt.py` で照合した
+  （通常 EM・SQUAREM の双方で通過。参照値生成: `validation/r/m4_mirt_reference.R` →
+  `tests/reference/v14_mirt2d.json`、`accelerate = "none"`, `TOL = 1e-10`, `SE.type = "Oakes"`、
+  求積格子は mirt の既定直積格子 $[-6, 6]$ 上で 2 次元 $31^2 = 961$ 点・3 次元 $15^3 = 3{,}375$ 点）。
+  2 次元の 3 ケースは `optimizer = "NR"`、3 次元ケースは mirt の `NR` が 3,375 点上の 3 次元 `GroupPars` で
+  数値 Hessian により極端に遅くなるため `optimizer = "BFGS"`（`control = list(reltol = 1e-13, maxit = 500L)`）を
+  用いた。全 4 ケースで `flexpyirt.loglik >= fixed_at_mirt.loglik`、EM / SQUAREM の厳密な単調性
+  （SQUAREM により EM 写像評価回数は 2.2–2.8 倍削減）、および Oakes と直接 Hessian の一致
+  （相対 $\le 1.2\times 10^{-14}$）を確認した:
+  - **V14a（`mirt2d_2pl_simple`、2 次元 2PL、$J=12, N=2000$、`F1=1-6`, `F2=7-12`, $\rho=0.5$、$31^2$ 点）**:
+    `loglik` 相対 `2.1e-15`、項目パラメタ `3.3e-9`、`cor_12` `1.0e-8`、項目 Oakes SE 相対 `3.7e-9`、
+    `cor_12_se` 相対 `1.1e-8`、Oakes 対 Hessian `7.5e-15`、EAP $\theta$ `7.3e-15` / SD `8.0e-15`。
+  - **V14b（`mirt2d_2pl_cross`、交差負荷 `q07` つき 2 次元 2PL、$J=12, N=2500$, $\rho=0.45$、$31^2$ 点）**:
+    `loglik` 相対 `1.8e-15`、項目パラメタ `4.0e-9`、`cor_12` `7.3e-9`、項目 Oakes SE 相対 `4.9e-9`、
+    `cor_12_se` 相対 `2.9e-9`、Oakes 対 Hessian `5.6e-15`、EAP $\theta$ `6.9e-15` / SD `7.0e-15`。
+  - **V14c（`mirt2d_grm`、2 次元 GRM $K=4$、$J=10, N=2000$、`F1=1-5`, `F2=6-10`, $\rho=0.55$、$31^2$ 点）**:
+    `loglik` 相対 `1.7e-15`、項目パラメタ `2.0e-9`、`cor_12` `4.6e-9`、項目 Oakes SE 相対 `2.2e-9`、
+    `cor_12_se` 相対 `3.0e-9`、Oakes 対 Hessian `4.4e-15`、EAP $\theta$ `8.0e-15` / SD `1.2e-14`。
+  - **V14d（`mirt3d_2pl`、3 次元 2PL、$J=9, N=2000$、`F1=1-3`, `F2=4-6`, `F3=7-9`, $\rho=(0.45, 0.25, 0.50)$、$15^3$ 点）**:
+    `loglik` 相対 `4.7e-15`、項目パラメタ `1.9e-8`、相関 `4.9e-8`、項目 Oakes SE 相対 `9.0e-7`、
+    相関 Oakes SE 相対 `7.3e-5`（mirt の 3 次元有限差分 Oakes ステップ由来。flexpyirt の Oakes 対 Hessian は
+    `1.2e-14`）、EAP $\theta$ `1.1e-14` / SD `1.1e-14`。
+  単体テスト（カーネル・多変量正規重みと正定値性ガード・直積格子形状・2 次元 Rasch / 混在 / 事前分布 / 固定・
+  Oakes == Hessian == 参照 Oakes・識別性と仕様エラー）: `tests/test_m4_mirt.py`。
 - 照合テスト: `tests/test_mirt_m1.py`（V1, V2, V10）。参照値の生成: `validation/r/m1_reference.R`。
 
 ## 照合以外の検証
