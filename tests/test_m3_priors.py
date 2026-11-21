@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import warnings
+from fractions import Fraction
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -90,7 +92,25 @@ def test_beta_prior_log_pdf_matches_scipy() -> None:
 
 
 def test_prior_parameter_validation() -> None:
-    for bad in (0.0, -1.0, np.nan, np.inf, -np.inf, True):
+    bad_pos: tuple[Any, ...] = (
+        0.0,
+        -1.0,
+        np.int64(0),
+        np.int64(-3),
+        np.float32(np.nan),
+        np.float32(np.inf),
+        np.nan,
+        np.inf,
+        -np.inf,
+        True,
+        np.bool_(True),
+        1 + 0j,
+        np.complex128(1.0),
+        "1.0",
+        np.array(1.0),
+        10**400,
+    )
+    for bad in bad_pos:
         with pytest.raises(SpecificationError):
             NormalPrior(0.0, bad)
         with pytest.raises(SpecificationError):
@@ -99,11 +119,43 @@ def test_prior_parameter_validation() -> None:
             Beta(bad, 2.0)
         with pytest.raises(SpecificationError):
             Beta(2.0, bad)
-    for bad_loc in (np.nan, np.inf, -np.inf, False):
+    bad_loc: tuple[Any, ...] = (
+        np.nan,
+        np.inf,
+        -np.inf,
+        np.float32(np.nan),
+        False,
+        np.bool_(False),
+        1 + 0j,
+        np.complex128(0.0),
+        "0.0",
+        np.array(0.0),
+        10**400,
+    )
+    for bad in bad_loc:
         with pytest.raises(SpecificationError):
-            NormalPrior(bad_loc, 1.0)
+            NormalPrior(bad, 1.0)
         with pytest.raises(SpecificationError):
-            LogNormal(bad_loc, 1.0)
+            LogNormal(bad, 1.0)
+
+
+def test_prior_accepts_real_numeric_scalars_and_stores_python_floats() -> None:
+    """Python and NumPy real scalars (non-bool) are accepted and normalized to Python float."""
+    beta_i64 = Beta(np.int64(5), np.int64(17))
+    assert beta_i64 == Beta(5.0, 17.0)
+    assert type(beta_i64.a) is float and type(beta_i64.b) is float
+
+    norm_np = NormalPrior(np.int32(-2), np.float32(1.5))
+    assert norm_np == NormalPrior(-2.0, 1.5)
+    assert type(norm_np.mean) is float and type(norm_np.sd) is float
+
+    ln_np = LogNormal(np.float16(0.5), np.uint8(2))
+    assert ln_np == LogNormal(0.5, 2.0)
+    assert type(ln_np.meanlog) is float and type(ln_np.sdlog) is float
+
+    beta_frac = Beta(Fraction(5, 2), 3)
+    assert beta_frac == Beta(2.5, 3.0)
+    assert type(beta_frac.a) is float and type(beta_frac.b) is float
 
 
 def test_eval_log_prior_branch_free_gradients_and_hessians() -> None:

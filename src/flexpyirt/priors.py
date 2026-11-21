@@ -9,10 +9,13 @@ distribution :class:`~flexpyirt.Normal` (API.md §7).
 from __future__ import annotations
 
 import math
+import numbers
 from dataclasses import dataclass
+from typing import Any
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
 from jax.typing import ArrayLike
 
@@ -38,19 +41,31 @@ PRIOR_BETA = 3
 
 _HALF_LOG_2PI = 0.5 * math.log(2.0 * math.pi)
 
+RealScalar = float | numbers.Real | np.integer[Any] | np.floating[Any]
 
-def _validate_finite(value: float, name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+
+def _validate_finite(value: object, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, numbers.Real):
         raise SpecificationError(f"{name} must be a finite real number, got {value!r}.")
+    try:
+        out = float(value)
+    except OverflowError:
+        raise SpecificationError(f"{name} must be a finite real number, got {value!r}.") from None
+    if not math.isfinite(out):
+        raise SpecificationError(f"{name} must be a finite real number, got {value!r}.")
+    return out
 
 
-def _validate_positive(value: float, name: str) -> None:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not (math.isfinite(value) and value > 0)
-    ):
+def _validate_positive(value: object, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, numbers.Real):
         raise SpecificationError(f"{name} must be positive and finite, got {value!r}.")
+    try:
+        out = float(value)
+    except OverflowError:
+        raise SpecificationError(f"{name} must be positive and finite, got {value!r}.") from None
+    if not (math.isfinite(out) and out > 0.0):
+        raise SpecificationError(f"{name} must be positive and finite, got {value!r}.")
+    return out
 
 
 def _as_float_array(x: ArrayLike) -> Array:
@@ -89,10 +104,10 @@ class NormalPrior:
     mean: float
     sd: float
 
-    def __post_init__(self) -> None:
-        """Validate prior hyperparameters."""
-        _validate_finite(self.mean, "NormalPrior mean")
-        _validate_positive(self.sd, "NormalPrior sd")
+    def __init__(self, mean: RealScalar, sd: RealScalar) -> None:
+        """Validate prior hyperparameters and store them as Python floats."""
+        object.__setattr__(self, "mean", _validate_finite(mean, "NormalPrior mean"))
+        object.__setattr__(self, "sd", _validate_positive(sd, "NormalPrior sd"))
 
     @property
     def support(self) -> tuple[float, float]:
@@ -130,10 +145,10 @@ class LogNormal:
     meanlog: float
     sdlog: float
 
-    def __post_init__(self) -> None:
-        """Validate prior hyperparameters."""
-        _validate_finite(self.meanlog, "LogNormal meanlog")
-        _validate_positive(self.sdlog, "LogNormal sdlog")
+    def __init__(self, meanlog: RealScalar, sdlog: RealScalar) -> None:
+        """Validate prior hyperparameters and store them as Python floats."""
+        object.__setattr__(self, "meanlog", _validate_finite(meanlog, "LogNormal meanlog"))
+        object.__setattr__(self, "sdlog", _validate_positive(sdlog, "LogNormal sdlog"))
 
     @property
     def support(self) -> tuple[float, float]:
@@ -175,10 +190,10 @@ class Beta:
     a: float
     b: float
 
-    def __post_init__(self) -> None:
-        """Validate prior hyperparameters."""
-        _validate_positive(self.a, "Beta a")
-        _validate_positive(self.b, "Beta b")
+    def __init__(self, a: RealScalar, b: RealScalar) -> None:
+        """Validate prior hyperparameters and store them as Python floats."""
+        object.__setattr__(self, "a", _validate_positive(a, "Beta a"))
+        object.__setattr__(self, "b", _validate_positive(b, "Beta b"))
 
     @property
     def support(self) -> tuple[float, float]:
