@@ -302,8 +302,28 @@ step difficulties $b_k=-(d_k-d_{k-1})/a$ with $d_0=0$ for GPCM/PCM) is computed 
 the Jacobian (§15.18).
 
 ## 8. Scoring
-`FitResult.score(data, method="EAP"|"MAP"|"ML"|"WLE"|"PV", group=...)`, using each group's
-estimated latent distribution as the prior. EAP also returns the posterior SD.
+`FitResult.score(data, *, method="EAP"|"MAP"|"ML"|"WLE"|"PV", group=None, item_names=None, key=None, n_draws=5)`:
+- **EAP** (Bock & Mislevy, 1982): posterior mean and posterior SD on the fitted model's quadrature
+  grid using the respondent's group's estimated latent distribution as the prior.
+- **MAP**: Bayes modal estimate maximizing $\log L(\theta\mid y) + \log\phi(\theta;\mu_g,\sigma_g^2)$
+  with the group's estimated normal latent distribution as a continuous prior; SE from the observed
+  posterior information $(-\partial^2/\partial\theta^2)^{-1/2}$ at the mode (§15.22).
+- **ML**: maximum likelihood estimate maximizing $\log L(\theta\mid y)$; SE from the observed
+  information $(-\partial^2\log L/\partial\theta^2)^{-1/2}$. Patterns with no finite maximum return
+  $-\infty$ / $+\infty$ (or NaN for all-missing) with SE NaN (§15.23).
+- **WLE** (Warm, 1989; Firth, 1993): weighted likelihood estimate solving
+  $\partial\log L/\partial\theta + J(\theta)/(2I(\theta)) = 0$ with Fisher test information
+  $I(\theta)$ over observed items and $J(\theta) = \partial I/\partial\theta$ from JAX autodiff,
+  equivalently maximizing $\log L(\theta\mid y) + \tfrac{1}{2}\log I(\theta)$; finite for extreme
+  patterns; SE from the observed curvature of the WLE objective matching mirt's default (§15.24).
+- **PV** (Mislevy, 1991): `n_draws` independent draws per respondent from the posterior on a fine
+  equispaced grid with piecewise-linear inverse-CDF interpolation, returning columns `pv1..pvM`.
+  Requires an explicit `key: jax.Array` (`SpecificationError` if missing); deterministic given `key`
+  (§15.25).
+
+Missing responses are dropped from the likelihood (and from $I(\theta)$ in WLE) for every method.
+All methods compress unique patterns with power-of-two bucket padding and run inside `jit` with
+data-independent shapes (§15.21).
 
 ## 9. Performance
 - Pattern compression and bucket padding limit recompilation.
@@ -617,6 +637,67 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
       fits including EM ≈ 0.41 s): `fit(..., se="oakes")` 3.39 s → **0.50 s** (the Oakes part
       ≈ 2.98 s → ≈ 0.09 s); `se="hessian"` 1.16 s → 1.07 s; covariance matrices agree with the
       previous implementation to $8.5\times10^{-16}$ (relative to the largest entry).
+21. **Scoring API and shared Core structure (M4, §8)**: `FitResult.score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5)` supports `Literal["EAP", "MAP", "ML", "WLE", "PV"]`.
+    EAP (`_core.eap`) is unchanged. The new scoring kernels live in `_scoring.py` (pure JAX Core
+    layer), compress unique `(group, pattern)` pairs and pad to power-of-two buckets as for EAP,
+    drop missing responses (`y == -1`) via masking, and run inside `jit` with shapes independent of
+    the data values. Passing `key` to a non-PV method, omitting or passing a non-PRNG `key` for PV,
+    or passing an invalid `method` or `n_draws` raises `SpecificationError`.
+22. **MAP scoring (`method="MAP"`, M4, §8)**: maximizes
+    $f_{\mathrm{MAP}}(\theta)=\log L(\theta\mid y) - (\theta-\mu_g)^2/(2\sigma_g^2)$ using the
+    respondent's group's estimated normal latent distribution $(\mu_g,\sigma_g^2)$ as a
+    **continuous** prior (not the quadrature grid), with
+    $\mathrm{SE}=(-f''_{\mathrm{MAP}}(\hat\theta))^{-1/2}$ at the mode. Optimization runs a
+    1-D safeguarded Newton ascent (`_newton_1d`, `vmap`-ed over unique patterns, starting from EAP):
+    derivatives $f', f''$ come strictly from JAX autodiff; when $f''\ge -10^{-12}$ (e.g. non-concave
+    3PL/4PL regions) the direction falls back to gradient ascent; candidate steps $2^{-k}\delta$
+    ($k=0..29$, with step magnitude capped at `10.0`) are evaluated together with `vmap` so the
+    objective never decreases. An all-missing row has $\log L\equiv 0$ and therefore returns the
+    continuous prior mode $\mu_g$ and SD $\sigma_g$ (consistent with flexpyirt's EAP returning the
+    prior mean and SD; note mirt strips completely empty rows to `NA` for all methods).
+23. **ML scoring (`method="ML"`, M4, §8)**: maximizes $f_{\mathrm{ML}}(\theta)=\log L(\theta\mid y)$
+    over $[-20, 20]$ (matching mirt's default `max_theta = 20`) via the same `vmap`-ed safeguarded
+    1-D Newton starting from EAP, with observed-information SE
+    $(-f''_{\mathrm{ML}}(\hat\theta))^{-1/2}$ (matching mirt's default `expected.info = FALSE`).
+    Extreme-pattern conventions: all-missing returns `(NaN, NaN)`; all observed items in their
+    lowest-$\theta$ category (category `0` for $a_j>0$, `K_j-1` for $a_j<0$) return `(-inf, NaN)`;
+    all observed items in their highest-$\theta$ category return `(+inf, NaN)`. For non-concave
+    models (3PL/4PL), patterns whose likelihood still has no finite interior maximum (e.g. low-score
+    patterns where $\log L(\theta)$ increases monotonically toward $-\infty$ due to guessing) are
+    also detected — when $|\hat\theta|$ hits the `±20` rail, $f''(\hat\theta)\ge 0$,
+    $\mathrm{SE}>30$ (mirt's threshold in `mirt:::ML`), or $f(\pm 20) > f(\hat\theta)$ — and return
+    `±inf` with SE NaN (cleanly handling the boundary cases where mirt 1.46.1's `nlm` finite-difference
+    Hessian fails to trigger its `SEest > 30` check; see VALIDATION.md V13).
+24. **WLE scoring (`method="WLE"`, M4, §8)**: Warm's (1989) weighted likelihood estimator is
+    implemented by maximizing the Jeffreys/Firth (1993) penalized log-likelihood
+    $f_{\mathrm{WLE}}(\theta)=\log L(\theta\mid y)+\tfrac{1}{2}\log I(\theta)$ on $[-20, 20]$ with
+    the same `vmap`-ed safeguarded 1-D Newton starting from EAP, where
+    $I(\theta)=\sum_{j:\,y_j\ge 0}\sum_k P_{jk}(\theta)\,(\partial\log P_{jk}/\partial\theta)^2$
+    is the observed-item Fisher test information computed strictly via JAX autodiff (`jax.jacfwd` on
+    each kernel's `log_prob`, working for every item family with no hand-written derivatives). Its
+    stationary condition is identically $\partial\log L/\partial\theta + J(\theta)/(2I(\theta)) = 0$
+    with $J(\theta)=\partial I/\partial\theta$, matching `mirt:::WLE.mirt` across 2PL, Rasch, GRM,
+    GPCM, PCM, 3PL, and 4PL (for exponential-family models $J=\partial I/\partial\theta$ equals
+    Warm's $\sum P'P''/P$ identically; for 3PL/4PL/GRM it matches Firth's Jeffreys-prior bias
+    reduction and mirt). Extreme patterns (all-lowest / all-highest) have finite WLEs; all-missing
+    patterns have $I(\theta)=0$ and return `(NaN, NaN)`. The SE is
+    $(-f''_{\mathrm{WLE}}(\hat\theta))^{-1/2}$ from JAX autodiff, matching mirt's default
+    `fscores(..., method="WLE", full.scores.SE=TRUE)` (whereas Warm's asymptotic $I(\hat\theta)^{-1/2}$
+    corresponds to mirt's `expected.info=TRUE` and differs on short tests and extreme patterns; see
+    VALIDATION.md V13).
+25. **Plausible values (`method="PV"`, M4, §8)**: draws `n_draws` (default `5`) independent samples
+    per respondent from the posterior $p(\theta\mid y_i;\mu_{g(i)},\sigma_{g(i)}^2)$, returned as a
+    DataFrame with columns `pv1..pvM`. To produce continuous draws without quadrature quantization
+    while keeping shapes static and fast inside `jit`, the posterior density is evaluated per unique
+    (compressed, power-of-two-padded) pattern on a fine equispaced grid of `501` nodes spanning the
+    fitted model's quadrature interval `[quad.lower, quad.upper]`, integrated via the trapezoidal
+    rule to a piecewise-linear CDF on $[0, 1]$, and inverted via branch-free `searchsorted(..., side="right")`
+    linear interpolation against `jax.random.uniform(key, (N_pad, n_draws))` (padded to a
+    power-of-two respondent bucket `N_pad` and sliced to `N`). Respondents sharing the same response
+    pattern reuse the same posterior CDF but receive independent uniform variates and thus
+    independent draws; all-missing rows draw from the group's prior. Requires an explicit JAX PRNG
+    `key` (`jax.random.key` or `jax.random.PRNGKey`, `SpecificationError` if absent or invalid) and
+    is fully deterministic given `key`.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -624,17 +705,21 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
+- Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
+- Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
+- Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
+- Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
-- Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
