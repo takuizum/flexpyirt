@@ -119,6 +119,30 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 **例外**: 不正な `method`、多次元モデルで `"ML"`・`"WLE"`・`"PV"` を指定した場合、`EmpiricalHistogram` で `method="MAP"` を指定した場合、`"PV"` で `key` が未指定・不正、決定的手法に
 `key` を渡した場合、または `n_draws` が正の整数でない場合に `SpecificationError`。
 
+#### `FitResult.item_fit`
+
+```text
+item_fit(data, *, mincell=1.0, item_names=None) -> DataFrame
+```
+
+Orlando–Thissen の S-X2 項目適合度（[ガイド 5 節](guide.ja.md#項目適合度s-x2)）。各項目について、合計得点
+$1,\dots,S-1$ ごとの各カテゴリの観測度数とモデルによる期待度数を比べる。期待度数は、その項目を除いた
+Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在分布の重みで計算する。度数の少ないセルは mirt の
+`itemfit()` と同じ方法でまとめ（`mincell` は mirt の引数）、$df_j$ = 残ったセル数 − 行数 − その項目の自由パラメタ数 −
+潜在分布の自由パラメタ数（mirt の約束）。
+
+| 引数 | 説明 |
+|---|---|
+| `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
+| `mincell` | まとめる前のセルあたり最小期待度数（既定 `1.0`） |
+| `item_names` | `data` が配列のときの列名 |
+
+**戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
+`df <= 0` になる項目は `df = 0` で統計量は NaN。
+
+**例外**: 多次元・多母集団・`EmpiricalHistogram` のモデル、欠測を含むデータ、観測されないカテゴリがある項目、
+正でない `mincell` の場合に `SpecificationError`。
+
 #### `FitResult.to_json`
 
 ```text

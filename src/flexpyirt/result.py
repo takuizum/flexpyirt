@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from jax import Array
 
-from flexpyirt import _core, _scoring
+from flexpyirt import _core, _itemfit, _scoring
 from flexpyirt._compile import (
     LATENT_ITEM,
     coerce_groups,
@@ -561,6 +561,98 @@ class FitResult:
             {"theta": np.asarray(theta)[:n][inverse], "se": np.asarray(se)[:n][inverse]},
             index=index,
         )
+
+    def item_fit(
+        self,
+        data: Any,
+        *,
+        mincell: float = 1.0,
+        item_names: list[str] | None = None,
+    ) -> pd.DataFrame:
+        r"""Orlando–Thissen S-X2 item fit statistics (DESIGN.md §15.40).
+
+        For each item :math:`j`, compares observed and model-implied counts of each category at
+        each summed score :math:`s=1,\dots,S-1` (Orlando & Thissen, 2000, 2003):
+
+        .. math::
+            E_j[s,k] = N_s\,\frac{\sum_q P_{jk}(\theta_q)\,L_{-j}(s-k\mid\theta_q)\,w_q}
+                                  {\sum_q L(s\mid\theta_q)\,w_q},\qquad
+            S\text{-}X^2_j=\sum_{s,k}\frac{(O_{jsk}-E_{jsk})^2}{E_{jsk}},
+
+        where :math:`L` and :math:`L_{-j}` (item :math:`j` left out) come from the
+        Lord–Wingersky recursion, :math:`w_q` are the fitted latent weights on the fitted
+        quadrature grid, and :math:`N_s` is the number of respondents with summed score
+        :math:`s`. Sparse cells are collapsed exactly as mirt's ``itemfit()`` does, and
+        :math:`df_j = \#\text{cells} - \#\text{rows} - p_j - p_{\text{latent}}`
+        (free parameters of item :math:`j` and of the latent distribution, mirt's convention).
+
+        Parameters
+        ----------
+        data : DataFrame or array-like
+            Complete responses on the fitted items (typically the fitting data).
+        mincell : float, default 1.0
+            Minimum expected count per cell before collapsing (mirt's ``mincell``).
+        item_names : list of str, optional
+            Column names when ``data`` is an array.
+
+        Returns
+        -------
+        DataFrame
+            One row per item: ``item``, ``s_x2``, ``df``, ``rmsea``, ``p``. Items whose
+            collapsed table leaves ``df <= 0`` get ``df = 0`` and NaN statistics.
+
+        Raises
+        ------
+        PrecisionError
+            If JAX is not configured for 64-bit floating point.
+        SpecificationError
+            For multidimensional, multiple-group or ``EmpiricalHistogram`` models (not yet
+            supported), data with missing responses, or an item with an unobserved category.
+        """
+        check_x64()
+        model = self._model
+        if model.is_multidimensional or model.is_multigroup or model.is_eh:
+            raise SpecificationError(
+                "item_fit() supports single-group unidimensional models with a Normal latent "
+                "distribution only."
+            )
+        if isinstance(mincell, bool) or not (isinstance(mincell, (int, float)) and mincell > 0):
+            raise SpecificationError(f"mincell must be a positive number, got {mincell!r}.")
+        y = coerce_responses(data, model, item_names=item_names)
+        if (y < 0).any():
+            raise SpecificationError(
+                "item_fit() requires complete data; S-X2 is not defined with missing responses."
+            )
+        n_cat = [m.kernel.n_cat for _, m in model.items]
+        for j, (name, _) in enumerate(model.items):
+            if np.unique(y[:, j]).size != n_cat[j]:
+                raise SpecificationError(
+                    f"Item {name!r} does not have every response category observed; S-X2 "
+                    "needs all categories (as in mirt)."
+                )
+        codes, _ = coerce_groups(None, model, y.shape[0], require_all=False)
+        compiled = compile_problem(model, y, codes, self.parameters, self._quadrature)
+        prob = compiled.problem
+        eta = jnp.asarray(self._eta)
+        traces: list[np.ndarray] = [np.empty(0)] * len(model.items)
+        for fam, lp in zip(prob.families, _core._item_log_probs(prob, eta), strict=True):
+            lp_np = np.exp(np.asarray(lp[0]))  # (J_f, Q, K_f)
+            for pos, col in enumerate(np.asarray(fam.columns)):
+                traces[int(col)] = lp_np[pos]
+        weights = np.exp(np.asarray(_core._latent_log_weights(prob, eta))[0])
+
+        observed = _itemfit.observed_tables(y, n_cat)
+        expected = _itemfit.s_x2_expected_tables(traces, weights)
+        n_s = observed[0].sum(axis=1)
+        params = self.parameters
+        n_free_latent = int(params.loc[params["item"] == LATENT_ITEM, "free"].sum())
+        rows = []
+        for j, (name, _) in enumerate(model.items):
+            o, e = _itemfit.collapse_cells(observed[j], expected[j] * n_s[:, None], mincell)
+            n_free_item = int(params.loc[params["item"] == name, "free"].sum())
+            stat, df, rmsea, pval = _itemfit.s_x2(o, e, n_free_item, n_free_latent, y.shape[0])
+            rows.append({"item": name, "s_x2": stat, "df": df, "rmsea": rmsea, "p": pval})
+        return pd.DataFrame(rows)
 
     def _model_label(self) -> str:
         """Concise description of item models in the specification."""

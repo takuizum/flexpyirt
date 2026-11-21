@@ -931,6 +931,21 @@ data-independent shapes (§15.21).
     `fscores(method = "MAP")`; all-missing rows return the prior mean and $\sqrt{\Sigma_{mm}}$.
     `ML`, `WLE` and `PV` still raise `SpecificationError` for $D > 1$ (ML/WLE need per-factor
     handling of diverging directions).
+40. **S-X2 item fit (M5, `FitResult.item_fit`)**: Orlando and Thissen's (2000, 2003) S-X2 for
+    single-group unidimensional models with a `Normal` latent distribution and complete data.
+    Expected proportions
+    $E_j[s,k]=\sum_q P_{jk}(\theta_q)L_{-j}(s-k\mid\theta_q)w_q/\sum_q L(s\mid\theta_q)w_q$ come
+    from the Lord–Wingersky recursion (Lord & Wingersky, 1984) on the fitted quadrature grid and
+    latent weights, for summed scores $1,\dots,S-1$, and are scaled by the observed number of
+    respondents at each score. Sparse cells are collapsed by a line-by-line port of
+    `mirt:::collapseCells` (mirt 1.46–1.48; its heuristics, including the row flags computed
+    before single-observation rows are merged, are reproduced exactly so the statistic and the
+    degrees of freedom match), and $df_j$ = kept cells − rows − free parameters of item $j$ −
+    free latent parameters, as in mirt (which subtracts the latent parameters from every item).
+    RMSEA and the $\chi^2$ p-value follow mirt. Tables are post-fit NumPy bookkeeping (data
+    dependent shapes, outside `jit`); category probabilities come from the JAX item kernels.
+    Multidimensional, multiple-group, EH and missing-data cases raise `SpecificationError` until
+    they are validated (mirt imputes missing data and ignores EH weights for S-X2).
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -944,6 +959,7 @@ data-independent shapes (§15.21).
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
+- Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
@@ -951,6 +967,8 @@ data-independent shapes (§15.21).
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
+- Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
+- Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.

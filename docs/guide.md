@@ -257,6 +257,18 @@ assert loaded.summary() == res.summary()
 np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_numpy())
 ```
 
+### Item fit (S-X2)
+
+`item_fit(data)` computes Orlando and Thissen's S-X2 for every item: observed versus model-implied
+counts of each response category at each summed score, with sparse cells collapsed exactly as
+mirt's `itemfit()` does (`mincell=1` by default). It needs complete data, every response category
+observed, and a single-group unidimensional model with a `Normal` latent distribution.
+
+```python
+fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
+print(fit_table.round(3))
+```
+
 ## 6. Standard errors
 
 - **`se="oakes"`** (default): the observed information from Oakes' (1999) identity. The second
