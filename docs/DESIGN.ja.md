@@ -577,14 +577,17 @@ class ItemKernel(Protocol):
     $<10^{-10}$）が保たれ、R `mirt` の `vcov(m)` の形状（`n_free_items × n_free_items`）および `SE.type = "Richardson"`
     （`mirt:::BL.LL` が `EHPrior` を固定）の定義と一致する。EH モデルの `ParameterTable` は項目行のみを持つ
     （EH 重みは `Model.parameter_table()` ではなく `fit()` に渡される `Quadrature` に依存するため、`__latent__` 行を持たない）。
-36. **EH に対する softmax（logit）尺度での SQUAREM（M3, §4.6）**:
-    `EmpiricalHistogram` で `BAEM(squarem=True)` を使う場合、SQUAREM は $(\eta_{\text{items}},\,z)$ の結合ベクトル上で
-    外挿する。ここで $z_{gq}=\log w_{gq}-\frac{1}{Q}\sum_r\log w_{gr}$ は中心化対数重み（$w_{gq}\ge\tau>0$ より常に有限）。
-    外挿候補は `softmax(z_g)` の後、期待度数に使うのと同じ M-step 写像（KKT 下限。標準化する参照群では §15.34 の
-    モーメント制約付き I 射影で、実行可能な入力はそのまま返す）で実行可能な重みへ戻す。射影がモーメント制約を $10^{-10}$ を超えて
-    満たさない候補は NaN にし、単調性安全装置（`log_posterior(cand) >= max(log_posterior(theta2), log_posterior(theta0))`、
-    $\delta$ を最大 10 回半減し不適なら $\theta_2$ へ退避）で棄却させる。通常 EM・SQUAREM ともに収束判定は
-    $\max(\max_i|\Delta\eta_i|,\;\max_{g,q}|\Delta w_{gq}|)<\text{tol}$（自然尺度の項目変化と確率尺度の重み変化）を用いる。
+36. **EH に対する平方根重み尺度での SQUAREM（M3, §4.6）**:
+    `EmpiricalHistogram` で `BAEM(squarem=True)` を使う場合、SQUAREM は $z_{gq}=\sqrt{w_{gq}}$ として
+    $(\eta_{\text{items}},\,z)$ の結合ベクトル上で外挿し、候補は $w_{gq}\propto z_{gq}^2$（$z$ の符号によらず常に単体上）の後、
+    期待度数に使うのと同じ M-step 写像（KKT 下限。標準化する参照群では §15.34 のモーメント制約付き I 射影で、実行可能な入力は
+    そのまま返す）で戻す。射影がモーメント制約を $10^{-10}$ を超えて満たさない候補は NaN にし、単調性安全装置
+    （`log_posterior(cand) >= max(log_posterior(theta2), log_posterior(theta0))`、$\delta$ を最大 10 回半減し不適なら
+    $\theta_2$ へ退避）で棄却させる。平方根尺度では多項分布の Fisher 情報が等方的（$4I$）になる。最初に決めた中心化対数重み
+    （softmax）尺度では、尤度にほとんど影響しないほぼ空の節点がステップ長を支配する（$w\approx10^{-9}$ で $\log w$ が 1 単位
+    ずつ動く）。V6a と自由推定の 2PL の 2 例（21 点・61 点）で、softmax 尺度では安全装置が反復の 99% 超で作動したのに対し、
+    平方根尺度では 1% 未満で、21 点の例では 3.5 倍速く収束し、他の例でも同じ反復数でより高い対数尤度に達した。通常 EM・SQUAREM
+    ともに収束判定は $\max(\max_i|\Delta\eta_i|,\;\max_{g,q}|\Delta w_{gq}|)<\text{tol}$（自然尺度の項目変化と確率尺度の重み変化）を用いる。
 37. **EH のスコアリング（M3, §8）**:
     `EmpiricalHistogram` モデルに対する `FitResult.score()` は、`"EAP"`（推定済み求積格子上で群ごとの推定 EH 重みを
     事前分布とする事後平均・SD）、`"ML"`・`"WLE"`（尤度のみ、Normal と同一）、および `"PV"`（各群の EH 密度を `prob.nodes`

@@ -876,17 +876,22 @@ data-independent shapes (§15.21).
     definition (which holds `EHPrior` fixed in `mirt:::BL.LL`). The `ParameterTable` contains item
     rows only for EH models (no `__latent__` rows, because EH weights depend on `Quadrature`,
     which is passed to `fit()`, not `Model.parameter_table()`).
-36. **SQUAREM on the softmax (logit) scale for EH (M3, §4.6)**:
+36. **SQUAREM on the square-root weight scale for EH (M3, §4.6)**:
     When `BAEM(squarem=True)` is used with `EmpiricalHistogram`, SQUAREM extrapolates the joint
-    vector $(\eta_{\text{items}},\,z)$ where $z_{gq}=\log w_{gq}-\frac{1}{Q}\sum_r\log w_{gr}$ are
-    the centered log-weights (always finite because $w_{gq}\ge\tau>0$). Extrapolated candidates
-    map back to feasible weights by `softmax(z_g)` followed by the same M-step map used for
-    expected counts (KKT floor; for the standardized reference group the moment-constrained
-    I-projection of §15.34, which returns a feasible input unchanged). A candidate whose
-    projection misses the moment constraints by more than $10^{-10}$ is set to NaN, so the
-    monotonicity safeguard (`log_posterior(cand) >= max(log_posterior(theta2),
+    vector $(\eta_{\text{items}},\,z)$ with $z_{gq}=\sqrt{w_{gq}}$, and candidates map back by
+    $w_{gq}\propto z_{gq}^2$ (always on the simplex, whatever the sign of $z$) followed by the same
+    M-step map used for expected counts (KKT floor; for the standardized reference group the
+    moment-constrained I-projection of §15.34, which returns a feasible input unchanged). A
+    candidate whose projection misses the moment constraints by more than $10^{-10}$ is set to NaN,
+    so the monotonicity safeguard (`log_posterior(cand) >= max(log_posterior(theta2),
     log_posterior(theta0))`, halving $\delta$ up to 10 times and falling back to $\theta_2$ if
-    needed) rejects it. Both plain EM and SQUAREM measure convergence by
+    needed) rejects it. The square-root scale makes the multinomial Fisher information isotropic
+    ($4I$). The centered log-weight (softmax) scale decided first lets near-empty nodes, which
+    barely affect the likelihood, dominate the step length ($\log w$ moves by whole units at
+    $w\approx10^{-9}$): on V6a and two free 2PL examples (21 and 61 nodes) the safeguard fired on
+    >99% of iterations, against <1% on the square-root scale, which also converged 3.5× faster
+    on the 21-node example and reached a higher log-likelihood in the same iteration budget on the
+    others. Both plain EM and SQUAREM measure convergence by
     $\max(\max_i|\Delta\eta_i|,\;\max_{g,q}|\Delta w_{gq}|)<\text{tol}$ (probability-scale weight
     changes alongside natural-scale item changes).
 37. **EH scoring (M3, §8)**:

@@ -556,20 +556,23 @@ def em(prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newto
 
 
 def _eh_pack(eta: Array, eh_w: Array) -> Array:
-    """Pack ``(eta, centered log(eh_w))`` for logit-scale SQUAREM (DESIGN.md §15.36)."""
-    log_w = jnp.log(eh_w)
-    centered = log_w - jnp.mean(log_w, axis=1, keepdims=True)
-    return jnp.concatenate([eta, centered.ravel()])
+    r"""Pack ``(eta, sqrt(eh_w))`` for SQUAREM on the square-root weight scale (DESIGN.md §15.36).
+
+    :math:`z_{gq}=\sqrt{w_{gq}}` makes the multinomial Fisher information isotropic
+    (:math:`4I`), so near-empty nodes, which barely affect the likelihood, do not dominate the
+    SQUAREM step length as they do on the log scale.
+    """
+    return jnp.concatenate([eta, jnp.sqrt(eh_w).ravel()])
 
 
 def _eh_unpack(
     prob: CompiledProblem, vec: Array, n_free: int, n_groups: int, n_nodes: int
 ) -> tuple[Array, Array]:
-    """Unpack the logit-scale SQUAREM vector and I-project it onto the feasible EH weights."""
+    r"""Unpack a SQUAREM vector: :math:`w\propto z^2`, then project onto the feasible weights."""
     eta = vec[:n_free]
-    logits = vec[n_free:].reshape((n_groups, n_nodes))
-    w_soft = jax.nn.softmax(logits, axis=1)
-    w = _eh_weights_update(prob, w_soft)
+    z = vec[n_free:].reshape((n_groups, n_nodes))
+    w_sq = z * z
+    w = _eh_weights_update(prob, w_sq / jnp.sum(w_sq, axis=1, keepdims=True))
     n_mom = _eh_n_moments(prob)
     if n_mom > 0:
         # A candidate whose I-projection misses the moment constraints (dual optimum on the
@@ -585,7 +588,7 @@ def _eh_unpack(
 def _squarem_eh(
     prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newton: int
 ) -> EMResult:
-    """SQUAREM scheme S3 on ``(eta, centered log(w))`` for EH models (DESIGN.md §15.36)."""
+    """SQUAREM scheme S3 on ``(eta, sqrt(w))`` for EH models (DESIGN.md §15.36)."""
     lower, upper = _eta_bounds(prob, eta0)
     n_free = eta0.shape[0]
     n_groups = prob.n_groups
@@ -611,10 +614,10 @@ def _squarem_eh(
 
     def _is_acceptable(cand: Array, lp_ref: Array) -> Array:
         eta_c = cand[:n_free]
-        logits_c = cand[n_free:]
+        z_c = cand[n_free:]
         items_ok = jnp.all(jnp.isfinite(eta_c) & (eta_c > lower) & (eta_c < upper))
-        logits_ok = jnp.all(jnp.isfinite(logits_c))
-        in_bounds = items_ok & logits_ok
+        z_ok = jnp.all(jnp.isfinite(z_c)) & jnp.any(z_c != 0.0)
+        in_bounds = items_ok & z_ok
 
         def _eval_lp(c: Array) -> Array:
             e_c, w_c = _eh_unpack(prob, c, n_free, n_groups, n_nodes)
@@ -757,8 +760,9 @@ def squarem(
         \theta'(\alpha) = \theta_0 - 2\alpha r + \alpha^2 v
         = \theta_2 - 2\delta s + \delta^2 v \quad (\delta=\alpha+1\le 0).
 
-    For ``EmpiricalHistogram`` models, EH weights are extrapolated on the centered log-weight
-    (softmax logit) scale so candidates remain on the positive simplex (DESIGN.md §15.36).
+    For ``EmpiricalHistogram`` models, EH weights are extrapolated on the square-root scale
+    :math:`z=\sqrt w` and mapped back by :math:`w\propto z^2` plus the EH M-step projection
+    (DESIGN.md §15.36).
     Monotonicity and feasibility safeguard: if :math:`\theta'(\alpha)` leaves the strict parameter
     bounds ``(lower, upper)`` or gives a non-finite or lower log posterior than
     :math:`\max(\ell_{\mathrm{post}}(\theta_2),\ell_{\mathrm{post}}(\theta_0))`, :math:`\alpha` is
