@@ -28,7 +28,7 @@ from flexpyirt._json import dump_fit_result, load_fit_result
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
 from flexpyirt.items import ItemKernel
-from flexpyirt.latent import eh_moments
+from flexpyirt.latent import eh_moments, latent_param_names
 from flexpyirt.method import BAEM
 from flexpyirt.quadrature import Quadrature
 
@@ -334,9 +334,11 @@ class FitResult:
         models = p.drop_duplicates(index).set_index(index)["model"]
         out.insert(0, "model", models.loc[order])
 
-        kernels = {name: m.kernel for name, m in self._model.items}
+        kernels = {name: self._model.item_kernel(m) for name, m in self._model.items}
         irt_cols = list(
-            dict.fromkeys(name for _, m in self._model.items for name in m.kernel.irt_names)
+            dict.fromkeys(
+                name for _, m in self._model.items for name in self._model.item_kernel(m).irt_names
+            )
         )
         if irt_cols:
             b_data: dict[str, np.ndarray] = {
@@ -367,10 +369,10 @@ class FitResult:
     def latent(self) -> pd.DataFrame:
         r"""Latent distribution summary per group.
 
-        For ``Normal`` models: columns ``group``, ``mean``, ``var``, ``mean_se``, ``var_se``.
+        For ``Normal`` models: latent means, variances, correlations (for D > 1) and their SEs.
         For ``EmpiricalHistogram`` models: columns ``group``, ``mean``, ``var``, ``sd``,
         ``skewness``, ``kurtosis`` (Fisher's excess kurtosis :math:`\mu_4/\sigma^4 - 3`, 0 for
-        a normal distribution; DESIGN.md §15.33). See :attr:`latent_weights` for the full
+        a normal distribution; DESIGN.md §15.38). See :attr:`latent_weights` for the full
         ``(group, node, weight)`` table.
         """
         if self._model.is_eh:
@@ -393,8 +395,9 @@ class FitResult:
             return pd.DataFrame(rows)
         p = self.parameters[self.parameters["item"] == LATENT_ITEM]
         groups = list(dict.fromkeys(p["group"]))
-        est = p.pivot(index="group", columns="param", values="estimate")[["mean", "var"]]
-        se = p.pivot(index="group", columns="param", values="se")[["mean", "var"]].add_suffix("_se")
+        lat_cols = list(latent_param_names(self._model.n_factors))
+        est = p.pivot(index="group", columns="param", values="estimate")[lat_cols]
+        se = p.pivot(index="group", columns="param", values="se")[lat_cols].add_suffix("_se")
         out = pd.concat([est, se], axis=1).loc[groups]
         out.columns.name = None
         return out.reset_index()
@@ -477,9 +480,11 @@ class FitResult:
         Returns
         -------
         DataFrame
-            For ``"EAP"``, ``"MAP"``, ``"ML"``, and ``"WLE"``: columns ``theta`` and ``se``.
-            For ``"PV"``: columns ``pv1`` .. ``pv{n_draws}``. One row per respondent; index
-            follows ``data`` when it is a DataFrame.
+            For unidimensional ``"EAP"``, ``"MAP"``, ``"ML"``, and ``"WLE"``: columns ``theta``
+            and ``se``. For unidimensional ``"PV"``: columns ``pv1`` .. ``pv{n_draws}``. For
+            multidimensional ``"EAP"``: columns ``theta_<factor>`` and ``se_<factor>`` for each
+            declared factor (other scoring methods raise :class:`SpecificationError` for
+            ``D > 1``). One row per respondent; index follows ``data`` when it is a DataFrame.
 
         Raises
         ------
@@ -498,6 +503,11 @@ class FitResult:
             raise SpecificationError(
                 "method='MAP' requires a continuous latent prior and is not supported with "
                 "EmpiricalHistogram; use method='EAP', 'ML', 'WLE', or 'PV'."
+            )
+        if self._model.is_multidimensional and method != "EAP":
+            raise SpecificationError(
+                f"Scoring method {method!r} is only implemented for unidimensional models; "
+                "use method='EAP' for multidimensional models."
             )
         if method == "PV":
             if key is None:
@@ -535,6 +545,15 @@ class FitResult:
 
         scorer = {"EAP": _eap, "MAP": _map, "ML": _ml, "WLE": _wle}[method]
         theta, se = scorer(compiled.problem, eta)
+        if self._model.is_multidimensional:
+            theta_obs = np.asarray(theta)[:n][inverse]
+            se_obs = np.asarray(se)[:n][inverse]
+            fnames = self._model.factor_names
+            cols_dict = {
+                **{f"theta_{f}": theta_obs[:, i] for i, f in enumerate(fnames)},
+                **{f"se_{f}": se_obs[:, i] for i, f in enumerate(fnames)},
+            }
+            return pd.DataFrame(cols_dict, index=index)
         return pd.DataFrame(
             {"theta": np.asarray(theta)[:n][inverse], "se": np.asarray(se)[:n][inverse]},
             index=index,
@@ -565,13 +584,30 @@ class FitResult:
             evals += f", {self.n_safeguards} SQUAREM safeguards"
         return f"{status} ({self.n_iter} iterations, {evals})"
 
+    def _quadrature_label(self) -> str:
+        """Concise description of the quadrature grid."""
+        quad = self._quadrature
+        d = self._model.n_factors
+        if d == 1:
+            return f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
+        total = quad.n_points**d
+        return (
+            f"{quad.n_points}^{d} = {total} product equispaced nodes "
+            f"on [{quad.lower:g}, {quad.upper:g}]^{d}"
+        )
+
+    def _factors_label(self) -> str:
+        """Concise description of latent factors for multidimensional models."""
+        fnames = self._model.factor_names
+        return f"{len(fnames)} ({', '.join(fnames)})"
+
     def summary(self, *, digits: int = 4) -> str:
         """Return a readable plain-text summary of the fitted model.
 
         Includes the model specification, sample/item/parameter counts, groups, convergence and
         EM evaluation counts, log-likelihood, log-posterior, AIC and BIC (with a note when priors
         are active), the latent distribution table, and the item parameter table with standard
-        errors (including delta-method ``b_se`` / ``bk_se``).
+        errors (including delta-method ``b_se`` / ``bk_se`` for unidimensional models).
 
         Parameters
         ----------
@@ -586,8 +622,7 @@ class FitResult:
             raise SpecificationError(f"digits must be a non-negative integer, got {digits!r}.")
         est_kind = "MAP, priors active" if self._has_priors else "MMLE"
         se_label = "None" if self.se_method is None else self.se_method
-        quad = self._quadrature
-        quad_label = f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
+        quad_label = self._quadrature_label()
         n_items = len(self._model.item_names)
         aic_val = self._aic_value()
         bic_val = self._bic_value()
@@ -604,6 +639,11 @@ class FitResult:
             f"Model:          {self._model_label()} ({est_kind})",
             f"Data:           {self.n_obs} observations, {n_items} items, "
             f"{self.n_params} free parameters",
+            *(
+                [f"Factors:        {self._factors_label()}"]
+                if self._model.is_multidimensional
+                else []
+            ),
             f"Groups:         {self._groups_label()}",
             f"Convergence:    {self._convergence_label()}",
             f"SE method:      {se_label}",
@@ -658,8 +698,7 @@ class FitResult:
         digits = 4
         est_kind = "MAP, priors active" if self._has_priors else "MMLE"
         se_label = "None" if self.se_method is None else self.se_method
-        quad = self._quadrature
-        quad_label = f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
+        quad_label = self._quadrature_label()
         n_items = len(self._model.item_names)
 
         meta_rows = [
@@ -668,6 +707,7 @@ class FitResult:
                 "Data",
                 f"{self.n_obs} observations, {n_items} items, {self.n_params} free parameters",
             ),
+            *([("Factors", self._factors_label())] if self._model.is_multidimensional else []),
             ("Groups", self._groups_label()),
             ("Convergence", self._convergence_label()),
             ("SE method", se_label),
@@ -755,6 +795,12 @@ class FitResult:
         SpecificationError
             If ``indent`` is invalid or the result contains an unregistered model/prior type.
         """
+        if self._model.is_multidimensional:
+            # The factor structure is not part of the JSON schema yet (DESIGN.md §15.33); refuse
+            # rather than write a file that from_json cannot read back.
+            raise SpecificationError(
+                "to_json() does not support multidimensional models yet (DESIGN.md §15.33)."
+            )
         return dump_fit_result(self, path=path, indent=indent)
 
     @classmethod

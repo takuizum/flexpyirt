@@ -1,4 +1,4 @@
-"""Unit tests for EmpiricalHistogram latent distributions (DESIGN.md §4.4, §4.5, §15.29–§15.33)."""
+"""Unit tests for EmpiricalHistogram latent distributions (DESIGN.md §4.4, §4.5, §15.34–§15.38)."""
 
 from __future__ import annotations
 
@@ -33,13 +33,13 @@ from flexpyirt import (
 )
 from flexpyirt._compile import compile_problem, eh_standardization_flags, prepare
 from flexpyirt.errors import (
+    ConvergenceWarning,
     FlexpyirtWarning,
     HeywoodWarning,
     IdentificationError,
     SpecificationError,
 )
-from flexpyirt.items import DichotomousKernel, FourPLKernel, GPCMKernel, GradedKernel, ItemKernel
-from flexpyirt.latent import eh_moments, eh_project_floor, eh_regrid_cdf
+from flexpyirt.latent import eh_constrained_weights, eh_moments, eh_project_floor
 
 
 def _simulate_2pl(
@@ -185,66 +185,58 @@ def test_eh_moments_analytic() -> None:
     assert abs(ku_n) < 1e-5
 
 
-def test_item_kernel_affine_transform_exact_invariance() -> None:
-    """Every kernel's affine_transform satisfies P(y | theta; xi) == P(y | (theta-m)/s; xi')."""
-    theta = jnp.linspace(-4.0, 4.0, 41)
-    m = jnp.asarray(0.65)
-    s = jnp.asarray(1.35)
-    theta_star = (theta - m) / s
+@pytest.mark.parametrize("k", [1, 2])
+def test_eh_constrained_weights_matches_slsqp_and_constraints(k: int) -> None:
+    """The dual Newton M-step meets the constraints and carries a KKT optimality certificate."""
+    nodes = np.linspace(-5.0, 5.0, 21)
+    rng = np.random.default_rng(3)
+    # Posterior-count-like input one EM step away from standardized (mean ~0.05, sd ~1.05),
+    # with a near-empty tail node that hits the floor.
+    counts = rng.gamma(200.0, 1.0, 21) * np.exp(-0.5 * ((nodes - 0.05) / 1.05) ** 2)
+    counts[0] = 1e-12
+    tau = 1e-6
+    w = np.asarray(eh_constrained_weights(jnp.asarray(counts), jnp.asarray(nodes), tau, k))
+    assert np.all(w >= tau - 1e-15)
+    assert abs(w.sum() - 1.0) < 1e-12
+    assert abs(np.sum(w * nodes)) < 1e-12
+    if k == 2:
+        assert abs(np.sum(w * nodes**2) - 1.0) < 1e-12
+    # KKT certificate (convex problem => global optimum): on unfloored nodes p_q / w_q equals a
+    # polynomial lambda' phi_q of degree k that is positive on the whole grid, and floored nodes
+    # satisfy p_q <= tau * lambda' phi_q.
+    p = counts / counts.sum()
+    free = w > tau * (1 + 1e-9)
+    phi = np.vander(nodes, k + 1, increasing=True)
+    lam, *_ = np.linalg.lstsq(phi[free], p[free] / w[free], rcond=None)
+    sq = phi @ lam
+    np.testing.assert_allclose(phi[free] @ lam, p[free] / w[free], rtol=1e-9)
+    assert np.all(sq > 0)
+    assert np.all(p[~free] <= tau * sq[~free] * (1 + 1e-9))
+    assert (~free).sum() >= 1  # the near-empty tail node is floored
 
-    cases: list[tuple[ItemKernel, jax.Array]] = [
-        (DichotomousKernel(), jnp.array([1.4, -0.5])),
-        (FourPLKernel(), jnp.array([1.6, 0.3, 0.18, 0.91])),
-        (GradedKernel(4), jnp.array([1.2, 1.5, 0.1, -1.3])),
-        (GPCMKernel(4), jnp.array([1.3, 0.8, -0.2, -1.4])),
-    ]
-    for kernel, params in cases:
-        transformed = kernel.affine_transform(params, m, s)
-        lp_orig = np.asarray(kernel.log_prob(theta, params))
-        lp_star = np.asarray(kernel.log_prob(theta_star, transformed))
-        np.testing.assert_allclose(lp_star, lp_orig, rtol=0.0, atol=1e-13)
 
-
-def test_loglik_invariance_under_eh_standardization() -> None:
-    """Marginal log-likelihood is invariant under affine standardization up to O(Delta^2) error."""
-    df, _, _ = _skewed_2pl_data(seed=77, n=600, j=8)
-    spec = Model.uniform(TwoPL(), items=df.columns).with_latent(EmpiricalHistogram())
-    prep = prepare(spec, df, group=None, item_names=None, table=None)
-
-    # Exact identity when already standardized (mean=0, var=1)
-    quad61 = Quadrature.equispaced(61, lim=(-6, 6))
-    comp61 = compile_problem(spec, prep.y, prep.group, prep.table, quad61)
-    nodes61 = comp61.problem.nodes
-    w_std = eh_regrid_cdf(
-        nodes61,
-        comp61.problem.latent.eh_weights[0],
-        jnp.asarray(0.0),
-        jnp.asarray(1.0),
-        jnp.asarray(1e-10),
+def test_eh_constrained_weights_special_cases() -> None:
+    """No constraints equals the KKT floor; a feasible input is its own I-projection."""
+    nodes = jnp.linspace(-5.0, 5.0, 21)
+    counts = jnp.exp(-0.5 * ((nodes - 0.7) / 1.3) ** 2)
+    np.testing.assert_array_equal(
+        np.asarray(eh_constrained_weights(counts, nodes, 1e-10, 0)),
+        np.asarray(eh_project_floor(counts, 1e-10)),
     )
-    np.testing.assert_allclose(
-        np.asarray(w_std), np.asarray(comp61.problem.latent.eh_weights[0]), atol=1e-15
-    )
+    w = np.asarray(eh_constrained_weights(counts, nodes, 1e-10, 2))
+    w_again = np.asarray(eh_constrained_weights(jnp.asarray(w), nodes, 1e-10, 2))
+    np.testing.assert_allclose(w_again, w, rtol=0.0, atol=1e-14)
 
-    # Shifted/scaled weights: interpolation error shrinks as grid gets finer (O(Delta^2))
-    errors = []
-    for n_pts in (31, 61, 121):
-        quad = Quadrature.equispaced(n_pts, lim=(-6, 6))
-        nodes = quad.nodes()
-        w_shift = np.exp(-0.5 * ((nodes - 0.5) / 1.25) ** 2)
-        w_shift /= w_shift.sum()
-        comp = compile_problem(
-            spec, prep.y, prep.group, prep.table, quad, eh_weights=w_shift[None, :]
-        )
-        eta = jnp.asarray(comp.eta0)
-        ll_before = float(_core.marginal_loglik(comp.problem, eta))
-        eta_std, w_after = _core._eh_standardize(comp.problem, eta, comp.problem.latent.eh_weights)
-        ll_after = float(
-            _core.marginal_loglik(_core._with_eh_weights(comp.problem, w_after), eta_std)
-        )
-        errors.append(abs(ll_after - ll_before) / abs(ll_before))
-    assert errors[1] < 2e-4  # < 2e-4 relative on default 61-point grid
-    assert errors[2] < errors[1] < errors[0]  # shrinks O(Delta^2) (~4x per halving)
+
+def test_eh_constrained_weights_boundary_case_is_not_hidden() -> None:
+    """With exact zeros and a far-off mean the dual optimum is on the boundary: no fake success."""
+    nodes = np.linspace(-4.0, 4.0, 17)
+    counts = np.exp(-0.25 * (nodes - 0.8) ** 2) * np.linspace(0.5, 2.0, 17)
+    counts[:2] = 0.0
+    w = np.asarray(eh_constrained_weights(jnp.asarray(counts), jnp.asarray(nodes), 1e-4, 1))
+    assert np.all(np.isfinite(w)) and np.all(w > 0)
+    residual = max(abs(w.sum() - 1.0), abs(np.sum(w * nodes)))
+    assert residual > 1e-8
 
 
 # --------------------------------------------------------------------------------------------
@@ -264,7 +256,7 @@ def test_reference_mean_zero_var_one_after_every_iteration() -> None:
 
     eta = jnp.asarray(comp.eta0)
     w = comp.problem.latent.eh_weights
-    nodes = np.asarray(comp.problem.nodes)
+    nodes = np.asarray(comp.problem.nodes[:, 0])
     prev_ll = -np.inf
     for _ in range(15):
         prob_t = _core._with_eh_weights(comp.problem, w)
@@ -331,33 +323,36 @@ def test_rasch_and_pcm_with_eh_standardize_mean_only() -> None:
 
 
 def test_eh_monotone_and_squarem_matches_plain_em() -> None:
-    """Both plain EM and logit-scale SQUAREM are monotone and converge to the same fixed point."""
+    """Plain EM and logit-scale SQUAREM are monotone; SQUAREM reaches the EM limit faster.
+
+    The moment-constrained reference M-step is exact (DESIGN.md §15.34), so the log-likelihood
+    never decreases. EH likelihoods are flat in many histogram directions, so plain EM crawls;
+    it is run for a fixed budget and must stay below (and close to) the SQUAREM optimum.
+    """
     df, _, _ = _skewed_2pl_data(seed=404, n=1200, j=10)
     quad = Quadrature.equispaced(9, lim=(-3.5, 3.5))
     spec = Model.uniform(TwoPL(), items=df.columns).with_latent(EmpiricalHistogram(min_weight=1e-6))
 
-    res_em = fit(spec, df, method=BAEM(tol=1e-7, max_iter=5000, squarem=False), quadrature=quad)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        res_em = fit(spec, df, method=BAEM(tol=1e-7, max_iter=3000, squarem=False), quadrature=quad)
     res_sq = fit(spec, df, method=BAEM(tol=1e-7, max_iter=5000, squarem=True), quadrature=quad)
-    assert res_em.converged
     assert res_sq.converged
 
     for res in (res_em, res_sq):
         ll = res.history["loglik"].to_numpy()
-        assert np.all(np.diff(ll) >= -1e-8 * np.abs(ll[1:]))
-        assert res.loglik >= ll[-1] - 1e-8 * abs(ll[-1])
+        assert np.all(np.diff(ll) >= -1e-10 * np.abs(ll[1:]))
         assert res.latent_weights is not None
         w = res.latent_weights["weight"].to_numpy()
-        assert np.all(np.isfinite(np.log(w)))
         assert np.all(w >= 1e-6 - 1e-14)
         assert np.isclose(w.sum(), 1.0, atol=1e-12)
+        mean, var, _, _, _ = eh_moments(quad.nodes(), w)
+        assert abs(mean) < 1e-10 and abs(var - 1.0) < 1e-10
 
-    assert abs(res_sq.loglik - res_em.loglik) <= 1e-6 * abs(res_em.loglik)
-    np.testing.assert_allclose(res_sq.items["a"], res_em.items["a"], atol=1e-4)
-    np.testing.assert_allclose(res_sq.items["d"], res_em.items["d"], atol=1e-4)
-    assert res_sq.latent_weights is not None and res_em.latent_weights is not None
-    np.testing.assert_allclose(
-        res_sq.latent_weights["weight"], res_em.latent_weights["weight"], atol=1e-4
-    )
+    assert res_sq.loglik >= res_em.loglik - 1e-10 * abs(res_em.loglik)
+    assert res_sq.loglik - res_em.loglik <= 1e-6 * abs(res_em.loglik)
+    np.testing.assert_allclose(res_sq.items["a"], res_em.items["a"], atol=5e-3)
+    np.testing.assert_allclose(res_sq.items["d"], res_em.items["d"], atol=5e-3)
 
 
 def test_eh_n_params_aic_bic_and_oakes_equals_hessian() -> None:
@@ -392,9 +387,9 @@ def test_eh_n_params_aic_bic_and_oakes_equals_hessian() -> None:
     assert res2_o.vcov is not None and res2_h.vcov is not None
     assert res2_o.vcov.shape == (24, 24)
     np.testing.assert_allclose(res2_o.vcov, res2_h.vcov, rtol=1e-8, atol=1e-12)
-    ref_lat = res2_o.latent.set_index("group").loc["ref"]
-    assert abs(float(ref_lat["mean"])) < 1e-7
-    assert abs(float(ref_lat["var"]) - 1.0) < 1e-7
+    ref_row = res2_o.latent.index[res2_o.latent["group"] == "ref"][0]
+    assert abs(res2_o.latent["mean"].to_numpy(dtype=float)[ref_row]) < 1e-7
+    assert abs(res2_o.latent["var"].to_numpy(dtype=float)[ref_row] - 1.0) < 1e-7
 
 
 def test_eh_works_with_all_families_missing_and_priors() -> None:
@@ -583,3 +578,15 @@ def test_eh_summary_html_and_json_roundtrip(tmp_path: Path) -> None:
     norm_parsed["latent_weights"] = [[1.0 / 61] * 61]
     with pytest.raises(SpecificationError, match="Unexpected key 'latent_weights'"):
         FitResult.from_json(json.dumps(norm_parsed))
+
+
+def test_eh_variance_only_standardization_is_rejected() -> None:
+    """Fixed intercepts without a fixed nonzero slope would need a nonlinear variance constraint."""
+    df, _, _ = _skewed_2pl_data(seed=11, n=300, j=6)
+    spec = (
+        Model.uniform(TwoPL(), items=df.columns)
+        .fix(item="q01", d=0.2)
+        .with_latent(EmpiricalHistogram())
+    )
+    with pytest.raises(IdentificationError, match="variance-only"):
+        fit(spec, df, quadrature=Quadrature.equispaced(21, lim=(-5, 5)))

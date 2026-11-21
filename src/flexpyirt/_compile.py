@@ -18,8 +18,28 @@ import pandas as pd
 
 from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock, PriorBlock
 from flexpyirt.errors import FlexpyirtWarning, IdentificationError, SpecificationError
-from flexpyirt.items import FourPLKernel, GradedKernel, ItemKernel
-from flexpyirt.latent import EmpiricalHistogram, Normal, eh_project_floor
+from flexpyirt.items import (
+    GPCM,
+    GRM,
+    PCM,
+    FourPL,
+    FourPLKernel,
+    GradedKernel,
+    ItemKernel,
+    ItemModel,
+    Rasch,
+    ThreePL,
+    _asymptote_starts,
+    _gpcm_intercept_starts,
+    _intercept_start,
+    _slope_start,
+)
+from flexpyirt.latent import (
+    EmpiricalHistogram,
+    correlation_matrix_is_pd,
+    eh_project_floor,
+    latent_param_names,
+)
 from flexpyirt.model import LATENT_ITEM
 from flexpyirt.priors import PRIOR_TYPES, Beta, LogNormal, NormalPrior, Prior, encode_prior
 from flexpyirt.quadrature import Quadrature
@@ -44,7 +64,6 @@ __all__ = [
     "validate_table_constraints",
 ]
 
-LATENT_PARAMS = ("mean", "var")
 TABLE_COLUMNS = (
     "group",
     "item",
@@ -191,21 +210,76 @@ def pad_patterns(
 # --------------------------------------------------------------------------------------------
 
 
+def _non_slope_starts(item_model: ItemModel, item: np.ndarray, a_eff: float) -> list[float]:
+    """Return classical starting values for non-slope parameters given effective slope ``a_eff``."""
+    p = float(item.mean())
+    if isinstance(item_model, (ThreePL, FourPL)):
+        g, u = _asymptote_starts(p, free_upper=isinstance(item_model, FourPL))
+        return [_intercept_start((p - g) / (u - g), a_eff), g, u]
+    if isinstance(item_model, GRM):
+        cum = [float((item >= k).mean()) for k in range(1, item_model.n_cat)]
+        d = [_intercept_start(prob, a_eff) for prob in cum]
+        for k in range(1, len(d)):
+            d[k] = min(d[k], d[k - 1] - 0.05)
+        return d
+    if isinstance(item_model, (GPCM, PCM)):
+        return _gpcm_intercept_starts(item, item_model.n_cat, a_eff)
+    return [_intercept_start(p, a_eff)]
+
+
 def _start_values(model: Model, y: np.ndarray) -> dict[str, np.ndarray]:
     obs = y >= 0
     scores = np.where(obs, y, 0)
-    total = scores.sum(axis=1)
+    if not model.is_multidimensional:
+        total = scores.sum(axis=1)
+        out = {}
+        for j, (name, item_model) in enumerate(model.items):
+            rows = obs[:, j]
+            if rows.sum() < 2:
+                # Not estimable (reported later by _check_estimable); finite placeholder values
+                # (starts for p = 0.5) keep the table valid when the user fixes this item.
+                out[name] = item_model.start_values(np.array([0.0, 1.0]), np.zeros(2))
+                continue
+            item = y[rows, j].astype(float)
+            rest = (total - scores[:, j])[rows].astype(float)
+            out[name] = item_model.start_values(item, rest)
+        return out
+
+    # Multidimensional confirmatory starts (DESIGN.md §4.10, §15.31): positive slopes on loaded
+    # factors (from factor-specific item-rest correlations, scaled by 1/sqrt(n_loaded)) and 0 on
+    # unloaded factors; intercepts/asymptotes use the effective slope norm ||a||.
+    n_factors = model.n_factors
+    col_of = {name: j for j, (name, _) in enumerate(model.items)}
+    assert model.factors is not None
+    factor_totals = [
+        scores[:, [col_of[item_name] for item_name in assigned]].sum(axis=1)
+        for _, assigned in model.factors
+    ]
     out = {}
     for j, (name, item_model) in enumerate(model.items):
         rows = obs[:, j]
+        loaded = model.item_factors(name)
+        slopes = np.zeros(n_factors, dtype=float)
         if rows.sum() < 2:
-            # Not estimable (reported later by _check_estimable); finite placeholder values (the
-            # item model's starts for p = 0.5) keep the table valid when the user fixes this item.
-            out[name] = item_model.start_values(np.array([0.0, 1.0]), np.zeros(2))
+            placeholder = np.array([0.0, 1.0])
+            for m in loaded:
+                slopes[m] = (
+                    1.0 if isinstance(item_model, (Rasch, PCM)) else 1.0 / math.sqrt(len(loaded))
+                )
+            a_eff = max(float(np.linalg.norm(slopes)), 0.25)
+            out[name] = np.array([*slopes, *_non_slope_starts(item_model, placeholder, a_eff)])
             continue
         item = y[rows, j].astype(float)
-        rest = (total - scores[:, j])[rows].astype(float)
-        out[name] = item_model.start_values(item, rest)
+        for m in loaded:
+            if isinstance(item_model, (Rasch, PCM)):
+                slopes[m] = 1.0
+            else:
+                rest_m = (factor_totals[m] - scores[:, j])[rows].astype(float)
+                slopes[m] = float(
+                    np.clip(_slope_start(item, rest_m) / math.sqrt(len(loaded)), 0.25, 3.0)
+                )
+        a_eff = max(float(np.linalg.norm(slopes)), 0.25)
+        out[name] = np.array([*slopes, *_non_slope_starts(item_model, item, a_eff)])
     return out
 
 
@@ -287,11 +361,20 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
     starts = _start_values(model, y)
     fixed = {(item, param): value for item, param, value in model.fixed}
     priors = {(item, param): dist for item, param, dist in model.priors}
+    n_factors = model.n_factors
+    all_fixed_slope = all(isinstance(m, (Rasch, PCM)) for _, m in model.items)
     for group_name, latent in model.resolved_groups():
         for name, item_model in model.items:
-            lower, upper = item_model.bounds()
-            free_default = item_model.default_free()
-            param_names = item_model.kernel.param_names
+            kernel = model.item_kernel(item_model)
+            base_lo, base_hi = item_model.bounds()
+            base_free = item_model.default_free()
+            lower = (base_lo[0],) * n_factors + base_lo[1:]
+            upper = (base_hi[0],) * n_factors + base_hi[1:]
+            loaded_set = set(model.item_factors(name))
+            free_default = (
+                tuple(m in loaded_set and base_free[0] for m in range(n_factors)) + base_free[1:]
+            )
+            param_names = kernel.param_names
             item_starts = starts[name].copy()
             is_free = [
                 free_default[k] and (name, param) not in fixed
@@ -312,26 +395,39 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                 if lo_k < hi_k and not (lo_k < float(item_starts[k]) < hi_k):
                     candidate = _prior_center(pri) if pri is not None else None
                     item_starts[k] = _interior_point(lo_k, hi_k, candidate)
-            if isinstance(item_model.kernel, FourPLKernel):
-                g_free = is_free[2]
-                u_free = is_free[3]
+            if isinstance(kernel, FourPLKernel):
+                g_idx = n_factors + 1
+                u_idx = n_factors + 2
+                g_free = is_free[g_idx]
+                u_free = is_free[u_idx]
                 if g_free and not u_free:
-                    hi_g = min(eff_hi[2], float(item_starts[3]))
-                    if eff_lo[2] < hi_g and not (eff_lo[2] < float(item_starts[2]) < hi_g):
-                        item_starts[2] = _interior_point(eff_lo[2], hi_g)
+                    hi_g = min(eff_hi[g_idx], float(item_starts[u_idx]))
+                    if eff_lo[g_idx] < hi_g and not (
+                        eff_lo[g_idx] < float(item_starts[g_idx]) < hi_g
+                    ):
+                        item_starts[g_idx] = _interior_point(eff_lo[g_idx], hi_g)
                 elif u_free and not g_free:
-                    lo_u = max(eff_lo[3], float(item_starts[2]))
-                    if lo_u < eff_hi[3] and not (lo_u < float(item_starts[3]) < eff_hi[3]):
-                        item_starts[3] = _interior_point(lo_u, eff_hi[3])
-                elif g_free and u_free and not (float(item_starts[2]) < float(item_starts[3])):
-                    ov_lo = max(eff_lo[2], eff_lo[3])
-                    ov_hi = min(eff_hi[2], eff_hi[3])
+                    lo_u = max(eff_lo[u_idx], float(item_starts[g_idx]))
+                    if lo_u < eff_hi[u_idx] and not (
+                        lo_u < float(item_starts[u_idx]) < eff_hi[u_idx]
+                    ):
+                        item_starts[u_idx] = _interior_point(lo_u, eff_hi[u_idx])
+                elif (
+                    g_free
+                    and u_free
+                    and not (float(item_starts[g_idx]) < float(item_starts[u_idx]))
+                ):
+                    ov_lo = max(eff_lo[g_idx], eff_lo[u_idx])
+                    ov_hi = min(eff_hi[g_idx], eff_hi[u_idx])
                     if ov_lo < ov_hi and math.isfinite(ov_lo) and math.isfinite(ov_hi):
-                        item_starts[2] = ov_lo + (ov_hi - ov_lo) / 3.0
-                        item_starts[3] = ov_lo + 2.0 * (ov_hi - ov_lo) / 3.0
-            elif isinstance(item_model.kernel, GradedKernel):
-                item_starts[1:] = _order_grm_intercepts(
-                    item_starts[1:], is_free[1:], eff_lo[1:], eff_hi[1:]
+                        item_starts[g_idx] = ov_lo + (ov_hi - ov_lo) / 3.0
+                        item_starts[u_idx] = ov_lo + 2.0 * (ov_hi - ov_lo) / 3.0
+            elif isinstance(kernel, GradedKernel):
+                item_starts[n_factors:] = _order_grm_intercepts(
+                    item_starts[n_factors:],
+                    is_free[n_factors:],
+                    eff_lo[n_factors:],
+                    eff_hi[n_factors:],
                 )
             for k, param in enumerate(param_names):
                 key = (name, param)
@@ -348,25 +444,39 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                         "prior": priors.get(key),
                     }
                 )
-        if isinstance(latent, Normal):
-            latent_rows: tuple[tuple[str, float, bool, float], ...] = (
-                ("mean", latent.mean, latent.free_mean, -np.inf),
-                ("var", latent.var, latent.free_var, 0.0),
+        if isinstance(latent, EmpiricalHistogram):
+            continue
+        if not model.is_multidimensional:
+            latent_rows: list[tuple[str, float, bool, float, float]] = [
+                ("mean", latent.mean, latent.free_mean, -np.inf, np.inf),
+                ("var", latent.var, latent.free_var, 0.0, np.inf),
+            ]
+            lat_model = "Normal"
+        else:
+            latent_rows = [
+                *((f"mean_{m}", 0.0, False, -np.inf, np.inf) for m in range(1, n_factors + 1)),
+                *((f"var_{m}", 1.0, all_fixed_slope, 0.0, np.inf) for m in range(1, n_factors + 1)),
+                *(
+                    (f"cor_{i}{j}", 0.0, model.correlated_factors, -1.0, 1.0)
+                    for i in range(1, n_factors + 1)
+                    for j in range(i + 1, n_factors + 1)
+                ),
+            ]
+            lat_model = "MVN"
+        for param, value, free, lat_lower, lat_upper in latent_rows:
+            rows.append(
+                {
+                    "group": group_name,
+                    "item": LATENT_ITEM,
+                    "model": lat_model,
+                    "param": param,
+                    "value": float(value),
+                    "free": bool(free),
+                    "lower": lat_lower,
+                    "upper": lat_upper,
+                    "prior": None,
+                }
             )
-            for param, value, free, lat_lower in latent_rows:
-                rows.append(
-                    {
-                        "group": group_name,
-                        "item": LATENT_ITEM,
-                        "model": "Normal",
-                        "param": param,
-                        "value": float(value),
-                        "free": bool(free),
-                        "lower": lat_lower,
-                        "upper": np.inf,
-                        "prior": None,
-                    }
-                )
     table = pd.DataFrame(rows)
     table["prior"] = table["prior"].astype(object)
     ids = np.full(len(table), -1)
@@ -395,9 +505,20 @@ def model_parameter_schema(model: Model) -> pd.DataFrame:
             lower, upper = item_model.bounds()
             for param, lo, hi in zip(item_model.kernel.param_names, lower, upper, strict=True):
                 rows.append((group_name, name, param, item_model.name, float(lo), float(hi)))
-        if isinstance(latent, Normal):
+        if isinstance(latent, EmpiricalHistogram):
+            continue
+        if not model.is_multidimensional:
             rows.append((group_name, LATENT_ITEM, "mean", "Normal", -np.inf, np.inf))
             rows.append((group_name, LATENT_ITEM, "var", "Normal", 0.0, np.inf))
+            continue
+        for lat_param in latent_param_names(model.n_factors):
+            if lat_param.startswith("var_"):
+                lo_hi = (0.0, np.inf)
+            elif lat_param.startswith("cor_"):
+                lo_hi = (-1.0, 1.0)
+            else:
+                lo_hi = (-np.inf, np.inf)
+            rows.append((group_name, LATENT_ITEM, lat_param, "MVN", *lo_hi))
     return pd.DataFrame(rows, columns=["group", "item", "param", "model", "lower", "upper"])
 
 
@@ -431,8 +552,20 @@ def _validate_value_column(
             raise SpecificationError(
                 f"{fixed_label} {value[i]} is outside [{lower[i]}, {upper[i]}] at {where}."
             )
-        if item_col[i] == LATENT_ITEM and param_col[i] == "var" and not value[i] > 0:
+        if (
+            item_col[i] == LATENT_ITEM
+            and (param_col[i] == "var" or str(param_col[i]).startswith("var_"))
+            and not value[i] > 0
+        ):
             raise SpecificationError(f"Latent variance must be positive at {where}.")
+        if (
+            item_col[i] == LATENT_ITEM
+            and str(param_col[i]).startswith("cor_")
+            and not (-1.0 < value[i] < 1.0)
+        ):
+            raise SpecificationError(
+                f"Latent correlation must lie strictly in (-1, 1), got {value[i]} at {where}."
+            )
         pri = prior_col[i]
         if pri is not None and free[i]:
             p_lo, p_hi = pri.support
@@ -595,6 +728,33 @@ def validate_table(
     t["model"] = reference["model"].to_numpy()
 
     free = t["free"].to_numpy(dtype=bool)
+    # Positive-definite latent correlation matrix and nonzero starting slopes per factor (D > 1).
+    if model.is_multidimensional:
+        n_factors = model.n_factors
+        cor_names = [
+            f"cor_{i}{j}" for i in range(1, n_factors + 1) for j in range(i + 1, n_factors + 1)
+        ]
+        lat_sub = t[t["item"] == LATENT_ITEM]
+        for grp_lat, rows_g in lat_sub.groupby("group", sort=False):
+            vals_g = dict(zip(rows_g["param"], rows_g["value"], strict=True))
+            cors = [float(vals_g[c]) for c in cor_names]
+            if not correlation_matrix_is_pd(cors, n_factors):
+                raise SpecificationError(
+                    f"Latent correlation matrix is not positive definite for group {grp_lat!r}: "
+                    f"{dict(zip(cor_names, cors, strict=True))}."
+                )
+        items_sub = t[t["item"] != LATENT_ITEM]
+        for m, fname in enumerate(model.factor_names, start=1):
+            rows_m = items_sub[items_sub["param"] == f"a{m}"]
+            slope_vals = rows_m["value"].to_numpy(dtype=float)
+            # A factor whose loadings are all fixed at 0 is an identification problem, reported
+            # as IdentificationError by _check_identification_mirt; here only starting values.
+            if rows_m["free"].any() and not np.any(slope_vals != 0.0):
+                raise SpecificationError(
+                    f"Factor {fname!r} (a{m}) has all starting slopes equal to 0; at least one "
+                    "loading must have a nonzero starting value."
+                )
+
     ids = np.where(free, t["free_id"].fillna(-1).to_numpy(dtype=int), -1)
     next_id = int(ids.max()) + 1 if (ids >= 0).any() else 0
     for i in np.flatnonzero(free & (ids < 0)).tolist():
@@ -632,7 +792,7 @@ def _check_estimable(t: pd.DataFrame, model: Model, y: np.ndarray, group: np.nda
 
 
 def eh_standardization_flags(t: pd.DataFrame, model: Model) -> tuple[bool, bool]:
-    """Return ``(standardize_mean, standardize_var)`` for an EH model (DESIGN.md §4.4, §15.29).
+    """Return ``(standardize_mean, standardize_var)`` for an EH model (DESIGN.md §4.4, §15.34).
 
     The reference group's mean is standardized iff no intercept parameter is fixed in its connected
     component; its variance is standardized iff no nonzero slope parameter is fixed in its
@@ -676,7 +836,7 @@ def eh_standardization_flags(t: pd.DataFrame, model: Model) -> tuple[bool, bool]
 
 
 def eh_param_count(t: pd.DataFrame, model: Model, quad: Quadrature) -> int:
-    """Return the number of free EH latent-weight parameters for AIC/BIC (DESIGN.md §4.8, §15.30).
+    """Return the number of free EH latent-weight parameters for AIC/BIC (DESIGN.md §4.8, §15.35).
 
     Reference group: ``Q - 1 - int(standardize_mean) - int(standardize_var)`` (``Q - 3`` when both
     mean and variance are standardized, ``Q - 2`` for Rasch/PCM, ``Q - 1`` under FIPC). Every
@@ -693,7 +853,10 @@ def eh_param_count(t: pd.DataFrame, model: Model, quad: Quadrature) -> int:
 
 
 def _check_identification(t: pd.DataFrame, model: Model) -> None:
-    """Scale identification rules of DESIGN.md §4.5 and §14.5 (necessary conditions)."""
+    """Scale identification rules of DESIGN.md §4.5, §14.5, and §15.31 (necessary conditions)."""
+    if model.is_multidimensional:
+        _check_identification_mirt(t, model)
+        return
     lookup = dict(model.items)
     groups = [g for g, _ in model.resolved_groups()]
     items = t[t["item"] != LATENT_ITEM]
@@ -768,6 +931,94 @@ def _check_identification(t: pd.DataFrame, model: Model) -> None:
                         "estimates may be unstable. Consider more anchor items.",
                         FlexpyirtWarning,
                         stacklevel=4,
+                    )
+
+
+def _check_identification_mirt(t: pd.DataFrame, model: Model) -> None:
+    """Necessary scale, location, and rotational identification checks for D > 1 (DESIGN §15.31)."""
+    n_factors = model.n_factors
+    fnames = model.factor_names
+    lookup = {name: model.item_kernel(m) for name, m in model.items}
+    lat_rows = t[t["item"] == LATENT_ITEM]
+    lat_free = dict(zip(lat_rows["param"], lat_rows["free"].astype(bool), strict=True))
+    items_df = t[t["item"] != LATENT_ITEM]
+
+    free_sets: list[set[str]] = []
+    fixed_nonzero_sets: list[set[str]] = []
+    n_fixed_slopes: list[int] = []
+    fixed_vectors: list[np.ndarray] = []
+    all_items = list(model.item_names)
+
+    for m, fname in enumerate(fnames, start=1):
+        slope = f"a{m}"
+        s_rows = items_df[items_df["param"] == slope]
+        free_items = set(s_rows.loc[s_rows["free"], "item"].tolist())
+        fixed_nz = set(s_rows.loc[(~s_rows["free"]) & (s_rows["value"] != 0.0), "item"].tolist())
+        active_items = free_items | fixed_nz
+        if not active_items:
+            raise IdentificationError(
+                f"Factor {fname!r} ({slope}) has no active loadings (all slopes are fixed at 0)."
+            )
+        if lat_free[f"var_{m}"] and not fixed_nz:
+            raise IdentificationError(
+                f"The latent variance of factor {fname!r} (var_{m}) is free, but no slope "
+                f"{slope} is fixed at a nonzero value."
+            )
+        if lat_free[f"mean_{m}"]:
+            has_fixed_int = False
+            for itm in active_items:
+                ints = lookup[itm].intercept_params
+                itm_ints = items_df[(items_df["item"] == itm) & (items_df["param"].isin(ints))]
+                if (~itm_ints["free"]).any():
+                    has_fixed_int = True
+                    break
+            if not has_fixed_int:
+                raise IdentificationError(
+                    f"The latent mean of factor {fname!r} (mean_{m}) is free, but no item "
+                    "loading on it has a fixed intercept."
+                )
+        free_sets.append(free_items)
+        fixed_nonzero_sets.append(fixed_nz)
+        n_fixed_slopes.append(int((~s_rows["free"]).sum()))
+        fixed_vals = dict(zip(s_rows["item"], s_rows["value"].astype(float), strict=True))
+        fixed_vectors.append(np.array([fixed_vals.get(it, 0.0) for it in all_items]))
+
+    # Necessary confirmatory rotational identification (Bollen, 1989; Reckase, 2009):
+    # each factor involved in c_m free correlations needs at least c_m fixed slopes (typically 0s),
+    # and no two factors may share an identical free-loading set with no fixed nonzero slopes.
+    for m, fname in enumerate(fnames, start=1):
+        free_cors = sum(
+            1
+            for other in range(1, n_factors + 1)
+            if other != m and lat_free[f"cor_{min(m, other)}{max(m, other)}"]
+        )
+        if n_fixed_slopes[m - 1] < free_cors:
+            raise IdentificationError(
+                f"Factor {fname!r} (a{m}) has {free_cors} free correlation(s) but only "
+                f"{n_fixed_slopes[m - 1]} fixed slope(s); confirmatory models need at least "
+                f"{free_cors} fixed loading(s) per correlated factor to prevent rotational "
+                "indeterminacy."
+            )
+    for i in range(n_factors):
+        for j in range(i + 1, n_factors):
+            if (
+                free_sets[i] == free_sets[j]
+                and not fixed_nonzero_sets[i]
+                and not fixed_nonzero_sets[j]
+            ):
+                raise IdentificationError(
+                    f"Factors {fnames[i]!r} and {fnames[j]!r} have identical free loading "
+                    "patterns with no fixed nonzero slopes, which is rotationally unidentified."
+                )
+            # With no free slopes on either factor, proportional fixed loading vectors make the
+            # loading matrix rank deficient (e.g. Rasch/PCM items loading on both factors):
+            # only a combination of the two factors is identified.
+            if not free_sets[i] and not free_sets[j]:
+                vi, vj = fixed_vectors[i], fixed_vectors[j]
+                if np.linalg.matrix_rank(np.vstack([vi, vj])) < 2:
+                    raise IdentificationError(
+                        f"Factors {fnames[i]!r} and {fnames[j]!r} have proportional fixed loadings "
+                        "and no free loadings, so only a combination of them is identified."
                     )
 
 
@@ -859,7 +1110,7 @@ def compile_problem(
     kernels: list[ItemKernel] = []
     members: dict[ItemKernel, list[int]] = {}
     for j, (_, item_model) in enumerate(model.items):
-        k = item_model.kernel
+        k = model.item_kernel(item_model)
         if k not in members:
             kernels.append(k)
             members[k] = []
@@ -913,7 +1164,7 @@ def compile_problem(
             )
         )
 
-    nodes = jnp.asarray(quad.nodes(), dtype=jnp.float64)
+    nodes = jnp.asarray(quad.grid(model.n_factors), dtype=jnp.float64)
     resolved = model.resolved_groups()
     if model.is_eh:
         min_w_list: list[float] = []
@@ -935,9 +1186,16 @@ def compile_problem(
                 )
             eh_w = jnp.asarray(w_arr, dtype=jnp.float64)
         else:
-            base = jnp.exp(-0.5 * nodes**2)
+            base = jnp.exp(-0.5 * nodes[:, 0] ** 2)
             eh_w = jnp.stack([eh_project_floor(base, min_w_arr[g]) for g in range(n_groups)])
         std_mean, std_var = eh_standardization_flags(table, model)
+        if std_var and not std_mean:
+            raise IdentificationError(
+                "EmpiricalHistogram with fixed intercepts but no fixed nonzero slope in the "
+                "reference group's linked items is not supported: the variance-only constraint is "
+                "not linear in the weights (DESIGN.md §15.34). Fix at least one slope as well, or "
+                "use a Normal latent distribution."
+            )
         latent = LatentBlock(
             fixed_values=jnp.zeros((n_groups, 2), dtype=jnp.float64),
             free_index=jnp.full((n_groups, 2), -1, dtype=jnp.int32),
@@ -950,8 +1208,9 @@ def compile_problem(
             standardize_var=std_var,
         )
     else:
+        lat_params = latent_param_names(model.n_factors)
         lat_vals = np.array(
-            [[lookup[(g, LATENT_ITEM, p)][:4] for p in LATENT_PARAMS] for g in groups], dtype=float
+            [[lookup[(g, LATENT_ITEM, p)][:4] for p in lat_params] for g in groups], dtype=float
         )
         latent = LatentBlock(
             fixed_values=jnp.asarray(lat_vals[:, :, 0], dtype=jnp.float64),

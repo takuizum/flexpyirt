@@ -10,9 +10,10 @@ from typing import Any, Literal
 import pandas as pd
 
 from flexpyirt.errors import SpecificationError
-from flexpyirt.items import PCM, GPCMKernel, ItemModel, Rasch
+from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, Rasch
 from flexpyirt.latent import EmpiricalHistogram, LatentSpec, Normal
 from flexpyirt.priors import PRIOR_TYPES, Prior
+from flexpyirt.quadrature import MAX_FACTORS
 
 __all__ = ["LATENT_ITEM", "SINGLE_GROUP", "Model"]
 
@@ -47,6 +48,11 @@ class Model:
     priors : tuple of (item, param, Prior)
         Prior distributions on item parameters from :meth:`prior` (applied across all groups;
         shared parameters are counted once and fixed parameters ignore their prior).
+    factors : tuple of (factor, tuple of item names) or None
+        Confirmatory loading pattern from :meth:`with_factors` for 2–3 dimensional models.
+        ``None`` means unidimensional.
+    correlated_factors : bool
+        Whether factor correlations are free by default when ``factors`` is set.
     """
 
     items: tuple[tuple[str, ItemModel], ...]
@@ -55,6 +61,8 @@ class Model:
     groups: tuple[tuple[str, LatentSpec], ...] | None = None
     equal: tuple[tuple[tuple[str, ...], tuple[str, ...] | None], ...] = ()
     priors: tuple[tuple[str, str, Prior], ...] = ()
+    factors: tuple[tuple[str, tuple[str, ...]], ...] | None = None
+    correlated_factors: bool = True
 
     def __post_init__(self) -> None:
         """Validate item names and group latent-distribution consistency."""
@@ -103,6 +111,33 @@ class Model:
         """Whether this model uses an :class:`~flexpyirt.EmpiricalHistogram` latent distribution."""
         return isinstance(self.resolved_groups()[0][1], EmpiricalHistogram)
 
+    @property
+    def is_multidimensional(self) -> bool:
+        """Whether confirmatory factors were declared with :meth:`with_factors`."""
+        return self.factors is not None
+
+    @property
+    def n_factors(self) -> int:
+        """Number of latent factors (1 for unidimensional, 2 or 3 with :meth:`with_factors`)."""
+        return 1 if self.factors is None else len(self.factors)
+
+    @property
+    def factor_names(self) -> tuple[str, ...]:
+        """Declared factor names in order (empty tuple for a unidimensional model)."""
+        return () if self.factors is None else tuple(name for name, _ in self.factors)
+
+    def item_kernel(self, item_model: ItemModel) -> ItemKernel:
+        """Return ``item_model``'s kernel adapted to this model's dimensionality."""
+        if self.factors is None:
+            return item_model.kernel
+        return item_model.kernel.with_factors(len(self.factors))
+
+    def item_factors(self, item: str) -> tuple[int, ...]:
+        """Return 0-based factor indices that ``item`` loads on."""
+        if self.factors is None:
+            return (0,)
+        return tuple(idx for idx, (_, assigned) in enumerate(self.factors) if item in assigned)
+
     def resolved_latent(self) -> LatentSpec:
         """Return the single-group latent distribution, applying DESIGN.md §4.5's default rule."""
         if self.latent is not None:
@@ -141,7 +176,7 @@ class Model:
             raise SpecificationError(f"Cannot fix unknown item {item!r}.")
         if not values:
             raise SpecificationError("fix() needs at least one parameter value.")
-        params = lookup[item].kernel.param_names
+        params = self.item_kernel(lookup[item]).param_names
         new = {(i, p): v for i, p, v in self.fixed}
         for param, value in values.items():
             if param not in params:
@@ -179,6 +214,11 @@ class Model:
             Items to fix (default: every bank item that is in the model).
         parameterization : {"slope-intercept", "irt"}
         """
+        if self.is_multidimensional and parameterization == "irt":
+            raise SpecificationError(
+                "parameterization='irt' is only supported for unidimensional models; "
+                "use parameterization='slope-intercept' for multidimensional models."
+            )
         if "item" not in bank.columns:
             raise SpecificationError("The item bank needs an 'item' column.")
         rows = {str(r["item"]): r for r in bank.to_dict("records")}
@@ -203,12 +243,18 @@ class Model:
         for item in chosen:
             row = rows[item]
             item_model = lookup[item]
-            kernel = item_model.kernel
+            kernel = self.item_kernel(item_model)
             slope = float(row["a"]) if _has_value(row, "a") else prior_fixed.get((item, "a"), 1.0)
             is_gpcm = isinstance(kernel, GPCMKernel)
             cum_b = 0.0
+            base_free = item_model.default_free()
+            loaded_set = set(self.item_factors(item))
+            free_defaults = (
+                tuple(m in loaded_set and base_free[0] for m in range(self.n_factors))
+                + base_free[1:]
+            )
             values: dict[str, float] = {}
-            for p, free_default in zip(kernel.param_names, item_model.default_free(), strict=True):
+            for p, free_default in zip(kernel.param_names, free_defaults, strict=True):
                 if p in kernel.slope_params:
                     if _has_value(row, p):
                         values[p] = float(row[p])
@@ -243,12 +289,113 @@ class Model:
             model = model.fix(item=item, **values)
         return model
 
+    def with_factors(
+        self,
+        factors: Mapping[str, ItemSelector],
+        *,
+        correlated: bool = True,
+    ) -> Model:
+        r"""Return a confirmatory multidimensional model with 2 or 3 latent factors (DESIGN §4.9).
+
+        Each entry ``factor_name: items`` declares which items load on that factor; an item may
+        load on multiple factors (cross-loading), and slopes on factors an item does not load on
+        are fixed at 0. Item parameters become ``a1``..``aD`` and ``d`` (or ``d1``.. for GRM /
+        GPCM / PCM), matching mirt (Chalmers, 2012).
+
+        The latent distribution is multivariate normal with means fixed at 0 and variances fixed
+        at 1 (or variances free when every item is :class:`Rasch` or :class:`PCM`), and
+        correlations free by default when ``correlated=True`` (as in mirt's ``COV = F1*F2``) or
+        fixed at 0 when ``correlated=False``.
+
+        Parameters
+        ----------
+        factors : mapping of str to iterable of item names or callable
+            Factor names (in order, 2 or 3 factors) mapped to the items loading on each factor.
+            Every factor must have at least one item, and every model item must load on at least
+            one factor.
+        correlated : bool, default True
+            Whether off-diagonal factor correlations are estimated by default.
+
+        Raises
+        ------
+        SpecificationError
+            If the number of factors is outside ``{2, 3}``, factor names are empty or duplicated,
+            any factor is empty or lists unknown/duplicated items, any model item loads on no
+            factor, or ``with_groups()`` / ``with_latent()`` is already set.
+        """
+        if self.groups is not None:
+            raise SpecificationError(
+                "Multiple-group multidimensional models are not supported yet."
+            )
+        if self.latent is not None:
+            raise SpecificationError(
+                "with_latent() is only supported for unidimensional models; configure factor "
+                "correlations with with_factors(..., correlated=...) or edit the ParameterTable."
+            )
+        if not isinstance(factors, Mapping):
+            raise SpecificationError("with_factors() requires a mapping of factor name -> items.")
+        n_factors = len(factors)
+        if not (2 <= n_factors <= MAX_FACTORS):
+            raise SpecificationError(
+                f"with_factors() supports 2 to {MAX_FACTORS} factors, got {n_factors}."
+            )
+        resolved: list[tuple[str, tuple[str, ...]]] = []
+        seen_factors: set[str] = set()
+        assigned_all: set[str] = set()
+        for raw_name, selector in factors.items():
+            name = str(raw_name)
+            if not name.strip():
+                raise SpecificationError("Factor names must be non-empty strings.")
+            if name in seen_factors:
+                raise SpecificationError(f"Duplicated factor name: {name!r}.")
+            seen_factors.add(name)
+            if isinstance(selector, str):
+                raise SpecificationError(
+                    f"Factor {name!r} items must be an iterable of item names or a callable, "
+                    f"not a single string {selector!r}."
+                )
+            chosen = self._select(selector)
+            if not chosen:
+                raise SpecificationError(f"Factor {name!r} must have at least one item.")
+            if len(set(chosen)) != len(chosen):
+                dup = sorted({i for i in chosen if chosen.count(i) > 1})
+                raise SpecificationError(f"Factor {name!r} lists duplicated items: {dup}.")
+            resolved.append((name, chosen))
+            assigned_all.update(chosen)
+
+        unassigned = [i for i in self.item_names if i not in assigned_all]
+        if unassigned:
+            raise SpecificationError(f"Items not assigned to any factor: {unassigned}.")
+
+        candidate = replace(self, factors=tuple(resolved), correlated_factors=bool(correlated))
+        lookup = dict(self.items)
+        for item, param, _ in self.fixed:
+            valid = candidate.item_kernel(lookup[item]).param_names
+            if param not in valid:
+                raise SpecificationError(
+                    f"Fixed parameter {item!r}.{param} is not valid for a {n_factors}-factor "
+                    f"model (available: {list(valid)}); call with_factors() before fix()."
+                )
+        for item, param, _ in self.priors:
+            valid = candidate.item_kernel(lookup[item]).param_names
+            if param not in valid:
+                raise SpecificationError(
+                    f"Prior on {item!r}.{param} is not valid for a {n_factors}-factor model "
+                    f"(available: {list(valid)}); call with_factors() before prior()."
+                )
+        return candidate
+
     def with_latent(self, dist: LatentSpec) -> Model:
         """Return a single-group model with latent distribution ``dist``."""
         if not isinstance(dist, (Normal, EmpiricalHistogram)):
             raise SpecificationError(f"Unsupported latent distribution {dist!r}.")
         if self.groups is not None:
             raise SpecificationError("This model has groups; set latents with with_groups().")
+        if self.is_multidimensional:
+            raise SpecificationError(
+                "with_latent() is only supported for unidimensional models; configure factor "
+                "correlations with with_factors(..., correlated=...) or edit the ParameterTable."
+            )
         return replace(self, latent=dist)
 
     def with_groups(self, **latents: LatentSpec) -> Model:
@@ -262,6 +409,10 @@ class Model:
         ``with_groups(ref=Normal.standard(), focal=Normal.free())``
         ``with_groups(ref=EmpiricalHistogram(), focal=EmpiricalHistogram())``
         """
+        if self.is_multidimensional:
+            raise SpecificationError(
+                "Multiple-group multidimensional models are not supported yet."
+            )
         if len(latents) < 2:
             raise SpecificationError("with_groups() needs at least two groups.")
         for name, dist in latents.items():
@@ -291,7 +442,9 @@ class Model:
         if param_tuple is not None:
             lookup = dict(self.items)
             for item in chosen:
-                bad = [p for p in param_tuple if p not in lookup[item].kernel.param_names]
+                bad = [
+                    p for p in param_tuple if p not in self.item_kernel(lookup[item]).param_names
+                ]
                 if bad:
                     raise SpecificationError(f"Item {item!r} has no parameters {bad}.")
         return replace(self, equal=(*self.equal, (chosen, param_tuple)))
@@ -308,12 +461,14 @@ class Model:
         The prior is evaluated on the natural parameter scale without a Jacobian term
         (DESIGN.md §4.7). In a multiple-group model it applies to every group; a parameter shared
         across groups (same ``free_id``) is counted once, and a fixed parameter ignores its prior.
-        Priors on latent-distribution parameters (``"mean"``, ``"var"``) are not supported.
+        Priors on latent-distribution parameters (``"mean"``, ``"var"``, ``"mean_*"``,
+        ``"var_*"``, ``"cor_*"``) are not supported.
 
         Parameters
         ----------
         param : str
-            Internal item parameter name (e.g. ``"a"``, ``"d"``, ``"g"``, ``"u"``, ``"d1"``).
+            Internal item parameter name (e.g. ``"a"``, ``"a1"``, ``"d"``, ``"g"``, ``"u"``,
+            ``"d1"``).
         dist : NormalPrior, LogNormal, or Beta
             Prior distribution on the natural parameter scale.
         items : iterable of str or callable, optional
@@ -323,7 +478,7 @@ class Model:
             raise SpecificationError(
                 f"Unsupported prior distribution {dist!r}; use NormalPrior, LogNormal or Beta."
             )
-        if param in ("mean", "var"):
+        if param in ("mean", "var") or param.startswith(("mean_", "var_", "cor_")):
             raise SpecificationError(
                 f"Priors on latent-distribution parameters ({param!r}) are not supported."
             )
@@ -332,7 +487,7 @@ class Model:
             raise SpecificationError("prior() selected no items.")
         lookup = dict(self.items)
         for item in chosen:
-            params = lookup[item].kernel.param_names
+            params = self.item_kernel(lookup[item]).param_names
             if param not in params:
                 raise SpecificationError(
                     f"Item {item!r} ({lookup[item].name}) has no parameter {param!r}; "

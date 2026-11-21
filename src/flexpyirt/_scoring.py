@@ -364,17 +364,21 @@ def plausible_values(
     (DESIGN.md §8, §15.25). Respondents sharing a response pattern reuse the same CDF but draw
     independently. Deterministic given ``key``.
     """
-    grid = jnp.linspace(prob.nodes[0], prob.nodes[-1], _PV_GRID_POINTS, dtype=prob.nodes.dtype)
+    lo = prob.nodes[0, 0] if prob.nodes.ndim == 2 else prob.nodes[0]
+    hi = prob.nodes[-1, 0] if prob.nodes.ndim == 2 else prob.nodes[-1]
+    grid = jnp.linspace(lo, hi, _PV_GRID_POINTS, dtype=prob.nodes.dtype)
+    fine_nodes = grid[:, None] if prob.nodes.ndim == 2 else grid
     if prob.latent.is_eh:
+        nodes_1d = prob.nodes[:, 0] if prob.nodes.ndim == 2 else prob.nodes
 
         def _interp_w(w_g: Array) -> Array:
-            w_fine = jnp.interp(grid, prob.nodes, w_g)
+            w_fine = jnp.interp(grid, nodes_1d, w_g)
             return w_fine / jnp.sum(w_fine)
 
         eh_fine = jax.vmap(_interp_w)(prob.latent.eh_weights)
-        prob_fine = replace(prob, nodes=grid, latent=replace(prob.latent, eh_weights=eh_fine))
+        prob_fine = replace(prob, nodes=fine_nodes, latent=replace(prob.latent, eh_weights=eh_fine))
     else:
-        prob_fine = replace(prob, nodes=grid)
+        prob_fine = replace(prob, nodes=fine_nodes)
     post = jax.nn.softmax(_log_joint(prob_fine, eta), axis=1)  # (P_pad, Q_pv)
 
     seg = 0.5 * (post[:, :-1] + post[:, 1:])  # trapezoidal interval mass, (P_pad, Q_pv - 1)

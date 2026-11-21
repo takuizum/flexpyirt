@@ -19,10 +19,9 @@ from jax import Array
 from flexpyirt._newton import newton_ascent
 from flexpyirt.items import ItemKernel
 from flexpyirt.latent import (
+    eh_constrained_weights,
     eh_project_floor,
-    eh_regrid_cdf,
-    eh_standardize_params,
-    normal_log_weights,
+    mvn_log_weights,
 )
 from flexpyirt.priors import PRIOR_NONE, eval_log_prior
 
@@ -80,12 +79,16 @@ class FamilyBlock:
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class LatentBlock:
-    """Latent distribution of each group (``Normal`` or ``EmpiricalHistogram``).
+    """Latent distribution of each group: multivariate normal or ``EmpiricalHistogram``.
+
+    ``Normal`` parameter order matches :func:`~flexpyirt.latent.latent_param_names`:
+    ``(mean, var)`` for ``D = 1`` (length 2) and ``(mean_1..D, var_1..D, cor_ij...)`` for
+    ``D in {2, 3}`` (length 5 or 9). EH is unidimensional only (DESIGN.md §4.4, §5.2).
 
     Attributes
     ----------
-    fixed_values, free_index, lower, upper : (G, 2)
-        ``Normal`` parameters in ``(mean, var)`` order (all ``free_index == -1`` for EH).
+    fixed_values, free_index, lower, upper : (G, L_D)
+        ``Normal`` parameters (all ``free_index == -1`` for EH).
     eh_weights : (G, Q) float
         Empirical histogram weights per group (dummy ``(G, 1)`` for ``Normal``).
     eh_min_weight : (G,) float
@@ -93,7 +96,7 @@ class LatentBlock:
     is_eh : bool
         Static flag distinguishing ``EmpiricalHistogram`` from ``Normal``.
     standardize_mean, standardize_var : bool
-        Static flags controlling approach (a) standardization of the reference group (DESIGN §4.4).
+        Static flags selecting the reference-group moment constraints (DESIGN §4.4, §15.34).
     """
 
     fixed_values: Array
@@ -138,8 +141,8 @@ class CompiledProblem:
         Pattern frequencies.
     group : (P,) int
         Group of each pattern.
-    nodes : (Q,) float
-        Quadrature nodes.
+    nodes : (Q, D) float
+        Product quadrature nodes (``D in {1, 2, 3}``).
     families : tuple[FamilyBlock, ...]
     latent : LatentBlock
     priors : PriorBlock
@@ -197,7 +200,7 @@ def _latent_log_weights(prob: CompiledProblem, eta: Array) -> Array:
     if prob.latent.is_eh:
         return jnp.log(prob.latent.eh_weights)
     lat = _expand(eta, prob.latent.fixed_values, prob.latent.free_index)
-    return jax.vmap(normal_log_weights, in_axes=(None, 0, 0))(prob.nodes, lat[:, 0], lat[:, 1])
+    return jax.vmap(mvn_log_weights, in_axes=(None, 0))(prob.nodes, lat)
 
 
 def _log_joint(prob: CompiledProblem, eta: Array) -> Array:
@@ -292,9 +295,9 @@ def _item_q(kernel: ItemKernel, nodes: Array, r: Array, params: Array) -> Array:
 def _latent_q(nodes: Array, n: Array, params: Array) -> Array:
     r"""Latent part of Q (DESIGN.md §4.4).
 
-    .. math:: Q_g^{\mathrm{lat}}=\sum_q\bar n_{gq}\log w_{gq}(\mu_g,\sigma_g^2)
+    .. math:: Q_g^{\mathrm{lat}}=\sum_q\bar n_{gq}\log w_{gq}(\boldsymbol\mu_g,\boldsymbol\Sigma_g)
     """
-    return jnp.sum(n * normal_log_weights(nodes, params[0], params[1]))
+    return jnp.sum(n * mvn_log_weights(nodes, params))
 
 
 def _local_to_xi(u: Array, local: Array, fixed: Array) -> Array:
@@ -374,40 +377,36 @@ def _m_step_items(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_s
     return new_eta
 
 
-def _eh_standardize(prob: CompiledProblem, eta: Array, eh_weights: Array) -> tuple[Array, Array]:
-    r"""Approach (a) standardization of reference group EH and item parameters (DESIGN §15.29)."""
+def _nodes_1d(prob: CompiledProblem) -> Array:
+    """``(Q,)`` nodes of a unidimensional problem (EH is unidimensional only)."""
+    nodes: Array = prob.nodes[:, 0] if prob.nodes.ndim == 2 else prob.nodes
+    return nodes
+
+
+def _eh_n_moments(prob: CompiledProblem) -> int:
+    """Return the number of reference-group moment constraints (0, 1 or 2; DESIGN §15.34)."""
     lat = prob.latent
-    if not (lat.standardize_mean or lat.standardize_var):
-        return eta, eh_weights
-    m, s = eh_standardize_params(
-        prob.nodes,
-        eh_weights[0],
-        lat.eh_min_weight[0],
-        standardize_mean=lat.standardize_mean,
-        standardize_var=lat.standardize_var,
-    )
-    new_eta = eta
-    for fam in prob.families:
-        xi = _expand(eta, fam.fixed_values, fam.free_index)  # (G, J_f, P_f)
+    return 2 if lat.standardize_var else (1 if lat.standardize_mean else 0)
 
-        def _xform(p: Array, k: ItemKernel = fam.kernel) -> Array:
-            return k.affine_transform(p, m, s)
 
-        xi_std = jax.vmap(jax.vmap(_xform))(xi)
-        new_eta = _scatter(new_eta, xi_std, fam.free_index)
-    new_w = jax.vmap(lambda w_g, mw_g: eh_regrid_cdf(prob.nodes, w_g, m, s, mw_g))(
-        eh_weights, lat.eh_min_weight
+def _eh_weights_update(prob: CompiledProblem, counts_or_w: Array) -> Array:
+    """Exact EH M-step (or I-projection) for every group: constrained reference, floored focal."""
+    w = jax.vmap(eh_project_floor)(counts_or_w, prob.latent.eh_min_weight)
+    n_mom = _eh_n_moments(prob)
+    if n_mom == 0:
+        return w
+    w0 = eh_constrained_weights(
+        counts_or_w[0], _nodes_1d(prob), prob.latent.eh_min_weight[0], n_mom
     )
-    return new_eta, new_w
+    return w.at[0].set(w0)
 
 
 def _m_step_eh(
     prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: int
 ) -> tuple[Array, Array]:
-    """Item Newton M-step + exact KKT EH M-step + approach (a) standardization (§4.4, §15.29)."""
+    """Item Newton M-step + exact (moment-constrained) EH M-step (DESIGN.md §4.4, §15.34)."""
     new_eta = _m_step_items(prob, eta, counts, n_steps)
-    raw_w = jax.vmap(eh_project_floor)(counts.n, prob.latent.eh_min_weight)
-    return _eh_standardize(prob, new_eta, raw_w)
+    return new_eta, _eh_weights_update(prob, counts.n)
 
 
 def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: int) -> Array:
@@ -557,43 +556,40 @@ def em(prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newto
 
 
 def _eh_pack(eta: Array, eh_w: Array) -> Array:
-    """Pack ``(eta, centered log(eh_w))`` for logit-scale SQUAREM (DESIGN.md §15.31)."""
+    """Pack ``(eta, centered log(eh_w))`` for logit-scale SQUAREM (DESIGN.md §15.36)."""
     log_w = jnp.log(eh_w)
     centered = log_w - jnp.mean(log_w, axis=1, keepdims=True)
     return jnp.concatenate([eta, centered.ravel()])
 
 
 def _eh_unpack(
-    prob: CompiledProblem, vec: Array, n_free: int, n_groups: int, n_nodes: int, min_weight: Array
+    prob: CompiledProblem, vec: Array, n_free: int, n_groups: int, n_nodes: int
 ) -> tuple[Array, Array]:
-    """Unpack logit-scale SQUAREM vector back onto the standardized, floored positive simplex."""
+    """Unpack the logit-scale SQUAREM vector and I-project it onto the feasible EH weights."""
     eta = vec[:n_free]
     logits = vec[n_free:].reshape((n_groups, n_nodes))
     w_soft = jax.nn.softmax(logits, axis=1)
-    w = jax.vmap(eh_project_floor)(w_soft, min_weight)
-    lat = prob.latent
-    if lat.standardize_mean or lat.standardize_var:
-        m, s = eh_standardize_params(
-            prob.nodes,
-            w[0],
-            min_weight[0],
-            standardize_mean=lat.standardize_mean,
-            standardize_var=lat.standardize_var,
-        )
-        w0 = eh_regrid_cdf(prob.nodes, w[0], m, s, min_weight[0])
-        w = w.at[0].set(w0)
+    w = _eh_weights_update(prob, w_soft)
+    n_mom = _eh_n_moments(prob)
+    if n_mom > 0:
+        # A candidate whose I-projection misses the moment constraints (dual optimum on the
+        # boundary, DESIGN.md §15.34) is made NaN so the SQUAREM safeguard rejects it.
+        nodes = _nodes_1d(prob)
+        moments = jnp.stack([jnp.ones_like(nodes), nodes, nodes**2])[: n_mom + 1] @ w[0]
+        target = jnp.asarray([1.0, 0.0, 1.0], dtype=w.dtype)[: n_mom + 1]
+        ok = jnp.max(jnp.abs(moments - target)) < 1e-10
+        w = jnp.where(ok, w, jnp.nan)
     return eta, w
 
 
 def _squarem_eh(
     prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newton: int
 ) -> EMResult:
-    """SQUAREM scheme S3 on ``(eta, centered log(w))`` for EH models (DESIGN.md §15.31)."""
+    """SQUAREM scheme S3 on ``(eta, centered log(w))`` for EH models (DESIGN.md §15.36)."""
     lower, upper = _eta_bounds(prob, eta0)
     n_free = eta0.shape[0]
     n_groups = prob.n_groups
     n_nodes = prob.nodes.shape[0]
-    min_w = prob.latent.eh_min_weight
 
     nan_hist = jnp.full((max_iter,), jnp.nan, dtype=eta0.dtype)
     eval_hist = jnp.zeros((max_iter,), dtype=jnp.int32)
@@ -621,7 +617,7 @@ def _squarem_eh(
         in_bounds = items_ok & logits_ok
 
         def _eval_lp(c: Array) -> Array:
-            e_c, w_c = _eh_unpack(prob, c, n_free, n_groups, n_nodes, min_w)
+            e_c, w_c = _eh_unpack(prob, c, n_free, n_groups, n_nodes)
             lp_c = _eval_lp_pair(e_c, w_c)
             return jnp.isfinite(lp_c) & (lp_c >= lp_ref)
 
@@ -683,7 +679,7 @@ def _squarem_eh(
         )
 
         def _stabilize(vp: Array) -> tuple[Array, Array, Array]:
-            e_p, w_p = _eh_unpack(prob, vp, n_free, n_groups, n_nodes, min_w)
+            e_p, w_p = _eh_unpack(prob, vp, n_free, n_groups, n_nodes)
             e_n, w_n, _, _ = _em_once(e_p, w_p)
             return e_n, w_n, three
 
@@ -762,7 +758,7 @@ def squarem(
         = \theta_2 - 2\delta s + \delta^2 v \quad (\delta=\alpha+1\le 0).
 
     For ``EmpiricalHistogram`` models, EH weights are extrapolated on the centered log-weight
-    (softmax logit) scale so candidates remain on the positive simplex (DESIGN.md §15.31).
+    (softmax logit) scale so candidates remain on the positive simplex (DESIGN.md §15.36).
     Monotonicity and feasibility safeguard: if :math:`\theta'(\alpha)` leaves the strict parameter
     bounds ``(lower, upper)`` or gives a non-finite or lower log posterior than
     :math:`\max(\ell_{\mathrm{post}}(\theta_2),\ell_{\mathrm{post}}(\theta_0))`, :math:`\alpha` is
@@ -1044,15 +1040,15 @@ def _oakes_cross_hessian(
 
     lat_block = prob.latent
     if lat_block.is_eh:
-        d_logw = jnp.zeros((G, Q, 2), dtype=eta.dtype)
+        d_logw = jnp.zeros((G, Q, lat_block.fixed_values.shape[1]), dtype=eta.dtype)
     else:
         lat = _expand(eta, lat_block.fixed_values, lat_block.free_index)
 
         def latent_jac(p: Array) -> Array:
-            out: Array = jax.jacfwd(lambda x: normal_log_weights(prob.nodes, x[0], x[1]))(p)
+            out: Array = jax.jacfwd(lambda x: mvn_log_weights(prob.nodes, x))(p)
             return out
 
-        d_logw = jax.vmap(latent_jac)(lat)  # (G, Q, 2)
+        d_logw = jax.vmap(latent_jac)(lat)  # (G, Q, L_D)
         d_logw = d_logw - jnp.sum(d_logw * q_w_g[:, :, None], axis=1, keepdims=True)
 
     target_b = max(1, _OAKES_CHUNK_ELEMENTS // max(1, Q * D))
@@ -1186,10 +1182,15 @@ def eap(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
     r"""EAP and posterior SD of each pattern, using its group's latent distribution as prior.
 
     .. math::
-        \hat\theta_p=\sum_q\theta_q h_{pq},\qquad
-        \mathrm{SD}_p=\Big(\sum_q\theta_q^2h_{pq}-\hat\theta_p^2\Big)^{1/2}
+        \hat{\boldsymbol\theta}_p=\sum_q\boldsymbol\theta_q h_{pq},\qquad
+        \mathrm{SD}_{pm}=\Big(\sum_q\theta_{qm}^2 h_{pq}-\hat\theta_{pm}^2\Big)^{1/2}
+
+    Returns arrays of shape ``(P,)`` when ``D = 1`` and ``(P, D)`` when ``D > 1``.
     """
     h = jax.nn.softmax(_log_joint(prob, eta), axis=1)
     mean = h @ prob.nodes
-    var = h @ prob.nodes**2 - mean**2
-    return mean, jnp.sqrt(jnp.maximum(var, 0.0))
+    var = h @ (prob.nodes**2) - mean**2
+    sd = jnp.sqrt(jnp.maximum(var, 0.0))
+    if prob.nodes.ndim == 2 and prob.nodes.shape[1] == 1:
+        return mean[:, 0], sd[:, 0]
+    return mean, sd

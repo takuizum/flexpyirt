@@ -81,7 +81,8 @@ def fit(
     method : BAEM, optional
         EM settings (default ``BAEM()``).
     quadrature : Quadrature, optional
-        Quadrature grid (default 61 equally spaced points on [-6, 6]).
+        Quadrature grid (default: 61 points on [-6, 6] for 1 factor, 31 per dimension for 2
+        factors, and 15 per dimension for 3 factors, matching mirt's defaults).
     se : {"oakes", "hessian"} or None
         Standard-error method, or ``None`` to skip.
 
@@ -100,7 +101,7 @@ def fit(
     if se not in (None, "oakes", "hessian"):
         raise SpecificationError(f"Unknown se={se!r}; use 'oakes', 'hessian' or None.")
     method = BAEM() if method is None else method
-    quadrature = Quadrature.equispaced() if quadrature is None else quadrature
+    quadrature = Quadrature.default(spec.n_factors) if quadrature is None else quadrature
 
     prep = prepare(spec, data, group=group, item_names=item_names, table=table)
     final_table = prep.table
@@ -151,6 +152,8 @@ def fit(
     se_values = np.full(eta.shape[0], np.nan)
     eh_weights = np.asarray(out.eh_weights, dtype=np.float64) if spec.is_eh else None
     problem_fin = _core._with_eh_weights(problem, out.eh_weights) if spec.is_eh else problem
+    if eh_weights is not None:
+        _check_eh_reference_moments(problem, eh_weights[0])
     if se is not None and eta.shape[0] > 0:
         info = np.asarray(_information[se](problem_fin, out.eta))
         vcov = _invert_information(info)
@@ -207,7 +210,7 @@ def _warn_heywood(params: pd.DataFrame, spec: Model) -> None:
     items = params[(params["item"] != LATENT_ITEM) & params["free"]]
     if items.empty:
         return
-    kernels = {name: m.kernel for name, m in spec.items}
+    kernels = {name: spec.item_kernel(m) for name, m in spec.items}
     est = items["estimate"].to_numpy(dtype=float)
     lower = items["lower"].to_numpy(dtype=float).copy()
     upper = items["upper"].to_numpy(dtype=float).copy()
@@ -256,3 +259,28 @@ def _invert_information(info: np.ndarray) -> np.ndarray:
     inv_chol = np.linalg.inv(chol)
     vcov: np.ndarray = inv_chol.T @ inv_chol
     return vcov
+
+
+EH_MOMENT_TOL = 1e-8
+"""Tolerance on the standardized reference EH moments checked after fitting (DESIGN §15.34)."""
+
+
+def _check_eh_reference_moments(problem: _core.CompiledProblem, w_ref: np.ndarray) -> None:
+    """Warn if the reference EH histogram misses its mean-0 / variance-1 constraints."""
+    lat = problem.latent
+    if not (lat.standardize_mean or lat.standardize_var):
+        return
+    nodes = np.asarray(problem.nodes, dtype=np.float64).reshape(-1)
+    mean = float(np.sum(w_ref * nodes))
+    second = float(np.sum(w_ref * nodes**2))
+    bad = abs(float(np.sum(w_ref)) - 1.0) > EH_MOMENT_TOL or abs(mean) > EH_MOMENT_TOL
+    if lat.standardize_var:
+        bad = bad or abs(second - 1.0) > EH_MOMENT_TOL
+    if bad:
+        warnings.warn(
+            "The reference group's empirical histogram does not meet its identification "
+            f"constraints (sum={np.sum(w_ref):.10g}, mean={mean:.3g}, E[theta^2]={second:.10g}); "
+            "the moment-constrained M-step did not converge. Widen the quadrature range.",
+            ConvergenceWarning,
+            stacklevel=3,
+        )

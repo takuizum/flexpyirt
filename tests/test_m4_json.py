@@ -10,7 +10,7 @@ import textwrap
 import warnings
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import jax
 import numpy as np
@@ -122,7 +122,9 @@ def _assert_fit_result_identical(
     assert loaded._repr_html_() == orig._repr_html_()
 
     # All supported scoring methods (MAP is Normal-only)
-    det_methods = ("EAP", "ML", "WLE") if orig._model.is_eh else ("EAP", "MAP", "ML", "WLE")
+    det_methods: tuple[Literal["EAP", "MAP", "ML", "WLE"], ...] = (
+        ("EAP", "ML", "WLE") if orig._model.is_eh else ("EAP", "MAP", "ML", "WLE")
+    )
     for method in det_methods:
         s_orig = orig.score(score_data, method=method, group=group)
         s_load = loaded.score(score_data, method=method, group=group)
