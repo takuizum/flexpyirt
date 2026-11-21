@@ -662,6 +662,40 @@ class ItemKernel(Protocol):
    パラメタ表で行うので識別性は通常の推定と同じく検査され（唯一のアンカーを自由にすると `IdentificationError`）、
    すでに等値（`"add"`）またはすでに自由（`"drop"`）な項目は `SpecificationError`。MAP 推定は拒否する（統計量は
    最尤推定値での周辺尤度を必要とするため）。DIF は Result 層の推定後の処理で、`jit` で動くのは再推定だけ。
+5. **微分可能な IRT 尺度リンキング（`link`、`LinkResult`、V20）**:
+   別々に推定した 2 つの 1 次元尺度を共通項目を介して結ぶ特性曲線法（§1）。`source`（新フォーム）の尺度を
+   `target`（基準フォーム）の尺度へ写す線形変換 $\theta^* = A\theta + B$（$A > 0$）の係数 $(A, B)$ を求める
+   （Kolen & Brennan, 2014）。$\theta = (\theta^* - B)/A$ より、傾き–切片パラメタ化での項目パラメタは
+   $a^* = a / A$ および以下で変換される。
+   - `DichotomousKernel`（2PL/Rasch）・`FourPLKernel`（3PL/4PL）: $d^* = d - aB/A$（漸近線 $g, u$ は不変）。
+   - `GradedKernel`（GRM）: $d_k^* = d_k - aB/A$（$k = 1, \dots, K-1$。順序 $d_1 > \dots > d_{K-1}$ を保存）。
+   - `GPCMKernel`（GPCM/PCM）: $d_k^* = d_k - k\,aB/A$（$k = 1, \dots, K-1$、$d_0 = 0$）。
+     $k a^* \theta^* + d_k^* = k a\theta + d_k$ とステップ困難度 $b_k^* = A b_k + B$ を保存する。
+   任意の 1 次元 `ItemKernel` で $P_j(y=k \mid \theta^*; \xi_j^*) = P_j(y=k \mid (\theta^* - B)/A; \xi_j)$ が成り立つため、
+   目的関数は `kernel.log_prob` から直接計算し、手書きの導関数を持たない。
+   - **Haebara 法**（Haebara, 1980; 多値拡張 Kim & Lee, 2006）:
+     $H_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} \sum_{j\in\mathcal{C}} \sum_{k=0}^{K_j-1} [P_{jk}^{\mathrm{tgt}}(\theta_q^{(t)}) - P_{jk}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$。
+   - **Stocking–Lord 法**（Stocking & Lord, 1983; 多値拡張 Kim & Lee, 2006）:
+     $\mathrm{SL}_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} [\mathrm{TCC}^{\mathrm{tgt}}(\theta_q^{(t)}) - \mathrm{TCC}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$。
+     ただし $\mathrm{TCC}(\theta) = \sum_{j\in\mathcal{C}}\sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)$。
+   - **対称版**（`symmetric=True`; Kim & Lee, 2006）: 逆方向（$P_{jk}^{\mathrm{src}}(\theta_q^{(s)})$ と
+     $P_{jk}^{\mathrm{tgt}}(A\theta_q^{(s)} + B)$、$\mathrm{TCC}$ も同様）の二乗差を加える。既定では $(\theta^{(t)}, w^{(t)})$ は
+     `target` 群の推定済み潜在分布の求積格子・重み、$(\theta^{(s)}, w^{(s)})$ は `source` 群のものを使うため、対称版は
+     `source` と `target` を入れ替えると厳密に $(1/A, -B/A)$ になる。`nodes` / `weights` を明示すると格子を上書きする
+     （重みは和が 1 になるよう正規化し、`nodes` のみ指定時は一様重み）。
+   **最適化**: Mean/Mean 初期値（$A_0 = \sum |a_j^{\mathrm{src}}| / \sum |a_j^{\mathrm{tgt}}|$、
+   $B_0 = \bar b^{\mathrm{tgt}} - A_0 \bar b^{\mathrm{src}}$）から出発し、`LinkingProblem` pytree 上の jit 済み・
+   形状静的な 2 次元範囲付き単調 Newton 最小化器（`_linking.solve_linking`、`lax.while_loop`）で `jax.grad` と
+   `jax.hessian` を用いて解く。$A > 0$ は境界の中点への射影で保ち、Hessian が正定値でないときは
+   Levenberg–Marquardt 減衰にフォールバックし、40 段階の並列バックトラッキングと最適点近傍での 1-ULP 勾配仕上げを行う。
+   **標準誤差（Ogasawara, 2001）**: 最適点 $\hat c = (\hat A, \hat B)$ の停留条件
+   $g(c, \eta_s, \eta_t) = \nabla_c F(c, \eta_s, \eta_t) = 0$ に陰関数定理を適用し、共通項目に現れる一意な自由パラメタ
+   （固定パラメタや共有 `free_id` をそのまま反映）に対して `jax.jacfwd(g, 0)` と `jax.jacrev(g, 1/2)` から
+   $J_s = -H_{cc}^{-1} H_{c,\eta_s}$、$J_t = -H_{cc}^{-1} H_{c,\eta_t}$ を得て、求積重み固定の下で
+   $\mathrm{Cov}(\hat A, \hat B) = J_s \Sigma_s J_s^\top + J_t \Sigma_t J_t^\top$ を計算する。自由な共通項目パラメタがある側の
+   `vcov` がない場合や $H_{cc}$ が正定値でない場合は `vcov = None`、SE は `NaN` とする。
+   **Python シェル層での検証**: 多次元結果、群指定のない多母集団結果、共通項目でカーネルまたはカテゴリ数が一致しない場合、
+   および不正な `nodes` / `weights` は `SpecificationError` を送出する。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -675,8 +709,11 @@ class ItemKernel(Protocol):
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
+- Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
+- Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
+- Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
@@ -685,10 +722,12 @@ class ItemKernel(Protocol):
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
+- Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
