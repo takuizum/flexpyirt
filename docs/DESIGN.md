@@ -124,9 +124,27 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   grid cuts it off; the variance of the distribution on the grid is $V_w(\hat\sigma^2)$. For groups
   with a large mean or variance (e.g. M2 focal groups) the cut-off also affects the mean, so the
   grid width matters.
-- **Empirical Histogram (EH)**: $w_{gq}=\bar n_{gq}/N_g$.
-  For identification, the reference group's EH is standardized to mean 0 and variance 1 at every
-  iteration (Woods, 2007). How to standardize is open question 1 in §12.
+- **Empirical Histogram (EH)** (`EmpiricalHistogram(*, min_weight=1e-10)`; Woods, 2007; §15.29–§15.33):
+  Each group's latent distribution is represented by discrete weights $w_{g1},\dots,w_{gQ}$ on the
+  fixed quadrature grid $\theta_1<\dots<\theta_Q$ (default 61 equispaced points on $[-6,6]$),
+  enforcing a configurable positive floor $w_{gq}\ge\tau$ ($\tau=\texttt{min\_weight}>0$,
+  $\tau Q<1$) so $\log w_{gq}$ is always finite. The EH M-step solves the exact constrained
+  complete-data problem $\max_{w\in\Delta^{Q-1},\,w_q\ge\tau}\sum_q\bar n_{gq}\log w_q$ by exact
+  KKT water-filling $w_{gq}=\max(\tau,\,c_g^*\bar n_{gq})$ (reducing identically to
+  $\bar n_{gq}/N_g$ whenever no node hits the floor).
+  **Decision (M3, resolves §12-1)**: identification uses **approach (a)**: at every EM iteration,
+  after the item and EH M-steps, the reference group ($g=0$) is standardized by an affine change of
+  latent scale $\theta^*=(\theta-m)/s$ (mean standardized iff no intercept is fixed in the reference
+  group's connected component; variance standardized iff no nonzero slope is fixed in that component;
+  **exception**: under FIPC with fixed slopes and intercepts, neither is standardized and all
+  groups' EH weights are free; for Rasch/PCM with fixed slopes and free intercepts, only the mean is
+  standardized). All free item parameters of every family and group are transformed back
+  ($a'=as$, $d'=d+am$ for 2PL/Rasch/3PL/4PL/GRM with $g,u$ unchanged; $d'_k=d_k+k\,am$ for
+  GPCM/PCM), and every group's weights are re-mapped onto the fixed grid by mass-conserving
+  piecewise-linear CDF interpolation on the quadrature bin edges followed by the KKT floor
+  projection, with $(m,s)$ refined so the re-gridded reference weights satisfy exact mean 0 and
+  variance 1 after every iteration. When EH is used in a multiple-group model, **every group uses
+  EH** (mixing `EmpiricalHistogram` and `Normal` raises `SpecificationError`).
 - Later: Davidian curves (Woods & Lin, 2009), normal mixtures. Both can be added without touching
   the Core by following the `LatentDist` protocol (§6).
 
@@ -140,6 +158,15 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   distribution held at $N(0,1)$ shifts the scale (Kim, 2006), so FIPC updates the latent
   distribution (Normal mean and variance, or EH weights) at every EM iteration by default
   (equivalent to Kim's MWU-MEM).
+- **Empirical Histogram (EH)**: when every group uses `EmpiricalHistogram`, the reference group's
+  location (mean) is identified by fixed intercepts if present in its connected component, and
+  otherwise by approach (a) mean standardization; its scale (variance) is identified by fixed
+  nonzero slopes if present in its connected component, and otherwise by approach (a) variance
+  standardization (so FIPC leaves all EH weights free, Rasch/PCM standardizes mean only, and
+  free-slope/intercept models standardize both mean and variance). Every focal group's EH weights
+  carry free location and scale and must be linked to an identified group (or have fixed items) via
+  anchor slopes and anchor intercepts, else `IdentificationError` (same graph check and single
+  location-anchor warning as `Normal`).
 - **Rasch and PCM (Decision, M1/M3)**: Rasch and PCM fix $a_j=1$ and free $d_j$ ($d_{jk}$); the
   slopes set the scale, so the **latent variance is estimated** and the mean is fixed at 0 (as
   mirt's `itemtype="Rasch"`, which fits the Rasch model on dichotomous data and the PCM on
@@ -364,9 +391,10 @@ data-independent shapes (§15.21).
 - Agreement: estimates, SEs and log-likelihood match R mirt within tolerance.
 
 ## 12. Open questions
-1. **Identification for EH**: either (a) at every iteration, affinely transform the nodes so the
-   weights have mean 0 and variance 1, and transform the item parameters back; or (b) standardize
-   the reference group's EH and re-interpolate. Decide after checking mirt's behaviour.
+1. ~~**Identification for EH**~~ → **Decision (2026-11-21)**: approach (a), affinely transforming
+   $\theta^*=(\theta-m)/s$, transforming every item family's parameters back, and putting every
+   group's EH weights back on the fixed grid via mass-conserving piecewise-linear CDF interpolation
+   with $(m, s)$ refinement (no standardization under FIPC; §4.4, §15.29).
 2. Many groups (e.g. school × grade). Keep the per-group latent distributions `vmap`-able.
 3. ~~Missing-data design~~ → exclusion under MAR only (§14.8, 2026-11-20).
 4. ~~Package name~~ → `flexpyirt` (2026-11-20).
@@ -739,6 +767,81 @@ data-independent shapes (§15.21).
     matching `vcov` shape) so estimates have a single source of truth. Loaded results reproduce
     every public attribute, `items`, `latent`, `summary()`, `_repr_html_()`, `aic`/`bic`, and
     `score()` for every method identically.
+29. **Empirical Histogram (`EmpiricalHistogram`) specification, KKT floor, and approach (a) standardization (M3, §4.4, §4.5, resolves §12-1)**:
+    `EmpiricalHistogram(*, min_weight: float = 1e-10)` is a public frozen dataclass exported from
+    `flexpyirt`, validating `0 < min_weight < 1` at construction and `min_weight * Q < 1` at
+    compile time (`SpecificationError`). Mixing `EmpiricalHistogram` and `Normal` across groups in
+    `Model.with_groups()` raises `SpecificationError`: when EH is used, every group uses EH.
+    Weights initialize from the standard normal density on the quadrature grid projected onto the
+    floored simplex. In the EH M-step, each group solves
+    $\max_{w\in\Delta^{Q-1},\,w_q\ge\tau}\sum_q\bar n_{gq}\log w_q$ ($\tau=\texttt{min\_weight}$)
+    exactly via KKT water-filling $w_{gq}=\max(\tau,\,c_g^*\bar n_{gq})$ (computed in $O(Q\log Q)$
+    with `jnp.sort`; reduces identically to $\bar n_{gq}/N_g$ when no node hits the floor, guarantees
+    $w_{gq}\ge\tau>0$ and finite $\log w_{gq}$ always, and preserves exact EM monotonicity of the
+    unpenalized log-likelihood on the floored simplex). When the reference group ($g=0$) is
+    standardized (`standardize_mean` iff no fixed intercept in its connected component;
+    `standardize_var` iff no fixed nonzero slope in its connected component; neither under FIPC;
+    mean only for Rasch/PCM), every group's weights are re-mapped from the shifted/scaled bin edges
+    $e^*_q=(e_q-m)/s$ onto the fixed bin edges
+    $e_0=\theta_1-\Delta/2,\; e_q=(\theta_q+\theta_{q+1})/2,\; e_Q=\theta_Q+\Delta/2$ via
+    mass-conserving piecewise-linear CDF interpolation (`jnp.interp` on the cumulative weights,
+    absorbing tail mass at the endpoints) followed by the KKT floor projection. A 12-step damped
+    refinement inside `lax.fori_loop` solves $(m,s)$ so the re-gridded reference weights satisfy
+    mean 0 and variance 1 to $<10^{-8}$ after **every** iteration (and reduces to the exact
+    identity when $(m,s)=(0,1)$). Every item kernel implements
+    `affine_transform(params, mean, sd)` ($a'=as$, $d'=d+am$ for `DichotomousKernel`,
+    `FourPLKernel` with $g,u$ unchanged, and `GradedKernel`; $a'=as$, $d'_k=d_k+k\,am$ for
+    `GPCMKernel`), transforming all free item parameters of every family and group with the exact
+    same $(m,s)$ so the marginal log-likelihood stays invariant up to the $O(\Delta^2)$
+    interpolation error.
+30. **EH parameter counts and conditional item standard errors (M3, §4.8)**:
+    EH weights are counted as parameters in `FitResult.n_params` (and hence `aic`/`bic`):
+    $Q - 1 - \mathbf{1}[\text{standardize\_mean}] - \mathbf{1}[\text{standardize\_var}]$ for the
+    reference group ($Q-3$ when both mean and variance are standardized, $Q-2$ for Rasch/PCM,
+    $Q-1$ under FIPC) plus $Q-1$ for every focal group. For standard errors, the full joint
+    observed information including all $G(Q-1)$ discrete histogram weights on the default 61-point
+    grid is mathematically rank-deficient (analytic IRT item likelihoods span a much smaller
+    subspace of $\mathbb R^Q$, giving numerical rank $\approx 20\ll 60$ and zero/negative
+    curvature at boundary/floored nodes). Therefore, `information_oakes` and `information_hessian`
+    compute the **conditional observed (posterior) information for the free item parameters holding
+    the converged EH weights $\hat w$ fixed**, keeping `vcov` strictly positive definite,
+    preserving the exact identity `oakes == hessian` (relative $<10^{-10}$), and matching R
+    `mirt`'s `vcov(m)` shape (`n_free_items × n_free_items`) and `SE.type = "Richardson"`
+    definition (which holds `EHPrior` fixed in `mirt:::BL.LL`). The `ParameterTable` contains item
+    rows only for EH models (no `__latent__` rows, because EH weights depend on `Quadrature`,
+    which is passed to `fit()`, not `Model.parameter_table()`).
+31. **SQUAREM on the softmax (logit) scale for EH (M3, §4.6)**:
+    When `BAEM(squarem=True)` is used with `EmpiricalHistogram`, SQUAREM extrapolates the joint
+    vector $(\eta_{\text{items}},\,z)$ where $z_{gq}=\log w_{gq}-\frac{1}{Q}\sum_r\log w_{gr}$ are
+    the centered log-weights (always finite because $w_{gq}\ge\tau>0$). Extrapolated candidates
+    map back onto the positive simplex via `jax.nn.log_softmax(z_g)` for the monotonicity safeguard
+    (`log_posterior(cand) >= max(log_posterior(theta2), log_posterior(theta0))`, halving $\delta$
+    up to 10 times and falling back to $\theta_2$ if needed), and the stabilizing EM step enforces
+    the exact KKT floor and reference standardization on every accepted iterate. Both plain EM and
+    SQUAREM measure convergence by
+    $\max(\max_i|\Delta\eta_i|,\;\max_{g,q}|\Delta w_{gq}|)<\text{tol}$ (probability-scale weight
+    changes alongside natural-scale item changes).
+32. **EH scoring (M3, §8)**:
+    `FitResult.score()` with `EmpiricalHistogram` supports `"EAP"` (posterior mean and SD on the
+    fitted quadrature grid using each group's estimated EH weights), `"ML"` and `"WLE"`
+    (likelihood-only, identical to Normal), and `"PV"` (piecewise-linear interpolation of each
+    group's EH density from `prob.nodes` onto the 501-node fine grid, renormalized, followed by
+    trapezoidal inverse-CDF sampling). `method="MAP"` raises `SpecificationError` for EH models
+    because MAP mode-finding and curvature SE require a twice-differentiable continuous latent
+    prior (note R `mirt` 1.46.1's `fscores(..., method="MAP")` silently ignores `EHW` weights and
+    falls back to $N(0,1)$).
+33. **EH reporting and JSON I/O (M3, §2 ④, §15.26–§15.28)**:
+    For EH models, `FitResult.latent` reports per-group summary moments up to the 4th — columns
+    `("group", "mean", "var", "sd", "skewness", "kurtosis")`, where `kurtosis` is Fisher's excess
+    kurtosis $\mu_4/\sigma^4 - 3$ (`0` for Normal) — and the new attribute
+    `FitResult.latent_weights` returns a DataFrame with columns `("group", "node", "weight")`
+    (`None` for `Normal` models). Both the moments table and the weights table are rendered in
+    `FitResult.summary()` and `FitResult._repr_html_()`. In `_json.py`, `"EmpiricalHistogram"` is
+    registered in the latent-distribution registry (`{"type": "EmpiricalHistogram", "min_weight": ...}`)
+    and EH results include a `"latent_weights"` field (shape `(G, Q)`, validated on load as finite,
+    strictly positive, summing to 1, and matching `n_groups` and `quadrature.n_points`; omitted and
+    forbidden for `Normal` models so existing schema-version-1 payloads remain unchanged). `_n_eh_params`
+    is recomputed deterministically from `(model, parameters, quadrature)` on load.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.

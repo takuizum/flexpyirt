@@ -103,8 +103,20 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   厳密: $V_w(\hat\sigma^2)=\hat m$、閉形式: $\hat\sigma^2=\hat m$（$\hat m$ は期待度数の 2 次モーメント）。
   報告する `var` は格子で打ち切る前の正規分布のパラメタであり、格子上の分布の分散は $V_w(\hat\sigma^2)$ である。
   平均・分散が大きい群（M2 の焦点群など）では打ち切りの影響が平均にも及ぶので、格子幅の選択が結果に効く。
-- **Empirical Histogram (EH)**: $w_{gq}=\bar n_{gq}/N_g$。
-  識別のため参照群 EH は各反復で平均 0・分散 1 に標準化する（Woods, 2007）。標準化の方法は §12 未決事項 1。
+- **Empirical Histogram (EH)**（`EmpiricalHistogram(*, min_weight=1e-10)`；Woods, 2007；§15.29–§15.33）:
+  各群の潜在分布を固定求積格子 $\theta_1<\dots<\theta_Q$（既定は $[-6,6]$ の等間隔 61 点）上の離散重み
+  $w_{g1},\dots,w_{gQ}$ で表し、空節点でも $\log w_{gq}$ が常に有限になるよう設定可能な正の下限
+  $w_{gq}\ge\tau$（$\tau=\texttt{min\_weight}>0$、$\tau Q<1$）を課す。EH の M-step は制約付き完全データ目的関数
+  $\max_{w\in\Delta^{Q-1},\,w_q\ge\tau}\sum_q\bar n_{gq}\log w_q$ を厳密な KKT water-filling
+  $w_{gq}=\max(\tau,\,c_g^*\bar n_{gq})$ で解く（どの節点も下限に当たらないときは $\bar n_{gq}/N_g$ と厳密に一致）。
+  **決定（M3、§12-1 を解決）**: 識別は **方式 (a)** による。毎 EM 反復で項目と EH の M-step 後に、参照群
+  （$g=0$）を潜在尺度のアフィン変換 $\theta^*=(\theta-m)/s$ で標準化する（平均の標準化は参照群の連結成分に固定切片がないとき、
+  分散の標準化は非ゼロの固定傾きがないとき。**例外**: 固定傾きと固定切片を持つ FIPC では標準化を行わず全群の EH 重みを
+  自由とし、傾き固定・切片自由の Rasch / PCM では平均のみ標準化する）。全ファミリー・全群の自由な項目パラメタを逆変換し
+  （2PL / Rasch / 3PL / 4PL / GRM は $a'=as$、$d'=d+am$、$g,u$ は不変；GPCM / PCM は $a'=as$、$d'_k=d_k+k\,am$）、
+  全群の重みを求積ビン端点の質量保存区分線形 CDF 補間と KKT 下限射影で固定格子に戻す。さらに $(m,s)$ を微調整して、
+  再格子化後の参照群重みが毎反復で厳密に平均 0・分散 1 を満たすようにする。多母集団モデルで EH を指定するときは
+  **全群が EH を使う**（`EmpiricalHistogram` と `Normal` の混在は `SpecificationError`）。
 - 将来: Davidian 曲線（Woods & Lin, 2009）、混合正規。いずれも `LatentDist` プロトコル（§6）に従えば Core に手を入れずに追加できる。
 
 ### 4.5 識別性ルール（Compile 層で検査）
@@ -113,6 +125,11 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - **FIPC**: 固定項目が尺度を決めるので、全群の平均・分散を自由にしてよい。固定項目が 0 なら参照群を固定。
   潜在分布を $N(0,1)$ に固定したまま固定項目以外を推定すると尺度がずれる（Kim, 2006）ので、
   FIPC では潜在分布（Normal の平均・分散、または EH の重み）を各 EM 反復で更新する方式（Kim の MWU-MEM に相当）を既定にする。
+- **Empirical Histogram (EH)**: 全群が `EmpiricalHistogram` を使うとき、参照群の位置（平均）は連結成分に固定切片があればそれで、
+  なければ方式 (a) の平均標準化で識別する。尺度（分散）は連結成分に非ゼロの固定傾きがあればそれで、なければ方式 (a) の分散標準化で
+  識別する（したがって FIPC は全 EH 重みを自由のまま残し、Rasch / PCM は平均のみ標準化し、傾き・切片とも自由なモデルは両方標準化する）。
+  焦点群の EH 重みは自由な位置と尺度を持つため、すべての焦点群はアンカー項目の傾き・切片（または固定項目）で識別済みの群と
+  連結していなければ `IdentificationError`（`Normal` と同じグラフ検査および単一位置アンカーの警告）。
 - **Rasch・PCM（決定, M1/M3）**: Rasch と PCM は $a_j=1$ 固定・$d_j$（$d_{jk}$）自由で、尺度は傾きで決まるので
   **潜在分布の分散を自由推定**し、平均は 0 に固定する（mirt の `itemtype="Rasch"` と同じ: 2 値データでは Rasch、
   多値データでは PCM になり、`a1` 固定、`MEAN_1` 固定、`COV_11` 自由）。潜在分布を明示しない単一群モデルでは、
@@ -296,7 +313,7 @@ class LatentDist(Protocol):
 - 照合: R mirt の推定値・SE・対数尤度と許容誤差内で一致。
 
 ## 12. 未決事項
-1. **EH の識別の取り方**: (a) 毎反復で重みの平均・分散を 0/1 に合わせて節点をアフィン変換し項目パラメタを逆変換、(b) 参照群の EH を標準化した後で補間し直す、のどちらか。mirt の挙動を確認したうえで決める。
+1. ~~**EH の識別の取り方**~~ → **決定（2026-11-21）**: 方式 (a)（$\theta^*=(\theta-m)/s$ のアフィン変換、全項目ファミリーのパラメタ逆変換、および $(m,s)$ 微調整つき質量保存区分線形 CDF 補間による固定格子への戻し。FIPC では標準化しない。§4.4、§15.29）。
 2. 多母集団で群の数が多いとき（例: 学校 × 学年）の扱い。群ごとの潜在分布を vmap できる形にしておく。
 3. ~~欠測の設計~~ → MAR 前提の除外のみ（§14.8、2026-11-20）。
 4. ~~パッケージ名~~ → `flexpyirt` に決定（2026-11-20）。
@@ -519,6 +536,59 @@ class LatentDist(Protocol):
 26. **`FitResult` の JSON 入出力 API とバージョン付き形式（M4, API §7）**: `FitResult.to_json(path=None, *, indent=2) -> str` は推定結果を厳格な JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定された場合は UTF-8 ファイルにも書き出す。`FitResult.from_json(source) -> FitResult` はファイルパスまたは JSON 文字列から再推定なしで復元する。素の JSON のみを使い、`pickle` や `eval` は一切使わない。最上位オブジェクトには `"format": "flexpyirt.FitResult"`、将来の移行のための `"schema_version": 1`、および書き出した版を記録する `"flexpyirt_version": flexpyirt.__version__` を持たせる。`FitResult` は `_model`・`_quadrature` とあわせて推定設定 `_method: BAEM` も保持し、メタデータ全体が往復保存できるようにする。`from_json` は入口で `check_x64()` を呼ぶ（スコアリングに float64 が必要なため、無効なら `PrecisionError`）。
 27. **厳格な JSON と正確な float64 往復保存（M4）**: 書き出しは `json.dumps(..., allow_nan=False)` で厳格な RFC 8259 JSON のみを出力し、読み込みは `json.loads` に `parse_constant` を渡して生の `NaN`/`Infinity` リテラルを `SpecificationError` で拒否する。有限な IEEE-754 float64 値は通常の JSON 数値（Python の `repr` 厳密な最短 10 進表現）として書き出し、`-0.0` を含むすべての有限 float64 をビット単位で正確に往復保存する。浮動小数点型のフィールド（無制約の `lower`/`upper`、固定または未計算の `se`、非正定値の `vcov` など）に現れる非有限値（`NaN`, `+Inf`, `-Inf`）は明示的に文字列 `"NaN"`, `"Infinity"`, `"-Infinity"` として符号化する。これらを浮動小数点へ復号するのはスキーマ上 float 型のスロットのみであるため、項目名や群名などの文字列フィールドとは衝突しない。
 28. **明示的レジストリと完全な状態保存（M4）**: 項目モデル（`"2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"GRM"`, `"GPCM"`, `"PCM"`、多値モデルでは `n_cat` を含む）、潜在分布（`"Normal"`）、事前分布（`"NormalPrior"`, `"LogNormal"`, `"Beta"`）、求積（`"equispaced"`）、推定手法（`"BAEM"`）は `_json.py` の明示的な名前レジストリで（逆）直列化する。未知の `format` タグ・スキーマ版・レジストリ名・不正な JSON・整合しない表や行列形状は明確なメッセージつきで `SpecificationError` を送出する。完全な `Model` 仕様（項目名と順序、項目モデル、`fixed`, `latent`, `groups`, `equal`, `priors`）と、`estimate`・`se` を含む検証済み `ParameterTable`（ユーザーによる `table=` 編集もそのまま保持）、`vcov`、`loglik`/`log_posterior`、収束情報と `history`、`quadrature`、`method`、`se_method`、`n_obs` をすべて保存する。`_eta` は `parameters` の検証済み自由行から直接復元し（`free_id` が `0..n_free-1` に連続であること、共有 `free_id` の `estimate` が一致すること、`vcov` 形状が整合することを検証）、推定値の重複を持たせない。復元後の `FitResult` はすべての公開属性・`items`・`latent`・`summary()`・`_repr_html_()`・`aic`/`bic`・全 5 手法の `score()` で完全に同一の結果を返す。
+29. **経験ヒストグラム（`EmpiricalHistogram`）の仕様・KKT 下限・方式 (a) 標準化（M3, §4.4, §4.5, §12-1 解決）**:
+    `EmpiricalHistogram(*, min_weight: float = 1e-10)` を `flexpyirt` から公開する不変 dataclass とし、生成時に
+    `0 < min_weight < 1`、コンパイル時に `min_weight * Q < 1` を検証する（`SpecificationError`）。
+    `Model.with_groups()` で `EmpiricalHistogram` と `Normal` を混在させると `SpecificationError` を送出する
+    （EH を使うときは全群が EH）。重みの初期値は求積格子上の標準正規密度をフロア付き単体へ射影したものとする。
+    EH の M-step では各群について $\max_{w\in\Delta^{Q-1},\,w_q\ge\tau}\sum_q\bar n_{gq}\log w_q$
+    （$\tau=\texttt{min\_weight}$）を KKT water-filling $w_{gq}=\max(\tau,\,c_g^*\bar n_{gq})$ で厳密に解く
+    （`jnp.sort` で $O(Q\log Q)$。どの節点も下限に当たらなければ $\bar n_{gq}/N_g$ と厳密に一致し、常に
+    $w_{gq}\ge\tau>0$ と有限な $\log w_{gq}$ を保証し、フロア付き単体上で非罰則周辺対数尤度の EM 単調性を厳密に保つ）。
+    参照群（$g=0$）を標準化するとき（連結成分に固定切片がなければ `standardize_mean`、非ゼロの固定傾きがなければ
+    `standardize_var`；FIPC では両方偽、Rasch / PCM では平均のみ真）、全群の重みを変換後のビン端点
+    $e^*_q=(e_q-m)/s$ から固定ビン端点
+    $e_0=\theta_1-\Delta/2,\; e_q=(\theta_q+\theta_{q+1})/2,\; e_Q=\theta_Q+\Delta/2$ へ質量保存の区分線形 CDF
+    補間（累積重み上の `jnp.interp`、端点の裾質量は両端セルへ吸収）と KKT 下限射影で戻す。`lax.fori_loop` 内で
+    12 回の減衰更新により $(m,s)$ を微調整することで、再格子化後の参照群重みが**毎反復で**平均 0・分散 1（誤差 $<10^{-8}$）
+    を満たすようにし、$(m,s)=(0,1)$ では厳密な恒等写像となる。すべての項目カーネルに
+    `affine_transform(params, mean, sd)`（`DichotomousKernel`、`FourPLKernel`（$g,u$ 不変）、`GradedKernel` は
+    $a'=as, d'=d+am$；`GPCMKernel` は $a'=as, d'_k=d_k+k\,am$）を実装し、全ファミリー・全群の自由な項目パラメタを
+    同一の $(m,s)$ で逆変換することで、周辺対数尤度を $O(\Delta^2)$ の補間誤差の範囲で不変に保つ。
+30. **EH のパラメタ数カウントと条件付き項目標準誤差（M3, §4.8）**:
+    EH の重みは `FitResult.n_params`（および `aic`/`bic`）にパラメタとして数える: 参照群は
+    $Q - 1 - \mathbf{1}[\text{standardize\_mean}] - \mathbf{1}[\text{standardize\_var}]$（平均・分散とも標準化なら
+    $Q-3$、Rasch / PCM は $Q-2$、FIPC は $Q-1$）、各焦点群は $Q-1$。標準誤差については、既定 61 点格子上の
+    $G(Q-1)$ 個の離散ヒストグラム重みすべてを含めた同時観測情報行列は数学的にランク落ちする（解析的な IRT 項目尤度が
+    $\mathbb R^Q$ 内の低次元部分空間しか張らず数値ランクが約 $20\ll 60$ となり、境界・フロア節点では曲率が 0 または負になる）。
+    そのため、`information_oakes` と `information_hessian` は**収束した EH 重み $\hat w$ を固定した条件での自由な項目パラメタの
+    条件付き観測（事後）情報行列**を計算する。これにより `vcov` の正定値性と `oakes == hessian` の厳密な恒等性（相対差
+    $<10^{-10}$）が保たれ、R `mirt` の `vcov(m)` の形状（`n_free_items × n_free_items`）および `SE.type = "Richardson"`
+    （`mirt:::BL.LL` が `EHPrior` を固定）の定義と一致する。EH モデルの `ParameterTable` は項目行のみを持つ
+    （EH 重みは `Model.parameter_table()` ではなく `fit()` に渡される `Quadrature` に依存するため、`__latent__` 行を持たない）。
+31. **EH に対する softmax（logit）尺度での SQUAREM（M3, §4.6）**:
+    `EmpiricalHistogram` で `BAEM(squarem=True)` を使う場合、SQUAREM は $(\eta_{\text{items}},\,z)$ の結合ベクトル上で
+    外挿する。ここで $z_{gq}=\log w_{gq}-\frac{1}{Q}\sum_r\log w_{gr}$ は中心化対数重み（$w_{gq}\ge\tau>0$ より常に有限）。
+    外挿候補は `jax.nn.log_softmax(z_g)` で正の単体へ戻して単調性安全装置
+    （`log_posterior(cand) >= max(log_posterior(theta2), log_posterior(theta0))`、$\delta$ を最大 10 回半減し不適なら
+    $\theta_2$ へ退避）を判定し、安定化 EM ステップによってすべての採択反復点で厳密な KKT 下限と参照群標準化を保つ。
+    通常 EM・SQUAREM ともに収束判定は $\max(\max_i|\Delta\eta_i|,\;\max_{g,q}|\Delta w_{gq}|)<\text{tol}$
+    （自然尺度の項目変化と確率尺度の重み変化）を用いる。
+32. **EH のスコアリング（M3, §8）**:
+    `EmpiricalHistogram` モデルに対する `FitResult.score()` は、`"EAP"`（推定済み求積格子上で群ごとの推定 EH 重みを
+    事前分布とする事後平均・SD）、`"ML"`・`"WLE"`（尤度のみ、Normal と同一）、および `"PV"`（各群の EH 密度を `prob.nodes`
+    から 501 点の細格子へ線形補間・再正規化して台形則逆 CDF 抽出）に対応する。`method="MAP"` は 2 階微分可能な連続事前分布を
+    要するため EH モデルでは `SpecificationError` を送出する（なお R `mirt` 1.46.1 の `fscores(..., method="MAP")` は
+    `EHW` 重みを暗黙に無視して $N(0,1)$ を使う）。
+33. **EH の結果報告と JSON 入出力（M3, §2 ④, §15.26–§15.28）**:
+    EH モデルでは、`FitResult.latent` が群ごとの 4 次までの要約モーメント — 列
+    `("group", "mean", "var", "sd", "skewness", "kurtosis")`（`kurtosis` は Fisher の超過尖度 $\mu_4/\sigma^4 - 3$、
+    正規分布で `0`）— を返し、新しい属性 `FitResult.latent_weights` が列 `("group", "node", "weight")` の DataFrame
+    を返す（`Normal` モデルでは `None`）。モーメント表と重み表の双方を `FitResult.summary()` と `FitResult._repr_html_()`
+    に含める。`_json.py` の潜在分布レジストリに `"EmpiricalHistogram"`（`{"type": "EmpiricalHistogram", "min_weight": ...}`）
+    を登録し、EH 結果にはトップレベルキー `"latent_weights"`（形状 `(G, Q)`。読み込み時に有限・厳密に正・和が 1・`n_groups`
+    および `quadrature.n_points` との整合を検証；`Normal` モデルでは省略かつ存在すれば拒否し、既存の schema_version 1 の
+    ペイロードと完全互換）を保存する。`_n_eh_params` は読み込み時に `(model, parameters, quadrature)` から決定的に再計算する。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
