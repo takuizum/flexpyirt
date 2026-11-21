@@ -636,3 +636,354 @@ def test_malformed_internal_consistency(sample_payload: dict[str, Any]) -> None:
     bad_se["se_method"] = "bootstrap"
     with pytest.raises(SpecificationError, match="Unknown se_method"):
         FitResult.from_json(json.dumps(bad_se))
+
+    # Reserved sentinel item name "__latent__"
+    bad_latent_item = _clone(sample_payload)
+    bad_latent_item["model"]["items"][0]["name"] = "__latent__"
+    for p in bad_latent_item["model"]["priors"]:
+        if p["item"] == sample_payload["model"]["items"][0]["name"]:
+            p["item"] = "__latent__"
+    for row in bad_latent_item["parameters"]:
+        if row["item"] == sample_payload["model"]["items"][0]["name"]:
+            row["item"] = "__latent__"
+    with pytest.raises(SpecificationError, match="reserved"):
+        FitResult.from_json(json.dumps(bad_latent_item))
+
+
+def test_malformed_parameter_invariants_and_se(sample_payload: dict[str, Any]) -> None:
+    # Non-finite value or estimate (including NaN on both value and estimate of a fixed row)
+    for token in ("NaN", "Infinity", "-Infinity"):
+        bad_val = _clone(sample_payload)
+        bad_val["parameters"][0]["value"] = token
+        with pytest.raises(SpecificationError, match="must be finite"):
+            FitResult.from_json(json.dumps(bad_val))
+
+        bad_est = _clone(sample_payload)
+        bad_est["parameters"][0]["estimate"] = token
+        with pytest.raises(SpecificationError, match="must be finite"):
+            FitResult.from_json(json.dumps(bad_est))
+
+        bad_fixed_nan = _clone(sample_payload)
+        lat_mean = next(
+            r
+            for r in bad_fixed_nan["parameters"]
+            if r["item"] == "__latent__" and r["param"] == "mean"
+        )
+        lat_mean["value"] = token
+        lat_mean["estimate"] = token
+        with pytest.raises(SpecificationError, match="must be finite"):
+            FitResult.from_json(json.dumps(bad_fixed_nan))
+
+    # Non-positive latent variance (0.0 and -1.0)
+    for bad_var in (0.0, -1.0):
+        bad_lat = _clone(sample_payload)
+        lat_var = next(
+            r for r in bad_lat["parameters"] if r["item"] == "__latent__" and r["param"] == "var"
+        )
+        lat_var["value"] = bad_var
+        lat_var["estimate"] = bad_var
+        if bad_var < 0.0:
+            lat_var["lower"] = -2.0
+        with pytest.raises(SpecificationError, match=r"positive|exceed model domain"):
+            FitResult.from_json(json.dumps(bad_lat))
+
+    # Bounds exceeding model domain (__latent__.var lower < 0)
+    bad_dom = _clone(sample_payload)
+    lat_var = next(
+        r for r in bad_dom["parameters"] if r["item"] == "__latent__" and r["param"] == "var"
+    )
+    lat_var["lower"] = -0.5
+    with pytest.raises(SpecificationError, match="exceed model domain"):
+        FitResult.from_json(json.dumps(bad_dom))
+
+    # Free estimate outside [lower, upper] or prior.support
+    bad_bounds = _clone(sample_payload)
+    bad_bounds["parameters"][1]["lower"] = -1.0
+    bad_bounds["parameters"][1]["upper"] = 1.0
+    bad_bounds["parameters"][1]["value"] = 0.0
+    bad_bounds["parameters"][1]["estimate"] = 1.0
+    with pytest.raises(SpecificationError, match="not strictly inside"):
+        FitResult.from_json(json.dumps(bad_bounds))
+
+    bad_prior_est = _clone(sample_payload)
+    # parameters[0] is Item.1.a with LogNormal prior -> support (0, inf)
+    bad_prior_est["parameters"][0]["estimate"] = -0.5
+    with pytest.raises(SpecificationError, match="outside the support"):
+        FitResult.from_json(json.dumps(bad_prior_est))
+
+    # Invalid se: finite on fixed row; negative or infinite on free row
+    bad_fix_se = _clone(sample_payload)
+    lat_row = next(r for r in bad_fix_se["parameters"] if not r["free"])
+    lat_row["se"] = 0.1
+    with pytest.raises(SpecificationError, match="se == NaN"):
+        FitResult.from_json(json.dumps(bad_fix_se))
+
+    for bad_se_val in (-1.0, "-Infinity", "Infinity"):
+        bad_free_se = _clone(sample_payload)
+        bad_free_se["parameters"][0]["se"] = bad_se_val
+        with pytest.raises(SpecificationError, match="finite non-negative or NaN se"):
+            FitResult.from_json(json.dumps(bad_free_se))
+
+
+def test_malformed_asymptotes_grm_order_and_shared_bounds() -> None:
+    # 3PL asymptote invariant 0 <= g < u <= 1 on value and estimate
+    rng = np.random.default_rng(5010)
+    theta = rng.normal(0.0, 1.0, 400)
+    a = np.full(5, 1.5)
+    d = np.array([-0.5, -0.2, 0.0, 0.2, 0.5])
+    p = 0.15 + 0.85 / (1.0 + np.exp(-(np.outer(theta, a) + d)))
+    cols = [f"q{j}" for j in range(1, 6)]
+    df3 = pd.DataFrame((rng.random(p.shape) < p).astype(float), columns=cols)
+    res3 = fit(
+        Model.uniform(ThreePL(), items=cols)
+        .prior(param="a", dist=LogNormal(0.4, 0.3))
+        .prior(param="g", dist=Beta(5.0, 20.0)),
+        df3,
+        method=BAEM(tol=1e-4),
+        se=None,
+    )
+    payload3 = _assert_strict_json(res3.to_json())
+
+    bad_g_est = _clone(payload3)
+    g_row = next(r for r in bad_g_est["parameters"] if r["item"] == "q1" and r["param"] == "g")
+    u_row = next(r for r in bad_g_est["parameters"] if r["item"] == "q1" and r["param"] == "u")
+    u_row["value"] = 0.5
+    u_row["estimate"] = 0.5
+    g_row["value"] = 0.2
+    g_row["estimate"] = 0.6
+    with pytest.raises(SpecificationError, match="Lower asymptote"):
+        FitResult.from_json(json.dumps(bad_g_est))
+
+    bad_g_dom = _clone(payload3)
+    g_row_dom = next(r for r in bad_g_dom["parameters"] if r["item"] == "q1" and r["param"] == "g")
+    g_row_dom["lower"] = -0.1
+    with pytest.raises(SpecificationError, match="exceed model domain"):
+        FitResult.from_json(json.dumps(bad_g_dom))
+
+    # GRM intercept ordering d1 > d2 > d3 on estimate and value
+    cuts4 = np.array([-1.0, 0.0, 1.0])
+    y4 = np.searchsorted(
+        cuts4, np.outer(theta, [1.2, 1.0, 1.3, 1.1]) + rng.logistic(0, 1, (400, 4))
+    )
+    df_grm = pd.DataFrame(y4.astype(float), columns=["g1", "g2", "g3", "g4"])
+    spec_grm = Model.uniform(GRM(4), items=df_grm.columns)
+    res_grm = fit(spec_grm, df_grm, method=BAEM(tol=1e-4), se=None)
+    payload_grm = _assert_strict_json(res_grm.to_json())
+
+    bad_grm_est = _clone(payload_grm)
+    d1 = next(r for r in bad_grm_est["parameters"] if r["item"] == "g1" and r["param"] == "d1")
+    d2 = next(r for r in bad_grm_est["parameters"] if r["item"] == "g1" and r["param"] == "d2")
+    d1["estimate"] = d2["estimate"]
+    with pytest.raises(SpecificationError, match="GRM intercepts"):
+        FitResult.from_json(json.dumps(bad_grm_est))
+
+    bad_grm_val = _clone(payload_grm)
+    d1_v = next(r for r in bad_grm_val["parameters"] if r["item"] == "g1" and r["param"] == "d1")
+    d2_v = next(r for r in bad_grm_val["parameters"] if r["item"] == "g1" and r["param"] == "d2")
+    d1_v["value"], d2_v["value"] = d2_v["value"], d1_v["value"]
+    with pytest.raises(SpecificationError, match="GRM intercepts"):
+        FitResult.from_json(json.dumps(bad_grm_val))
+
+    # validate_table in fit(..., table=...) also rejects disordered GRM starts
+    tbl_grm = spec_grm.parameter_table(df_grm)
+    m1 = (tbl_grm["item"] == "g1") & (tbl_grm["param"] == "d1")
+    m2 = (tbl_grm["item"] == "g1") & (tbl_grm["param"] == "d2")
+    tbl_grm.loc[m1, "value"] = -2.0
+    tbl_grm.loc[m2, "value"] = 2.0
+    with pytest.raises(SpecificationError, match="GRM intercepts"):
+        fit(spec_grm, df_grm, table=tbl_grm, se=None)
+
+    # Two-group shared free_id: conflicting bounds and conflicting se
+    n_g = 200
+    grp = np.repeat(["ref", "focal"], n_g)
+    spec_2g = (
+        Model.uniform(TwoPL(), items=cols)
+        .with_groups(ref=Normal.standard(), focal=Normal.free())
+        .equal_across_groups(items=["q1", "q2", "q3"])
+    )
+    res_2g = fit(
+        spec_2g,
+        df3,
+        group=grp,
+        method=BAEM(tol=1e-4),
+        se="oakes",
+        quadrature=Quadrature.equispaced(41, lim=(-6, 6)),
+    )
+    payload_2g = _assert_strict_json(res_2g.to_json())
+
+    bad_shared_bounds = _clone(payload_2g)
+    q1a_foc = next(
+        r
+        for r in bad_shared_bounds["parameters"]
+        if r["group"] == "focal" and r["item"] == "q1" and r["param"] == "a"
+    )
+    q1a_foc["lower"] = -10.0
+    with pytest.raises(SpecificationError, match="conflicting bounds"):
+        FitResult.from_json(json.dumps(bad_shared_bounds))
+
+    bad_shared_se = _clone(payload_2g)
+    q1a_foc_se = next(
+        r
+        for r in bad_shared_se["parameters"]
+        if r["group"] == "focal" and r["item"] == "q1" and r["param"] == "a"
+    )
+    q1a_foc_se["se"] = float(q1a_foc_se["se"]) + 0.5
+    with pytest.raises(SpecificationError, match="conflicting standard errors"):
+        FitResult.from_json(json.dumps(bad_shared_se))
+
+    # Reversed parameter rows in JSON restore canonical (group, item, param) order
+    rev_payload = _clone(payload_2g)
+    rev_payload["parameters"] = list(reversed(rev_payload["parameters"]))
+    loaded_rev = FitResult.from_json(json.dumps(rev_payload))
+    assert list(loaded_rev.latent["group"]) == ["ref", "focal"]
+    assert list(loaded_rev.items.columns) == list(res_2g.items.columns)
+    idx = [*range(10), *(n_g + i for i in range(10))]
+    _assert_fit_result_identical(res_2g, loaded_rev, df3.iloc[idx], group=grp[idx])
+
+
+def test_malformed_overflow_and_unbounded_ints(sample_payload: dict[str, Any]) -> None:
+    # Overflowing decimal exponents (1e400 / -1e400) must raise SpecificationError, not become inf
+    base_text = json.dumps(sample_payload)
+    ll_token = json.dumps(sample_payload["loglik"])
+    for raw_num in ("1e400", "-1e400"):
+        bad_exp = base_text.replace(f'"loglik": {ll_token}', f'"loglik": {raw_num}', 1)
+        with pytest.raises(SpecificationError, match="overflows float64"):
+            FitResult.from_json(bad_exp)
+
+    # Huge integers (10**400, 10**5000) in float or int fields must raise SpecificationError
+    for huge_digits in ("1" + "0" * 400, "1" + "0" * 5000):
+        bad_ll_int = base_text.replace(f'"loglik": {ll_token}', f'"loglik": {huge_digits}', 1)
+        with pytest.raises(SpecificationError, match="64-bit signed range"):
+            FitResult.from_json(bad_ll_int)
+
+        bad_nobs = base_text.replace(
+            f'"n_obs": {sample_payload["n_obs"]}', f'"n_obs": {huge_digits}', 1
+        )
+        with pytest.raises(SpecificationError, match="64-bit signed range"):
+            FitResult.from_json(bad_nobs)
+
+    # Huge integer in history iter / em_evaluations (int64 / int32 overflow)
+    bad_hist_iter = _clone(sample_payload)
+    bad_hist_iter["history"][0]["iter"] = 10**100
+    with pytest.raises(SpecificationError, match="64-bit signed range"):
+        FitResult.from_json(json.dumps(bad_hist_iter))
+
+    bad_hist_eval = _clone(sample_payload)
+    bad_hist_eval["history"][0]["em_evaluations"] = 10**12
+    with pytest.raises(SpecificationError, match="em_evaluations must be <="):
+        FitResult.from_json(json.dumps(bad_hist_eval))
+
+    # Huge polytomous n_cat must fail immediately without OOM/hang
+    for model_type in ("GRM", "GPCM", "PCM"):
+        for bad_n_cat in (10**9, 1025):
+            bad_poly = _clone(sample_payload)
+            bad_poly["model"]["items"][0]["model"] = {"type": model_type, "n_cat": bad_n_cat}
+            with pytest.raises(SpecificationError, match="n_cat must be <="):
+                FitResult.from_json(json.dumps(bad_poly))
+
+    # Huge quadrature n_points must fail at load time (not MemoryError in score())
+    for bad_pts in (10**18, 100_001):
+        bad_quad = _clone(sample_payload)
+        bad_quad["quadrature"]["n_points"] = bad_pts
+        with pytest.raises(SpecificationError, match="n_points must be <="):
+            FitResult.from_json(json.dumps(bad_quad))
+
+    # Documented string-encoded non-finite floats remain accepted on non-finite slots
+    ok_nonfinite = _clone(sample_payload)
+    ok_nonfinite["loglik"] = "-Infinity"
+    ok_nonfinite["log_posterior"] = "-Infinity"
+    loaded_inf = FitResult.from_json(json.dumps(ok_nonfinite))
+    assert loaded_inf.loglik == -np.inf
+    assert loaded_inf.log_posterior == -np.inf
+
+
+def test_malformed_cross_field_consistency(sample_payload: dict[str, Any]) -> None:
+    # se_method=None with non-null vcov (reviewer scenario: NaN se with finite delta b_se)
+    bad_none_vcov = _clone(sample_payload)
+    bad_none_vcov["se_method"] = None
+    for row in bad_none_vcov["parameters"]:
+        row["se"] = "NaN"
+    with pytest.raises(SpecificationError, match="vcov must be null when se_method is null"):
+        FitResult.from_json(json.dumps(bad_none_vcov))
+
+    # se_method="oakes" with vcov=None when n_free > 0
+    bad_missing_vcov = _clone(sample_payload)
+    bad_missing_vcov["vcov"] = None
+    with pytest.raises(SpecificationError, match="vcov cannot be null"):
+        FitResult.from_json(json.dumps(bad_missing_vcov))
+
+    # se_method=None, vcov=None, but finite se left in parameters
+    bad_se_when_null = _clone(sample_payload)
+    bad_se_when_null["se_method"] = None
+    bad_se_when_null["vcov"] = None
+    with pytest.raises(SpecificationError, match="standard errors must be NaN"):
+        FitResult.from_json(json.dumps(bad_se_when_null))
+
+    # n_free == 0 with non-null (empty []) vcov
+    all_fixed = _clone(sample_payload)
+    for row in all_fixed["parameters"]:
+        row["free"] = False
+        row["free_id"] = -1
+        row["estimate"] = row["value"]
+        row["se"] = "NaN"
+    all_fixed["vcov"] = []
+    with pytest.raises(SpecificationError, match="no free parameters"):
+        FitResult.from_json(json.dumps(all_fixed))
+
+    # History iter sequence must be 1..n_iter
+    bad_iter_seq = _clone(sample_payload)
+    bad_iter_seq["history"][0]["iter"] = 2
+    with pytest.raises(SpecificationError, match=r"history\[0\]\.iter must be 1"):
+        FitResult.from_json(json.dumps(bad_iter_seq))
+
+    # sum(history.safeguard) must match n_safeguards
+    bad_safe_sum = _clone(sample_payload)
+    bad_safe_sum["n_safeguards"] = int(bad_safe_sum["n_safeguards"]) + 1
+    with pytest.raises(SpecificationError, match="n_safeguards"):
+        FitResult.from_json(json.dumps(bad_safe_sum))
+
+    # history.em_evaluations must be non-decreasing
+    assert len(sample_payload["history"]) >= 2
+    bad_eval_dec = _clone(sample_payload)
+    bad_eval_dec["history"][1]["em_evaluations"] = 0
+    with pytest.raises(SpecificationError, match="non-decreasing"):
+        FitResult.from_json(json.dumps(bad_eval_dec))
+
+    # Final history.em_evaluations must match n_em_evaluations
+    bad_eval_end = _clone(sample_payload)
+    bad_eval_end["n_em_evaluations"] = int(bad_eval_end["n_em_evaluations"]) + 5
+    with pytest.raises(SpecificationError, match="n_em_evaluations"):
+        FitResult.from_json(json.dumps(bad_eval_end))
+
+    # n_iter == 0 requires n_em_evaluations == 0
+    bad_zero_iter = _clone(sample_payload)
+    bad_zero_iter["n_iter"] = 0
+    bad_zero_iter["history"] = []
+    bad_zero_iter["n_safeguards"] = 0
+    bad_zero_iter["n_em_evaluations"] = 1
+    with pytest.raises(SpecificationError, match="n_em_evaluations must be 0"):
+        FitResult.from_json(json.dumps(bad_zero_iter))
+
+
+def test_read_source_non_utf8_and_brace_prefixed_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Binary / non-UTF-8 file raises SpecificationError (never UnicodeDecodeError)
+    bin_path = tmp_path / "not_utf8.json"
+    bin_path.write_bytes(b"\x80\x04\x95\x05\x00\x00\x00\xff\xfe")
+    with pytest.raises(SpecificationError, match="not valid UTF-8"):
+        FitResult.from_json(bin_path)
+    with pytest.raises(SpecificationError, match="not valid UTF-8"):
+        FitResult.from_json(str(bin_path))
+
+    # Relative filename starting with '{' round-trips through to_json / from_json
+    case = load("v1_lsat7_2pl")
+    res = fit(Model.uniform(TwoPL(), items=case.items), case.data, se=None)
+    monkeypatch.chdir(tmp_path)
+    res.to_json("{fit}.json")
+    loaded = FitResult.from_json("{fit}.json")
+    _assert_fit_result_identical(res, loaded, case.data.iloc[:15])
+
+    # Non-existent relative '{...}.json' still raises FileNotFoundError
+    with pytest.raises(FileNotFoundError):
+        FitResult.from_json("{missing}.json")

@@ -14,8 +14,9 @@ from flexpyirt.items import PCM, GPCMKernel, ItemModel, Rasch
 from flexpyirt.latent import EmpiricalHistogram, LatentSpec, Normal
 from flexpyirt.priors import PRIOR_TYPES, Prior
 
-__all__ = ["SINGLE_GROUP", "Model"]
+__all__ = ["LATENT_ITEM", "SINGLE_GROUP", "Model"]
 
+LATENT_ITEM = "__latent__"
 SINGLE_GROUP = "all"
 
 ItemSelector = Iterable[Any] | Callable[[str], bool] | None
@@ -60,6 +61,8 @@ class Model:
         if not self.items:
             raise SpecificationError("A model needs at least one item.")
         names = [name for name, _ in self.items]
+        if LATENT_ITEM in names:
+            raise SpecificationError(f"Item name {LATENT_ITEM!r} is reserved.")
         dup = sorted({n for n in names if names.count(n) > 1})
         if dup:
             raise SpecificationError(f"Duplicated item names: {dup}.")

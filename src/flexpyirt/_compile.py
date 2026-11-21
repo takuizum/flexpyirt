@@ -20,6 +20,7 @@ from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock, PriorBloc
 from flexpyirt.errors import FlexpyirtWarning, IdentificationError, SpecificationError
 from flexpyirt.items import FourPLKernel, GradedKernel, ItemKernel
 from flexpyirt.latent import EmpiricalHistogram, Normal, eh_project_floor
+from flexpyirt.model import LATENT_ITEM
 from flexpyirt.priors import PRIOR_TYPES, Beta, LogNormal, NormalPrior, Prior, encode_prior
 from flexpyirt.quadrature import Quadrature
 
@@ -37,11 +38,12 @@ __all__ = [
     "compile_problem",
     "eh_param_count",
     "eh_standardization_flags",
+    "model_parameter_schema",
     "prepare",
     "validate_table",
+    "validate_table_constraints",
 ]
 
-LATENT_ITEM = "__latent__"
 LATENT_PARAMS = ("mean", "var")
 TABLE_COLUMNS = (
     "group",
@@ -385,6 +387,180 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
     return table[list(TABLE_COLUMNS)].astype({"free": bool, "free_id": int})
 
 
+def model_parameter_schema(model: Model) -> pd.DataFrame:
+    """Return canonical ``(group, item, param, model, lower, upper)`` bounds for ``model``."""
+    rows: list[tuple[str, str, str, str, float, float]] = []
+    for group_name, _ in model.resolved_groups():
+        for name, item_model in model.items:
+            lower, upper = item_model.bounds()
+            for param, lo, hi in zip(item_model.kernel.param_names, lower, upper, strict=True):
+                rows.append((group_name, name, param, item_model.name, float(lo), float(hi)))
+        rows.append((group_name, LATENT_ITEM, "mean", "Normal", -np.inf, np.inf))
+        rows.append((group_name, LATENT_ITEM, "var", "Normal", 0.0, np.inf))
+    return pd.DataFrame(rows, columns=["group", "item", "param", "model", "lower", "upper"])
+
+
+def _validate_value_column(
+    t: pd.DataFrame,
+    model: Model,
+    *,
+    value_col: str,
+    free_label: str,
+    fixed_label: str,
+) -> None:
+    """Validate finiteness, bounds, prior support, and model ordering for one value column."""
+    group_col = t["group"].to_numpy(dtype=object)
+    item_col = t["item"].to_numpy(dtype=object)
+    param_col = t["param"].to_numpy(dtype=object)
+    value = t[value_col].to_numpy(dtype=float)
+    lower = t["lower"].to_numpy(dtype=float)
+    upper = t["upper"].to_numpy(dtype=float)
+    free = t["free"].to_numpy(dtype=bool)
+    prior_col = t["prior"].to_numpy(dtype=object)
+    for i in range(len(t)):
+        where = f"(group={group_col[i]!r}, item={item_col[i]!r}, param={param_col[i]!r})"
+        if not np.isfinite(value[i]):
+            raise SpecificationError(f"Non-finite {value_col} {value[i]} at {where}.")
+        if free[i] and not (lower[i] < value[i] < upper[i]):
+            raise SpecificationError(
+                f"{free_label} {value[i]} is not strictly inside ({lower[i]}, {upper[i]}) "
+                f"at {where}."
+            )
+        if not free[i] and not (lower[i] <= value[i] <= upper[i]):
+            raise SpecificationError(
+                f"{fixed_label} {value[i]} is outside [{lower[i]}, {upper[i]}] at {where}."
+            )
+        if item_col[i] == LATENT_ITEM and param_col[i] == "var" and not value[i] > 0:
+            raise SpecificationError(f"Latent variance must be positive at {where}.")
+        pri = prior_col[i]
+        if pri is not None and free[i]:
+            p_lo, p_hi = pri.support
+            if not (p_lo < value[i] < p_hi):
+                raise SpecificationError(
+                    f"{free_label} {value[i]} is outside the support ({p_lo}, {p_hi}) "
+                    f"of {pri!r} at {where}."
+                )
+
+    # Asymptote ordering g < u for 3PL / 4PL items.
+    fourpl_items = {name for name, m in model.items if isinstance(m.kernel, FourPLKernel)}
+    if fourpl_items:
+        sub = t[t["item"].isin(fourpl_items) & t["param"].isin(["g", "u"])]
+        for (grp, itm), rows in sub.groupby(["group", "item"], sort=False):
+            vals = dict(zip(rows["param"], rows[value_col], strict=True))
+            if not vals["g"] < vals["u"]:
+                raise SpecificationError(
+                    f"Lower asymptote g ({vals['g']}) must be < upper asymptote u ({vals['u']}) "
+                    f"at (group={grp!r}, item={itm!r})."
+                )
+
+    # Intercept ordering d1 > d2 > ... > d_{K-1} for GRM items.
+    grm_items = {
+        name: m.kernel.intercept_params
+        for name, m in model.items
+        if isinstance(m.kernel, GradedKernel) and m.kernel.n_cat > 2
+    }
+    if grm_items:
+        sub = t[t["item"].isin(grm_items)]
+        for (grp, itm), rows in sub.groupby(["group", "item"], sort=False):
+            vals = dict(zip(rows["param"], rows[value_col], strict=True))
+            intercepts = grm_items[str(itm)]
+            ds = [float(vals[p]) for p in intercepts]
+            if not all(ds[k] > ds[k + 1] for k in range(len(ds) - 1)):
+                raise SpecificationError(
+                    f"GRM intercepts ({value_col}) must satisfy "
+                    f"{' > '.join(intercepts)} at (group={grp!r}, item={itm!r}), got {ds}."
+                )
+
+
+def _validate_shared_free_ids(t: pd.DataFrame) -> None:
+    """Verify rows sharing a ``free_id`` match in item, param, prior, and ``(lower, upper)``."""
+    free_rows = t[t["free"]]
+    shared = free_rows.groupby("free_id")["item"].nunique()
+    if (shared > 1).any():
+        fid = int(shared[shared > 1].index[0])
+        items = sorted(t.loc[t["free_id"] == fid, "item"].unique())
+        raise SpecificationError(
+            f"free_id {fid} is shared by items {items}. Equality constraints across items are "
+            "not supported yet (planned for M5)."
+        )
+    within = free_rows.groupby("free_id")["param"].nunique()
+    if (within > 1).any():
+        fid = int(within[within > 1].index[0])
+        raise SpecificationError(f"free_id {fid} is shared by different parameters of one item.")
+    for fid_val, rows_f in free_rows.groupby("free_id"):
+        priors_f = list(rows_f["prior"])
+        first_p = priors_f[0]
+        if any(p != first_p for p in priors_f[1:]):
+            raise SpecificationError(
+                f"Rows sharing free_id {fid_val} have conflicting priors: {priors_f}."
+            )
+        lowers_f = rows_f["lower"].to_numpy(dtype=float)
+        uppers_f = rows_f["upper"].to_numpy(dtype=float)
+        if np.any(lowers_f != lowers_f[0]) or np.any(uppers_f != uppers_f[0]):
+            raise SpecificationError(f"Rows sharing free_id {fid_val} have conflicting bounds.")
+
+
+def validate_table_constraints(
+    table: pd.DataFrame,
+    reference: pd.DataFrame,
+    model: Model,
+    *,
+    check_free_ids: bool = True,
+    extra_value_cols: Sequence[tuple[str, str, str]] = (),
+) -> pd.DataFrame:
+    """Reorder ``table`` to canonical ``(group, item, param)`` order and check domain invariants."""
+    keys = ["group", "item", "param"]
+    orig_cols = list(table.columns)
+    t = table.set_index(keys).loc[reference.set_index(keys).index].reset_index()[orig_cols]
+
+    group_col = t["group"].to_numpy(dtype=object)
+    item_col = t["item"].to_numpy(dtype=object)
+    param_col = t["param"].to_numpy(dtype=object)
+    lower = t["lower"].to_numpy(dtype=float)
+    upper = t["upper"].to_numpy(dtype=float)
+    ref_lower = reference["lower"].to_numpy(dtype=float)
+    ref_upper = reference["upper"].to_numpy(dtype=float)
+    free = t["free"].to_numpy(dtype=bool)
+    prior_col = t["prior"].to_numpy(dtype=object)
+    for i in range(len(t)):
+        where = f"(group={group_col[i]!r}, item={item_col[i]!r}, param={param_col[i]!r})"
+        if not lower[i] < upper[i]:
+            raise SpecificationError(f"lower must be < upper at {where}.")
+        if lower[i] < ref_lower[i] or upper[i] > ref_upper[i]:
+            raise SpecificationError(
+                f"Bounds [{lower[i]}, {upper[i]}] exceed model domain "
+                f"[{ref_lower[i]}, {ref_upper[i]}] at {where}."
+            )
+        pri = prior_col[i]
+        if pri is not None:
+            if item_col[i] == LATENT_ITEM:
+                raise SpecificationError(
+                    f"Priors on latent-distribution parameters are not supported at {where}."
+                )
+            if not isinstance(pri, PRIOR_TYPES):
+                raise SpecificationError(
+                    f"Invalid prior {pri!r} at {where}; use NormalPrior, LogNormal, Beta or None."
+                )
+            if free[i]:
+                p_lo, p_hi = pri.support
+                if not (max(lower[i], p_lo) < min(upper[i], p_hi)):
+                    raise SpecificationError(
+                        f"Bounds [{lower[i]}, {upper[i]}] do not overlap the support "
+                        f"({p_lo}, {p_hi}) of {pri!r} at {where}."
+                    )
+
+    _validate_value_column(
+        t, model, value_col="value", free_label="Starting value", fixed_label="Fixed value"
+    )
+    for col, free_label, fixed_label in extra_value_cols:
+        _validate_value_column(
+            t, model, value_col=col, free_label=free_label, fixed_label=fixed_label
+        )
+    if check_free_ids:
+        _validate_shared_free_ids(t)
+    return t
+
+
 def validate_table(
     table: pd.DataFrame, reference: pd.DataFrame, model: Model, y: np.ndarray, group: np.ndarray
 ) -> pd.DataFrame:
@@ -410,80 +586,14 @@ def validate_table(
             f"unexpected {sorted(got - want)}, missing {sorted(want - got)}. "
             "Edit values, free flags, bounds or free_id only."
         )
-    t = t.set_index(keys).loc[reference.set_index(keys).index].reset_index()[list(TABLE_COLUMNS)]
-    t["model"] = reference["model"].to_numpy()
     t["free"] = t["free"].astype(bool)
     t["prior"] = t["prior"].astype(object)
     for col in ("value", "lower", "upper"):
         t[col] = t[col].astype(float)
+    t = validate_table_constraints(t, reference, model, check_free_ids=False)
+    t["model"] = reference["model"].to_numpy()
 
-    group_col = t["group"].to_numpy(dtype=object)
-    item_col = t["item"].to_numpy(dtype=object)
-    param_col = t["param"].to_numpy(dtype=object)
-    value = t["value"].to_numpy(dtype=float)
-    lower = t["lower"].to_numpy(dtype=float)
-    upper = t["upper"].to_numpy(dtype=float)
-    ref_lower = reference["lower"].to_numpy(dtype=float)
-    ref_upper = reference["upper"].to_numpy(dtype=float)
     free = t["free"].to_numpy(dtype=bool)
-    prior_col = t["prior"].to_numpy(dtype=object)
-    for i in range(len(t)):
-        where = f"(group={group_col[i]!r}, item={item_col[i]!r}, param={param_col[i]!r})"
-        if not np.isfinite(value[i]):
-            raise SpecificationError(f"Non-finite value {value[i]} at {where}.")
-        if not lower[i] < upper[i]:
-            raise SpecificationError(f"lower must be < upper at {where}.")
-        if lower[i] < ref_lower[i] or upper[i] > ref_upper[i]:
-            raise SpecificationError(
-                f"Bounds [{lower[i]}, {upper[i]}] exceed model domain "
-                f"[{ref_lower[i]}, {ref_upper[i]}] at {where}."
-            )
-        if free[i] and not (lower[i] < value[i] < upper[i]):
-            raise SpecificationError(
-                f"Starting value {value[i]} is not strictly inside ({lower[i]}, {upper[i]}) "
-                f"at {where}."
-            )
-        if not free[i] and not (lower[i] <= value[i] <= upper[i]):
-            raise SpecificationError(
-                f"Fixed value {value[i]} is outside [{lower[i]}, {upper[i]}] at {where}."
-            )
-        if item_col[i] == LATENT_ITEM and param_col[i] == "var" and not value[i] > 0:
-            raise SpecificationError(f"Latent variance must be positive at {where}.")
-        pri = prior_col[i]
-        if pri is not None:
-            if item_col[i] == LATENT_ITEM:
-                raise SpecificationError(
-                    f"Priors on latent-distribution parameters are not supported at {where}."
-                )
-            if not isinstance(pri, PRIOR_TYPES):
-                raise SpecificationError(
-                    f"Invalid prior {pri!r} at {where}; use NormalPrior, LogNormal, Beta or None."
-                )
-            if free[i]:
-                p_lo, p_hi = pri.support
-                if not (p_lo < value[i] < p_hi):
-                    raise SpecificationError(
-                        f"Starting value {value[i]} is outside the support ({p_lo}, {p_hi}) "
-                        f"of {pri!r} at {where}."
-                    )
-                if not (max(lower[i], p_lo) < min(upper[i], p_hi)):
-                    raise SpecificationError(
-                        f"Bounds [{lower[i]}, {upper[i]}] do not overlap the support "
-                        f"({p_lo}, {p_hi}) of {pri!r} at {where}."
-                    )
-
-    # Asymptote ordering g < u for 3PL / 4PL items.
-    fourpl_items = {name for name, m in model.items if isinstance(m.kernel, FourPLKernel)}
-    if fourpl_items:
-        sub = t[t["item"].isin(fourpl_items) & t["param"].isin(["g", "u"])]
-        for (grp, itm), rows in sub.groupby(["group", "item"], sort=False):
-            vals = dict(zip(rows["param"], rows["value"], strict=True))
-            if not vals["g"] < vals["u"]:
-                raise SpecificationError(
-                    f"Lower asymptote g ({vals['g']}) must be < upper asymptote u ({vals['u']}) "
-                    f"at (group={grp!r}, item={itm!r})."
-                )
-
     ids = np.where(free, t["free_id"].fillna(-1).to_numpy(dtype=int), -1)
     next_id = int(ids.max()) + 1 if (ids >= 0).any() else 0
     for i in np.flatnonzero(free & (ids < 0)).tolist():
@@ -493,25 +603,7 @@ def validate_table(
     ids[ids >= 0] = ids_free
     t["free_id"] = ids.astype(int)
 
-    shared = t[t["free"]].groupby("free_id")["item"].nunique()
-    if (shared > 1).any():
-        fid = int(shared[shared > 1].index[0])
-        items = sorted(t.loc[t["free_id"] == fid, "item"].unique())
-        raise SpecificationError(
-            f"free_id {fid} is shared by items {items}. Equality constraints across items are "
-            "not supported yet (planned for M5)."
-        )
-    within = t[t["free"]].groupby("free_id")["param"].nunique()
-    if (within > 1).any():
-        fid = int(within[within > 1].index[0])
-        raise SpecificationError(f"free_id {fid} is shared by different parameters of one item.")
-    for fid_val, rows_f in t[t["free"]].groupby("free_id"):
-        priors_f = list(rows_f["prior"])
-        first_p = priors_f[0]
-        if any(p != first_p for p in priors_f[1:]):
-            raise SpecificationError(
-                f"Rows sharing free_id {fid_val} have conflicting priors: {priors_f}."
-            )
+    _validate_shared_free_ids(t)
     _check_estimable(t, model, y, group)
     _check_identification(t, model)
     return t
