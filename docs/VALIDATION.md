@@ -369,8 +369,10 @@ English | [日本語](VALIDATION.ja.md)
      `1.0e-12` at mirt's estimates, `9.5e-6` on refit due to the documented $7.9\times10^{-5}$
      latent variance difference on $[-6,6]$) and differs from mirt's `M2` by `0.035`.
   2. **`dP("dich")` bug for 3PL/4PL**: `mirt:::dP` for `dich` uses the 2PL derivative
-     $P_0 P_1$ (`cbind(Theta * PQ, PQ, P)`) instead of $(u-g)\sigma(1-\sigma)$, shifting
-     `threepl`'s `M2` by 4.8% (`64.82` vs exact `68.11`).
+     $P_0 P_1$ for `(a1, d)` instead of $(u-g)\sigma(1-\sigma)$ and places raw category
+     probabilities $(P_0, P_1)$ in columns 3–4 (`cbind(Theta * PQ, PQ, P)`) instead of
+     $((1-\sigma)g(1-g),\, \sigma u(1-u))$, shifting `threepl`'s `M2` by 4.8% (`64.82` vs exact
+     `68.11`).
   3. **`dP("gpcm")` slope-derivative bug**: `mirt:::dP` for `gpcm` omits division by
      `den = rowSums(num)` in the `a1` derivative (`rowSums(Theta[, i] * aknum[[i]])`), shifting
      `gpcm_sim`'s `M2` by 10.8% (`5.27` vs exact `5.90`).

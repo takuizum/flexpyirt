@@ -9,10 +9,11 @@
 # settings.
 #
 # Confirmed mirt 1.46.1 M2() issues cross-checked in R (VALIDATION.md V18):
-#   1. dP("dich") uses the 2PL derivative P_0 * P_1 for 3PL/4PL instead of (u - g) * sigma * (1 - sigma),
-#      affecting threepl's M2 by ~5.1%.
+#   1. dP("dich") uses the 2PL derivative P_0 * P_1 for (a1, d) instead of (u - g) * sigma * (1 - sigma)
+#      and puts raw probabilities (P_0, P_1) in columns 3-4 for (logit(g), logit(u)) instead of
+#      ((1 - sigma) * g * (1 - g), sigma * u * (1 - u)), shifting threepl's M2 by ~4.8% (relative to exact).
 #   2. dP("gpcm") omits division by den = rowSums(num) in the a1 slope derivative
-#      (rowSums(Theta[, i] * aknum[[i]]) instead of / den), affecting gpcm_sim's M2 by ~12.0%.
+#      (rowSums(Theta[, i] * aknum[[i]]) instead of / den), shifting gpcm_sim's M2 by ~10.8% (relative to exact).
 #   3. GroupPars (free latent mean/variance) are forced to est = FALSE in M2()'s Delta while still
 #      subtracted in df, affecting rasch_free_var's M2 by ~4.7e-4.
 #   4. For polytomous null models (grm_sim, gpcm_sim), Delta has rank J < sum(K_j - 1) = ncol(Delta);

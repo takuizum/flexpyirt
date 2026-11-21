@@ -176,10 +176,11 @@ every free item and latent parameter (shared parameters once) via JAX autodiff.
 
 **Returns**: One-row `DataFrame` with columns `m2`, `df` ($J + \binom{J}{2} - k$), `p`, `rmsea`,
 `rmsea_<lo>`, `rmsea_<hi>` (named from `ci`, e.g. `rmsea_5`, `rmsea_95` for `0.90`), `srmsr`,
-`tli`, `cfi`. When `df <= 0`, `p`, RMSEA, its CI, `tli` and `cfi` are `NaN` (and `m2` is `NaN`
-when the orthogonal complement is empty). Polytomous models return `NaN` for `tli` and `cfi`
-(DESIGN §16.3); if the dichotomous null $M_2$ is not greater than the fitted $M_2$, a
-`FlexpyirtWarning` is emitted and `tli`/`cfi` are `NaN`.
+`tli`, `cfi`. When `df <= 0` or $\Delta_2$ is rank-deficient (the model is not locally identified
+from first- and second-order moments), a `FlexpyirtWarning` is emitted and `m2`, `p`, RMSEA, its
+CI, `tli` and `cfi` are `NaN` (`df` and `srmsr` remain finite). Polytomous models return `NaN` for
+`tli` and `cfi` (DESIGN §16.3); if the dichotomous null $M_2$ is not greater than the fitted $M_2$,
+a `FlexpyirtWarning` is emitted and `tli`/`cfi` are `NaN`.
 
 **Raises**: `PrecisionError` if JAX 64-bit is disabled; `SpecificationError` for multidimensional,
 multiple-group, `EmpiricalHistogram`, or MAP (with priors) models, missing responses, invalid

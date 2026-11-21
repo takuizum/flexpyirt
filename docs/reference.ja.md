@@ -163,7 +163,8 @@ $\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、す
 
 **戻り値**: 1 行の `DataFrame`。列は `m2`, `df`（$J + \binom{J}{2} - k$）, `p`, `rmsea`,
 `rmsea_<lo>`, `rmsea_<hi>`（`ci` に従う。例: `0.90` で `rmsea_5`, `rmsea_95`）, `srmsr`,
-`tli`, `cfi`。`df <= 0` のときは `p`・RMSEA・信頼区間・`tli`・`cfi` が `NaN`（直交補空間が空なら `m2` も `NaN`）。
+`tli`, `cfi`。`df <= 0` または $\Delta_2$ がランク落ちしているとき（1 次・2 次モーメントから局所識別できないとき）は
+`FlexpyirtWarning` を出し、`m2`・`p`・RMSEA・信頼区間・`tli`・`cfi` を `NaN` とする（`df` と `srmsr` は有限のまま）。
 多値モデルでは `tli` と `cfi` を `NaN` とする（DESIGN §16.3）。2 値モデルで帰無モデルの $M_2$ が当てはめモデルの $M_2$
 以下のときは `FlexpyirtWarning` を出し `tli`・`cfi` を `NaN` とする。
 
