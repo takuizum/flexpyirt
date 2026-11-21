@@ -129,10 +129,10 @@ res3 = fit(spec3, df)
 
 Wall-time benchmarks against R `mirt` (default settings, `TOL = 1e-4`, 61 quadrature points on CPU)
 are in [benchmarks/](benchmarks/README.md) with committed Apple M5 results in
-[benchmarks/results/2026-11-21-takuizummbp.md](benchmarks/results/2026-11-21-takuizummbp.md).
-After the first-call JAX/XLA compilation (~0.6–1.5 s for EM), warm CPU fits are faster than `mirt`
-across all tested cases (`0.12×–0.66×` of `mirt` time), while `mirt` is faster for a single cold fit
-on smaller datasets.
+[benchmarks/results/2026-11-21-apple-m5.md](benchmarks/results/2026-11-21-apple-m5.md).
+After the first-call JAX/XLA compilation (a cold EM fit takes ~0.8–1.1 s), warm CPU fits are faster
+than `mirt` across all tested cases (`0.12×–0.60×` of `mirt` time), while `mirt` is faster for a
+single cold fit without standard errors.
 
 ## Documentation
 

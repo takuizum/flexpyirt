@@ -17,7 +17,6 @@ import argparse
 import json
 import os
 import platform
-import socket
 import statistics
 import subprocess
 import sys
@@ -92,10 +91,17 @@ def _ram_gb() -> float | None:
     return None
 
 
-def _host_short() -> str:
-    raw = socket.gethostname().split(".")[0]
-    cleaned = "".join(ch if (ch.isalnum() or ch in "-_") else "-" for ch in raw)
-    return cleaned or "host"
+def _machine_label() -> str:
+    """Return a short label for the result file name, derived from the CPU model.
+
+    The hostname is deliberately not recorded: results are committed to a public repository.
+    """
+    raw = _cpu_model().lower()
+    for noise in ("(r)", "(tm)", "cpu", "processor", "@"):
+        raw = raw.replace(noise, " ")
+    words = [w for w in raw.replace("-", " ").split() if w.isalnum() and "ghz" not in w]
+    label = "-".join(words[:4])
+    return label or platform.machine().lower() or "machine"
 
 
 def _build_spec(case: BenchmarkCase) -> Any:
@@ -222,8 +228,7 @@ def _collect_meta(
 
     return {
         "date": date.today().isoformat(),
-        "hostname": socket.gethostname(),
-        "host_short": _host_short(),
+        "machine_label": _machine_label(),
         "platform": platform.platform(),
         "machine": platform.machine(),
         "cpu_model": _cpu_model(),

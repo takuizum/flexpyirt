@@ -5,8 +5,8 @@ English | [日本語](README.ja.md)
 Wall-time comparison between **flexpyirt** (JAX on CPU) and R **`mirt`** on identical deterministic
 simulated datasets at `TOL = 1e-4` with 61 quadrature points on `[-6, 6]`.
 
-Latest committed results: [results/2026-11-21-takuizummbp.md](results/2026-11-21-takuizummbp.md)
-([JSON](results/2026-11-21-takuizummbp.json)).
+Latest committed results: [results/2026-11-21-apple-m5.md](results/2026-11-21-apple-m5.md)
+([JSON](results/2026-11-21-apple-m5.json)), measured with no other workload running.
 
 ## How to run
 
@@ -77,7 +77,8 @@ All datasets are simulated with fixed NumPy seeds so Python and R fit identical 
 ## Caveats
 
 - **Compile time vs. warm time**: JAX compiles each `(model family, padded pattern bucket, se)`
-  computation on the first call (~0.6–1.5 s for EM on CPU, more with Oakes SE on large problems).
+  computation on the first call (a cold EM fit takes ~0.8–1.1 s on CPU, more with Oakes SE on large
+  problems).
   For a single one-off fit of a small dataset, R `mirt` (precompiled C++) is faster than a cold
   flexpyirt call. Within a long-lived session (notebooks, simulations, repeated fits), only warm
   time is paid after the first call.
@@ -90,19 +91,19 @@ All datasets are simulated with fixed NumPy seeds so Python and R fit identical 
   data point and rerun on your own machine when making performance decisions.
 - **Oakes SE at large `(N, J)`**: `se="oakes"` differentiates $Q(\eta \mid \eta')$ via forward-over-reverse
   autodiff (`jacfwd(grad)`). At `N = 20000, J = 40` (19,859 unique patterns padded to 32,768),
-  Oakes SE dominates total wall time (~4 s vs. ~0.3–0.4 s for EM) and shows higher run-to-run
-  variance due to memory pressure.
+  Oakes SE dominates total wall time (~3.1–3.5 s vs. ~0.3–0.4 s for EM).
 
 ## Note on the SQUAREM default
 
 `BAEM(squarem=False)` is kept as the default; this benchmark does not change it. In the
-[2026-11-21 Apple M5 results](results/2026-11-21-takuizummbp.md):
+[2026-11-21 Apple M5 results](results/2026-11-21-apple-m5.md):
 
 - **Warm runs**: `squarem=True` cuts EM evaluations by 33–69% across all 6 cases and reduces warm
-  `se=None` wall time on every case (`0.38×–0.83×` of plain EM, up to 2.6× faster on two-group 2PL
-  and 1.7× faster on 3PL), with at most 1 safeguard intervention per case.
-- **Cold runs**: `squarem=True` adds ~0.2–0.4 s of extra JIT compilation time, making plain EM
-  faster for a single cold call on 5 of the 6 cases (and essentially tied on two-group 2PL).
+  wall time on every case (`0.38×–0.87×` of plain EM with `se=None`, `0.38×–0.90×` overall; up to
+  2.6× faster on two-group 2PL and 1.8× faster on 3PL), with at most 1 safeguard intervention per
+  case.
+- **Cold runs**: `squarem=True` adds ~0.05–0.4 s of extra JIT compilation time with `se=None`,
+  making plain EM faster for a single cold call on all 6 cases (by only 0.05 s on two-group 2PL).
 
 Whether to flip the default therefore depends on the expected workload (one-off scripts vs.
 repeated/slow-converging fits) and is left to the maintainer.

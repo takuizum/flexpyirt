@@ -1,8 +1,8 @@
 """Merge flexpyirt and R mirt benchmark outputs into JSON and Markdown reports.
 
 Reads raw JSON files produced by ``benchmarks/run_flexpyirt.py`` and ``benchmarks/run_mirt.R``
-and writes ``benchmarks/results/<date>-<host-short>.json`` and
-``benchmarks/results/<date>-<host-short>.md``.
+and writes ``benchmarks/results/<date>-<machine-label>.json`` and
+``benchmarks/results/<date>-<machine-label>.md``.
 
 Run from the repository root::
 
@@ -143,11 +143,11 @@ def render_markdown(merged: dict[str, Any]) -> str:
     fset = fmeta["settings"]
 
     lines: list[str] = [
-        f"# Benchmark results: {fmeta['date']} ({fmeta['host_short']})",
+        f"# Benchmark results: {fmeta['date']} ({fmeta['machine_label']})",
         "",
         "## Environment",
         "",
-        f"- **Host**: `{fmeta['host_short']}` ({fmeta['platform']})",
+        f"- **Machine**: `{fmeta['machine_label']}` ({fmeta['platform']})",
         f"- **CPU**: {fmeta['cpu_model']} ({fmeta['cpu_count']} logical cores"
         + (f", {fmeta['ram_gb']} GiB RAM" if fmeta.get("ram_gb") is not None else "")
         + ")",
@@ -331,7 +331,7 @@ def write_report(
 
     merged = merge_results(flex_raw, mirt_raw)
     fmeta = merged["meta"]["flexpyirt"]
-    report_stem = stem or f"{fmeta['date']}-{fmeta['host_short']}"
+    report_stem = stem or f"{fmeta['date']}-{fmeta['machine_label']}"
     results_dir.mkdir(parents=True, exist_ok=True)
     json_out = results_dir / f"{report_stem}.json"
     md_out = results_dir / f"{report_stem}.md"
@@ -355,7 +355,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--stem",
         type=str,
         default=None,
-        help="Output filename stem (default: <date>-<host-short>).",
+        help="Output filename stem (default: <date>-<machine-label>).",
     )
     return parser.parse_args(argv)
 
