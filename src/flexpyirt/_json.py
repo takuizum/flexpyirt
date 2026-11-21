@@ -1083,16 +1083,24 @@ def dump_fit_result(
     return text
 
 
+def _read_utf8_file(path: Path) -> str:
+    """Read a UTF-8 file, translating invalid UTF-8 bytes into :class:`SpecificationError`."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise SpecificationError(f"FitResult JSON file {str(path)!r} is not valid UTF-8.") from exc
+
+
 def _read_source(source: str | os.PathLike[str]) -> str:
     """Read raw JSON text from either a file path or a JSON string."""
     if isinstance(source, os.PathLike):
-        return Path(source).read_text(encoding="utf-8")
+        return _read_utf8_file(Path(source))
     if not isinstance(source, str):
         raise SpecificationError(
             f"from_json() expects a file path or JSON string, got {type(source).__name__}."
         )
-    stripped = source.lstrip()
-    if stripped.startswith("{"):
+    stripped = source.strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
         return source
     has_newline = "\n" in source or "\r" in source
     if not has_newline:
@@ -1102,14 +1110,14 @@ def _read_source(source: str | os.PathLike[str]) -> str:
         except OSError:
             is_file = False
         if is_file:
-            return candidate.read_text(encoding="utf-8")
+            return _read_utf8_file(candidate)
         looks_like_path = (
             os.sep in source
             or (os.altsep is not None and os.altsep in source)
             or source.lower().endswith(".json")
         )
         if looks_like_path:
-            return candidate.read_text(encoding="utf-8")
+            return _read_utf8_file(candidate)
     return source
 
 

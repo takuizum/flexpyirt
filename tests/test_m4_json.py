@@ -963,3 +963,27 @@ def test_malformed_cross_field_consistency(sample_payload: dict[str, Any]) -> No
     bad_zero_iter["n_em_evaluations"] = 1
     with pytest.raises(SpecificationError, match="n_em_evaluations must be 0"):
         FitResult.from_json(json.dumps(bad_zero_iter))
+
+
+def test_read_source_non_utf8_and_brace_prefixed_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Binary / non-UTF-8 file raises SpecificationError (never UnicodeDecodeError)
+    bin_path = tmp_path / "not_utf8.json"
+    bin_path.write_bytes(b"\x80\x04\x95\x05\x00\x00\x00\xff\xfe")
+    with pytest.raises(SpecificationError, match="not valid UTF-8"):
+        FitResult.from_json(bin_path)
+    with pytest.raises(SpecificationError, match="not valid UTF-8"):
+        FitResult.from_json(str(bin_path))
+
+    # Relative filename starting with '{' round-trips through to_json / from_json
+    case = load("v1_lsat7_2pl")
+    res = fit(Model.uniform(TwoPL(), items=case.items), case.data, se=None)
+    monkeypatch.chdir(tmp_path)
+    res.to_json("{fit}.json")
+    loaded = FitResult.from_json("{fit}.json")
+    _assert_fit_result_identical(res, loaded, case.data.iloc[:15])
+
+    # Non-existent relative '{...}.json' still raises FileNotFoundError
+    with pytest.raises(FileNotFoundError):
+        FitResult.from_json("{missing}.json")
