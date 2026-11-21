@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -77,6 +78,112 @@ def _delta_irt_thresholds(
     return b_vals, b_ses
 
 
+_PRIORS_IC_NOTE = (
+    "Note: Priors are active (MAP); AIC and BIC use the marginal log-likelihood evaluated at the "
+    "MAP estimate rather than the MLE."
+)
+
+_HTML_STYLE = """<style>
+.flexpyirt-result {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0.5em 0;
+}
+.flexpyirt-result h4 {
+  margin: 0.8em 0 0.35em 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.flexpyirt-result .flexpyirt-header {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 0.5em;
+}
+.flexpyirt-result .flexpyirt-meta {
+  border-collapse: collapse;
+  margin-bottom: 0.6em;
+}
+.flexpyirt-result .flexpyirt-meta th {
+  text-align: left;
+  font-weight: 600;
+  padding: 2px 12px 2px 0;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.flexpyirt-result .flexpyirt-meta td {
+  text-align: left;
+  padding: 2px 16px 2px 0;
+}
+.flexpyirt-result .flexpyirt-note {
+  margin: 0.4em 0 0.6em 0;
+  padding: 6px 10px;
+  border-left: 3px solid #d29922;
+  background: rgba(210, 153, 34, 0.12);
+  font-size: 12px;
+}
+.flexpyirt-result .flexpyirt-table-wrap {
+  overflow-x: auto;
+  max-height: 420px;
+  margin-bottom: 0.6em;
+}
+.flexpyirt-result table.flexpyirt-table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.flexpyirt-result table.flexpyirt-table th,
+.flexpyirt-result table.flexpyirt-table td {
+  padding: 3px 8px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+  white-space: nowrap;
+}
+.flexpyirt-result table.flexpyirt-table th {
+  background: rgba(127, 127, 127, 0.10);
+  font-weight: 600;
+  text-align: right;
+}
+.flexpyirt-result table.flexpyirt-table th.text,
+.flexpyirt-result table.flexpyirt-table td.text {
+  text-align: left;
+}
+.flexpyirt-result table.flexpyirt-table td.num {
+  text-align: right;
+}
+.flexpyirt-result table.flexpyirt-table td.na {
+  text-align: right;
+  opacity: 0.55;
+}
+</style>"""
+
+
+def _df_to_html_table(df: pd.DataFrame, *, digits: int = 4) -> str:
+    """Render a DataFrame as an escaped plain HTML table with tabular numeric formatting."""
+    is_num = [pd.api.types.is_numeric_dtype(df[col].dtype) for col in df.columns]
+    head_cells = [
+        f'<th class="{"num" if num else "text"}">{html.escape(str(col))}</th>'
+        for col, num in zip(df.columns, is_num, strict=True)
+    ]
+    body_rows: list[str] = []
+    for row in df.itertuples(index=False, name=None):
+        cells: list[str] = []
+        for val, num in zip(row, is_num, strict=True):
+            if num:
+                fval = float(val)
+                if np.isnan(fval):
+                    cells.append('<td class="na">NaN</td>')
+                else:
+                    cells.append(f'<td class="num">{fval:.{digits}f}</td>')
+            else:
+                cells.append(f'<td class="text">{html.escape(str(val))}</td>')
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+    return (
+        '<div class="flexpyirt-table-wrap"><table class="flexpyirt-table">'
+        f"<thead><tr>{''.join(head_cells)}</tr></thead>"
+        f"<tbody>{''.join(body_rows)}</tbody>"
+        "</table></div>"
+    )
+
+
 @dataclass(frozen=True)
 class FitResult:
     """Result of :func:`flexpyirt.fit`.
@@ -142,6 +249,12 @@ class FitResult:
         """Number of free parameters."""
         return int(self._eta.shape[0])
 
+    def _aic_value(self) -> float:
+        return -2.0 * self.loglik + 2.0 * self.n_params
+
+    def _bic_value(self) -> float:
+        return -2.0 * self.loglik + self.n_params * float(np.log(self.n_obs))
+
     @property
     def aic(self) -> float:
         r""":math:`-2\ell+2k` (warns with ``FlexpyirtWarning`` under MAP)."""
@@ -152,7 +265,7 @@ class FitResult:
                 FlexpyirtWarning,
                 stacklevel=2,
             )
-        return -2.0 * self.loglik + 2.0 * self.n_params
+        return self._aic_value()
 
     @property
     def bic(self) -> float:
@@ -164,7 +277,7 @@ class FitResult:
                 FlexpyirtWarning,
                 stacklevel=2,
             )
-        return -2.0 * self.loglik + self.n_params * float(np.log(self.n_obs))
+        return self._bic_value()
 
     @property
     def items(self) -> pd.DataFrame:
@@ -272,6 +385,145 @@ class FitResult:
         return pd.DataFrame(
             {"theta": np.asarray(theta)[:n][inverse], "se": np.asarray(sd)[:n][inverse]},
             index=index,
+        )
+
+    def _model_label(self) -> str:
+        """Concise description of item models in the specification."""
+        counts: dict[str, int] = {}
+        for _, m in self._model.items:
+            tag = f"{m.name}({m.kernel.n_cat})" if m.name in ("GRM", "GPCM", "PCM") else m.name
+            counts[tag] = counts.get(tag, 0) + 1
+        if len(counts) == 1:
+            return next(iter(counts))
+        return ", ".join(f"{name} ({count})" for name, count in counts.items())
+
+    def _groups_label(self) -> str:
+        """Concise description of the model's groups."""
+        groups = [g for g, _ in self._model.resolved_groups()]
+        if self._model.is_multigroup:
+            return f"{len(groups)} ({', '.join(groups)})"
+        return "1 (single group)"
+
+    def _convergence_label(self) -> str:
+        """Concise description of convergence, iterations, and EM map evaluations."""
+        status = "Converged" if self.converged else "NOT converged"
+        evals = f"{self.n_em_evaluations} EM evaluations"
+        if self.n_safeguards > 0:
+            evals += f", {self.n_safeguards} SQUAREM safeguards"
+        return f"{status} ({self.n_iter} iterations, {evals})"
+
+    def summary(self, *, digits: int = 4) -> str:
+        """Return a readable plain-text summary of the fitted model.
+
+        Includes the model specification, sample/item/parameter counts, groups, convergence and
+        EM evaluation counts, log-likelihood, log-posterior, AIC and BIC (with a note when priors
+        are active), the latent distribution table, and the item parameter table with standard
+        errors (including delta-method ``b_se`` / ``bk_se``).
+
+        Parameters
+        ----------
+        digits : int, default 4
+            Number of decimal places for floating-point values.
+
+        Returns
+        -------
+        str
+        """
+        if isinstance(digits, bool) or not isinstance(digits, int) or digits < 0:
+            raise SpecificationError(f"digits must be a non-negative integer, got {digits!r}.")
+        est_kind = "MAP, priors active" if self._has_priors else "MMLE"
+        se_label = "None" if self.se_method is None else self.se_method
+        quad = self._quadrature
+        quad_label = f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
+        n_items = len(self._model.item_names)
+        aic_val = self._aic_value()
+        bic_val = self._bic_value()
+
+        def _fmt(v: float) -> str:
+            return f"{v:.{digits}f}"
+
+        latent_str = self.latent.to_string(index=False, float_format=_fmt, na_rep="NaN")
+        items_str = self.items.to_string(index=False, float_format=_fmt, na_rep="NaN")
+
+        lines = [
+            "flexpyirt FitResult",
+            "===================",
+            f"Model:          {self._model_label()} ({est_kind})",
+            f"Data:           {self.n_obs} observations, {n_items} items, "
+            f"{self.n_params} free parameters",
+            f"Groups:         {self._groups_label()}",
+            f"Convergence:    {self._convergence_label()}",
+            f"SE method:      {se_label}",
+            f"Quadrature:     {quad_label}",
+            "",
+            "Fit statistics",
+            "--------------",
+            f"Log-likelihood: {self.loglik:.{digits}f}",
+            f"Log-posterior:  {self.log_posterior:.{digits}f}",
+            f"AIC:            {aic_val:.{digits}f}",
+            f"BIC:            {bic_val:.{digits}f}",
+        ]
+        if self._has_priors:
+            lines.append(_PRIORS_IC_NOTE)
+        lines.extend(
+            [
+                "",
+                "Latent distribution",
+                "-------------------",
+                latent_str,
+                "",
+                "Item parameters",
+                "---------------",
+                items_str,
+            ]
+        )
+        return "\n".join(lines)
+
+    def _repr_html_(self) -> str:
+        """Return an HTML rendering of the summary for Jupyter notebooks (no external assets)."""
+        digits = 4
+        est_kind = "MAP, priors active" if self._has_priors else "MMLE"
+        se_label = "None" if self.se_method is None else self.se_method
+        quad = self._quadrature
+        quad_label = f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
+        n_items = len(self._model.item_names)
+
+        meta_rows = [
+            ("Model", f"{self._model_label()} ({est_kind})"),
+            (
+                "Data",
+                f"{self.n_obs} observations, {n_items} items, {self.n_params} free parameters",
+            ),
+            ("Groups", self._groups_label()),
+            ("Convergence", self._convergence_label()),
+            ("SE method", se_label),
+            ("Quadrature", quad_label),
+            ("Log-likelihood", f"{self.loglik:.{digits}f}"),
+            ("Log-posterior", f"{self.log_posterior:.{digits}f}"),
+            ("AIC", f"{self._aic_value():.{digits}f}"),
+            ("BIC", f"{self._bic_value():.{digits}f}"),
+        ]
+        meta_html = "".join(
+            f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>" for k, v in meta_rows
+        )
+        note_html = (
+            f'<div class="flexpyirt-note">{html.escape(_PRIORS_IC_NOTE)}</div>'
+            if self._has_priors
+            else ""
+        )
+        latent_html = _df_to_html_table(self.latent, digits=digits)
+        items_html = _df_to_html_table(self.items, digits=digits)
+        return (
+            f"{_HTML_STYLE}"
+            '<div class="flexpyirt-result">'
+            '<div class="flexpyirt-header">flexpyirt FitResult</div>'
+            f'<table class="flexpyirt-meta"><tbody>{meta_html}</tbody></table>'
+            f"{note_html}"
+            "<h4>Latent distribution</h4>"
+            f"{latent_html}"
+            "<h4>Item parameters</h4>"
+            f"{items_html}"
+            "</div>"
         )
 
     def __repr__(self) -> str:
