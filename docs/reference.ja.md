@@ -505,12 +505,17 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 ```text
 Quadrature.equispaced(n_points=61, *, lim=(-6.0, 6.0))
 Quadrature.default(n_factors=1, *, lim=(-6.0, 6.0))
+Quadrature.gauss_hermite(n_points=21)
 ```
 
 等間隔の求積格子（両端を含む）。2・3 次元では直積格子として使う。`Quadrature.default(n_factors)` は
 mirt の既定と同じく、1 因子で 61 点、2 因子で各軸 31 点（$31^2 = 961$）、3 因子で各軸 15 点
 （$15^3 = 3{,}375$）、区間 $[-6, 6]$ を返す。`nodes()` は 1 次元軸 `(n_points,)`、`grid(n_factors)` は
 直積格子 `(n_points**n_factors, n_factors)` を返す。軸あたり点数は 3 以上、範囲は有限で `lower < upper`。
+
+`Quadrature.gauss_hermite(n_points)` は `Normal` 潜在分布用に Gauss–Hermite 節点 $\sqrt2\,x_q$（次元あたり 3–200 点、
+2・3 次元では直積則）を使い、推定した平均・共分散に合わせて重みを付け直す（DESIGN §15.44）。`base_log_weights(n_factors)` は
+節点ごとの固定の対数重み（等間隔格子では 0）を返す。`EmpiricalHistogram` とは併用できない。
 
 ---
 
