@@ -607,6 +607,16 @@ class ItemKernel(Protocol):
     を登録し、EH 結果にはトップレベルキー `"latent_weights"`（形状 `(G, Q)`。読み込み時に有限・厳密に正・和が 1・`n_groups`
     および `quadrature.n_points` との整合を検証；`Normal` モデルでは省略かつ存在すれば拒否し、既存の schema_version 1 の
     ペイロードと完全互換）を保存する。`_n_eh_params` は読み込み時に `(model, parameters, quadrature)` から決定的に再計算する。
+40. **S-X2 項目適合度（M5、`FitResult.item_fit`）**: `Normal` 潜在分布の単一群 1 次元モデルと欠測のないデータに対する
+    Orlando と Thissen（2000, 2003）の S-X2。期待割合
+    $E_j[s,k]=\sum_q P_{jk}(\theta_q)L_{-j}(s-k\mid\theta_q)w_q/\sum_q L(s\mid\theta_q)w_q$ を、推定時の求積格子と潜在分布の重みの上で
+    Lord–Wingersky 漸化式（Lord & Wingersky, 1984）から合計得点 $1,\dots,S-1$ について求め、各得点の観測人数を掛ける。
+    度数の少ないセルは `mirt:::collapseCells`（mirt 1.46–1.48）を 1 行ずつ移植した処理でまとめる（1 件だけの行をまとめる前に
+    計算した行のフラグを後で使う点も含め、統計量と自由度が一致するようにヒューリスティックをそのまま再現する）。
+    $df_j$ = 残ったセル数 − 行数 − 項目 $j$ の自由パラメタ数 − 潜在分布の自由パラメタ数で、mirt と同じ（mirt はすべての項目から
+    潜在分布のパラメタ数を引く）。RMSEA と $\chi^2$ の p 値も mirt に合わせる。表の計算は推定後の NumPy 処理（形がデータに依存
+    するので `jit` の外）で、カテゴリ確率は JAX の項目カーネルから得る。多次元・多母集団・EH・欠測データは照合するまで
+    `SpecificationError`（mirt は S-X2 で欠測を補完し、EH の重みを無視する）。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -620,6 +630,7 @@ class ItemKernel(Protocol):
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
+- Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
@@ -627,6 +638,8 @@ class ItemKernel(Protocol):
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
+- Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
+- Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.

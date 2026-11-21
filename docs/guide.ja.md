@@ -247,6 +247,17 @@ assert loaded.summary() == res.summary()
 np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_numpy())
 ```
 
+### 項目適合度（S-X2）
+
+`item_fit(data)` は各項目の Orlando と Thissen の S-X2 を計算する。合計得点ごとの各反応カテゴリの観測度数とモデルによる
+期待度数を比べ、度数の少ないセルは mirt の `itemfit()` と同じ方法でまとめる（既定 `mincell=1`）。欠測のないデータ、
+すべての反応カテゴリが観測されていること、`Normal` 潜在分布の単一群 1 次元モデルが必要。
+
+```python
+fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
+print(fit_table.round(3))
+```
+
 ## 6. 標準誤差
 
 - **`se="oakes"`**（既定）: Oakes (1999) の恒等式で観測情報行列を求める。E-step の期待度数を通した

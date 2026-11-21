@@ -130,6 +130,32 @@ and `pv1`…`pv{n_draws}` for `"PV"`; for multidimensional models (`method="EAP"
 model, `method="MAP"` with an `EmpiricalHistogram` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for a deterministic method, or
 `n_draws` is not a positive integer.
 
+#### `FitResult.item_fit`
+
+```text
+item_fit(data, *, mincell=1.0, item_names=None) -> DataFrame
+```
+
+Orlando–Thissen S-X2 item fit ([guide section 5](guide.md#item-fit-s-x2)). For each item,
+observed and model-implied counts of each category at summed scores $1,\dots,S-1$ are compared;
+the expected counts use the Lord–Wingersky recursion with the item left out and the fitted latent
+weights on the fitted quadrature grid. Sparse cells are collapsed exactly as mirt's `itemfit()`
+(`mincell` is mirt's argument), and $df_j$ = kept cells − rows − free parameters of the item −
+free latent parameters (mirt's convention).
+
+| Argument | Description |
+|---|---|
+| `data` | Complete responses on the fitted items (typically the fitting data) |
+| `mincell` | Minimum expected count per cell before collapsing (default `1.0`) |
+| `item_names` | Column names when `data` is an array |
+
+**Returns**: `DataFrame` with columns `item`, `s_x2`, `df`, `rmsea`
+($\sqrt{\max(0, X^2/df-1)/(N-1)}$) and `p`; items whose collapsed table leaves `df <= 0` get
+`df = 0` and NaN statistics.
+
+**Raises**: `SpecificationError` for multidimensional, multiple-group or `EmpiricalHistogram`
+models, missing responses, an item with an unobserved category, or a non-positive `mincell`.
+
 #### `FitResult.to_json`
 
 ```text

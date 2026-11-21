@@ -35,6 +35,7 @@
 | V11 | 3PL・4PL 単一群（シミュレーション） | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 | V12 | 表示用 IRT 閾値とデルタ法 SE（2PL・Rasch・GRM・GPCM・PCM・2 群 2PL） | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | 能力値スコアリング: MAP・ML・WLE（2PL・GRM・GPCM・3PL・2 群・欠測） | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
+| V15 | S-X2 項目適合度（GRM・GPCM・分散自由の PCM・3PL・FIPC の 2PL、`mincell` 1 と 3） | `itemfit(m, fit_stats = "S_X2")` | M5 |
 | V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -241,6 +242,13 @@
   同一パターンの回答者間での独立性、標本平均・標準偏差がモンテカルロ誤差内で EAP と事後 SD に一致すること）。
   あわせて平坦事前分布 MAP $\approx$ ML、全 7 項目モデルでの WLE 停留条件、極端パターン、多母集団、欠測、入力検証を
   単体テストで確認している。
+- **S-X2 項目適合度（V15、M5）**: 既存の参照値を再利用した 6 ケース（Science の V3 GRM と V8 GPCM、潜在分散が自由な
+  V8 PCM、V11 3PL、8 項目を固定した V5 FIPC 2PL、および `mincell = 3` の V3）。mirt は参照値の推定値で、各パラメタの
+  `est` フラグを保ったまま（自由パラメタを自由度から引くため）`TOL = NaN` とし、推定と同じ格子で
+  `itemfit(m, fit_stats = "S_X2")` を計算する（mirt 1.48、`validation/r/m5_itemfit_reference.R` →
+  `tests/reference/v15_sx2.json`）。flexpyirt はデータを推定し直す: 自由度はすべてのケースで一致し、S-X2 は相対 `2.2e-8`、
+  p 値は `1.3e-8` で一致（推定値自体の一致の水準）。単体テストで Lord–Wingersky 漸化式を全パターン列挙と比べ、期待度数の行が
+  条件付き確率であることを確認する。テスト: `tests/test_mirt_m5_itemfit.py`。
 - **確認的 2–3 次元 MIRT（V14, M4）**: 4 つのシミュレーションケースを `tests/test_mirt_m4_mirt.py` で照合した
   （通常 EM・SQUAREM の双方で通過。参照値生成: `validation/r/m4_mirt_reference.R` →
   `tests/reference/v14_mirt2d.json`、`accelerate = "none"`, `TOL = 1e-10`, `SE.type = "Oakes"`、

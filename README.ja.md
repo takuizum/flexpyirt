@@ -28,6 +28,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 経験ヒストグラム | 歪んだ・多峰の潜在分布のための `EmpiricalHistogram()`（Woods, 2007）。参照群は厳密な制約付き M-step で平均 0・分散 1 に標準化、FIPC では自由。重みと 4 次までのモーメントを報告 | V6 |
 | 結果の保存 | `FitResult.to_json()` / `FitResult.from_json()`（厳密なスキーマ、pickle 不使用） | — |
 | EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | V1–V5, V7–V9, V11, V14 |
+| 項目適合度 | Orlando–Thissen の S-X2（`FitResult.item_fit()`）。mirt と同じセルのまとめ方・自由度・RMSEA・p 値 | V15 |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
 
 今後の予定は[ロードマップ](docs/ROADMAP.ja.md)を参照。

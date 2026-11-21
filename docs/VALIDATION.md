@@ -40,6 +40,7 @@ English | [日本語](VALIDATION.ja.md)
 | V11 | 3PL and 4PL, single group (simulated) | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 | V12 | Display IRT thresholds and delta-method SEs (2PL, Rasch, GRM, GPCM, PCM, 2-group 2PL) | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | Ability scoring: MAP, ML, WLE (2PL, GRM, GPCM, 3PL, 2-group, missing) | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
+| V15 | S-X2 item fit (GRM, GPCM, PCM with free variance, 3PL, FIPC 2PL; `mincell` 1 and 3) | `itemfit(m, fit_stats = "S_X2")` | M5 |
 | V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 
 ## mirt settings and known differences (found in M1)
@@ -288,6 +289,16 @@ English | [日本語](VALIDATION.ja.md)
   mean/SD matching EAP and posterior SD within Monte-Carlo error), alongside unit tests for
   flat-prior MAP $\approx$ ML, WLE Warm-equation stationarity across all seven item models, extreme
   patterns, multiple groups, missing data, and input validation.
+- **S-X2 item fit (V15, M5)**: six cases reuse existing references (V3 GRM and V8 GPCM on
+  Science, V8 PCM with a free latent variance, V11 3PL, V5 FIPC 2PL with eight fixed items, and
+  V3 again with `mincell = 3`). mirt evaluates `itemfit(m, fit_stats = "S_X2")` at its reference
+  estimates with every parameter's `est` flag kept (so free parameters count against the df) and
+  `TOL = NaN`, on the same grid as the fit (mirt 1.48, `validation/r/m5_itemfit_reference.R` →
+  `tests/reference/v15_sx2.json`). flexpyirt refits the data: degrees of freedom are identical in
+  every case, S-X2 agrees to `2.2e-8` (relative) and p-values to `1.3e-8`, the level at which the
+  estimates themselves agree. Unit tests check the Lord–Wingersky recursion against brute-force
+  enumeration and that expected rows are conditional probabilities. Tests:
+  `tests/test_mirt_m5_itemfit.py`.
 - **Confirmatory 2–3 dimensional MIRT (V14, M4)**: four simulated cases are validated in
   `tests/test_mirt_m4_mirt.py` (with both plain EM and SQUAREM; reference generator
   `validation/r/m4_mirt_reference.R` → `tests/reference/v14_mirt2d.json`, `accelerate = "none"`,
