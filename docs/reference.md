@@ -571,8 +571,12 @@ Hermite polynomials with unit-sphere coefficients parameterized by $k$ angles
 `phi_1`…`phi_k` ($\boldsymbol\phi = \mathbf 0$ reproduces $N(\mu,\sigma^2)$ non-singularly),
 analytically standardized by the exact continuous moments of $h_k$ so the continuous mean and
 variance equal `mean` and `var` for every $\boldsymbol\phi$. Quadrature weights are normalized on
-the grid, keeping EM strictly monotone and Oakes / Hessian standard errors exact for all free item
-and latent parameters. Single-group unidimensional models only.
+the grid, keeping EM monotone (non-decreasing) and Oakes / Hessian standard errors exact for all
+free item and latent parameters. Single-group unidimensional models only. The Fisher information
+is singular at $\boldsymbol\phi = \mathbf 0$ in `phi_1`, `phi_2` (in `phi_1` for `degree=1`), so
+near-normal traits give unreliable angle standard errors, a non-standard likelihood-ratio test
+against `Normal` (use AIC / BIC), and possibly several local maxima
+([guide section 8](guide.md#davidian-curves)).
 
 | Argument | Description |
 |---|---|

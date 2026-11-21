@@ -435,6 +435,17 @@ print(dc.score(skew_df.iloc[:3], method="EAP").round(3))  # uses the fitted Davi
 - **Scoring**: `"EAP"` and `"PV"` use the fitted Davidian density; `"ML"` and `"WLE"` are
   likelihood-only; `"MAP"` raises `SpecificationError` because a Davidian density can be multimodal
   and vanish at real roots of $P_k$.
+- **Near-normal traits and local maxima**: at $\boldsymbol\phi=\mathbf 0$ (the normal density) the
+  first-order effects of `phi_1` and `phi_2` are pure location / scale changes, which the
+  standardization removes, so the Fisher information is singular there (in `phi_1` for
+  `degree=1`). When the trait is close to normal, the angles are poorly determined, their
+  standard errors are unreliable, and a likelihood-ratio test of `DavidianCurve` against `Normal`
+  does not follow its usual $\chi^2$ distribution; compare degrees (and `Normal`) by AIC / BIC
+  instead (Woods & Lin, 2009). The likelihood can also have several local maxima (in a `degree=1`
+  example the default start reached `phi_1 = 0.50` while a start at `-1.0` reached a fit 2.2
+  log-likelihood points better), so for important analyses refit from a few starting angles
+  (edit `value` of the `phi_*` rows of `Model.parameter_table()` and pass `table=`) and keep the
+  fit with the highest `loglik`.
 
 ## 9. Multiple groups
 
