@@ -2,7 +2,8 @@
 
 Implements the versioned plain-JSON format specified in DESIGN.md §15.26–§15.28:
 
-- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 1``, and
+- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 2`` (version 1,
+  written before multidimensional models were supported, is still read), and
   ``"flexpyirt_version"``.
 - Strict RFC 8259 JSON (``allow_nan=False`` on write; rejecting ``parse_constant`` on read).
   Finite IEEE-754 float64 values use standard ``repr``-exact JSON numbers; non-finite values in
@@ -17,6 +18,7 @@ import json
 import math
 import os
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -48,7 +50,10 @@ __all__ = [
 ]
 
 FORMAT_TAG = "flexpyirt.FitResult"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+"""Schema version written by :func:`dump_fit_result` (2 adds the confirmatory factor structure)."""
+SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2})
+"""Schema versions accepted by :func:`load_fit_result`; version 1 has no factor keys."""
 
 _INT32_MAX = (1 << 31) - 1
 _INT64_MIN = -(1 << 63)
@@ -633,17 +638,28 @@ def _serialize_model(model: Model) -> dict[str, Any]:
             {"item": item, "param": param, "dist": _serialize_prior(dist)}
             for item, param, dist in model.priors
         ],
+        "factors": (
+            None
+            if model.factors is None
+            else [{"name": name, "items": list(items)} for name, items in model.factors]
+        ),
+        "correlated_factors": bool(model.correlated_factors),
     }
 
 
-def _deserialize_model(raw: Any) -> Model:
-    """Deserialize and validate a :class:`~flexpyirt.Model` specification."""
+def _deserialize_model(raw: Any, *, schema_version: int = SCHEMA_VERSION) -> Model:
+    """Deserialize and validate a :class:`~flexpyirt.Model` specification.
+
+    Schema version 2 adds ``factors`` and ``correlated_factors``; version 1 payloads have neither
+    and are unidimensional. A factor structure is rebuilt through :meth:`Model.with_factors`, so
+    the same validation applies as when it was first declared, and the fixed values, equalities
+    and priors are checked against the multidimensional parameter names (``a1``..``aD``).
+    """
     obj = _require_dict(raw, field_name="model")
-    _check_keys(
-        obj,
-        required={"items", "fixed", "latent", "groups", "equal", "priors"},
-        field_name="model",
-    )
+    required = {"items", "fixed", "latent", "groups", "equal", "priors"}
+    if schema_version >= 2:
+        required |= {"factors", "correlated_factors"}
+    _check_keys(obj, required=required, field_name="model")
 
     items_raw = _require_list(obj["items"], field_name="model.items")
     items_list: list[tuple[str, ItemModel]] = []
@@ -657,6 +673,33 @@ def _deserialize_model(raw: Any) -> Model:
     # Validates non-empty and unique item names.
     base = Model(items=items_tuple)
     lookup = dict(base.items)
+    if schema_version >= 2 and obj["factors"] is not None:
+        correlated = _require_bool(obj["correlated_factors"], field_name="model.correlated_factors")
+        factors_raw = _require_list(obj["factors"], field_name="model.factors")
+        factor_map: dict[str, list[str]] = {}
+        for idx, entry in enumerate(factors_raw):
+            f_obj = _require_dict(entry, field_name=f"model.factors[{idx}]")
+            _check_keys(f_obj, required={"name", "items"}, field_name=f"model.factors[{idx}]")
+            f_name = _require_str(f_obj["name"], field_name=f"model.factors[{idx}].name")
+            if f_name in factor_map:
+                raise SpecificationError(f"Duplicated factor name {f_name!r} in model.factors.")
+            f_items_raw = _require_list(f_obj["items"], field_name=f"model.factors[{idx}].items")
+            f_items = [
+                _require_str(v, field_name=f"model.factors[{idx}].items[{k}]")
+                for k, v in enumerate(f_items_raw)
+            ]
+            unknown_f = [i for i in f_items if i not in lookup]
+            if unknown_f:
+                raise SpecificationError(
+                    f"model.factors[{idx}] references unknown items {unknown_f}."
+                )
+            factor_map[f_name] = f_items
+        base = base.with_factors(factor_map, correlated=correlated)
+    elif schema_version >= 2:
+        _require_bool(obj["correlated_factors"], field_name="model.correlated_factors")
+
+    def _param_names(item: str) -> tuple[str, ...]:
+        return base.item_kernel(lookup[item]).param_names
 
     latent = (
         None
@@ -682,6 +725,11 @@ def _deserialize_model(raw: Any) -> Model:
         groups = tuple(groups_list)
     if latent is not None and groups is not None:
         raise SpecificationError("model cannot specify both 'latent' and 'groups'.")
+    if base.is_multidimensional and (latent is not None or groups is not None):
+        raise SpecificationError(
+            "model with factors cannot specify 'latent' or 'groups' (multidimensional models "
+            "are single-group with a multivariate normal latent distribution)."
+        )
 
     fixed_raw = _require_list(obj["fixed"], field_name="model.fixed")
     fixed_list: list[tuple[str, str, float]] = []
@@ -693,7 +741,7 @@ def _deserialize_model(raw: Any) -> Model:
         f_val = _decode_float(f_obj["value"], field_name=f"model.fixed[{idx}].value", finite=True)
         if f_item not in lookup:
             raise SpecificationError(f"model.fixed[{idx}] references unknown item {f_item!r}.")
-        if f_param not in lookup[f_item].kernel.param_names:
+        if f_param not in _param_names(f_item):
             raise SpecificationError(
                 f"model.fixed[{idx}] references unknown parameter {f_param!r} for item {f_item!r}."
             )
@@ -724,7 +772,7 @@ def _deserialize_model(raw: Any) -> Model:
                 for k, v in enumerate(eq_params_raw)
             )
             for item in eq_items:
-                bad = [p for p in eq_params if p not in lookup[item].kernel.param_names]
+                bad = [p for p in eq_params if p not in _param_names(item)]
                 if bad:
                     raise SpecificationError(
                         f"model.equal[{idx}] references unknown parameters {bad} for item {item!r}."
@@ -743,14 +791,14 @@ def _deserialize_model(raw: Any) -> Model:
             raise SpecificationError(f"model.priors[{idx}].dist cannot be null.")
         if p_item not in lookup:
             raise SpecificationError(f"model.priors[{idx}] references unknown item {p_item!r}.")
-        if p_param not in lookup[p_item].kernel.param_names:
+        if p_param not in _param_names(p_item):
             raise SpecificationError(
                 f"model.priors[{idx}] references unknown parameter {p_param!r} for item {p_item!r}."
             )
         priors_list.append((p_item, p_param, p_dist))
 
-    return Model(
-        items=items_tuple,
+    return replace(
+        base,
         fixed=tuple(fixed_list),
         latent=latent,
         groups=groups,
@@ -1210,10 +1258,10 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
     if "schema_version" not in obj:
         raise SpecificationError("Missing 'schema_version' in FitResult JSON.")
     schema_version = _require_int(obj["schema_version"], field_name="schema_version")
-    if schema_version != SCHEMA_VERSION:
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         raise SpecificationError(
             f"Unsupported FitResult schema_version {schema_version}; "
-            f"supported version is {SCHEMA_VERSION}."
+            f"supported versions are {sorted(SUPPORTED_SCHEMA_VERSIONS)}."
         )
     allowed_keys = _TOP_LEVEL_KEYS | {"latent_weights"}
     keys = set(obj.keys())
@@ -1225,7 +1273,7 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
         raise SpecificationError(f"Unexpected keys in FitResult: {extra_top}.")
     _require_str(obj["flexpyirt_version"], field_name="flexpyirt_version")
 
-    model = _deserialize_model(obj["model"])
+    model = _deserialize_model(obj["model"], schema_version=schema_version)
     quadrature = _deserialize_quadrature(obj["quadrature"], field_name="quadrature")
     eh_weights: np.ndarray | None = None
     if model.is_eh:
