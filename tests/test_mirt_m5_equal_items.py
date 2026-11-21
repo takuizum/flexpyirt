@@ -41,7 +41,8 @@ class Case:
 
     @property
     def patterns(self) -> pd.DataFrame:
-        return pd.DataFrame(np.asarray(self.raw["patterns"], dtype=float), columns=self.raw["items"])
+        rows = np.asarray(self.raw["patterns"], dtype=float)
+        return pd.DataFrame(rows, columns=self.raw["items"])
 
     @property
     def data(self) -> pd.DataFrame:
