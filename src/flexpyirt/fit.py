@@ -56,10 +56,13 @@ def fit(
     quadrature: Quadrature | None = None,
     se: SEMethod | None = "oakes",
 ) -> FitResult:
-    r"""Estimate an IRT model by marginal maximum likelihood with Bock–Aitkin EM.
+    r"""Estimate an IRT model by MMLE or MAP with Bock–Aitkin EM.
 
-    Bock & Aitkin (1981). Standard errors from Oakes' identity (Oakes, 1999) or the Hessian of the
-    marginal log-likelihood, both by automatic differentiation (DESIGN.md §4.8).
+    Bock & Aitkin (1981). When item-parameter priors are attached via :meth:`Model.prior` (or the
+    ``prior`` column of ``table``), EM finds the Bayes modal (MAP) estimate on the natural
+    parameter scale without a Jacobian term (DESIGN.md §4.7). Standard errors come from Oakes'
+    identity (Oakes, 1999) or the direct Hessian of the log-likelihood (or log posterior with
+    priors), both by automatic differentiation (DESIGN.md §4.8).
 
     Parameters
     ----------
@@ -166,6 +169,7 @@ def fit(
         {
             "iter": np.arange(1, n_iter + 1),
             "loglik": np.asarray(out.loglik_history)[:n_iter],
+            "log_posterior": np.asarray(out.log_posterior_history)[:n_iter],
             "max_change": np.asarray(out.change_history)[:n_iter],
             "em_evaluations": np.asarray(out.em_eval_history)[:n_iter],
             "safeguard": np.asarray(out.safeguard_history)[:n_iter],
@@ -174,6 +178,7 @@ def fit(
     return FitResult(
         parameters=params,
         loglik=float(out.loglik),
+        log_posterior=float(out.log_posterior),
         converged=converged,
         n_iter=n_iter,
         n_em_evaluations=n_em_evaluations,

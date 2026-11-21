@@ -15,9 +15,10 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock
+from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock, PriorBlock
 from flexpyirt.errors import FlexpyirtWarning, IdentificationError, SpecificationError
 from flexpyirt.items import FourPLKernel, ItemKernel
+from flexpyirt.priors import PRIOR_TYPES, Prior, encode_prior
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -38,7 +39,18 @@ __all__ = [
 
 LATENT_ITEM = "__latent__"
 LATENT_PARAMS = ("mean", "var")
-TABLE_COLUMNS = ("group", "item", "model", "param", "value", "free", "lower", "upper", "free_id")
+TABLE_COLUMNS = (
+    "group",
+    "item",
+    "model",
+    "param",
+    "value",
+    "free",
+    "lower",
+    "upper",
+    "prior",
+    "free_id",
+)
 
 
 # --------------------------------------------------------------------------------------------
@@ -196,6 +208,7 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     starts = _start_values(model, y)
     fixed = {(item, param): value for item, param, value in model.fixed}
+    priors = {(item, param): dist for item, param, dist in model.priors}
     for group_name, latent in model.resolved_groups():
         for name, item_model in model.items:
             lower, upper = item_model.bounds()
@@ -224,6 +237,7 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                         "free": free_default[k] and key not in fixed,
                         "lower": float(lower[k]),
                         "upper": float(upper[k]),
+                        "prior": priors.get(key),
                     }
                 )
         latent_rows: tuple[tuple[str, float, bool, float], ...] = (
@@ -241,9 +255,11 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                     "free": bool(free),
                     "lower": lat_lower,
                     "upper": np.inf,
+                    "prior": None,
                 }
             )
     table = pd.DataFrame(rows)
+    table["prior"] = table["prior"].astype(object)
     ids = np.full(len(table), -1)
     free_mask = table["free"].to_numpy(dtype=bool)
     ids[free_mask] = np.arange(int(free_mask.sum()))
@@ -290,6 +306,7 @@ def validate_table(
     t = t.set_index(keys).loc[reference.set_index(keys).index].reset_index()[list(TABLE_COLUMNS)]
     t["model"] = reference["model"].to_numpy()
     t["free"] = t["free"].astype(bool)
+    t["prior"] = t["prior"].astype(object)
     for col in ("value", "lower", "upper"):
         t[col] = t[col].astype(float)
 
@@ -302,6 +319,7 @@ def validate_table(
     ref_lower = reference["lower"].to_numpy(dtype=float)
     ref_upper = reference["upper"].to_numpy(dtype=float)
     free = t["free"].to_numpy(dtype=bool)
+    prior_col = t["prior"].to_numpy(dtype=object)
     for i in range(len(t)):
         where = f"(group={group_col[i]!r}, item={item_col[i]!r}, param={param_col[i]!r})"
         if not np.isfinite(value[i]):
@@ -324,6 +342,28 @@ def validate_table(
             )
         if item_col[i] == LATENT_ITEM and param_col[i] == "var" and not value[i] > 0:
             raise SpecificationError(f"Latent variance must be positive at {where}.")
+        pri = prior_col[i]
+        if pri is not None:
+            if item_col[i] == LATENT_ITEM:
+                raise SpecificationError(
+                    f"Priors on latent-distribution parameters are not supported at {where}."
+                )
+            if not isinstance(pri, PRIOR_TYPES):
+                raise SpecificationError(
+                    f"Invalid prior {pri!r} at {where}; use NormalPrior, LogNormal, Beta or None."
+                )
+            if free[i]:
+                p_lo, p_hi = pri.support
+                if not (p_lo < value[i] < p_hi):
+                    raise SpecificationError(
+                        f"Starting value {value[i]} is outside the support ({p_lo}, {p_hi}) "
+                        f"of {pri!r} at {where}."
+                    )
+                if not (max(lower[i], p_lo) < min(upper[i], p_hi)):
+                    raise SpecificationError(
+                        f"Bounds [{lower[i]}, {upper[i]}] do not overlap the support "
+                        f"({p_lo}, {p_hi}) of {pri!r} at {where}."
+                    )
 
     # Asymptote ordering g < u for 3PL / 4PL items.
     fourpl_items = {name for name, m in model.items if isinstance(m.kernel, FourPLKernel)}
@@ -358,6 +398,13 @@ def validate_table(
     if (within > 1).any():
         fid = int(within[within > 1].index[0])
         raise SpecificationError(f"free_id {fid} is shared by different parameters of one item.")
+    for fid_val, rows_f in t[t["free"]].groupby("free_id"):
+        priors_f = list(rows_f["prior"])
+        first_p = priors_f[0]
+        if any(p != first_p for p in priors_f[1:]):
+            raise SpecificationError(
+                f"Rows sharing free_id {fid_val} have conflicting priors: {priors_f}."
+            )
     _check_estimable(t, model, y, group)
     _check_identification(t, model)
     return t
@@ -502,14 +549,23 @@ def compile_problem(
     patterns, pat_groups, counts = pad_patterns(patterns, pat_groups, counts)
     n_free = int(table["free_id"].max()) + 1 if table["free"].any() else 0
     eta0 = np.zeros(n_free)
+    prior_kind = np.zeros(n_free, dtype=np.int32)
+    prior_p1 = np.zeros(n_free, dtype=float)
+    prior_p2 = np.ones(n_free, dtype=float)
     free_rows = table[table["free"]].drop_duplicates("free_id")
-    eta0[free_rows["free_id"].to_numpy(dtype=int)] = free_rows["value"].to_numpy(dtype=float)
+    free_ids = free_rows["free_id"].to_numpy(dtype=int)
+    eta0[free_ids] = free_rows["value"].to_numpy(dtype=float)
+    for fid_val, pri in zip(free_ids.tolist(), free_rows["prior"].tolist(), strict=True):
+        k_code, p1, p2 = encode_prior(pri)
+        prior_kind[fid_val] = k_code
+        prior_p1[fid_val] = p1
+        prior_p2[fid_val] = p2
 
     groups = [g for g, _ in model.resolved_groups()]
     n_groups = len(groups)
-    lookup = {
-        (g, i, p): (v, fid, lo, hi)
-        for g, i, p, v, fid, lo, hi in zip(
+    lookup: dict[tuple[str, str, str], tuple[float, int, float, float, Prior | None]] = {
+        (g, i, p): (v, fid, lo, hi, pri)
+        for g, i, p, v, fid, lo, hi, pri in zip(
             table["group"],
             table["item"],
             table["param"],
@@ -517,6 +573,7 @@ def compile_problem(
             table["free_id"].to_numpy(dtype=int),
             table["lower"].to_numpy(dtype=float),
             table["upper"].to_numpy(dtype=float),
+            table["prior"].tolist(),
             strict=True,
         )
     }
@@ -545,12 +602,16 @@ def compile_problem(
             item_slots: list[tuple[int, float, float]] = []
             for gg, g in enumerate(groups):
                 for pp, p in enumerate(params):
-                    v, fid, lo, hi = lookup[(g, item, p)]
+                    v, fid, lo, hi, pri = lookup[(g, item, p)]
                     fixed[gg, jj, pp] = v
                     free_index[gg, jj, pp] = fid
                     if fid >= 0:
                         if fid not in seen:
                             seen[fid] = len(item_slots)
+                            if pri is not None:
+                                p_lo, p_hi = pri.support
+                                lo = max(lo, p_lo)
+                                hi = min(hi, p_hi)
                             item_slots.append((fid, lo, hi))
                         local_index[gg, jj, pp] = seen[fid]
             slots.append(item_slots)
@@ -574,12 +635,19 @@ def compile_problem(
             )
         )
 
-    lat_vals = np.array([[lookup[(g, LATENT_ITEM, p)] for p in LATENT_PARAMS] for g in groups])
+    lat_vals = np.array(
+        [[lookup[(g, LATENT_ITEM, p)][:4] for p in LATENT_PARAMS] for g in groups], dtype=float
+    )
     latent = LatentBlock(
         fixed_values=jnp.asarray(lat_vals[:, :, 0], dtype=jnp.float64),
         free_index=jnp.asarray(lat_vals[:, :, 1].astype(np.int32)),
         lower=jnp.asarray(lat_vals[:, :, 2], dtype=jnp.float64),
         upper=jnp.asarray(lat_vals[:, :, 3], dtype=jnp.float64),
+    )
+    priors_block = PriorBlock(
+        kind=jnp.asarray(prior_kind, dtype=jnp.int32),
+        param1=jnp.asarray(prior_p1, dtype=jnp.float64),
+        param2=jnp.asarray(prior_p2, dtype=jnp.float64),
     )
     problem = CompiledProblem(
         y=jnp.asarray(patterns, dtype=jnp.int32),
@@ -588,6 +656,7 @@ def compile_problem(
         nodes=jnp.asarray(quad.nodes(), dtype=jnp.float64),
         families=tuple(families),
         latent=latent,
+        priors=priors_block,
         n_groups=n_groups,
     )
     return Compiled(problem=problem, eta0=eta0, inverse=inverse, n_patterns=n_patterns)
