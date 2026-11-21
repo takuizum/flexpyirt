@@ -728,8 +728,12 @@ def _oakes_cross_hessian(
     Q = prob.nodes.shape[0]
     P = prob.y.shape[0]
 
-    n_g_tot = jnp.maximum(jnp.sum(counts.n, axis=1, keepdims=True), 1.0)
-    q_w_g = counts.n / n_g_tot  # (G, Q)
+    # Normalize with a guarded positive denominator (a clamp at 1 would leave weights that do not
+    # sum to 1 when a total is fractional); an empty group falls back to uniform weights.
+    n_g_tot = jnp.sum(counts.n, axis=1, keepdims=True)
+    q_w_g = jnp.where(
+        n_g_tot > 0, counts.n / jnp.where(n_g_tot > 0, n_g_tot, 1.0), 1.0 / counts.n.shape[1]
+    )  # (G, Q)
 
     fam_d: list[tuple[FamilyBlock, Array]] = []
     D = 1  # column 0 carries the per-group latent score
@@ -748,7 +752,7 @@ def _oakes_cross_hessian(
 
         d_lp = jnp.transpose(jax.vmap(item_jac)(local, fixed, u0), (1, 0, 3, 2, 4))  # (G,J,K,Q,S)
         r_tot = jnp.sum(r, axis=-1, keepdims=True)  # (G, J, K, 1)
-        r_w = jnp.where(r_tot > 0, r / jnp.maximum(r_tot, 1.0), q_w_g[:, None, None, :])
+        r_w = jnp.where(r_tot > 0, r / jnp.where(r_tot > 0, r_tot, 1.0), q_w_g[:, None, None, :])
         d_lp = d_lp - jnp.sum(d_lp * r_w[..., None], axis=3, keepdims=True)
         fam_d.append((fam, d_lp))
         D += fam.columns.shape[0] * fam.kernel.n_cat

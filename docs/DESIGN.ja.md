@@ -464,6 +464,9 @@ class LatentDist(Protocol):
       V1–V11（2PL, Rasch, GRM, 2 群アンカー, FIPC, 欠測, 3PL, GPCM, PCM, MAP 事前分布）すべてで旧
       `jacfwd(grad(q))` 実装との差は $\max|\Delta I|/\max|I|\le 8.8\times 10^{-16}$（要素別相対誤差
       $\le 3.1\times 10^{-12}$、`tests/test_oakes.py`）。
+    - **他の処理がない状態での計測**（メンテナー、同じ 2PL $20{,}000\times40$ データ、EM 約 0.41 s を含む
+      ウォーム 5 回の中央値）: `fit(..., se="oakes")` 3.39 s → **0.50 s**（Oakes 部分は約 2.98 s → 約 0.09 s）、
+      `se="hessian"` 1.16 s → 1.07 s。共分散行列は従来の実装と最大要素比 $8.5\times10^{-16}$ で一致。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.

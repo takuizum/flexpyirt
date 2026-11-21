@@ -278,3 +278,47 @@ def test_oakes_prior_hessian_is_added_once_per_shared_free_id() -> None:
     assert np.sum(np.isclose(diag, 4.0, rtol=1e-12)) == 3
     assert np.sum(np.isclose(diag, 0.0, atol=1e-12)) == len(diag) - 3
     _assert_matches_reference(prob_prior, eta)
+
+
+def test_oakes_many_chunks_two_groups_and_padding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise multi-chunk accumulation with several groups and all-padding chunks.
+
+    With the default chunk size every other test fits in one chunk. Shrinking the chunk forces:
+    several chunks per group, chunks belonging entirely to the other group (skipped by the
+    `lax.cond` on `jnp.any(mask_g)`), and trailing chunks made only of zero-count padding rows.
+    The function is called without `jax.jit` so the patched constant is read at trace time.
+    """
+    rng = np.random.default_rng(11)
+    a = np.array([1.2, 0.8, 1.5, 1.0, 0.9, 1.3])
+    d = np.array([0.5, -0.4, 0.0, 1.0, -0.8, 0.3])
+
+    def sim(n: int, mu: float) -> np.ndarray:
+        theta = rng.normal(mu, 1.0, size=(n, 1))
+        y: np.ndarray = (rng.random((n, a.size)) < 1.0 / (1.0 + np.exp(-(theta * a + d)))).astype(
+            float
+        )
+        return y
+
+    df = pd.DataFrame(
+        np.vstack([sim(500, 0.0), sim(500, 0.6)]), columns=[f"i{j}" for j in range(6)]
+    )
+    df = df.mask(rng.random(df.shape) < 0.1)  # some missing responses
+    group = np.repeat(["ref", "focal"], 500)
+    spec = (
+        Model.uniform(TwoPL(), items=df.columns)
+        .with_groups(ref=Normal.standard(), focal=Normal.free())
+        .equal_across_groups(items=["i0", "i1", "i2"])
+    )
+    prob, eta = _compile_case(spec, df, group=group)
+    n_rows = int(prob.y.shape[0])
+    n_real = int(np.count_nonzero(np.asarray(prob.counts)))
+    chunk = 8
+    assert n_rows // chunk >= 4, "need several chunks"
+    assert n_rows - n_real >= chunk, "need at least one all-padding chunk"
+    eta = eta + 0.05  # away from the starting point; Oakes' identity holds at any eta
+
+    monkeypatch.setattr(_core, "_OAKES_MAX_CHUNK", chunk)
+    got = np.asarray(_core.information_oakes(prob, eta))
+    ref = np.asarray(jax.jit(_reference_information_oakes)(prob, eta))
+    scale = max(float(np.max(np.abs(ref))), 1.0)
+    np.testing.assert_allclose(got, ref, rtol=1e-10, atol=1e-12 * scale)

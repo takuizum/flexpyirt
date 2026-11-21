@@ -570,6 +570,10 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
       priors), agreement with the previous `jacfwd(grad(q))` implementation is
       $\max|\Delta I|/\max|I|\le 8.8\times 10^{-16}$ (elementwise $\le 3.1\times 10^{-12}$;
       `tests/test_oakes.py`).
+    - **Idle-machine measurement** (maintainer, same 2PL $20{,}000\times40$ data, warm median of 5
+      fits including EM ≈ 0.41 s): `fit(..., se="oakes")` 3.39 s → **0.50 s** (the Oakes part
+      ≈ 2.98 s → ≈ 0.09 s); `se="hessian"` 1.16 s → 1.07 s; covariance matrices agree with the
+      previous implementation to $8.5\times10^{-16}$ (relative to the largest entry).
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
