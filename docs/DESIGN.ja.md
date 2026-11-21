@@ -701,10 +701,16 @@ class ItemKernel(Protocol):
      帰着させる。これは mirt 1.46.1 と意図的に異なる。mirt の `fscores(method = "ML")` は $\mathrm{ak}$ にかかわらず
      全項目カテゴリ 0 / 全項目最上位カテゴリのパタンに $\mp\infty$ を返すが、$\mathrm{ak}_1<0$ では全 0 パタンの
      ML 推定値は内点にあり、flexpyirt はその値を返す（VALIDATION.md V23）。
+   - **退化項目**: `fit()` は、傾きが自由な `Nominal` 項目（$K\ge 3$）について、傾きのノルムが $10^{-3}$ 未満
+     （項目が情報を持たず $\mathrm{ak}_1..\mathrm{ak}_{K-2}$ が識別されない。mirt の NR が既定初期値から陥る鞍点）か、
+     $|\mathrm{ak}_k|$ または $|d_k|$ が 50 を超える（カテゴリの発散）ときに `HeywoodWarning` を出す。
    - **照合（V23）**: mirt の名義モデルの既定初期値では NR が `Science` で鞍点に止まるため、
-     `validation/r/m5_nominal_reference.R` は mirt の NR を GPCM の点から開始する。flexpyirt は自身の既定初期値から
-     推定し、3 ケース（`Science`、順序のない・負の $\mathrm{ak}$ を含むシミュレーション、名義 + 2PL）すべてで
-     VALIDATION.md の許容誤差内で mirt の解に到達する。
+     `validation/r/m5_nominal_reference.R` は mirt の NR を GPCM の点から開始し、mirt の別の初期値 5 通りのうち最良のものが
+     より高ければそこから NR をやり直す（大半が非単調な V23e では GPCM の点からの NR は局所最大に止まる）。flexpyirt は
+     自身の既定初期値から推定し、1 次元（`Science`、順序のない・負の $\mathrm{ak}$ を含むシミュレーション、名義 + 2PL、
+     大半が非単調な項目）と 2 因子の確認的モデル（V23f）のすべてで VALIDATION.md の許容誤差内で mirt の解に到達する。
+     3 因子の名義モデルは単体テストのみ。mirt は V23e の真に $+\infty$ のパタン 1 つを `max_theta = 20` の境界に残す。
+     ML の極端パタンは R での独立な対数尤度走査と照合する。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.

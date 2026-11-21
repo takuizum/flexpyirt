@@ -46,4 +46,4 @@
 - [x] 項目適合度: S-X2（`FitResult.item_fit()`、単一群 1 次元。V15 で照合済み）。
 - [x] DIF: 多群の尤度比検定（`FitResult.dif()`、`add` / `drop` の 2 方式、Holm / BH 補正。V17 で照合済み）。
 - M2（限定情報の適合度）。
-- [x] 名義反応モデル（`Nominal(n_cat)`、mirt の `itemtype = "nominal"` と同じ Thissen, Cai & Bock (2010) のパラメタ化。V23 で照合済み）。
+- [x] 名義反応モデル（`Nominal(n_cat)`、mirt の `itemtype = "nominal"` と同じ Thissen, Cai & Bock (2010) のパラメタ化。V23 で 1 因子・2 因子を照合済み、3 因子は単体テストのみ）。

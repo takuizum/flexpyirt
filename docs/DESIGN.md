@@ -1054,10 +1054,19 @@ data-independent shapes (§15.21).
      whose `fscores(method = "ML")` returns $\mp\infty$ for every all-category-0 /
      all-top-category pattern regardless of $\mathrm{ak}$: with $\mathrm{ak}_1<0$ the all-0 pattern
      has an interior ML estimate, which flexpyirt returns (VALIDATION.md V23).
+   - **Degenerate items**: `fit()` emits a `HeywoodWarning` for a `Nominal` item ($K\ge 3$) with a
+     free slope whose slope norm is below $10^{-3}$ (the item carries no information and
+     $\mathrm{ak}_1..\mathrm{ak}_{K-2}$ are unidentified: the saddle that traps mirt's NR from its
+     default starts) or whose $|\mathrm{ak}_k|$ or $|d_k|$ exceeds 50 (diverging categories).
    - **Validation (V23)**: `validation/r/m5_nominal_reference.R` starts mirt's NR at the GPCM point
-     because mirt's default nominal starting values stop NR at a saddle on `Science`; flexpyirt
-     fits from its own defaults and reaches mirt's solution in all three cases (`Science`, simulated
-     with unordered / negative $\mathrm{ak}$, nominal + 2PL) within the VALIDATION.md tolerances.
+     (mirt's default nominal starting values stop NR at a saddle on `Science`) and restarts it from
+     the best of five alternative mirt starts when that is higher (on the mostly non-monotone V23e
+     data the GPCM-point NR stops at a local maximum). flexpyirt fits from its own defaults and
+     reaches mirt's solution in all cases within the VALIDATION.md tolerances: unidimensional
+     (`Science`, simulated with unordered / negative $\mathrm{ak}$, nominal + 2PL, mostly
+     non-monotone items) and a two-factor confirmatory model (V23f). Three-factor nominal models
+     are unit-tested only. mirt also leaves one true $+\infty$ V23e pattern at its `max_theta = 20`
+     bound; ML extremes are checked against an independent R log-likelihood scan.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
