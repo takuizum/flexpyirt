@@ -986,7 +986,8 @@ data-independent shapes (§15.21).
    **Identification**: the necessary conditions of §4.5 and §14.5 are unchanged (for example a
    common free slope with a free latent variance is still rejected, because no slope is fixed).
 2. **DIF by multiple-group likelihood-ratio tests (`FitResult.dif`)**:
-   `FitResult.dif(data, *, group, items, params=None, scheme="add", item_names=None)` tests each
+   `FitResult.dif(data, *, group, items, params=None, scheme="add", p_adjust="holm",
+   item_names=None)` tests each
    item in `items` for differential item functioning across the groups of a fitted
    multiple-group model (Thissen, Steinberg & Wainer, 1993), as mirt's `DIF()`. For
    `scheme="add"` the fitted model is the baseline and each item's `params` (default: all of
@@ -995,10 +996,11 @@ data-independent shapes (§15.21).
    quadrature, starting from the baseline estimates, and
    $X^2=2(\ell_{\text{free}}-\ell_{\text{constrained}})$ with
    $df=|k_{\text{base}}-k_{\text{new}}|$ gives $p=P(\chi^2_{df}>X^2)$. The result has one row per
-   item with `item`, `converged`, the differences (new minus baseline, mirt's sign) of AIC,
+   item with `item`, `converged`, the differences (item free minus item constrained, mirt's sign,
+   so negative values favour DIF) of AIC,
    SABIC ($-2\ell+k\log((N+2)/24)$), HQ ($-2\ell+2k\log\log N$) and BIC, `x2`, `df`, `p` and
-   `adj_p` (Benjamini & Hochberg, 1995, over the tested items, as mirt's default
-   `p.adjust = "BH"`). Changes are made in the parameter table, so identification is checked as
+   `adj_p` (adjusted over the tested items: Holm, 1979, by default as mirt's `p.adjust = "holm"`;
+   `p_adjust="BH"` for Benjamini & Hochberg, 1995, or `"none"`). Changes are made in the parameter table, so identification is checked as
    for any fit (freeing the only anchors raises `IdentificationError`), and an item whose
    parameters are already equal (`"add"`) or already free (`"drop"`) raises
    `SpecificationError`. MAP fits are rejected (the statistic needs the marginal likelihood at
@@ -1016,6 +1018,7 @@ data-independent shapes (§15.21).
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
+- Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
