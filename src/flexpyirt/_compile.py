@@ -55,7 +55,6 @@ __all__ = [
 ]
 
 LATENT_ITEM = "__latent__"
-LATENT_PARAMS = ("mean", "var")
 TABLE_COLUMNS = (
     "group",
     "item",
@@ -603,8 +602,11 @@ def validate_table(
                 )
         items_sub = t[t["item"] != LATENT_ITEM]
         for m, fname in enumerate(model.factor_names, start=1):
-            slope_vals = items_sub.loc[items_sub["param"] == f"a{m}", "value"].to_numpy(dtype=float)
-            if not np.any(slope_vals != 0.0):
+            rows_m = items_sub[items_sub["param"] == f"a{m}"]
+            slope_vals = rows_m["value"].to_numpy(dtype=float)
+            # A factor whose loadings are all fixed at 0 is an identification problem, reported
+            # as IdentificationError by _check_identification_mirt; here only starting values.
+            if rows_m["free"].any() and not np.any(slope_vals != 0.0):
                 raise SpecificationError(
                     f"Factor {fname!r} (a{m}) has all starting slopes equal to 0; at least one "
                     "loading must have a nonzero starting value."
@@ -759,6 +761,8 @@ def _check_identification_mirt(t: pd.DataFrame, model: Model) -> None:
     free_sets: list[set[str]] = []
     fixed_nonzero_sets: list[set[str]] = []
     n_fixed_slopes: list[int] = []
+    fixed_vectors: list[np.ndarray] = []
+    all_items = list(model.item_names)
 
     for m, fname in enumerate(fnames, start=1):
         slope = f"a{m}"
@@ -791,6 +795,8 @@ def _check_identification_mirt(t: pd.DataFrame, model: Model) -> None:
         free_sets.append(free_items)
         fixed_nonzero_sets.append(fixed_nz)
         n_fixed_slopes.append(int((~s_rows["free"]).sum()))
+        fixed_vals = dict(zip(s_rows["item"], s_rows["value"].astype(float), strict=True))
+        fixed_vectors.append(np.array([fixed_vals.get(it, 0.0) for it in all_items]))
 
     # Necessary confirmatory rotational identification (Bollen, 1989; Reckase, 2009):
     # each factor involved in c_m free correlations needs at least c_m fixed slopes (typically 0s),
@@ -819,6 +825,16 @@ def _check_identification_mirt(t: pd.DataFrame, model: Model) -> None:
                     f"Factors {fnames[i]!r} and {fnames[j]!r} have identical free loading "
                     "patterns with no fixed nonzero slopes, which is rotationally unidentified."
                 )
+            # With no free slopes on either factor, proportional fixed loading vectors make the
+            # loading matrix rank deficient (e.g. Rasch/PCM items loading on both factors):
+            # only a combination of the two factors is identified.
+            if not free_sets[i] and not free_sets[j]:
+                vi, vj = fixed_vectors[i], fixed_vectors[j]
+                if np.linalg.matrix_rank(np.vstack([vi, vj])) < 2:
+                    raise IdentificationError(
+                        f"Factors {fnames[i]!r} and {fnames[j]!r} have proportional fixed loadings "
+                        "and no free loadings, so only a combination of them is identified."
+                    )
 
 
 # --------------------------------------------------------------------------------------------

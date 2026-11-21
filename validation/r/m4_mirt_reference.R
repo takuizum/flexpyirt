@@ -2,7 +2,8 @@
 # Run from the repository root:  Rscript validation/r/m4_mirt_reference.R
 # Writes tests/reference/v14_mirt2d.json. CI does not run R; the JSON is committed.
 #
-# Settings match m1/m2/m3/m4 references: optimizer = "NR", accelerate = "none", TOL = 1e-10,
+# Settings match m1/m2/m3/m4 references: optimizer = "NR" (2D cases; the 3D case uses "BFGS" with
+# control = list(reltol = 1e-13)), accelerate = "none", TOL = 1e-10,
 # SE.type = "Oakes", theta_lim inside technical = list(...), quadpts matching mirt's defaults
 # (31 per dimension for 2D -> 961 nodes; 15 per dimension for 3D -> 3375 nodes).
 # Convergence and grid_check are asserted for every case.
@@ -21,7 +22,6 @@ suppressMessages({
 
 out_dir <- file.path("tests", "reference")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-common <- list(TOL = 1e-10, accelerate = "none", optimizer = "NR", verbose = FALSE)
 
 extract_item <- function(x, itemtype, n_factors) {
   nm <- colnames(x)
@@ -301,7 +301,7 @@ bundle <- list(
     mirt_version = as.character(packageVersion("mirt")),
     TOL = 1e-10,
     accelerate = "none",
-    optimizer = "NR",
+    optimizer = "per case (NR for 2D, BFGS reltol 1e-13 for 3D)",
     theta_lim = c(-6, 6),
     grid_check = c(-6, 6),
     converged = all(vapply(cases, function(c) isTRUE(c$meta$converged), logical(1)))

@@ -627,3 +627,33 @@ def test_mirt_table_validation_and_identification_errors() -> None:
     t3.loc[t3["param"] == "cor_23", "value"] = -0.5
     with pytest.raises(SpecificationError, match="positive definite"):
         fit(spec3, df, table=t3)
+
+
+# ---- identification regressions (review findings) ----------------------------------------
+
+
+def _binary_df(n_items: int, seed: int = 3) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    theta = rng.normal(size=(600, 1))
+    y = (rng.random((600, n_items)) < 1.0 / (1.0 + np.exp(-(theta - 0.2)))).astype(float)
+    return pd.DataFrame(y, columns=[f"q{j}" for j in range(1, n_items + 1)])
+
+
+def test_all_loadings_fixed_at_zero_is_identification_error() -> None:
+    df = _binary_df(4)
+    spec = (
+        Model.uniform(TwoPL(), items=df.columns)
+        .with_factors({"F1": ["q1", "q2"], "F2": ["q3", "q4"]})
+        .fix(item="q1", a1=0.0)
+        .fix(item="q2", a1=0.0)
+    )
+    with pytest.raises(IdentificationError, match="no active loadings"):
+        fit(spec, df)
+
+
+def test_proportional_fixed_loadings_are_identification_error() -> None:
+    df = _binary_df(6)
+    items = list(df.columns)
+    spec = Model.uniform(Rasch(), items=items).with_factors({"F1": items, "F2": items})
+    with pytest.raises(IdentificationError, match="proportional fixed loadings"):
+        fit(spec, df)
