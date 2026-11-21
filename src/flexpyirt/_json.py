@@ -738,11 +738,16 @@ def _deserialize_model(raw: Any, *, schema_version: int = SCHEMA_VERSION) -> Mod
         groups = tuple(groups_list)
     if latent is not None and groups is not None:
         raise SpecificationError("model cannot specify both 'latent' and 'groups'.")
-    if base.is_multidimensional and (latent is not None or groups is not None):
+    if base.is_multidimensional and latent is not None:
         raise SpecificationError(
-            "model with factors cannot specify 'latent' or 'groups' (multidimensional models "
-            "are single-group with a multivariate normal latent distribution)."
+            "model with factors cannot specify 'latent' (use groups for multiple-group models)."
         )
+    if (
+        base.is_multidimensional
+        and groups is not None
+        and any(not isinstance(dist, Normal) for _, dist in groups)
+    ):
+        raise SpecificationError("model with factors requires Normal group latents.")
 
     fixed_raw = _require_list(obj["fixed"], field_name="model.fixed")
     fixed_list: list[tuple[str, str, float]] = []

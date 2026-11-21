@@ -266,8 +266,10 @@ must have at least one item, every model item must load on at least one factor, 
 slopes are fixed at `0`. Item parameters become `a1`…`aD`, `d` (or `d1`…). The latent
 distribution is multivariate normal with means fixed at `0`, variances fixed at `1` (or free when
 all items are `Rasch` or `PCM`), and correlations free when `correlated=True` (matching mirt's
-`COV = F1*F2`) or fixed at `0` when `correlated=False`. Multiple groups (`with_groups()`) and
-`with_latent()` are not supported for multidimensional models (`SpecificationError`).
+`COV = F1*F2`) or fixed at `0` when `correlated=False`. With `with_groups()` (either order), each
+group's `Normal` applies to every factor ([guide section 14](guide.md#14-confirmatory-multidimensional-models)).
+`with_latent()` and `EmpiricalHistogram` are not supported for multidimensional models
+(`SpecificationError`).
 
 #### `Model.with_latent`
 

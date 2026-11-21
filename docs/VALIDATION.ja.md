@@ -36,6 +36,7 @@
 | V12 | 表示用 IRT 閾値とデルタ法 SE（2PL・Rasch・GRM・GPCM・PCM・2 群 2PL） | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | 能力値スコアリング: MAP・ML・WLE（2PL・GRM・GPCM・3PL・2 群・欠測） | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
 | V15 | S-X2 項目適合度（GRM・GPCM・分散自由の PCM・3PL・FIPC の 2PL、`mincell` 1 と 3） | `itemfit(m, fit_stats = "S_X2")` | M5 |
+| V16 | 多母集団の確認的 2 次元 MIRT（単純構造・交差負荷。両因子にアンカー、焦点群の平均・分散を自由） | `COV = F1*F2` での `multipleGroup(..., invariance = c(anchors, "free_means", "free_var"))` | M4 |
 | V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -242,6 +243,16 @@
   同一パターンの回答者間での独立性、標本平均・標準偏差がモンテカルロ誤差内で EAP と事後 SD に一致すること）。
   あわせて平坦事前分布 MAP $\approx$ ML、全 7 項目モデルでの WLE 停留条件、極端パターン、多母集団、欠測、入力検証を
   単体テストで確認している。
+- **多母集団の 2 次元 MIRT（V16、M4）**: シミュレーション 2 ケース（1,500 人 × 2 群。アンカー q01–q03 / q07–q09 の単純構造と、
+  q07 が交差負荷しアンカーが q01–q03 / q08–q10 のもの）。焦点群の平均・分散は自由、相関は両群で自由、$[-6, 6]$ 上の次元あたり
+  81 点（`validation/r/m4_mirt_multigroup_reference.R` → `tests/reference/v16_mirt_multigroup.json`、mirt 1.48、`NR`、
+  `TOL = 1e-10`）。mirt は 1 つの因子の尾根（その因子の焦点群の平均・分散とその傾きの交換）に沿って最大点の手前で止まる:
+  flexpyirt は mirt の推定値での mirt の対数尤度を正確に再現するが、自身の解はそれより 3.2e-5 高く、mirt の推定値でのスコアは
+  その因子の焦点群の分散 / 平均で約 0.035 / 0.018（他は 1e-3 未満）、flexpyirt の解では 1e-6 未満。この差は次元あたり 31 点から
+  81 点にしても縮まらなかった（issue #20 の 13）。そのため、その因子のブロック（その因子の項目の傾き・切片と焦点群の平均・分散）
+  以外のパラメタと SE は通常の許容誤差（`1e-4`、SE 相対 `1e-3`）で比べ、ブロックは対数尤度（flexpyirt の方が高い）と停留性で
+  確認する。Oakes と直接 Hessian の一致、EM と SQUAREM の単調性、スコアリングと JSON の往復保存も確認する。テスト:
+  `tests/test_mirt_m4_multigroup.py`。
 - **S-X2 項目適合度（V15、M5）**: 既存の参照値を再利用した 6 ケース（Science の V3 GRM と V8 GPCM、潜在分散が自由な
   V8 PCM、V11 3PL、8 項目を固定した V5 FIPC 2PL、および `mincell = 3` の V3）。mirt は参照値の推定値で、各パラメタの
   `est` フラグを保ったまま（自由パラメタを自由度から引くため）`TOL = NaN` とし、推定と同じ格子で

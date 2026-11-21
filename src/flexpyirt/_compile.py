@@ -36,6 +36,7 @@ from flexpyirt.items import (
 )
 from flexpyirt.latent import (
     EmpiricalHistogram,
+    Normal,
     correlation_matrix_is_pd,
     eh_project_floor,
     latent_param_names,
@@ -453,9 +454,20 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
             ]
             lat_model = "Normal"
         else:
+            # Single group: means 0 and variances 1 (free for all-Rasch/PCM). Multiple groups:
+            # each group's Normal spec applies to every factor (DESIGN.md §15.43).
+            if model.is_multigroup:
+                assert isinstance(latent, Normal)
+                mean0, free_mean = latent.mean, latent.free_mean
+                var0, free_var = latent.var, latent.free_var
+            else:
+                mean0, free_mean, var0, free_var = 0.0, False, 1.0, all_fixed_slope
             latent_rows = [
-                *((f"mean_{m}", 0.0, False, -np.inf, np.inf) for m in range(1, n_factors + 1)),
-                *((f"var_{m}", 1.0, all_fixed_slope, 0.0, np.inf) for m in range(1, n_factors + 1)),
+                *(
+                    (f"mean_{m}", mean0, free_mean, -np.inf, np.inf)
+                    for m in range(1, n_factors + 1)
+                ),
+                *((f"var_{m}", var0, free_var, 0.0, np.inf) for m in range(1, n_factors + 1)),
                 *(
                     (f"cor_{i}{j}", 0.0, model.correlated_factors, -1.0, 1.0)
                     for i in range(1, n_factors + 1)
@@ -940,6 +952,79 @@ def _check_identification(t: pd.DataFrame, model: Model) -> None:
 
 
 def _check_identification_mirt(t: pd.DataFrame, model: Model) -> None:
+    """Identification checks for D > 1 (DESIGN §15.31, §15.43).
+
+    Single group: the per-group checks below. Multiple groups: rotational checks within each
+    group, and scale/location linking per factor across groups (:func:`_check_mirt_group_links`).
+    """
+    if not model.is_multigroup:
+        _check_identification_mirt_group(t, model, check_scale=True)
+        return
+    for g, _ in model.resolved_groups():
+        _check_identification_mirt_group(t[t["group"] == g], model, check_scale=False)
+    _check_mirt_group_links(t, model)
+
+
+def _check_mirt_group_links(t: pd.DataFrame, model: Model) -> None:
+    """Per factor, every free ``var_m`` / ``mean_m`` must be linked to a fixed scale / location.
+
+    For factor :math:`m`, groups are connected when they share a free slope ``a{m}`` (scale) or a
+    free intercept of an item loading on :math:`m` (location) through a common ``free_id`` (anchor
+    items). A component is anchored by a fixed nonzero ``a{m}`` (scale), a fixed intercept of an
+    item loading on :math:`m` (location), or a group whose ``var_m`` / ``mean_m`` is fixed
+    (DESIGN.md §4.5, §15.43).
+    """
+    groups = [g for g, _ in model.resolved_groups()]
+    kernels = {name: model.item_kernel(m) for name, m in model.items}
+    items_df = t[t["item"] != LATENT_ITEM]
+    lat = t[t["item"] == LATENT_ITEM]
+    lat_free = {
+        (g, p): bool(f) for g, p, f in zip(lat["group"], lat["param"], lat["free"], strict=True)
+    }
+    for m, fname in enumerate(model.factor_names, start=1):
+        slope = f"a{m}"
+        s_rows = items_df[items_df["param"] == slope]
+        active = s_rows[s_rows["free"] | (s_rows["value"] != 0.0)]
+        active_pairs = set(zip(active["group"], active["item"], strict=True))
+        int_mask = np.array(
+            [
+                (g, i) in active_pairs and p in kernels[i].intercept_params
+                for g, i, p in zip(
+                    items_df["group"], items_df["item"], items_df["param"], strict=True
+                )
+            ],
+            dtype=bool,
+        )
+        for latent_param, rows, what in (
+            (f"var_{m}", s_rows, "scale"),
+            (f"mean_{m}", items_df[int_mask], "location"),
+        ):
+            parent = {g: g for g in groups}
+
+            def find(g: str, parent: dict[str, str] = parent) -> str:
+                while parent[g] != g:
+                    g = parent[g]
+                return g
+
+            for _, shared in rows[rows["free"]].groupby("free_id"):
+                gs = list(shared["group"].unique())
+                for other in gs[1:]:
+                    parent[find(other)] = find(gs[0])
+            fixed = rows[~rows["free"]]
+            if what == "scale":
+                fixed = fixed[fixed["value"] != 0.0]
+            anchored = {find(g) for g in fixed["group"]}
+            anchored |= {find(g) for g in groups if not lat_free[(g, latent_param)]}
+            for g in groups:
+                if lat_free[(g, latent_param)] and find(g) not in anchored:
+                    raise IdentificationError(
+                        f"The latent {latent_param} of group {g!r} (factor {fname!r}) is free but "
+                        f"nothing links it to a fixed {what}: make items loading on {fname!r} "
+                        "equal across groups (anchors) or fix them."
+                    )
+
+
+def _check_identification_mirt_group(t: pd.DataFrame, model: Model, *, check_scale: bool) -> None:
     """Necessary scale, location, and rotational identification checks for D > 1 (DESIGN §15.31)."""
     n_factors = model.n_factors
     fnames = model.factor_names
@@ -964,12 +1049,12 @@ def _check_identification_mirt(t: pd.DataFrame, model: Model) -> None:
             raise IdentificationError(
                 f"Factor {fname!r} ({slope}) has no active loadings (all slopes are fixed at 0)."
             )
-        if lat_free[f"var_{m}"] and not fixed_nz:
+        if check_scale and lat_free[f"var_{m}"] and not fixed_nz:
             raise IdentificationError(
                 f"The latent variance of factor {fname!r} (var_{m}) is free, but no slope "
                 f"{slope} is fixed at a nonzero value."
             )
-        if lat_free[f"mean_{m}"]:
+        if check_scale and lat_free[f"mean_{m}"]:
             has_fixed_int = False
             for itm in active_items:
                 ints = lookup[itm].intercept_params

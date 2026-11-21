@@ -323,9 +323,11 @@ class Model:
             any factor is empty or lists unknown/duplicated items, any model item loads on no
             factor, or ``with_groups()`` / ``with_latent()`` is already set.
         """
-        if self.groups is not None:
+        if self.groups is not None and any(
+            isinstance(dist, EmpiricalHistogram) for _, dist in self.groups
+        ):
             raise SpecificationError(
-                "Multiple-group multidimensional models are not supported yet."
+                "EmpiricalHistogram is only supported for unidimensional models."
             )
         if self.latent is not None:
             raise SpecificationError(
@@ -408,17 +410,21 @@ class Model:
         --------
         ``with_groups(ref=Normal.standard(), focal=Normal.free())``
         ``with_groups(ref=EmpiricalHistogram(), focal=EmpiricalHistogram())``
+
+        With :meth:`with_factors` (in either order), each group's ``Normal`` applies to every
+        factor: ``Normal.free()`` frees all of that group's factor means and variances, and the
+        factor correlations follow ``with_factors(correlated=...)`` in every group (§15.43).
         """
-        if self.is_multidimensional:
-            raise SpecificationError(
-                "Multiple-group multidimensional models are not supported yet."
-            )
         if len(latents) < 2:
             raise SpecificationError("with_groups() needs at least two groups.")
         for name, dist in latents.items():
             if not isinstance(dist, (Normal, EmpiricalHistogram)):
                 raise SpecificationError(f"Unsupported latent distribution for group {name!r}.")
         kinds = {type(dist) for dist in latents.values()}
+        if self.is_multidimensional and EmpiricalHistogram in kinds:
+            raise SpecificationError(
+                "EmpiricalHistogram is only supported for unidimensional models."
+            )
         if EmpiricalHistogram in kinds and len(kinds) > 1:
             raise SpecificationError(
                 "Cannot mix EmpiricalHistogram and Normal across groups; when EmpiricalHistogram "
