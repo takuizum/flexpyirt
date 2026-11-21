@@ -228,9 +228,13 @@ def test_scoring_and_json_round_trip() -> None:
     df, grp = _data(raw)
     res = _fit("mg2d_cross")
     sub, sub_grp = df.iloc[:40], grp[:40]
-    for method in ("EAP", "MAP"):
+    for method in ("EAP", "MAP", "WLE"):
         scores = res.score(sub, method=method, group=sub_grp)
         assert np.isfinite(scores.to_numpy()).all()
+    ml = res.score(sub, method="ML", group=sub_grp).to_numpy()
+    assert not np.isnan(ml[:, :2]).any()
+    pv = res.score(sub, method="PV", group=sub_grp, key=jax.random.key(0), n_draws=3)
+    assert pv.shape == (40, 6) and np.isfinite(pv.to_numpy()).all()
     loaded = FitResult.from_json(res.to_json())
     pd.testing.assert_frame_equal(loaded.latent, res.latent, check_exact=True)
     pd.testing.assert_frame_equal(
