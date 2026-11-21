@@ -28,8 +28,8 @@ calibration and fixed item parameter calibration (FIPC).
 | FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | V5 |
 | Missing data | Responses missing at random (MAR) | V9 |
 | Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior, plus delta-method SEs for display IRT thresholds (`b_se` / `bk_se`) | V7, V10, V12, V14 |
-| Scoring | EAP and MAP (1–3 factors), ML, WLE (with standard errors) and plausible values (`PV`, explicit JAX PRNG `key`), using each group's latent distribution as the prior where applicable | V1–V5, V7–V9, V11, V13, V14 |
-| Multidimensional models | Confirmatory 2–3 factor MIRT (`Model.with_factors()`) with cross-loadings, correlated or orthogonal MVN factors, product quadrature grids, Oakes/Hessian SEs, and EAP / MAP scoring | V14 |
+| Scoring | EAP, MAP, ML and WLE (1–3 factors, with standard errors) and plausible values (`PV`, 1–3 factors, explicit JAX PRNG `key`), using each group's latent distribution as the prior where applicable | V1–V5, V7–V9, V11, V13, V14 |
+| Multidimensional models | Confirmatory 2–3 factor MIRT (`Model.with_factors()`) with cross-loadings, correlated or orthogonal MVN factors, product quadrature grids, Oakes/Hessian SEs, and EAP / MAP / ML / WLE scoring | V14 |
 | Empirical histogram | `EmpiricalHistogram()` latent distributions (Woods, 2007) for skewed or multimodal traits; reference group standardized to mean 0 / variance 1 by an exact constrained M-step, free under FIPC; weights reported with moments up to the 4th | V6 |
 | Davidian curves | `DavidianCurve(degree)` seminonparametric latent distributions (Zhang & Davidian, 2001; Woods & Lin, 2009) for single-group unidimensional models; analytically standardized to exact continuous `mean`/`var` (optional `free_mean`/`free_var` for Rasch, PCM, FIPC) with joint Oakes/Hessian SEs and EAP/PV scoring | V19 |
 | Saving results | `FitResult.to_json()` / `FitResult.from_json()` (strict schema, no pickle) | — |

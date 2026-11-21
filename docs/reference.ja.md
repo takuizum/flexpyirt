@@ -113,12 +113,11 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 | `n_draws` | int | `method="PV"` で回答者ごとに抽出する plausible values の個数（既定 `5`、1 以上の整数） |
 
 **戻り値**: 回答者 1 行ずつの `DataFrame`（`data` が DataFrame ならその index を引き継ぐ）。1 次元モデルでは
-`"EAP"`, `"MAP"`, `"ML"`, `"WLE"` が `theta`, `se` 列、`"PV"` が `pv1`…`pv{n_draws}` 列。多次元モデル（`method="EAP"` または `"MAP"`）では
-宣言した因子順に `theta_<factor>`, `se_<factor>` 列。
+`"EAP"`, `"MAP"`, `"ML"`, `"WLE"` が `theta`, `se` 列、`"PV"` が `pv1`…`pv{n_draws}` 列。多次元モデルでは
+宣言した因子順に `theta_<factor>`, `se_<factor>` 列（`"PV"` は `pv<m>_<factor>`）。
 
-**例外**: 不正な `method`、多次元モデルで `"ML"`・`"WLE"`・`"PV"` を指定した場合、`EmpiricalHistogram` または
-`DavidianCurve` で `method="MAP"` を指定した場合、`"PV"` で `key` が未指定・不正、決定的手法に `key` を渡した場合、
-または `n_draws` が正の整数でない場合に `SpecificationError`。
+**例外**: 不正な `method`、`EmpiricalHistogram` または `DavidianCurve` で `method="MAP"` を指定した場合、`"PV"` で
+`key` が未指定・不正、決定的手法に `key` を渡した場合、または `n_draws` が正の整数でない場合に `SpecificationError`。
 
 #### `FitResult.item_fit`
 

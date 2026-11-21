@@ -663,8 +663,9 @@ print(res_mirt.score(mirt_df.iloc[:3], method="EAP").round(3))  # theta_F1, thet
 - **識別性と符号の向き**: 確認的モデルでは回転の不定性を除くために 0 固定（または既知値固定）の負荷が必要
   （全項目が全因子に自由負荷するような指定は `IdentificationError`）。各因子の符号の向きは、因子別の項目−残余相関から
   計算する厳密に正の初期傾きによって正の方向へ揃える。
-- **スコアリング**: `method="EAP"` と `method="MAP"`（推定した多変量正規を事前分布とする）が宣言した因子ごとの
-  `theta_<factor>`, `se_<factor>` 列を返す。`ML`・`WLE`・`PV` および多次元の多母集団モデルは未対応で `SpecificationError` を送出する。
+- **スコアリング**: `"EAP"`・`"MAP"`（推定した多変量正規を事前分布とする）・`"ML"`・`"WLE"` が宣言した因子ごとの
+  `theta_<factor>`, `se_<factor>` 列を返す。ML は推定値が発散する次元で $\pm\infty$ を返す。`"PV"` は `pv<m>_<factor>` 列を返す。
+  多次元の多母集団モデルは未対応で `SpecificationError` を送出する。
 
 ## 15. エラーと警告
 

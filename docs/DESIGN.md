@@ -839,8 +839,8 @@ data-independent shapes (§15.21).
     shape-static pytrees and autodiff only. `FitResult.items` displays `a1..aD`, `d` (`d1..`), and
     their SEs; `FitResult.latent` displays `mean_1..D`, `var_1..D`, `cor_ij`, and their SEs.
     `FitResult.score(data, method="EAP")` returns columns `theta_<factor>` and `se_<factor>` in
-    declared factor order; `method="MAP"` is supported as well (§15.39), while `ML`, `WLE` and
-    `PV` raise `SpecificationError` for $D > 1$.
+    declared factor order; `"MAP"` (§15.39), `"ML"`, `"WLE"` (§15.41) and `"PV"` (§15.42) are
+    supported as well.
 33. **JSON I/O for multidimensional `FitResult` (schema version 2, M4)**: the model object in the
     JSON payload stores `"factors"` (`null`, or a list of `{"name", "items"}` in declared order)
     and `"correlated_factors"`, so `to_json()` / `from_json()` round-trip 2–3 dimensional results
@@ -943,8 +943,7 @@ data-independent shapes (§15.21).
     capped at 10; step sizes $2^{-k}$, $k=0..29$, evaluated together so $f$ never decreases).
     SEs are $\big[(-\nabla^2 f(\hat{\boldsymbol\theta}))^{-1}\big]_{mm}^{1/2}$, as in mirt's
     `fscores(method = "MAP")`; all-missing rows return the prior mean and $\sqrt{\Sigma_{mm}}$.
-    `ML`, `WLE` and `PV` still raise `SpecificationError` for $D > 1$ (ML/WLE need per-factor
-    handling of diverging directions).
+    `ML` and `WLE` for $D > 1$ are in §15.41 and `PV` in §15.42.
 40. **S-X2 item fit (M5, `FitResult.item_fit`)**: Orlando and Thissen's (2000, 2003) S-X2 for
     single-group unidimensional models with a `Normal` latent distribution and complete data.
     Expected proportions
@@ -960,6 +959,32 @@ data-independent shapes (§15.21).
     dependent shapes, outside `jit`); category probabilities come from the JAX item kernels.
     Multidimensional, multiple-group, EH and missing-data cases raise `SpecificationError` until
     they are validated (mirt imputes missing data and ignores EH weights for S-X2).
+41. **ML and WLE scoring for multidimensional models (M4, §8)**: for $D \in \{2, 3\}$, `"ML"`
+    maximizes $\log L(\boldsymbol\theta\mid y)$ and `"WLE"` maximizes the Jeffreys/Firth penalized
+    $\log L(\boldsymbol\theta\mid y)+\tfrac12\log\det\mathbf I(\boldsymbol\theta)$ (`mirt:::WLE.mirt`;
+    Warm, 1989; Wang, 2015), where $\mathbf I$ is the expected test information matrix of the
+    observed items from autodiff, over the box $|\theta_m|<20$ (mirt's `max_theta`) by the bounded
+    `_newton_nd`, starting from EAP. SEs are square roots of the diagonal of the inverse negative
+    Hessian of the objective. ML: patterns whose observed responses are all in the lowest (highest)
+    raw category return $-\infty$ ($+\infty$) on every dimension (as mirt does before optimizing);
+    a dimension that reaches the bound or has SE $>30$ returns $\pm\infty$ with SE NaN, and the
+    remaining dimensions take SEs from the inverse of their own block of the negative Hessian.
+    mirt instead sometimes stops such a dimension at a finite value near $\pm20$ with SE 0 (its
+    `diag(hessian) > 0` sub-selection); flexpyirt reports the signed infinity. WLE is finite on
+    extreme patterns. All-missing rows return NaN.
+42. **Plausible values for multidimensional models (M4, §8)**: for $D \in \{2, 3\}$, each unique
+    pattern's posterior
+    $\log L(\boldsymbol\theta\mid y)-\tfrac12(\boldsymbol\theta-\boldsymbol\mu)^\top\boldsymbol\Sigma^{-1}(\boldsymbol\theta-\boldsymbol\mu)$
+    (continuous MVN prior) is evaluated on its own equispaced lattice of 61 (2D) or 25 (3D) points
+    per dimension spanning EAP $\pm 6$ posterior SD (clipped to the fitted grid's range). Each draw
+    picks a cell from the discrete posterior (`jax.random.categorical`) and adds uniform jitter
+    within the cell, so draws are continuous; the jitter inflates the variance by $\Delta_m^2/12$
+    (about 0.2% in 2D and 0.6% in 3D of the posterior variance). Per-respondent keys come from
+    `jax.random.split(key, N)`, so draws are independent across respondents sharing a pattern and
+    deterministic given `key`. Patterns and respondents are processed with `lax.map` in batches to
+    bound memory. Columns are `pv<m>_<factor>`. Validated statistically: with 4,000 draws the
+    sample mean, SD and correlations match the grid posterior within Monte Carlo error (mirt's
+    default plausible values use a normal approximation, so they are not a reference).
 
 ## 16. Implementation decisions (M5)
 1. **Equality constraints across items (`Model.equal_across_items`, shared `free_id`s)**:
@@ -1124,6 +1149,7 @@ data-independent shapes (§15.21).
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
+- Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
