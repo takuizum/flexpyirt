@@ -364,8 +364,10 @@ def plausible_values(
     (DESIGN.md §8, §15.25). Respondents sharing a response pattern reuse the same CDF but draw
     independently. Deterministic given ``key``.
     """
-    grid = jnp.linspace(prob.nodes[0], prob.nodes[-1], _PV_GRID_POINTS, dtype=prob.nodes.dtype)
-    prob_fine = replace(prob, nodes=grid)
+    lo = prob.nodes[0, 0] if prob.nodes.ndim == 2 else prob.nodes[0]
+    hi = prob.nodes[-1, 0] if prob.nodes.ndim == 2 else prob.nodes[-1]
+    grid = jnp.linspace(lo, hi, _PV_GRID_POINTS, dtype=prob.nodes.dtype)
+    prob_fine = replace(prob, nodes=grid[:, None] if prob.nodes.ndim == 2 else grid)
     post = jax.nn.softmax(_log_joint(prob_fine, eta), axis=1)  # (P_pad, Q_pv)
 
     seg = 0.5 * (post[:, :-1] + post[:, 1:])  # trapezoidal interval mass, (P_pad, Q_pv - 1)

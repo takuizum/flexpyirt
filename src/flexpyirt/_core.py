@@ -18,7 +18,7 @@ from jax import Array
 
 from flexpyirt._newton import newton_ascent
 from flexpyirt.items import ItemKernel
-from flexpyirt.latent import normal_log_weights
+from flexpyirt.latent import mvn_log_weights
 from flexpyirt.priors import PRIOR_NONE, eval_log_prior
 
 __all__ = [
@@ -75,11 +75,15 @@ class FamilyBlock:
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class LatentBlock:
-    """Normal latent distribution of each group; parameter order is ``(mean, var)``.
+    """Multivariate normal latent distribution of each group (DESIGN.md §4.4, §5.2).
+
+    Parameter order matches :func:`~flexpyirt.latent.latent_param_names`: ``(mean, var)`` for
+    ``D = 1`` (length 2) and ``(mean_1..D, var_1..D, cor_ij...)`` for ``D in {2, 3}`` (length 5
+    or 9).
 
     Attributes
     ----------
-    fixed_values, free_index, lower, upper : (G, 2)
+    fixed_values, free_index, lower, upper : (G, L_D)
     """
 
     fixed_values: Array
@@ -119,8 +123,8 @@ class CompiledProblem:
         Pattern frequencies.
     group : (P,) int
         Group of each pattern.
-    nodes : (Q,) float
-        Quadrature nodes.
+    nodes : (Q, D) float
+        Product quadrature nodes (``D in {1, 2, 3}``).
     families : tuple[FamilyBlock, ...]
     latent : LatentBlock
     priors : PriorBlock
@@ -176,7 +180,7 @@ def _one_hots(prob: CompiledProblem) -> list[Array]:
 def _latent_log_weights(prob: CompiledProblem, eta: Array) -> Array:
     """``(G, Q)`` log quadrature weights."""
     lat = _expand(eta, prob.latent.fixed_values, prob.latent.free_index)
-    return jax.vmap(normal_log_weights, in_axes=(None, 0, 0))(prob.nodes, lat[:, 0], lat[:, 1])
+    return jax.vmap(mvn_log_weights, in_axes=(None, 0))(prob.nodes, lat)
 
 
 def _log_joint(prob: CompiledProblem, eta: Array) -> Array:
@@ -271,9 +275,9 @@ def _item_q(kernel: ItemKernel, nodes: Array, r: Array, params: Array) -> Array:
 def _latent_q(nodes: Array, n: Array, params: Array) -> Array:
     r"""Latent part of Q (DESIGN.md §4.4).
 
-    .. math:: Q_g^{\mathrm{lat}}=\sum_q\bar n_{gq}\log w_{gq}(\mu_g,\sigma_g^2)
+    .. math:: Q_g^{\mathrm{lat}}=\sum_q\bar n_{gq}\log w_{gq}(\boldsymbol\mu_g,\boldsymbol\Sigma_g)
     """
-    return jnp.sum(n * normal_log_weights(nodes, params[0], params[1]))
+    return jnp.sum(n * mvn_log_weights(nodes, params))
 
 
 def _local_to_xi(u: Array, local: Array, fixed: Array) -> Array:
@@ -761,10 +765,10 @@ def _oakes_cross_hessian(
     lat = _expand(eta, lat_block.fixed_values, lat_block.free_index)
 
     def latent_jac(p: Array) -> Array:
-        out: Array = jax.jacfwd(lambda x: normal_log_weights(prob.nodes, x[0], x[1]))(p)
+        out: Array = jax.jacfwd(lambda x: mvn_log_weights(prob.nodes, x))(p)
         return out
 
-    d_logw = jax.vmap(latent_jac)(lat)  # (G, Q, 2)
+    d_logw = jax.vmap(latent_jac)(lat)  # (G, Q, L_D)
     d_logw = d_logw - jnp.sum(d_logw * q_w_g[:, :, None], axis=1, keepdims=True)
 
     target_b = max(1, _OAKES_CHUNK_ELEMENTS // max(1, Q * D))
@@ -898,10 +902,15 @@ def eap(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
     r"""EAP and posterior SD of each pattern, using its group's latent distribution as prior.
 
     .. math::
-        \hat\theta_p=\sum_q\theta_q h_{pq},\qquad
-        \mathrm{SD}_p=\Big(\sum_q\theta_q^2h_{pq}-\hat\theta_p^2\Big)^{1/2}
+        \hat{\boldsymbol\theta}_p=\sum_q\boldsymbol\theta_q h_{pq},\qquad
+        \mathrm{SD}_{pm}=\Big(\sum_q\theta_{qm}^2 h_{pq}-\hat\theta_{pm}^2\Big)^{1/2}
+
+    Returns arrays of shape ``(P,)`` when ``D = 1`` and ``(P, D)`` when ``D > 1``.
     """
     h = jax.nn.softmax(_log_joint(prob, eta), axis=1)
     mean = h @ prob.nodes
-    var = h @ prob.nodes**2 - mean**2
-    return mean, jnp.sqrt(jnp.maximum(var, 0.0))
+    var = h @ (prob.nodes**2) - mean**2
+    sd = jnp.sqrt(jnp.maximum(var, 0.0))
+    if prob.nodes.ndim == 2 and prob.nodes.shape[1] == 1:
+        return mean[:, 0], sd[:, 0]
+    return mean, sd

@@ -81,7 +81,8 @@ def fit(
     method : BAEM, optional
         EM settings (default ``BAEM()``).
     quadrature : Quadrature, optional
-        Quadrature grid (default 61 equally spaced points on [-6, 6]).
+        Quadrature grid (default: 61 points on [-6, 6] for 1 factor, 31 per dimension for 2
+        factors, and 15 per dimension for 3 factors, matching mirt's defaults).
     se : {"oakes", "hessian"} or None
         Standard-error method, or ``None`` to skip.
 
@@ -100,7 +101,7 @@ def fit(
     if se not in (None, "oakes", "hessian"):
         raise SpecificationError(f"Unknown se={se!r}; use 'oakes', 'hessian' or None.")
     method = BAEM() if method is None else method
-    quadrature = Quadrature.equispaced() if quadrature is None else quadrature
+    quadrature = Quadrature.default(spec.n_factors) if quadrature is None else quadrature
 
     prep = prepare(spec, data, group=group, item_names=item_names, table=table)
     final_table = prep.table
@@ -204,7 +205,7 @@ def _warn_heywood(params: pd.DataFrame, spec: Model) -> None:
     items = params[(params["item"] != LATENT_ITEM) & params["free"]]
     if items.empty:
         return
-    kernels = {name: m.kernel for name, m in spec.items}
+    kernels = {name: spec.item_kernel(m) for name, m in spec.items}
     est = items["estimate"].to_numpy(dtype=float)
     lower = items["lower"].to_numpy(dtype=float).copy()
     upper = items["upper"].to_numpy(dtype=float).copy()

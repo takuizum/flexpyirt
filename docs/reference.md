@@ -39,7 +39,7 @@ Bock–Aitkin EM algorithm (Bock & Aitkin, 1981).
 | `table` | DataFrame, optional | An edited `Model.parameter_table()`. Overrides the fixed values, equalities, priors and starting values of `spec` |
 | `item_names` | list[str], optional | Column names when `data` is an array |
 | `method` | `BAEM`, optional | EM settings (default `BAEM()`) |
-| `quadrature` | `Quadrature`, optional | Quadrature grid (default 61 points on $[-6, 6]$) |
+| `quadrature` | `Quadrature`, optional | Quadrature grid (default: 61 points on $[-6, 6]$ for 1 factor, 31 per dimension for 2 factors, 15 per dimension for 3 factors) |
 | `se` | `"oakes"` / `"hessian"` / `None` | Standard-error method (includes prior Hessian under MAP); `None` skips it |
 
 **Returns**: [`FitResult`](#fitresult)
@@ -58,8 +58,8 @@ Returned by `fit()`. Immutable.
 
 | Attribute | Type | Description |
 |---|---|---|
-| `items` | DataFrame | One row per item (per group × item, with a `group` column, for multiple groups): `model`, internal parameters (`a`, `d` / `d1`…, `g`, `u`), `<param>_se`, display `b` / `bk` ($-d/a$, GRM $-d_k/a$, GPCM/PCM $-(d_k-d_{k-1})/a$ with $d_0=0$), and delta-method `b_se` / `bk_se` (from `vcov` via JAX autodiff; NaN when `se=None` or all parameters entering a threshold are fixed) |
-| `latent` | DataFrame | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` (SEs of fixed values are NaN) |
+| `items` | DataFrame | One row per item (per group × item, with a `group` column, for multiple groups): `model`, internal parameters (`a` or `a1`…`aD`, `d` / `d1`…, `g`, `u`), `<param>_se`, and for unidimensional models display `b` / `bk` ($-d/a$, GRM $-d_k/a$, GPCM/PCM $-(d_k-d_{k-1})/a$ with $d_0=0$) and delta-method `b_se` / `bk_se` (from `vcov` via JAX autodiff; NaN when `se=None` or all parameters entering a threshold are fixed) |
+| `latent` | DataFrame | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` for 1 factor, or `group`, `mean_1`…`mean_D`, `var_1`…`var_D`, `cor_12`… and their `_se` columns for 2–3 factors (SEs of fixed values are NaN) |
 | `parameters` | DataFrame | The validated ParameterTable plus `estimate` (the estimate, or the fixed value) and `se` |
 | `loglik` | float | Marginal log-likelihood at the estimates (likelihood only, excluding priors) |
 | `log_posterior` | float | Log posterior ($\ell(\hat\eta) + \log\pi(\hat\eta)$) at the estimates; equals `loglik` without priors |
@@ -121,11 +121,13 @@ are dropped from the likelihood (and from $I(\theta)$ in WLE) for every method.
 | `n_draws` | int | Number of plausible values per respondent when `method="PV"` (default `5`, must be `>= 1`) |
 
 **Returns**: `DataFrame` with one row per respondent (index follows `data` when it is a
-DataFrame): columns `theta`, `se` for `"EAP"`, `"MAP"`, `"ML"`, `"WLE"`; columns `pv1`…`pv{n_draws}`
-for `"PV"`.
+DataFrame): for unidimensional models, columns `theta`, `se` for `"EAP"`, `"MAP"`, `"ML"`, `"WLE"`
+and `pv1`…`pv{n_draws}` for `"PV"`; for multidimensional models (`method="EAP"`), columns
+`theta_<factor>` and `se_<factor>` in declared factor order.
 
-**Raises**: `SpecificationError` if `method` is unknown, `key` is missing or invalid for `"PV"`,
-`key` is supplied for a deterministic method, or `n_draws` is not a positive integer.
+**Raises**: `SpecificationError` if `method` is unknown, `method != "EAP"` on a multidimensional
+model, `key` is missing or invalid for `"PV"`, `key` is supplied for a deterministic method, or
+`n_draws` is not a positive integer.
 
 #### `FitResult.to_json`
 
@@ -224,6 +226,22 @@ estimate the latent distribution.
 | `items` | Items to fix (a list of names or a `str -> bool` function). Default: every bank item that is also in the model |
 | `parameterization` | `"slope-intercept"` or `"irt"` (converted with $d = -ab$, or $d_k = -a\sum_{c=1}^{k} b_c$ for GPCM/PCM) |
 
+#### `Model.with_factors`
+
+```text
+model.with_factors(factors, *, correlated=True) -> Model
+```
+
+Declare a confirmatory 2- or 3-dimensional loading pattern ([guide section 14](guide.md#14-confirmatory-multidimensional-models)).
+`factors` maps factor names (in order, 2 or 3 entries) to the items loading on each factor
+(an iterable of item names or a `str -> bool` callable). Cross-loadings are allowed; each factor
+must have at least one item, every model item must load on at least one factor, and unloaded
+slopes are fixed at `0`. Item parameters become `a1`…`aD`, `d` (or `d1`…). The latent
+distribution is multivariate normal with means fixed at `0`, variances fixed at `1` (or free when
+all items are `Rasch` or `PCM`), and correlations free when `correlated=True` (matching mirt's
+`COV = F1*F2`) or fixed at `0` when `correlated=False`. Multiple groups (`with_groups()`) and
+`with_latent()` are not supported for multidimensional models (`SpecificationError`).
+
 #### `Model.with_latent`
 
 ```text
@@ -287,9 +305,12 @@ The default ParameterTable for `data`, with columns `group`, `item`, `model`, `p
 |---|---|
 | `item_names` | Tuple of item names |
 | `is_multigroup` | Whether groups were declared with `with_groups()` |
+| `is_multidimensional` | Whether confirmatory factors were declared with `with_factors()` |
+| `n_factors` | Number of latent factors (`1`, `2`, or `3`) |
+| `factor_names` | Tuple of factor names (empty for a unidimensional model) |
 | `resolved_latent()` | The single-group latent distribution, with the default rule applied |
 | `resolved_groups()` | Tuple of `(group name, Normal)`; `(("all", ...),)` for a single group |
-| `items`, `fixed`, `latent`, `groups`, `equal`, `priors` | The raw specification (rarely used directly) |
+| `items`, `fixed`, `latent`, `groups`, `equal`, `priors`, `factors`, `correlated_factors` | The raw specification (rarely used directly) |
 
 ---
 
@@ -461,11 +482,15 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 
 ```text
 Quadrature.equispaced(n_points=61, *, lim=(-6.0, 6.0))
+Quadrature.default(n_factors=1, *, lim=(-6.0, 6.0))
 ```
 
-An equally spaced one-dimensional grid (endpoints included). The default, 61 points on
-$[-6, 6]$, is mirt's default. `nodes()` returns the grid points. At least 3 points; the limits
-must be finite with `lower < upper`.
+An equally spaced quadrature grid (endpoints included), extended to a Cartesian product grid in
+2–3 dimensions. `Quadrature.default(n_factors)` matches mirt's defaults: 61 points for 1 factor,
+31 per dimension ($31^2 = 961$) for 2 factors, and 15 per dimension ($15^3 = 3{,}375$) for 3
+factors on $[-6, 6]$. `nodes()` returns the 1-D axis of shape `(n_points,)`; `grid(n_factors)`
+returns the product grid of shape `(n_points**n_factors, n_factors)`. At least 3 points per
+dimension; limits must be finite with `lower < upper`.
 
 ---
 

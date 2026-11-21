@@ -26,13 +26,14 @@ calibration and fixed item parameter calibration (FIPC).
 | Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | V4 |
 | FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | V5 |
 | Missing data | Responses missing at random (MAR) | V9 |
-| Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior, plus delta-method SEs for display IRT thresholds (`b_se` / `bk_se`) | V7, V10, V12 |
-| Scoring | EAP, MAP, ML, WLE (with standard errors) and plausible values (`PV`, explicit JAX PRNG `key`), using each group's latent distribution as the prior where applicable | V1–V5, V7–V9, V11, V13 |
-| EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | V1–V5, V7–V9, V11 |
+| Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior, plus delta-method SEs for display IRT thresholds (`b_se` / `bk_se`) | V7, V10, V12, V14 |
+| Scoring | EAP (1–3 factors), MAP, ML, WLE (with standard errors) and plausible values (`PV`, explicit JAX PRNG `key`), using each group's latent distribution as the prior where applicable | V1–V5, V7–V9, V11, V13, V14 |
+| Multidimensional models | Confirmatory 2–3 factor MIRT (`Model.with_factors()`) with cross-loadings, correlated or orthogonal MVN factors, product quadrature grids, Oakes/Hessian SEs, and EAP scoring | V14 |
+| EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | V1–V5, V7–V9, V11, V14 |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
 Not yet available ([roadmap](docs/ROADMAP.md)): empirical histogram (EH) latent distributions
-(M3); `FitResult` JSON I/O and multidimensional models (M4).
+(M3); `FitResult` JSON I/O (M4).
 
 ## Installation
 

@@ -10,7 +10,7 @@ together as one "family" (DESIGN.md §4.3, §6).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import ClassVar, Protocol
 
 import jax
@@ -19,6 +19,7 @@ import numpy as np
 from jax import Array
 
 from flexpyirt.errors import SpecificationError
+from flexpyirt.quadrature import MAX_FACTORS
 
 __all__ = [
     "GPCM",
@@ -37,11 +38,41 @@ __all__ = [
 ]
 
 
+def _validate_n_factors(n_factors: int) -> None:
+    if n_factors < 1 or n_factors > MAX_FACTORS:
+        raise SpecificationError(
+            f"Item kernels support 1 to {MAX_FACTORS} factors, got {n_factors}."
+        )
+
+
+def _slope_names(n_factors: int) -> tuple[str, ...]:
+    if n_factors == 1:
+        return ("a",)
+    return tuple(f"a{m}" for m in range(1, n_factors + 1))
+
+
+def _linear_predictor(theta: Array, slopes: Array, n_factors: int) -> Array:
+    """Return ``theta @ slopes`` of shape ``(Q,)``; accepts 1-D or ``(Q, 1)`` for ``D == 1``."""
+    if n_factors == 1:
+        t = theta[:, 0] if theta.ndim == 2 else theta
+        return slopes[0] * t
+    return theta @ slopes
+
+
 class ItemKernel(Protocol):
     """Pure log-probability function of an item family (Core layer).
 
     Implementations must be hashable (they are static arguments of jit).
     """
+
+    @property
+    def n_factors(self) -> int:
+        """Number of latent factors (1 to 3)."""
+        ...
+
+    def with_factors(self, n_factors: int) -> ItemKernel:
+        """Return a copy of this kernel with ``n_factors`` latent dimensions."""
+        ...
 
     @property
     def param_names(self) -> tuple[str, ...]:
@@ -65,7 +96,7 @@ class ItemKernel(Protocol):
 
     @property
     def irt_names(self) -> tuple[str, ...]:
-        """Display IRT threshold/difficulty names, in order (e.g. ``("b",)``)."""
+        """Display IRT threshold/difficulty names, in order (e.g. ``("b",)``; empty for D > 1)."""
         ...
 
     @property
@@ -78,7 +109,7 @@ class ItemKernel(Protocol):
         ...
 
     def log_prob(self, theta: Array, params: Array) -> Array:
-        """Return ``(Q, n_cat)`` log-probabilities for nodes ``theta`` of shape ``(Q,)``."""
+        """Return ``(Q, n_cat)`` log-probabilities for nodes ``theta`` of shape ``(Q, D)``."""
         ...
 
     def __hash__(self) -> int:
@@ -91,17 +122,28 @@ class DichotomousKernel:
     r"""Two-parameter logistic kernel in slope–intercept form.
 
     .. math::
-        P(y=1\mid\theta) = \sigma(a\theta + d), \qquad
-        \log P(y=1\mid\theta) = \log\sigma(a\theta+d),\quad
-        \log P(y=0\mid\theta) = \log\sigma(-(a\theta+d)).
+        P(y=1\mid\boldsymbol\theta) = \sigma(\mathbf a^\top\boldsymbol\theta + d), \qquad
+        \log P(y=1\mid\boldsymbol\theta) = \log\sigma(z),\quad
+        \log P(y=0\mid\boldsymbol\theta) = \log\sigma(-z),\quad
+        z = \mathbf a^\top\boldsymbol\theta + d.
 
-    Birnbaum (1968); slope–intercept parameterization as in mirt (Chalmers, 2012).
+    Birnbaum (1968); Reckase (2009); slope–intercept parameterization as in mirt (Chalmers, 2012).
     """
+
+    n_factors: int = 1
+
+    def __post_init__(self) -> None:
+        """Validate the number of factors."""
+        _validate_n_factors(self.n_factors)
+
+    def with_factors(self, n_factors: int) -> DichotomousKernel:
+        """Return a dichotomous kernel with ``n_factors`` latent dimensions."""
+        return replace(self, n_factors=n_factors)
 
     @property
     def param_names(self) -> tuple[str, ...]:
-        """``("a", "d")``."""
-        return ("a", "d")
+        """``("a", "d")`` for ``D == 1`` or ``("a1", ..., "aD", "d")`` for ``D > 1``."""
+        return (*_slope_names(self.n_factors), "d")
 
     @property
     def n_cat(self) -> int:
@@ -110,8 +152,8 @@ class DichotomousKernel:
 
     @property
     def slope_params(self) -> tuple[str, ...]:
-        """``("a",)``."""
-        return ("a",)
+        """``("a",)`` for ``D == 1`` or ``("a1", ..., "aD")`` for ``D > 1``."""
+        return _slope_names(self.n_factors)
 
     @property
     def intercept_params(self) -> tuple[str, ...]:
@@ -120,21 +162,24 @@ class DichotomousKernel:
 
     @property
     def irt_names(self) -> tuple[str, ...]:
-        """``("b",)``."""
-        return ("b",)
+        """``("b",)`` for unidimensional models; empty for ``D > 1``."""
+        return ("b",) if self.n_factors == 1 else ()
 
     @property
     def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
-        """``((0, 1),)`` — ``b`` depends on ``(a, d)``."""
-        return ((0, 1),)
+        """``((0, 1),)`` for ``D == 1``; empty for ``D > 1``."""
+        return ((0, 1),) if self.n_factors == 1 else ()
 
     def irt_thresholds(self, params: Array) -> Array:
-        r"""Return IRT difficulty :math:`b = -d / a` (Birnbaum, 1968)."""
+        r"""Return IRT difficulty :math:`b = -d / a` for ``D == 1`` (Birnbaum, 1968)."""
+        if self.n_factors > 1:
+            return jnp.empty((0,), dtype=params.dtype)
         return jnp.array([-params[1] / params[0]])
 
     def log_prob(self, theta: Array, params: Array) -> Array:
         """Return ``(Q, 2)`` log-probabilities of responses 0 and 1."""
-        z = params[0] * theta + params[1]
+        d = self.n_factors
+        z = _linear_predictor(theta, params[:d], d) + params[d]
         return jnp.stack([jax.nn.log_sigmoid(-z), jax.nn.log_sigmoid(z)], axis=-1)
 
 
@@ -143,14 +188,15 @@ class FourPLKernel:
     r"""Four-parameter logistic kernel in slope–intercept form, shared by 3PL and 4PL items.
 
     .. math::
-        P(y=1\mid\theta) = g + (u-g)\,\sigma(a\theta+d),\qquad 0\le g<u\le 1,
+        P(y=1\mid\boldsymbol\theta) = g + (u-g)\,\sigma(\mathbf a^\top\boldsymbol\theta+d),
+        \qquad 0\le g<u\le 1,
 
     computed in log space as (DESIGN.md §15.3)
 
     .. math::
         \log P(y=1) &= \operatorname{logaddexp}\big(\log g,\ \log(u-g)+\log\sigma(z)\big),\\
         \log P(y=0) &= \operatorname{logaddexp}\big(\log(1-u),\ \log(u-g)+\log\sigma(-z)\big),
-        \qquad z=a\theta+d.
+        \qquad z=\mathbf a^\top\boldsymbol\theta+d.
 
     At :math:`g=0` the first log-probability is :math:`\log(u-g)+\log\sigma(z)` and at :math:`u=1`
     the second is :math:`\log(u-g)+\log\sigma(-z)`, selected with a double ``where`` so that
@@ -163,10 +209,20 @@ class FourPLKernel:
     parameterization and parameter names as in mirt (Chalmers, 2012).
     """
 
+    n_factors: int = 1
+
+    def __post_init__(self) -> None:
+        """Validate the number of factors."""
+        _validate_n_factors(self.n_factors)
+
+    def with_factors(self, n_factors: int) -> FourPLKernel:
+        """Return a 4PL kernel with ``n_factors`` latent dimensions."""
+        return replace(self, n_factors=n_factors)
+
     @property
     def param_names(self) -> tuple[str, ...]:
-        """``("a", "d", "g", "u")``."""
-        return ("a", "d", "g", "u")
+        """``("a", "d", "g", "u")`` for ``D == 1`` or ``("a1", ..., "aD", "d", "g", "u")``."""
+        return (*_slope_names(self.n_factors), "d", "g", "u")
 
     @property
     def n_cat(self) -> int:
@@ -175,8 +231,8 @@ class FourPLKernel:
 
     @property
     def slope_params(self) -> tuple[str, ...]:
-        """``("a",)``."""
-        return ("a",)
+        """``("a",)`` for ``D == 1`` or ``("a1", ..., "aD")`` for ``D > 1``."""
+        return _slope_names(self.n_factors)
 
     @property
     def intercept_params(self) -> tuple[str, ...]:
@@ -185,22 +241,25 @@ class FourPLKernel:
 
     @property
     def irt_names(self) -> tuple[str, ...]:
-        """``("b",)``."""
-        return ("b",)
+        """``("b",)`` for unidimensional models; empty for ``D > 1``."""
+        return ("b",) if self.n_factors == 1 else ()
 
     @property
     def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
-        """``((0, 1),)`` — ``b`` depends on ``(a, d)`` only."""
-        return ((0, 1),)
+        """``((0, 1),)`` for ``D == 1``; empty for ``D > 1``."""
+        return ((0, 1),) if self.n_factors == 1 else ()
 
     def irt_thresholds(self, params: Array) -> Array:
-        r"""Return IRT difficulty :math:`b = -d / a` (Birnbaum, 1968; Barton & Lord, 1981)."""
+        r"""Return IRT difficulty :math:`b = -d / a` for ``D == 1`` (Birnbaum, 1968)."""
+        if self.n_factors > 1:
+            return jnp.empty((0,), dtype=params.dtype)
         return jnp.array([-params[1] / params[0]])
 
     def log_prob(self, theta: Array, params: Array) -> Array:
         """Return ``(Q, 2)`` log-probabilities of responses 0 and 1."""
-        a, d, g, u = params[0], params[1], params[2], params[3]
-        z = a * theta + d
+        nf = self.n_factors
+        d, g, u = params[nf], params[nf + 1], params[nf + 2]
+        z = _linear_predictor(theta, params[:nf], nf) + d
         log_span = jnp.log(u - g)
         core1 = log_span + jax.nn.log_sigmoid(z)
         core0 = log_span + jax.nn.log_sigmoid(-z)
@@ -237,9 +296,10 @@ class GradedKernel:
     r"""Graded response kernel (Samejima, 1969) in slope–intercept form.
 
     .. math::
-        P(y\ge k\mid\theta)=\sigma(a\theta+d_k),\quad k=1,\dots,K-1,\qquad d_1>\dots>d_{K-1},
+        P(y\ge k\mid\boldsymbol\theta)=\sigma(\mathbf a^\top\boldsymbol\theta+d_k),
+        \quad k=1,\dots,K-1,\qquad d_1>\dots>d_{K-1},
 
-        P(y=k\mid\theta)=P(y\ge k\mid\theta)-P(y\ge k+1\mid\theta).
+        P(y=k\mid\boldsymbol\theta)=P(y\ge k\mid\boldsymbol\theta)-P(y\ge k+1\mid\boldsymbol\theta).
 
     Log-probabilities: :math:`\log\sigma(-z_1)` for :math:`k=0`, :math:`\log\sigma(z_{K-1})` for
     :math:`k=K-1`, and
@@ -248,44 +308,58 @@ class GradedKernel:
     """
 
     n_cat: int
+    n_factors: int = 1
 
     def __post_init__(self) -> None:
-        """Validate the number of categories."""
+        """Validate the number of categories and factors."""
         if self.n_cat < 2:
             raise SpecificationError(f"GRM needs at least 2 categories, got {self.n_cat}.")
+        _validate_n_factors(self.n_factors)
+
+    def with_factors(self, n_factors: int) -> GradedKernel:
+        """Return a graded kernel with ``n_factors`` latent dimensions."""
+        return replace(self, n_factors=n_factors)
 
     @property
     def param_names(self) -> tuple[str, ...]:
-        """``("a", "d1", ..., "d{K-1}")``."""
-        return ("a", *(f"d{k}" for k in range(1, self.n_cat)))
+        """``("a", "d1", ..., "d{K-1}")`` or ``("a1", ..., "aD", "d1", ..., "d{K-1}")``."""
+        return (*_slope_names(self.n_factors), *(f"d{k}" for k in range(1, self.n_cat)))
 
     @property
     def slope_params(self) -> tuple[str, ...]:
-        """``("a",)``."""
-        return ("a",)
+        """``("a",)`` for ``D == 1`` or ``("a1", ..., "aD")`` for ``D > 1``."""
+        return _slope_names(self.n_factors)
 
     @property
     def intercept_params(self) -> tuple[str, ...]:
         """``("d1", ..., "d{K-1}")``."""
-        return self.param_names[1:]
+        return self.param_names[self.n_factors :]
 
     @property
     def irt_names(self) -> tuple[str, ...]:
-        """``("b1", ..., "b{K-1}")``."""
+        """``("b1", ..., "b{K-1}")`` for ``D == 1``; empty for ``D > 1``."""
+        if self.n_factors > 1:
+            return ()
         return tuple(f"b{k}" for k in range(1, self.n_cat))
 
     @property
     def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
-        """Each ``bk`` depends on ``(a, dk)``."""
+        """Each ``bk`` depends on ``(a, dk)`` for ``D == 1``; empty for ``D > 1``."""
+        if self.n_factors > 1:
+            return ()
         return tuple((0, k) for k in range(1, self.n_cat))
 
     def irt_thresholds(self, params: Array) -> Array:
-        r"""Return IRT thresholds :math:`b_k = -d_k / a` (Samejima, 1969)."""
+        r"""Return IRT thresholds :math:`b_k = -d_k / a` for ``D == 1`` (Samejima, 1969)."""
+        if self.n_factors > 1:
+            return jnp.empty((0,), dtype=params.dtype)
         return -params[1:] / params[0]
 
     def log_prob(self, theta: Array, params: Array) -> Array:
         """Return ``(Q, n_cat)`` category log-probabilities."""
-        z = params[0] * theta[:, None] + params[None, 1:]  # (Q, K-1)
+        d = self.n_factors
+        lin = _linear_predictor(theta, params[:d], d)
+        z = lin[:, None] + params[None, d:]  # (Q, K-1)
         log_cum = jax.nn.log_sigmoid(z)  # log P(y >= k), k = 1..K-1
         first = jax.nn.log_sigmoid(-z[:, :1])
         last = log_cum[:, -1:]
@@ -298,7 +372,9 @@ class GPCMKernel:
     r"""Generalized partial credit kernel (Muraki, 1992) in slope–intercept form.
 
     .. math::
-        P(y=k\mid\theta) = \frac{\exp(k\,a\theta + d_k)}{\sum_{c=0}^{K-1}\exp(c\,a\theta + d_c)},
+        P(y=k\mid\boldsymbol\theta)
+        = \frac{\exp(k\,\mathbf a^\top\boldsymbol\theta + d_k)}
+               {\sum_{c=0}^{K-1}\exp(c\,\mathbf a^\top\boldsymbol\theta + d_c)},
         \qquad k=0,\dots,K-1,\quad d_0=0,
 
     with fixed scoring coefficients :math:`\mathrm{ak}_k=k` and :math:`d_0=0` (not a parameter),
@@ -308,50 +384,64 @@ class GPCMKernel:
     """
 
     n_cat: int
+    n_factors: int = 1
 
     def __post_init__(self) -> None:
-        """Validate the number of categories."""
+        """Validate the number of categories and factors."""
         if self.n_cat < 2:
             raise SpecificationError(f"GPCM needs at least 2 categories, got {self.n_cat}.")
+        _validate_n_factors(self.n_factors)
+
+    def with_factors(self, n_factors: int) -> GPCMKernel:
+        """Return a GPCM kernel with ``n_factors`` latent dimensions."""
+        return replace(self, n_factors=n_factors)
 
     @property
     def param_names(self) -> tuple[str, ...]:
-        """``("a", "d1", ..., "d{K-1}")``."""
-        return ("a", *(f"d{k}" for k in range(1, self.n_cat)))
+        """``("a", "d1", ..., "d{K-1}")`` or ``("a1", ..., "aD", "d1", ..., "d{K-1}")``."""
+        return (*_slope_names(self.n_factors), *(f"d{k}" for k in range(1, self.n_cat)))
 
     @property
     def slope_params(self) -> tuple[str, ...]:
-        """``("a",)``."""
-        return ("a",)
+        """``("a",)`` for ``D == 1`` or ``("a1", ..., "aD")`` for ``D > 1``."""
+        return _slope_names(self.n_factors)
 
     @property
     def intercept_params(self) -> tuple[str, ...]:
         """``("d1", ..., "d{K-1}")``."""
-        return self.param_names[1:]
+        return self.param_names[self.n_factors :]
 
     @property
     def irt_names(self) -> tuple[str, ...]:
-        """``("b1", ..., "b{K-1}")``."""
+        """``("b1", ..., "b{K-1}")`` for ``D == 1``; empty for ``D > 1``."""
+        if self.n_factors > 1:
+            return ()
         return tuple(f"b{k}" for k in range(1, self.n_cat))
 
     @property
     def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
         r"""``b1`` depends on ``(a, d1)``; ``bk`` (:math:`k\ge 2`) on ``(a, d{k-1}, dk)``."""
+        if self.n_factors > 1:
+            return ()
         return ((0, 1), *((0, k - 1, k) for k in range(2, self.n_cat)))
 
     def irt_thresholds(self, params: Array) -> Array:
-        r"""Return step difficulties :math:`b_k = -(d_k - d_{k-1}) / a` with :math:`d_0 = 0`.
+        r"""Return step difficulties :math:`b_k = -(d_k - d_{k-1}) / a` for ``D == 1``.
 
         Muraki (1992); Masters (1982).
         """
+        if self.n_factors > 1:
+            return jnp.empty((0,), dtype=params.dtype)
         intercepts = jnp.concatenate([jnp.zeros((1,), dtype=params.dtype), params[1:]])
         return -jnp.diff(intercepts) / params[0]
 
     def log_prob(self, theta: Array, params: Array) -> Array:
         """Return ``(Q, n_cat)`` category log-probabilities."""
+        d = self.n_factors
         categories = jnp.arange(self.n_cat, dtype=theta.dtype)
-        intercepts = jnp.concatenate([jnp.zeros((1,), dtype=params.dtype), params[1:]])
-        eta = params[0] * theta[:, None] * categories[None, :] + intercepts[None, :]
+        intercepts = jnp.concatenate([jnp.zeros((1,), dtype=params.dtype), params[d:]])
+        lin = _linear_predictor(theta, params[:d], d)
+        eta = lin[:, None] * categories[None, :] + intercepts[None, :]
         return jax.nn.log_softmax(eta, axis=-1)
 
 
