@@ -251,7 +251,8 @@ np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_nump
 
 `item_fit(data)` は各項目の Orlando と Thissen の S-X2 を計算する。合計得点ごとの各反応カテゴリの観測度数とモデルによる
 期待度数を比べ、度数の少ないセルは mirt の `itemfit()` と同じ方法でまとめる（既定 `mincell=1`）。欠測のないデータ、
-すべての反応カテゴリが観測されていること、`Normal` 潜在分布の単一群 1 次元モデルが必要。
+すべての反応カテゴリが観測されていること、`Normal` 潜在分布の 1 次元モデルが必要。多母集団モデルでは `group=` を
+渡すと、（mirt と同じく）群ごとに S-X2 を計算し、先頭に `group` 列がつく。
 
 ```python
 fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)

@@ -51,5 +51,5 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - M-step for equality constraints across items.
 - Davidian-curve and normal-mixture latent distributions.
 - Differentiable linking (Haebara / Stocking–Lord and generalizations) on top of the library.
-- [x] Item fit: S-X2 (`FitResult.item_fit()`, single-group unidimensional; validated in V15).
+- [x] Item fit: S-X2 (`FitResult.item_fit()`, unidimensional, per group for multiple groups; validated in V15).
 - DIF (multiple-group likelihood-ratio tests), M2.

@@ -132,7 +132,7 @@ order (`"PV"`: `pv<m>_<factor>`).
 #### `FitResult.item_fit`
 
 ```text
-item_fit(data, *, mincell=1.0, item_names=None) -> DataFrame
+item_fit(data, *, mincell=1.0, group=None, item_names=None) -> DataFrame
 ```
 
 Orlando–Thissen S-X2 item fit ([guide section 5](guide.md#item-fit-s-x2)). For each item,
@@ -146,14 +146,16 @@ free latent parameters (mirt's convention).
 |---|---|
 | `data` | Complete responses on the fitted items (typically the fitting data) |
 | `mincell` | Minimum expected count per cell before collapsing (default `1.0`) |
+| `group` | Group labels (required for a multiple-group model; S-X2 is computed within each group, DESIGN §15.45) |
 | `item_names` | Column names when `data` is an array |
 
 **Returns**: `DataFrame` with columns `item`, `s_x2`, `df`, `rmsea`
 ($\sqrt{\max(0, X^2/df-1)/(N-1)}$) and `p`; items whose collapsed table leaves `df <= 0` get
-`df = 0` and NaN statistics.
+`df = 0` and NaN statistics. A multiple-group model adds a leading `group` column (one row per
+group and item).
 
-**Raises**: `SpecificationError` for multidimensional, multiple-group or `EmpiricalHistogram`
-models, missing responses, an item with an unobserved category, or a non-positive `mincell`.
+**Raises**: `SpecificationError` for multidimensional or `EmpiricalHistogram` models, missing
+responses, an item with an unobserved category (within a group), or a non-positive `mincell`.
 
 #### `FitResult.to_json`
 
