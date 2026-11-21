@@ -142,7 +142,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | 名前 | 種類 | 役割 |
 |---|---|---|
 | `Model` | frozen dataclass | 仕様全体。`uniform`, `from_items` で生成、`.fix`, `.fix_from`, `.prior`, `.equal_across_groups`, `.equal_across_items`, `.with_groups`, `.with_latent`, `.parameter_table` |
-| `Rasch`, `TwoPL`, `ThreePL`, `FourPL`, `GRM`, `GPCM` | frozen dataclass（`ItemModel` を満たす） | 項目モデル |
+| `Rasch`, `TwoPL`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`, `Nominal` | frozen dataclass（`ItemModel` を満たす） | 項目モデル |
 | `Normal`, `EmpiricalHistogram` | frozen dataclass（`LatentDist` を満たす） | 潜在分布。`Normal.standard()`, `Normal.free()` |
 | `LogNormal`, `NormalPrior`, `Beta`, `TruncNormal` | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
 | `BAEM`, `Quadrature` | frozen dataclass | 推定設定 |

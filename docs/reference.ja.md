@@ -10,7 +10,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - モデル: [`Model`](#model)
-- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm)
+- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormal`](#lognormal), [`Beta`](#beta)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
@@ -426,6 +426,21 @@ $P(y=k\mid\theta)=\exp(k\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\theta+d_c)$（$d_0=0$
 表示用にステップ困難度 $b_k=-(d_k-d_{k-1})$。全項目が `Rasch` または `PCM` の単一群モデルでは、既定で
 潜在分布の分散を推定する（多値データに対する mirt の `itemtype = "Rasch"` と同じ）。`n_cat = 2` では
 `Rasch` と一致する。`n_cat` が同じ `GPCM` と `GPCMKernel` を共有する。
+
+### `Nominal`
+
+```text
+Nominal(n_cat)
+```
+
+Thissen, Cai & Bock (2010) の全体傾き × 採点関数パラメタ化による名義反応モデル（Bock, 1972）。カテゴリは
+`0..n_cat-1`（`n_cat >= 2`）。
+$P(y=k\mid\theta)=\exp(a\,\mathrm{ak}_k\,\theta+d_k)/\sum_{c=0}^{K-1}\exp(a\,\mathrm{ak}_c\,\theta+d_c)$
+（$\mathrm{ak}_0=0$、$\mathrm{ak}_{K-1}=K-1$、$d_0=0$ 固定）。内部パラメタは `a`（多次元モデルでは
+`a1`…`aD`）、`ak1`…`ak{K-2}`、`d1`…`d{K-1}`（すべて自由推定・順序制約なし、表示用の `b` / `bk` 列はなし）。
+mirt の `itemtype = "nominal"` と同じ。$\mathrm{ak}_k=k$ に固定すると `GPCM(n_cat)` と厳密に一致する
+（`n_cat = 2` では自由な `ak` パラメタがなく、`Nominal(2)` は `GPCM(2)` / `TwoPL` と一致する）。
+`NominalKernel(n_cat)` を用いる。
 
 ---
 
