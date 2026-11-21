@@ -180,7 +180,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 
 ### 4.9 求積
 - **決定**: 1 次元の既定は等間隔 61 点、$[-6,6]$（EH と同じ格子を共有でき、Normal でも重みを密度から作る）。
-- Normal 専用に Gauss–Hermite も選べる（`Quadrature.gauss_hermite(n)`、未実装）。
+- Normal 潜在分布では Gauss–Hermite も選べる（`Quadrature.gauss_hermite(n)`、§15.44）。
 - **多次元直積格子（M4, §15.30）**: 2・3 次元モデルは 1 次元等間隔格子の直積（`Quadrature.grid(n_factors)` → `(Q, D)`）を使う。次元あたりの既定節点数は `Quadrature.default(n_factors)` により mirt の `select_quadpts` に合わせ、1 次元で 61 点、2 次元で 31 点（$31^2 = 961$）、3 次元で 15 点（$15^3 = 3{,}375$）、区間 $[-6, 6]$ とする。4 次元以上は対象外（非目的）。
 
 ### 4.10 初期値
@@ -643,6 +643,19 @@ class ItemKernel(Protocol):
     同じパターンの回答者でも独立で、`key` に対して決定的。メモリを抑えるためパターンと回答者を `lax.map` で分割して処理する。
     列名は `pv<m>_<factor>`。統計的に検証する: 4,000 回抽出すると標本平均・SD・相関が格子上の事後分布とモンテカルロ誤差の
     範囲で一致する（mirt の既定の plausible values は正規近似なので参照にはしない）。
+44. **Gauss–Hermite 求積（`Quadrature.gauss_hermite(n)`、§4.9）**: $e^{-x^2}$ に対する Gauss–Hermite 則 $(x_q, w_q)$
+    （Golub & Welsch, 1969; `numpy.polynomial.hermite.hermgauss`）から固定節点 $\theta_q=\sqrt2x_q$ と、節点ごとの固定の
+    対数基準重み $b_q=\log(w_q/\sqrt\pi)+\tfrac12\theta_q^2$（直積則では次元について和）を作る。潜在分布の重みは
+    $\operatorname{softmax}_q\big(b_q+\log\phi(\boldsymbol\theta_q;\boldsymbol\mu,\boldsymbol\Sigma)\big)$、つまり $N(0,1)$ の
+    Gauss–Hermite 則を $\phi(\cdot;\boldsymbol\mu,\boldsymbol\Sigma)/\phi(\cdot;0,I)$ で重み付け直したもので、節点は動かず、
+    自由な平均・分散・相関でも EM の構造（E-step、厳密な潜在 M-step、Oakes、SQUAREM）はそのまま。
+    `CompiledProblem.node_log_base` が $b_q$（等間隔格子では 0）を持ち、潜在分布の対数重みを作るすべての箇所
+    （`_normal_logw`）で加える。潜在分散が 1 より十分大きいと裾で重みの比が大きくなり精度が落ちる。`EmpiricalHistogram` は
+    等間隔格子が必要（`SpecificationError`）。$D=1$ の PV は自前の細かい等間隔格子で抽出する（基準重み 0）。JSON は
+    `{"type": "gauss_hermite", "n_points": n}` を保存する。`scipy.integrate.quad` と比べて検証（$N(0.3, 1.4)$ の周辺対数尤度、
+    61 節点で相対誤差 $1.2\times10^{-10}$）し、非常に細かい等間隔格子での推定とも比べた（分散自由の Rasch、41 節点と
+    $[-12,12]$ の 401 点: 推定値は $2\times10^{-10}$ 以内。2 次元 2PL、$31^2$ と $121^2$: $5\times10^{-7}$ 以内）。
+    mirt は EM で Gauss–Hermite を使わない。
 
 ## 16. 実装上の決定（M5）
 1. **項目をまたぐ等値制約（`Model.equal_across_items`、`free_id` の共有）**:
@@ -745,6 +758,7 @@ class ItemKernel(Protocol):
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
+- Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
