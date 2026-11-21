@@ -39,6 +39,7 @@
 | V16 | 項目をまたぐ等値制約（LSAT7 の共通傾き、2PL + graded のモデル間制約、アンカーつき 2 群 + 共通傾き） | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V17 | V4 のデータでの尤度比検定による DIF（`a`+`d` と `d` の `add`、完全不変モデルからの `a`+`d` の `drop`） | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
+| V19 | Davidian 曲線潜在分布（2PL $k=3$・GRM $k=2$・平均分散自由の FIPC 2PL $k=3$） | `mirt(..., dentype = "Davidian-k")` および `mirt(..., customGroup = ..., SE.type = "Oakes")` | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -295,6 +296,44 @@
   （`p.adjust = "holm"`）。mirt の `p` は `1 - pchisq(...)` なので非常に大きな $X^2$ では厳密に 0（flexpyirt は生存関数）。
   一致（通常の EM・SQUAREM とも）: $X^2$ と AIC/SABIC/HQ/BIC の差 $2.2\times10^{-11}$、`p`・`adj_p` $3\times10^{-11}$。
   テスト: `tests/test_mirt_m5_dif.py`。参照値生成: `validation/r/m5_dif_reference.R`。
+- **Davidian 曲線潜在分布（V19、M5）**: `mirt` 1.46.1（`Theta_DC_den`, `Mstep.DC.optim`, `EM.group`,
+  `LoadGroupPars`, `updatePrior`）および `dcurver` 0.9.3 の調査から、厳密な離散化 MMLE との 4 つの相違を確認した
+  （DESIGN §16.4）:
+  1. 組み込みの `mirt(..., dentype = "Davidian-k")` は毎 EM 反復で期待度数に Woods の線形補間
+     `standardizeQuadrature` を適用してから未正規化の `dcurver::ddc` を `nlminb` で最適化するため、EM の単調性が
+     崩れ（mirt は `"Davidian"` で単調性検査を無効化）、周辺対数尤度が真に低い非停留点に収束する（V19a の 2PL
+     $k=3$ で `21.5` 点低く、V19b の GRM $k=2$ では mirt の正弦優先初期角 `1.570789` が極特異点 $\phi_1=\pi/2$
+     すなわち $N(0,1)$ に捕捉され `139.3` 点低い）。
+  2. 組み込みの `dentype = "Davidian-k"` は `SE = TRUE`（`"No standard error method currently supported
+     for Davidian curves"`）と `MEAN_1` / `COV_11` の自由推定（`"Estimating Davidian mean-variance
+     hyper-parameters is not currently supported"`）を禁止している。
+  3. `fscores()` は `use_dentype_estimate = TRUE` を明示しない限り $N(0,1)$ 事前分布を使う（`EAP` と plausible
+     values のみ対応し `MAP` は拒否）。
+  4. `createGroup()`（格子上で正規化した `dcurver::ddc` を呼び、`TOL = 1e-10`, `accelerate = "none"`,
+     `SE.type = "Oakes"`）経由で厳密な標準化 Davidian MMLE を mirt 内で検証する際、`createGroup` 既定の
+     `derivType = "Richardson"` は粗い 2 階差分幅 `delta = 0.01`（`2*delta = 0.02`）により $k=3$ の Oakes SE を最大
+     25.6% 歪めるため `derivType = "central"`（`delta = 1e-5`）を用いた。また `mirt:::BL.LL` は `dentype == "custom"`
+     で `pars2` ではなく `pars` を参照する不具合があるため、Richardson Hessian SE は R の厳密な周辺対数尤度から直接
+     算出した（`h = 1e-4`）。
+
+  歪んだ標準化 $\chi^2_4$ 特性の 3 シミュレーションケース（$N = 3000$）を `tests/test_mirt_m5_davidian.py` で照合する
+  （通常 EM・SQUAREM とも。参照値生成: `validation/r/m5_davidian_reference.R` → `tests/reference/v19_davidian_*.json`）:
+  - **V19a（`v19_davidian_2pl_k3`、2PL、$J=20, k=3$、61 点 $[-6,6]$）**: 厳密 MMLE 対 R `mirt(customGroup)` / R
+    Hessian: `loglik` 相対 `2.3e-16`、項目パラメタ `9.8e-8`、`phi_1..3` `6.3e-9`、Oakes SE 対 mirt Oakes `3.8e-6`
+    （項目 `7.7e-7`）、Hessian SE 対 R Richardson `1.8e-6`（潜在 `3.7e-7`）、flexpyirt Oakes 対 Hessian `7.6e-16`、
+    EAP `5.3e-15`（SQUAREM で EM 評価回数 `113 → 39`）。組み込み `mirt(..., dentype="Davidian-3")` のパラメタ
+    （`mean = mu_z`, `var = var_z`）では `Prior`・`logLik`（相対 `1.4e-15`）・`fscores(..., use_dentype_estimate=TRUE)`
+    （`8.2e-15`）が完全一致し、厳密 MMLE は対数尤度を `+21.47` 改善する。
+  - **V19b（`v19_davidian_grm_k2`、GRM $K=4$、$J=10, k=2$、61 点 $[-6,6]$）**: 厳密 MMLE: `loglik` 相対 `1.9e-16`、
+    項目パラメタ `3.6e-8`、`phi_1..2` `1.3e-9`、Oakes SE 対 mirt Oakes `1.3e-6`、Hessian SE 対 R Richardson `2.6e-6`、
+    flexpyirt Oakes 対 Hessian `7.0e-16`、EAP `6.2e-15`（SQUAREM `111 → 33`）。組み込み `Davidian-2` のパラメタでは
+    `logLik`（相対 `1.9e-16`）・EAP（`6.7e-15`）が完全一致し、厳密 MMLE は対数尤度を `+139.32` 改善する。
+  - **V19c（`v19_davidian_fipc_k3`、FIPC 2PL、`q01–q10` 固定、$J=20, k=3$、`mean`/`var` 自由、移動・拡大した歪み特性
+    $0.4 + 1.2\cdot\text{skewed}$、81 点 $[-8,8]$）**: 厳密 MMLE: `loglik` 相対 `5.6e-13`、項目パラメタ `8.5e-6`、
+    潜在パラメタ（`mean, var, phi_1..3`）`7.3e-6`、Oakes SE 対 mirt Oakes `7.0e-6`、Hessian SE 対 R Richardson
+    `8.3e-6`、flexpyirt Oakes 対 Hessian `2.9e-15`、EAP `4.0e-15`（SQUAREM `107 → 33`）。
+  単体テスト（単位球面・モーメント・ゼロ角での $N(0,1)$ 一致・多項式零点の自動微分ガード・Rasch/FIPC・識別性と仕様エラー・
+  スコアリング・JSON 往復）: `tests/test_m5_davidian.py`。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

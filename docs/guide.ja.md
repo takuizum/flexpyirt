@@ -383,6 +383,34 @@ print(eh.latent_weights.head())  # group, node, weight
 - 採点: EAP・ML・WLE・PV はヒストグラムを使う。MAP は連続な事前分布が必要なので `SpecificationError`。
 - ヒストグラムの重みの多くは弱くしか決まらないため、厳しい収束基準では EM の収束が遅い。`BAEM(squarem=True)` が有効。
 
+### Davidian 曲線
+
+`DavidianCurve(degree)` は $k \in \{1,\dots,10\}$ 個の角度パラメタ `phi_1`…`phi_k` で滑らかな非正規 1 次元潜在密度
+$h_k(z;\boldsymbol\phi) = P_k(z;\boldsymbol\phi)^2\varphi(z)$ を表す（Zhang & Davidian, 2001; Woods & Lin, 2009）。
+解析的に標準化しているため、任意の $\boldsymbol\phi$ で連続平均・分散が `mean`（既定 `0`）・`var`（既定 `1`）に一致する。
+`EmpiricalHistogram` と異なり増える潜在パラメタは $k$ 個だけで、項目パラメタと潜在パラメタの同時 Oakes / Hessian 標準誤差が得られる。
+
+```python
+from flexpyirt import DavidianCurve
+
+theta_skew = (rng.chisquare(4.0, 1200) - 4.0) / np.sqrt(8.0)
+skew_df = pd.DataFrame(simulate_2pl(a_true, d_true, theta_skew, rng), columns=items)
+
+dc = fit(
+    Model.uniform(TwoPL(), items=items).with_latent(DavidianCurve(3)),
+    skew_df,
+    method=BAEM(squarem=True),
+)
+print(dc.latent.round(3))  # mean, var, phi_1..phi_3 とその SE
+print(dc.score(skew_df.iloc[:3], method="EAP").round(3))  # 推定した Davidian 事前分布を使う
+```
+
+- **識別性**: `mean` と `var` は `Normal` と同じ規則に従う（既定は `0`・`1` 固定。Rasch / PCM では `free_var=True`、
+  FIPC では `DavidianCurve.free(degree)` を使う）。
+- **対象範囲**: 単一群の 1 次元モデルのみ（`with_groups()` と `with_factors()` は `SpecificationError`）。
+- **採点**: `"EAP"` と `"PV"` は推定した Davidian 密度を使い、`"ML"` と `"WLE"` は尤度のみ。Davidian 密度は多峰に
+  なったり $P_k$ の実根で 0 になったりするため、`"MAP"` は `SpecificationError`。
+
 ## 9. 多母集団
 
 複数の集団（学年、受験年度、言語版など）の回答を同時に推定する。アンカー項目のパラメタを群間で等しくして
@@ -670,3 +698,6 @@ except SpecificationError as e:
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
+- Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
+- Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.

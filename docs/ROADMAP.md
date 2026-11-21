@@ -51,7 +51,8 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - [x] M-step for equality constraints across items (`Model.equal_across_items()`, shared
   `free_id`s across items and item models; joint Newton per connected component; validated
   in V16).
-- Davidian-curve and normal-mixture latent distributions.
+- [x] Davidian-curve latent distributions (`DavidianCurve`, single-group unidimensional, analytically standardized, Oakes/Hessian SEs; validated in V19).
+- Normal-mixture latent distributions.
 - Differentiable linking (Haebara / Stocking–Lord and generalizations) on top of the library.
 - [x] Item fit: S-X2 (`FitResult.item_fit()`, single-group unidimensional; validated in V15).
 - [x] DIF: multiple-group likelihood-ratio tests (`FitResult.dif()`, schemes `add` / `drop`,

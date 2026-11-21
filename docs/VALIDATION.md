@@ -44,6 +44,7 @@ English | [日本語](VALIDATION.ja.md)
 | V16 | Equality constraints across items (LSAT7 common slope; 2PL + graded with cross-model constraints; two groups with anchors and a common slope) | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V17 | DIF likelihood-ratio tests on the V4 data (`add` for `a`+`d` and for `d`; `drop` for `a`+`d` from the fully invariant model) | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
+| V19 | Davidian-curve latent distributions (2PL $k=3$, GRM $k=2$, FIPC 2PL $k=3$ with free mean/var) | `mirt(..., dentype = "Davidian-k")` & `mirt(..., customGroup = ..., SE.type = "Oakes")` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -354,6 +355,54 @@ English | [日本語](VALIDATION.ja.md)
   Agreement (plain EM and SQUAREM): $X^2$ and the AIC/SABIC/HQ/BIC differences to $2.2\times10^{-11}$,
   `p` and `adj_p` to $3\times10^{-11}$. Tests: `tests/test_mirt_m5_dif.py`. Reference generator:
   `validation/r/m5_dif_reference.R`.
+- **Davidian-curve latent distributions (V19, M5)**: inspecting `mirt` 1.46.1 (`Theta_DC_den`,
+  `Mstep.DC.optim`, `EM.group`, `LoadGroupPars`, `updatePrior`) and `dcurver` 0.9.3 established
+  four key differences from exact discretized MMLE (DESIGN §16.4):
+  1. Built-in `mirt(..., dentype = "Davidian-k")` applies Woods' linear-interpolation
+     `standardizeQuadrature` to expected counts at every EM cycle before running `nlminb` on
+     unnormalized `dcurver::ddc`, which breaks EM monotonicity (mirt disables its monotonicity
+     check for `"Davidian"`) and converges to a non-stationary point with strictly lower
+     marginal log-likelihood (by `21.5` points on V19a's 2PL $k=3$, and by `139.3` points on
+     V19b's GRM $k=2$, where mirt's sine-first starting angle `1.570789` traps it at the polar
+     singularity $\phi_1=\pi/2$, i.e. $N(0,1)$).
+  2. Built-in `dentype = "Davidian-k"` forbids `SE = TRUE` (`"No standard error method currently
+     supported for Davidian curves"`) and forbids freeing `MEAN_1` / `COV_11` (`"Estimating
+     Davidian mean-variance hyper-parameters is not currently supported"`).
+  3. In `fscores()`, mirt defaults to an $N(0,1)$ prior unless `use_dentype_estimate = TRUE` is
+     passed (which supports `EAP` and plausible values, and rejects `MAP`).
+  4. When validating the exact standardized Davidian MMLE inside `mirt` via `createGroup()`
+     (calling `dcurver::ddc` normalized on the grid, `TOL = 1e-10`, `accelerate = "none"`,
+     `SE.type = "Oakes"`), `createGroup`'s default `derivType = "Richardson"` uses a coarse
+     second-derivative step `delta = 0.01` (`2*delta = 0.02`) that corrupts `k = 3` Oakes SEs by
+     up to 25.6%, so `derivType = "central"` (`delta = 1e-5`) is used; and `mirt:::BL.LL` reads
+     `pars` instead of `pars2` for `dentype == "custom"`, so Richardson Hessian SEs are computed
+     directly on the exact R marginal log-likelihood (`h = 1e-4`).
+
+  Three simulated cases with skewed standardized $\chi^2_4$ traits ($N = 3000$) are validated
+  in `tests/test_mirt_m5_davidian.py` (plain EM and SQUAREM, `validation/r/m5_davidian_reference.R`
+  → `tests/reference/v19_davidian_*.json`):
+  - **V19a (`v19_davidian_2pl_k3`, 2PL, $J=20, k=3$, 61 pts $[-6,6]$)**: exact MMLE vs R
+    `mirt(customGroup)` / R Hessian: `loglik` rel `2.3e-16`, item params `9.8e-8`, `phi_1..3`
+    `6.3e-9`, Oakes SE vs mirt Oakes `3.8e-6` (items `7.7e-7`), Hessian SE vs R Richardson
+    `1.8e-6` (latent `3.7e-7`), flexpyirt Oakes vs Hessian `7.6e-16`, EAP `5.3e-15` (SQUAREM
+    reduces EM evaluations `113 → 39`). At built-in `mirt(..., dentype="Davidian-3")` parameters
+    (with `mean = mu_z`, `var = var_z`), flexpyirt reproduces mirt's `Prior`, `logLik` (`1.4e-15`
+    rel), and `fscores(..., use_dentype_estimate=TRUE)` (`8.2e-15`), while exact MMLE gains
+    `+21.47` log-likelihood points.
+  - **V19b (`v19_davidian_grm_k2`, GRM $K=4$, $J=10, k=2$, 61 pts $[-6,6]$)**: exact MMLE:
+    `loglik` rel `1.9e-16`, item params `3.6e-8`, `phi_1..2` `1.3e-9`, Oakes SE vs mirt Oakes
+    `1.3e-6`, Hessian SE vs R Richardson `2.6e-6`, flexpyirt Oakes vs Hessian `7.0e-16`, EAP
+    `6.2e-15` (SQUAREM `111 → 33`). At built-in `mirt(..., dentype="Davidian-2")` parameters,
+    `logLik` (`1.9e-16` rel) and EAP (`6.7e-15`) match identically, while exact MMLE gains
+    `+139.32` log-likelihood points.
+  - **V19c (`v19_davidian_fipc_k3`, FIPC 2PL, `q01–q10` fixed, $J=20, k=3$, free `mean`/`var`,
+    shifted/scaled trait $0.4 + 1.2\cdot\text{skewed}$, 81 pts $[-8,8]$)**: exact MMLE: `loglik`
+    rel `5.6e-13`, item params `8.5e-6`, latent params (`mean, var, phi_1..3`) `7.3e-6`, Oakes SE
+    vs mirt Oakes `7.0e-6`, Hessian SE vs R Richardson `8.3e-6`, flexpyirt Oakes vs Hessian
+    `2.9e-15`, EAP `4.0e-15` (SQUAREM `107 → 33`).
+  Unit tests (unit sphere, moments, zero-angle $N(0,1)$ equivalence, polynomial-root autodiff
+  guard, Rasch/FIPC, identification/spec errors, scoring, JSON round trip):
+  `tests/test_m5_davidian.py`.
 
 ## Validation beyond agreement
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number

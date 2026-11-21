@@ -127,8 +127,9 @@ and `pv1`…`pv{n_draws}` for `"PV"`; for multidimensional models (`method="EAP"
 `theta_<factor>` and `se_<factor>` in declared factor order.
 
 **Raises**: `SpecificationError` if `method` is unknown, `"ML"`, `"WLE"` or `"PV"` on a
-multidimensional model, `method="MAP"` with an `EmpiricalHistogram` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for a deterministic method, or
-`n_draws` is not a positive integer.
+multidimensional model, `method="MAP"` with an `EmpiricalHistogram` or `DavidianCurve` latent
+distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for a deterministic method,
+or `n_draws` is not a positive integer.
 
 #### `FitResult.item_fit`
 
@@ -153,8 +154,9 @@ free latent parameters (mirt's convention).
 ($\sqrt{\max(0, X^2/df-1)/(N-1)}$) and `p`; items whose collapsed table leaves `df <= 0` get
 `df = 0` and NaN statistics.
 
-**Raises**: `SpecificationError` for multidimensional, multiple-group or `EmpiricalHistogram`
-models, missing responses, an item with an unobserved category, or a non-positive `mincell`.
+**Raises**: `SpecificationError` for multidimensional, multiple-group, `EmpiricalHistogram`, or
+`DavidianCurve` models, missing responses, an item with an unobserved category, or a non-positive
+`mincell`.
 
 #### `FitResult.dif`
 
@@ -554,6 +556,33 @@ fitted histogram. Unidimensional models only.
 **Raises**: `SpecificationError` for an invalid `min_weight`, for mixing `EmpiricalHistogram` and
 `Normal` across groups, or for a multidimensional model; `IdentificationError` when intercepts are
 fixed but no nonzero slope is (a variance-only constraint is not supported).
+
+### `DavidianCurve`
+
+```text
+DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)
+DavidianCurve.free(degree, *, mean=0.0, var=1.0)
+```
+
+Seminonparametric Davidian-curve latent density of polynomial degree `degree` in `1..10`
+(Zhang & Davidian, 2001; Woods & Lin, 2009; [guide section 8](guide.md#davidian-curves)).
+Evaluates $h_k(z;\boldsymbol\phi) = P_k(z;\boldsymbol\phi)^2\varphi(z)$ in normalized probabilists'
+Hermite polynomials with unit-sphere coefficients parameterized by $k$ angles
+`phi_1`…`phi_k` ($\boldsymbol\phi = \mathbf 0$ reproduces $N(\mu,\sigma^2)$ non-singularly),
+analytically standardized by the exact continuous moments of $h_k$ so the continuous mean and
+variance equal `mean` and `var` for every $\boldsymbol\phi$. Quadrature weights are normalized on
+the grid, keeping EM strictly monotone and Oakes / Hessian standard errors exact for all free item
+and latent parameters. Single-group unidimensional models only.
+
+| Argument | Description |
+|---|---|
+| `degree` | Integer polynomial degree $k \in \{1,\dots,10\}$ (number of angle parameters `phi_1`…`phi_k`) |
+| `mean`, `var` | Value (or starting value when free) of the continuous mean and positive variance |
+| `free_mean`, `free_var` | Whether `mean` / `var` is estimated (same identification rules as `Normal`) |
+
+**Raises**: `SpecificationError` for an invalid `degree`, `mean`, `var`, or flags, or when used
+with `Model.with_groups()` or `Model.with_factors()`; `IdentificationError` when `free_mean` or
+`free_var` lacks fixed intercepts or slopes.
 
 ---
 

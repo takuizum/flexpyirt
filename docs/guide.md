@@ -404,6 +404,38 @@ print(eh.latent_weights.head())  # group, node, weight
 - Many histogram weights are only weakly determined, so EM converges slowly at tight tolerances;
   `BAEM(squarem=True)` helps.
 
+### Davidian curves
+
+`DavidianCurve(degree)` models a smooth non-normal unidimensional latent density
+$h_k(z;\boldsymbol\phi) = P_k(z;\boldsymbol\phi)^2\varphi(z)$ using $k \in \{1,\dots,10\}$ angle
+parameters `phi_1`…`phi_k` (Zhang & Davidian, 2001; Woods & Lin, 2009), analytically standardized
+so the continuous mean and variance equal `mean` (default `0`) and `var` (default `1`) for every
+$\boldsymbol\phi$. Unlike `EmpiricalHistogram`, it adds only $k$ latent parameters and provides
+joint Oakes and Hessian standard errors for both item and latent parameters.
+
+```python
+from flexpyirt import DavidianCurve
+
+theta_skew = (rng.chisquare(4.0, 1200) - 4.0) / np.sqrt(8.0)
+skew_df = pd.DataFrame(simulate_2pl(a_true, d_true, theta_skew, rng), columns=items)
+
+dc = fit(
+    Model.uniform(TwoPL(), items=items).with_latent(DavidianCurve(3)),
+    skew_df,
+    method=BAEM(squarem=True),
+)
+print(dc.latent.round(3))  # mean, var, phi_1..phi_3 and SEs
+print(dc.score(skew_df.iloc[:3], method="EAP").round(3))  # uses the fitted Davidian prior
+```
+
+- **Identification**: `mean` and `var` follow the same rules as `Normal` (fixed at `0` and `1` by
+  default; pass `free_var=True` for Rasch/PCM, or `DavidianCurve.free(degree)` under FIPC).
+- **Scope**: single-group unidimensional models only (`with_groups()` and `with_factors()` raise
+  `SpecificationError`).
+- **Scoring**: `"EAP"` and `"PV"` use the fitted Davidian density; `"ML"` and `"WLE"` are
+  likelihood-only; `"MAP"` raises `SpecificationError` because a Davidian density can be multimodal
+  and vanish at real roots of $P_k$.
+
 ## 9. Multiple groups
 
 Calibrate responses from several populations (grades, test years, language versions) together.
@@ -710,3 +742,6 @@ except SpecificationError as e:
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
+- Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
+- Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
