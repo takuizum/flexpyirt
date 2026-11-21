@@ -678,8 +678,13 @@ class ItemKernel(Protocol):
      df = s - q,$$
    とする。ここで $s = J + \binom{J}{2}$、$q = \text{n\_params}$（自由な潜在分布パラメタを含む全自由パラメタ数）、
    $\Delta_c$ は $\Delta_2$ の SVD から得る $\operatorname{col}(\Delta_2)$ の直交補空間の正規直交基底である。
-   $df \le 0$（または $\Delta_c$ が空）のとき、$p$、RMSEA、その信頼区間、TLI、CFI は `NaN`（$\Delta_c$ が空のときは
-   $M_2$ も `NaN`）とする。
+   漸近 $\chi^2_{s-q}$ 分布が成り立つには $df = s - q > 0$ かつ列フルランク $\operatorname{rank}(\Delta_2) = q$
+   （1 次・2 次モーメントからの局所識別可能性。Maydeu-Olivares & Joe, 2005, Theorem 1; 2006, Theorem 2）が
+   必要である。$df \le 0$ または $\operatorname{rank}(\Delta_2) < \operatorname{ncol}(\Delta_2)$（例: 多値項目の自由
+   パラメタ数が項目数を超える $P_j > J$ や傾きが 0 に固定された場合、$df > 0$ であっても起こりうる）のときは、
+   1 次・2 次モーメントからは局所識別できない（または残差自由度がない）旨の `FlexpyirtWarning` を出し、
+   `m2`・`p`・RMSEA・信頼区間・`tli`・`cfi` をすべて `NaN` とする（`df` と `srmsr` は有限のまま）。
+   $(s - r)$ 次元の 2 次形式を $df = s - q$ と組み合わせることは決してしない。
    **$\Delta_2$ における自由な潜在分布パラメタ**: mirt 1.46.1 は自由な潜在平均・分散の列を $\Delta_2$ から除きつつ
    $df$ からは引いている。flexpyirt は Maydeu-Olivares & Joe (2005, 2006) に従い、既定ではすべての自由パラメタ
    （項目・潜在分布とも）を $\Delta_2$ に含める。内部関数 `_m2.m2_statistic` に非公開の `_latent_in_delta: bool = True`
@@ -687,9 +692,10 @@ class ItemKernel(Protocol):
    ないモデルでは両者は一致する）。
    **補助適合度指標**:
    - $p = P(\chi^2_{df} > M_2)$（生存関数）。
-   - $\mathrm{RMSEA} = \sqrt{\max(0, M_2/df - 1)/(N - 1)}$（$df \le 0$ で `NaN`）。$(100\,\mathrm{ci})\%$ 信頼区間は
+   - $\mathrm{RMSEA} = \sqrt{\max(0, M_2/df - 1)/(N - 1)}$（$df \le 0$ または $N \le 1$ で `NaN`）。$(100\,\mathrm{ci})\%$ 信頼区間は
      非心 $\chi^2$ 分布の CDF を逆算して $\sqrt{\lambda/(N\,df)}$ で求める（MacCallum, Browne & Sugawara, 1996。
-     mirt の `RMSEA.CI` と同じく、$[0, M_2]$ / $[0, \max(N, 5M_2)]$ に根が挟まれない端点は 0）。列名は `ci` に従う
+     mirt の `RMSEA.CI` と同じく、$P(\chi^2_{df}\le M_2)$ がすでに目標確率以下のときは 0 とし、上側端点の探索区間は
+     $\max(N, 5M_2)$ で根が挟まれない場合に倍増して拡張し、上端が誤って 0 に潰れないようにする）。列名は `ci` に従う
      （例: `ci=0.90` で `rmsea_5`, `rmsea_95`）。
    - $\mathrm{SRMSR} = \sqrt{\binom{J}{2}^{-1}\sum_{i<j}(r_{ij} - \hat\rho_{ij})^2}$（観測とモデルから導く項目得点相関行列の差。
      モデル分散の対角要素は $E[y_j^2] - E[y_j]^2$）。

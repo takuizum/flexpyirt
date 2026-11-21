@@ -1024,9 +1024,15 @@ data-independent shapes (§15.21).
      df = s - q,$$
    where $s = J + \binom{J}{2}$, $q = \text{n\_params}$ (all free parameters, including any free
    latent mean/variance), and $\Delta_c$ is an orthonormal basis for the orthogonal complement of
-   $\operatorname{col}(\Delta_2)$ obtained from the SVD of $\Delta_2$. When $df \le 0$ (or
-   $\Delta_c$ is empty), $p$, RMSEA, its CI, TLI and CFI are `NaN` (and $M_2$ is `NaN` when
-   $\Delta_c$ is empty).
+   $\operatorname{col}(\Delta_2)$ obtained from the SVD of $\Delta_2$. The asymptotic $\chi^2_{s-q}$
+   distribution requires $df = s - q > 0$ and full column rank $\operatorname{rank}(\Delta_2) = q$
+   (local identification from first- and second-order moments; Maydeu-Olivares & Joe, 2005,
+   Theorem 1; 2006, Theorem 2). Whenever $df \le 0$ or $\operatorname{rank}(\Delta_2) < \operatorname{ncol}(\Delta_2)$
+   (for example when a polytomous item has more free parameters than items, $P_j > J$, or a fixed
+   zero slope, even if $df > 0$), flexpyirt emits a `FlexpyirtWarning` noting that the model is not
+   locally identified with residual degrees of freedom from first- and second-order moments and
+   returns `NaN` for `m2`, `p`, RMSEA, its CI, `tli` and `cfi` (keeping `df` and `srmsr` finite);
+   it never pairs an $(s - r)$-dimensional quadratic form with $df = s - q$.
    **Free latent parameters in $\Delta_2$**: mirt 1.46.1 excludes free latent mean/variance columns
    from $\Delta_2$ while still subtracting them in $df$. Following Maydeu-Olivares & Joe (2005,
    2006), flexpyirt includes every free parameter (item and latent) in $\Delta_2$ by default; the
@@ -1035,11 +1041,12 @@ data-independent shapes (§15.21).
    `False` (for models with no free latent parameters both are identical).
    **Auxiliary fit indices**:
    - $p = P(\chi^2_{df} > M_2)$ (survival function).
-   - $\mathrm{RMSEA} = \sqrt{\max(0, M_2/df - 1)/(N - 1)}$ (`NaN` for $df \le 0$), with
+   - $\mathrm{RMSEA} = \sqrt{\max(0, M_2/df - 1)/(N - 1)}$ (`NaN` for $df \le 0$ or $N \le 1$), with
      $(100\,\mathrm{ci})\%$ confidence interval $\sqrt{\lambda/(N\,df)}$ by inverting the
      noncentral $\chi^2$ CDF (MacCallum, Browne & Sugawara, 1996; matching mirt's `RMSEA.CI`,
-     returning 0 when a bound's root is not bracketed on $[0, M_2]$ / $[0, \max(N, 5M_2)]$).
-     Column names follow `ci` (e.g. `rmsea_5`, `rmsea_95` for `ci=0.90`).
+     returning 0 when $P(\chi^2_{df}\le M_2)$ is already at or below the target probability, and
+     expanding the upper search bracket from $\max(N, 5M_2)$ if needed so the upper bound cannot
+     spuriously collapse to 0). Column names follow `ci` (e.g. `rmsea_5`, `rmsea_95` for `ci=0.90`).
    - $\mathrm{SRMSR} = \sqrt{\binom{J}{2}^{-1}\sum_{i<j}(r_{ij} - \hat\rho_{ij})^2}$ from the
      observed and model-implied item-score correlation matrices (diagonal variance uses
      $E[y_j^2] - E[y_j]^2$).
