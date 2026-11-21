@@ -143,6 +143,33 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 **例外**: 多次元・多母集団・`EmpiricalHistogram` のモデル、欠測を含むデータ、観測されないカテゴリがある項目、
 正でない `mincell` の場合に `SpecificationError`。
 
+#### `FitResult.dif`
+
+```text
+dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None) -> DataFrame
+```
+
+多母集団モデルの群間の尤度比検定による DIF（[ガイド 9 節](guide.ja.md#特異項目機能dif)）。mirt の `DIF()` に相当。
+項目ごとに、その項目の `params` を群間で等値にして（`scheme="add"`）または群ごとに自由にして（`scheme="drop"`）
+モデルを推定し直し（同じ `BAEM` 設定と求積、この推定値から開始）、
+$X^2 = 2(\ell_{\text{free}} - \ell_{\text{constrained}})$、$df = |k_{\text{base}} - k_{\text{new}}|$ を求める。
+
+| 引数 | 説明 |
+|---|---|
+| `data`, `group` | この結果を推定したときの反応と群ラベル |
+| `items` | 検定する項目（項目ごとに 1 回推定し直す） |
+| `params` | 検定する内部パラメタ（既定: 各項目の全パラメタ） |
+| `scheme` | `"add"`（制約する。推定済みモデルが基準）または `"drop"`（自由にする） |
+| `p_adjust` | `adj_p` の補正。`"holm"`（既定、mirt と同じ）、`"BH"`（Benjamini–Hochberg）、`"none"` |
+| `item_names` | `data` が配列のときの列名 |
+
+**戻り値**: `item`, `converged`, `aic`, `sabic`, `hq`, `bic`（項目を自由にしたモデル − 制約したモデル。負なら DIF を
+支持）, `x2`, `df`, `p`, `adj_p` 列の `DataFrame`。
+
+**例外**: 単一群のモデル、事前分布つきの MAP 推定、未知の項目やパラメタ、検定するものがない項目（`"add"` で
+すでに等値、`"drop"` ですでに自由）では `SpecificationError`。推定し直すモデルが識別できない（例: 唯一のアンカーを
+自由にする）と `IdentificationError`。
+
 #### `FitResult.to_json`
 
 ```text
@@ -151,7 +178,7 @@ to_json(path=None, *, indent=2) -> str
 
 推定結果を厳格な RFC 8259 JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定されたときは
 UTF-8 ファイルにも書き出す。`pickle` を使わないバージョン付き JSON 形式で、最上位に
-`"format": "flexpyirt.FitResult"`、`"schema_version": 2`（version 1 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
+`"format": "flexpyirt.FitResult"`、`"schema_version": 3`（version 1・2 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
 float64 値は `repr` 厳密な JSON 数値として、非有限値（`NaN`, `+inf`, `-inf`）は浮動小数点型フィールドに
 `"NaN"`, `"Infinity"`, `"-Infinity"` として明示的に符号化するため、すべての属性がビット単位で正確に往復する。
 
@@ -272,6 +299,17 @@ model.equal_across_groups(*, items, params=None) -> Model
 `items` のパラメタを群間で等しくする（アンカー項目）。`params` を省略すると全パラメタ、
 `params=["a"]` のように指定するとそのパラメタだけ。`items` は名前のリストか `str -> bool` の関数、
 `None` なら全項目。何度でも重ねて呼べる。
+
+#### `Model.equal_across_items`
+
+```text
+model.equal_across_items(*, items, params) -> Model
+```
+
+`params`（例: `["a"]`, `["a1"]`, `["d"]`, `["d1", "d2"]`）の各パラメタを、選んだ `items`（2 項目以上）で共通の
+1 つのパラメタにする（mirt の `CONSTRAIN` と同じく群ごと）。`equal_across_groups` と組み合わせると群間でも共有され、
+重なる等値制約はまとめられる。固定パラメタには影響しない。共有パラメタの既定の初期値は各項目の初期値の平均。
+編集した表で該当行に同じ `free_id` を与えるのと同じ。
 
 #### `Model.prior`
 

@@ -452,6 +452,23 @@ mg_scores = mg.score(mg_df.iloc[[0, -1]], group=["ref", "focal"])
 print(mg_scores)
 ```
 
+### Differential item functioning (DIF)
+
+`dif(data, group=..., items=...)` runs multiple-group likelihood-ratio tests, one refit per item.
+With `scheme="add"` (default) the fitted model is the baseline and the item's parameters are made
+equal across groups; with `scheme="drop"` (start from a model with the items equal) they are freed.
+`params=["d"]` tests only some parameters. `x2 = 2(loglik_free - loglik_constrained)`, `df` is the
+number of parameters the constraint removes, and `aic`, `sabic`, `hq`, `bic` are the model with
+the item free minus the constrained one (negative values favour DIF), as in mirt's `DIF()`.
+`adj_p` is Holm-adjusted over the tested items by default (`p_adjust="BH"` or `"none"`).
+
+```python
+# Likelihood-ratio DIF tests: constrain each non-anchor item's parameters to be equal across
+# groups and refit (mirt's DIF(scheme = "add")).
+dif_table = mg.dif(mg_df, group=group, items=items[6:9])
+print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
+```
+
 ## 10. Fixed item parameter calibration (FIPC)
 
 Fix some items at the values of an already scaled item bank and estimate the new items and the
@@ -558,9 +575,28 @@ print(res_edit.items.set_index("item").loc["q05", ["a", "d"]])
 ```
 
 - Rows cannot be added, removed or renamed (`SpecificationError`).
-- Sharing a `free_id` is limited to making **the same parameter of the same item equal across
-  groups**. Equality across different items (for example one common slope) is not supported yet
-  (planned for M5).
+- Rows sharing a `free_id` may belong to different groups and to **different items** (also of
+  different item models, e.g. a slope shared by 2PL and GRM items); within one item a `free_id`
+  maps to one parameter, and the shared rows must agree on bounds and prior.
+
+### Equality constraints across items
+
+`Model.equal_across_items(items=..., params=[...])` makes each listed parameter one common
+parameter for the selected items (within each group, like mirt's `CONSTRAIN`). It combines with
+`equal_across_groups`, and is the same as giving those rows one `free_id` in the table.
+
+```python
+# One common slope for every item (a "1PL" with N(0, 1)); intercepts stay item-specific.
+common_spec = Model.uniform(TwoPL(), items=items).equal_across_items(items=None, params=["a"])
+res_common = fit(common_spec, df, se="oakes")
+print(res_common.items[["item", "a", "a_se", "d"]].head(3))
+print(res_common.n_params)  # 1 slope + one intercept per item
+```
+
+- Items connected by such constraints are solved jointly in the M-step; SEs, SQUAREM, priors
+  (counted once per shared parameter), JSON and the other features work as usual.
+- A common free slope does not identify a free latent variance (`IdentificationError`), just as
+  separate free slopes do not.
 
 ## 13. Choosing the quadrature grid
 

@@ -155,6 +155,37 @@ free latent parameters (mirt's convention).
 **Raises**: `SpecificationError` for multidimensional, multiple-group or `EmpiricalHistogram`
 models, missing responses, an item with an unobserved category, or a non-positive `mincell`.
 
+#### `FitResult.dif`
+
+```text
+dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None) -> DataFrame
+```
+
+Likelihood-ratio DIF tests across the groups of a multiple-group model
+([guide section 9](guide.md#differential-item-functioning-dif)), as mirt's `DIF()`. For each item
+the model is refitted (same `BAEM` settings and quadrature, starting from these estimates) with
+the item's `params` made equal across groups (`scheme="add"`) or freed in every group
+(`scheme="drop"`); $X^2 = 2(\ell_{\text{free}} - \ell_{\text{constrained}})$ with
+$df = |k_{\text{base}} - k_{\text{new}}|$.
+
+| Argument | Description |
+|---|---|
+| `data`, `group` | The responses and group labels this result was fitted to |
+| `items` | Items to test (one refit each) |
+| `params` | Internal parameters to test (default: all of each item's parameters) |
+| `scheme` | `"add"` (constrain; the fitted model is the baseline) or `"drop"` (free) |
+| `p_adjust` | `"holm"` (default, mirt's), `"BH"` (Benjamini–Hochberg) or `"none"` for `adj_p` |
+| `item_names` | Column names when `data` is an array |
+
+**Returns**: `DataFrame` with columns `item`, `converged`, `aic`, `sabic`, `hq`, `bic` (the model
+with the item free minus the constrained one; negative values favour DIF), `x2`, `df`, `p` and
+`adj_p`.
+
+**Raises**: `SpecificationError` for single-group models, MAP fits with priors, unknown items or
+parameters, or an item with nothing to test (already equal for `"add"`, already free for
+`"drop"`); `IdentificationError` if a refitted model is not identified (e.g. freeing the only
+anchors).
+
 #### `FitResult.to_json`
 
 ```text
@@ -163,8 +194,8 @@ to_json(path=None, *, indent=2) -> str
 
 Serialize the fitted result to a strict RFC 8259 JSON string, and also write it (UTF-8) to `path`
 (`str` or `os.PathLike`) when `path` is given. Uses plain, versioned JSON (no `pickle`) with
-top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 2` (files with version 1 are still
-read), and `"flexpyirt_version"`. Multidimensional results store their factor structure.
+top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 3` (files with versions 1 and 2 are
+still read), and `"flexpyirt_version"`. Multidimensional results store their factor structure.
 Finite float64 values are written as `repr`-exact JSON numbers and non-finite values (`NaN`,
 `+inf`, `-inf`) are encoded explicitly as `"NaN"`, `"Infinity"`, and `"-Infinity"` in float-typed
 fields so every attribute round-trips bit-for-bit.
@@ -298,6 +329,18 @@ model.equal_across_groups(*, items, params=None) -> Model
 Make the parameters of `items` equal across groups (anchor items). Without `params`, all
 parameters; with e.g. `params=["a"]`, only those. `items` is a list of names, a `str -> bool`
 function, or `None` for every item. Can be called repeatedly.
+
+#### `Model.equal_across_items`
+
+```text
+model.equal_across_items(*, items, params) -> Model
+```
+
+Make each parameter in `params` (e.g. `["a"]`, `["a1"]`, `["d"]`, `["d1", "d2"]`) one common
+parameter for the selected `items` (at least two), within each group (as mirt's `CONSTRAIN`).
+Combine with `equal_across_groups` to share across groups as well; overlapping equalities are
+merged. Fixed parameters are not affected. The parameter's default starting value is the mean of
+the items' starting values. Equivalent to giving the rows one `free_id` in an edited table.
 
 #### `Model.prior`
 

@@ -98,8 +98,9 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   M-step need not converge fully; a few Newton steps are enough.
 - Fixed parameters are not part of $\eta$ (they come from the ParameterTable as constants).
 - **Equality constraints across items** (e.g. one common $a$ for all items) break the
-  decomposition. Not supported in v1; M5 will add "joint Newton per component of items connected
-  by constraints".
+  decomposition. **Decision (M5, §16.1)**: items connected by shared `free_id`s form a component
+  that is solved by one joint masked Newton over the union of its free parameters; items outside
+  such components keep the item-wise `vmap` path.
 
 ### 4.4 M-step (latent distribution)
 - **Normal** (when group $g$'s mean or variance is free):
@@ -400,7 +401,8 @@ data-independent shapes (§15.21).
 2. Many groups (e.g. school × grade). Keep the per-group latent distributions `vmap`-able.
 3. ~~Missing-data design~~ → exclusion under MAR only (§14.8, 2026-11-20).
 4. ~~Package name~~ → `flexpyirt` (2026-11-20).
-5. How to implement the M-step with equality constraints across items (§4.3).
+5. ~~How to implement the M-step with equality constraints across items (§4.3)~~ → joint
+   Newton per connected component of items (§16.1, 2026-11-21).
 
 ## 13. Implementation decisions (M1)
 1. **Newton in the M-step**: every gradient and Hessian comes from JAX autodiff (`jax.grad` /
@@ -972,8 +974,66 @@ data-independent shapes (§15.21).
     sample mean, SD and correlations match the grid posterior within Monte Carlo error (mirt's
     default plausible values use a normal approximation, so they are not a reference).
 
+## 16. Implementation decisions (M5)
+1. **Equality constraints across items (`Model.equal_across_items`, shared `free_id`s)**:
+   `Model.equal_across_items(*, items, params)` makes each parameter in `params` of the selected
+   items (at least two) equal within every group, by giving their free rows one `free_id` (as
+   mirt's `CONSTRAIN = (items, param)`; in a multiple-group model the constraint applies within
+   each group, as `CONSTRAIN` does in `multipleGroup`). It combines with `equal_across_groups`:
+   all equalities of the model are merged by union–find over rows, so overlapping constraints
+   share one id. Fixed rows are not affected. Rows sharing a `free_id` (from the model or from an
+   edited table) may now belong to different items and different item models (e.g. a common
+   slope for 2PL and GRM items), but within one item a `free_id` still maps to one parameter, and
+   the rows must agree on bounds and prior (as before). The default starting value of a shared
+   parameter is the mean of its rows' default starting values.
+   **M-step**: the expected complete-data log posterior is
+   $Q(\eta)=\sum_j Q_j(\xi_j(\eta))+\log\pi(\eta)$, so the item-wise decomposition (§4.3) holds
+   between connected components of the item graph whose edges are shared `free_id`s, not between
+   items. The Compile layer finds the components by union–find over items; a component with two
+   or more items becomes a `CoupledBlock` (per member family: the static family index, the
+   dynamic item positions and a `(G, n, P_f)` local index into the component's vector $u_c$ of
+   free parameters; plus $u_c$'s `free_id`s and bounds). Its M-step maximizes
+   $\sum_{j\in c}\sum_g Q_{jg}(\xi_j^{(g)}(u_c))+\sum_{s}\log\pi(u_{cs})$ over $u_c$ with the
+   same masked, bounded, monotone Newton (§13.1, §15.2; gradient and Hessian by autodiff, each
+   member family's items `vmap`ed), so each shared prior is counted once and EM stays monotone.
+   Items of a component are masked out of the item-wise `vmap` (their slots are held) and the
+   component step runs after it, reading the component's parameters from the previous iterate
+   (they are disjoint from every other block's). Components are a static Python loop, so a model
+   with many small components traces one Newton block per component. A common slope over $J$
+   2PL items gives one block of $1+J$ parameters, whose dense Hessian is cheap at the sizes of
+   interest.
+   **Standard errors and SQUAREM**: Oakes' first term scatter-adds each item's Hessian block by
+   `free_id`, and the cross term accumulates scores by `free_id`, so parameters shared across
+   items are summed exactly with no change (likewise `information_hessian`, which differentiates
+   the marginal log posterior directly, and the SQUAREM bounds). Delta-method SEs, `n_params`
+   (counted once per `free_id`) and JSON (model field `equal_items`, schema version 3) follow
+   from the table.
+   **Identification**: the necessary conditions of §4.5 and §14.5 are unchanged (for example a
+   common free slope with a free latent variance is still rejected, because no slope is fixed).
+2. **DIF by multiple-group likelihood-ratio tests (`FitResult.dif`)**:
+   `FitResult.dif(data, *, group, items, params=None, scheme="add", p_adjust="holm",
+   item_names=None)` tests each
+   item in `items` for differential item functioning across the groups of a fitted
+   multiple-group model (Thissen, Steinberg & Wainer, 1993), as mirt's `DIF()`. For
+   `scheme="add"` the fitted model is the baseline and each item's `params` (default: all of
+   its parameters) are made equal across groups; for `scheme="drop"` they are freed (one
+   `free_id` per group). Each modified model is refitted with the same `BAEM` settings and
+   quadrature, starting from the baseline estimates, and
+   $X^2=2(\ell_{\text{free}}-\ell_{\text{constrained}})$ with
+   $df=|k_{\text{base}}-k_{\text{new}}|$ gives $p=P(\chi^2_{df}>X^2)$. The result has one row per
+   item with `item`, `converged`, the differences (item free minus item constrained, mirt's sign,
+   so negative values favour DIF) of AIC,
+   SABIC ($-2\ell+k\log((N+2)/24)$), HQ ($-2\ell+2k\log\log N$) and BIC, `x2`, `df`, `p` and
+   `adj_p` (adjusted over the tested items: Holm, 1979, by default as mirt's `p.adjust = "holm"`;
+   `p_adjust="BH"` for Benjamini & Hochberg, 1995, or `"none"`). Changes are made in the parameter table, so identification is checked as
+   for any fit (freeing the only anchors raises `IdentificationError`), and an item whose
+   parameters are already equal (`"add"`) or already free (`"drop"`) raises
+   `SpecificationError`. MAP fits are rejected (the statistic needs the marginal likelihood at
+   the MLE). DIF is post-fit orchestration in the Result layer; only the refits run in `jit`.
+
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
+- Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
@@ -983,6 +1043,7 @@ data-independent shapes (§15.21).
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
+- Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -997,6 +1058,7 @@ data-independent shapes (§15.21).
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
+- Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.

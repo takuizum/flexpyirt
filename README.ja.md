@@ -20,6 +20,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 項目モデル | 2PL、Rasch（潜在分散を自由推定）、3PL、4PL、GRM（段階反応モデル）、GPCM、PCM（潜在分散を自由推定） | V1, V2, V3, V8, V11 |
 | 事前分布と MAP | 項目パラメタの事前分布 `NormalPrior`・`LogNormal`・`Beta`（`Model.prior()`）、自然尺度、`FitResult.log_posterior` | V7 |
 | 多母集団 | 群ごとの項目パラメタ、アンカー項目の群間等値、焦点群の平均・分散の推定 | V4 |
+| 項目間の等値制約 | 項目・項目モデルをまたぐ共通パラメタ（`Model.equal_across_items()`、例: 全項目共通の傾き）。群間等値と組み合わせ可 | V16 |
 | FIPC | 項目バンクの値で一部の項目を固定し、残りの項目と潜在分布を推定 | V5 |
 | 欠測 | 欠測（MAR）を含むデータ | V9 |
 | 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度（MAP 時は対数事後）の Hessian、表示用 IRT 閾値のデルタ法 SE（`b_se` / `bk_se`） | V7, V10, V12, V14 |
@@ -29,6 +30,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 結果の保存 | `FitResult.to_json()` / `FitResult.from_json()`（厳密なスキーマ、pickle 不使用） | — |
 | EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | V1–V5, V7–V9, V11, V14 |
 | 項目適合度 | Orlando–Thissen の S-X2（`FitResult.item_fit()`）。mirt と同じセルのまとめ方・自由度・RMSEA・p 値 | V15 |
+| DIF | 多母集団の尤度比検定による DIF（`FitResult.dif()`。mirt の `DIF()` の `add` / `drop` 方式、AIC・SABIC・HQ・BIC の差、Holm または BH で補正した p 値） | V17 |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
 
 今後の予定は[ロードマップ](docs/ROADMAP.ja.md)を参照。

@@ -45,6 +45,9 @@ class Model:
         reference group (DESIGN.md §14.4).
     equal : tuple of (items, params or None)
         Across-group equality constraints from :meth:`equal_across_groups`.
+    equal_items : tuple of (items, params)
+        Across-item equality constraints from :meth:`equal_across_items` (each parameter in
+        ``params`` is shared by ``items`` within every group; DESIGN.md §16.1).
     priors : tuple of (item, param, Prior)
         Prior distributions on item parameters from :meth:`prior` (applied across all groups;
         shared parameters are counted once and fixed parameters ignore their prior).
@@ -60,6 +63,7 @@ class Model:
     latent: LatentSpec | None = None
     groups: tuple[tuple[str, LatentSpec], ...] | None = None
     equal: tuple[tuple[tuple[str, ...], tuple[str, ...] | None], ...] = ()
+    equal_items: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = ()
     priors: tuple[tuple[str, str, Prior], ...] = ()
     factors: tuple[tuple[str, tuple[str, ...]], ...] | None = None
     correlated_factors: bool = True
@@ -383,6 +387,16 @@ class Model:
                     f"Prior on {item!r}.{param} is not valid for a {n_factors}-factor model "
                     f"(available: {list(valid)}); call with_factors() before prior()."
                 )
+        for eq_items, eq_params in self.equal_items:
+            for item in eq_items:
+                valid = candidate.item_kernel(lookup[item]).param_names
+                bad = [p for p in eq_params if p not in valid]
+                if bad:
+                    raise SpecificationError(
+                        f"Equality on {item!r}.{bad} is not valid for a {n_factors}-factor model "
+                        f"(available: {list(valid)}); call with_factors() before "
+                        "equal_across_items()."
+                    )
         return candidate
 
     def with_latent(self, dist: LatentSpec) -> Model:
@@ -448,6 +462,38 @@ class Model:
                 if bad:
                     raise SpecificationError(f"Item {item!r} has no parameters {bad}.")
         return replace(self, equal=(*self.equal, (chosen, param_tuple)))
+
+    def equal_across_items(self, *, items: ItemSelector, params: Iterable[str]) -> Model:
+        r"""Return a model where each of ``params`` is one common parameter for ``items``.
+
+        For example ``equal_across_items(items=None, params=["a"])`` gives every item the same
+        slope (a "1PL" with the latent variance fixed). The constraint applies within each group
+        (as mirt's ``CONSTRAIN``); combine it with :meth:`equal_across_groups` to share across
+        groups too. Fixed parameters are not affected. The M-step solves the items connected by
+        such constraints jointly (DESIGN.md §4.3, §16.1).
+
+        Parameters
+        ----------
+        items : iterable of str or callable, or None
+            At least two items (``None`` selects every item).
+        params : iterable of str
+            Internal parameter names (e.g. ``"a"``, ``"a1"``, ``"d"``, ``"d1"``, ``"g"``) that every
+            selected item has. Each name is one separate common parameter.
+        """
+        chosen = self._select(items)
+        if len(chosen) < 2:
+            raise SpecificationError("equal_across_items() needs at least two items.")
+        if isinstance(params, str):
+            raise SpecificationError("params must be an iterable of parameter names, not a str.")
+        param_tuple = tuple(dict.fromkeys(str(p) for p in params))
+        if not param_tuple:
+            raise SpecificationError("equal_across_items() needs at least one parameter.")
+        lookup = dict(self.items)
+        for item in chosen:
+            bad = [p for p in param_tuple if p not in self.item_kernel(lookup[item]).param_names]
+            if bad:
+                raise SpecificationError(f"Item {item!r} has no parameters {bad}.")
+        return replace(self, equal_items=(*self.equal_items, (chosen, param_tuple)))
 
     def prior(
         self,

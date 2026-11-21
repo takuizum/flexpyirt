@@ -427,6 +427,22 @@ mg_scores = mg.score(mg_df.iloc[[0, -1]], group=["ref", "focal"])
 print(mg_scores)
 ```
 
+### 特異項目機能（DIF）
+
+`dif(data, group=..., items=...)` は多母集団の尤度比検定を行う（項目ごとに 1 回推定し直す）。`scheme="add"`
+（既定）では推定済みモデルを基準とし、その項目のパラメタを群間で等値にする。`scheme="drop"`（項目を等値にした
+モデルから始める）では自由にする。`params=["d"]` で一部のパラメタだけを検定できる。
+`x2 = 2(loglik_free - loglik_constrained)`、`df` は制約で減るパラメタ数、`aic`・`sabic`・`hq`・`bic` は項目を自由に
+したモデルから制約したモデルを引いた差（負なら DIF を支持）で、mirt の `DIF()` と同じ。`adj_p` は既定で検定した
+項目にわたる Holm の補正（`p_adjust="BH"` または `"none"` も可）。
+
+```python
+# 尤度比検定による DIF: アンカーでない各項目のパラメタを群間で等値にして推定し直す
+# （mirt の DIF(scheme = "add")）。
+dif_table = mg.dif(mg_df, group=group, items=items[6:9])
+print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
+```
+
 ## 10. 固定項目パラメタ推定（FIPC）
 
 既に尺度化された項目バンクの値で一部の項目を固定し、新しい項目と潜在分布を推定する。固定項目が尺度を
@@ -527,8 +543,27 @@ print(res_edit.items.set_index("item").loc["q05", ["a", "d"]])
 ```
 
 - 行の追加・削除や識別子の変更はできない（`SpecificationError`）。
-- `free_id` の共有は**同じ項目の同じパラメタを群間で**等しくする用途に限られる。異なる項目をまたぐ等値制約
-  （例: 全項目で共通の傾き）は未対応（M5 予定）。
+- `free_id` を共有する行は群をまたいでも、**異なる項目**（異なる項目モデル、例: 2PL と GRM の項目で共通の傾き）
+  をまたいでもよい。1 つの項目の中では `free_id` は 1 つのパラメタにだけ対応し、共有する行どうしの範囲と事前分布は
+  一致しなければならない。
+
+### 項目をまたぐ等値制約
+
+`Model.equal_across_items(items=..., params=[...])` は、指定した各パラメタを選んだ項目で共通の 1 つのパラメタにする
+（mirt の `CONSTRAIN` と同じく群ごとに適用）。`equal_across_groups` と組み合わせられ、表でそれらの行に同じ
+`free_id` を与えるのと同じ。
+
+```python
+# 全項目で共通の傾き（N(0, 1) の「1PL」）。切片は項目ごと。
+common_spec = Model.uniform(TwoPL(), items=items).equal_across_items(items=None, params=["a"])
+res_common = fit(common_spec, df, se="oakes")
+print(res_common.items[["item", "a", "a_se", "d"]].head(3))
+print(res_common.n_params)  # 傾き 1 つ + 項目ごとの切片
+```
+
+- こうした制約で結ばれた項目は M-step で同時に解かれる。SE・SQUAREM・事前分布（共有パラメタごとに 1 回）・JSON など
+  ほかの機能はそのまま使える。
+- 共通の自由な傾きは、項目ごとの自由な傾きと同様に、自由な潜在分散を識別しない（`IdentificationError`）。
 
 ## 13. 求積格子の選び方
 

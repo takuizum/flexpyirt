@@ -48,8 +48,12 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   agrees with mirt.
 
 ## M5 and later (candidates)
-- M-step for equality constraints across items.
+- [x] M-step for equality constraints across items (`Model.equal_across_items()`, shared
+  `free_id`s across items and item models; joint Newton per connected component; validated
+  in V16).
 - Davidian-curve and normal-mixture latent distributions.
 - Differentiable linking (Haebara / Stocking–Lord and generalizations) on top of the library.
 - [x] Item fit: S-X2 (`FitResult.item_fit()`, single-group unidimensional; validated in V15).
-- DIF (multiple-group likelihood-ratio tests), M2.
+- [x] DIF: multiple-group likelihood-ratio tests (`FitResult.dif()`, schemes `add` / `drop`,
+  Holm / BH adjustment; validated in V17).
+- M2 (limited-information goodness of fit).

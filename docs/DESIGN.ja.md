@@ -85,7 +85,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   同じ項目モデル（"item family"）の項目は配列にまとめて `vmap`。ステップは backtracking line search
   で $Q_j$ の増加を保証（一般化 EM として単調性を保つ）。M-step は完全収束させず、Newton 数ステップで打ち切ってよい。
 - 固定パラメタは $\eta$ に含めない（定数として ParameterTable から渡す）。
-- **項目をまたぐ等値制約**（例: 全項目共通の $a$）は分解を壊す。v1 では非対応とし、M5 で「制約で連結された項目成分ごとに同時 Newton」を実装する。
+- **項目をまたぐ等値制約**（例: 全項目共通の $a$）は分解を壊す。**決定（M5、§16.1）**: `free_id` の共有で連結された項目の成分ごとに、その自由パラメタ全体について同時にマスク付き Newton を解く。成分に属さない項目は従来どおり項目ごとの `vmap`。
 
 ### 4.4 M-step（潜在分布）
 - **Normal**（群 $g$ の平均・分散が自由な場合）:
@@ -315,7 +315,7 @@ class ItemKernel(Protocol):
 2. 多母集団で群の数が多いとき（例: 学校 × 学年）の扱い。群ごとの潜在分布を vmap できる形にしておく。
 3. ~~欠測の設計~~ → MAR 前提の除外のみ（§14.8、2026-11-20）。
 4. ~~パッケージ名~~ → `flexpyirt` に決定（2026-11-20）。
-5. 項目をまたぐ等値制約の M-step（§4.3）の実装方式。
+5. ~~項目をまたぐ等値制約の M-step（§4.3）の実装方式~~ → 項目の連結成分ごとの同時 Newton（§16.1、2026-11-21）。
 
 ## 13. 実装上の決定（M1）
 1. **M-step の Newton**: 勾配・Hessian はすべて JAX の自動微分（`jax.grad` / `jax.hessian`）で得て、手書きの解析微分は持たない。
@@ -644,8 +644,46 @@ class ItemKernel(Protocol):
     列名は `pv<m>_<factor>`。統計的に検証する: 4,000 回抽出すると標本平均・SD・相関が格子上の事後分布とモンテカルロ誤差の
     範囲で一致する（mirt の既定の plausible values は正規近似なので参照にはしない）。
 
+## 16. 実装上の決定（M5）
+1. **項目をまたぐ等値制約（`Model.equal_across_items`、`free_id` の共有）**:
+   `Model.equal_across_items(*, items, params)` は、選んだ項目（2 つ以上）の `params` の各パラメタを各群の中で等値にする。
+   自由な行に同じ `free_id` を与えて表す（mirt の `CONSTRAIN = (items, param)` に相当。多母集団では `multipleGroup` の
+   `CONSTRAIN` と同じく群ごとに適用）。`equal_across_groups` と組み合わせられ、モデルのすべての等値制約は行の
+   union–find でまとめるので、重なる制約は 1 つの id を共有する。固定された行は影響を受けない。`free_id` を共有する行は
+   （モデルからでも編集した表からでも）異なる項目・異なる項目モデルにまたがってよい（例: 2PL と GRM の共通傾き）。
+   ただし 1 つの項目の中では `free_id` は 1 つのパラメタにだけ対応し、行どうしの範囲と事前分布は一致しなければならない
+   （従来どおり）。共有パラメタの既定の初期値は、各行の既定初期値の平均。
+   **M-step**: 期待完全データ対数事後は $Q(\eta)=\sum_j Q_j(\xi_j(\eta))+\log\pi(\eta)$ なので、項目ごとの分解（§4.3）は
+   項目どうしではなく、「`free_id` の共有を辺とする項目グラフの連結成分」どうしの間で成り立つ。Compile 層は項目の
+   union–find で成分を求め、2 項目以上の成分を `CoupledBlock` にする（メンバーの family ごとに静的な family 番号・動的な
+   項目位置・成分の自由パラメタベクトル $u_c$ への `(G, n, P_f)` の局所インデックス、および $u_c$ の `free_id` と範囲）。
+   その M-step は $\sum_{j\in c}\sum_g Q_{jg}(\xi_j^{(g)}(u_c))+\sum_s\log\pi(u_{cs})$ を $u_c$ について同じマスク付き・範囲つき・
+   単調な Newton（§13.1、§15.2。勾配と Hessian は自動微分、メンバー family ごとに項目を `vmap`）で最大化する。共有
+   パラメタの事前分布は 1 回だけ数えられ、EM の単調性も保たれる。成分の項目は項目ごとの `vmap` ではマスクして
+   （スロットを動かさず）、成分のステップをその後に実行する。成分のパラメタは前の反復値から読む（ほかのブロックと
+   重ならない）。成分は静的な Python ループなので、小さな成分が多いモデルは成分ごとに Newton ブロックをトレースする。
+   2PL の $J$ 項目共通傾きは $1+J$ パラメタの 1 ブロックで、密な Hessian でも想定する規模では軽い。
+   **標準誤差と SQUAREM**: Oakes の第 1 項は各項目の Hessian ブロックを `free_id` で足し込み、交差項もスコアを
+   `free_id` で集計するので、項目をまたぐ共有パラメタは変更なしで厳密に合算される（周辺対数事後を直接微分する
+   `information_hessian` と SQUAREM の範囲も同様）。デルタ法 SE、`n_params`（`free_id` ごとに 1 回）、JSON
+   （モデルの `equal_items` フィールド、スキーマバージョン 3）は表から従う。
+   **識別**: §4.5・§14.5 の必要条件は変えない（例: 共通の自由傾きと自由な潜在分散は、固定された傾きがないので引き続き拒否）。
+2. **多母集団の尤度比検定による DIF（`FitResult.dif`）**:
+   `FitResult.dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None)` は、推定済みの多母集団モデルの
+   群間で `items` の各項目の特異項目機能（DIF）を検定する（Thissen, Steinberg & Wainer, 1993。mirt の `DIF()` に相当）。
+   `scheme="add"` では推定済みモデルを基準とし、各項目の `params`（既定: その項目の全パラメタ）を群間で等値にする。
+   `scheme="drop"` では逆に群ごとに自由にする（群ごとに別の `free_id`）。変更したモデルを同じ `BAEM` 設定・求積で
+   基準の推定値から推定し直し、$X^2=2(\ell_{\text{free}}-\ell_{\text{constrained}})$、$df=|k_{\text{base}}-k_{\text{new}}|$
+   から $p=P(\chi^2_{df}>X^2)$ を求める。結果は項目ごとに 1 行で、`item`、`converged`、AIC・SABIC
+   （$-2\ell+k\log((N+2)/24)$）・HQ（$-2\ell+2k\log\log N$）・BIC の差（項目を自由にしたモデル − 制約したモデル。mirt と同じ符号で、負なら DIF を支持）、`x2`、`df`、
+   `p`、`adj_p`（検定した項目にわたる補正。既定は mirt の `p.adjust = "holm"` と同じ Holm (1979)、`p_adjust="BH"` で Benjamini & Hochberg (1995)、`"none"` で補正なし）。変更は
+   パラメタ表で行うので識別性は通常の推定と同じく検査され（唯一のアンカーを自由にすると `IdentificationError`）、
+   すでに等値（`"add"`）またはすでに自由（`"drop"`）な項目は `SpecificationError`。MAP 推定は拒否する（統計量は
+   最尤推定値での周辺尤度を必要とするため）。DIF は Result 層の推定後の処理で、`jit` で動くのは再推定だけ。
+
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
+- Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
@@ -655,6 +693,7 @@ class ItemKernel(Protocol):
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
+- Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -669,6 +708,7 @@ class ItemKernel(Protocol):
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
+- Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.

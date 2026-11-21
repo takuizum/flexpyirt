@@ -24,6 +24,7 @@ calibration and fixed item parameter calibration (FIPC).
 | Item models | 2PL, Rasch (latent variance estimated), 3PL, 4PL, GRM (graded response model), GPCM, PCM (latent variance estimated) | V1, V2, V3, V8, V11 |
 | Priors and MAP | `NormalPrior`, `LogNormal`, `Beta` on item parameters (`Model.prior()`), natural scale, `FitResult.log_posterior` | V7 |
 | Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | V4 |
+| Equality across items | Common parameters across items and item models (`Model.equal_across_items()`, e.g. one common slope), combined with across-group equalities | V16 |
 | FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | V5 |
 | Missing data | Responses missing at random (MAR) | V9 |
 | Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior, plus delta-method SEs for display IRT thresholds (`b_se` / `bk_se`) | V7, V10, V12, V14 |
@@ -33,6 +34,7 @@ calibration and fixed item parameter calibration (FIPC).
 | Saving results | `FitResult.to_json()` / `FitResult.from_json()` (strict schema, no pickle) | — |
 | EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | V1–V5, V7–V9, V11, V14 |
 | Item fit | Orlando–Thissen S-X2 (`FitResult.item_fit()`) with mirt's cell collapsing, df, RMSEA and p-values | V15 |
+| DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | V17 |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
 See the [roadmap](docs/ROADMAP.md) for what comes next.
