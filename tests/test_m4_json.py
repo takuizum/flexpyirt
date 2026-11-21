@@ -1,0 +1,638 @@
+"""Tests for FitResult JSON serialization and deserialization (to_json / from_json)."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import textwrap
+import warnings
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
+
+import jax
+import numpy as np
+import pandas as pd
+import pytest
+
+import flexpyirt
+from flexpyirt import (
+    BAEM,
+    GPCM,
+    GRM,
+    PCM,
+    Beta,
+    FitResult,
+    FourPL,
+    LogNormal,
+    Model,
+    Normal,
+    NormalPrior,
+    Quadrature,
+    Rasch,
+    ThreePL,
+    TwoPL,
+    fit,
+)
+from flexpyirt._json import FORMAT_TAG, SCHEMA_VERSION
+from flexpyirt.errors import ConvergenceWarning, FlexpyirtWarning, SpecificationError
+from tests._reference import load
+
+
+def _reject_constant(token: str) -> Any:
+    raise ValueError(f"Non-standard JSON constant {token!r}")
+
+
+def _assert_strict_json(text: str) -> dict[str, Any]:
+    parsed = json.loads(text, parse_constant=_reject_constant)
+    assert isinstance(parsed, dict)
+    assert parsed["format"] == FORMAT_TAG
+    assert parsed["schema_version"] == SCHEMA_VERSION
+    assert parsed["flexpyirt_version"] == flexpyirt.__version__
+    return parsed
+
+
+def _assert_fit_result_identical(
+    orig: FitResult,
+    loaded: FitResult,
+    score_data: pd.DataFrame,
+    *,
+    group: Any = None,
+) -> None:
+    """Assert ``loaded`` reproduces every attribute, summary, and scoring method of ``orig``."""
+    # Scalar and metadata attributes
+    assert loaded.loglik == orig.loglik
+    assert loaded.log_posterior == orig.log_posterior
+    assert loaded.converged is orig.converged
+    assert loaded.n_iter == orig.n_iter
+    assert loaded.n_em_evaluations == orig.n_em_evaluations
+    assert loaded.n_safeguards == orig.n_safeguards
+    assert loaded.n_params == orig.n_params
+    assert loaded.n_obs == orig.n_obs
+    assert loaded.se_method == orig.se_method
+    assert loaded._model == orig._model
+    assert loaded._quadrature == orig._quadrature
+    assert loaded._method == orig._method
+    np.testing.assert_array_equal(loaded._eta, orig._eta)
+
+    # AIC / BIC (with warning behavior under MAP)
+    if orig._has_priors:
+        with pytest.warns(FlexpyirtWarning):
+            orig_aic = orig.aic
+        with pytest.warns(FlexpyirtWarning):
+            load_aic = loaded.aic
+        with pytest.warns(FlexpyirtWarning):
+            orig_bic = orig.bic
+        with pytest.warns(FlexpyirtWarning):
+            load_bic = loaded.bic
+    else:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", FlexpyirtWarning)
+            orig_aic, load_aic = orig.aic, loaded.aic
+            orig_bic, load_bic = orig.bic, loaded.bic
+        assert len(caught) == 0
+    assert load_aic == orig_aic
+    assert load_bic == orig_bic
+
+    # Covariance matrix
+    if orig.vcov is None:
+        assert loaded.vcov is None
+    else:
+        assert loaded.vcov is not None
+        assert loaded.vcov.dtype == np.float64
+        np.testing.assert_array_equal(loaded.vcov, orig.vcov)
+
+    # Tables (exact values, dtypes, column order, and index)
+    pd.testing.assert_frame_equal(loaded.parameters, orig.parameters, check_exact=True)
+    pd.testing.assert_frame_equal(loaded.items, orig.items, check_exact=True)
+    pd.testing.assert_frame_equal(loaded.latent, orig.latent, check_exact=True)
+    pd.testing.assert_frame_equal(loaded.history, orig.history, check_exact=True)
+
+    # Text / HTML representations
+    assert repr(loaded) == repr(orig)
+    assert loaded.summary() == orig.summary()
+    assert loaded.summary(digits=2) == orig.summary(digits=2)
+    assert loaded._repr_html_() == orig._repr_html_()
+
+    # All five scoring methods
+    for method in ("EAP", "MAP", "ML", "WLE"):
+        s_orig = orig.score(score_data, method=method, group=group)
+        s_load = loaded.score(score_data, method=method, group=group)
+        assert list(s_load.columns) == ["theta", "se"]
+        pd.testing.assert_index_equal(s_load.index, s_orig.index)
+        np.testing.assert_array_equal(s_load["theta"].to_numpy(), s_orig["theta"].to_numpy())
+        np.testing.assert_array_equal(s_load["se"].to_numpy(), s_orig["se"].to_numpy())
+
+    key = jax.random.key(42)
+    pv_orig = orig.score(score_data, method="PV", group=group, key=key, n_draws=4)
+    pv_load = loaded.score(score_data, method="PV", group=group, key=key, n_draws=4)
+    assert list(pv_load.columns) == list(pv_orig.columns)
+    pd.testing.assert_index_equal(pv_load.index, pv_orig.index)
+    np.testing.assert_array_equal(pv_load.to_numpy(), pv_orig.to_numpy())
+
+
+def _roundtrip(
+    res: FitResult,
+    tmp_path: Path,
+    name: str,
+    *,
+    indent: int | None = 2,
+) -> tuple[FitResult, FitResult, str]:
+    """Round-trip ``res`` through both a file path and an in-memory JSON string."""
+    out_path = tmp_path / f"{name}.json"
+    text = res.to_json(out_path, indent=indent)
+    assert out_path.read_text(encoding="utf-8") == text
+    _assert_strict_json(text)
+    from_file = FitResult.from_json(out_path)
+    from_str = FitResult.from_json(text)
+    return from_file, from_str, text
+
+
+# --------------------------------------------------------------------------------------------
+# Representative fit round-trips
+# --------------------------------------------------------------------------------------------
+
+
+def test_roundtrip_2pl_oakes_and_hessian(tmp_path: Path) -> None:
+    case = load("v1_lsat7_2pl")
+    spec = Model.uniform(TwoPL(), items=case.items)
+    res = fit(spec, case.data, method=BAEM(tol=1e-6), se="oakes")
+    from_file, from_str, _ = _roundtrip(res, tmp_path, "2pl_oakes")
+    score_sub = case.data.iloc[:25]
+    _assert_fit_result_identical(res, from_file, score_sub)
+    _assert_fit_result_identical(res, from_str, score_sub)
+
+    # Also test loading via str path and compact indent=None with se="hessian"
+    res_h = fit(spec, case.data, method=BAEM(tol=1e-6), se="hessian")
+    compact_path = tmp_path / "2pl_hessian.json"
+    compact_text = res_h.to_json(str(compact_path), indent=None)
+    assert "\n" not in compact_text
+    _assert_strict_json(compact_text)
+    loaded_h = FitResult.from_json(str(compact_path))
+    _assert_fit_result_identical(res_h, loaded_h, score_sub)
+
+
+def test_roundtrip_rasch_free_variance(tmp_path: Path) -> None:
+    case = load("v2_lsat7_rasch")
+    spec = Model.uniform(Rasch(), items=case.items)
+    res = fit(spec, case.data, method=BAEM(tol=1e-6))
+    assert res._model.latent is None  # default free variance rule preserved
+    from_file, from_str, _ = _roundtrip(res, tmp_path, "rasch")
+    score_sub = case.data.iloc[:25]
+    _assert_fit_result_identical(res, from_file, score_sub)
+    _assert_fit_result_identical(res, from_str, score_sub)
+
+
+def test_roundtrip_grm_gpcm_pcm_and_mixed(tmp_path: Path) -> None:
+    rng = np.random.default_rng(5001)
+    n = 600
+    theta = rng.normal(0.0, 1.0, n)
+    cuts4 = np.array([-1.1, 0.1, 1.2])
+    y4 = np.searchsorted(cuts4, np.outer(theta, [1.2, 0.9, 1.5, 1.1]) + rng.logistic(0, 1, (n, 4)))
+    df4 = pd.DataFrame(y4.astype(float), columns=["s1", "s2", "s3", "s4"])
+    score_sub = df4.iloc[:25]
+
+    for label, item_model in (("grm", GRM(4)), ("gpcm", GPCM(4)), ("pcm", PCM(4))):
+        res = fit(Model.uniform(item_model, items=df4.columns), df4, method=BAEM(tol=1e-6))
+        from_file, from_str, _ = _roundtrip(res, tmp_path, label)
+        _assert_fit_result_identical(res, from_file, score_sub)
+        _assert_fit_result_identical(res, from_str, score_sub)
+
+    # Mixed item models in one Model (2PL, Rasch, GRM(4), GPCM(3), PCM(3))
+    p_bin = 1.0 / (1.0 + np.exp(-(np.outer(theta, [1.2, 1.0]) + np.array([0.3, -0.4]))))
+    y_bin = (rng.random(p_bin.shape) < p_bin).astype(float)
+    y_grm = np.searchsorted([-1.0, 0.1, 1.1], theta + rng.logistic(0, 1, n)).astype(float)
+    y_gpcm = np.searchsorted([-0.7, 0.8], theta + rng.logistic(0, 1, n)).astype(float)
+    y_pcm = np.searchsorted([-0.5, 0.6], theta + rng.logistic(0, 1, n)).astype(float)
+    df_mix = pd.DataFrame(
+        {
+            "i_2pl": y_bin[:, 0],
+            "i_rasch": y_bin[:, 1],
+            "i_grm": y_grm,
+            "i_gpcm": y_gpcm,
+            "i_pcm": y_pcm,
+        }
+    )
+    spec_mix = Model.from_items(
+        {"i_2pl": TwoPL(), "i_rasch": Rasch(), "i_grm": GRM(4), "i_gpcm": GPCM(3), "i_pcm": PCM(3)}
+    )
+    res_mix = fit(spec_mix, df_mix, method=BAEM(tol=1e-6))
+    from_file, _, _ = _roundtrip(res_mix, tmp_path, "mixed")
+    _assert_fit_result_identical(res_mix, from_file, df_mix.iloc[:25])
+
+
+def test_roundtrip_3pl_4pl_and_priors_map(tmp_path: Path) -> None:
+    rng = np.random.default_rng(5002)
+    theta = rng.normal(0.0, 1.0, 1500)
+    a = np.array([1.7, 1.8, 1.6, 1.9, 1.7, 1.8, 1.6, 1.7])
+    d = np.array([-0.8, -0.5, -1.0, -0.6, -0.7, -0.9, -0.4, -0.8])
+    g = np.full(len(a), 0.18)
+    u = np.full(len(a), 0.88)
+    p = g + (u - g) / (1.0 + np.exp(-(np.outer(theta, a) + d)))
+    cols = [f"q{j}" for j in range(1, len(a) + 1)]
+    df = pd.DataFrame((rng.random(p.shape) < p).astype(float), columns=cols)
+    score_sub = df.iloc[:25]
+
+    # 3PL with all three prior families (LogNormal, NormalPrior, Beta)
+    spec3 = (
+        Model.uniform(ThreePL(), items=cols)
+        .prior(param="a", dist=LogNormal(0.4, 0.3))
+        .prior(param="d", dist=NormalPrior(-0.7, 1.5))
+        .prior(param="g", dist=Beta(5.0, 20.0))
+    )
+    res3 = fit(spec3, df, method=BAEM(tol=1e-6))
+    assert res3.log_posterior != res3.loglik
+    from_file, from_str, _ = _roundtrip(res3, tmp_path, "3pl_map")
+    _assert_fit_result_identical(res3, from_file, score_sub)
+    _assert_fit_result_identical(res3, from_str, score_sub)
+
+    # 4PL with interior priors on a, g, u
+    spec4 = (
+        Model.uniform(FourPL(), items=cols)
+        .prior(param="a", dist=LogNormal(0.4, 0.3))
+        .prior(param="g", dist=Beta(5.0, 20.0))
+        .prior(param="u", dist=Beta(22.0, 3.0))
+    )
+    res4 = fit(spec4, df, method=BAEM(tol=1e-6))
+    from_file4, from_str4, _ = _roundtrip(res4, tmp_path, "4pl_map")
+    _assert_fit_result_identical(res4, from_file4, score_sub)
+    _assert_fit_result_identical(res4, from_str4, score_sub)
+
+
+def test_roundtrip_two_group_with_anchors(tmp_path: Path) -> None:
+    rng = np.random.default_rng(5003)
+    n_g = 500
+    a_true = np.array([1.2, 1.5, 1.0, 1.4, 1.1, 1.3])
+    d_ref = np.array([-0.6, 0.2, 0.8, -0.2, 0.4, -0.5])
+    d_foc = d_ref.copy()
+    d_foc[4:] += np.array([0.4, -0.3])
+    th_ref = rng.normal(0.0, 1.0, n_g)
+    th_foc = rng.normal(0.4, 1.1, n_g)
+
+    def sim(th: np.ndarray, d: np.ndarray) -> np.ndarray:
+        p = 1.0 / (1.0 + np.exp(-(np.outer(th, a_true) + d)))
+        return np.asarray(rng.random(p.shape) < p, dtype=float)
+
+    cols = [f"q{j}" for j in range(1, 7)]
+    df = pd.DataFrame(np.vstack([sim(th_ref, d_ref), sim(th_foc, d_foc)]), columns=cols)
+    grp = np.repeat(["ref", "focal"], n_g)
+
+    spec = (
+        Model.uniform(TwoPL(), items=cols)
+        .with_groups(ref=Normal.standard(), focal=Normal.free())
+        .equal_across_groups(items=["q1", "q2", "q3"])
+        .equal_across_groups(items=["q4"], params=["a"])
+    )
+    res = fit(
+        spec,
+        df,
+        group=grp,
+        method=BAEM(tol=1e-6),
+        quadrature=Quadrature.equispaced(81, lim=(-8, 8)),
+    )
+    from_file, from_str, _ = _roundtrip(res, tmp_path, "two_group")
+    idx = [*range(15), *(n_g + i for i in range(15))]
+    _assert_fit_result_identical(res, from_file, df.iloc[idx], group=grp[idx])
+    _assert_fit_result_identical(res, from_str, df.iloc[idx], group=grp[idx])
+
+
+def test_roundtrip_fipc(tmp_path: Path) -> None:
+    case = load("v1_lsat7_2pl")
+    bank = pd.DataFrame({"item": ["Item.1", "Item.2"], "a": [1.0, 1.1], "d": [1.8, 0.8]})
+    spec = Model.uniform(TwoPL(), items=case.items).fix_from(bank).with_latent(Normal.free())
+    res = fit(
+        spec,
+        case.data,
+        method=BAEM(tol=1e-6),
+        quadrature=Quadrature.equispaced(81, lim=(-8, 8)),
+    )
+    from_file, from_str, _ = _roundtrip(res, tmp_path, "fipc")
+    _assert_fit_result_identical(res, from_file, case.data.iloc[:25])
+    _assert_fit_result_identical(res, from_str, case.data.iloc[:25])
+
+
+def test_roundtrip_missing_data_and_all_missing_scoring(tmp_path: Path) -> None:
+    case = load("v1_lsat7_2pl")
+    rng = np.random.default_rng(5004)
+    df_miss = case.data.copy().astype(float)
+    mask = rng.random(df_miss.shape) < 0.12
+    # Keep at least one observed item per row during fitting
+    mask[:, 0] &= ~mask.all(axis=1)
+    df_miss[mask] = np.nan
+
+    res = fit(Model.uniform(TwoPL(), items=case.items), df_miss, method=BAEM(tol=1e-6))
+    from_file, from_str, _ = _roundtrip(res, tmp_path, "missing")
+
+    # Include partial missing, extreme patterns (all-0 / all-1), and an all-missing row for scoring
+    score_df = df_miss.iloc[:20].copy()
+    score_df.iloc[0] = np.nan
+    score_df.iloc[1] = 0.0
+    score_df.iloc[2] = 1.0
+    _assert_fit_result_identical(res, from_file, score_df)
+    _assert_fit_result_identical(res, from_str, score_df)
+
+
+def test_roundtrip_squarem_and_se_none(tmp_path: Path) -> None:
+    case = load("v1_lsat7_2pl")
+    spec = Model.uniform(TwoPL(), items=case.items)
+    method = BAEM(tol=1e-7, max_iter=500, m_step_newton_steps=4, squarem=True)
+    res_sq = fit(spec, case.data, method=method, se="oakes")
+    assert res_sq.n_em_evaluations > res_sq.n_iter
+    from_file, from_str, _ = _roundtrip(res_sq, tmp_path, "squarem")
+    _assert_fit_result_identical(res_sq, from_file, case.data.iloc[:25])
+    _assert_fit_result_identical(res_sq, from_str, case.data.iloc[:25])
+
+    res_none = fit(spec, case.data, method=BAEM(tol=1e-6), se=None)
+    assert res_none.vcov is None
+    assert res_none.se_method is None
+    from_file_n, from_str_n, _ = _roundtrip(res_none, tmp_path, "se_none")
+    _assert_fit_result_identical(res_none, from_file_n, case.data.iloc[:25])
+    _assert_fit_result_identical(res_none, from_str_n, case.data.iloc[:25])
+
+
+# --------------------------------------------------------------------------------------------
+# Edge cases: edited table, non-converged, non-PD vcov, all-fixed, special names, -0.0
+# --------------------------------------------------------------------------------------------
+
+
+def test_roundtrip_edited_parameter_table(tmp_path: Path) -> None:
+    case = load("v1_lsat7_2pl")
+    spec = Model.uniform(TwoPL(), items=case.items)
+    table = spec.parameter_table(case.data)
+    row_a = (table["item"] == "Item.2") & (table["param"] == "a")
+    table.loc[row_a, "value"] = 1.25
+    table.loc[row_a, "free"] = False
+    row_d = (table["item"] == "Item.3") & (table["param"] == "d")
+    table.loc[row_d, "lower"] = -5.0
+    table.loc[row_d, "upper"] = 5.0
+    table["prior"] = pd.Series(
+        [NormalPrior(0.0, 2.0) if m else p for m, p in zip(row_d, table["prior"], strict=True)],
+        dtype=object,
+    )
+
+    res = fit(spec, case.data, table=table, method=BAEM(tol=1e-6))
+    from_file, _, _ = _roundtrip(res, tmp_path, "edited_table")
+    _assert_fit_result_identical(res, from_file, case.data.iloc[:25])
+
+
+def test_roundtrip_nonconverged_nonpd_vcov_and_all_fixed(tmp_path: Path) -> None:
+    case = load("v1_lsat7_2pl")
+    spec = Model.uniform(TwoPL(), items=case.items)
+
+    # Non-converged fit
+    with pytest.warns(ConvergenceWarning):
+        res_nc = fit(spec, case.data, method=BAEM(max_iter=1), se="oakes")
+    assert not res_nc.converged
+    from_nc, _, _ = _roundtrip(res_nc, tmp_path, "nonconverged")
+    _assert_fit_result_identical(res_nc, from_nc, case.data.iloc[:15])
+
+    # Non-PD vcov (all NaN matrix) -> strict JSON still holds, shape and NaNs preserved
+    assert res_nc.vcov is not None
+    res_nan_vcov = replace(
+        res_nc,
+        vcov=np.full_like(res_nc.vcov, np.nan),
+        parameters=res_nc.parameters.assign(se=np.nan),
+    )
+    from_nan, _, text_nan = _roundtrip(res_nan_vcov, tmp_path, "nan_vcov")
+    assert '"NaN"' in text_nan
+    assert from_nan.vcov is not None
+    assert from_nan.vcov.shape == res_nc.vcov.shape
+    assert np.isnan(from_nan.vcov).all()
+    _assert_fit_result_identical(res_nan_vcov, from_nan, case.data.iloc[:15])
+
+    # All parameters fixed (n_free == 0)
+    spec_all_fixed = spec
+    for item in case.items:
+        spec_all_fixed = spec_all_fixed.fix(item=item, a=1.0, d=0.0)
+    res_zero = fit(spec_all_fixed, case.data, se="oakes")
+    assert res_zero.n_params == 0
+    assert res_zero.vcov is None
+    assert res_zero.se_method == "oakes"
+    from_zero, _, _ = _roundtrip(res_zero, tmp_path, "all_fixed")
+    _assert_fit_result_identical(res_zero, from_zero, case.data.iloc[:15])
+
+
+def test_roundtrip_special_item_and_group_names(tmp_path: Path) -> None:
+    case = load("v1_lsat7_2pl")
+    # Include string names that coincide with special float tokens, HTML chars, and Unicode.
+    tricky = ["NaN", "Infinity", "-Infinity", 'q<1>&"a"', "項目5"]
+    df = case.data.copy()
+    df.columns = tricky
+    grp = np.tile(["g<ref>&1", "NaN"], len(df) // 2)
+    spec = (
+        Model.uniform(TwoPL(), items=tricky)
+        .with_groups(**{"g<ref>&1": Normal.standard(), "NaN": Normal.free()})
+        .equal_across_groups(items=tricky[:3])
+    )
+    res = fit(spec, df, group=grp, se=None, quadrature=Quadrature.equispaced(81, lim=(-8, 8)))
+    from_file, from_str, _ = _roundtrip(res, tmp_path, "special_names")
+    _assert_fit_result_identical(res, from_file, df.iloc[:20], group=grp[:20])
+    _assert_fit_result_identical(res, from_str, df.iloc[:20], group=grp[:20])
+
+
+# --------------------------------------------------------------------------------------------
+# Precision check on from_json (check_x64)
+# --------------------------------------------------------------------------------------------
+
+
+def test_from_json_raises_precision_error_without_x64(tmp_path: Path) -> None:
+    case = load("v1_lsat7_2pl")
+    res = fit(Model.uniform(TwoPL(), items=case.items), case.data, se=None)
+    path = tmp_path / "fit.json"
+    res.to_json(path)
+
+    code = textwrap.dedent(
+        f"""
+        import jax
+        from flexpyirt import FitResult
+        from flexpyirt.errors import PrecisionError
+
+        assert not jax.config.jax_enable_x64
+        try:
+            FitResult.from_json({str(path)!r})
+        except PrecisionError as exc:
+            assert "jax_enable_x64" in str(exc)
+        else:
+            raise SystemExit("PrecisionError not raised by FitResult.from_json")
+        """
+    )
+    env = {**os.environ, "JAX_ENABLE_X64": "0", "JAX_PLATFORMS": "cpu"}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert proc.returncode == 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+
+
+# --------------------------------------------------------------------------------------------
+# Malformed files, strict JSON rejections, and invalid inputs
+# --------------------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def sample_payload() -> dict[str, Any]:
+    case = load("v1_lsat7_2pl")
+    spec = Model.uniform(TwoPL(), items=case.items).prior(param="a", dist=LogNormal(0.0, 0.5))
+    res = fit(spec, case.data, method=BAEM(tol=1e-5), se="oakes")
+    return _assert_strict_json(res.to_json())
+
+
+def _clone(payload: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = json.loads(json.dumps(payload, allow_nan=False))
+    return out
+
+
+def test_malformed_format_and_schema_version(
+    sample_payload: dict[str, Any], tmp_path: Path
+) -> None:
+    # Wrong format tag (both via string and via file)
+    bad_fmt = _clone(sample_payload)
+    bad_fmt["format"] = "other.Result"
+    bad_path = tmp_path / "bad_fmt.json"
+    bad_path.write_text(json.dumps(bad_fmt), encoding="utf-8")
+    with pytest.raises(SpecificationError, match="Unsupported format"):
+        FitResult.from_json(bad_path)
+
+    # Missing format tag
+    no_fmt = _clone(sample_payload)
+    del no_fmt["format"]
+    with pytest.raises(SpecificationError, match="Unsupported format"):
+        FitResult.from_json(json.dumps(no_fmt))
+
+    # Unknown schema_version
+    for bad_ver in (0, 2, 99, "1", True):
+        bad = _clone(sample_payload)
+        bad["schema_version"] = bad_ver
+        with pytest.raises(SpecificationError, match="schema_version"):
+            FitResult.from_json(json.dumps(bad))
+
+    # Missing schema_version
+    no_ver = _clone(sample_payload)
+    del no_ver["schema_version"]
+    with pytest.raises(SpecificationError, match="schema_version"):
+        FitResult.from_json(json.dumps(no_ver))
+
+
+def test_malformed_registry_types(sample_payload: dict[str, Any]) -> None:
+    # Unknown item model
+    bad_item = _clone(sample_payload)
+    bad_item["model"]["items"][0]["model"] = {"type": "5PL"}
+    with pytest.raises(SpecificationError, match="Unknown item model type '5PL'"):
+        FitResult.from_json(json.dumps(bad_item))
+
+    # Invalid polytomous n_cat
+    bad_ncat = _clone(sample_payload)
+    bad_ncat["model"]["items"][0]["model"] = {"type": "GRM", "n_cat": 1}
+    with pytest.raises(SpecificationError, match="at least 2 categories"):
+        FitResult.from_json(json.dumps(bad_ncat))
+
+    bad_ncat_bool = _clone(sample_payload)
+    bad_ncat_bool["model"]["items"][0]["model"] = {"type": "GRM", "n_cat": True}
+    with pytest.raises(SpecificationError, match="Expected an integer"):
+        FitResult.from_json(json.dumps(bad_ncat_bool))
+
+    # Extra key on simple item model
+    extra_item_key = _clone(sample_payload)
+    extra_item_key["model"]["items"][0]["model"] = {"type": "2PL", "n_cat": 2}
+    with pytest.raises(SpecificationError, match="Unexpected keys"):
+        FitResult.from_json(json.dumps(extra_item_key))
+
+    # Unknown latent distribution
+    bad_lat = _clone(sample_payload)
+    bad_lat["model"]["latent"] = {"type": "EmpiricalHistogram"}
+    with pytest.raises(SpecificationError, match="Unknown latent distribution type"):
+        FitResult.from_json(json.dumps(bad_lat))
+
+    # Unknown prior
+    bad_pri = _clone(sample_payload)
+    bad_pri["model"]["priors"][0]["dist"] = {"type": "Cauchy", "loc": 0.0, "scale": 1.0}
+    with pytest.raises(SpecificationError, match="Unknown prior type 'Cauchy'"):
+        FitResult.from_json(json.dumps(bad_pri))
+
+    # Unknown quadrature
+    bad_quad = _clone(sample_payload)
+    bad_quad["quadrature"] = {"type": "gauss_hermite", "n_points": 41}
+    with pytest.raises(SpecificationError, match="Unknown quadrature type"):
+        FitResult.from_json(json.dumps(bad_quad))
+
+    # Unknown method
+    bad_meth = _clone(sample_payload)
+    bad_meth["method"] = {"type": "MHRM"}
+    with pytest.raises(SpecificationError, match="Unknown estimation method type"):
+        FitResult.from_json(json.dumps(bad_meth))
+
+
+def test_malformed_json_and_nonstandard_constants(
+    sample_payload: dict[str, Any], tmp_path: Path
+) -> None:
+    # Literal NaN / Infinity in JSON text must be rejected
+    raw_nan = json.dumps(sample_payload).replace('"-Infinity"', "-Infinity", 1)
+    with pytest.raises(SpecificationError, match="Non-standard JSON constant"):
+        FitResult.from_json(raw_nan)
+
+    raw_nan_file = tmp_path / "bare_nan.json"
+    raw_nan_file.write_text('{"format": "flexpyirt.FitResult", "loglik": NaN}', encoding="utf-8")
+    with pytest.raises(SpecificationError, match="Non-standard JSON constant"):
+        FitResult.from_json(raw_nan_file)
+
+    # Syntax errors and non-object top-level JSON
+    for bad_text in ("{not json", "not json", "[]", "123", '"hello"'):
+        with pytest.raises(SpecificationError):
+            FitResult.from_json(bad_text)
+
+    # Non-existent file paths raise FileNotFoundError
+    with pytest.raises(FileNotFoundError):
+        FitResult.from_json(tmp_path / "does_not_exist.json")
+    with pytest.raises(FileNotFoundError):
+        FitResult.from_json(str(tmp_path / "does_not_exist.json"))
+
+    # Invalid indent in to_json
+    case = load("v1_lsat7_2pl")
+    res = fit(Model.uniform(TwoPL(), items=case.items), case.data, se=None)
+    for bad_indent in (-1, True, "2"):
+        with pytest.raises(SpecificationError, match="indent"):
+            res.to_json(indent=bad_indent)  # type: ignore[arg-type]
+
+
+def test_malformed_internal_consistency(sample_payload: dict[str, Any]) -> None:
+    # Missing parameter row
+    missing_row = _clone(sample_payload)
+    missing_row["parameters"].pop()
+    with pytest.raises(SpecificationError, match="Missing parameter rows"):
+        FitResult.from_json(json.dumps(missing_row))
+
+    # Non-contiguous free_id
+    bad_fid = _clone(sample_payload)
+    bad_fid["parameters"][0]["free_id"] = 999
+    with pytest.raises(SpecificationError, match="contiguous"):
+        FitResult.from_json(json.dumps(bad_fid))
+
+    # Mismatched vcov shape
+    bad_vcov = _clone(sample_payload)
+    bad_vcov["vcov"] = bad_vcov["vcov"][:-1]
+    with pytest.raises(SpecificationError, match="vcov must have shape"):
+        FitResult.from_json(json.dumps(bad_vcov))
+
+    # Mismatched history length
+    bad_hist = _clone(sample_payload)
+    bad_hist["history"] = bad_hist["history"][:-1]
+    with pytest.raises(SpecificationError, match="history length"):
+        FitResult.from_json(json.dumps(bad_hist))
+
+    # Fixed row with estimate != value
+    bad_fix = _clone(sample_payload)
+    latent_row = next(r for r in bad_fix["parameters"] if not r["free"])
+    latent_row["estimate"] = float(latent_row["value"]) + 1.0
+    with pytest.raises(SpecificationError, match="estimate"):
+        FitResult.from_json(json.dumps(bad_fix))
+
+    # Unknown se_method
+    bad_se = _clone(sample_payload)
+    bad_se["se_method"] = "bootstrap"
+    with pytest.raises(SpecificationError, match="Unknown se_method"):
+        FitResult.from_json(json.dumps(bad_se))
