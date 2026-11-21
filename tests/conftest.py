@@ -21,5 +21,5 @@ def _release_jax_compilations() -> Iterator[None]:
     shutdown signal in ``tests/test_mirt_m4_scoring.py``). Later modules recompile what they use.
     """
     yield
-    jax.clear_caches()
+    jax.clear_caches()  # type: ignore[no-untyped-call]
     gc.collect()
