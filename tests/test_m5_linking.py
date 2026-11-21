@@ -791,6 +791,112 @@ def test_errors_and_validation(
     with pytest.warns(ConvergenceWarning, match="did not converge"):
         r_nc = link(res_src, res_tgt, tol=1e-30, max_iter=1)
     assert not r_nc.converged
+    # Delta-method SEs are only valid at a stationary point: none are reported here.
+    assert r_nc.vcov is None
+    assert math.isnan(r_nc.A_se) and math.isnan(r_nc.B_se)
+
+
+@pytest.fixture(scope="module")
+def multigroup_anchor_fit() -> FitResult:
+    """Two-group 2PL calibration with 4 equality-constrained anchors and 4 group-specific items."""
+    items = [f"c{j}" for j in range(8)]
+    rng = np.random.default_rng(11)
+    true = {
+        n: np.array([float(rng.lognormal(0.1, 0.25)), float(rng.normal(0.0, 0.9))]) for n in items
+    }
+    base = Model.uniform(TwoPL(), items=items)
+    df = pd.concat(
+        [
+            _simulate(base, true, n_obs=1500, seed=21),
+            _simulate(base, true, n_obs=1500, seed=22, mean=0.5, sd=1.2),
+        ],
+        ignore_index=True,
+    )
+    spec = base.with_groups(ref=Normal.standard(), focal=Normal.free()).equal_across_groups(
+        items=items[:4]
+    )
+    grp = np.repeat(["ref", "focal"], 1500)
+    return fit(spec, df, group=grp, method=BAEM(tol=1e-8, squarem=True), se="oakes")
+
+
+def test_same_multigroup_fit_uses_joint_vcov(multigroup_anchor_fit: FitResult) -> None:
+    """One FitResult on both sides: cross-covariance from the joint vcov enters the SEs."""
+    res = multigroup_anchor_fit
+    assert res.vcov is not None
+    anchors = ["c0", "c1", "c2", "c3"]
+    # Shared (equality-constrained) anchors give (A, B) = (1, 0) for every parameter value, so the
+    # delta-method covariance must vanish; ignoring the cross block would give SEs ~0.03-0.04.
+    shared = link(res, res, source_group="focal", target_group="ref", items=anchors)
+    assert shared.converged
+    assert pytest.approx(1.0, abs=1e-10) == shared.A
+    assert pytest.approx(0.0, abs=1e-10) == shared.B
+    assert shared.vcov is not None
+    assert np.max(np.abs(shared.vcov)) < 1e-12
+
+    # Group-specific items: compare against the explicit joint-covariance delta method, where the
+    # Jacobians come from autodiff through the converged solver and the joint vcov block includes
+    # the cross-covariance between the two groups' parameters.
+    other = ["c4", "c5", "c6", "c7"]
+    linked = link(res, res, source_group="focal", target_group="ref", items=other)
+    assert linked.converged and linked.vcov is not None
+    params = res.parameters[res.parameters["item"].isin(other)]
+    fid = {
+        (str(r.group), str(r.item), str(r.param)): int(r.free_id)
+        for r in params.itertuples()
+        if int(r.free_id) >= 0
+    }
+    src_ids = [fid[("focal", i, p)] for i in other for p in ("a", "d")]
+    tgt_ids = [fid[("ref", i, p)] for i in other for p in ("a", "d")]
+    n = len(other)
+    fam = LinkingFamily(
+        kernel=DichotomousKernel(),
+        src_params=jnp.asarray(res._eta[src_ids].reshape(n, 2)),
+        tgt_params=jnp.asarray(res._eta[tgt_ids].reshape(n, 2)),
+        src_free_index=jnp.arange(2 * n, dtype=jnp.int32).reshape(n, 2),
+        tgt_free_index=jnp.arange(2 * n, dtype=jnp.int32).reshape(n, 2),
+    )
+    nodes = jnp.asarray(res._quadrature.nodes(), dtype=jnp.float64)
+    lat = res.parameters[res.parameters["item"] == "__latent__"].set_index(["group", "param"])
+    mu, var = (
+        float(lat.loc[("focal", "mean"), "estimate"]),
+        float(lat.loc[("focal", "var"), "estimate"]),
+    )
+    w_t = jax.nn.softmax(-0.5 * nodes**2)
+    w_s = jax.nn.softmax(-0.5 * (nodes - mu) ** 2 / var)
+    prob = LinkingProblem(
+        families=(fam,), tgt_nodes=nodes, tgt_weights=w_t, src_nodes=nodes, src_weights=w_s
+    )
+
+    def ab_of(eta_joint: jax.Array) -> jax.Array:
+        es, et = eta_joint[: 2 * n], eta_joint[2 * n :]
+        return solve_linking(
+            prob,
+            es,
+            et,
+            jnp.array([linked.A, linked.B]),
+            method="stocking-lord",
+            symmetric=False,
+            tol=1e-13,
+            max_iter=50,
+        )[0]
+
+    eta_joint = jnp.asarray(res._eta[src_ids + tgt_ids])
+    # Implicit-function Jacobian via central differences of the converged solution.
+    eps = 1e-6
+    cols = []
+    for k in range(4 * n):
+        e = jnp.zeros(4 * n).at[k].set(eps)
+        cols.append((ab_of(eta_joint + e) - ab_of(eta_joint - e)) / (2 * eps))
+    jac = np.stack([np.asarray(c) for c in cols], axis=1)
+    joint = res.vcov[np.ix_(src_ids + tgt_ids, src_ids + tgt_ids)]
+    expected = jac @ joint @ jac.T
+    np.testing.assert_allclose(linked.vcov, expected, rtol=1e-5, atol=1e-12)
+    # The cross block is not negligible here: dropping it changes the covariance.
+    indep = (
+        jac[:, : 2 * n] @ joint[: 2 * n, : 2 * n] @ jac[:, : 2 * n].T
+        + jac[:, 2 * n :] @ joint[2 * n :, 2 * n :] @ jac[:, 2 * n :].T
+    )
+    assert not np.allclose(indep, expected, rtol=1e-3, atol=0.0)
 
 
 def test_link_requires_x64() -> None:

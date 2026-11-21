@@ -438,6 +438,7 @@ def linking_vcov(
     *,
     method: LinkMethod,
     symmetric: bool,
+    vcov_st: Array | None = None,
 ) -> tuple[Array, Array]:
     r"""Asymptotic covariance of :math:`(\hat A, \hat B)` by the delta method (Ogasawara, 2001).
 
@@ -450,12 +451,28 @@ def linking_vcov(
         J_t = \frac{\partial \hat c}{\partial \eta_t^\top} = -H_{cc}^{-1} H_{c,\eta_t},
 
     where :math:`H_{cc} = \partial^2 F/\partial c\,\partial c^\top` (``jax.jacfwd``) and
-    :math:`H_{c,\eta_s}, H_{c,\eta_t}` (``jax.jacrev``) are computed via JAX autodiff. For two
-    independently calibrated forms with common-item free-parameter covariances
-    :math:`\Sigma_s, \Sigma_t` (treating the quadrature weights as fixed),
+    :math:`H_{c,\eta_s}, H_{c,\eta_t}` (``jax.jacrev``) are computed via JAX autodiff. With
+    common-item free-parameter covariances :math:`\Sigma_s, \Sigma_t` and cross-covariance
+    :math:`\Sigma_{st} = \operatorname{Cov}(\hat\eta_s, \hat\eta_t)`,
 
     .. math::
-        \operatorname{Cov}(\hat A, \hat B) = J_s \Sigma_s J_s^\top + J_t \Sigma_t J_t^\top.
+        \operatorname{Cov}(\hat A, \hat B) = J_s \Sigma_s J_s^\top + J_t \Sigma_t J_t^\top
+            + J_s \Sigma_{st} J_t^\top + J_t \Sigma_{st}^\top J_s^\top,
+
+    where :math:`\Sigma_{st} = 0` for two independently calibrated forms (the default) and is the
+    corresponding block of the joint covariance when both scales come from one (multiple-group)
+    calibration, so that shared free parameters (``free_id`` equality constraints) are counted
+    consistently.
+
+    The quadrature weights are held fixed. When they are estimates (fitted latent mean/variance or
+    empirical-histogram weights) this is exact to first order under a correctly specified model:
+    :math:`\partial g / \partial w_q` is a weighted sum of curve residuals times curve
+    derivatives, the residuals vanish at the population solution, so :math:`H_{c,w} = 0` there.
+    Under item parameter drift / DIF (non-zero population residuals) the weights' sampling
+    variability is ignored.
+
+    The result is meaningful only at a stationary point of the criterion; callers must not use it
+    when the optimizer did not converge.
 
     Parameters
     ----------
@@ -471,6 +488,8 @@ def linking_vcov(
         Static criterion selector.
     symmetric : bool
         Static flag for the symmetric criterion.
+    vcov_st : Array, shape (m_s, m_t), optional
+        Cross-covariance of ``eta_s`` and ``eta_t`` (``None`` means zero: independent forms).
 
     Returns
     -------
@@ -502,6 +521,9 @@ def linking_vcov(
     j_t = -jnp.linalg.solve(safe_h, h_ct)
 
     cov = j_s @ vcov_s @ j_s.T + j_t @ vcov_t @ j_t.T
+    if vcov_st is not None:
+        cross = j_s @ vcov_st @ j_t.T
+        cov = cov + cross + cross.T
     cov = 0.5 * (cov + cov.T)
     valid = is_pd & jnp.all(jnp.isfinite(cov))
     return jnp.where(valid, cov, jnp.nan), valid

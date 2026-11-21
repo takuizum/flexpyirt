@@ -318,9 +318,9 @@ class LinkResult:
     B_se : float
         Delta-method standard error of ``B`` (Ogasawara, 2001), or ``NaN`` if unavailable.
     vcov : ndarray or None
-        ``(2, 2)`` asymptotic covariance matrix of ``(A, B)``, or ``None`` if unavailable (e.g.
-        when ``se=None`` on a side with free common-item parameters, all common parameters are
-        fixed, or the criterion Hessian is not positive definite).
+        ``(2, 2)`` asymptotic covariance matrix of ``(A, B)``, or ``None`` if unavailable (the
+        optimizer did not converge, ``se=None`` on a side with free common-item parameters, all
+        common parameters are fixed, or the criterion Hessian is not positive definite).
     criterion : float
         Minimized Haebara or Stocking–Lord criterion value at ``(A, B)``.
     method : {"haebara", "stocking-lord"}
@@ -532,9 +532,24 @@ def link(
     - ``symmetric=True`` (Kim & Lee, 2006): adds the reverse-direction squared difference
       comparing source curves on the source scale against target curves at :math:`A\theta + B`.
 
-    Every unidimensional item model (2PL, Rasch, 3PL, 4PL, GRM, GPCM, PCM) and mixed-format
-    combinations are supported. Derivatives for Newton optimization and delta-method standard
-    errors (Ogasawara, 2001) are computed by JAX automatic differentiation.
+    Haebara sums over all :math:`K_j` categories, including both categories of a dichotomous
+    item (the Kim & Lee, 2006 convention). For a dichotomous item this is
+    :math:`2[P^{\mathrm{tgt}} - P^{\mathrm{src}}]^2`, twice Haebara's (1980) original term: the
+    solution is unchanged when all common items are dichotomous, reported criterion values are
+    doubled, and in mixed-format sets dichotomous items carry the Kim & Lee weight.
+
+    Derivatives for Newton optimization and delta-method standard errors (Ogasawara, 2001) are
+    computed by JAX automatic differentiation. The standard errors assume ``source`` and
+    ``target`` are independent calibrations; when the same :class:`FitResult` is passed as both
+    (two groups of one multiple-group fit), the cross-covariance block of its joint ``vcov`` is
+    included so shared (equality-constrained) parameters are handled correctly. Two *distinct*
+    ``FitResult`` objects fitted to overlapping data are treated as independent. Quadrature
+    weights are held fixed, which is exact to first order under a correctly specified model
+    (DESIGN.md §16.5). No standard errors are reported when the optimizer did not converge.
+
+    Validated against base-R references (VALIDATION.md V20) for 2PL, 3PL, GRM, GPCM, and mixed
+    2PL + GPCM common items; the parameter transforms and criteria for Rasch, 4PL and PCM are
+    covered by exact-recovery unit tests only.
 
     Parameters
     ----------
@@ -712,14 +727,16 @@ def link(
             stacklevel=2,
         )
 
-    # Delta-method standard errors (Ogasawara, 2001) when covariances are available.
+    # Delta-method standard errors (Ogasawara, 2001) when covariances are available. They are only
+    # valid at a stationary point, so a non-converged solution reports no SEs.
     vcov_out: np.ndarray | None = None
     a_se = math.nan
     b_se = math.nan
     has_free = bool(src_fids or tgt_fids)
     have_src_cov = (not src_fids) or (source.vcov is not None)
     have_tgt_cov = (not tgt_fids) or (target.vcov is not None)
-    if has_free and have_src_cov and have_tgt_cov:
+    same_fit = source is target
+    if converged and has_free and have_src_cov and have_tgt_cov:
         vcov_s = (
             np.asarray(source.vcov[np.ix_(src_fids, src_fids)], dtype=np.float64)
             if src_fids and source.vcov is not None
@@ -730,6 +747,14 @@ def link(
             if tgt_fids and target.vcov is not None
             else np.zeros((0, 0), dtype=np.float64)
         )
+        # One calibration on both sides (e.g. two groups of a multiple-group fit): the two scales'
+        # estimates are correlated (shared free_ids, common latent/anchor parameters), so the
+        # joint covariance's cross block enters; independent fits have zero cross-covariance.
+        vcov_st = (
+            jnp.asarray(source.vcov[np.ix_(src_fids, tgt_fids)], dtype=jnp.float64)
+            if same_fit and src_fids and tgt_fids and source.vcov is not None
+            else None
+        )
         cov_j, valid_j = _linking_vcov(
             ab_hat_j,
             eta_s_j,
@@ -739,6 +764,7 @@ def link(
             prob,
             method=method,
             symmetric=symmetric,
+            vcov_st=vcov_st,
         )
         if bool(valid_j):
             vcov_out = np.asarray(cov_j, dtype=float)
