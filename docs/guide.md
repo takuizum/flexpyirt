@@ -262,22 +262,44 @@ entering a threshold is fixed.
 
 ## 7. Scoring
 
-`FitResult.score()` returns EAP estimates and posterior standard deviations. The prior is the
-estimated latent distribution (the respondent's group's distribution with multiple groups).
-Missing responses are left out of the likelihood; a respondent with every item missing gets the
-prior mean and SD.
+`FitResult.score()` estimates each respondent's latent ability $\theta$ with five methods:
+
+| `method` | Definition | Extreme patterns (all lowest / highest) | All-missing row | When to use |
+|---|---|---|---|---|
+| `"EAP"` (default) | Posterior mean & SD on the fitted quadrature grid (Bock & Mislevy, 1982) | Finite | Prior mean & SD | Fast, low MSE for individual scores; good general default |
+| `"MAP"` | Posterior mode with continuous normal prior $N(\mu_g,\sigma_g^2)$ & observed curvature SE | Finite | Prior mode $\mu_g$ & SD $\sigma_g$ | Modal Bayesian estimate without grid discretization |
+| `"ML"` | Maximum likelihood & observed-information SE | $-\infty$ / $+\infty$, SE NaN | NaN, SE NaN | Prior-free score when reporting individual performance without shrinkage |
+| `"WLE"` | Weighted likelihood $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta))=0$ & observed curvature SE (Warm, 1989; Firth, 1993) | Finite | NaN, SE NaN | Prior-free score with reduced finite-test bias and finite extreme scores |
+| `"PV"` | `n_draws` independent draws per respondent from the posterior (Mislevy, 1991), columns `pv1..pvM` | Finite | Drawn from the prior | Downstream population / regression analyses that must propagate measurement error |
+
+- Bayesian methods (`"EAP"`, `"MAP"`, `"PV"`) use the respondent's group's estimated latent
+  distribution as the prior; `"ML"` and `"WLE"` use the item likelihood only.
+- Missing responses are dropped from the likelihood (and from $I(\theta)$ in `"WLE"`) for every
+  method. In 3PL/4PL models, low-score patterns whose likelihood increases monotonically toward
+  $-\infty$ due to guessing also return $-\infty$ with SE NaN under `"ML"`.
+- **`method="PV"` requires an explicit JAX PRNG `key`** (e.g. `jax.random.key(0)`): flexpyirt
+  never uses global random state, so results are fully deterministic given `key` while giving
+  independent draws to respondents even when they share the same response pattern.
 
 ```python
-scores = res.score(df)
-print(scores.head(3))  # theta, se (index follows df)
+scores_eap = res.score(df)  # default: method="EAP" -> columns theta, se
+scores_map = res.score(df, method="MAP")
+scores_ml = res.score(df, method="ML")
+scores_wle = res.score(df, method="WLE")
+print(scores_eap.head(3))  # theta, se (index follows df)
+print(scores_wle.head(3))
+
+# Plausible values require an explicit JAX PRNG key (deterministic given key).
+key = jax.random.key(0)
+pvs = res.score(df.iloc[:5], method="PV", key=key, n_draws=5)
+print(pvs)  # columns pv1..pv5
 
 new = df.iloc[:2].copy()
 new.iloc[0, :3] = np.nan  # partly missing rows are scored too
-print(res.score(new))
+print(res.score(new, method="MAP"))
 ```
 
 The scored data need not be the data used for fitting (the columns must be the same items).
-MAP / ML / WLE / plausible values are planned for M4.
 
 ## 8. Latent distributions and identification
 
@@ -517,12 +539,16 @@ except SpecificationError as e:
 ## References
 
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
+- Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
+- Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
+- Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.

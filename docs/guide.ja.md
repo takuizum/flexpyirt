@@ -251,20 +251,43 @@ print(vcov.iloc[:2, :2])
 
 ## 7. スコアリング
 
-`FitResult.score()` は EAP（事後期待値）と事後標準偏差を返す。事前分布には推定した潜在分布を使う
-（多母集団では回答者の群の分布）。欠測は尤度から除かれ、全項目が欠測の回答者は事前分布の平均・SD になる。
+`FitResult.score()` は 5 つの手法で回答者ごとの潜在能力 $\theta$ を推定する。
+
+| `method` | 内容 | 極端パターン（全最低・全最高） | 全項目欠測の行 | 使い分け |
+|---|---|---|---|---|
+| `"EAP"`（既定） | 推定時の求積格子上の事後平均と事後 SD（Bock & Mislevy, 1982） | 有限 | 事前分布の平均・SD | 高速で個人スコアの MSE が小さい。標準の既定値 |
+| `"MAP"` | 連続正規事前分布 $N(\mu_g,\sigma_g^2)$ による事後最頻値と観測曲率 SE | 有限 | 事前分布の最頻値 $\mu_g$ と SD $\sigma_g$ | 格子離散化を避けたベイズ最頻値推定 |
+| `"ML"` | 最尤推定と観測情報量 SE | $-\infty$ / $+\infty$、SE は NaN | NaN、SE は NaN | 事前分布による縮小を避けて個人の反応のみで評価したいとき |
+| `"WLE"` | 重み付き最尤推定 $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta))=0$ と観測曲率 SE（Warm, 1989; Firth, 1993） | 有限 | NaN、SE は NaN | 事前分布なしで有限テストのバイアスを抑え、極端パターンも有限にしたいとき |
+| `"PV"` | 事後分布から回答者ごとに独立に `n_draws` 個を抽出（Mislevy, 1991）、列 `pv1..pvM` | 有限 | 事前分布から抽出 | 測定誤差を伝播させる母集団統計・回帰などの二次解析 |
+
+- ベイズ手法（`"EAP"`, `"MAP"`, `"PV"`）は回答者の群の推定済み潜在分布を事前分布に使い、`"ML"` と
+  `"WLE"` は項目尤度のみを使う。
+- どの手法でも欠測反応は尤度（`"WLE"` ではテスト情報量 $I(\theta)$ も）から除かれる。3PL / 4PL では、
+  当て推量により尤度が $-\infty$ へ向かって単調増加する低得点パターンも `"ML"` で $-\infty$・SE NaN となる。
+- **`method="PV"` は明示的な JAX PRNG の `key`（例: `jax.random.key(0)`）が必須**: flexpyirt は
+  グローバルな乱数状態を持たないため、同じ `key` で完全に再現可能であり、同じ反応パターンの回答者にも互いに
+  独立な標本を与える。
 
 ```python
-scores = res.score(df)
-print(scores.head(3))  # theta, se（index は df と同じ）
+scores_eap = res.score(df)  # 既定: method="EAP" -> 列 theta, se
+scores_map = res.score(df, method="MAP")
+scores_ml = res.score(df, method="ML")
+scores_wle = res.score(df, method="WLE")
+print(scores_eap.head(3))  # theta, se（index は df と同じ）
+print(scores_wle.head(3))
+
+# Plausible values は明示的な JAX PRNG の key が必須（key に対して決定的）
+key = jax.random.key(0)
+pvs = res.score(df.iloc[:5], method="PV", key=key, n_draws=5)
+print(pvs)  # 列 pv1..pv5
 
 new = df.iloc[:2].copy()
 new.iloc[0, :3] = np.nan  # 一部欠測でも採点できる
-print(res.score(new))
+print(res.score(new, method="MAP"))
 ```
 
-採点に使うデータは、推定に使ったデータと別でもよい（列は同じ項目）。MAP / ML / WLE / plausible values は M4 で
-追加予定。
+採点に使うデータは、推定に使ったデータと別でもよい（列は同じ項目）。
 
 ## 8. 潜在分布と識別性
 
@@ -489,12 +512,16 @@ except SpecificationError as e:
 ## 参考文献
 
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
+- Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
+- Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
+- Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.

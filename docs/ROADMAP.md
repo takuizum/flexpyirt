@@ -41,7 +41,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - [x] `FitResult.summary()`, `FitResult._repr_html_()`, and delta-method SEs for the display IRT
   parameterization (`b_se` / `bk_se`, validated in V12).
 - `FitResult` JSON I/O.
-- Scoring (MAP, ML, WLE, plausible values).
+- [x] Scoring (MAP, ML, WLE, plausible values; validated in V13).
 - Confirmatory 2–3 dimensional MIRT (product grids).
 - **Acceptance**: EAP / MAP agree with mirt's `fscores`. A two-dimensional confirmatory model
   agrees with mirt.

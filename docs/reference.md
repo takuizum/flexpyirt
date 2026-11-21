@@ -105,21 +105,27 @@ concise one-line summary.
 #### `FitResult.score`
 
 ```text
-score(data, *, method="EAP", group=None, item_names=None) -> DataFrame
+score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -> DataFrame
 ```
 
-EAP (`theta`) and posterior standard deviation (`se`) per respondent (Bock & Mislevy, 1982). The
-prior is the estimated latent distribution (the respondent's group's distribution with multiple
-groups) on the same grid as in fitting. Missing responses are left out of the likelihood.
+Score respondents on the fitted model ([guide section 7](guide.md#7-scoring)). Missing responses
+are dropped from the likelihood (and from $I(\theta)$ in WLE) for every method.
 
-| Argument | Description |
-|---|---|
-| `data` | Responses on the fitted items (need not be the fitting data) |
-| `method` | `"EAP"` only (MAP / ML / WLE / PV are planned for M4) |
-| `group` | Required for a multiple-group model: each row's group label |
-| `item_names` | Column names when `data` is an array |
+| Argument | Type | Description |
+|---|---|---|
+| `data` | DataFrame / polars DataFrame / 2-D array | Responses on the fitted items (need not be the fitting data) |
+| `method` | `"EAP"` / `"MAP"` / `"ML"` / `"WLE"` / `"PV"` | Scoring method (default `"EAP"`): EAP (posterior mean & SD on the fitted quadrature grid; Bock & Mislevy, 1982), MAP (posterior mode with continuous normal prior $N(\mu_g,\sigma_g^2)$ & observed curvature SE), ML (maximum likelihood & observed-information SE; $-\infty$/$+\infty$ with SE NaN for patterns with no finite maximum, NaN for all-missing), WLE (Warm, 1989; Firth, 1993: solves $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta))=0$, finite on extreme patterns, NaN for all-missing, SE from observed WLE curvature), or PV (`n_draws` independent posterior draws via piecewise-linear inverse-CDF interpolation on a 501-node grid; Mislevy, 1991) |
+| `group` | array, optional | Required for a multiple-group model: each row's group label |
+| `item_names` | list[str], optional | Column names when `data` is an array |
+| `key` | `jax.Array`, optional | Explicit JAX PRNG key (from `jax.random.key()` or `jax.random.PRNGKey()`). Required for `method="PV"`; must be `None` for other methods |
+| `n_draws` | int | Number of plausible values per respondent when `method="PV"` (default `5`, must be `>= 1`) |
 
-The index of the result follows `data` when it is a DataFrame.
+**Returns**: `DataFrame` with one row per respondent (index follows `data` when it is a
+DataFrame): columns `theta`, `se` for `"EAP"`, `"MAP"`, `"ML"`, `"WLE"`; columns `pv1`…`pv{n_draws}`
+for `"PV"`.
+
+**Raises**: `SpecificationError` if `method` is unknown, `key` is missing or invalid for `"PV"`,
+`key` is supplied for a deterministic method, or `n_draws` is not a positive integer.
 
 ---
 

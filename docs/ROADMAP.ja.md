@@ -35,7 +35,7 @@
 - [x] `FitResult.summary()`、`FitResult._repr_html_()`、デルタ法による表示用 IRT パラメタ化の SE
   （`b_se` / `bk_se`、V12 で照合済み）。
 - `FitResult` の JSON 入出力。
-- スコアリング（MAP, ML, WLE, plausible values）。
+- [x] スコアリング（MAP, ML, WLE, plausible values。V13 で照合済み）。
 - 確認的 2–3 次元 MIRT（直積格子）。
 - **受け入れ基準**: mirt の `fscores` と EAP / MAP が一致。2 次元確認的モデルが mirt と一致。
 

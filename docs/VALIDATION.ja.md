@@ -16,6 +16,8 @@
 | 潜在分布パラメタ（平均・SD） | 1e-4 |
 | 標準誤差 | 1e-3（相対） |
 | EAP | 1e-5 |
+| MAP / ML / WLE（$\theta$） | 1e-4 |
+| MAP / ML / WLE（SE） | 1e-3（相対） |
 
 ## ケース一覧（マイルストーンと対応）
 | ID | 内容 | mirt 側の呼び出し | MS |
@@ -32,6 +34,7 @@
 | V10 | SE（Oakes / crossprod / sandwich） | `SE.type=` | M1–M3 |
 | V11 | 3PL・4PL 単一群（シミュレーション） | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 | V12 | 表示用 IRT 閾値とデルタ法 SE（2PL・Rasch・GRM・GPCM・PCM・2 群 2PL） | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
+| V13 | 能力値スコアリング: MAP・ML・WLE（2PL・GRM・GPCM・3PL・2 群・欠測） | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -168,6 +171,54 @@
   `tests/test_m4_result.py`。
 - **EAP の照合**: 推定値の差が EAP に伝播しないよう、全パラメタを mirt の推定値に固定して
   （ParameterTable の `free=False`）スコアリングだけを照合する。許容誤差 1e-5。
+- **能力値スコアリング: MAP・ML・WLE（V13、M4）**: mirt 1.46.1 の `mirt:::fscores.internal`、`mirt:::MAP`、
+  `mirt:::ML`、`mirt:::WLE`、`mirt:::MAP.mirt`、`mirt:::WLE.mirt` を調査し、以下を確認した:
+  - **範囲（境界）**: `theta_lim` は EAP の求積格子（および MAP / ML / WLE の EAP 初期値）に使われ、
+    MAP・ML・WLE 本体は `[-max_theta, max_theta]`（既定 `max_theta = 20`）上で最適化する。
+  - **目的関数と SE（既定 `expected.info = FALSE`）**: MAP は連続な正規潜在分布を事前分布とする
+    $\log L(\theta\mid y) + \log\phi(\theta;\mu_g,\sigma_g^2)$、ML は $\log L(\theta\mid y)$、WLE は
+    $\log L(\theta\mid y) + \tfrac{1}{2}\log I(\theta)$（$I(\theta)$ は観測項目の Fisher テスト情報量。
+    Warm の方程式 $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta)) = 0$ および Firth の Jeffreys
+    事前分布と一致）を最大化する。3 手法とも mirt 既定の SE は最適点における負の目的関数の `nlm()` Hessian
+    の逆平方根（観測曲率。`response.pattern` なしで `expected.info = TRUE` にすると $I(\hat\theta)^{-1/2}$
+    へ切り替わり、短いテストや極端パターンで差が出る。mirt 1.46.1 では `response.pattern` 経由で
+    `expected.info` が引き継がれない）。
+  - **極端パターンと mirt 1.46.1 の不具合**: ML では全観測項目が最低／最高カテゴリなら `-Inf` / `+Inf`
+    （SE は `NA`）、全欠測は `NA` / `NA`。mirt 1.46.1 に 2 つの境界バグを確認した: (a) 3PL の低得点パターンで
+    $\log L(\theta)$ の上限が $-\infty$ にある場合、`nlm` の有限差分 Hessian が $\le 0$（`SE = NA`）に
+    なると `mirt:::ML` が `SEest > 30` 判定をすり抜けて `-Inf` ではなく有限値 `F1 ≈ -17`（`SE = NA`）を
+    返す（`v11_3pl` の 3,790 パターン中 31 件）。(b) 欠測データでは `fscores.internal` が
+    `tabdata[, -ncol(tabdata)]` で最後の項目列を落として欠測数を数えるため、最終項目が欠測の極端パターンを
+    検出できず `max_theta = 20`（`F1 ≈ 20`, `SE = NA`）に張り付く。flexpyirt はこれらを正しく検出し
+    `±inf` と SE `NaN` を返す。全欠測行については、mirt が全手法で `NA` に落とすのに対し、flexpyirt では
+    ベイズ手法（EAP・MAP・PV）は事前分布、尤度のみの手法（ML・WLE）は `(NaN, NaN)` を返す。
+
+  全パラメタを mirt の推定値に固定して 6 ケースを `tests/test_mirt_m4_scoring.py` で照合した
+  （参照値生成: `validation/r/m4_scoring_reference.R` → `tests/reference/v13_fscores.json`、
+  `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`。許容誤差は $\theta$ 絶対 `1e-4`・SE 相対 `1e-3`、
+  `-inf`/`+inf`/`NaN` は厳密一致。残る ~`1e-6`–`2e-4` の差は `nlm` の有限差分勾配・Hessian 由来）:
+  - **V13a（`lsat7_2pl`、2PL、32 パターン、61 点 $[-6,6]$）**: `loglik` 相対差 `5.1e-16`、
+    MAP $\theta$ `2.2e-6` / SE 相対 `1.8e-5`、ML $\theta$ `1.5e-6` / SE 相対 `4.1e-5`（`±inf` 2 件）、
+    WLE $\theta$ `2.1e-6` / SE 相対 `5.1e-5`。
+  - **V13b（`science_grm`、GRM 0..3、90 パターン、61 点 $[-6,6]$）**: `loglik` 相対差 `3.7e-15`、
+    MAP $\theta$ `3.0e-6` / SE 相対 `3.6e-5`、ML $\theta$ `2.5e-6` / SE 相対 `8.7e-5`（`±inf` 2 件）、
+    WLE $\theta$ `2.8e-6` / SE 相対 `1.5e-4`。
+  - **V13c（`science_gpcm`、GPCM 0..3、90 パターン、61 点 $[-6,6]$）**: `loglik` 相対差 `2.8e-15`、
+    MAP $\theta$ `2.2e-6` / SE 相対 `4.1e-5`、ML $\theta$ `2.0e-6` / SE 相対 `8.8e-5`（`±inf` 2 件）、
+    WLE $\theta$ `2.5e-6` / SE 相対 `1.2e-4`。
+  - **V13d（`v11_3pl`、3PL、112 パターン、61 点 $[-6,6]$）**: `loglik` 相対差 `1.5e-15`、
+    MAP $\theta$ `3.8e-6` / SE 相対 `7.4e-5`、ML $\theta$ `5.8e-6` / SE 相対 `2.1e-4`（低得点発散を含む `±inf` 20 件）、
+    WLE $\theta$ `3.2e-6` / SE 相対 `1.9e-4`。
+  - **V13e（`twogroup_2pl`、2 群 2PL、ref/focal 計 104 パターン、81 点 $[-8,8]$）**:
+    `loglik` 相対差 `1.9e-15`、MAP $\theta$ `2.9e-6` / SE 相対 `5.1e-5`、ML $\theta$ `2.6e-6` / SE 相対 `8.7e-5`
+    （`±inf` 4 件）、WLE $\theta$ `3.3e-6` / SE 相対 `1.6e-4`。
+  - **V13f（`missing_2pl`、15% MCAR 欠測 2PL、88 パターン、61 点 $[-6,6]$）**:
+    `loglik` 相対差 `7.4e-16`、MAP $\theta$ `2.0e-6` / SE 相対 `4.6e-5`、ML $\theta$ `1.4e-6` / SE 相対 `1.1e-4`
+    （`±inf` 8 件）、WLE $\theta$ `2.0e-6` / SE 相対 `1.5e-4`。
+  Plausible values（`method="PV"`）は `tests/test_m4_scoring.py` で統計的に検証する（同一 `key` の再現性、
+  同一パターンの回答者間での独立性、標本平均・標準偏差がモンテカルロ誤差内で EAP と事後 SD に一致すること）。
+  あわせて平坦事前分布 MAP $\approx$ ML、全 7 項目モデルでの WLE 停留条件、極端パターン、多母集団、欠測、入力検証を
+  単体テストで確認している。
 - 照合テスト: `tests/test_mirt_m1.py`（V1, V2, V10）。参照値の生成: `validation/r/m1_reference.R`。
 
 ## 照合以外の検証
