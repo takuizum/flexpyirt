@@ -130,7 +130,7 @@ def test_scoring_json_and_errors() -> None:
     spec = Model.uniform(TwoPL(), items=df.columns)
     res = fit(spec, df, quadrature=Quadrature.gauss_hermite(31))
     for method in ("EAP", "MAP", "WLE"):
-        scores = res.score(df.iloc[:20], method=method)  # type: ignore[arg-type]
+        scores = res.score(df.iloc[:20], method=method)
         assert np.isfinite(scores.to_numpy()).all()
     assert not res.score(df.iloc[:20], method="ML")["theta"].isna().any()  # +/-inf allowed
     pv = res.score(df.iloc[:5], method="PV", key=jax.random.key(0), n_draws=3)
