@@ -269,6 +269,20 @@ fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
 print(fit_table.round(3))
 ```
 
+### Limited-information fit (M2)
+
+`m2(data)` computes the Maydeu-Olivares & Joe (2005, 2006) limited-information goodness-of-fit
+statistic on the item-score means and pairwise cross-products (mirt's default `M2(type = "M2*")`;
+identically $M_2$ for dichotomous items), together with RMSEA and its confidence interval
+(`ci=0.90` by default), SRMSR, and — for dichotomous models — TLI and CFI against the independence
+null model (polytomous models report `NaN` for `tli` and `cfi`; see [DESIGN §16.3](DESIGN.md)).
+It requires complete data and a single-group, unidimensional, `Normal` MLE fit (no priors).
+
+```python
+m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi
+print(m2_table.round(3))
+```
+
 ## 6. Standard errors
 
 - **`se="oakes"`** (default): the observed information from Oakes' (1999) identity. The second

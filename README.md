@@ -34,6 +34,7 @@ calibration and fixed item parameter calibration (FIPC).
 | Saving results | `FitResult.to_json()` / `FitResult.from_json()` (strict schema, no pickle) | — |
 | EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | V1–V5, V7–V9, V11, V14 |
 | Item fit | Orlando–Thissen S-X2 (`FitResult.item_fit()`) with mirt's cell collapsing, df, RMSEA and p-values | V15 |
+| Limited-information fit | Maydeu-Olivares & Joe M2 / M2* (`FitResult.m2()`) with df, p-value, RMSEA + CI, SRMSR and dichotomous TLI / CFI | V18 |
 | DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | V17 |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
