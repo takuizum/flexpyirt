@@ -178,7 +178,7 @@ class CoupledBlock:
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class CompiledProblem:
-    """Everything the Core needs (DESIGN.md §5.2).
+    r"""Everything the Core needs (DESIGN.md §5.2).
 
     Attributes
     ----------
@@ -190,6 +190,10 @@ class CompiledProblem:
         Group of each pattern.
     nodes : (Q, D) float
         Product quadrature nodes (``D in {1, 2, 3}``).
+    node_log_base : (Q,) float
+        Fixed log base weight of each node, added inside the normalization of the latent weights:
+        0 for equispaced grids, :math:`\\log w^{GH}_q + \tfrac12\\|\theta_q\\|^2` for
+        Gauss–Hermite (DESIGN.md §15.44).
     families : tuple[FamilyBlock, ...]
     latent : LatentBlock
     priors : PriorBlock
@@ -208,6 +212,7 @@ class CompiledProblem:
     families: tuple[FamilyBlock, ...]
     latent: LatentBlock
     priors: PriorBlock
+    node_log_base: Array
     n_groups: int = field(metadata={"static": True})
     coupled: tuple[CoupledBlock, ...] = ()
 
@@ -246,11 +251,18 @@ def _one_hots(prob: CompiledProblem) -> list[Array]:
     ]
 
 
-def _latent_log_weights_group(nodes: Array, params: Array, davidian_degree: int) -> Array:
-    """``(Q,)`` log quadrature weights for one parametric group (Normal / MVN / Davidian)."""
+def _latent_log_weights_group(
+    nodes: Array, base: Array, params: Array, davidian_degree: int
+) -> Array:
+    """``(Q,)`` log quadrature weights for one parametric group (Normal / MVN / Davidian).
+
+    ``base`` is the fixed node log base weight (§15.44). Davidian curves are restricted to
+    equispaced grids (``base`` is 0 there; ``compile_problem`` rejects Gauss–Hermite), so their
+    weights are the density normalized on the grid as validated in V19.
+    """
     if davidian_degree > 0:
         return davidian_log_weights(nodes, params)
-    return mvn_log_weights(nodes, params)
+    return _normal_logw(nodes, base, params)
 
 
 def _latent_log_weights(prob: CompiledProblem, eta: Array) -> Array:
@@ -259,7 +271,9 @@ def _latent_log_weights(prob: CompiledProblem, eta: Array) -> Array:
         return jnp.log(prob.latent.eh_weights)
     lat = _expand(eta, prob.latent.fixed_values, prob.latent.free_index)
     deg = prob.latent.davidian_degree
-    return jax.vmap(lambda p: _latent_log_weights_group(prob.nodes, p, deg))(lat)
+    return jax.vmap(lambda p: _latent_log_weights_group(prob.nodes, prob.node_log_base, p, deg))(
+        lat
+    )
 
 
 def _log_joint(prob: CompiledProblem, eta: Array) -> Array:
@@ -351,12 +365,23 @@ def _item_q(kernel: ItemKernel, nodes: Array, r: Array, params: Array) -> Array:
     return jnp.sum(r.T * kernel.log_prob(nodes, params))
 
 
-def _latent_q(nodes: Array, n: Array, params: Array, davidian_degree: int = 0) -> Array:
+def _normal_logw(nodes: Array, base: Array, params: Array) -> Array:
+    r"""Return normalized log latent weights :math:`\log\mathrm{softmax}_q(b_q+\log\phi_q)`.
+
+    ``base`` is the fixed node log base weight (0 on equispaced grids; Gauss–Hermite, §15.44).
+    """
+    out: Array = jax.nn.log_softmax(base + mvn_log_weights(nodes, params))
+    return out
+
+
+def _latent_q(
+    nodes: Array, base: Array, n: Array, params: Array, davidian_degree: int = 0
+) -> Array:
     r"""Latent part of Q (DESIGN.md §4.4, §16.4).
 
     .. math:: Q_g^{\mathrm{lat}}=\sum_q\bar n_{gq}\log w_{gq}(\text{params}_g)
     """
-    logw = _latent_log_weights_group(nodes, params, davidian_degree)
+    logw = _latent_log_weights_group(nodes, base, params, davidian_degree)
     if davidian_degree > 0:
         # Guard 0 * (-inf) when a polynomial root coincides with a zero-count node.
         return jnp.sum(jnp.where(n > 0.0, n * logw, 0.0))
@@ -382,7 +407,9 @@ def expected_complete_loglik(prob: CompiledProblem, eta: Array, counts: Expected
         return total + jnp.sum(counts.n * jnp.log(prob.latent.eh_weights))
     lat = _expand(eta, prob.latent.fixed_values, prob.latent.free_index)
     deg = prob.latent.davidian_degree
-    q_lat = jax.vmap(lambda n, p: _latent_q(prob.nodes, n, p, deg))(counts.n, lat)
+    q_lat = jax.vmap(lambda n, p: _latent_q(prob.nodes, prob.node_log_base, n, p, deg))(
+        counts.n, lat
+    )
     return total + jnp.sum(q_lat)
 
 
@@ -548,7 +575,14 @@ def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: i
     deg = lat_block.davidian_degree
 
     def solve_group(n: Array, x: Array, free: Array, lo: Array, hi: Array) -> Array:
-        return newton_ascent(lambda p: _latent_q(prob.nodes, n, p, deg), x, free, lo, hi, n_steps)
+        return newton_ascent(
+            lambda p: _latent_q(prob.nodes, prob.node_log_base, n, p, deg),
+            x,
+            free,
+            lo,
+            hi,
+            n_steps,
+        )
 
     lat_new = jax.vmap(solve_group)(
         counts.n, lat, lat_block.free_index >= 0, lat_block.lower, lat_block.upper
@@ -1094,7 +1128,9 @@ def _oakes_own_hessian(prob: CompiledProblem, eta: Array, counts: ExpectedCounts
         deg = lat_block.davidian_degree
 
         def group_hess(n: Array, x: Array) -> Array:
-            out: Array = jax.hessian(lambda p: _latent_q(prob.nodes, n, p, deg))(x)
+            out: Array = jax.hessian(
+                lambda p: _latent_q(prob.nodes, prob.node_log_base, n, p, deg)
+            )(x)
             return out
 
         h_lat = jax.vmap(group_hess)(counts.n, lat)  # (G, L, L)
@@ -1174,7 +1210,9 @@ def _oakes_cross_hessian(
         deg = lat_block.davidian_degree
 
         def latent_jac(p: Array) -> Array:
-            out: Array = jax.jacfwd(lambda x: _latent_log_weights_group(prob.nodes, x, deg))(p)
+            out: Array = jax.jacfwd(
+                lambda x: _latent_log_weights_group(prob.nodes, prob.node_log_base, x, deg)
+            )(p)
             return out
 
         d_logw = jax.vmap(latent_jac)(lat)  # (G, Q, L)

@@ -113,7 +113,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 - `fit(spec, data, *, group=None, table=None, item_names=None, method=None, quadrature=None, se="oakes")`。
   `se` は `"oakes" | "hessian" | None`。`group=` は M2 まで `NotImplementedError`。
 - `BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3)`（`squarem` は M3）。
-  `Quadrature.equispaced(n_points=61, lim=(-6, 6))`（Gauss–Hermite は未実装）。
+  `Quadrature.equispaced(n_points=61, lim=(-6, 6))`。Gauss–Hermite は `Quadrature.gauss_hermite(n)`（DESIGN §15.44）。
 - `Model.uniform`, `Model.from_items`, `.fix(item=..., a=..., d=...)`, `.with_latent(...)`, `.parameter_table(data)`。
 - `FitResult`: `items`, `latent`, `parameters`（表 + `estimate`, `se`）, `vcov`, `loglik`, `aic`, `bic`,
   `converged`, `n_iter`, `history`, `score(data, method="EAP")`。

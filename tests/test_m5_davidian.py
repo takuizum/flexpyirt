@@ -20,6 +20,7 @@ from flexpyirt import (
     Model,
     Normal,
     NormalPrior,
+    Quadrature,
     Rasch,
     TwoPL,
     fit,
@@ -122,6 +123,9 @@ def test_model_unsupported_combinations() -> None:
     )
     with pytest.raises(SpecificationError, match="Priors on latent"):
         fit(spec, df, table=tbl, se=None)
+
+    with pytest.raises(SpecificationError, match="equispaced"):
+        fit(spec, df, quadrature=Quadrature.gauss_hermite(21), se=None)
 
 
 # --------------------------------------------------------------------------------------------

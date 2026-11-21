@@ -657,9 +657,17 @@ def plausible_values(
             return w_fine / jnp.sum(w_fine)
 
         eh_fine = jax.vmap(_interp_w)(prob.latent.eh_weights)
-        prob_fine = replace(prob, nodes=fine_nodes, latent=replace(prob.latent, eh_weights=eh_fine))
+        prob_fine = replace(
+            prob,
+            nodes=fine_nodes,
+            node_log_base=jnp.zeros(grid.shape[0], dtype=grid.dtype),
+            latent=replace(prob.latent, eh_weights=eh_fine),
+        )
     else:
-        prob_fine = replace(prob, nodes=fine_nodes)
+        # The fine grid is equispaced: no Gauss-Hermite base weights (DESIGN.md §15.44).
+        prob_fine = replace(
+            prob, nodes=fine_nodes, node_log_base=jnp.zeros(grid.shape[0], dtype=grid.dtype)
+        )
     post = jax.nn.softmax(_log_joint(prob_fine, eta), axis=1)  # (P_pad, Q_pv)
 
     seg = 0.5 * (post[:, :-1] + post[:, 1:])  # trapezoidal interval mass, (P_pad, Q_pv - 1)
