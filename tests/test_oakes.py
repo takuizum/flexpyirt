@@ -245,6 +245,7 @@ def test_oakes_non_power_of_two_patterns_and_high_slopes() -> None:
         families=prob.families,
         latent=prob.latent,
         priors=prob.priors,
+        node_log_base=prob.node_log_base,
         n_groups=prob.n_groups,
     )
     eta = jnp.asarray(np.column_stack([a.ravel(), d.ravel()]).ravel())

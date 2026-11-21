@@ -606,6 +606,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 ```text
 Quadrature.equispaced(n_points=61, *, lim=(-6.0, 6.0))
 Quadrature.default(n_factors=1, *, lim=(-6.0, 6.0))
+Quadrature.gauss_hermite(n_points=21)
 ```
 
 An equally spaced quadrature grid (endpoints included), extended to a Cartesian product grid in
@@ -614,6 +615,11 @@ An equally spaced quadrature grid (endpoints included), extended to a Cartesian 
 factors on $[-6, 6]$. `nodes()` returns the 1-D axis of shape `(n_points,)`; `grid(n_factors)`
 returns the product grid of shape `(n_points**n_factors, n_factors)`. At least 3 points per
 dimension; limits must be finite with `lower < upper`.
+
+`Quadrature.gauss_hermite(n_points)` uses the Gauss–Hermite nodes $\sqrt2\,x_q$ (3–200 per
+dimension, product rule in 2–3 dimensions) for `Normal` latent distributions, reweighted for the
+estimated mean and covariance (DESIGN §15.44); `base_log_weights(n_factors)` returns the fixed
+per-node log weights (0 for equispaced grids). Not available with `EmpiricalHistogram`.
 
 ---
 
