@@ -1,7 +1,8 @@
 """Check that JAX runs in 64-bit floating point.
 
-The check is performed at the entry of :func:`flexpyirt.fit`, not at import time, so that importing
-flexpyirt never depends on or alters the user's global JAX configuration (CLAUDE.md, principle 4).
+The check is performed at the entry of :func:`flexpyirt.fit` and :meth:`flexpyirt.FitResult.score`,
+not at import time, so that importing flexpyirt never depends on or alters the user's global JAX
+configuration (CLAUDE.md, principle 4).
 """
 
 from __future__ import annotations

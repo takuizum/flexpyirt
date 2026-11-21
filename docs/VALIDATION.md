@@ -21,6 +21,8 @@ English | [日本語](VALIDATION.ja.md)
 | Latent-distribution parameters (mean, SD) | 1e-4 |
 | Standard errors | 1e-3 (relative) |
 | EAP | 1e-5 |
+| MAP / ML / WLE ($\theta$) | 1e-4 |
+| MAP / ML / WLE (SE) | 1e-3 (relative) |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -37,6 +39,7 @@ English | [日本語](VALIDATION.ja.md)
 | V10 | SE (Oakes / crossprod / sandwich) | `SE.type=` | M1–M3 |
 | V11 | 3PL and 4PL, single group (simulated) | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 | V12 | Display IRT thresholds and delta-method SEs (2PL, Rasch, GRM, GPCM, PCM, 2-group 2PL) | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
+| V13 | Ability scoring: MAP, ML, WLE (2PL, GRM, GPCM, 3PL, 2-group, missing) | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -199,6 +202,72 @@ English | [日本語](VALIDATION.ja.md)
 - **Comparing EAP**: so that differences in the estimates do not propagate into EAP, every
   parameter is fixed at mirt's estimates (`free=False` in the ParameterTable) and only the scoring
   is compared. Tolerance 1e-5.
+- **Ability scoring: MAP, ML, WLE (V13, M4)**: inspected `mirt:::fscores.internal`, `mirt:::MAP`,
+  `mirt:::ML`, `mirt:::WLE`, `mirt:::MAP.mirt`, and `mirt:::WLE.mirt` in mirt 1.46.1:
+  - **Bounds**: `theta_lim` sets the EAP quadrature grid (and the EAP starting values for
+    MAP/ML/WLE); MAP, ML, and WLE optimize over `[-max_theta, max_theta]` with default
+    `max_theta = 20`.
+  - **Objectives and SEs (default `expected.info = FALSE`)**: MAP maximizes
+    $\log L(\theta\mid y) + \log\phi(\theta;\mu_g,\sigma_g^2)$ with the continuous normal latent
+    prior, ML maximizes $\log L(\theta\mid y)$, and WLE maximizes
+    $\log L(\theta\mid y) + \tfrac{1}{2}\log I(\theta)$ (where $I(\theta)$ is the observed-item
+    Fisher test information, matching Warm's equation $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta)) = 0$
+    and Firth's Jeffreys prior). For all three, mirt's default SE is the inverse square root of the
+    `nlm()` Hessian of the negative objective at the optimum (observed curvature; passing
+    `expected.info = TRUE` without `response.pattern` switches to $I(\hat\theta)^{-1/2}$, which
+    differs on short tests and extreme patterns; note mirt 1.46.1 does not forward `expected.info`
+    through `response.pattern`).
+  - **Extreme patterns and mirt 1.46.1 quirks**: for ML, all-lowest / all-highest observed
+    categories return `-Inf` / `+Inf` with SE `NA`, and all-missing returns `NA` / `NA`. Two
+    edge-case behaviours were seen in mirt 1.46.1: (a) on diverging 3PL low-score tails where
+    $\log L(\theta)$ has its supremum at $-\infty$, when `nlm`'s finite-difference Hessian turns
+    $\le 0$ (`SE = NA`), `mirt:::ML` skips its `SEest > 30` check and returns a finite
+    `F1 ≈ -17` with `SE = NA` instead of `-Inf` (31 of 3,790 patterns in `v11_3pl`; confirmed in
+    `mirt:::ML`, whose NaN-SE branch skips the `SEest > 30` → `±Inf` conversion); (b) with missing
+    data, some all-extreme patterns that are missing the last item run into `max_theta = 20`
+    (`F1 ≈ 20`, `SE = NA`) instead of `±Inf` (observed; the cause was attributed to how
+    `fscores.internal` counts missing values, but the code could not be located in mirt's R source,
+    so treat the explanation as unconfirmed). Neither case is used in the V13 comparisons. flexpyirt
+    detects all of these cleanly and returns `±inf` with SE `NaN`. Separately, on bimodal 3PL
+    patterns where a strictly concave interior local mode $\hat\theta$ (with $\mathrm{SE} \le 30$)
+    has strictly smaller log-likelihood than the lower-asymptote plateau
+    $\lim_{\theta\to-\infty}\log L(\theta)$, `mirt:::ML`'s local `nlm()` search starting from EAP
+    stops at the interior local mode and returns finite `(F1, SE_F1)`, whereas flexpyirt compares
+    $f(\hat\theta)$ against $f(\pm 20)$ and intentionally returns the true global supremum
+    `(-inf, NaN)` (the actual maximum likelihood). Across all 3,790 unique patterns of `v11_3pl`,
+    this occurs on **25 patterns** (none appeared in the seeded V13d subsample; pattern index 1285
+    is verified directly in `tests/test_mirt_m4_scoring.py`). For all-missing rows, mirt strips
+    them to `NA` for all methods, whereas flexpyirt's Bayesian methods (EAP, MAP, PV) return the
+    prior and likelihood-only methods (ML, WLE) return `(NaN, NaN)`.
+
+  Six cases are validated in `tests/test_mirt_m4_scoring.py` with all parameters fixed at mirt's
+  estimates (reference generator `validation/r/m4_scoring_reference.R` →
+  `tests/reference/v13_fscores.json`, `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`;
+  tolerances `1e-4` abs for $\theta$, `1e-3` rel for SE, exact agreement on `-inf`/`+inf`/`NaN`;
+  remaining ~`1e-6`–`2e-4` differences reflect `nlm`'s finite-difference gradient/Hessian):
+  - **V13a (`lsat7_2pl`, 2PL, 32 patterns, 61 pts $[-6,6]$)**: `loglik` rel `5.1e-16`;
+    MAP $\theta$ `2.2e-6` / SE rel `1.8e-5`; ML $\theta$ `1.5e-6` / SE rel `4.1e-5` (2 `±inf`);
+    WLE $\theta$ `2.1e-6` / SE rel `5.1e-5`.
+  - **V13b (`science_grm`, GRM 0..3, 90 patterns, 61 pts $[-6,6]$)**: `loglik` rel `3.7e-15`;
+    MAP $\theta$ `3.0e-6` / SE rel `3.6e-5`; ML $\theta$ `2.5e-6` / SE rel `8.7e-5` (2 `±inf`);
+    WLE $\theta$ `2.8e-6` / SE rel `1.5e-4`.
+  - **V13c (`science_gpcm`, GPCM 0..3, 90 patterns, 61 pts $[-6,6]$)**: `loglik` rel `2.8e-15`;
+    MAP $\theta$ `2.2e-6` / SE rel `4.1e-5`; ML $\theta$ `2.0e-6` / SE rel `8.8e-5` (2 `±inf`);
+    WLE $\theta$ `2.5e-6` / SE rel `1.2e-4`.
+  - **V13d (`v11_3pl`, 3PL, 112 patterns, 61 pts $[-6,6]$)**: `loglik` rel `1.5e-15`;
+    MAP $\theta$ `3.8e-6` / SE rel `7.4e-5`; ML $\theta$ `5.8e-6` / SE rel `2.1e-4` (20 `±inf`,
+    including diverging low-score patterns); WLE $\theta$ `3.2e-6` / SE rel `1.9e-4`.
+  - **V13e (`twogroup_2pl`, 2-group 2PL, 104 patterns across ref/focal, 81 pts $[-8,8]$)**:
+    `loglik` rel `1.9e-15`; MAP $\theta$ `2.9e-6` / SE rel `5.1e-5`; ML $\theta$ `2.6e-6` / SE rel
+    `8.7e-5` (4 `±inf`); WLE $\theta$ `3.3e-6` / SE rel `1.6e-4`.
+  - **V13f (`missing_2pl`, 2PL with 15% MCAR missing, 88 patterns, 61 pts $[-6,6]$)**:
+    `loglik` rel `7.4e-16`; MAP $\theta$ `2.0e-6` / SE rel `4.6e-5`; ML $\theta$ `1.4e-6` / SE rel
+    `1.1e-4` (8 `±inf`); WLE $\theta$ `2.0e-6` / SE rel `1.5e-4`.
+  Plausible values (`method="PV"`) are validated statistically in `tests/test_m4_scoring.py`
+  (reproducibility given `key`, independence across respondents sharing a pattern, and sample
+  mean/SD matching EAP and posterior SD within Monte-Carlo error), alongside unit tests for
+  flat-prior MAP $\approx$ ML, WLE Warm-equation stationarity across all seven item models, extreme
+  patterns, multiple groups, missing data, and input validation.
 - Tests: `tests/test_mirt_m1.py` (V1, V2, V10). Reference generator: `validation/r/m1_reference.R`.
 
 ## Validation beyond agreement

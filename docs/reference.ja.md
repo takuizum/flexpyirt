@@ -96,20 +96,26 @@ Jupyter ノートブックでは `FitResult._repr_html_()` が同じ内容を外
 #### `FitResult.score`
 
 ```text
-score(data, *, method="EAP", group=None, item_names=None) -> DataFrame
+score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -> DataFrame
 ```
 
-回答者ごとの EAP（`theta`）と事後標準偏差（`se`）を返す（Bock & Mislevy, 1982）。事前分布は推定した潜在分布
-（多母集団では回答者の群の分布）、求積格子は推定と同じ。欠測は尤度から除く。
+推定済みモデルで回答者を採点する（[ユーザーガイド 7 節](guide.ja.md#7-スコアリング)）。すべての手法で欠測反応は
+尤度（WLE では $I(\theta)$ も）から除く。
 
-| 引数 | 説明 |
-|---|---|
-| `data` | 推定と同じ項目の反応データ（推定に使ったものでなくてよい） |
-| `method` | `"EAP"` のみ（MAP / ML / WLE / PV は M4 予定） |
-| `group` | 多母集団モデルでは必須。行ごとの群ラベル |
-| `item_names` | `data` が配列のときの列名 |
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `data` | DataFrame / polars DataFrame / 2 次元配列 | 推定と同じ項目の反応データ（推定に使ったものでなくてよい） |
+| `method` | `"EAP"` / `"MAP"` / `"ML"` / `"WLE"` / `"PV"` | 採点手法（既定 `"EAP"`）: EAP（推定時の求積格子上の事後平均・事後 SD; Bock & Mislevy, 1982）、MAP（連続正規事前分布 $N(\mu_g,\sigma_g^2)$ による事後最頻値と観測曲率 SE）、ML（最尤推定と観測情報量 SE。有限最大値のないパターンは $-\infty$/$+\infty$・SE NaN、全欠測は NaN）、WLE（Warm, 1989; Firth, 1993: $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta))=0$ を解く。極端パターンでも有限、全欠測は NaN、SE は WLE 目的関数の観測曲率）、PV（501 点格子上の区分線形逆 CDF 補間による回答者ごと独立な `n_draws` 個の事後標本; Mislevy, 1991） |
+| `group` | 配列（任意） | 多母集団モデルでは必須。行ごとの群ラベル |
+| `item_names` | list[str]（任意） | `data` が配列のときの列名 |
+| `key` | `jax.Array`（任意） | 明示的な JAX PRNG キー（`jax.random.key()` または `jax.random.PRNGKey()`）。`method="PV"` では必須、他の手法では `None` |
+| `n_draws` | int | `method="PV"` で回答者ごとに抽出する plausible values の個数（既定 `5`、1 以上の整数） |
 
-戻り値の index は `data` が DataFrame ならその index。
+**戻り値**: 回答者 1 行ずつの `DataFrame`（`data` が DataFrame ならその index を引き継ぐ）。`"EAP"`, `"MAP"`,
+`"ML"`, `"WLE"` では `theta`, `se` 列、`"PV"` では `pv1`…`pv{n_draws}` 列。
+
+**例外**: 不正な `method`、`"PV"` で `key` が未指定・不正、決定的手法に `key` を渡した場合、または `n_draws` が
+正の整数でない場合に `SpecificationError`。
 
 ---
 
