@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from jax import Array
 
-from flexpyirt import _core, _itemfit, _scoring
+from flexpyirt import _core, _itemfit, _m2, _scoring
 from flexpyirt._compile import (
     LATENT_ITEM,
     coerce_groups,
@@ -654,6 +654,112 @@ class FitResult:
             stat, df, rmsea, pval = _itemfit.s_x2(o, e, n_free_item, n_free_latent, y.shape[0])
             rows.append({"item": name, "s_x2": stat, "df": df, "rmsea": rmsea, "p": pval})
         return pd.DataFrame(rows)
+
+    def m2(
+        self,
+        data: Any,
+        *,
+        item_names: list[str] | None = None,
+        ci: float = 0.90,
+    ) -> pd.DataFrame:
+        r"""Compute the :math:`M_2` / :math:`M_2^*` limited-information fit statistic (§16.3).
+
+        Computes the Maydeu-Olivares & Joe (2005, 2006) limited-information test statistic on the
+        first- and second-order item-score moments — the :math:`J` item means :math:`E[y_j]` and
+        :math:`\binom{J}{2}` cross-products :math:`E[y_i y_j]` (:math:`i < j`), matching R mirt's
+        default ``M2(type = "M2*")`` (for dichotomous items this is identically :math:`M_2`):
+
+        .. math::
+            M_2 = N\,(\hat p_2 - \pi_2)^\top C_2\,(\hat p_2 - \pi_2),\qquad
+            C_2 = \Delta_c(\Delta_c^\top \Xi_2 \Delta_c)^{-1}\Delta_c^\top,\qquad
+            df = J + \binom{J}{2} - q,
+
+        where :math:`\Delta_c` is an orthonormal basis for the orthogonal complement of
+        :math:`\Delta_2 = \partial\pi_2 / \partial\eta^\top` (over all free item and latent
+        parameters, shared parameters once), :math:`\Xi_2` is the asymptotic covariance of
+        :math:`\sqrt{N}(\hat p_2 - \pi_2)` under local independence, and :math:`q` is
+        :attr:`n_params`. Also reports RMSEA with its noncentral-:math:`\chi^2` confidence
+        interval (MacCallum, Browne & Sugawara, 1996), SRMSR from item-score residual
+        correlations, and for dichotomous models TLI and CFI against the independence (null)
+        model (polytomous models return ``NaN`` for ``tli`` and ``cfi`` because the null
+        :math:`\Delta_2` is rank-deficient under item-score moments; see DESIGN.md §16.3).
+
+        Parameters
+        ----------
+        data : DataFrame or array-like
+            Complete responses on the fitted items (typically the fitting data).
+        item_names : list of str, optional
+            Column names when ``data`` is an array.
+        ci : float, default 0.90
+            Confidence level strictly in ``(0, 1)`` for the RMSEA confidence interval. The
+            output columns follow ``ci`` (e.g. ``rmsea_5`` and ``rmsea_95`` for ``ci=0.90``).
+
+        Returns
+        -------
+        DataFrame
+            One-row DataFrame with columns ``m2``, ``df``, ``p``, ``rmsea``, ``rmsea_<lo>``,
+            ``rmsea_<hi>``, ``srmsr``, ``tli``, ``cfi``. When ``df <= 0``, ``p``, RMSEA, its CI,
+            ``tli`` and ``cfi`` are ``NaN`` (and ``m2`` is ``NaN`` if :math:`\Delta_c` is empty).
+
+        Raises
+        ------
+        PrecisionError
+            If JAX is not configured for 64-bit floating point.
+        SpecificationError
+            For multidimensional, multiple-group, ``EmpiricalHistogram``, or MAP (with priors)
+            models, missing responses, invalid ``ci``, or fewer than 2 items or respondents.
+        """
+        check_x64()
+        model = self._model
+        if model.is_multidimensional or model.is_multigroup or model.is_eh:
+            raise SpecificationError(
+                "m2() supports single-group unidimensional models with a Normal latent "
+                "distribution only."
+            )
+        if self._has_priors:
+            raise SpecificationError(
+                "m2() requires an MLE fit without priors (MAP fits are not supported)."
+            )
+        if isinstance(ci, bool) or not isinstance(ci, (int, float)) or not (0.0 < float(ci) < 1.0):
+            raise SpecificationError(f"ci must be strictly between 0 and 1, got {ci!r}.")
+        ci_f = float(ci)
+        y = coerce_responses(data, model, item_names=item_names)
+        if (y < 0).any():
+            raise SpecificationError(
+                "m2() requires complete data; M2 is not defined with missing responses."
+            )
+        if y.shape[0] < 2:
+            raise SpecificationError("m2() requires at least 2 respondents.")
+        if y.shape[1] < 2:
+            raise SpecificationError("m2() requires at least 2 items.")
+
+        codes, _ = coerce_groups(None, model, y.shape[0], require_all=False)
+        compiled = compile_problem(model, y, codes, self.parameters, self._quadrature)
+        n_cat = [m.kernel.n_cat for _, m in model.items]
+        res = _m2.m2_statistic(
+            compiled.problem,
+            jnp.asarray(self._eta),
+            y,
+            n_params=self.n_params,
+            n_cat=n_cat,
+            level=ci_f,
+        )
+        lo_col, hi_col = _m2.ci_column_names(ci_f)
+        return pd.DataFrame(
+            [
+                {
+                    "m2": res.m2,
+                    "df": res.df,
+                    "p": res.p,
+                    "rmsea": res.rmsea,
+                    lo_col: res.rmsea_lower,
+                    hi_col: res.rmsea_upper,
+                    "srmsr": res.srmsr,
+                    "tli": res.tli,
+                    "cfi": res.cfi,
+                }
+            ]
+        )
 
     def dif(
         self,
