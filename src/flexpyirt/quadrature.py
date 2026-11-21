@@ -78,7 +78,7 @@ class Quadrature:
         ``EmpiricalHistogram``. Product rules are used in 2–3 dimensions.
         """
         x, _ = np.polynomial.hermite.hermgauss(n_points)
-        span = float(math.sqrt(2.0) * x.max())
+        span = math.sqrt(2.0) * float(np.max(np.abs(x)))
         return cls(n_points=n_points, lower=-span, upper=span, kind="gauss_hermite")
 
     @classmethod
