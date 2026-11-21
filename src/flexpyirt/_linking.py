@@ -305,7 +305,8 @@ def solve_linking(
     - If the :math:`2\times 2` Hessian is positive definite, takes the exact Newton step
       :math:`\delta = -H^{-1}g`; otherwise adds Levenberg–Marquardt damping
       :math:`(H + \lambda I)^{-1}g` (falling back to :math:`-g` if still not a finite descent
-      direction).
+      direction). The step's Euclidean norm is capped at ``_MAX_STEP = 1`` so that a poor start
+      cannot jump onto a flat plateau of the criterion (where curves no longer overlap).
     - Evaluates 40 step sizes :math:`2^{-k}` in parallel with ``vmap``, projecting any candidate
       with :math:`A \le 0` halfway to the boundary (:math:`A/2`), and takes the largest step that
       does not increase the criterion (monotone descent).
@@ -326,7 +327,12 @@ def solve_linking(
     symmetric : bool
         Static flag for the symmetric criterion.
     tol : float or Array, default 1e-10
-        Convergence tolerance on :math:`\|\nabla F(A, B)\|_\infty`.
+        Absolute convergence tolerance on :math:`\|\nabla F(A, B)\|_\infty`. It is not rescaled:
+        :math:`F` uses weights summing to 1 and grows with the number of common items and (for
+        Stocking–Lord) the squared score range, so the default is near float64 resolution for
+        typical tests; loosen it for very long anchor sets if the solver reports
+        non-convergence with a tiny gradient. Non-convergence (including a step that no longer
+        decreases :math:`F`) is reported as ``converged = False``.
     max_iter : int or Array, default 200
         Maximum number of Newton iterations.
 

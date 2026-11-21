@@ -587,7 +587,9 @@ def link(
     target_group : str, optional
         Group name when ``target`` is a multiple-group :class:`FitResult`.
     tol : float, default 1e-10
-        Convergence tolerance on :math:`\|\nabla F(A, B)\|_\infty`.
+        Absolute (not rescaled) convergence tolerance on :math:`\|\nabla F(A, B)\|_\infty`; the
+        criterion uses weights summing to 1 and grows with the number of common items, so the
+        default suits typical anchor sets and may need loosening for very long ones.
     max_iter : int, default 200
         Maximum number of Newton iterations.
 
