@@ -103,8 +103,22 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   厳密: $V_w(\hat\sigma^2)=\hat m$、閉形式: $\hat\sigma^2=\hat m$（$\hat m$ は期待度数の 2 次モーメント）。
   報告する `var` は格子で打ち切る前の正規分布のパラメタであり、格子上の分布の分散は $V_w(\hat\sigma^2)$ である。
   平均・分散が大きい群（M2 の焦点群など）では打ち切りの影響が平均にも及ぶので、格子幅の選択が結果に効く。
-- **Empirical Histogram (EH)**: $w_{gq}=\bar n_{gq}/N_g$。
-  識別のため参照群 EH は各反復で平均 0・分散 1 に標準化する（Woods, 2007）。標準化の方法は §12 未決事項 1。
+- **Empirical Histogram (EH)**（`EmpiricalHistogram(*, min_weight=1e-10)`；Woods, 2007；§15.34–§15.38）:
+  各群の潜在分布を固定求積格子 $\theta_1<\dots<\theta_Q$（既定は $[-6,6]$ の等間隔 61 点）上の離散重み
+  $w_{g1},\dots,w_{gQ}$ で表し、空節点でも $\log w_{gq}$ が常に有限になるよう設定可能な正の下限
+  $w_{gq}\ge\tau$（$\tau=\texttt{min\_weight}>0$、$\tau Q<1$）を課す。EH の M-step は制約付き完全データ目的関数
+  $\max_{w\in\Delta^{Q-1},\,w_q\ge\tau}\sum_q\bar n_{gq}\log w_q$ を厳密な KKT water-filling
+  $w_{gq}=\max(\tau,\,c_g^*\bar n_{gq})$ で解く（どの節点も下限に当たらないときは $\bar n_{gq}/N_g$ と厳密に一致）。
+  **決定（M3、§12-1 を解決）**: 参照群（$g=0$）を**毎 EM 反復で**平均 0・分散 1 に標準化する（平均は参照群の連結成分に
+  固定切片がないとき、分散は非ゼロの固定傾きがないとき。**例外**: 固定傾きと固定切片を持つ FIPC では標準化せず全群の EH 重みを
+  自由とし、傾き固定・切片自由の Rasch / PCM では平均のみ標準化する。固定切片があり非ゼロの固定傾きがない場合は、分散のみの制約が
+  重みについて線形でないため `IdentificationError`）。標準化は参照群の M-step の一部として行い、
+  $w_q\ge\tau$、$\sum_q w_q=1$、$\sum_q w_q\theta_q=0$、$\sum_q w_q\theta_q^2=1$ の制約下で $\max\sum_q\bar n_{0q}\log w_q$ を解く
+  （§15.34）。したがって EM は厳密に単調で、項目パラメタの変換は行わない。（最初の実装は $\theta$ をアフィン変換して項目パラメタを
+  逆変換し、全群の重みを CDF 補間で再格子化していた（mirt の `EHW` や Woods (2007) と同様の再格子化）。補間誤差によって反復間で
+  対数尤度が減少し SQUAREM が停滞したため、リリース前に置き換えた。）
+  多母集団モデルで EH を指定するときは
+  **全群が EH を使う**（`EmpiricalHistogram` と `Normal` の混在は `SpecificationError`）。
 - 将来: Davidian 曲線（Woods & Lin, 2009）、混合正規。いずれも `LatentDist` プロトコル（§6）に従えば Core に手を入れずに追加できる。
 
 ### 4.5 識別性ルール（Compile 層で検査）
@@ -113,6 +127,11 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - **FIPC**: 固定項目が尺度を決めるので、全群の平均・分散を自由にしてよい。固定項目が 0 なら参照群を固定。
   潜在分布を $N(0,1)$ に固定したまま固定項目以外を推定すると尺度がずれる（Kim, 2006）ので、
   FIPC では潜在分布（Normal の平均・分散、または EH の重み）を各 EM 反復で更新する方式（Kim の MWU-MEM に相当）を既定にする。
+- **Empirical Histogram (EH)**: 全群が `EmpiricalHistogram` を使うとき、参照群の位置（平均）は連結成分に固定切片があればそれで、
+  なければ §4.4 の平均 0 制約で識別する。尺度（分散）は連結成分に非ゼロの固定傾きがあればそれで、なければ分散 1 制約で
+  識別する（したがって FIPC は全 EH 重みを自由のまま残し、Rasch / PCM は平均のみ標準化し、傾き・切片とも自由なモデルは両方標準化する）。
+  焦点群の EH 重みは自由な位置と尺度を持つため、すべての焦点群はアンカー項目の傾き・切片（または固定項目）で識別済みの群と
+  連結していなければ `IdentificationError`（`Normal` と同じグラフ検査および単一位置アンカーの警告）。
 - **Rasch・PCM（決定, M1/M3）**: Rasch と PCM は $a_j=1$ 固定・$d_j$（$d_{jk}$）自由で、尺度は傾きで決まるので
   **潜在分布の分散を自由推定**し、平均は 0 に固定する（mirt の `itemtype="Rasch"` と同じ: 2 値データでは Rasch、
   多値データでは PCM になり、`a1` 固定、`MEAN_1` 固定、`COV_11` 自由）。潜在分布を明示しない単一群モデルでは、
@@ -292,7 +311,7 @@ class ItemKernel(Protocol):
 - 照合: R mirt の推定値・SE・対数尤度と許容誤差内で一致。
 
 ## 12. 未決事項
-1. **EH の識別の取り方**: (a) 毎反復で重みの平均・分散を 0/1 に合わせて節点をアフィン変換し項目パラメタを逆変換、(b) 参照群の EH を標準化した後で補間し直す、のどちらか。mirt の挙動を確認したうえで決める。
+1. ~~**EH の識別の取り方**~~ → **決定（2026-11-21）**: 参照群を毎反復で平均 0・分散 1 に標準化する（FIPC では行わない）。モーメント制約付きの EH M-step として実装（§4.4、§15.34）。
 2. 多母集団で群の数が多いとき（例: 学校 × 学年）の扱い。群ごとの潜在分布を vmap できる形にしておく。
 3. ~~欠測の設計~~ → MAR 前提の除外のみ（§14.8、2026-11-20）。
 4. ~~パッケージ名~~ → `flexpyirt` に決定（2026-11-20）。
@@ -527,6 +546,63 @@ class ItemKernel(Protocol):
     `Model.factors`・`Model.correlated_factors`・多次元の潜在分布の行を保存しないため、$D > 1$ のモデルでは
     `FitResult.to_json()` が `SpecificationError` を出す（`from_json()` で読み戻せないファイルを書かないため）。
     対応するには、因子構造を形式に加え（新しい `schema_version`）、往復保存のテストを足す。
+34. **経験ヒストグラム（`EmpiricalHistogram`）の仕様・KKT 下限・モーメント制約付き参照群 M-step（M3, §4.4, §4.5, §12-1 解決）**:
+    `EmpiricalHistogram(*, min_weight: float = 1e-10)` を `flexpyirt` から公開する不変 dataclass とし、生成時に
+    `0 < min_weight < 1`、コンパイル時に `min_weight * Q < 1` を検証する（`SpecificationError`）。
+    `Model.with_groups()` で `EmpiricalHistogram` と `Normal` を混在させると `SpecificationError` を送出する
+    （EH を使うときは全群が EH）。重みの初期値は求積格子上の標準正規密度をフロア付き単体へ射影したものとする。
+    EH の M-step では、標準化しない群（焦点群と FIPC 時の参照群）について
+    $\max_{w\in\Delta^{Q-1},\,w_q\ge\tau}\sum_q\bar n_{gq}\log w_q$（$\tau=\texttt{min\_weight}$）を KKT water-filling
+    $w_{gq}=\max(\tau,\,c_g^*\bar n_{gq})$ で厳密に解く（`jnp.sort` で $O(Q\log Q)$。どの節点も下限に当たらなければ
+    $\bar n_{gq}/N_g$ と厳密に一致）。標準化する参照群（連結成分に固定切片がなければ `standardize_mean`、非ゼロの固定傾きが
+    なければ `standardize_var`；FIPC では両方偽、Rasch / PCM では平均のみ。平均なしの分散のみは `IdentificationError`）では、
+    線形のモーメント制約 $\sum_q w_q\theta_q=0$ と（`standardize_var` のとき）$\sum_q w_q\theta_q^2=1$ を加える
+    （`eh_constrained_weights`）。$\phi_q=(1,\theta_q,\theta_q^2)$ と乗数 $\lambda$ について KKT 解は
+    $w_q=\max\{\tau,\,p_q/\lambda^\top\phi_q\}$（$p_q=\bar n_{0q}/N_0$）で、$\lambda$ は滑らかな凸の双対
+    $G(\lambda)=\sum_q[p_q\log w_q(\lambda)-(\lambda^\top\phi_q)w_q(\lambda)]+\lambda^\top c$ を
+    $\{\lambda^\top\phi_q>0\ \forall q\}$ 上で最小化する（Boyd & Vandenberghe, 2004, §5.2）。$\lambda=(1,0,0)$ から
+    減衰 Newton（未知数 $K\le 3$、`lax.while_loop`、定義域を出ないバックトラック）で、制約残差 $\nabla G$ が $10^{-13}$ 未満に
+    なるまで解く。これは識別された集合上で潜在 Q 関数を厳密に最大化するので、EM は厳密に単調で、参照群ヒストグラムは毎反復で
+    平均 0・分散 1 を満たし、項目パラメタは変換しない。すべての $p_q>0$（E-step の期待度数は常にそう）なら最小点は内部にある。
+    ある $p_q=0$ でその節点に質量が必要な場合は双対の下限が境界にあり Newton が途中で止まるので、最終的な参照群モーメントが
+    目標から $10^{-8}$ を超えてずれていれば `fit()` が `ConvergenceWarning` を出す。
+35. **EH のパラメタ数カウントと条件付き項目標準誤差（M3, §4.8）**:
+    EH の重みは `FitResult.n_params`（および `aic`/`bic`）にパラメタとして数える: 参照群は
+    $Q - 1 - \mathbf{1}[\text{standardize\_mean}] - \mathbf{1}[\text{standardize\_var}]$（平均・分散とも標準化なら
+    $Q-3$、Rasch / PCM は $Q-2$、FIPC は $Q-1$）、各焦点群は $Q-1$。標準誤差については、既定 61 点格子上の
+    $G(Q-1)$ 個の離散ヒストグラム重みすべてを含めた同時観測情報行列は数学的にランク落ちする（解析的な IRT 項目尤度が
+    $\mathbb R^Q$ 内の低次元部分空間しか張らず数値ランクが約 $20\ll 60$ となり、境界・フロア節点では曲率が 0 または負になる）。
+    そのため、`information_oakes` と `information_hessian` は**収束した EH 重み $\hat w$ を固定した条件での自由な項目パラメタの
+    条件付き観測（事後）情報行列**を計算する。これにより `vcov` の正定値性と `oakes == hessian` の厳密な恒等性（相対差
+    $<10^{-10}$）が保たれ、R `mirt` の `vcov(m)` の形状（`n_free_items × n_free_items`）および `SE.type = "Richardson"`
+    （`mirt:::BL.LL` が `EHPrior` を固定）の定義と一致する。EH モデルの `ParameterTable` は項目行のみを持つ
+    （EH 重みは `Model.parameter_table()` ではなく `fit()` に渡される `Quadrature` に依存するため、`__latent__` 行を持たない）。
+36. **EH に対する平方根重み尺度での SQUAREM（M3, §4.6）**:
+    `EmpiricalHistogram` で `BAEM(squarem=True)` を使う場合、SQUAREM は $z_{gq}=\sqrt{w_{gq}}$ として
+    $(\eta_{\text{items}},\,z)$ の結合ベクトル上で外挿し、候補は $w_{gq}\propto z_{gq}^2$（$z$ の符号によらず常に単体上）の後、
+    期待度数に使うのと同じ M-step 写像（KKT 下限。標準化する参照群では §15.34 のモーメント制約付き I 射影で、実行可能な入力は
+    そのまま返す）で戻す。射影がモーメント制約を $10^{-10}$ を超えて満たさない候補は NaN にし、単調性安全装置
+    （`log_posterior(cand) >= max(log_posterior(theta2), log_posterior(theta0))`、$\delta$ を最大 10 回半減し不適なら
+    $\theta_2$ へ退避）で棄却させる。平方根尺度では多項分布の Fisher 情報が等方的（$4I$）になる。最初に決めた中心化対数重み
+    （softmax）尺度では、尤度にほとんど影響しないほぼ空の節点がステップ長を支配する（$w\approx10^{-9}$ で $\log w$ が 1 単位
+    ずつ動く）。V6a と自由推定の 2PL の 2 例（21 点・61 点）で、softmax 尺度では安全装置が反復の 99% 超で作動したのに対し、
+    平方根尺度では 1% 未満で、21 点の例では 3.5 倍速く収束し、他の例でも同じ反復数でより高い対数尤度に達した。通常 EM・SQUAREM
+    ともに収束判定は $\max(\max_i|\Delta\eta_i|,\;\max_{g,q}|\Delta w_{gq}|)<\text{tol}$（自然尺度の項目変化と確率尺度の重み変化）を用いる。
+37. **EH のスコアリング（M3, §8）**:
+    `EmpiricalHistogram` モデルに対する `FitResult.score()` は、`"EAP"`（推定済み求積格子上で群ごとの推定 EH 重みを
+    事前分布とする事後平均・SD）、`"ML"`・`"WLE"`（尤度のみ、Normal と同一）、および `"PV"`（各群の EH 密度を `prob.nodes`
+    から 501 点の細格子へ線形補間・再正規化して台形則逆 CDF 抽出）に対応する。`method="MAP"` は 2 階微分可能な連続事前分布を
+    要するため EH モデルでは `SpecificationError` を送出する（なお R `mirt` 1.46.1 の `fscores(..., method="MAP")` は
+    `EHW` 重みを暗黙に無視して $N(0,1)$ を使う）。
+38. **EH の結果報告と JSON 入出力（M3, §2 ④, §15.26–§15.28）**:
+    EH モデルでは、`FitResult.latent` が群ごとの 4 次までの要約モーメント — 列
+    `("group", "mean", "var", "sd", "skewness", "kurtosis")`（`kurtosis` は Fisher の超過尖度 $\mu_4/\sigma^4 - 3$、
+    正規分布で `0`）— を返し、新しい属性 `FitResult.latent_weights` が列 `("group", "node", "weight")` の DataFrame
+    を返す（`Normal` モデルでは `None`）。モーメント表と重み表の双方を `FitResult.summary()` と `FitResult._repr_html_()`
+    に含める。`_json.py` の潜在分布レジストリに `"EmpiricalHistogram"`（`{"type": "EmpiricalHistogram", "min_weight": ...}`）
+    を登録し、EH 結果にはトップレベルキー `"latent_weights"`（形状 `(G, Q)`。読み込み時に有限・厳密に正・和が 1・`n_groups`
+    および `quadrature.n_points` との整合を検証；`Normal` モデルでは省略かつ存在すれば拒否し、既存の schema_version 1 の
+    ペイロードと完全互換）を保存する。`_n_eh_params` は読み込み時に `(model, parameters, quadrature)` から決定的に再計算する。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.

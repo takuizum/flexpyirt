@@ -11,7 +11,7 @@ import pandas as pd
 
 from flexpyirt.errors import SpecificationError
 from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, Rasch
-from flexpyirt.latent import Normal
+from flexpyirt.latent import EmpiricalHistogram, LatentSpec, Normal
 from flexpyirt.priors import PRIOR_TYPES, Prior
 from flexpyirt.quadrature import MAX_FACTORS
 
@@ -57,15 +57,15 @@ class Model:
 
     items: tuple[tuple[str, ItemModel], ...]
     fixed: tuple[tuple[str, str, float], ...] = ()
-    latent: Normal | None = None
-    groups: tuple[tuple[str, Normal], ...] | None = None
+    latent: LatentSpec | None = None
+    groups: tuple[tuple[str, LatentSpec], ...] | None = None
     equal: tuple[tuple[tuple[str, ...], tuple[str, ...] | None], ...] = ()
     priors: tuple[tuple[str, str, Prior], ...] = ()
     factors: tuple[tuple[str, tuple[str, ...]], ...] | None = None
     correlated_factors: bool = True
 
     def __post_init__(self) -> None:
-        """Validate item names."""
+        """Validate item names and group latent-distribution consistency."""
         if not self.items:
             raise SpecificationError("A model needs at least one item.")
         names = [name for name, _ in self.items]
@@ -74,6 +74,13 @@ class Model:
         dup = sorted({n for n in names if names.count(n) > 1})
         if dup:
             raise SpecificationError(f"Duplicated item names: {dup}.")
+        if self.groups is not None:
+            kinds = {type(dist) for _, dist in self.groups}
+            if EmpiricalHistogram in kinds and len(kinds) > 1:
+                raise SpecificationError(
+                    "Cannot mix EmpiricalHistogram and Normal across groups; when "
+                    "EmpiricalHistogram is specified, every group must use EmpiricalHistogram."
+                )
 
     # ---- constructors ------------------------------------------------------------------------
 
@@ -98,6 +105,11 @@ class Model:
     def is_multigroup(self) -> bool:
         """Whether groups were declared with :meth:`with_groups`."""
         return self.groups is not None
+
+    @property
+    def is_eh(self) -> bool:
+        """Whether this model uses an :class:`~flexpyirt.EmpiricalHistogram` latent distribution."""
+        return isinstance(self.resolved_groups()[0][1], EmpiricalHistogram)
 
     @property
     def is_multidimensional(self) -> bool:
@@ -126,7 +138,7 @@ class Model:
             return (0,)
         return tuple(idx for idx, (_, assigned) in enumerate(self.factors) if item in assigned)
 
-    def resolved_latent(self) -> Normal:
+    def resolved_latent(self) -> LatentSpec:
         """Return the single-group latent distribution, applying DESIGN.md §4.5's default rule."""
         if self.latent is not None:
             return self.latent
@@ -134,7 +146,7 @@ class Model:
             return Normal(free_var=True)
         return Normal.standard()
 
-    def resolved_groups(self) -> tuple[tuple[str, Normal], ...]:
+    def resolved_groups(self) -> tuple[tuple[str, LatentSpec], ...]:
         """Return ``(group, latent)`` pairs; a single-group model has one group named ``"all"``."""
         if self.groups is None:
             return ((SINGLE_GROUP, self.resolved_latent()),)
@@ -373,9 +385,9 @@ class Model:
                 )
         return candidate
 
-    def with_latent(self, dist: Normal) -> Model:
+    def with_latent(self, dist: LatentSpec) -> Model:
         """Return a single-group model with latent distribution ``dist``."""
-        if not isinstance(dist, Normal):
+        if not isinstance(dist, (Normal, EmpiricalHistogram)):
             raise SpecificationError(f"Unsupported latent distribution {dist!r}.")
         if self.groups is not None:
             raise SpecificationError("This model has groups; set latents with with_groups().")
@@ -386,10 +398,16 @@ class Model:
             )
         return replace(self, latent=dist)
 
-    def with_groups(self, **latents: Normal) -> Model:
+    def with_groups(self, **latents: LatentSpec) -> Model:
         """Return a multiple-group model; keyword order defines the groups, the first is reference.
 
-        Example: ``with_groups(ref=Normal.standard(), focal=Normal.free())``.
+        Every group must use ``Normal`` or every group must use ``EmpiricalHistogram`` (mixing
+        them across groups raises :class:`~flexpyirt.errors.SpecificationError`; DESIGN.md §4.4).
+
+        Examples
+        --------
+        ``with_groups(ref=Normal.standard(), focal=Normal.free())``
+        ``with_groups(ref=EmpiricalHistogram(), focal=EmpiricalHistogram())``
         """
         if self.is_multidimensional:
             raise SpecificationError(
@@ -398,8 +416,14 @@ class Model:
         if len(latents) < 2:
             raise SpecificationError("with_groups() needs at least two groups.")
         for name, dist in latents.items():
-            if not isinstance(dist, Normal):
+            if not isinstance(dist, (Normal, EmpiricalHistogram)):
                 raise SpecificationError(f"Unsupported latent distribution for group {name!r}.")
+        kinds = {type(dist) for dist in latents.values()}
+        if EmpiricalHistogram in kinds and len(kinds) > 1:
+            raise SpecificationError(
+                "Cannot mix EmpiricalHistogram and Normal across groups; when EmpiricalHistogram "
+                "is specified, every group must use EmpiricalHistogram."
+            )
         if self.latent is not None:
             raise SpecificationError("Use with_groups() instead of with_latent() for groups.")
         return replace(self, groups=tuple(latents.items()))

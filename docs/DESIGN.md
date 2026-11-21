@@ -124,9 +124,31 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   grid cuts it off; the variance of the distribution on the grid is $V_w(\hat\sigma^2)$. For groups
   with a large mean or variance (e.g. M2 focal groups) the cut-off also affects the mean, so the
   grid width matters.
-- **Empirical Histogram (EH)**: $w_{gq}=\bar n_{gq}/N_g$.
-  For identification, the reference group's EH is standardized to mean 0 and variance 1 at every
-  iteration (Woods, 2007). How to standardize is open question 1 in §12.
+- **Empirical Histogram (EH)** (`EmpiricalHistogram(*, min_weight=1e-10)`; Woods, 2007; §15.34–§15.38):
+  Each group's latent distribution is represented by discrete weights $w_{g1},\dots,w_{gQ}$ on the
+  fixed quadrature grid $\theta_1<\dots<\theta_Q$ (default 61 equispaced points on $[-6,6]$),
+  enforcing a configurable positive floor $w_{gq}\ge\tau$ ($\tau=\texttt{min\_weight}>0$,
+  $\tau Q<1$) so $\log w_{gq}$ is always finite. The EH M-step solves the exact constrained
+  complete-data problem $\max_{w\in\Delta^{Q-1},\,w_q\ge\tau}\sum_q\bar n_{gq}\log w_q$ by exact
+  KKT water-filling $w_{gq}=\max(\tau,\,c_g^*\bar n_{gq})$ (reducing identically to
+  $\bar n_{gq}/N_g$ whenever no node hits the floor).
+  **Decision (M3, resolves §12-1)**: the reference group ($g=0$) is standardized to mean 0 and
+  variance 1 at **every** EM iteration (mean iff no intercept is fixed in the reference group's
+  connected component; variance iff no nonzero slope is fixed in that component; **exception**:
+  under FIPC with fixed slopes and intercepts nothing is standardized and all groups' EH weights
+  are free; for Rasch/PCM with fixed slopes and free intercepts only the mean is standardized;
+  fixed intercepts without a fixed nonzero slope raise `IdentificationError`, because a
+  variance-only constraint is not linear in the weights). The standardization is part of the
+  reference group's M-step, which solves
+  $\max\sum_q\bar n_{0q}\log w_q$ subject to $w_q\ge\tau$, $\sum_q w_q=1$,
+  $\sum_q w_q\theta_q=0$ and $\sum_q w_q\theta_q^2=1$ (§15.34). EM therefore stays exactly
+  monotone and no item parameters are transformed. (The first implementation rescaled $\theta$
+  affinely, transformed the item parameters back and re-gridded every group's weights by CDF
+  interpolation, as mirt's `EHW` and Woods (2007) re-grid the histogram; the interpolation error
+  made the log-likelihood decrease between iterations and stalled SQUAREM, so it was replaced
+  before release.)
+  When EH is used in a multiple-group model, **every group uses
+  EH** (mixing `EmpiricalHistogram` and `Normal` raises `SpecificationError`).
 - Later: Davidian curves (Woods & Lin, 2009), normal mixtures. Both can be added without touching
   the Core by following the `LatentDist` protocol (§6).
 
@@ -140,6 +162,15 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   distribution held at $N(0,1)$ shifts the scale (Kim, 2006), so FIPC updates the latent
   distribution (Normal mean and variance, or EH weights) at every EM iteration by default
   (equivalent to Kim's MWU-MEM).
+- **Empirical Histogram (EH)**: when every group uses `EmpiricalHistogram`, the reference group's
+  location (mean) is identified by fixed intercepts if present in its connected component, and
+  otherwise by the mean-0 constraint of §4.4; its scale (variance) is identified by fixed
+  nonzero slopes if present in its connected component, and otherwise by the variance-1
+  constraint (so FIPC leaves all EH weights free, Rasch/PCM standardizes mean only, and
+  free-slope/intercept models standardize both mean and variance). Every focal group's EH weights
+  carry free location and scale and must be linked to an identified group (or have fixed items) via
+  anchor slopes and anchor intercepts, else `IdentificationError` (same graph check and single
+  location-anchor warning as `Normal`).
 - **Rasch and PCM (Decision, M1/M3)**: Rasch and PCM fix $a_j=1$ and free $d_j$ ($d_{jk}$); the
   slopes set the scale, so the **latent variance is estimated** and the mean is fixed at 0 (as
   mirt's `itemtype="Rasch"`, which fits the Rasch model on dichotomous data and the PCM on
@@ -363,9 +394,9 @@ data-independent shapes (§15.21).
 - Agreement: estimates, SEs and log-likelihood match R mirt within tolerance.
 
 ## 12. Open questions
-1. **Identification for EH**: either (a) at every iteration, affinely transform the nodes so the
-   weights have mean 0 and variance 1, and transform the item parameters back; or (b) standardize
-   the reference group's EH and re-interpolate. Decide after checking mirt's behaviour.
+1. ~~**Identification for EH**~~ → **Decision (2026-11-21)**: standardize the reference group to
+   mean 0 and variance 1 at every iteration (not under FIPC), implemented as a moment-constrained
+   EH M-step (§4.4, §15.34).
 2. Many groups (e.g. school × grade). Keep the per-group latent distributions `vmap`-able.
 3. ~~Missing-data design~~ → exclusion under MAR only (§14.8, 2026-11-20).
 4. ~~Package name~~ → `flexpyirt` (2026-11-20).
@@ -801,6 +832,89 @@ data-independent shapes (§15.21).
     rows, so `FitResult.to_json()` raises `SpecificationError` for models with $D > 1$ instead of
     writing a file that `from_json()` cannot read back. Supporting it means adding the factor
     structure to the schema (a new `schema_version`) and round-trip tests.
+34. **Empirical Histogram (`EmpiricalHistogram`) specification, KKT floor, and moment-constrained reference M-step (M3, §4.4, §4.5, resolves §12-1)**:
+    `EmpiricalHistogram(*, min_weight: float = 1e-10)` is a public frozen dataclass exported from
+    `flexpyirt`, validating `0 < min_weight < 1` at construction and `min_weight * Q < 1` at
+    compile time (`SpecificationError`). Mixing `EmpiricalHistogram` and `Normal` across groups in
+    `Model.with_groups()` raises `SpecificationError`: when EH is used, every group uses EH.
+    Weights initialize from the standard normal density on the quadrature grid projected onto the
+    floored simplex. In the EH M-step, every unstandardized group (focal groups, and the reference
+    group under FIPC) solves $\max_{w\in\Delta^{Q-1},\,w_q\ge\tau}\sum_q\bar n_{gq}\log w_q$
+    ($\tau=\texttt{min\_weight}$) exactly via KKT water-filling
+    $w_{gq}=\max(\tau,\,c_g^*\bar n_{gq})$ (computed in $O(Q\log Q)$ with `jnp.sort`; reduces
+    identically to $\bar n_{gq}/N_g$ when no node hits the floor). The standardized reference group
+    (`standardize_mean` iff no fixed intercept in its connected component; `standardize_var` iff no
+    fixed nonzero slope in it; neither under FIPC; mean only for Rasch/PCM; variance without mean
+    is rejected with `IdentificationError`) adds the linear moment constraints
+    $\sum_q w_q\theta_q=0$ and (if `standardize_var`) $\sum_q w_q\theta_q^2=1$
+    (`eh_constrained_weights`). With $\phi_q=(1,\theta_q,\theta_q^2)$ and multipliers $\lambda$,
+    the KKT solution is $w_q=\max\{\tau,\,p_q/\lambda^\top\phi_q\}$ ($p_q=\bar n_{0q}/N_0$), where
+    $\lambda$ minimizes the smooth convex dual
+    $G(\lambda)=\sum_q[p_q\log w_q(\lambda)-(\lambda^\top\phi_q)w_q(\lambda)]+\lambda^\top c$ on
+    $\{\lambda^\top\phi_q>0\ \forall q\}$ (Boyd & Vandenberghe, 2004, §5.2). It is solved by damped
+    Newton ($K\le 3$ unknowns, `lax.while_loop`, backtracking that never leaves the domain) from
+    $\lambda=(1,0,0)$, until the constraint residual $\nabla G$ is below $10^{-13}$. Because this
+    is the exact maximizer of the latent Q-function over the identified set, EM is exactly
+    monotone, the reference histogram has mean 0 and variance 1 after every iteration, and item
+    parameters are never transformed. The minimizer is interior whenever every $p_q>0$ (E-step
+    counts always are); if some $p_q=0$ and the optimum needs mass on those nodes, the dual
+    infimum lies on the boundary, Newton stops early, and `fit()` emits `ConvergenceWarning` when
+    the final reference moments miss their targets by more than $10^{-8}$.
+35. **EH parameter counts and conditional item standard errors (M3, §4.8)**:
+    EH weights are counted as parameters in `FitResult.n_params` (and hence `aic`/`bic`):
+    $Q - 1 - \mathbf{1}[\text{standardize\_mean}] - \mathbf{1}[\text{standardize\_var}]$ for the
+    reference group ($Q-3$ when both mean and variance are standardized, $Q-2$ for Rasch/PCM,
+    $Q-1$ under FIPC) plus $Q-1$ for every focal group. For standard errors, the full joint
+    observed information including all $G(Q-1)$ discrete histogram weights on the default 61-point
+    grid is mathematically rank-deficient (analytic IRT item likelihoods span a much smaller
+    subspace of $\mathbb R^Q$, giving numerical rank $\approx 20\ll 60$ and zero/negative
+    curvature at boundary/floored nodes). Therefore, `information_oakes` and `information_hessian`
+    compute the **conditional observed (posterior) information for the free item parameters holding
+    the converged EH weights $\hat w$ fixed**, keeping `vcov` strictly positive definite,
+    preserving the exact identity `oakes == hessian` (relative $<10^{-10}$), and matching R
+    `mirt`'s `vcov(m)` shape (`n_free_items × n_free_items`) and `SE.type = "Richardson"`
+    definition (which holds `EHPrior` fixed in `mirt:::BL.LL`). The `ParameterTable` contains item
+    rows only for EH models (no `__latent__` rows, because EH weights depend on `Quadrature`,
+    which is passed to `fit()`, not `Model.parameter_table()`).
+36. **SQUAREM on the square-root weight scale for EH (M3, §4.6)**:
+    When `BAEM(squarem=True)` is used with `EmpiricalHistogram`, SQUAREM extrapolates the joint
+    vector $(\eta_{\text{items}},\,z)$ with $z_{gq}=\sqrt{w_{gq}}$, and candidates map back by
+    $w_{gq}\propto z_{gq}^2$ (always on the simplex, whatever the sign of $z$) followed by the same
+    M-step map used for expected counts (KKT floor; for the standardized reference group the
+    moment-constrained I-projection of §15.34, which returns a feasible input unchanged). A
+    candidate whose projection misses the moment constraints by more than $10^{-10}$ is set to NaN,
+    so the monotonicity safeguard (`log_posterior(cand) >= max(log_posterior(theta2),
+    log_posterior(theta0))`, halving $\delta$ up to 10 times and falling back to $\theta_2$ if
+    needed) rejects it. The square-root scale makes the multinomial Fisher information isotropic
+    ($4I$). The centered log-weight (softmax) scale decided first lets near-empty nodes, which
+    barely affect the likelihood, dominate the step length ($\log w$ moves by whole units at
+    $w\approx10^{-9}$): on V6a and two free 2PL examples (21 and 61 nodes) the safeguard fired on
+    >99% of iterations, against <1% on the square-root scale, which also converged 3.5× faster
+    on the 21-node example and reached a higher log-likelihood in the same iteration budget on the
+    others. Both plain EM and SQUAREM measure convergence by
+    $\max(\max_i|\Delta\eta_i|,\;\max_{g,q}|\Delta w_{gq}|)<\text{tol}$ (probability-scale weight
+    changes alongside natural-scale item changes).
+37. **EH scoring (M3, §8)**:
+    `FitResult.score()` with `EmpiricalHistogram` supports `"EAP"` (posterior mean and SD on the
+    fitted quadrature grid using each group's estimated EH weights), `"ML"` and `"WLE"`
+    (likelihood-only, identical to Normal), and `"PV"` (piecewise-linear interpolation of each
+    group's EH density from `prob.nodes` onto the 501-node fine grid, renormalized, followed by
+    trapezoidal inverse-CDF sampling). `method="MAP"` raises `SpecificationError` for EH models
+    because MAP mode-finding and curvature SE require a twice-differentiable continuous latent
+    prior (note R `mirt` 1.46.1's `fscores(..., method="MAP")` silently ignores `EHW` weights and
+    falls back to $N(0,1)$).
+38. **EH reporting and JSON I/O (M3, §2 ④, §15.26–§15.28)**:
+    For EH models, `FitResult.latent` reports per-group summary moments up to the 4th — columns
+    `("group", "mean", "var", "sd", "skewness", "kurtosis")`, where `kurtosis` is Fisher's excess
+    kurtosis $\mu_4/\sigma^4 - 3$ (`0` for Normal) — and the new attribute
+    `FitResult.latent_weights` returns a DataFrame with columns `("group", "node", "weight")`
+    (`None` for `Normal` models). Both the moments table and the weights table are rendered in
+    `FitResult.summary()` and `FitResult._repr_html_()`. In `_json.py`, `"EmpiricalHistogram"` is
+    registered in the latent-distribution registry (`{"type": "EmpiricalHistogram", "min_weight": ...}`)
+    and EH results include a `"latent_weights"` field (shape `(G, Q)`, validated on load as finite,
+    strictly positive, summing to 1, and matching `n_groups` and `quadrature.n_points`; omitted and
+    forbidden for `Normal` models so existing schema-version-1 payloads remain unchanged). `_n_eh_params`
+    is recomputed deterministically from `(model, parameters, quadrature)` on load.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.

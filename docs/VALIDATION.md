@@ -32,7 +32,7 @@ English | [日本語](VALIDATION.ja.md)
 | V3 | GRM, single group (Science) | `mirt(Science, 1, "graded")` | M2 |
 | V4 | 2PL, two groups, partial anchors, focal group free | `multipleGroup(..., invariance=c(anchors, "free_means","free_var"))` | M2 |
 | V5 | FIPC (fixed items + latent distribution estimated) | `pars='values'` with `est=FALSE` | M2 |
-| V6 | EH (single group, two groups) | `dentype="EH"` | M3 |
+| V6 | EH under FIPC (single group, two groups) | `mirt(..., dentype = "EH", pars = <bank fixed>)` / `multipleGroup(...)` | M3 |
 | V7 | 3PL + priors (MAP) | equivalent of `PRIOR = (1-30, g, expbeta, ...)` in `mirt.model` | M3 |
 | V8 | GPCM and PCM (Science + simulated) | `mirt(..., "gpcm")` / `mirt(..., "Rasch")` (polytomous) | M3 |
 | V9 | Missing data (MAR) | data with NA | M2 |
@@ -80,6 +80,25 @@ English | [日本語](VALIDATION.ja.md)
   delta method, $SE_g = g(1-g)\,SE_{\mathrm{logit}(g)}$ (and likewise for $u$), while keeping the
   raw logit-scale values under `raw_logit`. At an interior ML solution the observed information
   transforms identically with the Jacobian.
+- **Empirical histogram (V6, M3)**: mirt's `dentype = "EH"` re-estimates the histogram every
+  cycle without standardizing it, so with all items free the scale is unidentified and EM drifts
+  (a free 2PL calibration did not converge in 50,000 cycles and its histogram variance drifted to
+  1.5). flexpyirt standardizes the reference group instead (DESIGN §15.34), which mirt does not
+  offer, so V6 uses FIPC, where fixed items set the scale and neither program standardizes:
+  V6a ($J=20$, items 1–10 fixed, $N=3000$, standardized $\chi^2_4$ trait) and V6b (two groups of
+  3000, the same bank fixed in both, items 11–20 equal across groups, focal trait
+  $0.5-1.2\,\chi^2_4$), 61 points on $[-6,6]$. On a fine grid the EH likelihood is nearly flat in
+  many histogram directions and its maximum is spiky, so EM creeps (mirt needed 69,683 and 62,632
+  cycles at `TOL = 1e-9`), and mirt's stopping rule ignores the histogram. Final weights are
+  therefore not compared node by node. At mirt's solution: our log-likelihood equals mirt's to
+  1.5e-15; one flexpyirt EM step moves items by 1e-9 (mirt's `TOL`) and the histogram by
+  4e-7 (mirt reports it one E-step behind); Hessian and Oakes SEs (histogram held fixed) match
+  mirt's Richardson SEs to 1.1e-7. A full flexpyirt fit (SQUAREM, `tol = 1e-6`) converges in
+  7,162 / 2,837 iterations, ends above mirt's log-likelihood (by 1.6e-3 / 7.3e-4), with items
+  within 5e-5 of mirt's. mirt 1.46.1's Oakes SEs for EH are 0.1–1.3% below its own Richardson
+  SEs (cause not confirmed), and its Richardson SEs fail for the two-group EH model, so V6b checks
+  Oakes == Hessian (4e-16). Tests: `tests/test_mirt_v6_eh.py`. Reference generator:
+  `validation/r/m3_eh_reference.R`.
 - **V11 simulation design and mirt `NR` starting-value trap (M3)**: unregularized ML for 3PL/4PL
   easily produces finite-sample boundary solutions ($g\to 0$ or $u\to 1$, with a singular
   information matrix) when items are too easy/hard or slopes are too low for the asymptote tails to

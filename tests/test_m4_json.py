@@ -10,7 +10,7 @@ import textwrap
 import warnings
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import jax
 import numpy as np
@@ -109,6 +109,11 @@ def _assert_fit_result_identical(
     pd.testing.assert_frame_equal(loaded.items, orig.items, check_exact=True)
     pd.testing.assert_frame_equal(loaded.latent, orig.latent, check_exact=True)
     pd.testing.assert_frame_equal(loaded.history, orig.history, check_exact=True)
+    if orig.latent_weights is None:
+        assert loaded.latent_weights is None
+    else:
+        assert loaded.latent_weights is not None
+        pd.testing.assert_frame_equal(loaded.latent_weights, orig.latent_weights, check_exact=True)
 
     # Text / HTML representations
     assert repr(loaded) == repr(orig)
@@ -116,8 +121,11 @@ def _assert_fit_result_identical(
     assert loaded.summary(digits=2) == orig.summary(digits=2)
     assert loaded._repr_html_() == orig._repr_html_()
 
-    # All five scoring methods
-    for method in ("EAP", "MAP", "ML", "WLE"):
+    # All supported scoring methods (MAP is Normal-only)
+    det_methods: tuple[Literal["EAP", "MAP", "ML", "WLE"], ...] = (
+        ("EAP", "ML", "WLE") if orig._model.is_eh else ("EAP", "MAP", "ML", "WLE")
+    )
+    for method in det_methods:
         s_orig = orig.score(score_data, method=method, group=group)
         s_load = loaded.score(score_data, method=method, group=group)
         assert list(s_load.columns) == ["theta", "se"]
@@ -544,7 +552,7 @@ def test_malformed_registry_types(sample_payload: dict[str, Any]) -> None:
 
     # Unknown latent distribution
     bad_lat = _clone(sample_payload)
-    bad_lat["model"]["latent"] = {"type": "EmpiricalHistogram"}
+    bad_lat["model"]["latent"] = {"type": "DavidianCurve"}
     with pytest.raises(SpecificationError, match="Unknown latent distribution type"):
         FitResult.from_json(json.dumps(bad_lat))
 

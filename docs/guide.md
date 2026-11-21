@@ -366,6 +366,32 @@ except IdentificationError as e:
     print("IdentificationError:", e)
 ```
 
+### Empirical histogram (EH)
+
+`EmpiricalHistogram()` replaces the normal distribution with free weights on the quadrature nodes
+(Woods, 2007), for skewed or multimodal latent distributions. The weights are re-estimated at every
+EM iteration and count as parameters (`n_params`, AIC, BIC).
+
+```python
+from flexpyirt import EmpiricalHistogram
+
+eh = fit(Model.uniform(TwoPL(), items=items).with_latent(EmpiricalHistogram()), df)
+print(eh.latent)  # group, mean, var, sd, skewness, kurtosis (excess)
+print(eh.latent_weights.head())  # group, node, weight
+```
+
+- **Identification**: unless fixed items set the scale (FIPC), the reference group's histogram is
+  constrained to mean 0 and variance 1 at every iteration (mean only for Rasch/PCM). Under FIPC
+  the histogram is free. With multiple groups every group uses EH, and focal groups are linked by
+  anchor items.
+- `min_weight` (default `1e-10`) is a floor on every node, so empty nodes keep finite log-weights.
+- Standard errors are for the item parameters with the histogram held at its estimate (as in
+  mirt).
+- Scoring: EAP, ML, WLE and PV use the histogram; MAP needs a continuous prior and raises
+  `SpecificationError`.
+- Many histogram weights are only weakly determined, so EM converges slowly at tight tolerances;
+  `BAEM(squarem=True)` helps.
+
 ## 9. Multiple groups
 
 Calibrate responses from several populations (grades, test years, language versions) together.

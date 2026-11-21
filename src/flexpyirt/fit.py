@@ -150,8 +150,12 @@ def fit(
 
     vcov = None
     se_values = np.full(eta.shape[0], np.nan)
+    eh_weights = np.asarray(out.eh_weights, dtype=np.float64) if spec.is_eh else None
+    problem_fin = _core._with_eh_weights(problem, out.eh_weights) if spec.is_eh else problem
+    if eh_weights is not None:
+        _check_eh_reference_moments(problem, eh_weights[0])
     if se is not None and eta.shape[0] > 0:
-        info = np.asarray(_information[se](problem, out.eta))
+        info = np.asarray(_information[se](problem_fin, out.eta))
         vcov = _invert_information(info)
         se_values = np.sqrt(np.clip(np.diag(vcov), 0.0, None))
 
@@ -192,6 +196,7 @@ def fit(
         _eta=eta,
         _quadrature=quadrature,
         _method=method,
+        _eh_weights=eh_weights,
     )
 
 
@@ -254,3 +259,28 @@ def _invert_information(info: np.ndarray) -> np.ndarray:
     inv_chol = np.linalg.inv(chol)
     vcov: np.ndarray = inv_chol.T @ inv_chol
     return vcov
+
+
+EH_MOMENT_TOL = 1e-8
+"""Tolerance on the standardized reference EH moments checked after fitting (DESIGN §15.34)."""
+
+
+def _check_eh_reference_moments(problem: _core.CompiledProblem, w_ref: np.ndarray) -> None:
+    """Warn if the reference EH histogram misses its mean-0 / variance-1 constraints."""
+    lat = problem.latent
+    if not (lat.standardize_mean or lat.standardize_var):
+        return
+    nodes = np.asarray(problem.nodes, dtype=np.float64).reshape(-1)
+    mean = float(np.sum(w_ref * nodes))
+    second = float(np.sum(w_ref * nodes**2))
+    bad = abs(float(np.sum(w_ref)) - 1.0) > EH_MOMENT_TOL or abs(mean) > EH_MOMENT_TOL
+    if lat.standardize_var:
+        bad = bad or abs(second - 1.0) > EH_MOMENT_TOL
+    if bad:
+        warnings.warn(
+            "The reference group's empirical histogram does not meet its identification "
+            f"constraints (sum={np.sum(w_ref):.10g}, mean={mean:.3g}, E[theta^2]={second:.10g}); "
+            "the moment-constrained M-step did not converge. Widen the quadrature range.",
+            ConvergenceWarning,
+            stacklevel=3,
+        )

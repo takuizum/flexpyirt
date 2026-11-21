@@ -17,12 +17,18 @@ import pandas as pd
 from jax import Array
 
 from flexpyirt import _core, _scoring
-from flexpyirt._compile import LATENT_ITEM, coerce_groups, coerce_responses, compile_problem
+from flexpyirt._compile import (
+    LATENT_ITEM,
+    coerce_groups,
+    coerce_responses,
+    compile_problem,
+    eh_param_count,
+)
 from flexpyirt._json import dump_fit_result, load_fit_result
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
 from flexpyirt.items import ItemKernel
-from flexpyirt.latent import latent_param_names
+from flexpyirt.latent import eh_moments, latent_param_names
 from flexpyirt.method import BAEM
 from flexpyirt.quadrature import Quadrature
 
@@ -257,6 +263,7 @@ class FitResult:
     _eta: np.ndarray = field(repr=False)
     _quadrature: Quadrature = field(repr=False)
     _method: BAEM = field(default_factory=BAEM, repr=False)
+    _eh_weights: np.ndarray | None = field(default=None, repr=False)
 
     # ---- summaries ---------------------------------------------------------------------------
 
@@ -268,8 +275,10 @@ class FitResult:
 
     @property
     def n_params(self) -> int:
-        """Number of free parameters."""
-        return int(self._eta.shape[0])
+        """Number of free parameters (including EH latent-weight parameters; DESIGN §4.8)."""
+        return int(self._eta.shape[0]) + eh_param_count(
+            self.parameters, self._model, self._quadrature
+        )
 
     def _aic_value(self) -> float:
         return -2.0 * self.loglik + 2.0 * self.n_params
@@ -358,7 +367,32 @@ class FitResult:
 
     @property
     def latent(self) -> pd.DataFrame:
-        """One row per group: latent means, variances, correlations (for D > 1) and their SEs."""
+        r"""Latent distribution summary per group.
+
+        For ``Normal`` models: latent means, variances, correlations (for D > 1) and their SEs.
+        For ``EmpiricalHistogram`` models: columns ``group``, ``mean``, ``var``, ``sd``,
+        ``skewness``, ``kurtosis`` (Fisher's excess kurtosis :math:`\mu_4/\sigma^4 - 3`, 0 for
+        a normal distribution; DESIGN.md §15.38). See :attr:`latent_weights` for the full
+        ``(group, node, weight)`` table.
+        """
+        if self._model.is_eh:
+            assert self._eh_weights is not None
+            nodes = self._quadrature.nodes()
+            groups = [g for g, _ in self._model.resolved_groups()]
+            rows = []
+            for idx, g_name in enumerate(groups):
+                mean, var, sd, skew, kurt = eh_moments(nodes, self._eh_weights[idx])
+                rows.append(
+                    {
+                        "group": g_name,
+                        "mean": mean,
+                        "var": var,
+                        "sd": sd,
+                        "skewness": skew,
+                        "kurtosis": kurt,
+                    }
+                )
+            return pd.DataFrame(rows)
         p = self.parameters[self.parameters["item"] == LATENT_ITEM]
         groups = list(dict.fromkeys(p["group"]))
         lat_cols = list(latent_param_names(self._model.n_factors))
@@ -367,6 +401,23 @@ class FitResult:
         out = pd.concat([est, se], axis=1).loc[groups]
         out.columns.name = None
         return out.reset_index()
+
+    @property
+    def latent_weights(self) -> pd.DataFrame | None:
+        """Per-group EH weights ``(group, node, weight)``, or ``None`` for ``Normal`` models."""
+        if not self._model.is_eh:
+            return None
+        assert self._eh_weights is not None
+        nodes = self._quadrature.nodes()
+        groups = [g for g, _ in self._model.resolved_groups()]
+        n_nodes = len(nodes)
+        return pd.DataFrame(
+            {
+                "group": np.repeat(groups, n_nodes),
+                "node": np.tile(nodes, len(groups)),
+                "weight": self._eh_weights.reshape(-1),
+            }
+        )
 
     # ---- scoring -----------------------------------------------------------------------------
 
@@ -448,6 +499,11 @@ class FitResult:
             raise SpecificationError(
                 f"Unsupported scoring method {method!r}; use one of {_SCORE_METHODS}."
             )
+        if method == "MAP" and self._model.is_eh:
+            raise SpecificationError(
+                "method='MAP' requires a continuous latent prior and is not supported with "
+                "EmpiricalHistogram; use method='EAP', 'ML', 'WLE', or 'PV'."
+            )
         if self._model.is_multidimensional and method != "EAP":
             raise SpecificationError(
                 f"Scoring method {method!r} is only implemented for unidimensional models; "
@@ -469,7 +525,9 @@ class FitResult:
 
         y = coerce_responses(data, self._model, item_names=item_names)
         codes, _ = coerce_groups(group, self._model, y.shape[0], require_all=False)
-        compiled = compile_problem(self._model, y, codes, self.parameters, self._quadrature)
+        compiled = compile_problem(
+            self._model, y, codes, self.parameters, self._quadrature, eh_weights=self._eh_weights
+        )
         eta = jnp.asarray(self._eta)
         n = compiled.n_patterns
         inverse = compiled.inverse
@@ -600,12 +658,33 @@ class FitResult:
         ]
         if self._has_priors:
             lines.append(_PRIORS_IC_NOTE)
+        latent_title = (
+            "Latent distribution (EmpiricalHistogram)"
+            if self._model.is_eh
+            else "Latent distribution"
+        )
         lines.extend(
             [
                 "",
-                "Latent distribution",
-                "-------------------",
+                latent_title,
+                "-" * len(latent_title),
                 latent_str,
+            ]
+        )
+        if self.latent_weights is not None:
+            weights_str = self.latent_weights.to_string(
+                index=False, float_format=_fmt, na_rep="NaN"
+            )
+            lines.extend(
+                [
+                    "",
+                    "Empirical histogram weights",
+                    "---------------------------",
+                    weights_str,
+                ]
+            )
+        lines.extend(
+            [
                 "",
                 "Item parameters",
                 "---------------",
@@ -646,7 +725,18 @@ class FitResult:
             if self._has_priors
             else ""
         )
+        latent_heading = (
+            "Latent distribution (EmpiricalHistogram)"
+            if self._model.is_eh
+            else "Latent distribution"
+        )
         latent_html = _df_to_html_table(self.latent, digits=digits)
+        weights_section = (
+            "<h4>Empirical histogram weights</h4>"
+            f"{_df_to_html_table(self.latent_weights, digits=digits)}"
+            if self.latent_weights is not None
+            else ""
+        )
         items_html = _df_to_html_table(self.items, digits=digits)
         return (
             f"{_HTML_STYLE}"
@@ -654,8 +744,9 @@ class FitResult:
             '<div class="flexpyirt-header">flexpyirt FitResult</div>'
             f'<table class="flexpyirt-meta"><tbody>{meta_html}</tbody></table>'
             f"{note_html}"
-            "<h4>Latent distribution</h4>"
+            f"<h4>{html.escape(latent_heading)}</h4>"
             f"{latent_html}"
+            f"{weights_section}"
             "<h4>Item parameters</h4>"
             f"{items_html}"
             "</div>"

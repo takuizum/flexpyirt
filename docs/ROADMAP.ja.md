@@ -23,7 +23,7 @@
 - **受け入れ基準**: V3, V4, V5, V9 が許容誤差内。識別不能な仕様で `IdentificationError`。
 
 ## M3 EH・MAP・3PL/4PL・GPCM・SQUAREM
-- EmpiricalHistogram（DESIGN §12-1 を決めてから）。
+- [x] EmpiricalHistogram（`EmpiricalHistogram`、モーメント制約付き M-step による参照群の標準化、平方根尺度の SQUAREM。V6 で照合済み）。
 - [x] 事前分布と MAP（`NormalPrior`, `LogNormal`, `Beta`, `Model.prior()`, `FitResult.log_posterior`、V7 で照合済み）。
 - [x] 3PL / 4PL（`ThreePL`, `FourPL`, `HeywoodWarning`、V11 で照合済み）。
 - [x] GPCM / PCM（`GPCM`, `PCM`、V8 で照合済み）。
