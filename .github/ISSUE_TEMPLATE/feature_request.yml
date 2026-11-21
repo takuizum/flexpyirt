@@ -1,0 +1,14 @@
+name: 機能の提案
+description: 新しいモデル・オプション・API の提案
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: やりたいこと
+    validations:
+      required: true
+  - type: textarea
+    id: reference
+    attributes:
+      label: 参照（論文・mirt の対応機能など）

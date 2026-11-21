@@ -1,0 +1,143 @@
+name: Release
+
+# Runs when a develop -> main PR is merged. The PR title `release(major|minor|patch): ...`
+# decides the bump from the latest vX.Y.Z tag; the first release is v0.0.1.
+# The version comes from git tags (hatch-vcs), so releasing = tagging main; nothing is committed.
+#
+# Security (CONTRIBUTING.md): only repository admins can update main (ruleset
+# "main-release-gate"), and the publish job runs in the "release" environment, which needs the
+# owner's approval and only deploys from main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Bump level (dry run only)
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      skip: ${{ steps.plan.outputs.skip }}
+      version: ${{ steps.plan.outputs.version }}
+      previous: ${{ steps.plan.outputs.previous }}
+      dry_run: ${{ steps.plan.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - name: Find the release PR and the next version
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          DISPATCH_BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            bump="$DISPATCH_BUMP"; dry_run=true
+          else
+            title=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
+              --jq '[.[] | select(.base.ref == "main" and .head.ref == "develop")][0].title // ""')
+            if [ -z "$title" ]; then
+              echo "No merged develop -> main PR for $SHA; nothing to release."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            bump=$(uv run --no-project python scripts/release_version.py parse-title "$title")
+            dry_run=false
+          fi
+          previous=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n 1)
+          version=$(uv run --no-project python scripts/release_version.py next --bump "$bump" --latest "$previous")
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "::error::Tag v$version already exists."
+            exit 1
+          fi
+          {
+            echo "skip=false"
+            echo "version=$version"
+            echo "previous=$previous"
+            echo "dry_run=$dry_run"
+          } >> "$GITHUB_OUTPUT"
+          echo "Next release: v$version (bump: $bump, previous: ${previous:-none}, dry run: $dry_run)"
+      - name: Dry-run build
+        if: steps.plan.outputs.dry_run == 'true'
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          uv build
+          ls dist
+
+  publish:
+    needs: plan
+    if: needs.plan.outputs.skip == 'false' && needs.plan.outputs.dry_run == 'false'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - name: Tag and build
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "v$VERSION"
+          uv build
+          ls dist
+          test -f "dist/flexpyirt-$VERSION-py3-none-any.whl"
+      - name: Push the tag and publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" dist/* --title "v$VERSION" --generate-notes --verify-tag
+      - name: Close issues fixed in this release
+        if: needs.plan.outputs.previous != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          PREVIOUS: ${{ needs.plan.outputs.previous }}
+        run: |
+          set -euo pipefail
+          prs=$(gh api "repos/$GITHUB_REPOSITORY/compare/$PREVIOUS...v$VERSION" --jq '.commits[].sha' \
+            | while read -r sha; do
+                gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" \
+                  --jq '.[] | select(.base.ref == "develop" and (.head.ref | startswith("fix/"))) | .number'
+              done | sort -u)
+          for pr in $prs; do
+            for issue in $(gh pr view "$pr" --json closingIssuesReferences --jq '.closingIssuesReferences[].number'); do
+              if [ "$(gh issue view "$issue" --json state --jq .state)" = "OPEN" ]; then
+                gh issue close "$issue" --comment "Released in v$VERSION (#$pr)."
+              fi
+            done
+          done
