@@ -52,7 +52,8 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   `free_id`s across items and item models; joint Newton per connected component; validated
   in V16).
 - Davidian-curve and normal-mixture latent distributions.
-- Differentiable linking (Haebara / Stocking–Lord and generalizations) on top of the library.
+- [x] Differentiable linking (`link()`, `LinkResult`: Haebara / Stocking–Lord, non-symmetric and
+  symmetric, Ogasawara delta-method SEs via autodiff, all unidimensional models; validated in V20).
 - [x] Item fit: S-X2 (`FitResult.item_fit()`, single-group unidimensional; validated in V15).
 - [x] DIF: multiple-group likelihood-ratio tests (`FitResult.dif()`, schemes `add` / `drop`,
   Holm / BH adjustment; validated in V17).

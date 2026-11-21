@@ -20,7 +20,8 @@ function, see the [API reference](reference.md).
 12. [Editing the ParameterTable](#12-editing-the-parametertable)
 13. [Choosing the quadrature grid](#13-choosing-the-quadrature-grid)
 14. [Confirmatory multidimensional models](#14-confirmatory-multidimensional-models)
-15. [Errors and warnings](#15-errors-and-warnings)
+15. [Scale linking](#15-scale-linking)
+16. [Errors and warnings](#16-errors-and-warnings)
 
 ## 1. Setup
 
@@ -670,7 +671,46 @@ print(res_mirt.score(mirt_df.iloc[:3], method="EAP").round(3))  # theta_F1, thet
   prior) return `theta_<factor>` and `se_<factor>` per declared factor. `ML`, `WLE`, `PV` and
   multiple-group multidimensional models are not yet implemented and raise `SpecificationError`.
 
-## 15. Errors and warnings
+## 15. Scale linking
+
+When two forms are calibrated separately on different samples and share common items,
+`flexpyirt.link(source, target)` estimates the linear transformation $\theta^* = A\theta + B$
+($A > 0$) that places the `source` (new) scale onto the `target` (base) scale using
+characteristic-curve methods (Stocking & Lord, 1983, default; or Haebara, 1980, via
+`method="haebara"`, plus symmetric versions via `symmetric=True`, Kim & Lee, 2006). Derivatives
+for Newton optimization and Ogasawara (2001) delta-method standard errors come from JAX automatic
+differentiation.
+
+```python
+from flexpyirt import link
+
+new_items = [*items[:6], "n01", "n02", "n03", "n04"]
+a_new = np.concatenate([a_true[:6], rng.lognormal(0.0, 0.3, 4)])
+d_new = np.concatenate([d_true[:6], rng.normal(0.0, 1.0, 4)])
+src_df = pd.DataFrame(simulate_2pl(a_new, d_new, rng.normal(0.5, 1.2, 800), rng), columns=new_items)
+src_res = fit(Model.uniform(TwoPL(), items=new_items), src_df, method=BAEM(squarem=True))
+
+linked_sl = link(src_res, res, method="stocking-lord")
+linked_hb = link(src_res, res, method="haebara", symmetric=True)
+print(linked_sl)
+print(
+    f"SL: A={linked_sl.A:.3f} (SE={linked_sl.A_se:.3f}), B={linked_sl.B:.3f} (SE={linked_sl.B_se:.3f})"
+)
+print(f"HB sym: A={linked_hb.A:.3f}, B={linked_hb.B:.3f}")
+print(linked_sl.items.head(4))
+print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
+```
+
+- All unidimensional item models (2PL, Rasch, 3PL, 4PL, GRM, GPCM, PCM) and mixed-format forms are
+  supported; common items must share the same kernel and category count on both sides.
+- Pass `items={source_name: target_name}` if common items have different names in the two forms,
+  `nodes=` / `weights=` to override the default quadrature grid (the fitted latent distribution),
+  and `source_group=` / `target_group=` when linking a group from a multiple-group fit.
+- `linked.items` transforms every source item onto the target scale (and works directly with
+  `Model.fix_from()`); `linked.transform_theta()` transforms scalars, arrays, Series, or scoring
+  DataFrames (including `se` and plausible values `pv1..`).
+
+## 16. Errors and warnings
 
 | Type | When |
 |---|---|
@@ -700,13 +740,18 @@ except SpecificationError as e:
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
+- Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
+- Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
+- Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
+- Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.

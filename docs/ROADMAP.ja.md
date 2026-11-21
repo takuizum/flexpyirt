@@ -42,7 +42,7 @@
 ## M5 以降（候補）
 - [x] 項目をまたぐ等値制約の M-step（`Model.equal_across_items()`、項目・項目モデルをまたぐ `free_id` の共有、連結成分ごとの同時 Newton。V16 で照合済み）。
 - Davidian 曲線・混合正規の潜在分布。
-- 微分可能なリンキング（Haebara / Stocking–Lord とその一般化）をライブラリの上に実装。
+- [x] 微分可能なリンキング（`link()`, `LinkResult`: Haebara / Stocking–Lord の非対称・対称版、自動微分による Ogasawara デルタ法 SE、全 1 次元モデル対応。V20 で照合済み）。
 - [x] 項目適合度: S-X2（`FitResult.item_fit()`、単一群 1 次元。V15 で照合済み）。
 - [x] DIF: 多群の尤度比検定（`FitResult.dif()`、`add` / `drop` の 2 方式、Holm / BH 補正。V17 で照合済み）。
 - M2（限定情報の適合度）。

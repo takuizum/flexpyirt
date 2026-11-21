@@ -44,6 +44,7 @@ English | [日本語](VALIDATION.ja.md)
 | V16 | Equality constraints across items (LSAT7 common slope; 2PL + graded with cross-model constraints; two groups with anchors and a common slope) | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V17 | DIF likelihood-ratio tests on the V4 data (`add` for `a`+`d` and for `d`; `drop` for `a`+`d` from the fully invariant model) | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
+| V20 | Scale linking: Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara SEs (2PL, GRM, GPCM, 3PL) | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -354,6 +355,34 @@ English | [日本語](VALIDATION.ja.md)
   Agreement (plain EM and SQUAREM): $X^2$ and the AIC/SABIC/HQ/BIC differences to $2.2\times10^{-11}$,
   `p` and `adj_p` to $3\times10^{-11}$. Tests: `tests/test_mirt_m5_dif.py`. Reference generator:
   `validation/r/m5_dif_reference.R`.
+- **Differentiable IRT scale linking (V20, M5)**: `mirt` does not implement characteristic-curve
+  linking, so `validation/r/m5_linking_reference.R` (→ `tests/reference/v20_linking.json`)
+  calibrates two separate forms with common items in `mirt` (`optimizer = "NR"`,
+  `accelerate = "none"`, `TOL = 1e-10`, $N(0, 1)$, 61 equispaced nodes on $[-6, 6]$,
+  `SE.type = "Oakes"`; target $\theta\sim N(0, 1)$, source $\theta\sim N(0.5, 1.2^2)$, true
+  $A = 1.2, B = 0.5$) and computes reference $(A, B)$, criterion values, and Ogasawara (2001)
+  delta-method SEs in base R directly from the formulas (Haebara, 1980; Stocking & Lord, 1983;
+  Kim & Lee, 2006) using `mirt::probtrace()` / `mirt::expected.item()` and `optim(BFGS)` + `nlm`
+  with central-FD Newton polish (`max |grad| <= 1.9e-11`). Four cases are checked across all four
+  variants (Stocking–Lord and Haebara, non-symmetric and symmetric) both on identical mirt item
+  estimates (separating linking error from calibration error) and end-to-end (fitting both forms
+  in flexpyirt and linking):
+  - **V20a (`v20a_2pl`, 2PL, $J=20$/form, 10 common, $N=2000$/group)**: direct `max |Δ(A, B)| = 9.7e-13`,
+    criterion rel `1.6e-13`; end-to-end `max |Δ(A, B)| = 1.9e-10`, criterion rel `2.6e-9`,
+    Ogasawara SE rel `2.2e-8`.
+  - **V20b (`v20b_grm`, GRM $K=4$, $J=16$/form, 8 common, $N=2000$/group)**: direct `max |Δ(A, B)| = 9.1e-13`,
+    criterion rel `1.0e-13`; end-to-end `max |Δ(A, B)| = 9.5e-10`, criterion rel `2.3e-9`,
+    Ogasawara SE rel `8.1e-9`.
+  - **V20c (`v20c_gpcm`, GPCM $K=4$, $J=16$/form, 8 common, $N=2000$/group)**: direct `max |Δ(A, B)| = 2.5e-12`,
+    criterion rel `9.5e-14`; end-to-end `max |Δ(A, B)| = 1.4e-9`, criterion rel `7.1e-10`,
+    Ogasawara SE rel `1.6e-8`.
+  - **V20d (`v20d_3pl`, 3PL, $J=16$/form, 8 common, $N=4000$/group, interior $g$)**: direct
+    `max |Δ(A, B)| = 3.6e-12`, criterion rel `1.2e-13`; end-to-end `max |Δ(A, B)| = 3.0e-10`,
+    criterion rel `5.2e-9`, Ogasawara SE rel `9.4e-8`.
+  Tests: `tests/test_mirt_m5_linking.py`. Unit tests (all 7 unidimensional models, ICC/threshold
+  invariance, exact identity & recovery, symmetric reversibility, custom grids, EH/multiple-group,
+  `transform_theta`, finite-difference gradient & Ogasawara SE checks vs finite differences and
+  parametric bootstrap): `tests/test_m5_linking.py`.
 
 ## Validation beyond agreement
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number

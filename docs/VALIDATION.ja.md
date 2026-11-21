@@ -39,6 +39,7 @@
 | V16 | 項目をまたぐ等値制約（LSAT7 の共通傾き、2PL + graded のモデル間制約、アンカーつき 2 群 + 共通傾き） | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V17 | V4 のデータでの尤度比検定による DIF（`a`+`d` と `d` の `add`、完全不変モデルからの `a`+`d` の `drop`） | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
+| V20 | 尺度リンキング: Haebara・Stocking–Lord（非対称・対称）と Ogasawara SE（2PL・GRM・GPCM・3PL） | 個別 `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R 実装 | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -295,6 +296,28 @@
   （`p.adjust = "holm"`）。mirt の `p` は `1 - pchisq(...)` なので非常に大きな $X^2$ では厳密に 0（flexpyirt は生存関数）。
   一致（通常の EM・SQUAREM とも）: $X^2$ と AIC/SABIC/HQ/BIC の差 $2.2\times10^{-11}$、`p`・`adj_p` $3\times10^{-11}$。
   テスト: `tests/test_mirt_m5_dif.py`。参照値生成: `validation/r/m5_dif_reference.R`。
+- **微分可能な IRT 尺度リンキング（V20、M5）**: `mirt` は特性曲線法リンキングを持たないため、
+  `validation/r/m5_linking_reference.R`（→ `tests/reference/v20_linking.json`）では共通項目を含む 2 つの
+  フォームをそれぞれ `mirt` で推定し（`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、$N(0, 1)$、
+  $[-6, 6]$ の等間隔 61 点、`SE.type = "Oakes"`。基準群 $\theta\sim N(0, 1)$、新群 $\theta\sim N(0.5, 1.2^2)$、
+  真値 $A = 1.2, B = 0.5$）、`mirt::probtrace()` / `mirt::expected.item()` と論文の定義式
+  （Haebara, 1980; Stocking & Lord, 1983; Kim & Lee, 2006）に基づく独立した素の R 実装（`optim(BFGS)` + `nlm`
+  と中心有限差分 Newton 仕上げ、`max |grad| <= 1.9e-11`）で参照値 $(A, B)$、目的関数値、および Ogasawara (2001) の
+  デルタ法 SE を算出した。4 ケース × 4 方式（Stocking–Lord・Haebara の非対称・対称）について、mirt の項目推定値を
+  そのまま入力した直接比較（推定誤差とリンキング誤差を分離）と、flexpyirt で両フォームを推定してリンキングする
+  一連の比較の双方を検証した:
+  - **V20a（`v20a_2pl`、2PL、各フォーム $J=20$、共通 10 項目、各群 $N=2000$）**: 直接比較 `max |Δ(A, B)| = 9.7e-13`、
+    目的関数相対 `1.6e-13`。一連の比較 `max |Δ(A, B)| = 1.9e-10`、目的関数相対 `2.6e-9`、Ogasawara SE 相対 `2.2e-8`。
+  - **V20b（`v20b_grm`、GRM $K=4$、各フォーム $J=16$、共通 8 項目、各群 $N=2000$）**: 直接比較 `max |Δ(A, B)| = 9.1e-13`、
+    目的関数相対 `1.0e-13`。一連の比較 `max |Δ(A, B)| = 9.5e-10`、目的関数相対 `2.3e-9`、Ogasawara SE 相対 `8.1e-9`。
+  - **V20c（`v20c_gpcm`、GPCM $K=4$、各フォーム $J=16$、共通 8 項目、各群 $N=2000$）**: 直接比較 `max |Δ(A, B)| = 2.5e-12`、
+    目的関数相対 `9.5e-14`。一連の比較 `max |Δ(A, B)| = 1.4e-9`、目的関数相対 `7.1e-10`、Ogasawara SE 相対 `1.6e-8`。
+  - **V20d（`v20d_3pl`、3PL、各フォーム $J=16$、共通 8 項目、各群 $N=4000$、内点 $g$）**: 直接比較
+    `max |Δ(A, B)| = 3.6e-12`、目的関数相対 `1.2e-13`。一連の比較 `max |Δ(A, B)| = 3.0e-10`、目的関数相対 `5.2e-9`、
+    Ogasawara SE 相対 `9.4e-8`。
+  照合テスト: `tests/test_mirt_m5_linking.py`。単体テスト（全 7 種の 1 次元モデル、ICC・閾値の不変性、恒等変換と厳密回復、
+  対称版の可逆性、独自格子、EH・多母集団、`transform_theta`、勾配の有限差分検証、Ogasawara SE の中心有限差分および
+  パラメトリックブートストラップ検証）: `tests/test_m5_linking.py`。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
