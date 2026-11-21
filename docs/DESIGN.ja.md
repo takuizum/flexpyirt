@@ -128,7 +128,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   解析的に標準化し、$\theta=\mu+\sigma(Z-\mu_Z)/\sigma_Z$ が任意の $\boldsymbol\phi$ で厳密に連続平均 $\mu$・分散 $\sigma^2$
   を持つようにする。求積重みは格子上で正規化した密度とし、潜在分布の M-step は
   $Q^{\text{lat}}=\sum_q \bar n_q\log w_q(\mu,\sigma^2,\boldsymbol\phi)$ を既存のマスク付き Newton（`_newton.py`）で最大化する。
-  これにより EM の厳密な単調性・SQUAREM の適用・Oakes の恒等式の厳密性を保つ。
+  これにより EM の単調性（非減少）・SQUAREM の適用・Oakes の恒等式の厳密性を保つ。
 - 将来: 混合正規。`LatentDist` プロトコル（§6）に従えば Core に手を入れずに追加できる。
 
 ### 4.5 識別性ルール（Compile 層で検査）
@@ -684,9 +684,19 @@ class ItemKernel(Protocol):
    $h_k(z;\boldsymbol\phi)=P_k(z;\boldsymbol\phi)^2\varphi(z)$ とする。単位ベクトル $\mathbf c(\boldsymbol\phi)\in S^k$ には
    余弦優先の球面座標 $c_0=\prod_{m=1}^k\cos\phi_m$、$c_j=\sin\phi_j\prod_{m=j+1}^k\cos\phi_m$（$j=1,\dots,k$）を採用する。
    `dcurver` の正弦優先座標（$c_0=\sin\phi_1$）は $N(0,1)$ を $\partial\mathbf c/\partial\phi_{2:k}=\mathbf 0$ となる極特異点
-   $\phi_1=\pi/2$ に置くため mirt 1.46.1 が $k=2$ で $N(0,1)$ に停留する問題があるが、本座標系は $N(0,1)$ を
-   ヤコビアンが単位行列 $\partial c_j/\partial\phi_m|_{\mathbf 0}=\delta_{jm}$ となる $\boldsymbol\phi=\mathbf 0$ に置き、かつ
-   $\phi_k=0$ で次数 $k-1$ を厳密に内包する。両座標系は $S^k$ 上の同一の密度族を張る。
+   $\phi_1=\pi/2$ に置く。本座標系は $N(0,1)$ をヤコビアンが単位行列 $\partial c_j/\partial\phi_m|_{\mathbf 0}=\delta_{jm}$
+   となる $\boldsymbol\phi=\mathbf 0$ に置き、かつ $\phi_k=0$ で次数 $k-1$ を厳密に内包する。両座標系はともに $S^k$ 全体を覆うため
+   同一の密度族を張る（$P_k^2$ を変えない $\mathbf c\mapsto-\mathbf c$ を除いて識別される）。ただし座標系だけでは $N(0,1)$ は
+   停留点でなくならない: 1 次の摂動 $\psi_1(z)\varphi(z)$ と $\psi_2(z)\varphi(z)$ は純粋な位置・尺度の変化であり、解析的標準化で
+   除去される（mirt の未標準化パラメタ化では自由な項目パラメタが吸収する）ため、$\boldsymbol\phi=\mathbf 0$ における
+   $\phi_1,\phi_2$ のスコアはどのデータでも恒等的に 0 になる（$k=1$ では $\phi=0$ が常に停留点）。mirt 1.46.1 が V19b
+   （$k=2$）で $N(0,1)$ に停滞するのはこの理由と $\phi_2$ の極特異点の組み合わせによる。flexpyirt は後述の摂動つき既定初期値で
+   これを脱する。
+   **$\boldsymbol\phi=\mathbf 0$ での情報行列の特異性**: このため Fisher 情報行列は $\boldsymbol\phi=\mathbf 0$ で
+   $(\phi_1,\phi_2)$ 方向に特異になる（$k=1$ では $\phi_1$ 方向）。真の潜在密度が正規に近いと $\hat{\boldsymbol\phi}$ は
+   不安定に定まり、尤度が複数の局所最大を持ちうるうえ、角度の SE（とそれに基づく Wald 検定）は信頼できず、`Normal` に対する
+   `DavidianCurve` の尤度比検定は通常の $\chi^2$ 参照分布に従わない（帰無仮説がモデルの 1 次の識別が失われる点にある）。
+   次数の比較は `Normal` との尤度比検定ではなく AIC/BIC で行う（Woods & Lin, 2009 と同様）。
    Hermite の 3 項漸化式より $Z\sim h_k(\cdot;\boldsymbol\phi)$ の連続モーメントは閉形式で
    $$\mu_Z(\boldsymbol\phi)=2\sum_{j=0}^{k-1}\sqrt{j+1}\,c_jc_{j+1},\qquad
      \sigma_Z^2(\boldsymbol\phi)=\sum_{j=0}^k(2j+1)c_j^2+2\sum_{j=0}^{k-2}\sqrt{(j+1)(j+2)}\,c_jc_{j+2}-\mu_Z(\boldsymbol\phi)^2>0$$
@@ -702,10 +712,14 @@ class ItemKernel(Protocol):
    （`Normal` と同じ平均・分散ルール、潜在パラメタへの事前分布は `SpecificationError`）に従う。解析的標準化により
    $\boldsymbol\phi=\mathbf 0$ で $\phi_1,\phi_2$ の 1 次微分が相殺するため、既定初期値には合計得点の経験的歪度の符号 `sign` に
    合わせた微小摂動（$k=1$ で `phi_1 = 0.1 * sign`、$k\ge 2$ で `phi_1 = -0.1 * sign, phi_2 = 0.1, phi_{3..k} = 0`）を与える。
+   これらの初期値では、標準化した初期密度の 3 次標準化モーメントが `sign` と同符号になる: 主要項は $k=1$ で
+   $\approx 4\phi_1^3$（$\phi_1=0.1$ で `+0.0039`）、$k\ge 2$ で $\approx -8.3\,\phi_1\phi_2$（$(\phi_1,\phi_2)=(-0.1,0.1)$ で
+   `+0.083`）であり、$\phi_2=0.1$ は初期値を $\boldsymbol\phi=\mathbf 0$ の停留点から外す（`tests/test_m5_davidian.py` で検査）。
    潜在分布の M-step は $Q^{\text{lat}}=\sum_q \bar n_q\log w_q$ を既存のマスク付き Newton（`_newton.py`）で最大化し、
-   EM の厳密な単調性・特別処理なしの SQUAREM・相対 $\sim 10^{-12}$ での Oakes == Hessian SE を保つ（対照的に mirt 1.46.1 は
+   EM の単調性（非減少）・特別処理なしの SQUAREM・相対 $\sim 10^{-12}$ での Oakes == Hessian SE を保つ（対照的に mirt 1.46.1 は
    期待度数に Woods の線形補間 `standardizeQuadrature` をかけてから未正規化の `ddc` を `nlminb` で最適化するため、EM 単調性が
-   崩れ、`SE = TRUE` と自由平均・分散が禁止され、対数尤度が真に低い非停留点に収束する。VALIDATION.ja.md V19 参照）。
+   崩れ、`SE = TRUE` と自由平均・分散が禁止される。V19a では mirt 自身の離散化尤度に対しても停留点でない点（`PHI_3` の
+   スコア $\approx 56.7$）で停止し、V19b では $N(0,1)$ の停留点に停滞する。いずれも対数尤度は真に低い。VALIDATION.ja.md V19 参照）。
    **スコアリング・出力・JSON**:
    `FitResult.latent` は `mean`・`var`・`phi_1..phi_k` とその SE を返し、`latent_weights` はパラメトリック分布のため `None`。
    `score()` は `"EAP"`（求積格子上）と `"PV"`（501 点細密格子上）で推定した Davidian 密度を用い、`"ML"` と `"WLE"` は尤度のみ、

@@ -160,7 +160,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   of $h_k$ so that $\theta=\mu+\sigma(Z-\mu_Z)/\sigma_Z$ has exact continuous mean $\mu$ and
   variance $\sigma^2$ for every $\boldsymbol\phi$. Quadrature weights are the density normalized on
   the grid, and the latent M-step maximizes $Q^{\text{lat}}=\sum_q \bar n_q\log w_q(\mu,\sigma^2,\boldsymbol\phi)$
-  with the existing masked Newton (`_newton.py`), keeping EM strictly monotone, SQUAREM
+  with the existing masked Newton (`_newton.py`), keeping EM monotone (non-decreasing), SQUAREM
   applicable, and Oakes' identity exact.
 - Later: normal mixtures. Can be added without touching the Core by following the `LatentDist`
   protocol (§6).
@@ -1031,11 +1031,27 @@ data-independent shapes (§15.21).
    $P_k(z;\boldsymbol\phi)=\sum_{j=0}^k c_j(\boldsymbol\phi)\psi_j(z)$, where the unit vector
    $\mathbf c(\boldsymbol\phi)\in S^k$ uses the cosine-first spherical chart
    $c_0=\prod_{m=1}^k\cos\phi_m$, $c_j=\sin\phi_j\prod_{m=j+1}^k\cos\phi_m$ ($j=1,\dots,k$).
-   Unlike `dcurver`'s sine-first chart ($c_0=\sin\phi_1$), which places $N(0,1)$ at a polar
-   singularity $\phi_1=\pi/2$ where $\partial\mathbf c/\partial\phi_{2:k}=\mathbf 0$ (trapping
-   mirt 1.46.1 at $N(0,1)$ on $k=2$), this chart places $N(0,1)$ at $\boldsymbol\phi=\mathbf 0$
-   with identity Jacobian $\partial c_j/\partial\phi_m|_{\mathbf 0}=\delta_{jm}$ and nests
-   degree $k-1$ at $\phi_k=0$. Both charts span the exact same family of densities on $S^k$.
+   `dcurver`'s sine-first chart ($c_0=\sin\phi_1$) places $N(0,1)$ at the polar singularity
+   $\phi_1=\pi/2$, where $\partial\mathbf c/\partial\phi_{2:k}=\mathbf 0$; this chart places
+   $N(0,1)$ at $\boldsymbol\phi=\mathbf 0$ with identity Jacobian
+   $\partial c_j/\partial\phi_m|_{\mathbf 0}=\delta_{jm}$ and nests degree $k-1$ at $\phi_k=0$.
+   Both charts cover all of $S^k$ and therefore span the exact same family of densities
+   (identified up to $\mathbf c\mapsto-\mathbf c$, which leaves $P_k^2$ unchanged). The chart alone
+   does **not** make $N(0,1)$ a non-stationary point: the first-order perturbations
+   $\psi_1(z)\varphi(z)$ and $\psi_2(z)\varphi(z)$ are pure location and scale changes, which
+   analytical standardization removes (and which free items absorb in mirt's unstandardized
+   parameterization), so the score in $\phi_1,\phi_2$ is identically zero at
+   $\boldsymbol\phi=\mathbf 0$ for every data set (for $k=1$, $\phi=0$ is always stationary).
+   mirt 1.46.1 stalls at $N(0,1)$ on V19b ($k=2$) for the same reason combined with the polar
+   singularity in $\phi_2$; flexpyirt escapes it through the perturbed default starts below.
+   **Singular information at $\boldsymbol\phi=\mathbf 0$**: consequently the Fisher information
+   is singular in the $(\phi_1,\phi_2)$ directions at $\boldsymbol\phi=\mathbf 0$ (in $\phi_1$
+   for $k=1$). When the true latent density is close to normal, $\hat{\boldsymbol\phi}$ is
+   poorly determined, the likelihood can have several local maxima, the angle SEs (and the
+   Wald tests built on them) are unreliable, and a likelihood-ratio test of `DavidianCurve`
+   against `Normal` does not have its usual $\chi^2$ reference distribution (the null lies
+   where the model is not first-order identified). Users should compare degrees with
+   AIC/BIC (as in Woods & Lin, 2009) rather than with LR tests against `Normal`.
    From the Hermite three-term recurrence, $Z\sim h_k(\cdot;\boldsymbol\phi)$ has closed-form
    continuous moments
    $$\mu_Z(\boldsymbol\phi)=2\sum_{j=0}^{k-1}\sqrt{j+1}\,c_jc_{j+1},\qquad
@@ -1056,13 +1072,20 @@ data-independent shapes (§15.21).
    analytical standardization cancels the first-order derivative in $\phi_1,\phi_2$ at
    $\boldsymbol\phi=\mathbf 0$, default starts apply a small skewness-aligned perturbation
    (`phi_1 = 0.1 * sign` for $k=1$; `phi_1 = -0.1 * sign, phi_2 = 0.1, phi_{3..k} = 0` for
-   $k\ge 2$, where `sign` comes from empirical total-score skewness). The latent M-step maximizes
+   $k\ge 2$, where `sign` comes from empirical total-score skewness). These starts give the
+   standardized start density a third standardized moment with the same sign as `sign`: to
+   leading order it is $\approx 4\phi_1^3$ for $k=1$ (`+0.0039` at $\phi_1=0.1$) and
+   $\approx -8.3\,\phi_1\phi_2$ for $k\ge 2$ (`+0.083` at $(\phi_1,\phi_2)=(-0.1,0.1)$), while
+   $\phi_2=0.1$ moves the start off the stationary point at $\boldsymbol\phi=\mathbf 0$ (checked
+   in `tests/test_m5_davidian.py`). The latent M-step maximizes
    $Q^{\text{lat}}=\sum_q \bar n_q\log w_q$ with the existing masked Newton (`_newton.py`),
-   keeping EM strictly monotone, SQUAREM working without special cases, and Oakes == Hessian SEs
+   keeping EM monotone (non-decreasing), SQUAREM working without special cases, and Oakes == Hessian SEs
    exact to $\sim 10^{-12}$ (by contrast, mirt 1.46.1 applies Woods' linear-interpolation
    `standardizeQuadrature` to expected counts before calling `nlminb` on unnormalized `ddc`,
-   which breaks EM monotonicity, disables `SE = TRUE`, forbids free mean/variance, and converges
-   to a non-stationary point with strictly lower log-likelihood; see VALIDATION.md V19).
+   which breaks EM monotonicity, disables `SE = TRUE`, and forbids free mean/variance; on V19a it
+   stops at a point that is non-stationary for mirt's own discretized likelihood (score
+   $\approx 56.7$ in `PHI_3`), and on V19b it stalls at the $N(0,1)$ stationary point; both
+   with strictly lower log-likelihood; see VALIDATION.md V19).
    **Scoring, reporting, and JSON**:
    `FitResult.latent` displays `mean`, `var`, `phi_1..phi_k` and their SEs; `latent_weights`
    stays `None` (parametric). `score()` uses the fitted Davidian density for `"EAP"` (on the

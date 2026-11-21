@@ -164,6 +164,18 @@ class DavidianCurve:
 
     Supported for single-group unidimensional models only.
 
+    Notes
+    -----
+    The Fisher information is singular at :math:`\boldsymbol\phi=\mathbf 0` in the
+    :math:`(\phi_1,\phi_2)` directions (in :math:`\phi_1` for ``degree=1``): their first-order
+    perturbations of :math:`\varphi` are pure location / scale changes, which the
+    standardization removes, so the score in :math:`\phi_1,\phi_2` is zero there for every data
+    set. When the latent density is close to normal, the angles are poorly determined, the
+    likelihood can have several local maxima, the angle standard errors are unreliable, and a
+    likelihood-ratio test of ``DavidianCurve`` against :class:`Normal` has no standard
+    :math:`\chi^2` reference distribution. Compare degrees with AIC/BIC instead (Woods & Lin,
+    2009; DESIGN.md §16.4).
+
     Parameters
     ----------
     degree : int

@@ -365,7 +365,15 @@ def _order_grm_intercepts(
 
 
 def _davidian_phi_starts(degree: int, y: np.ndarray) -> list[float]:
-    """Return small skewness-aligned starting angles for ``DavidianCurve`` (DESIGN.md §16.4)."""
+    """Return small skewness-aligned starting angles for ``DavidianCurve`` (DESIGN.md §16.4).
+
+    ``phi = 0`` is a stationary point of the standardized likelihood (the scores in ``phi_1`` and
+    ``phi_2`` vanish there), so the start is moved off it. The sign is chosen so that the
+    standardized start density has a third standardized moment with the same sign as the
+    total-score skewness: to leading order ``+4 phi_1**3`` for ``degree == 1`` (``+0.0039`` at
+    ``phi_1 = 0.1``) and ``-8.3 phi_1 phi_2`` for ``degree >= 2`` (``+0.083`` at
+    ``(phi_1, phi_2) = (-0.1, 0.1)``).
+    """
     obs = y >= 0
     has_obs = obs.any(axis=1)
     sign = 1.0
