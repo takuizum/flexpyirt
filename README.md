@@ -24,6 +24,7 @@ calibration and fixed item parameter calibration (FIPC).
 | Item models | 2PL, Rasch (latent variance estimated), 3PL, 4PL, GRM (graded response model), GPCM, PCM (latent variance estimated) | V1, V2, V3, V8, V11 |
 | Priors and MAP | `NormalPrior`, `LogNormal`, `Beta` on item parameters (`Model.prior()`), natural scale, `FitResult.log_posterior` | V7 |
 | Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | V4 |
+| Equality across items | Common parameters across items and item models (`Model.equal_across_items()`, e.g. one common slope), combined with across-group equalities | V16 |
 | FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | V5 |
 | Missing data | Responses missing at random (MAR) | V9 |
 | Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior, plus delta-method SEs for display IRT thresholds (`b_se` / `bk_se`) | V7, V10, V12, V14 |

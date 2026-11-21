@@ -41,6 +41,7 @@ English | [日本語](VALIDATION.ja.md)
 | V12 | Display IRT thresholds and delta-method SEs (2PL, Rasch, GRM, GPCM, PCM, 2-group 2PL) | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | Ability scoring: MAP, ML, WLE (2PL, GRM, GPCM, 3PL, 2-group, missing) | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
 | V15 | S-X2 item fit (GRM, GPCM, PCM with free variance, 3PL, FIPC 2PL; `mincell` 1 and 3) | `itemfit(m, fit_stats = "S_X2")` | M5 |
+| V16 | Equality constraints across items (LSAT7 common slope; 2PL + graded with cross-model constraints; two groups with anchors and a common slope) | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 
 ## mirt settings and known differences (found in M1)
@@ -339,6 +340,17 @@ English | [日本語](VALIDATION.ja.md)
   Oakes == Hessian == reference Oakes, identification & specification errors):
   `tests/test_m4_mirt.py`.
 - Tests: `tests/test_mirt_m1.py` (V1, V2, V10). Reference generator: `validation/r/m1_reference.R`.
+- **Equality constraints across items (V16, M5)**: mirt's `CONSTRAIN` with `optimizer = "NR"`,
+  `TOL = 1e-10`. V16a: LSAT7 2PL with one common slope ($N(0,1)$, 61 points on $[-6,6]$). V16b:
+  simulated $N=2500$, items 1–6 2PL and 7–10 graded with 3 categories, with a slope shared by
+  2PL and graded items (1, 2, 7), an intercept shared by items 3 and 4, a slope shared by 8–10 and
+  `d1` shared by 9 and 10. V16c: two groups of 1500, anchors q01–q05 equal across groups, the
+  slopes of q06–q10 one common slope within each group, focal mean and variance free (81 points on
+  $[-8,8]$). All agree with mirt (plain EM and SQUAREM): parameters to $2.1\times10^{-8}$,
+  log-likelihood to $4\times10^{-11}$, Oakes SEs to $1.3\times10^{-8}$ (relative), Hessian vs
+  mirt Richardson SEs to $2.9\times10^{-8}$, flexpyirt Oakes vs Hessian to $5\times10^{-15}$, and
+  the number of free parameters equals mirt's `nest`. Tests: `tests/test_mirt_m5_equal_items.py`.
+  Reference generator: `validation/r/m5_equal_items_reference.R`.
 
 ## Validation beyond agreement
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number

@@ -558,9 +558,28 @@ print(res_edit.items.set_index("item").loc["q05", ["a", "d"]])
 ```
 
 - Rows cannot be added, removed or renamed (`SpecificationError`).
-- Sharing a `free_id` is limited to making **the same parameter of the same item equal across
-  groups**. Equality across different items (for example one common slope) is not supported yet
-  (planned for M5).
+- Rows sharing a `free_id` may belong to different groups and to **different items** (also of
+  different item models, e.g. a slope shared by 2PL and GRM items); within one item a `free_id`
+  maps to one parameter, and the shared rows must agree on bounds and prior.
+
+### Equality constraints across items
+
+`Model.equal_across_items(items=..., params=[...])` makes each listed parameter one common
+parameter for the selected items (within each group, like mirt's `CONSTRAIN`). It combines with
+`equal_across_groups`, and is the same as giving those rows one `free_id` in the table.
+
+```python
+# One common slope for every item (a "1PL" with N(0, 1)); intercepts stay item-specific.
+common_spec = Model.uniform(TwoPL(), items=items).equal_across_items(items=None, params=["a"])
+res_common = fit(common_spec, df, se="oakes")
+print(res_common.items[["item", "a", "a_se", "d"]].head(3))
+print(res_common.n_params)  # 1 slope + one intercept per item
+```
+
+- Items connected by such constraints are solved jointly in the M-step; SEs, SQUAREM, priors
+  (counted once per shared parameter), JSON and the other features work as usual.
+- A common free slope does not identify a free latent variance (`IdentificationError`), just as
+  separate free slopes do not.
 
 ## 13. Choosing the quadrature grid
 

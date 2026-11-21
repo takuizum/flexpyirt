@@ -151,7 +151,7 @@ to_json(path=None, *, indent=2) -> str
 
 推定結果を厳格な RFC 8259 JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定されたときは
 UTF-8 ファイルにも書き出す。`pickle` を使わないバージョン付き JSON 形式で、最上位に
-`"format": "flexpyirt.FitResult"`、`"schema_version": 2`（version 1 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
+`"format": "flexpyirt.FitResult"`、`"schema_version": 3`（version 1・2 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
 float64 値は `repr` 厳密な JSON 数値として、非有限値（`NaN`, `+inf`, `-inf`）は浮動小数点型フィールドに
 `"NaN"`, `"Infinity"`, `"-Infinity"` として明示的に符号化するため、すべての属性がビット単位で正確に往復する。
 
@@ -272,6 +272,17 @@ model.equal_across_groups(*, items, params=None) -> Model
 `items` のパラメタを群間で等しくする（アンカー項目）。`params` を省略すると全パラメタ、
 `params=["a"]` のように指定するとそのパラメタだけ。`items` は名前のリストか `str -> bool` の関数、
 `None` なら全項目。何度でも重ねて呼べる。
+
+#### `Model.equal_across_items`
+
+```text
+model.equal_across_items(*, items, params) -> Model
+```
+
+`params`（例: `["a"]`, `["a1"]`, `["d"]`, `["d1", "d2"]`）の各パラメタを、選んだ `items`（2 項目以上）で共通の
+1 つのパラメタにする（mirt の `CONSTRAIN` と同じく群ごと）。`equal_across_groups` と組み合わせると群間でも共有され、
+重なる等値制約はまとめられる。固定パラメタには影響しない。共有パラメタの既定の初期値は各項目の初期値の平均。
+編集した表で該当行に同じ `free_id` を与えるのと同じ。
 
 #### `Model.prior`
 

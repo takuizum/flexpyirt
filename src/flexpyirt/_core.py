@@ -27,6 +27,8 @@ from flexpyirt.priors import PRIOR_NONE, eval_log_prior
 
 __all__ = [
     "CompiledProblem",
+    "CoupledBlock",
+    "CoupledMember",
     "EMResult",
     "FamilyBlock",
     "LatentBlock",
@@ -130,6 +132,47 @@ class PriorBlock:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
+class CoupledMember:
+    """Items of one family inside a :class:`CoupledBlock` (DESIGN.md §16.1).
+
+    Attributes
+    ----------
+    positions : (n,) int
+        Positions of the member items within the family (indices into ``J_f``).
+    local_index : (G, n, P_f) int
+        Slot of each parameter in the component's vector ``u_c``, or ``-1`` if fixed.
+    family : int
+        Static index of the family in ``CompiledProblem.families``.
+    """
+
+    positions: Array
+    local_index: Array
+    family: int = field(metadata={"static": True})
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class CoupledBlock:
+    """Items connected by equality constraints across items, solved jointly (DESIGN.md §16.1).
+
+    Attributes
+    ----------
+    slot_free_index : (S,) int
+        Index into ``eta`` of each slot of the component's vector ``u_c`` (all free).
+    slot_lower, slot_upper : (S,) float
+        Bounds of each slot (intersected with the prior's support).
+    members : tuple[CoupledMember, ...]
+        One entry per family with items in the component.
+    """
+
+    slot_free_index: Array
+    slot_lower: Array
+    slot_upper: Array
+    members: tuple[CoupledMember, ...]
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
 class CompiledProblem:
     r"""Everything the Core needs (DESIGN.md §5.2).
 
@@ -153,6 +196,9 @@ class CompiledProblem:
         Prior specification per free parameter (counted once per ``free_id``).
     n_groups : int
         Static number of groups.
+    coupled : tuple[CoupledBlock, ...]
+        Components of items connected by equality constraints across items (DESIGN.md §16.1);
+        empty when every ``free_id`` stays within one item.
     """
 
     y: Array
@@ -164,6 +210,7 @@ class CompiledProblem:
     priors: PriorBlock
     node_log_base: Array
     n_groups: int = field(metadata={"static": True})
+    coupled: tuple[CoupledBlock, ...] = ()
 
 
 def _expand(eta: Array, fixed: Array, free_index: Array) -> Array:
@@ -336,10 +383,68 @@ def expected_complete_loglik(prob: CompiledProblem, eta: Array, counts: Expected
     return total + jnp.sum(q_lat)
 
 
+def _coupled_masks(prob: CompiledProblem) -> list[Array]:
+    """Per family, ``(J_f,)`` mask of the items that belong to a :class:`CoupledBlock`."""
+    masks = [jnp.zeros(fam.columns.shape, dtype=jnp.bool_) for fam in prob.families]
+    for block in prob.coupled:
+        for mem in block.members:
+            masks[mem.family] = masks[mem.family].at[mem.positions].set(True)
+    return masks
+
+
+def _m_step_coupled(
+    prob: CompiledProblem, eta: Array, new_eta: Array, counts: ExpectedCounts, n_steps: int
+) -> Array:
+    r"""Joint masked Newton per component of items linked across items (DESIGN.md §16.1).
+
+    For component :math:`c` with free vector :math:`u_c`, maximizes
+
+    .. math::
+        Q_c(u_c)=\sum_{j\in c}\sum_g\sum_q\sum_k\bar r_{gjkq}
+        \log P_{jk}(\theta_q;\xi_j^{(g)}(u_c))+\sum_s\log\pi(u_{cs}),
+
+    the part of :math:`Q(\eta\mid\eta')` (Bock & Aitkin, 1981; Dempster, Laird & Rubin, 1977)
+    that depends on :math:`u_c`, with every prior counted once. Reads ``u_c`` from ``eta`` (the
+    previous iterate) and writes it into ``new_eta``.
+    """
+    for block in prob.coupled:
+        fids = block.slot_free_index
+        u0 = eta[fids]
+        kind = prob.priors.kind[fids]
+        p1 = prob.priors.param1[fids]
+        p2 = prob.priors.param2[fids]
+
+        def q_comp(
+            v: Array, blk: CoupledBlock = block, sk: Array = kind, sp1: Array = p1, sp2: Array = p2
+        ) -> Array:
+            total = jnp.sum(eval_log_prior(v, sk, sp1, sp2))
+            for mem in blk.members:
+                fam = prob.families[mem.family]
+                r_m = counts.r[mem.family][:, mem.positions]  # (G, n, K, Q)
+                fix_m = fam.fixed_values[:, mem.positions]  # (G, n, P_f)
+                xi = _local_to_xi(v, mem.local_index, fix_m)  # (G, n, P_f)
+
+                def per_item(rj: Array, pj: Array, k: ItemKernel = fam.kernel) -> Array:
+                    return _item_q(k, prob.nodes, rj, pj)
+
+                total = total + jnp.sum(jax.vmap(jax.vmap(per_item))(r_m, xi))
+            return total
+
+        mask = jnp.ones(fids.shape, dtype=jnp.bool_)
+        u_new = newton_ascent(q_comp, u0, mask, block.slot_lower, block.slot_upper, n_steps)
+        new_eta = new_eta.at[fids].set(u_new)
+    return new_eta
+
+
 def _m_step_items(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: int) -> Array:
-    """Item-wise masked Newton M-step (DESIGN.md §4.3, §14.2)."""
+    """Item-wise masked Newton M-step, then the coupled components (DESIGN.md §4.3, §14.2, §16.1).
+
+    Items in a :class:`CoupledBlock` are held in the item-wise ``vmap`` and solved jointly by
+    :func:`_m_step_coupled`.
+    """
     new_eta = eta
-    for fam, r in zip(prob.families, counts.r, strict=True):
+    coupled_masks = _coupled_masks(prob)
+    for fam, r, cmask in zip(prob.families, counts.r, coupled_masks, strict=True):
         u0 = _expand(eta, jnp.zeros(fam.slot_free_index.shape, eta.dtype), fam.slot_free_index)
         slot_free = fam.slot_free_index >= 0
         if eta.shape[0] == 0:
@@ -380,7 +485,7 @@ def _m_step_items(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_s
             local,
             fixed,
             u0,
-            slot_free,
+            slot_free & ~cmask[:, None],
             fam.slot_lower,
             fam.slot_upper,
             slot_kind,
@@ -388,7 +493,7 @@ def _m_step_items(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_s
             slot_p2,
         )
         new_eta = _scatter(new_eta, u_new, fam.slot_free_index)
-    return new_eta
+    return _m_step_coupled(prob, eta, new_eta, counts, n_steps) if prob.coupled else new_eta
 
 
 def _nodes_1d(prob: CompiledProblem) -> Array:
