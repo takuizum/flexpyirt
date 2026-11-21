@@ -131,7 +131,7 @@ class PriorBlock:
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class CompiledProblem:
-    """Everything the Core needs (DESIGN.md §5.2).
+    r"""Everything the Core needs (DESIGN.md §5.2).
 
     Attributes
     ----------
@@ -143,6 +143,10 @@ class CompiledProblem:
         Group of each pattern.
     nodes : (Q, D) float
         Product quadrature nodes (``D in {1, 2, 3}``).
+    node_log_base : (Q,) float
+        Fixed log base weight of each node, added inside the normalization of the latent weights:
+        0 for equispaced grids, :math:`\\log w^{GH}_q + \tfrac12\\|\theta_q\\|^2` for
+        Gauss–Hermite (DESIGN.md §15.44).
     families : tuple[FamilyBlock, ...]
     latent : LatentBlock
     priors : PriorBlock
@@ -158,6 +162,7 @@ class CompiledProblem:
     families: tuple[FamilyBlock, ...]
     latent: LatentBlock
     priors: PriorBlock
+    node_log_base: Array
     n_groups: int = field(metadata={"static": True})
 
 
@@ -200,7 +205,7 @@ def _latent_log_weights(prob: CompiledProblem, eta: Array) -> Array:
     if prob.latent.is_eh:
         return jnp.log(prob.latent.eh_weights)
     lat = _expand(eta, prob.latent.fixed_values, prob.latent.free_index)
-    return jax.vmap(mvn_log_weights, in_axes=(None, 0))(prob.nodes, lat)
+    return jax.vmap(lambda p: _normal_logw(prob.nodes, prob.node_log_base, p))(lat)
 
 
 def _log_joint(prob: CompiledProblem, eta: Array) -> Array:
@@ -292,12 +297,21 @@ def _item_q(kernel: ItemKernel, nodes: Array, r: Array, params: Array) -> Array:
     return jnp.sum(r.T * kernel.log_prob(nodes, params))
 
 
-def _latent_q(nodes: Array, n: Array, params: Array) -> Array:
+def _normal_logw(nodes: Array, base: Array, params: Array) -> Array:
+    r"""Return normalized log latent weights :math:`\log\mathrm{softmax}_q(b_q+\log\phi_q)`.
+
+    ``base`` is the fixed node log base weight (0 on equispaced grids; Gauss–Hermite, §15.44).
+    """
+    out: Array = jax.nn.log_softmax(base + mvn_log_weights(nodes, params))
+    return out
+
+
+def _latent_q(nodes: Array, base: Array, n: Array, params: Array) -> Array:
     r"""Latent part of Q (DESIGN.md §4.4).
 
     .. math:: Q_g^{\mathrm{lat}}=\sum_q\bar n_{gq}\log w_{gq}(\boldsymbol\mu_g,\boldsymbol\Sigma_g)
     """
-    return jnp.sum(n * mvn_log_weights(nodes, params))
+    return jnp.sum(n * _normal_logw(nodes, base, params))
 
 
 def _local_to_xi(u: Array, local: Array, fixed: Array) -> Array:
@@ -318,7 +332,7 @@ def expected_complete_loglik(prob: CompiledProblem, eta: Array, counts: Expected
     if prob.latent.is_eh:
         return total + jnp.sum(counts.n * jnp.log(prob.latent.eh_weights))
     lat = _expand(eta, prob.latent.fixed_values, prob.latent.free_index)
-    q_lat = jax.vmap(lambda n, p: _latent_q(prob.nodes, n, p))(counts.n, lat)
+    q_lat = jax.vmap(lambda n, p: _latent_q(prob.nodes, prob.node_log_base, n, p))(counts.n, lat)
     return total + jnp.sum(q_lat)
 
 
@@ -425,7 +439,9 @@ def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: i
     lat = _expand(eta, lat_block.fixed_values, lat_block.free_index)
 
     def solve_group(n: Array, x: Array, free: Array, lo: Array, hi: Array) -> Array:
-        return newton_ascent(lambda p: _latent_q(prob.nodes, n, p), x, free, lo, hi, n_steps)
+        return newton_ascent(
+            lambda p: _latent_q(prob.nodes, prob.node_log_base, n, p), x, free, lo, hi, n_steps
+        )
 
     lat_new = jax.vmap(solve_group)(
         counts.n, lat, lat_block.free_index >= 0, lat_block.lower, lat_block.upper
@@ -970,7 +986,7 @@ def _oakes_own_hessian(prob: CompiledProblem, eta: Array, counts: ExpectedCounts
         lat = _expand(eta, lat_block.fixed_values, lat_block.free_index)
 
         def group_hess(n: Array, x: Array) -> Array:
-            out: Array = jax.hessian(lambda p: _latent_q(prob.nodes, n, p))(x)
+            out: Array = jax.hessian(lambda p: _latent_q(prob.nodes, prob.node_log_base, n, p))(x)
             return out
 
         h_lat = jax.vmap(group_hess)(counts.n, lat)  # (G, 2, 2)
@@ -1049,7 +1065,7 @@ def _oakes_cross_hessian(
         lat = _expand(eta, lat_block.fixed_values, lat_block.free_index)
 
         def latent_jac(p: Array) -> Array:
-            out: Array = jax.jacfwd(lambda x: mvn_log_weights(prob.nodes, x))(p)
+            out: Array = jax.jacfwd(lambda x: _normal_logw(prob.nodes, prob.node_log_base, x))(p)
             return out
 
         d_logw = jax.vmap(latent_jac)(lat)  # (G, Q, L_D)
