@@ -449,6 +449,63 @@ def test_transform_theta_all_input_types(
     for col in ("pv1", "pv2", "pv3"):
         np.testing.assert_allclose(pv_t[col], a * pv_df[col] + b)
 
+    # A frame with both theta/se and plausible values transforms all of them.
+    both = eap_df.join(pv_df[["pv1", "pv2"]])
+    both_t = linked.transform_theta(both)
+    np.testing.assert_allclose(both_t["theta"], a * eap_df["theta"] + b)
+    np.testing.assert_allclose(both_t["se"], a * eap_df["se"])
+    for col in ("pv1", "pv2"):
+        np.testing.assert_allclose(both_t[col], a * pv_df[col] + b)
+
+
+def test_fixed_slope_items_transform_to_slope_one_over_a() -> None:
+    """Rasch / PCM source items get a* = 1/A on the target scale and fix_from keeps that slope."""
+    a_true, b_true = 1.3, 0.4
+    src_spec: dict[str, ItemModel] = {
+        "r1": Rasch(),
+        "r2": Rasch(),
+        "r3": Rasch(),
+        "p1": PCM(n_cat=3),
+        "p2": PCM(n_cat=3),
+    }
+    src_model = Model.from_items(src_spec)
+    src_params = {
+        "r1": np.array([1.0, -0.5]),
+        "r2": np.array([1.0, 0.3]),
+        "r3": np.array([1.0, 1.1]),
+        "p1": np.array([1.0, 0.6, -0.2]),
+        "p2": np.array([1.0, 0.1, -0.9]),
+    }
+    # The target holds the same items on the target scale (slope 1/A), so it needs 2PL / GPCM.
+    tgt_spec: dict[str, ItemModel] = {
+        n: (TwoPL() if isinstance(m, Rasch) else GPCM(n_cat=3)) for n, m in src_spec.items()
+    }
+    tgt_model = Model.from_items(tgt_spec)
+    tgt_params = {
+        n: np.asarray(
+            transform_kernel_params(
+                src_model.item_kernel(m),
+                jnp.asarray(src_params[n]),
+                jnp.asarray(a_true),
+                jnp.asarray(b_true),
+            )
+        )
+        for n, m in src_spec.items()
+    }
+    source = _make_fixed_fit(src_model, src_params, seed=3)
+    target = _make_fixed_fit(tgt_model, tgt_params, seed=4)
+    # Kernels differ only in which parameters are free, so Rasch/2PL and PCM/GPCM share a kernel.
+    linked = link(source, target)
+    assert pytest.approx(a_true, abs=1e-10) == linked.A
+    assert pytest.approx(b_true, abs=1e-10) == linked.B
+    tbl = linked.items.set_index("item")
+    np.testing.assert_allclose(tbl["a"].to_numpy(dtype=float), 1.0 / a_true, atol=1e-10)
+
+    # fix_from on the Rasch / PCM model fixes the slope at 1/A (not at 1).
+    fixed = dict(((i, p), v) for i, p, v in src_model.fix_from(linked.items).fixed)
+    for name in src_spec:
+        assert fixed[(name, "a")] == pytest.approx(1.0 / a_true, abs=1e-10)
+
 
 def test_summary_str_and_html(
     fitted_2pl_pair: tuple[FitResult, FitResult, pd.DataFrame],
@@ -464,7 +521,7 @@ def test_summary_str_and_html(
     assert "flexpyirt-result" in html_str and "<table" in html_str
 
 
-# ---- Ogasawara (2001) delta-method SE validation (finite differences + parametric bootstrap) ----
+# ---- Ogasawara (2001) delta-method SE validation (finite differences + Monte Carlo) -------------
 
 
 @pytest.mark.parametrize("method", METHODS)
@@ -554,10 +611,16 @@ def test_ogasawara_se_matches_central_finite_differences(
     assert linked.B_se == pytest.approx(math.sqrt(cov_fd[1, 1]), rel=1e-6)
 
 
-def test_ogasawara_se_matches_parametric_bootstrap(
+def test_ogasawara_se_monte_carlo_linearization_check(
     fitted_2pl_pair: tuple[FitResult, FitResult, pd.DataFrame],
 ) -> None:
-    """Verify Ogasawara delta-method vcov matches Monte Carlo draws from N(eta_hat, vcov)."""
+    """Monte Carlo linearization check of the Ogasawara delta-method vcov.
+
+    Draws common-item parameters from N(eta_hat, vcov) of each calibration and re-solves the
+    linking with the quadrature weights held fixed. This checks the delta-method linearization
+    under its own assumptions (normal parameter estimates, fixed weights); it is not a bootstrap
+    of the calibrations (no data are resampled and no models are refitted).
+    """
     res_src, res_tgt, _ = fitted_2pl_pair
     linked = link(res_src, res_tgt, method="stocking-lord", symmetric=False)
     assert linked.vcov is not None and res_src.vcov is not None and res_tgt.vcov is not None

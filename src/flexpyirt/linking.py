@@ -234,7 +234,10 @@ def _mean_mean_start(
         \qquad
         B_0 = \bar b^{\mathrm{tgt}} - A_0 \bar b^{\mathrm{src}},
 
-    computed across all common items (falling back to ``(1.0, 0.0)`` when slopes vanish).
+    computed across all common items (falling back to ``(1.0, 0.0)`` when slopes vanish). These
+    are starting values only: absolute slopes are summed, and :math:`\bar b` pools every display
+    threshold of every common item (one per dichotomous item, :math:`K_j - 1` per polytomous
+    item), so polytomous items weigh more than in per-item Mean/Mean averages.
     """
     sum_s = sum(abs(float(src_est[s][0])) for s, _ in pairs)
     sum_t = sum(abs(float(tgt_est[t][0])) for _, t in pairs)
@@ -339,6 +342,9 @@ class LinkResult:
         All source items transformed onto the target scale (columns ``item``, ``model``,
         ``common``, internal slope–intercept parameters ``a``, ``d``/``d1..``, ``g``, ``u``, and
         display IRT thresholds ``b``/``b1..``). Directly usable with :meth:`Model.fix_from`.
+        For fixed-slope models (Rasch, PCM) the transformed slope is :math:`a^* = 1/A`, not 1:
+        the items keep their response curves on the target scale, so ``fix_from`` fixes the slope
+        at :math:`1/A` (they are unit-slope items again only when :math:`A = 1`).
     """
 
     A: float
@@ -372,8 +378,11 @@ class LinkResult:
     def transform_theta(self, theta: Any) -> Any:
         r"""Transform ability estimates from the source scale to the target scale.
 
-        Applies :math:`\theta^* = A\theta + B` (and :math:`\mathrm{SE}^* = A\,\mathrm{SE}` for
-        standard errors in a scoring DataFrame, treating :math:`A` as fixed).
+        Applies :math:`\theta^* = A\theta + B` to a ``theta`` column and to every plausible-value
+        column ``pv1``, ``pv2``, ... (both are transformed when both are present), and
+        :math:`\mathrm{SE}^* = A\,\mathrm{SE}` to an ``se`` column. :math:`(A, B)` are treated as
+        known, so the transformed SEs exclude linking error (the sampling variability of
+        :math:`(\hat A, \hat B)` summarized by :attr:`vcov`).
 
         Parameters
         ----------
@@ -400,20 +409,19 @@ class LinkResult:
             raise SpecificationError("transform_theta() does not accept a boolean.")
         if isinstance(theta, pd.DataFrame):
             out = theta.copy()
+            pv_cols = [c for c in out.columns if isinstance(c, str) and _PV_COL_RE.match(c)]
+            if "theta" not in out.columns and not pv_cols:
+                raise SpecificationError(
+                    "DataFrame passed to transform_theta() must contain a 'theta' column or "
+                    "plausible-value columns ('pv1', ...)."
+                )
             if "theta" in out.columns:
                 out["theta"] = self.A * out["theta"].astype(float) + self.B
                 if "se" in out.columns:
                     out["se"] = self.A * out["se"].astype(float)
-                return out
-            pv_cols = [c for c in out.columns if isinstance(c, str) and _PV_COL_RE.match(c)]
-            if pv_cols:
-                for col in pv_cols:
-                    out[col] = self.A * out[col].astype(float) + self.B
-                return out
-            raise SpecificationError(
-                "DataFrame passed to transform_theta() must contain a 'theta' column or "
-                "plausible-value columns ('pv1', ...)."
-            )
+            for col in pv_cols:
+                out[col] = self.A * out[col].astype(float) + self.B
+            return out
         if isinstance(theta, pd.Series):
             return self.A * theta.astype(float) + self.B
         if isinstance(theta, (int, float, np.number)):
