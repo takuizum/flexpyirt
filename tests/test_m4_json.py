@@ -648,3 +648,194 @@ def test_malformed_internal_consistency(sample_payload: dict[str, Any]) -> None:
             row["item"] = "__latent__"
     with pytest.raises(SpecificationError, match="reserved"):
         FitResult.from_json(json.dumps(bad_latent_item))
+
+
+def test_malformed_parameter_invariants_and_se(sample_payload: dict[str, Any]) -> None:
+    # Non-finite value or estimate (including NaN on both value and estimate of a fixed row)
+    for token in ("NaN", "Infinity", "-Infinity"):
+        bad_val = _clone(sample_payload)
+        bad_val["parameters"][0]["value"] = token
+        with pytest.raises(SpecificationError, match="must be finite"):
+            FitResult.from_json(json.dumps(bad_val))
+
+        bad_est = _clone(sample_payload)
+        bad_est["parameters"][0]["estimate"] = token
+        with pytest.raises(SpecificationError, match="must be finite"):
+            FitResult.from_json(json.dumps(bad_est))
+
+        bad_fixed_nan = _clone(sample_payload)
+        lat_mean = next(
+            r
+            for r in bad_fixed_nan["parameters"]
+            if r["item"] == "__latent__" and r["param"] == "mean"
+        )
+        lat_mean["value"] = token
+        lat_mean["estimate"] = token
+        with pytest.raises(SpecificationError, match="must be finite"):
+            FitResult.from_json(json.dumps(bad_fixed_nan))
+
+    # Non-positive latent variance (0.0 and -1.0)
+    for bad_var in (0.0, -1.0):
+        bad_lat = _clone(sample_payload)
+        lat_var = next(
+            r for r in bad_lat["parameters"] if r["item"] == "__latent__" and r["param"] == "var"
+        )
+        lat_var["value"] = bad_var
+        lat_var["estimate"] = bad_var
+        if bad_var < 0.0:
+            lat_var["lower"] = -2.0
+        with pytest.raises(SpecificationError, match=r"positive|exceed model domain"):
+            FitResult.from_json(json.dumps(bad_lat))
+
+    # Bounds exceeding model domain (__latent__.var lower < 0)
+    bad_dom = _clone(sample_payload)
+    lat_var = next(
+        r for r in bad_dom["parameters"] if r["item"] == "__latent__" and r["param"] == "var"
+    )
+    lat_var["lower"] = -0.5
+    with pytest.raises(SpecificationError, match="exceed model domain"):
+        FitResult.from_json(json.dumps(bad_dom))
+
+    # Free estimate outside [lower, upper] or prior.support
+    bad_bounds = _clone(sample_payload)
+    bad_bounds["parameters"][1]["lower"] = -1.0
+    bad_bounds["parameters"][1]["upper"] = 1.0
+    bad_bounds["parameters"][1]["value"] = 0.0
+    bad_bounds["parameters"][1]["estimate"] = 1.0
+    with pytest.raises(SpecificationError, match="not strictly inside"):
+        FitResult.from_json(json.dumps(bad_bounds))
+
+    bad_prior_est = _clone(sample_payload)
+    # parameters[0] is Item.1.a with LogNormal prior -> support (0, inf)
+    bad_prior_est["parameters"][0]["estimate"] = -0.5
+    with pytest.raises(SpecificationError, match="outside the support"):
+        FitResult.from_json(json.dumps(bad_prior_est))
+
+    # Invalid se: finite on fixed row; negative or infinite on free row
+    bad_fix_se = _clone(sample_payload)
+    lat_row = next(r for r in bad_fix_se["parameters"] if not r["free"])
+    lat_row["se"] = 0.1
+    with pytest.raises(SpecificationError, match="se == NaN"):
+        FitResult.from_json(json.dumps(bad_fix_se))
+
+    for bad_se_val in (-1.0, "-Infinity", "Infinity"):
+        bad_free_se = _clone(sample_payload)
+        bad_free_se["parameters"][0]["se"] = bad_se_val
+        with pytest.raises(SpecificationError, match="finite non-negative or NaN se"):
+            FitResult.from_json(json.dumps(bad_free_se))
+
+
+def test_malformed_asymptotes_grm_order_and_shared_bounds() -> None:
+    # 3PL asymptote invariant 0 <= g < u <= 1 on value and estimate
+    rng = np.random.default_rng(5010)
+    theta = rng.normal(0.0, 1.0, 400)
+    a = np.full(5, 1.5)
+    d = np.array([-0.5, -0.2, 0.0, 0.2, 0.5])
+    p = 0.15 + 0.85 / (1.0 + np.exp(-(np.outer(theta, a) + d)))
+    cols = [f"q{j}" for j in range(1, 6)]
+    df3 = pd.DataFrame((rng.random(p.shape) < p).astype(float), columns=cols)
+    res3 = fit(
+        Model.uniform(ThreePL(), items=cols)
+        .prior(param="a", dist=LogNormal(0.4, 0.3))
+        .prior(param="g", dist=Beta(5.0, 20.0)),
+        df3,
+        method=BAEM(tol=1e-4),
+        se=None,
+    )
+    payload3 = _assert_strict_json(res3.to_json())
+
+    bad_g_est = _clone(payload3)
+    g_row = next(r for r in bad_g_est["parameters"] if r["item"] == "q1" and r["param"] == "g")
+    u_row = next(r for r in bad_g_est["parameters"] if r["item"] == "q1" and r["param"] == "u")
+    u_row["value"] = 0.5
+    u_row["estimate"] = 0.5
+    g_row["value"] = 0.2
+    g_row["estimate"] = 0.6
+    with pytest.raises(SpecificationError, match="Lower asymptote"):
+        FitResult.from_json(json.dumps(bad_g_est))
+
+    bad_g_dom = _clone(payload3)
+    g_row_dom = next(r for r in bad_g_dom["parameters"] if r["item"] == "q1" and r["param"] == "g")
+    g_row_dom["lower"] = -0.1
+    with pytest.raises(SpecificationError, match="exceed model domain"):
+        FitResult.from_json(json.dumps(bad_g_dom))
+
+    # GRM intercept ordering d1 > d2 > d3 on estimate and value
+    cuts4 = np.array([-1.0, 0.0, 1.0])
+    y4 = np.searchsorted(
+        cuts4, np.outer(theta, [1.2, 1.0, 1.3, 1.1]) + rng.logistic(0, 1, (400, 4))
+    )
+    df_grm = pd.DataFrame(y4.astype(float), columns=["g1", "g2", "g3", "g4"])
+    spec_grm = Model.uniform(GRM(4), items=df_grm.columns)
+    res_grm = fit(spec_grm, df_grm, method=BAEM(tol=1e-4), se=None)
+    payload_grm = _assert_strict_json(res_grm.to_json())
+
+    bad_grm_est = _clone(payload_grm)
+    d1 = next(r for r in bad_grm_est["parameters"] if r["item"] == "g1" and r["param"] == "d1")
+    d2 = next(r for r in bad_grm_est["parameters"] if r["item"] == "g1" and r["param"] == "d2")
+    d1["estimate"] = d2["estimate"]
+    with pytest.raises(SpecificationError, match="GRM intercepts"):
+        FitResult.from_json(json.dumps(bad_grm_est))
+
+    bad_grm_val = _clone(payload_grm)
+    d1_v = next(r for r in bad_grm_val["parameters"] if r["item"] == "g1" and r["param"] == "d1")
+    d2_v = next(r for r in bad_grm_val["parameters"] if r["item"] == "g1" and r["param"] == "d2")
+    d1_v["value"], d2_v["value"] = d2_v["value"], d1_v["value"]
+    with pytest.raises(SpecificationError, match="GRM intercepts"):
+        FitResult.from_json(json.dumps(bad_grm_val))
+
+    # validate_table in fit(..., table=...) also rejects disordered GRM starts
+    tbl_grm = spec_grm.parameter_table(df_grm)
+    m1 = (tbl_grm["item"] == "g1") & (tbl_grm["param"] == "d1")
+    m2 = (tbl_grm["item"] == "g1") & (tbl_grm["param"] == "d2")
+    tbl_grm.loc[m1, "value"] = -2.0
+    tbl_grm.loc[m2, "value"] = 2.0
+    with pytest.raises(SpecificationError, match="GRM intercepts"):
+        fit(spec_grm, df_grm, table=tbl_grm, se=None)
+
+    # Two-group shared free_id: conflicting bounds and conflicting se
+    n_g = 200
+    grp = np.repeat(["ref", "focal"], n_g)
+    spec_2g = (
+        Model.uniform(TwoPL(), items=cols)
+        .with_groups(ref=Normal.standard(), focal=Normal.free())
+        .equal_across_groups(items=["q1", "q2", "q3"])
+    )
+    res_2g = fit(
+        spec_2g,
+        df3,
+        group=grp,
+        method=BAEM(tol=1e-4),
+        se="oakes",
+        quadrature=Quadrature.equispaced(41, lim=(-6, 6)),
+    )
+    payload_2g = _assert_strict_json(res_2g.to_json())
+
+    bad_shared_bounds = _clone(payload_2g)
+    q1a_foc = next(
+        r
+        for r in bad_shared_bounds["parameters"]
+        if r["group"] == "focal" and r["item"] == "q1" and r["param"] == "a"
+    )
+    q1a_foc["lower"] = -10.0
+    with pytest.raises(SpecificationError, match="conflicting bounds"):
+        FitResult.from_json(json.dumps(bad_shared_bounds))
+
+    bad_shared_se = _clone(payload_2g)
+    q1a_foc_se = next(
+        r
+        for r in bad_shared_se["parameters"]
+        if r["group"] == "focal" and r["item"] == "q1" and r["param"] == "a"
+    )
+    q1a_foc_se["se"] = float(q1a_foc_se["se"]) + 0.5
+    with pytest.raises(SpecificationError, match="conflicting standard errors"):
+        FitResult.from_json(json.dumps(bad_shared_se))
+
+    # Reversed parameter rows in JSON restore canonical (group, item, param) order
+    rev_payload = _clone(payload_2g)
+    rev_payload["parameters"] = list(reversed(rev_payload["parameters"]))
+    loaded_rev = FitResult.from_json(json.dumps(rev_payload))
+    assert list(loaded_rev.latent["group"]) == ["ref", "focal"]
+    assert list(loaded_rev.items.columns) == list(res_2g.items.columns)
+    idx = [*range(10), *(n_g + i for i in range(10))]
+    _assert_fit_result_identical(res_2g, loaded_rev, df3.iloc[idx], group=grp[idx])

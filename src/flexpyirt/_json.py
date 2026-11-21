@@ -23,7 +23,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
-from flexpyirt._compile import LATENT_ITEM, LATENT_PARAMS, TABLE_COLUMNS
+from flexpyirt._compile import (
+    TABLE_COLUMNS,
+    model_parameter_schema,
+    validate_table_constraints,
+)
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import SpecificationError
 from flexpyirt.items import GPCM, GRM, PCM, FourPL, ItemModel, Rasch, ThreePL, TwoPL
@@ -704,22 +708,16 @@ def _serialize_parameters(table: pd.DataFrame) -> list[dict[str, Any]]:
     return rows
 
 
-def _expected_parameter_keys(model: Model) -> dict[tuple[str, str, str], str]:
-    """Return expected ``(group, item, param) -> model_name`` entries for ``model``."""
-    expected: dict[tuple[str, str, str], str] = {}
-    for group_name, _ in model.resolved_groups():
-        for item_name, item_model in model.items:
-            for param in item_model.kernel.param_names:
-                expected[(group_name, item_name, param)] = item_model.name
-        for param in LATENT_PARAMS:
-            expected[(group_name, LATENT_ITEM, param)] = "Normal"
-    return expected
-
-
 def _deserialize_parameters(raw: Any, model: Model) -> tuple[pd.DataFrame, np.ndarray]:
     """Deserialize ``parameters`` and reconstruct ``_eta`` with full consistency checks."""
     rows_raw = _require_list(raw, field_name="parameters")
-    expected = _expected_parameter_keys(model)
+    schema = model_parameter_schema(model)
+    expected: dict[tuple[str, str, str], str] = {
+        (str(g), str(i), str(p)): str(m)
+        for g, i, p, m in zip(
+            schema["group"], schema["item"], schema["param"], schema["model"], strict=True
+        )
+    }
     required_keys = frozenset(_PARAM_COLUMNS)
 
     groups: list[str] = []
@@ -736,7 +734,6 @@ def _deserialize_parameters(raw: Any, model: Model) -> tuple[pd.DataFrame, np.nd
     ses: list[float] = []
 
     seen: set[tuple[str, str, str]] = set()
-    free_meta: dict[int, tuple[str, str, Prior | None, float]] = {}
 
     for idx, entry in enumerate(rows_raw):
         loc = f"parameters[{idx}]"
@@ -760,17 +757,11 @@ def _deserialize_parameters(raw: Any, model: Model) -> tuple[pd.DataFrame, np.nd
             )
         seen.add(key)
 
-        val = _decode_float(row["value"], field_name=f"{loc}.value")
+        val = _decode_float(row["value"], field_name=f"{loc}.value", finite=True)
         is_free = _require_bool(row["free"], field_name=f"{loc}.free")
         lo = _decode_float(row["lower"], field_name=f"{loc}.lower")
         hi = _decode_float(row["upper"], field_name=f"{loc}.upper")
-        if not (lo < hi):
-            raise SpecificationError(f"lower ({lo}) must be < upper ({hi}) at {loc}.")
         pri = _deserialize_prior(row["prior"], field_name=f"{loc}.prior")
-        if itm == LATENT_ITEM and pri is not None:
-            raise SpecificationError(
-                f"Priors on latent-distribution parameters are not supported at {loc}."
-            )
         fid = _require_int(row["free_id"], field_name=f"{loc}.free_id")
         if is_free:
             if fid < 0:
@@ -779,31 +770,21 @@ def _deserialize_parameters(raw: Any, model: Model) -> tuple[pd.DataFrame, np.nd
             raise SpecificationError(
                 f"Fixed parameter row {key} must have free_id == -1, got {fid}."
             )
-        est = _decode_float(row["estimate"], field_name=f"{loc}.estimate")
+        est = _decode_float(row["estimate"], field_name=f"{loc}.estimate", finite=True)
         se_val = _decode_float(row["se"], field_name=f"{loc}.se")
-        if not is_free and not _floats_equal(est, val):
+        if not is_free:
+            if est != val:
+                raise SpecificationError(
+                    f"Fixed parameter row {key} has estimate ({est!r}) != value ({val!r})."
+                )
+            if not math.isnan(se_val):
+                raise SpecificationError(
+                    f"Fixed parameter row {key} must have se == NaN, got {se_val!r}."
+                )
+        elif not (math.isnan(se_val) or (math.isfinite(se_val) and se_val >= 0.0)):
             raise SpecificationError(
-                f"Fixed parameter row {key} has estimate ({est!r}) != value ({val!r})."
+                f"Free parameter row {key} must have finite non-negative or NaN se, got {se_val!r}."
             )
-
-        if is_free:
-            prev = free_meta.get(fid)
-            if prev is None:
-                free_meta[fid] = (itm, prm, pri, est)
-            else:
-                prev_itm, prev_prm, prev_pri, prev_est = prev
-                if prev_itm != itm or prev_prm != prm:
-                    raise SpecificationError(
-                        f"free_id {fid} is shared across incompatible rows "
-                        f"({prev_itm!r}.{prev_prm!r} vs {itm!r}.{prm!r})."
-                    )
-                if prev_pri != pri:
-                    raise SpecificationError(f"Rows sharing free_id {fid} have conflicting priors.")
-                if not _floats_equal(prev_est, est):
-                    raise SpecificationError(
-                        f"Rows sharing free_id {fid} have conflicting estimates "
-                        f"({prev_est!r} vs {est!r})."
-                    )
 
         groups.append(grp)
         items.append(itm)
@@ -822,17 +803,6 @@ def _deserialize_parameters(raw: Any, model: Model) -> tuple[pd.DataFrame, np.nd
     if missing:
         raise SpecificationError(f"Missing parameter rows for this model: {missing}.")
 
-    n_free = len(free_meta)
-    expected_fids = set(range(n_free))
-    if set(free_meta.keys()) != expected_fids:
-        raise SpecificationError(
-            f"Free parameter free_id values must be contiguous 0..{n_free - 1}, "
-            f"got {sorted(free_meta.keys())}."
-        )
-    eta = np.empty(n_free, dtype=np.float64)
-    for fid_val, (_, _, _, est_val) in free_meta.items():
-        eta[fid_val] = est_val
-
     frame = pd.DataFrame(
         {
             "group": groups,
@@ -849,6 +819,49 @@ def _deserialize_parameters(raw: Any, model: Model) -> tuple[pd.DataFrame, np.nd
             "se": np.array(ses, dtype=np.float64),
         }
     )
+    frame = validate_table_constraints(
+        frame,
+        schema,
+        model,
+        check_free_ids=True,
+        extra_value_cols=(("estimate", "Estimate", "Fixed estimate"),),
+    )
+
+    free_meta: dict[int, tuple[float, float]] = {}
+    free_rows = frame[frame["free"]]
+    for fid_val, est_val, se_item in zip(
+        free_rows["free_id"].tolist(),
+        free_rows["estimate"].tolist(),
+        free_rows["se"].tolist(),
+        strict=True,
+    ):
+        prev = free_meta.get(fid_val)
+        if prev is None:
+            free_meta[fid_val] = (float(est_val), float(se_item))
+        else:
+            prev_est, prev_se = prev
+            if prev_est != est_val:
+                raise SpecificationError(
+                    f"Rows sharing free_id {fid_val} have conflicting estimates "
+                    f"({prev_est!r} vs {est_val!r})."
+                )
+            if not _floats_equal(prev_se, float(se_item)):
+                raise SpecificationError(
+                    f"Rows sharing free_id {fid_val} have conflicting standard errors "
+                    f"({prev_se!r} vs {se_item!r})."
+                )
+
+    n_free = len(free_meta)
+    expected_fids = set(range(n_free))
+    if set(free_meta.keys()) != expected_fids:
+        raise SpecificationError(
+            f"Free parameter free_id values must be contiguous 0..{n_free - 1}, "
+            f"got {sorted(free_meta.keys())}."
+        )
+    eta = np.empty(n_free, dtype=np.float64)
+    for fid_val, (est_val, _) in free_meta.items():
+        eta[fid_val] = est_val
+
     return frame, eta
 
 
