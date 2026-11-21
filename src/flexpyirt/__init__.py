@@ -8,6 +8,7 @@ from flexpyirt import errors
 from flexpyirt.fit import fit
 from flexpyirt.items import GPCM, GRM, PCM, FourPL, Rasch, ThreePL, TwoPL
 from flexpyirt.latent import EmpiricalHistogram, Normal
+from flexpyirt.linking import LinkResult, link
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
 from flexpyirt.priors import Beta, LogNormal, NormalPrior
@@ -28,6 +29,7 @@ __all__ = [
     "EmpiricalHistogram",
     "FitResult",
     "FourPL",
+    "LinkResult",
     "LogNormal",
     "Model",
     "Normal",
@@ -39,4 +41,5 @@ __all__ = [
     "__version__",
     "errors",
     "fit",
+    "link",
 ]
