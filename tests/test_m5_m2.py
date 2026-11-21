@@ -14,11 +14,14 @@ from flexpyirt import (
     BAEM,
     GPCM,
     GRM,
+    PCM,
     EmpiricalHistogram,
+    FourPL,
     Model,
     Normal,
     NormalPrior,
     Quadrature,
+    Rasch,
     ThreePL,
     TwoPL,
     _core,
@@ -124,6 +127,16 @@ def test_m2_rejects_unsupported_models_and_inputs() -> None:
     with pytest.raises(SpecificationError, match="at least 2 respondents"):
         res.m2(df.iloc[:1])
 
+    # 1-item model.
+    res_1item = fit(
+        Model.uniform(Rasch(), items=["q01"]).with_latent(Normal.standard()),
+        df[["q01"]],
+        method=BAEM(tol=1e-4, squarem=True),
+        se=None,
+    )
+    with pytest.raises(SpecificationError, match="at least 2 items"):
+        res_1item.m2(df[["q01"]])
+
 
 @pytest.mark.parametrize("n_items,expected_df", [(3, 0), (2, -1)])
 def test_m2_nonpositive_df_returns_nan_indices(n_items: int, expected_df: int) -> None:
@@ -134,7 +147,8 @@ def test_m2_nonpositive_df_returns_nan_indices(n_items: int, expected_df: int) -
         method=BAEM(tol=1e-6, squarem=True),
         se=None,
     )
-    out = res.m2(df)
+    with pytest.warns(FlexpyirtWarning, match="non-positive degrees of freedom"):
+        out = res.m2(df)
     assert len(out) == 1
     row = out.iloc[0]
     assert int(row["df"]) == expected_df
@@ -146,6 +160,46 @@ def test_m2_nonpositive_df_returns_nan_indices(n_items: int, expected_df: int) -
     assert np.isnan(row["tli"])
     assert np.isnan(row["cfi"])
     assert np.isfinite(row["srmsr"]) and row["srmsr"] >= 0.0
+
+
+def test_m2_nonpositive_df_with_low_rank_and_rank_deficient_positive_df() -> None:
+    """Both df <= 0 with rank < s and df > 0 with rank < n_cols warn and return NaN M2."""
+    # Case 1: df <= 0 with rank(Delta_2) < s (3 GPCM(4) items with slopes fixed at 0:
+    # s = 6, q = 9, df = -3, rank = 3 < 6).
+    df3 = _sim_grm(n_obs=400, n_items=3, n_cat=4, seed=11)
+    spec_low = Model.uniform(GPCM(n_cat=4), items=list(df3.columns))
+    for item in df3.columns:
+        spec_low = spec_low.fix(item=item, a=0.0)
+    res_low = fit(spec_low, df3, method=BAEM(tol=1e-6, squarem=True), se=None)
+    with pytest.warns(FlexpyirtWarning, match="not locally identified"):
+        out_low = res_low.m2(df3)
+    row_low = out_low.iloc[0]
+    assert int(row_low["df"]) == -3
+    for col in ("m2", "p", "rmsea", "rmsea_5", "rmsea_95", "tli", "cfi"):
+        assert np.isnan(row_low[col])
+    assert np.isfinite(row_low["srmsr"])
+
+    # Case 2: df > 0 with rank-deficient Delta_2 (4 Rasch + 1 GPCM(7), Normal(0,1) fixed:
+    # s = 15, q = 4 + 7 = 11, df = 4, but item 5's 7 columns lie in 5 rows -> rank <= 9 < 11).
+    rng = np.random.default_rng(12)
+    n_obs = 600
+    theta = rng.normal(0.0, 1.0, n_obs)
+    d_r = rng.normal(0.0, 0.5, 4)
+    y_r = (rng.random((n_obs, 4)) < 1.0 / (1.0 + np.exp(-(theta[:, None] + d_r)))).astype(int)
+    y_p = rng.integers(0, 7, size=(n_obs, 1))
+    df5 = pd.DataFrame(np.hstack([y_r, y_p]), columns=["r1", "r2", "r3", "r4", "p5"])
+    spec_rd = Model.from_items(
+        {"r1": Rasch(), "r2": Rasch(), "r3": Rasch(), "r4": Rasch(), "p5": GPCM(n_cat=7)}
+    ).with_latent(Normal.standard())
+    res_rd = fit(spec_rd, df5, method=BAEM(tol=1e-4, max_iter=200, squarem=True), se=None)
+    assert res_rd.n_params == 11
+    with pytest.warns(FlexpyirtWarning, match="not locally identified"):
+        out_rd = res_rd.m2(df5)
+    row_rd = out_rd.iloc[0]
+    assert int(row_rd["df"]) == 4
+    for col in ("m2", "p", "rmsea", "rmsea_5", "rmsea_95", "tli", "cfi"):
+        assert np.isnan(row_rd[col])
+    assert np.isfinite(row_rd["srmsr"])
 
 
 def test_m2_invariant_to_item_order() -> None:
@@ -216,9 +270,23 @@ def test_rmsea_and_rmsea_ci_against_hand_values() -> None:
     lo_z, hi_z = _m2.rmsea_ci(1.0, df=10, n=400, level=0.90)
     assert lo_z == 0.0 and hi_z == 0.0
 
-    # Non-positive df gives (NaN, NaN).
+    # Non-positive df or n <= 1 gives (NaN, NaN).
     lo_n, hi_n = _m2.rmsea_ci(10.0, df=0, n=400)
     assert np.isnan(lo_n) and np.isnan(hi_n)
+    lo_n1, hi_n1 = _m2.rmsea_ci(10.0, df=5, n=1)
+    assert np.isnan(lo_n1) and np.isnan(hi_n1)
+
+    # Small N or high confidence level: upper bracket expands instead of collapsing to 0.
+    lo_hi, hi_hi = _m2.rmsea_ci(8.0, df=2, n=50, level=0.9999)
+    assert lo_hi == 0.0 < _m2.rmsea(8.0, df=2, n=50) < hi_hi
+    np.testing.assert_allclose(stats.ncx2.cdf(8.0, 2, 50 * 2 * hi_hi**2), 0.00005, atol=1e-10)
+    lo_hi2, hi_hi2 = _m2.rmsea_ci(25.0, df=2, n=50, level=0.9999)
+    assert 0.0 < lo_hi2 < _m2.rmsea(25.0, df=2, n=50) < hi_hi2
+    np.testing.assert_allclose(stats.ncx2.cdf(25.0, 2, 50 * 2 * lo_hi2**2), 0.99995, atol=1e-10)
+    np.testing.assert_allclose(stats.ncx2.cdf(25.0, 2, 50 * 2 * hi_hi2**2), 0.00005, atol=1e-10)
+    lo_sm, hi_sm = _m2.rmsea_ci(1.0, df=1, n=3, level=0.90)
+    assert lo_sm == 0.0 and hi_sm > 0.0
+    np.testing.assert_allclose(stats.ncx2.cdf(1.0, 1, 3 * 1 * hi_sm**2), 0.05, atol=1e-10)
 
     # CI column names and width ordering.
     assert _m2.ci_column_names(0.90) == ("rmsea_5", "rmsea_95")
@@ -307,3 +375,91 @@ def test_m2_all_fixed_and_null_warning() -> None:
     assert np.isfinite(row["m2"]) and row["m2"] > 0.0
     assert np.isnan(row["tli"])
     assert np.isnan(row["cfi"])
+
+
+def test_null_m2_matches_explicit_independence_model() -> None:
+    """Closed-form null_m2 equals m2_statistic on an explicit a=0 dichotomous independence model."""
+    df = _sim_2pl(n_obs=500, n_items=6, seed=9)
+    items = list(df.columns)
+    spec = Model.uniform(TwoPL(), items=items)
+    table = spec.parameter_table(df)
+    table.loc[table["param"] == "a", ["value", "free"]] = [0.0, False]
+    p_bar = df.mean(axis=0)
+    for item in items:
+        p = float(p_bar[item])
+        table.loc[(table["item"] == item) & (table["param"] == "d"), "value"] = np.log(
+            p / (1.0 - p)
+        )
+    res_null = fit(spec, df, table=table, method=BAEM(tol=1e-11, squarem=True), se=None)
+    y = coerce_responses(df, res_null._model)
+    codes, _ = coerce_groups(None, res_null._model, y.shape[0], require_all=False)
+    compiled = compile_problem(res_null._model, y, codes, res_null.parameters, res_null._quadrature)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FlexpyirtWarning)
+        explicit = _m2.m2_statistic(
+            compiled.problem,
+            jnp.asarray(res_null._eta),
+            y,
+            n_params=res_null.n_params,
+            n_cat=[2] * len(items),
+        )
+    closed_stat, closed_df = _m2.null_m2(y)
+    assert closed_df == explicit.df
+    np.testing.assert_allclose(closed_stat, explicit.m2, rtol=1e-12)
+
+
+def test_m2_fourpl_and_pcm() -> None:
+    """FourPL (dichotomous) and PCM (polytomous Rasch with free latent variance) work cleanly."""
+    # FourPL with J=10: s = 55, q = 40 -> df = 15.
+    rng = np.random.default_rng(13)
+    n_obs, n_items = 800, 10
+    theta = rng.normal(0.0, 1.0, n_obs)
+    a = rng.lognormal(0.3, 0.2, n_items)
+    d = rng.normal(0.0, 0.5, n_items)
+    g = rng.uniform(0.10, 0.20, n_items)
+    u = rng.uniform(0.82, 0.92, n_items)
+    prob = g + (u - g) / (1.0 + np.exp(-(np.outer(theta, a) + d)))
+    df4 = pd.DataFrame(
+        (rng.random(prob.shape) < prob).astype(int),
+        columns=[f"f{j + 1:02d}" for j in range(n_items)],
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", HeywoodWarning)
+        res4 = fit(
+            Model.uniform(FourPL(), items=list(df4.columns)),
+            df4,
+            method=BAEM(tol=1e-4, max_iter=300, squarem=True),
+            se=None,
+        )
+    out4 = res4.m2(df4).iloc[0]
+    assert int(out4["df"]) == 15
+    for col in ("m2", "p", "rmsea", "rmsea_5", "rmsea_95", "srmsr", "tli", "cfi"):
+        assert np.isfinite(out4[col])
+
+    # PCM(n_cat=3) with J=6: s = 21, q = 6*2 + 1 = 13 -> df = 8; latent variance in Delta differs
+    # from _latent_in_delta=False, and tli/cfi are NaN (polytomous).
+    df_pcm = _sim_grm(n_obs=500, n_items=6, n_cat=3, seed=14)
+    res_pcm = fit(
+        Model.uniform(PCM(n_cat=3), items=list(df_pcm.columns)),
+        df_pcm,
+        method=BAEM(tol=1e-7, squarem=True),
+        se=None,
+    )
+    out_pcm = res_pcm.m2(df_pcm).iloc[0]
+    assert int(out_pcm["df"]) == 8
+    for col in ("m2", "p", "rmsea", "rmsea_5", "rmsea_95", "srmsr"):
+        assert np.isfinite(out_pcm[col])
+    assert np.isnan(out_pcm["tli"]) and np.isnan(out_pcm["cfi"])
+
+    y = coerce_responses(df_pcm, res_pcm._model)
+    codes, _ = coerce_groups(None, res_pcm._model, y.shape[0], require_all=False)
+    compiled = compile_problem(res_pcm._model, y, codes, res_pcm.parameters, res_pcm._quadrature)
+    nolat = _m2.m2_statistic(
+        compiled.problem,
+        jnp.asarray(res_pcm._eta),
+        y,
+        n_params=res_pcm.n_params,
+        n_cat=[3] * 6,
+        _latent_in_delta=False,
+    )
+    assert abs(float(out_pcm["m2"]) - nolat.m2) > 1e-6

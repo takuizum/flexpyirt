@@ -185,9 +185,13 @@ def test_m2_rasch_free_var_latent_in_delta(squarem: bool) -> None:
     assert int(row["df"]) == int(ref["df"])
     assert abs(float(row["m2"]) - float(ref["M2"])) > 1e-2
     np.testing.assert_allclose(row["m2"], ex_lat["M2"], rtol=2e-5)
-    np.testing.assert_allclose(row["srmsr"], ref["SRMSR"], rtol=2e-5, atol=1e-6)
+    np.testing.assert_allclose(row["p"], ex_lat["p"], rtol=1e-4, atol=3e-5)
+    np.testing.assert_allclose(row["rmsea"], ex_lat["RMSEA"], rtol=1e-4, atol=1e-6)
     np.testing.assert_allclose(row["rmsea_5"], ex_lat["RMSEA_5"], rtol=0.0, atol=1e-4)
     np.testing.assert_allclose(row["rmsea_95"], ex_lat["RMSEA_95"], rtol=0.0, atol=1e-4)
+    np.testing.assert_allclose(row["srmsr"], ref["SRMSR"], rtol=2e-5, atol=1e-6)
+    np.testing.assert_allclose(row["tli"], ex_lat["TLI"], rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(row["cfi"], ex_lat["CFI"], rtol=1e-5, atol=1e-6)
 
     # Evaluate at mirt's exact parameter estimates (keeping free flags) to isolate the M2 formula.
     y = coerce_responses(df, res._model)
@@ -227,6 +231,9 @@ def test_m2_rasch_free_var_latent_in_delta(squarem: bool) -> None:
     np.testing.assert_allclose(m2_lat.m2, ex_lat["M2"], rtol=1e-7)
     np.testing.assert_allclose(m2_lat.p, ex_lat["p"], rtol=1e-7, atol=1e-8)
     np.testing.assert_allclose(m2_lat.rmsea, ex_lat["RMSEA"], rtol=1e-7, atol=1e-8)
+    np.testing.assert_allclose(m2_lat.rmsea_lower, ex_lat["RMSEA_5"], rtol=0.0, atol=1e-4)
+    np.testing.assert_allclose(m2_lat.rmsea_upper, ex_lat["RMSEA_95"], rtol=0.0, atol=1e-4)
+    np.testing.assert_allclose(m2_lat.srmsr, ref["SRMSR"], rtol=1e-9, atol=1e-10)
     np.testing.assert_allclose(m2_lat.tli, ex_lat["TLI"], rtol=1e-7, atol=1e-8)
     np.testing.assert_allclose(m2_lat.cfi, ex_lat["CFI"], rtol=1e-7, atol=1e-8)
     assert abs(m2_lat.m2 - m2_nolat.m2) > 0.03
