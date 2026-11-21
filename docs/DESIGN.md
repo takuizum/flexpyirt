@@ -150,8 +150,20 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   before release.)
   When EH is used in a multiple-group model, **every group uses
   EH** (mixing `EmpiricalHistogram` and `Normal` raises `SpecificationError`).
-- Later: Davidian curves (Woods & Lin, 2009), normal mixtures. Both can be added without touching
-  the Core by following the `LatentDist` protocol (§6).
+- **Davidian curves** (`DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)`;
+  Zhang & Davidian, 2001; Woods & Lin, 2009; §16.4):
+  Single-group, unidimensional seminonparametric density $h_k(z;\boldsymbol\phi)=P_k(z;\boldsymbol\phi)^2\varphi(z)$
+  expanded in normalized probabilists' Hermite polynomials $He_j(z)/\sqrt{j!}$ with unit-sphere
+  coefficients $\mathbf c(\boldsymbol\phi)\in S^k$ parameterized by $k\in\{1,\dots,10\}$ angles
+  $\boldsymbol\phi=(\phi_1,\dots,\phi_k)$ ($\boldsymbol\phi=\mathbf 0$ gives $N(0,1)$ non-singularly).
+  Analytically standardized by the closed-form continuous moments $(\mu_Z(\boldsymbol\phi),\sigma_Z^2(\boldsymbol\phi))$
+  of $h_k$ so that $\theta=\mu+\sigma(Z-\mu_Z)/\sigma_Z$ has exact continuous mean $\mu$ and
+  variance $\sigma^2$ for every $\boldsymbol\phi$. Quadrature weights are the density normalized on
+  the grid, and the latent M-step maximizes $Q^{\text{lat}}=\sum_q \bar n_q\log w_q(\mu,\sigma^2,\boldsymbol\phi)$
+  with the existing masked Newton (`_newton.py`), keeping EM strictly monotone, SQUAREM
+  applicable, and Oakes' identity exact.
+- Later: normal mixtures. Can be added without touching the Core by following the `LatentDist`
+  protocol (§6).
 
 ### 4.5 Identification rules (checked in the Compile layer)
 - Default: the reference group is fixed at $N(0,1)$; focal groups' means and variances are free.
@@ -1005,6 +1017,60 @@ data-independent shapes (§15.21).
    parameters are already equal (`"add"`) or already free (`"drop"`) raises
    `SpecificationError`. MAP fits are rejected (the statistic needs the marginal likelihood at
    the MLE). DIF is post-fit orchestration in the Result layer; only the refits run in `jit`.
+4. **Davidian-curve latent distributions (`DavidianCurve`, §4.4, V19)**:
+   `DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)` (plus
+   `DavidianCurve.free(degree, *, mean=0.0, var=1.0)`) specifies a single-group unidimensional
+   Davidian-curve density of degree $k\in\{1,\dots,10\}$ (Zhang & Davidian, 2001; Woods & Lin,
+   2009). Multiple-group (`Model.with_groups`) and multidimensional (`Model.with_factors`) models
+   with `DavidianCurve` raise `SpecificationError` (mirt 1.46.1 forbids free mean/variance
+   hyper-parameters and standard errors for Davidian curves).
+   **Density and analytical standardization**:
+   Let $\psi_j(z)=He_j(z)/\sqrt{j!}$ ($j=0,\dots,k$) be the normalized probabilists' Hermite
+   polynomials (orthonormal under $\varphi(z)=(2\pi)^{-1/2}e^{-z^2/2}$) and let
+   $h_k(z;\boldsymbol\phi)=P_k(z;\boldsymbol\phi)^2\varphi(z)$ with
+   $P_k(z;\boldsymbol\phi)=\sum_{j=0}^k c_j(\boldsymbol\phi)\psi_j(z)$, where the unit vector
+   $\mathbf c(\boldsymbol\phi)\in S^k$ uses the cosine-first spherical chart
+   $c_0=\prod_{m=1}^k\cos\phi_m$, $c_j=\sin\phi_j\prod_{m=j+1}^k\cos\phi_m$ ($j=1,\dots,k$).
+   Unlike `dcurver`'s sine-first chart ($c_0=\sin\phi_1$), which places $N(0,1)$ at a polar
+   singularity $\phi_1=\pi/2$ where $\partial\mathbf c/\partial\phi_{2:k}=\mathbf 0$ (trapping
+   mirt 1.46.1 at $N(0,1)$ on $k=2$), this chart places $N(0,1)$ at $\boldsymbol\phi=\mathbf 0$
+   with identity Jacobian $\partial c_j/\partial\phi_m|_{\mathbf 0}=\delta_{jm}$ and nests
+   degree $k-1$ at $\phi_k=0$. Both charts span the exact same family of densities on $S^k$.
+   From the Hermite three-term recurrence, $Z\sim h_k(\cdot;\boldsymbol\phi)$ has closed-form
+   continuous moments
+   $$\mu_Z(\boldsymbol\phi)=2\sum_{j=0}^{k-1}\sqrt{j+1}\,c_jc_{j+1},\qquad
+     \sigma_Z^2(\boldsymbol\phi)=\sum_{j=0}^k(2j+1)c_j^2+2\sum_{j=0}^{k-2}\sqrt{(j+1)(j+2)}\,c_jc_{j+2}-\mu_Z(\boldsymbol\phi)^2>0.$$
+   Standardizing analytically to $\theta=\mu+\sigma(Z-\mu_Z)/\sigma_Z$ gives the density
+   $f_k(\theta;\mu,\sigma^2,\boldsymbol\phi)=(\sigma_Z/\sigma)h_k(z(\theta);\boldsymbol\phi)$
+   with $z(\theta)=\mu_Z(\boldsymbol\phi)+\sigma_Z(\boldsymbol\phi)(\theta-\mu)/\sigma$, which
+   has exact continuous mean $\mu$ and variance $\sigma^2$ for every $\boldsymbol\phi\in\mathbb R^k$
+   (and reduces identically to `dcurver::ddc` when $\mu=\mu_Z$, $\sigma^2=\sigma_Z^2$).
+   **Grid weights, M-step, and comparison with mirt**:
+   Quadrature log-weights are normalized on the grid via
+   $\log w_q=\operatorname{log\_softmax}_q(\log(P_k(z_q)^2)-\tfrac12 z_q^2)$ (with double-`where`
+   guards for exact polynomial roots $P_k(z_q)=0$). Angles $\phi_1,\dots,\phi_k$ are unbounded in
+   `(-inf, inf)` during optimization so Newton and SQUAREM are never blocked when a coefficient
+   $c_j$ changes sign. The `ParameterTable` stores `mean`, `var`, and `phi_1..phi_k` under
+   `item="__latent__"`, `model="Davidian"`; identification follows §4.5 (`mean`/`var` follow the
+   same rules as `Normal`, and priors on latent parameters raise `SpecificationError`). Because
+   analytical standardization cancels the first-order derivative in $\phi_1,\phi_2$ at
+   $\boldsymbol\phi=\mathbf 0$, default starts apply a small skewness-aligned perturbation
+   (`phi_1 = 0.1 * sign` for $k=1$; `phi_1 = -0.1 * sign, phi_2 = 0.1, phi_{3..k} = 0` for
+   $k\ge 2$, where `sign` comes from empirical total-score skewness). The latent M-step maximizes
+   $Q^{\text{lat}}=\sum_q \bar n_q\log w_q$ with the existing masked Newton (`_newton.py`),
+   keeping EM strictly monotone, SQUAREM working without special cases, and Oakes == Hessian SEs
+   exact to $\sim 10^{-12}$ (by contrast, mirt 1.46.1 applies Woods' linear-interpolation
+   `standardizeQuadrature` to expected counts before calling `nlminb` on unnormalized `ddc`,
+   which breaks EM monotonicity, disables `SE = TRUE`, forbids free mean/variance, and converges
+   to a non-stationary point with strictly lower log-likelihood; see VALIDATION.md V19).
+   **Scoring, reporting, and JSON**:
+   `FitResult.latent` displays `mean`, `var`, `phi_1..phi_k` and their SEs; `latent_weights`
+   stays `None` (parametric). `score()` uses the fitted Davidian density for `"EAP"` (on the
+   quadrature grid) and `"PV"` (on the 501-node fine grid), keeps `"ML"` and `"WLE"`
+   likelihood-only, and rejects `"MAP"` with `SpecificationError` because $P_k(z)^2\varphi(z)$
+   can be multimodal and vanish at real roots of $P_k$ (matching mirt's `use_dentype_estimate`).
+   `item_fit()` rejects `DavidianCurve` until validated. `"DavidianCurve"` is registered in
+   `_json.py` without changing the JSON payload shape (`schema_version` remains 3).
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -1038,3 +1104,4 @@ data-independent shapes (§15.21).
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.

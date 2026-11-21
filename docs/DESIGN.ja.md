@@ -119,7 +119,17 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   対数尤度が減少し SQUAREM が停滞したため、リリース前に置き換えた。）
   多母集団モデルで EH を指定するときは
   **全群が EH を使う**（`EmpiricalHistogram` と `Normal` の混在は `SpecificationError`）。
-- 将来: Davidian 曲線（Woods & Lin, 2009）、混合正規。いずれも `LatentDist` プロトコル（§6）に従えば Core に手を入れずに追加できる。
+- **Davidian 曲線**（`DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)`；
+  Zhang & Davidian, 2001；Woods & Lin, 2009；§16.4）:
+  単一群・1 次元の半ノンパラメトリック密度 $h_k(z;\boldsymbol\phi)=P_k(z;\boldsymbol\phi)^2\varphi(z)$ を、
+  正規化確率論的 Hermite 多項式 $He_j(z)/\sqrt{j!}$ と単位球面上の係数 $\mathbf c(\boldsymbol\phi)\in S^k$
+  （$k\in\{1,\dots,10\}$ 個の角度 $\boldsymbol\phi=(\phi_1,\dots,\phi_k)$ で表現し、$\boldsymbol\phi=\mathbf 0$ が非特異に
+  $N(0,1)$ を与える）で展開する。$h_k$ の閉形式の連続モーメント $(\mu_Z(\boldsymbol\phi),\sigma_Z^2(\boldsymbol\phi))$ で
+  解析的に標準化し、$\theta=\mu+\sigma(Z-\mu_Z)/\sigma_Z$ が任意の $\boldsymbol\phi$ で厳密に連続平均 $\mu$・分散 $\sigma^2$
+  を持つようにする。求積重みは格子上で正規化した密度とし、潜在分布の M-step は
+  $Q^{\text{lat}}=\sum_q \bar n_q\log w_q(\mu,\sigma^2,\boldsymbol\phi)$ を既存のマスク付き Newton（`_newton.py`）で最大化する。
+  これにより EM の厳密な単調性・SQUAREM の適用・Oakes の恒等式の厳密性を保つ。
+- 将来: 混合正規。`LatentDist` プロトコル（§6）に従えば Core に手を入れずに追加できる。
 
 ### 4.5 識別性ルール（Compile 層で検査）
 - 既定: 参照群は $N(0,1)$ 固定、焦点群の平均・分散は自由。焦点群を自由にするには、群間で全パラメタが等しいアンカー項目が必要
@@ -662,6 +672,46 @@ class ItemKernel(Protocol):
    パラメタ表で行うので識別性は通常の推定と同じく検査され（唯一のアンカーを自由にすると `IdentificationError`）、
    すでに等値（`"add"`）またはすでに自由（`"drop"`）な項目は `SpecificationError`。MAP 推定は拒否する（統計量は
    最尤推定値での周辺尤度を必要とするため）。DIF は Result 層の推定後の処理で、`jit` で動くのは再推定だけ。
+4. **Davidian 曲線潜在分布（`DavidianCurve`、§4.4、V19）**:
+   `DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)`（および
+   `DavidianCurve.free(degree, *, mean=0.0, var=1.0)`）は、次数 $k\in\{1,\dots,10\}$ の単一群 1 次元 Davidian 曲線密度を
+   指定する（Zhang & Davidian, 2001；Woods & Lin, 2009）。多母集団（`Model.with_groups`）および多次元
+   （`Model.with_factors`）での `DavidianCurve` は `SpecificationError` を投げる（mirt 1.46.1 は Davidian 曲線の自由平均・
+   分散パラメタと標準誤差を禁止しているため）。
+   **密度と解析的標準化**:
+   $\psi_j(z)=He_j(z)/\sqrt{j!}$（$j=0,\dots,k$）を正規化確率論的 Hermite 多項式（$\varphi(z)=(2\pi)^{-1/2}e^{-z^2/2}$ に対して
+   正規直交）とし、$P_k(z;\boldsymbol\phi)=\sum_{j=0}^k c_j(\boldsymbol\phi)\psi_j(z)$ により
+   $h_k(z;\boldsymbol\phi)=P_k(z;\boldsymbol\phi)^2\varphi(z)$ とする。単位ベクトル $\mathbf c(\boldsymbol\phi)\in S^k$ には
+   余弦優先の球面座標 $c_0=\prod_{m=1}^k\cos\phi_m$、$c_j=\sin\phi_j\prod_{m=j+1}^k\cos\phi_m$（$j=1,\dots,k$）を採用する。
+   `dcurver` の正弦優先座標（$c_0=\sin\phi_1$）は $N(0,1)$ を $\partial\mathbf c/\partial\phi_{2:k}=\mathbf 0$ となる極特異点
+   $\phi_1=\pi/2$ に置くため mirt 1.46.1 が $k=2$ で $N(0,1)$ に停留する問題があるが、本座標系は $N(0,1)$ を
+   ヤコビアンが単位行列 $\partial c_j/\partial\phi_m|_{\mathbf 0}=\delta_{jm}$ となる $\boldsymbol\phi=\mathbf 0$ に置き、かつ
+   $\phi_k=0$ で次数 $k-1$ を厳密に内包する。両座標系は $S^k$ 上の同一の密度族を張る。
+   Hermite の 3 項漸化式より $Z\sim h_k(\cdot;\boldsymbol\phi)$ の連続モーメントは閉形式で
+   $$\mu_Z(\boldsymbol\phi)=2\sum_{j=0}^{k-1}\sqrt{j+1}\,c_jc_{j+1},\qquad
+     \sigma_Z^2(\boldsymbol\phi)=\sum_{j=0}^k(2j+1)c_j^2+2\sum_{j=0}^{k-2}\sqrt{(j+1)(j+2)}\,c_jc_{j+2}-\mu_Z(\boldsymbol\phi)^2>0$$
+   と与えられる。$\theta=\mu+\sigma(Z-\mu_Z)/\sigma_Z$ により解析的に標準化すると、密度
+   $f_k(\theta;\mu,\sigma^2,\boldsymbol\phi)=(\sigma_Z/\sigma)h_k(z(\theta);\boldsymbol\phi)$
+   （$z(\theta)=\mu_Z(\boldsymbol\phi)+\sigma_Z(\boldsymbol\phi)(\theta-\mu)/\sigma$）は任意の $\boldsymbol\phi\in\mathbb R^k$ で
+   厳密な連続平均 $\mu$・分散 $\sigma^2$ を持つ（また $\mu=\mu_Z$、$\sigma^2=\sigma_Z^2$ と置けば `dcurver::ddc` に厳密一致する）。
+   **格子重み・M-step・mirt との比較**:
+   求積対数重みは $\log w_q=\operatorname{log\_softmax}_q(\log(P_k(z_q)^2)-\tfrac12 z_q^2)$ で格子上に正規化する
+   （多項式の厳密な零点 $P_k(z_q)=0$ は二重 `where` でガードする）。角度 $\phi_1,\dots,\phi_k$ は最適化中 `(-inf, inf)` の
+   無制約とし、係数 $c_j$ の符号反転を Newton や SQUAREM が妨げられないようにする。`ParameterTable` は
+   `item="__latent__"`、`model="Davidian"` の下に `mean`・`var`・`phi_1..phi_k` を持ち、識別性検査は §4.5
+   （`Normal` と同じ平均・分散ルール、潜在パラメタへの事前分布は `SpecificationError`）に従う。解析的標準化により
+   $\boldsymbol\phi=\mathbf 0$ で $\phi_1,\phi_2$ の 1 次微分が相殺するため、既定初期値には合計得点の経験的歪度の符号 `sign` に
+   合わせた微小摂動（$k=1$ で `phi_1 = 0.1 * sign`、$k\ge 2$ で `phi_1 = -0.1 * sign, phi_2 = 0.1, phi_{3..k} = 0`）を与える。
+   潜在分布の M-step は $Q^{\text{lat}}=\sum_q \bar n_q\log w_q$ を既存のマスク付き Newton（`_newton.py`）で最大化し、
+   EM の厳密な単調性・特別処理なしの SQUAREM・相対 $\sim 10^{-12}$ での Oakes == Hessian SE を保つ（対照的に mirt 1.46.1 は
+   期待度数に Woods の線形補間 `standardizeQuadrature` をかけてから未正規化の `ddc` を `nlminb` で最適化するため、EM 単調性が
+   崩れ、`SE = TRUE` と自由平均・分散が禁止され、対数尤度が真に低い非停留点に収束する。VALIDATION.ja.md V19 参照）。
+   **スコアリング・出力・JSON**:
+   `FitResult.latent` は `mean`・`var`・`phi_1..phi_k` とその SE を返し、`latent_weights` はパラメトリック分布のため `None`。
+   `score()` は `"EAP"`（求積格子上）と `"PV"`（501 点細密格子上）で推定した Davidian 密度を用い、`"ML"` と `"WLE"` は尤度のみ、
+   `"MAP"` は $P_k(z)^2\varphi(z)$ が多峰になったり実根で密度 0 になったりするため `SpecificationError`（mirt の
+   `use_dentype_estimate` の制限と同じ）。`item_fit()` は検証されるまで `DavidianCurve` を拒否する。`_json.py` に
+   `"DavidianCurve"` を登録し、JSON ペイロードの形は変わらないため `schema_version` は 3 のままとする。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -695,3 +745,4 @@ class ItemKernel(Protocol):
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
