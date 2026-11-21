@@ -24,7 +24,7 @@
 
 ## M3 EH・MAP・3PL/4PL・GPCM・SQUAREM
 - EmpiricalHistogram（DESIGN §12-1 を決めてから）。
-- 事前分布と MAP、`log_posterior` の報告。
+- [x] 事前分布と MAP（`NormalPrior`, `LogNormal`, `Beta`, `Model.prior()`, `FitResult.log_posterior`、V7 で照合済み）。
 - [x] 3PL / 4PL（`ThreePL`, `FourPL`, `HeywoodWarning`、V11 で照合済み）。
 - [x] GPCM / PCM（`GPCM`, `PCM`、V8 で照合済み）。
 - [x] SQUAREM（`BAEM(squarem=True)`、スキーム S3 と単調性・実行可能性の安全装置。全 mirt 照合スイートが SQUAREM あり・なしで通過）。

@@ -16,9 +16,10 @@ flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめ�
 8. [潜在分布と識別性](#8-潜在分布と識別性)
 9. [多母集団](#9-多母集団)
 10. [固定項目パラメタ推定（FIPC）](#10-固定項目パラメタ推定fipc)
-11. [ParameterTable を編集する](#11-parametertable-を編集する)
-12. [求積格子の選び方](#12-求積格子の選び方)
-13. [エラーと警告](#13-エラーと警告)
+11. [事前分布と MAP 推定](#11-事前分布と-map-推定)
+12. [ParameterTable を編集する](#12-parametertable-を編集する)
+13. [求積格子の選び方](#13-求積格子の選び方)
+14. [エラーと警告](#14-エラーと警告)
 
 ## 1. 準備
 
@@ -38,9 +39,12 @@ from flexpyirt import (
     GPCM,
     GRM,
     PCM,
+    Beta,
     FourPL,
+    LogNormal,
     Model,
     Normal,
+    NormalPrior,
     Quadrature,
     Rasch,
     ThreePL,
@@ -172,7 +176,7 @@ res = fit(
   多母集団、3PL / 4PL、厳しい `tol`）で有効にする。同じ不動点に収束し、`history["loglik"]` は単調で、
   EM の評価回数が大きく減る。M3 では mirt との実行時間のベンチマークが済むまで、通常の EM（`squarem=False`）を既定とする。
 - **`quadrature`**: 潜在変数の求積格子。既定は等間隔 61 点・$[-6, 6]$（mirt の既定と同じ）。
-  広げるべき場合は [12 節](#12-求積格子の選び方)。
+  広げるべき場合は [13 節](#13-求積格子の選び方)。
 - **`se`**: `"oakes"`（既定）、`"hessian"`、`None`（計算しない）。
 
 ```python
@@ -200,11 +204,11 @@ print(res.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeguar
 |---|---|
 | `items` | 1 項目 1 行（多母集団では群 × 項目）。`model`、内部パラメタ、`<param>_se`、表示用の `b` / `bk` |
 | `latent` | 1 群 1 行。`group`, `mean`, `var`, `mean_se`, `var_se`（固定値の SE は NaN） |
-| `parameters` | ParameterTable（[11 節](#11-parametertable-を編集する)）に `estimate` と `se` を足したもの |
-| `loglik`, `aic`, `bic` | 周辺対数尤度と情報量規準（$-2\ell+2k$, $-2\ell+k\log N$） |
+| `parameters` | ParameterTable（[12 節](#12-parametertable-を編集する)）に `estimate` と `se` を足したもの |
+| `loglik`, `log_posterior`, `aic`, `bic` | 周辺対数尤度、対数事後確率（事前分布なしでは `loglik` と同値）、情報量規準（$-2\ell+2k$, $-2\ell+k\log N$。MAP 時は `FlexpyirtWarning`） |
 | `n_params`, `n_obs` | 自由パラメタ数、回答者数 |
 | `converged`, `n_iter`, `n_em_evaluations`, `n_safeguards` | 収束したか、採択された反復回数、EM 写像の評価回数の合計（通常の EM では `n_iter` と同じ）、SQUAREM の安全装置が働いた回数 |
-| `history` | 採択された反復ごとの `iter`, `loglik`, `max_change`, `em_evaluations`（累計）, `safeguard`（SQUAREM の安全装置が働いたか） |
+| `history` | 採択された反復ごとの `iter`, `loglik`, `log_posterior`, `max_change`, `em_evaluations`（累計）, `safeguard`（SQUAREM の安全装置が働いたか） |
 | `vcov`, `se_method` | 自由パラメタの共分散行列（`free_id` 順）と計算方法 |
 
 `history.loglik` は反復ごとに減らない（EM の単調性）。減っていたらバグなので報告してほしい。
@@ -368,7 +372,43 @@ fipc_spec_irt = (
 )
 ```
 
-## 11. ParameterTable を編集する
+## 11. 事前分布と MAP 推定
+
+`Model.prior(*, param, dist, items=None)` で項目パラメタに事前分布を付けると、Bayes modal（MAP）推定を行う
+（Mislevy, 1986; Swaminathan & Gifford, 1986）。自然尺度上の 3 種類の事前分布を用意している。
+
+| クラス | 台（サポート） | 主な用途 |
+|---|---|---|
+| `NormalPrior(mean, sd)` | $(-\infty, \infty)$ | 切片 `d` / `dk`、または傾き `a` |
+| `LogNormal(meanlog, sdlog)` | $(0, \infty)$ | 傾き `a`（$\log a \sim N(\mu, s^2)$） |
+| `Beta(a, b)` | $(0, 1)$ | 3PL / 4PL の漸近線 `g`・`u` |
+
+事前分布は**ヤコビアンなしの自然パラメタ尺度**で直接評価する（R mirt の対数事前目的関数 `LL.Priors` と一致）。
+多母集団モデルでは `.prior()` が全群に適用され、群間で共有されるパラメタ（同じ `free_id`）の事前分布は **1 回だけ**
+数えられる。固定されたパラメタの事前分布は無視される。潜在分布パラメタ（`"mean"`, `"var"`）への事前分布は対象外
+（`SpecificationError`）。
+
+```python
+map_spec = (
+    Model.uniform(ThreePL(), items=df_3pl.columns)
+    .prior(param="a", dist=LogNormal(0.2, 0.3))
+    .prior(param="d", dist=NormalPrior(0.0, 2.0))
+    .prior(param="g", dist=Beta(5, 17))
+)
+map_res = fit(map_spec, df_3pl)
+print(map_res.loglik, map_res.log_posterior)
+print(map_res.items[["item", "a", "d", "g", "g_se"]].head(3).round(3))
+assert (map_res.history["log_posterior"].diff().dropna() >= -1e-8).all()
+```
+
+- `res.loglik` は周辺対数尤度のみのままで、`res.log_posterior` が $\ell(\hat\eta) + \log\pi(\hat\eta)$ を返す
+  （事前分布がないときは `loglik` と同値）。
+- 通常の EM・SQUAREM とも `history["log_posterior"]` が単調非減少になる。
+- 標準誤差（`se="oakes"`・`se="hessian"`）はどちらも観測情報行列に事前分布の負の Hessian
+  $-\nabla^2_\eta\log\pi(\hat\eta)$ を加え、互いに一致する。
+- 事前分布が有効なとき、`res.aic` と `res.bic` は MLE ではなく MAP 推定値での尤度を使うため `FlexpyirtWarning` を出す。
+
+## 12. ParameterTable を編集する
 
 すべての制約は ParameterTable の列で表される（mirt の `pars = "values"` に相当）。表を取り出して pandas で
 編集し、`fit(..., table=...)` に渡すと、表が `Model` の指定より優先される。
@@ -385,6 +425,7 @@ print(table.head(4))
 | `value` | 初期値（固定なら固定値） |
 | `free` | 推定するか |
 | `lower`, `upper` | 範囲。初期値はこの範囲の内側でなければならない |
+| `prior` | 事前分布オブジェクト（`NormalPrior`, `LogNormal`, `Beta`, または `None`。固定なら無視） |
 | `free_id` | 自由パラメタの番号。**同じ番号の行は同じ値に制約される**（等値制約）。新しく自由にした行は `-1` のままでよい（番号が振られる） |
 
 ```python
@@ -402,7 +443,7 @@ print(res_edit.items.set_index("item").loc["q05", ["a", "d"]])
 - `free_id` の共有は**同じ項目の同じパラメタを群間で**等しくする用途に限られる。異なる項目をまたぐ等値制約
   （例: 全項目で共通の傾き）は未対応（M5 予定）。
 
-## 12. 求積格子の選び方
+## 13. 求積格子の選び方
 
 潜在分布の重みは格子 $[\text{lower}, \text{upper}]$ の上で正規化するので、格子の端で分布が切れるとその分だけ
 推定値が影響を受ける。既定の 61 点・$[-6, 6]$ は $N(0,1)$ 付近では十分だが、**推定する群の分散が大きい
@@ -416,16 +457,16 @@ wide = Quadrature.equispaced(81, lim=(-8, 8))  # 刻み 0.2 のまま範囲を�
 mirt は分散を閉形式のモーメントで更新するため、格子の端の影響が大きい条件では mirt と値がずれる。格子を
 広げると両者は一致する（[VALIDATION.md](VALIDATION.ja.md)）。
 
-## 13. エラーと警告
+## 14. エラーと警告
 
 | 種類 | いつ出るか |
 |---|---|
 | `PrecisionError` | JAX の 64 ビット浮動小数点が無効なまま `fit()` を呼んだ |
-| `SpecificationError` | 仕様とデータの矛盾（列の過不足、範囲外の値、観測されないカテゴリ、存在しない項目の固定、表の不正な編集、群ラベルの不一致） |
+| `SpecificationError` | 仕様とデータの矛盾（列の過不足、範囲外の値、観測されないカテゴリ、存在しない項目の固定、表や事前分布の不正な編集、群ラベルの不一致） |
 | `IdentificationError` | 尺度が識別できない（[8 節](#8-潜在分布と識別性)） |
 | `ConvergenceWarning` | `max_iter` までに収束しなかった、または SQUAREM が反復の 50% 超（5 回以上）で通常の EM に戻った |
 | `HeywoodWarning` | 自由な項目パラメタが有限の境界から `1e-4` 以内（3PL / 4PL で `g` が 0 付近、`u` が 1 付近など）、または自由な傾きが $|a| > 20$ |
-| `FlexpyirtWarning` | 情報行列が正定値でない（SE が NaN）、アンカーが 1 パラメタだけ |
+| `FlexpyirtWarning` | 情報行列が正定値でない（SE が NaN）、アンカーが 1 パラメタだけ、または MAP 推定で `aic` / `bic` を参照した |
 
 すべての例外は `flexpyirt.errors.FlexpyirtError`、警告は `flexpyirt.errors.FlexpyirtWarning` を継承する。
 `SpecificationError` と `IdentificationError` は `ValueError` でもある。
@@ -445,7 +486,9 @@ except SpecificationError as e:
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.

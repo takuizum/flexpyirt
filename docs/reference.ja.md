@@ -11,6 +11,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm)
+- 事前分布: [`NormalPrior`](#normalprior), [`LogNormal`](#lognormal), [`Beta`](#beta)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - 例外と警告: [`flexpyirt.errors`](#flexpyirterrors)
@@ -26,18 +27,18 @@ fit(spec, data, *, group=None, table=None, item_names=None, method=None,
     quadrature=None, se="oakes") -> FitResult
 ```
 
-Bock–Aitkin EM による周辺最尤推定（Bock & Aitkin, 1981）。
+Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は Bayes modal / MAP 推定。Bock & Aitkin, 1981）。
 
 | 引数 | 型 | 説明 |
 |---|---|---|
 | `spec` | `Model` | モデルの指定 |
 | `data` | DataFrame / polars DataFrame / 2 次元配列 | 行が回答者・列が項目。値は `0..K-1`、欠測は NaN。列はモデルの項目とちょうど一致すること |
 | `group` | 配列（長さ = 行数）, 任意 | 多母集団モデルの群ラベル。`Model.with_groups()` で宣言した群名 |
-| `table` | DataFrame, 任意 | `Model.parameter_table()` を編集した表。指定すると `spec` の固定・等値・初期値より優先 |
+| `table` | DataFrame, 任意 | `Model.parameter_table()` を編集した表。指定すると `spec` の固定・等値・事前分布・初期値より優先 |
 | `item_names` | list[str], 任意 | `data` が配列のときの列名 |
 | `method` | `BAEM`, 任意 | EM の設定（既定 `BAEM()`） |
 | `quadrature` | `Quadrature`, 任意 | 求積格子（既定 61 点・$[-6, 6]$） |
-| `se` | `"oakes"` / `"hessian"` / `None` | 標準誤差の計算方法。`None` なら計算しない |
+| `se` | `"oakes"` / `"hessian"` / `None` | 標準誤差の計算方法（MAP 時は事前分布の Hessian を含む）。`None` なら計算しない |
 
 **戻り値**: [`FitResult`](#fitresult)
 
@@ -55,17 +56,27 @@ Bock–Aitkin EM による周辺最尤推定（Bock & Aitkin, 1981）。
 | `items` | DataFrame | 1 項目 1 行（多母集団では `group` 列つきで群 × 項目）。`model`、内部パラメタ（`a`, `d` / `d1`…, `g`, `u`）、`<param>_se`、表示用の `b` / `bk`（$-d/a$、GRM は $-d_k/a$、GPCM/PCM は $-(d_k-d_{k-1})/a$、$d_0=0$。SE なし） |
 | `latent` | DataFrame | 1 群 1 行。`group`, `mean`, `var`, `mean_se`, `var_se`（固定値の SE は NaN） |
 | `parameters` | DataFrame | 検証済みの ParameterTable に `estimate`（推定値。固定なら固定値）と `se` を足したもの |
-| `loglik` | float | 推定値での周辺対数尤度 |
-| `aic`, `bic` | float | $-2\ell + 2k$、$-2\ell + k\log N$（$k$ = `n_params`, $N$ = `n_obs`） |
+| `loglik` | float | 推定値での周辺対数尤度（尤度のみ、事前分布は含めない） |
+| `log_posterior` | float | 推定値での対数事後確率（$\ell(\hat\eta) + \log\pi(\hat\eta)$）。事前分布なしでは `loglik` と同値 |
+| `aic`, `bic` | float | $-2\ell + 2k$、$-2\ell + k\log N$（$k$ = `n_params`, $N$ = `n_obs`）。事前分布が有効なときは `FlexpyirtWarning` を出す |
 | `n_params` | int | 自由パラメタ数（等値制約は 1 つと数える） |
 | `n_obs` | int | 回答者数 |
 | `converged` | bool | 収束基準を満たしたか |
 | `n_iter` | int | 採択された EM（または SQUAREM）の反復回数 |
 | `n_em_evaluations` | int | EM 写像（E-step + M-step）の総評価回数。通常 EM では `n_iter` と同値、SQUAREM では採択 1 回あたり 2 または 3 |
 | `n_safeguards` | int | SQUAREM の単調性・実行可能性の安全装置が介入した反復数（通常 EM では 0） |
-| `history` | DataFrame | `iter`, `loglik`（その反復に入るときの値）, `max_change`, `em_evaluations`（累積 EM 写像評価回数）, `safeguard`（SQUAREM 安全装置が発動したか） |
+| `history` | DataFrame | `iter`, `loglik`, `log_posterior`（その反復に入るときの値。反復ごとに単調非減少）, `max_change`, `em_evaluations`（累積 EM 写像評価回数）, `safeguard`（SQUAREM 安全装置が発動したか） |
 | `vcov` | ndarray / None | 自由パラメタの共分散行列（`free_id` 順）。`se=None` なら None |
 | `se_method` | str / None | `"oakes"` / `"hessian"` / None |
+
+#### `FitResult.log_posterior`
+
+```text
+res.log_posterior -> float
+```
+
+自然尺度で評価した自由パラメタ全体の対数事後確率 $\ell(\hat\eta) + \sum_i \log\pi_i(\hat\eta_i)$
+（`free_id` ごとに 1 回計上、固定パラメタの事前分布は無視）。事前分布がないときは `res.loglik` と同値。
 
 #### `FitResult.score`
 
@@ -159,6 +170,23 @@ model.equal_across_groups(*, items, params=None) -> Model
 `params=["a"]` のように指定するとそのパラメタだけ。`items` は名前のリストか `str -> bool` の関数、
 `None` なら全項目。何度でも重ねて呼べる。
 
+#### `Model.prior`
+
+```text
+model.prior(*, param, dist, items=None) -> Model
+```
+
+選択した項目の内部パラメタ `param` に事前分布 `dist`（`NormalPrior`, `LogNormal`, `Beta`）を全群共通で付ける
+（MAP 推定、[ガイド 11 節](guide.ja.md#11-事前分布と-map-推定)）。事前分布はヤコビアンなしの自然尺度で評価される。
+固定パラメタの事前分布は無視され、群間で共有されるパラメタ（同じ `free_id`）は 1 回だけ数えられる。潜在分布パラメタ
+（`"mean"`, `"var"`）への指定は `SpecificationError`。
+
+| 引数 | 説明 |
+|---|---|
+| `param` | 内部項目パラメタ名（`"a"`, `"d"`, `"g"`, `"u"`, `"d1"`, …） |
+| `dist` | `NormalPrior`, `LogNormal`, `Beta` のいずれか |
+| `items` | 項目名のリスト、`str -> bool` の関数、または全項目を表す `None` |
+
 #### `Model.parameter_table`
 
 ```text
@@ -166,7 +194,7 @@ model.parameter_table(data, *, group=None, item_names=None) -> DataFrame
 ```
 
 `data` に対する既定の ParameterTable を返す。列は `group`, `item`, `model`, `param`, `value`, `free`,
-`lower`, `upper`, `free_id`。編集して `fit(..., table=...)` に渡す（[ガイド 11 節](guide.ja.md#11-parametertable-を編集する)）。
+`lower`, `upper`, `prior`, `free_id`。編集して `fit(..., table=...)` に渡す（[ガイド 12 節](guide.ja.md#12-parametertable-を編集する)）。
 
 #### その他の属性
 
@@ -176,7 +204,7 @@ model.parameter_table(data, *, group=None, item_names=None) -> DataFrame
 | `is_multigroup` | `with_groups()` で群を宣言したか |
 | `resolved_latent()` | 単一群モデルの潜在分布（既定則を適用したもの） |
 | `resolved_groups()` | `(群名, Normal)` のタプル。単一群なら `(("all", ...),)` |
-| `items`, `fixed`, `latent`, `groups`, `equal` | 指定の中身（通常は直接使わない） |
+| `items`, `fixed`, `latent`, `groups`, `equal`, `priors` | 指定の中身（通常は直接使わない） |
 
 ---
 
@@ -257,6 +285,46 @@ $P(y=k\mid\theta)=\exp(k\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\theta+d_c)$（$d_0=0$
 
 ---
 
+## 事前分布
+
+ヤコビアンなしの自然尺度で項目パラメタに課す事前分布の不変データクラス（DESIGN §4.7）。いずれもハイパーパラメタを検証し
+（不正なら `SpecificationError`）、`support` と `log_pdf(x) -> Array` を持つ。
+
+### `NormalPrior`
+
+```text
+NormalPrior(mean, sd)
+```
+
+$(-\infty, \infty)$ 上の正規事前分布:
+$\log\pi(x) = -\tfrac{1}{2}\log(2\pi) - \log\sigma - \frac{(x-\mu)^2}{2\sigma^2}$
+（Mislevy, 1986、mirt の `norm`）。有限な `mean` と正の有限な `sd` が必要。潜在分布 `Normal` と名前が衝突しないよう
+`NormalPrior` としている。
+
+### `LogNormal`
+
+```text
+LogNormal(meanlog, sdlog)
+```
+
+$(0, \infty)$ 上の対数正規事前分布（$\log X \sim N(\mu, s^2)$）:
+$\log\pi(x) = -\log x - \log s - \tfrac{1}{2}\log(2\pi) - \frac{(\log x - \mu)^2}{2s^2}$
+（$x \le 0$ で $-\infty$。Mislevy, 1986、mirt の `lnorm`）。有限な `meanlog` と正の有限な `sdlog` が必要。
+傾き `a` によく使う。
+
+### `Beta`
+
+```text
+Beta(a, b)
+```
+
+$(0, 1)$ 上のベータ事前分布:
+$\log\pi(x) = (a - 1)\log x + (b - 1)\log(1 - x) - \log B(a, b)$
+（$(0, 1)$ の外で $-\infty$。Swaminathan & Gifford, 1986、mirt の `expbeta` の自然尺度対数事前目的関数と一致、
+logit ヤコビアンなし）。正の有限な `a`, `b` が必要。3PL / 4PL の漸近線 `g`, `u` によく使う。
+
+---
+
 ## 潜在分布
 
 ### `Normal`
@@ -277,7 +345,7 @@ Normal.free(*, mean=0.0, var=1.0)
 | `Normal.free()` | 平均・分散を推定 |
 
 `var` は正、`mean` は有限でなければ `SpecificationError`。推定した `var` は格子で切る前の正規分布の
-パラメタ（[ガイド 12 節](guide.ja.md#12-求積格子の選び方)）。
+パラメタ（[ガイド 13 節](guide.ja.md#13-求積格子の選び方)）。
 
 ---
 
@@ -334,8 +402,9 @@ JAX の 64 ビット浮動小数点が無効。`jax.config.update("jax_enable_x6
 
 #### `FlexpyirtWarning`
 
-flexpyirt が出すすべての警告の基底クラス（`UserWarning` を継承）。情報行列が正定値でない場合や、
-焦点群の平均が 1 つのパラメタだけでつながっている場合に直接出る。
+flexpyirt が出すすべての警告の基底クラス（`UserWarning` を継承）。情報行列が正定値でない場合、
+焦点群の平均が 1 つのパラメタだけでつながっている場合、または事前分布が有効なモデルで `FitResult.aic` /
+`FitResult.bic` を参照した場合に直接出る。
 
 #### `ConvergenceWarning`
 

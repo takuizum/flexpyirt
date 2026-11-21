@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -11,7 +12,7 @@ import pandas as pd
 
 from flexpyirt import _core
 from flexpyirt._compile import LATENT_ITEM, coerce_groups, coerce_responses, compile_problem
-from flexpyirt.errors import SpecificationError
+from flexpyirt.errors import FlexpyirtWarning, SpecificationError
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -31,7 +32,10 @@ class FitResult:
     parameters : DataFrame
         The parameter table (DESIGN.md §5.1) with ``estimate`` and ``se`` columns added.
     loglik : float
-        Marginal log-likelihood at the estimates.
+        Marginal log-likelihood at the estimates (likelihood only, excluding priors).
+    log_posterior : float
+        Log posterior (marginal log-likelihood plus sum of free-parameter log priors) at the
+        estimates; equals ``loglik`` when no priors are active (DESIGN.md §4.7).
     converged : bool
         Whether the EM convergence criterion was met.
     n_iter : int
@@ -43,9 +47,11 @@ class FitResult:
         Number of SQUAREM iterations on which the monotonicity/feasibility safeguard fired (0 for
         plain EM).
     history : DataFrame
-        Columns ``iter``, ``loglik`` (at the parameters entering the iteration), ``max_change``,
-        ``em_evaluations`` (cumulative EM map evaluations through the iteration), and
-        ``safeguard`` (whether the SQUAREM safeguard fired on that iteration).
+        Columns ``iter``, ``loglik`` (at the parameters entering the iteration),
+        ``log_posterior`` (at the parameters entering the iteration; equals ``loglik`` without
+        priors and is non-decreasing across iterations), ``max_change``, ``em_evaluations``
+        (cumulative EM map evaluations through the iteration), and ``safeguard`` (whether the
+        SQUAREM safeguard fired on that iteration).
     vcov : ndarray or None
         Covariance matrix of the free parameters in ``free_id`` order (``None`` if ``se=None``).
     se_method : str or None
@@ -56,6 +62,7 @@ class FitResult:
 
     parameters: pd.DataFrame
     loglik: float
+    log_posterior: float
     converged: bool
     n_iter: int
     n_em_evaluations: int
@@ -71,18 +78,38 @@ class FitResult:
     # ---- summaries ---------------------------------------------------------------------------
 
     @property
+    def _has_priors(self) -> bool:
+        """Whether at least one free parameter has an active prior."""
+        free = self.parameters[self.parameters["free"]]
+        return any(p is not None for p in free["prior"])
+
+    @property
     def n_params(self) -> int:
         """Number of free parameters."""
         return int(self._eta.shape[0])
 
     @property
     def aic(self) -> float:
-        r""":math:`-2\ell+2k`."""
+        r""":math:`-2\ell+2k` (warns with ``FlexpyirtWarning`` under MAP)."""
+        if self._has_priors:
+            warnings.warn(
+                "AIC uses the marginal log-likelihood evaluated at the MAP estimate rather than "
+                "the MLE; interpret with caution when priors are present.",
+                FlexpyirtWarning,
+                stacklevel=2,
+            )
         return -2.0 * self.loglik + 2.0 * self.n_params
 
     @property
     def bic(self) -> float:
-        r""":math:`-2\ell+k\log N`."""
+        r""":math:`-2\ell+k\log N` (warns with ``FlexpyirtWarning`` under MAP)."""
+        if self._has_priors:
+            warnings.warn(
+                "BIC uses the marginal log-likelihood evaluated at the MAP estimate rather than "
+                "the MLE; interpret with caution when priors are present.",
+                FlexpyirtWarning,
+                stacklevel=2,
+            )
         return -2.0 * self.loglik + self.n_params * float(np.log(self.n_obs))
 
     @property
@@ -178,7 +205,8 @@ class FitResult:
     def __repr__(self) -> str:
         """Short text summary."""
         status = "converged" if self.converged else "NOT converged"
+        post = f", log_posterior={self.log_posterior:.4f}" if self._has_priors else ""
         return (
-            f"FitResult(loglik={self.loglik:.4f}, n_params={self.n_params}, n_obs={self.n_obs}, "
-            f"{status} in {self.n_iter} iterations, se={self.se_method})"
+            f"FitResult(loglik={self.loglik:.4f}{post}, n_params={self.n_params}, "
+            f"n_obs={self.n_obs}, {status} in {self.n_iter} iterations, se={self.se_method})"
         )

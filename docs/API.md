@@ -3,8 +3,8 @@
 English | [日本語](API.ja.md)
 
 > **For the implemented API, see the [API reference](reference.md) and the [user guide](guide.md).**
-> This file is the design-stage sketch and includes features that are not implemented yet (3PL,
-> priors, EH, ...).
+> This file is the design-stage sketch and still includes a few features that are not implemented yet
+> (EH, Gauss–Hermite, `TruncNormal`, M4 scoring/MIRT, ...).
 
 > Goal: separate "specification (Spec), estimation (fit), result (FitResult)". A specification is
 > an immutable object, and method chaining returns a new specification.
@@ -134,6 +134,18 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
   `.with_latent(Normal.free())`.
 - Unidentified specifications (focal group free without anchors, a free mean without fixed items,
   ...) raise `IdentificationError` before fitting.
+
+## 6.3 Added in M3 (so far)
+- Item models: `ThreePL`, `FourPL`, `GPCM(n_cat=K)`, `PCM(n_cat=K)` (`HeywoodWarning` on boundary
+  solutions).
+- SQUAREM acceleration: `BAEM(squarem=True)` (scheme S3 with monotonicity/feasibility safeguard;
+  `FitResult.n_em_evaluations`, `FitResult.n_safeguards`).
+- Priors and MAP estimation: `NormalPrior(mean, sd)`, `LogNormal(meanlog, sdlog)`, `Beta(a, b)`
+  with `log_pdf`, attached via `Model.prior(*, param, dist, items=None)` or the `prior` column of
+  `ParameterTable`. `FitResult.log_posterior` (equal to `loglik` without priors),
+  `history["log_posterior"]`, `FlexpyirtWarning` on `aic`/`bic` when priors are active, and
+  posterior information in both `se="oakes"` and `se="hessian"`. Priors on latent-distribution
+  parameters raise `SpecificationError`.
 
 ## 7. Main classes and functions
 

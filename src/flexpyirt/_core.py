@@ -19,16 +19,20 @@ from jax import Array
 from flexpyirt._newton import newton_ascent
 from flexpyirt.items import ItemKernel
 from flexpyirt.latent import normal_log_weights
+from flexpyirt.priors import PRIOR_NONE, eval_log_prior
 
 __all__ = [
     "CompiledProblem",
     "EMResult",
     "FamilyBlock",
     "LatentBlock",
+    "PriorBlock",
     "eap",
     "em",
     "information_hessian",
     "information_oakes",
+    "log_posterior",
+    "log_prior",
     "marginal_loglik",
     "squarem",
 ]
@@ -86,6 +90,24 @@ class LatentBlock:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
+class PriorBlock:
+    """Branch-free prior specification per free parameter ``eta`` (DESIGN.md §4.7).
+
+    Attributes
+    ----------
+    kind : (n_free,) int32
+        ``0`` none, ``1`` NormalPrior, ``2`` LogNormal, ``3`` Beta.
+    param1, param2 : (n_free,) float64
+        Distribution parameters (unused entries hold ``0.0`` and ``1.0``).
+    """
+
+    kind: Array
+    param1: Array
+    param2: Array
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
 class CompiledProblem:
     """Everything the Core needs (DESIGN.md §5.2).
 
@@ -101,6 +123,8 @@ class CompiledProblem:
         Quadrature nodes.
     families : tuple[FamilyBlock, ...]
     latent : LatentBlock
+    priors : PriorBlock
+        Prior specification per free parameter (counted once per ``free_id``).
     n_groups : int
         Static number of groups.
     """
@@ -111,6 +135,7 @@ class CompiledProblem:
     nodes: Array
     families: tuple[FamilyBlock, ...]
     latent: LatentBlock
+    priors: PriorBlock
     n_groups: int = field(metadata={"static": True})
 
 
@@ -175,6 +200,25 @@ def marginal_loglik(prob: CompiledProblem, eta: Array) -> Array:
         \ell(\eta)=\sum_p c_p\log\sum_q w_{g(p)q}\prod_j P_j(y_{pj}\mid\theta_q)
     """
     return jnp.sum(prob.counts * jax.scipy.special.logsumexp(_log_joint(prob, eta), axis=1))
+
+
+def log_prior(prob: CompiledProblem, eta: Array) -> Array:
+    r"""Sum of log priors over all free parameters on the natural scale (DESIGN.md §4.7).
+
+    Returns ``0.0`` when no priors are present or ``eta`` is empty. Each free parameter
+    (``free_id``) is counted once; fixed parameters are not in ``eta`` and contribute nothing.
+    """
+    if eta.shape[0] == 0:
+        return jnp.zeros((), dtype=prob.nodes.dtype)
+    return jnp.sum(eval_log_prior(eta, prob.priors.kind, prob.priors.param1, prob.priors.param2))
+
+
+def log_posterior(prob: CompiledProblem, eta: Array) -> Array:
+    r"""Log posterior :math:`\ell(\eta) + \log\pi(\eta)` (DESIGN.md §4.7).
+
+    Equals :func:`marginal_loglik` when no priors are attached.
+    """
+    return marginal_loglik(prob, eta) + log_prior(prob, eta)
 
 
 class ExpectedCounts(NamedTuple):
@@ -249,11 +293,23 @@ def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: i
     """M-step: item-wise and group-wise masked Newton, ``vmap``-ed (DESIGN.md §4.3, §4.4, §14.2).
 
     Each item is one Newton block over its local vector, which holds the parameters of all
-    groups with across-group equalities merged into shared slots.
+    groups with across-group equalities merged into shared slots. Item-parameter priors are added
+    directly to each item's local objective so the item-wise decomposition is preserved and every
+    shared parameter's prior is counted once.
     """
     new_eta = eta
     for fam, r in zip(prob.families, counts.r, strict=True):
         u0 = _expand(eta, jnp.zeros(fam.slot_free_index.shape, eta.dtype), fam.slot_free_index)
+        slot_free = fam.slot_free_index >= 0
+        if eta.shape[0] == 0:
+            slot_kind = jnp.full(fam.slot_free_index.shape, PRIOR_NONE, dtype=jnp.int32)
+            slot_p1 = jnp.zeros(fam.slot_free_index.shape, dtype=eta.dtype)
+            slot_p2 = jnp.ones(fam.slot_free_index.shape, dtype=eta.dtype)
+        else:
+            safe_fid = jnp.maximum(fam.slot_free_index, 0)
+            slot_kind = jnp.where(slot_free, prob.priors.kind[safe_fid], PRIOR_NONE)
+            slot_p1 = jnp.where(slot_free, prob.priors.param1[safe_fid], 0.0)
+            slot_p2 = jnp.where(slot_free, prob.priors.param2[safe_fid], 1.0)
         r_items = jnp.swapaxes(r, 0, 1)  # (J_f, G, K, Q)
         local = jnp.swapaxes(fam.local_index, 0, 1)  # (J_f, G, P_f)
         fixed = jnp.swapaxes(fam.fixed_values, 0, 1)
@@ -266,11 +322,15 @@ def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: i
             free: Array,
             lo: Array,
             hi: Array,
+            sk: Array,
+            sp1: Array,
+            sp2: Array,
             k: ItemKernel = fam.kernel,
         ) -> Array:
             def q_item(v: Array) -> Array:
                 xi = _local_to_xi(v, loc, fix)  # (G, P_f)
-                return jnp.sum(jax.vmap(lambda rg, pg: _item_q(k, prob.nodes, rg, pg))(rj, xi))
+                q_lik = jnp.sum(jax.vmap(lambda rg, pg: _item_q(k, prob.nodes, rg, pg))(rj, xi))
+                return q_lik + jnp.sum(eval_log_prior(v, sk, sp1, sp2))
 
             return newton_ascent(q_item, u, free, lo, hi, n_steps)
 
@@ -279,9 +339,12 @@ def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: i
             local,
             fixed,
             u0,
-            fam.slot_free_index >= 0,
+            slot_free,
             fam.slot_lower,
             fam.slot_upper,
+            slot_kind,
+            slot_p1,
+            slot_p2,
         )
         new_eta = _scatter(new_eta, u_new, fam.slot_free_index)
 
@@ -308,7 +371,9 @@ class EMResult(NamedTuple):
     n_iter: Array
     converged: Array
     loglik: Array
+    log_posterior: Array
     loglik_history: Array
+    log_posterior_history: Array
     change_history: Array
     n_em_evaluations: Array
     em_eval_history: Array
@@ -333,25 +398,28 @@ def _eta_bounds(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
 
 
 def em(prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newton: int) -> EMResult:
-    """Bock–Aitkin EM in a ``lax.while_loop`` (DESIGN.md §4.6).
+    """Bock–Aitkin EM in a ``lax.while_loop`` (DESIGN.md §4.6, §4.7).
 
-    ``loglik_history[t]`` is the log-likelihood at the parameters entering iteration ``t``;
-    ``change_history[t]`` the maximum absolute parameter change made by iteration ``t``.
+    ``loglik_history[t]`` and ``log_posterior_history[t]`` are evaluated at the parameters entering
+    iteration ``t``; ``change_history[t]`` is the maximum absolute parameter change made by
+    iteration ``t``. EM is monotone in the log posterior (which equals the log-likelihood without
+    priors).
     """
     nan_hist = jnp.full((max_iter,), jnp.nan, dtype=eta0.dtype)
     eval_hist = jnp.zeros((max_iter,), dtype=jnp.int32)
     safe_hist = jnp.zeros((max_iter,), dtype=jnp.bool_)
     one = jnp.asarray(1, dtype=jnp.int32)
 
-    def cond(state: tuple[Array, Array, Array, Array, Array, Array]) -> Array:
-        _, it, change, _, _, _ = state
+    def cond(state: tuple[Array, Array, Array, Array, Array, Array, Array]) -> Array:
+        _, it, change, _, _, _, _ = state
         return (it < max_iter) & (change >= tol)
 
     def body(
-        state: tuple[Array, Array, Array, Array, Array, Array],
-    ) -> tuple[Array, Array, Array, Array, Array, Array]:
-        eta, it, _, ll_hist, ch_hist, ev_hist = state
+        state: tuple[Array, Array, Array, Array, Array, Array, Array],
+    ) -> tuple[Array, Array, Array, Array, Array, Array, Array]:
+        eta, it, _, ll_hist, lp_hist, ch_hist, ev_hist = state
         counts, ll = e_step(prob, eta)
+        lp = ll + log_prior(prob, eta)
         new = m_step(prob, eta, counts, n_newton)
         change = jnp.max(jnp.abs(new - eta), initial=0.0)
         next_it = it + one
@@ -360,6 +428,7 @@ def em(prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newto
             next_it,
             change,
             ll_hist.at[it].set(ll),
+            lp_hist.at[it].set(lp),
             ch_hist.at[it].set(change),
             ev_hist.at[it].set(next_it),
         )
@@ -370,15 +439,19 @@ def em(prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newto
         jnp.asarray(jnp.inf, eta0.dtype),
         nan_hist,
         nan_hist,
+        nan_hist,
         eval_hist,
     )
-    eta, n_iter, change, ll_hist, ch_hist, ev_hist = jax.lax.while_loop(cond, body, init)
+    eta, n_iter, change, ll_hist, lp_hist, ch_hist, ev_hist = jax.lax.while_loop(cond, body, init)
+    final_ll = marginal_loglik(prob, eta)
     return EMResult(
         eta=eta,
         n_iter=n_iter,
         converged=change < tol,
-        loglik=marginal_loglik(prob, eta),
+        loglik=final_ll,
+        log_posterior=final_ll + log_prior(prob, eta),
         loglik_history=ll_hist,
+        log_posterior_history=lp_hist,
         change_history=ch_hist,
         n_em_evaluations=n_iter,
         em_eval_history=ev_hist,
@@ -390,7 +463,7 @@ def em(prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newto
 def squarem(
     prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newton: int
 ) -> EMResult:
-    r"""SQUAREM-accelerated Bock–Aitkin EM (Varadhan & Roland, 2008, scheme S3; DESIGN §4.6).
+    r"""SQUAREM-accelerated Bock–Aitkin EM (Varadhan & Roland, 2008, scheme S3; DESIGN §4.6, §4.7).
 
     Each iteration applies the EM map :math:`F` twice to obtain :math:`\theta_1=F(\theta_0)` and
     :math:`\theta_2=F(\theta_1)`, forms :math:`r=\theta_1-\theta_0`,
@@ -403,13 +476,14 @@ def squarem(
         = \theta_2 - 2\delta s + \delta^2 v \quad (\delta=\alpha+1\le 0).
 
     Monotonicity and feasibility safeguard: if :math:`\theta'(\alpha)` leaves the strict parameter
-    bounds ``(lower, upper)`` or gives a non-finite or lower marginal log-likelihood than
-    :math:`\max(\ell(\theta_2),\ell(\theta_0))`, :math:`\alpha` is stepped back towards :math:`-1`
-    via :math:`\alpha\leftarrow(\alpha-1)/2` (i.e. :math:`\delta\leftarrow\delta/2`) up to
-    ``_SQUAREM_MAX_BACKTRACK`` times. An accepted :math:`\theta'` is followed by one stabilizing
-    EM step :math:`\theta_{\text{new}}=F(\theta')` (3 EM map evaluations); if no backtracked
-    candidate is acceptable, :math:`\theta_{\text{new}}=\theta_2` is used directly (2 EM map
-    evaluations). Runs entirely inside ``lax.while_loop``.
+    bounds ``(lower, upper)`` or gives a non-finite or lower log posterior than
+    :math:`\max(\ell_{\mathrm{post}}(\theta_2),\ell_{\mathrm{post}}(\theta_0))`, :math:`\alpha` is
+    stepped back towards :math:`-1` via :math:`\alpha\leftarrow(\alpha-1)/2` (i.e.
+    :math:`\delta\leftarrow\delta/2`) up to ``_SQUAREM_MAX_BACKTRACK`` times. An accepted
+    :math:`\theta'` is followed by one stabilizing EM step :math:`\theta_{\text{new}}=F(\theta')`
+    (3 EM map evaluations); if no backtracked candidate is acceptable,
+    :math:`\theta_{\text{new}}=\theta_2` is used directly (2 EM map evaluations). Runs entirely
+    inside ``lax.while_loop``.
     """
     lower, upper = _eta_bounds(prob, eta0)
     nan_hist = jnp.full((max_iter,), jnp.nan, dtype=eta0.dtype)
@@ -420,27 +494,28 @@ def squarem(
     two = jnp.asarray(2, dtype=jnp.int32)
     three = jnp.asarray(3, dtype=jnp.int32)
 
-    def _is_acceptable(cand: Array, ll_ref: Array) -> Array:
+    def _is_acceptable(cand: Array, lp_ref: Array) -> Array:
         in_bounds = jnp.all(jnp.isfinite(cand) & (cand > lower) & (cand < upper))
 
-        def _eval_ll(c: Array) -> Array:
-            ll_c = marginal_loglik(prob, c)
-            return jnp.isfinite(ll_c) & (ll_c >= ll_ref)
+        def _eval_lp(c: Array) -> Array:
+            lp_c = log_posterior(prob, c)
+            return jnp.isfinite(lp_c) & (lp_c >= lp_ref)
 
-        accepted: Array = jax.lax.cond(in_bounds, _eval_ll, lambda _: jnp.asarray(False), cand)
+        accepted: Array = jax.lax.cond(in_bounds, _eval_lp, lambda _: jnp.asarray(False), cand)
         return accepted
 
     def cond(
-        state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array],
+        state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
     ) -> Array:
-        _, it, change, _, _, _, _, _, _ = state
+        _, it, change, _, _, _, _, _, _, _ = state
         return (it < max_iter) & (change >= tol)
 
     def body(
-        state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array],
-    ) -> tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array]:
-        eta, it, _, n_evals, n_safe, ll_hist, ch_hist, ev_hist, sf_hist = state
+        state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
+    ) -> tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array]:
+        eta, it, _, n_evals, n_safe, ll_hist, lp_hist, ch_hist, ev_hist, sf_hist = state
         counts0, ll0 = e_step(prob, eta)
+        lp0 = ll0 + log_prior(prob, eta)
         theta1 = m_step(prob, eta, counts0, n_newton)
         counts1, _ = e_step(prob, theta1)
         theta2 = m_step(prob, theta1, counts1, n_newton)
@@ -455,8 +530,8 @@ def squarem(
         alpha = jnp.where(jnp.isfinite(raw_alpha), jnp.minimum(raw_alpha, -1.0), -1.0)
 
         def _extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            ll2 = marginal_loglik(prob, theta2)
-            ll_ref = jnp.maximum(ll2, ll0)
+            lp2 = log_posterior(prob, theta2)
+            lp_ref = jnp.maximum(lp2, lp0)
 
             def bt_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
                 k, _, ok, _ = bt
@@ -465,7 +540,7 @@ def squarem(
             def bt_body(bt: tuple[Array, Array, Array, Array]) -> tuple[Array, Array, Array, Array]:
                 k, delta, _, _ = bt
                 cand = theta2 - 2.0 * delta * s + (delta * delta) * v
-                ok = _is_acceptable(cand, ll_ref)
+                ok = _is_acceptable(cand, lp_ref)
                 next_delta = jnp.where(ok, delta, 0.5 * delta)
                 next_k = jnp.where(ok, k, k + one)
                 return next_k, next_delta, ok, cand
@@ -501,6 +576,7 @@ def squarem(
             next_evals,
             next_safe,
             ll_hist.at[it].set(ll0),
+            lp_hist.at[it].set(lp0),
             ch_hist.at[it].set(change),
             ev_hist.at[it].set(next_evals),
             sf_hist.at[it].set(fired),
@@ -514,18 +590,22 @@ def squarem(
         zero,
         nan_hist,
         nan_hist,
+        nan_hist,
         eval_hist,
         safe_hist,
     )
-    eta, n_iter, change, n_evals, n_safe, ll_hist, ch_hist, ev_hist, sf_hist = jax.lax.while_loop(
-        cond, body, init
+    eta, n_iter, change, n_evals, n_safe, ll_hist, lp_hist, ch_hist, ev_hist, sf_hist = (
+        jax.lax.while_loop(cond, body, init)
     )
+    final_ll = marginal_loglik(prob, eta)
     return EMResult(
         eta=eta,
         n_iter=n_iter,
         converged=change < tol,
-        loglik=marginal_loglik(prob, eta),
+        loglik=final_ll,
+        log_posterior=final_ll + log_prior(prob, eta),
         loglik_history=ll_hist,
+        log_posterior_history=lp_hist,
         change_history=ch_hist,
         n_em_evaluations=n_evals,
         em_eval_history=ev_hist,
@@ -535,22 +615,29 @@ def squarem(
 
 
 def information_hessian(prob: CompiledProblem, eta: Array) -> Array:
-    r"""Observed information :math:`-\nabla^2_\eta\ell(\eta)` by ``jax.hessian`` (DESIGN §4.8)."""
-    info: Array = -jax.hessian(lambda e: marginal_loglik(prob, e))(eta)
+    r"""Observed posterior information :math:`-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]` (§4.8).
+
+    Reduces to :math:`-\nabla^2_\eta\ell(\eta)` when no priors are present.
+    """
+    info: Array = -jax.hessian(lambda e: log_posterior(prob, e))(eta)
     return info
 
 
 def information_oakes(prob: CompiledProblem, eta: Array) -> Array:
-    r"""Observed information by Oakes' identity (Oakes, 1999; DESIGN.md §4.8).
+    r"""Observed (posterior) information by Oakes' identity (Oakes, 1999; DESIGN.md §4.8).
 
     .. math::
-        I(\hat\eta)=-\Big[\frac{\partial^2Q(\eta\mid\eta')}{\partial\eta\,\partial\eta^\top}
-        +\frac{\partial^2Q(\eta\mid\eta')}{\partial\eta\,\partial\eta'^\top}\Big]_{\eta=\eta'=\hat\eta}
+        I(\hat\eta)=-\Big[\frac{\partial^2Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta^\top}
+        +\frac{\partial^2Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta'^\top}\Big]_{\eta=\eta'=\hat\eta}
+
+    where :math:`Q_{\mathrm{post}}(\eta\mid\eta')=Q(\eta\mid\eta')+\log\pi(\eta)`. Adding
+    :math:`\log\pi(\eta)` contributes :math:`-\nabla^2_\eta\log\pi(\hat\eta)` and keeps the
+    exact identity with :func:`information_hessian`.
     """
 
     def q(e: Array, e_prime: Array) -> Array:
         counts, _ = e_step(prob, e_prime)
-        return expected_complete_loglik(prob, e, counts)
+        return expected_complete_loglik(prob, e, counts) + log_prior(prob, e)
 
     h_own, h_cross = jax.jacfwd(jax.grad(q, argnums=0), argnums=(0, 1))(eta, eta)
     info: Array = -(h_own + h_cross)

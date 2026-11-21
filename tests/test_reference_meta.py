@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from tests import _reference, test_mirt_m2, test_mirt_m3, test_mirt_m3_gpcm
+from tests import _reference, test_mirt_m2, test_mirt_m3, test_mirt_m3_gpcm, test_mirt_m3_priors
 from tests._reference import REFERENCE_DIR, check_reference_meta
 
 
@@ -58,6 +58,7 @@ def test_all_committed_reference_jsons_pass_meta_checks() -> None:
         (test_mirt_m2, "v3_science_grm"),
         (test_mirt_m3, "v11_3pl"),
         (test_mirt_m3_gpcm, "v8_science_gpcm"),
+        (test_mirt_m3_priors, "v7_2pl_map"),
     ],
 )
 @pytest.mark.parametrize(

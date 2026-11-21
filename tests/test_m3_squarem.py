@@ -132,6 +132,7 @@ def test_history_columns_and_counters_plain_vs_squarem() -> None:
     assert list(plain.history.columns) == [
         "iter",
         "loglik",
+        "log_posterior",
         "max_change",
         "em_evaluations",
         "safeguard",

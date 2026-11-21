@@ -12,6 +12,7 @@ import pandas as pd
 from flexpyirt.errors import SpecificationError
 from flexpyirt.items import PCM, GPCMKernel, ItemModel, Rasch
 from flexpyirt.latent import Normal
+from flexpyirt.priors import PRIOR_TYPES, Prior
 
 __all__ = ["SINGLE_GROUP", "Model"]
 
@@ -42,6 +43,9 @@ class Model:
         reference group (DESIGN.md §14.4).
     equal : tuple of (items, params or None)
         Across-group equality constraints from :meth:`equal_across_groups`.
+    priors : tuple of (item, param, Prior)
+        Prior distributions on item parameters from :meth:`prior` (applied across all groups;
+        shared parameters are counted once and fixed parameters ignore their prior).
     """
 
     items: tuple[tuple[str, ItemModel], ...]
@@ -49,6 +53,7 @@ class Model:
     latent: Normal | None = None
     groups: tuple[tuple[str, Normal], ...] | None = None
     equal: tuple[tuple[tuple[str, ...], tuple[str, ...] | None], ...] = ()
+    priors: tuple[tuple[str, str, Prior], ...] = ()
 
     def __post_init__(self) -> None:
         """Validate item names."""
@@ -264,13 +269,60 @@ class Model:
                     raise SpecificationError(f"Item {item!r} has no parameters {bad}.")
         return replace(self, equal=(*self.equal, (chosen, param_tuple)))
 
+    def prior(
+        self,
+        *,
+        param: str,
+        dist: Prior,
+        items: ItemSelector = None,
+    ) -> Model:
+        """Return a model with prior ``dist`` attached to ``param`` of the selected items.
+
+        The prior is evaluated on the natural parameter scale without a Jacobian term
+        (DESIGN.md §4.7). In a multiple-group model it applies to every group; a parameter shared
+        across groups (same ``free_id``) is counted once, and a fixed parameter ignores its prior.
+        Priors on latent-distribution parameters (``"mean"``, ``"var"``) are not supported.
+
+        Parameters
+        ----------
+        param : str
+            Internal item parameter name (e.g. ``"a"``, ``"d"``, ``"g"``, ``"u"``, ``"d1"``).
+        dist : NormalPrior, LogNormal, or Beta
+            Prior distribution on the natural parameter scale.
+        items : iterable of str or callable, optional
+            Items to attach the prior to (default: every item in the model).
+        """
+        if not isinstance(dist, PRIOR_TYPES):
+            raise SpecificationError(
+                f"Unsupported prior distribution {dist!r}; use NormalPrior, LogNormal or Beta."
+            )
+        if param in ("mean", "var"):
+            raise SpecificationError(
+                f"Priors on latent-distribution parameters ({param!r}) are not supported."
+            )
+        chosen = self._select(items)
+        if not chosen:
+            raise SpecificationError("prior() selected no items.")
+        lookup = dict(self.items)
+        for item in chosen:
+            params = lookup[item].kernel.param_names
+            if param not in params:
+                raise SpecificationError(
+                    f"Item {item!r} ({lookup[item].name}) has no parameter {param!r}; "
+                    f"available: {list(params)}."
+                )
+        new = {(i, p): d for i, p, d in self.priors}
+        for item in chosen:
+            new[(item, param)] = dist
+        return replace(self, priors=tuple((i, p, d) for (i, p), d in new.items()))
+
     def parameter_table(
         self, data: Any, *, group: Any = None, item_names: Iterable[str] | None = None
     ) -> pd.DataFrame:
         """Return the default parameter table (DESIGN.md §5.1) for ``data``.
 
-        Edit ``value``, ``free``, ``lower``, ``upper`` or ``free_id`` and pass it back with
-        ``fit(..., table=edited)``.
+        Edit ``value``, ``free``, ``lower``, ``upper``, ``prior`` or ``free_id`` and pass it back
+        with ``fit(..., table=edited)``.
         """
         from flexpyirt._compile import prepare
 

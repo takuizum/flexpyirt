@@ -6,6 +6,7 @@ group / item / parameter.
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -15,9 +16,10 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock
+from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock, PriorBlock
 from flexpyirt.errors import FlexpyirtWarning, IdentificationError, SpecificationError
-from flexpyirt.items import FourPLKernel, ItemKernel
+from flexpyirt.items import FourPLKernel, GradedKernel, ItemKernel
+from flexpyirt.priors import PRIOR_TYPES, Beta, LogNormal, NormalPrior, Prior, encode_prior
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -38,7 +40,18 @@ __all__ = [
 
 LATENT_ITEM = "__latent__"
 LATENT_PARAMS = ("mean", "var")
-TABLE_COLUMNS = ("group", "item", "model", "param", "value", "free", "lower", "upper", "free_id")
+TABLE_COLUMNS = (
+    "group",
+    "item",
+    "model",
+    "param",
+    "value",
+    "free",
+    "lower",
+    "upper",
+    "prior",
+    "free_id",
+)
 
 
 # --------------------------------------------------------------------------------------------
@@ -191,28 +204,131 @@ def _start_values(model: Model, y: np.ndarray) -> dict[str, np.ndarray]:
     return out
 
 
+def _prior_center(pri: Prior) -> float | None:
+    """Return a representative interior point for ``pri``, or ``None`` if it overflows."""
+    if isinstance(pri, NormalPrior):
+        return pri.mean
+    if isinstance(pri, LogNormal):
+        try:
+            return math.exp(pri.meanlog)
+        except OverflowError:
+            return None
+    if isinstance(pri, Beta):
+        return pri.a / (pri.a + pri.b)
+    return None
+
+
+def _interior_point(lo: float, hi: float, candidate: float | None = None) -> float:
+    """Return a finite point strictly inside ``(lo, hi)`` (assuming ``lo < hi``)."""
+    if candidate is not None and math.isfinite(candidate) and lo < candidate < hi:
+        return candidate
+    if math.isfinite(lo) and math.isfinite(hi):
+        return 0.5 * (lo + hi)
+    if math.isfinite(lo):
+        return lo + 1.0
+    if math.isfinite(hi):
+        return hi - 1.0
+    return 0.0
+
+
+def _order_grm_intercepts(
+    d: np.ndarray,
+    is_free: Sequence[bool],
+    eff_lo: Sequence[float],
+    eff_hi: Sequence[float],
+) -> np.ndarray:
+    """Ensure GRM intercepts are strictly decreasing inside each free parameter's open bounds."""
+    m = len(d)
+    if m < 2 or all(float(d[j]) > float(d[j + 1]) for j in range(m - 1)):
+        return d
+    lb = [eff_lo[j] if is_free[j] else float(d[j]) for j in range(m)]
+    ub = [eff_hi[j] if is_free[j] else float(d[j]) for j in range(m)]
+    for j in range(m - 2, -1, -1):
+        if is_free[j]:
+            lb[j] = max(lb[j], lb[j + 1])
+    for j in range(1, m):
+        if is_free[j]:
+            ub[j] = min(ub[j], ub[j - 1])
+    if any(is_free[j] and not (lb[j] < ub[j]) for j in range(m)):
+        return d
+    out = d.copy()
+    j = 0
+    while j < m:
+        if not is_free[j]:
+            j += 1
+            continue
+        s = j
+        while j < m and is_free[j]:
+            j += 1
+        e = j - 1
+        for idx in range(s, e + 1):
+            rem = e - idx + 1
+            lo = lb[idx]
+            hi = ub[idx] if idx == 0 else min(ub[idx], float(out[idx - 1]))
+            if math.isfinite(lo) and math.isfinite(hi):
+                out[idx] = lo + (hi - lo) * (rem / (rem + 1.0))
+            elif math.isfinite(lo):
+                out[idx] = lo + 0.5 * rem
+            elif math.isfinite(hi):
+                out[idx] = hi - 0.5
+            else:
+                out[idx] = 0.5 * (rem - 0.5 * (e - s + 2))
+    return out
+
+
 def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
     """Build the default ParameterTable (DESIGN.md §5.1, §14.1) from the spec and responses."""
     rows: list[dict[str, Any]] = []
     starts = _start_values(model, y)
     fixed = {(item, param): value for item, param, value in model.fixed}
+    priors = {(item, param): dist for item, param, dist in model.priors}
     for group_name, latent in model.resolved_groups():
         for name, item_model in model.items:
             lower, upper = item_model.bounds()
             free_default = item_model.default_free()
+            param_names = item_model.kernel.param_names
             item_starts = starts[name].copy()
+            is_free = [
+                free_default[k] and (name, param) not in fixed
+                for k, param in enumerate(param_names)
+            ]
+            eff_lo = [float(v) for v in lower]
+            eff_hi = [float(v) for v in upper]
+            for k, param in enumerate(param_names):
+                if not is_free[k]:
+                    item_starts[k] = fixed.get((name, param), float(item_starts[k]))
+                    continue
+                pri = priors.get((name, param))
+                if pri is not None:
+                    p_lo, p_hi = pri.support
+                    eff_lo[k] = max(eff_lo[k], p_lo)
+                    eff_hi[k] = min(eff_hi[k], p_hi)
+                lo_k, hi_k = eff_lo[k], eff_hi[k]
+                if lo_k < hi_k and not (lo_k < float(item_starts[k]) < hi_k):
+                    candidate = _prior_center(pri) if pri is not None else None
+                    item_starts[k] = _interior_point(lo_k, hi_k, candidate)
             if isinstance(item_model.kernel, FourPLKernel):
-                g_free = free_default[2] and (name, "g") not in fixed
-                u_free = free_default[3] and (name, "u") not in fixed
+                g_free = is_free[2]
+                u_free = is_free[3]
                 if g_free and not u_free:
-                    u_val = fixed.get((name, "u"), float(item_starts[3]))
-                    if u_val > 0.0:
-                        item_starts[2] = min(float(item_starts[2]), 0.5 * u_val)
+                    hi_g = min(eff_hi[2], float(item_starts[3]))
+                    if eff_lo[2] < hi_g and not (eff_lo[2] < float(item_starts[2]) < hi_g):
+                        item_starts[2] = _interior_point(eff_lo[2], hi_g)
                 elif u_free and not g_free:
-                    g_val = fixed.get((name, "g"), float(item_starts[2]))
-                    if g_val < 1.0:
-                        item_starts[3] = max(float(item_starts[3]), 0.5 * (1.0 + g_val))
-            for k, param in enumerate(item_model.kernel.param_names):
+                    lo_u = max(eff_lo[3], float(item_starts[2]))
+                    if lo_u < eff_hi[3] and not (lo_u < float(item_starts[3]) < eff_hi[3]):
+                        item_starts[3] = _interior_point(lo_u, eff_hi[3])
+                elif g_free and u_free and not (float(item_starts[2]) < float(item_starts[3])):
+                    ov_lo = max(eff_lo[2], eff_lo[3])
+                    ov_hi = min(eff_hi[2], eff_hi[3])
+                    if ov_lo < ov_hi and math.isfinite(ov_lo) and math.isfinite(ov_hi):
+                        item_starts[2] = ov_lo + (ov_hi - ov_lo) / 3.0
+                        item_starts[3] = ov_lo + 2.0 * (ov_hi - ov_lo) / 3.0
+            elif isinstance(item_model.kernel, GradedKernel):
+                item_starts[1:] = _order_grm_intercepts(
+                    item_starts[1:], is_free[1:], eff_lo[1:], eff_hi[1:]
+                )
+            for k, param in enumerate(param_names):
                 key = (name, param)
                 rows.append(
                     {
@@ -220,10 +336,11 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                         "item": name,
                         "model": item_model.name,
                         "param": param,
-                        "value": fixed.get(key, float(item_starts[k])),
-                        "free": free_default[k] and key not in fixed,
+                        "value": float(item_starts[k]),
+                        "free": is_free[k],
                         "lower": float(lower[k]),
                         "upper": float(upper[k]),
+                        "prior": priors.get(key),
                     }
                 )
         latent_rows: tuple[tuple[str, float, bool, float], ...] = (
@@ -241,9 +358,11 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                     "free": bool(free),
                     "lower": lat_lower,
                     "upper": np.inf,
+                    "prior": None,
                 }
             )
     table = pd.DataFrame(rows)
+    table["prior"] = table["prior"].astype(object)
     ids = np.full(len(table), -1)
     free_mask = table["free"].to_numpy(dtype=bool)
     ids[free_mask] = np.arange(int(free_mask.sum()))
@@ -290,6 +409,7 @@ def validate_table(
     t = t.set_index(keys).loc[reference.set_index(keys).index].reset_index()[list(TABLE_COLUMNS)]
     t["model"] = reference["model"].to_numpy()
     t["free"] = t["free"].astype(bool)
+    t["prior"] = t["prior"].astype(object)
     for col in ("value", "lower", "upper"):
         t[col] = t[col].astype(float)
 
@@ -302,6 +422,7 @@ def validate_table(
     ref_lower = reference["lower"].to_numpy(dtype=float)
     ref_upper = reference["upper"].to_numpy(dtype=float)
     free = t["free"].to_numpy(dtype=bool)
+    prior_col = t["prior"].to_numpy(dtype=object)
     for i in range(len(t)):
         where = f"(group={group_col[i]!r}, item={item_col[i]!r}, param={param_col[i]!r})"
         if not np.isfinite(value[i]):
@@ -324,6 +445,28 @@ def validate_table(
             )
         if item_col[i] == LATENT_ITEM and param_col[i] == "var" and not value[i] > 0:
             raise SpecificationError(f"Latent variance must be positive at {where}.")
+        pri = prior_col[i]
+        if pri is not None:
+            if item_col[i] == LATENT_ITEM:
+                raise SpecificationError(
+                    f"Priors on latent-distribution parameters are not supported at {where}."
+                )
+            if not isinstance(pri, PRIOR_TYPES):
+                raise SpecificationError(
+                    f"Invalid prior {pri!r} at {where}; use NormalPrior, LogNormal, Beta or None."
+                )
+            if free[i]:
+                p_lo, p_hi = pri.support
+                if not (p_lo < value[i] < p_hi):
+                    raise SpecificationError(
+                        f"Starting value {value[i]} is outside the support ({p_lo}, {p_hi}) "
+                        f"of {pri!r} at {where}."
+                    )
+                if not (max(lower[i], p_lo) < min(upper[i], p_hi)):
+                    raise SpecificationError(
+                        f"Bounds [{lower[i]}, {upper[i]}] do not overlap the support "
+                        f"({p_lo}, {p_hi}) of {pri!r} at {where}."
+                    )
 
     # Asymptote ordering g < u for 3PL / 4PL items.
     fourpl_items = {name for name, m in model.items if isinstance(m.kernel, FourPLKernel)}
@@ -358,6 +501,13 @@ def validate_table(
     if (within > 1).any():
         fid = int(within[within > 1].index[0])
         raise SpecificationError(f"free_id {fid} is shared by different parameters of one item.")
+    for fid_val, rows_f in t[t["free"]].groupby("free_id"):
+        priors_f = list(rows_f["prior"])
+        first_p = priors_f[0]
+        if any(p != first_p for p in priors_f[1:]):
+            raise SpecificationError(
+                f"Rows sharing free_id {fid_val} have conflicting priors: {priors_f}."
+            )
     _check_estimable(t, model, y, group)
     _check_identification(t, model)
     return t
@@ -502,14 +652,23 @@ def compile_problem(
     patterns, pat_groups, counts = pad_patterns(patterns, pat_groups, counts)
     n_free = int(table["free_id"].max()) + 1 if table["free"].any() else 0
     eta0 = np.zeros(n_free)
+    prior_kind = np.zeros(n_free, dtype=np.int32)
+    prior_p1 = np.zeros(n_free, dtype=float)
+    prior_p2 = np.ones(n_free, dtype=float)
     free_rows = table[table["free"]].drop_duplicates("free_id")
-    eta0[free_rows["free_id"].to_numpy(dtype=int)] = free_rows["value"].to_numpy(dtype=float)
+    free_ids = free_rows["free_id"].to_numpy(dtype=int)
+    eta0[free_ids] = free_rows["value"].to_numpy(dtype=float)
+    for fid_val, pri in zip(free_ids.tolist(), free_rows["prior"].tolist(), strict=True):
+        k_code, p1, p2 = encode_prior(pri)
+        prior_kind[fid_val] = k_code
+        prior_p1[fid_val] = p1
+        prior_p2[fid_val] = p2
 
     groups = [g for g, _ in model.resolved_groups()]
     n_groups = len(groups)
-    lookup = {
-        (g, i, p): (v, fid, lo, hi)
-        for g, i, p, v, fid, lo, hi in zip(
+    lookup: dict[tuple[str, str, str], tuple[float, int, float, float, Prior | None]] = {
+        (g, i, p): (v, fid, lo, hi, pri)
+        for g, i, p, v, fid, lo, hi, pri in zip(
             table["group"],
             table["item"],
             table["param"],
@@ -517,6 +676,7 @@ def compile_problem(
             table["free_id"].to_numpy(dtype=int),
             table["lower"].to_numpy(dtype=float),
             table["upper"].to_numpy(dtype=float),
+            table["prior"].tolist(),
             strict=True,
         )
     }
@@ -545,12 +705,16 @@ def compile_problem(
             item_slots: list[tuple[int, float, float]] = []
             for gg, g in enumerate(groups):
                 for pp, p in enumerate(params):
-                    v, fid, lo, hi = lookup[(g, item, p)]
+                    v, fid, lo, hi, pri = lookup[(g, item, p)]
                     fixed[gg, jj, pp] = v
                     free_index[gg, jj, pp] = fid
                     if fid >= 0:
                         if fid not in seen:
                             seen[fid] = len(item_slots)
+                            if pri is not None:
+                                p_lo, p_hi = pri.support
+                                lo = max(lo, p_lo)
+                                hi = min(hi, p_hi)
                             item_slots.append((fid, lo, hi))
                         local_index[gg, jj, pp] = seen[fid]
             slots.append(item_slots)
@@ -574,12 +738,19 @@ def compile_problem(
             )
         )
 
-    lat_vals = np.array([[lookup[(g, LATENT_ITEM, p)] for p in LATENT_PARAMS] for g in groups])
+    lat_vals = np.array(
+        [[lookup[(g, LATENT_ITEM, p)][:4] for p in LATENT_PARAMS] for g in groups], dtype=float
+    )
     latent = LatentBlock(
         fixed_values=jnp.asarray(lat_vals[:, :, 0], dtype=jnp.float64),
         free_index=jnp.asarray(lat_vals[:, :, 1].astype(np.int32)),
         lower=jnp.asarray(lat_vals[:, :, 2], dtype=jnp.float64),
         upper=jnp.asarray(lat_vals[:, :, 3], dtype=jnp.float64),
+    )
+    priors_block = PriorBlock(
+        kind=jnp.asarray(prior_kind, dtype=jnp.int32),
+        param1=jnp.asarray(prior_p1, dtype=jnp.float64),
+        param2=jnp.asarray(prior_p2, dtype=jnp.float64),
     )
     problem = CompiledProblem(
         y=jnp.asarray(patterns, dtype=jnp.int32),
@@ -588,6 +759,7 @@ def compile_problem(
         nodes=jnp.asarray(quad.nodes(), dtype=jnp.float64),
         families=tuple(families),
         latent=latent,
+        priors=priors_block,
         n_groups=n_groups,
     )
     return Compiled(problem=problem, eta0=eta0, inverse=inverse, n_patterns=n_patterns)

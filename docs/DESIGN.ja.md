@@ -123,26 +123,37 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 
 ### 4.6 収束と加速
 - 収束判定: 連続して採択された反復点の間での自由パラメタ（自然尺度の $\eta$）の最大絶対変化 $<$ `tol`（既定 1e-4、
-  mirt の `TOL` と同じ定義）。対数尤度（MAP 時は対数事後）・最大変化・累積 EM 写像評価回数・SQUAREM 安全装置の
-  発動履歴を保存し、単調性はテストで検査する。
+  mirt の `TOL` と同じ定義）。対数尤度・対数事後・最大変化・累積 EM 写像評価回数・SQUAREM 安全装置の発動履歴を保存し、
+  対数事後（事前分布なしでは対数尤度）の単調性はテストで検査する。
   **決定（M1）**: 停止条件は最大絶対変化のみとする（対数尤度の変化量を条件に足すと mirt との対応が崩れるため）。
 - **SQUAREM**（Varadhan & Roland, 2008, スキーム S3）を `BAEM(squarem=True)` で選択可能（M3 では mirt との
-  wall-time ベンチマーク前のため既定 `False`、§15.13）。外挿候補が境界を出るか対数尤度が非有限・$\theta_2$ 未満なら
-  $\alpha$ を $-1$ 方向へ固定回数まで半減し、なお不適なら $\theta_2$ をそのまま採って単調性を保つ（§15.11–§15.12）。
+  wall-time ベンチマーク前のため既定 `False`、§15.13）。外挿候補が境界（事前分布の台との積集合）を出るか対数事後が
+  非有限・$\theta_2$ 未満なら $\alpha$ を $-1$ 方向へ固定回数まで半減し、なお不適なら $\theta_2$ をそのまま採って
+  対数事後の単調性を保つ（§15.11–§15.12, §15.17）。
 - 通常の EM・SQUAREM とも全体がデバイス上の `lax.while_loop` で走る（Python の反復ループやホストコールバックなし）。
   `jax.debug.callback` による進捗表示は後回し。
 
 ### 4.7 MAP（Bayes modal）
-- 事前分布は**自然なパラメタ尺度**（$a, b$ または $a, d$, $c$ など）で定義し、Jacobian 項は入れない（自然尺度での事後モード。mirt の Bayes modal と同じ）。
-- 内部の最適化を変換後の尺度（例: $c$ を logit）で行っても、目的関数自体は自然尺度の事前分布で評価する。
-- 結果には `loglik`（尤度のみ）と `log_posterior` を分けて返す。AIC/BIC は事前分布がある場合に警告付き。
+- **決定（M3, §15.14–§15.17）**: 公開の不変事前分布 `NormalPrior(mean, sd)`, `LogNormal(meanlog, sdlog)`,
+  `Beta(a, b)` を提供する（各々 `log_pdf` とパラメタ検証を持つ。潜在分布 `Normal` との衝突を避けるため `NormalPrior`）。
+- 事前分布は**自然なパラメタ尺度**（$a, d, g, u, d_k$ など）で定義し、Jacobian 項は入れない（自然尺度での事後モード。
+  R mirt 1.46 の `LL.Priors` でも `expbeta` は `dbeta(plogis(logit_g), a, b, log = TRUE)` を logit ヤコビアンなしで
+  評価していることを確認済み。VALIDATION.ja.md 参照）。
+- 内部の最適化を変換後の尺度で行っても、目的関数自体は自然尺度の事前分布で評価する。
+- 固定パラメタは事前分布を無視し、群間で共有するパラメタ（同じ `free_id`）の事前分布は **1 回だけ**数える。
+  潜在分布パラメタへの事前分布は対象外（`SpecificationError`）。
+- 結果には `loglik`（尤度のみ）と `log_posterior`（事前分布なしでは `loglik` と同値）を分けて返し、`history` も
+  `loglik`・`log_posterior` の両方を記録する。事前分布が有効なときの `aic`/`bic` は `FlexpyirtWarning` を出す。
 
 ### 4.8 標準誤差
 - **決定**: 既定は Oakes (1999) の恒等式
-  $$I(\hat\eta)=-\Big[\tfrac{\partial^2 Q(\eta\mid\eta')}{\partial\eta\,\partial\eta^\top}+\tfrac{\partial^2 Q(\eta\mid\eta')}{\partial\eta\,\partial\eta'^\top}\Big]_{\eta=\eta'=\hat\eta}$$
-  を `jax.hessian` と `jax.jacfwd(jax.grad(...))` で計算。$Q$ は「E-step の重みを $\eta'$ で計算し、尤度を $\eta$ で評価する」2 引数関数として実装する。
-- 代替: 直接 `jax.hessian` で周辺対数尤度の観測情報（小規模なら最も素直。Oakes の検証にも使う）、cross-product（$\sum_p c_p s_p s_p^\top$）、sandwich。
-- MAP 時は事前分布の Hessian を加える。固定パラメタは $\eta$ に含まれないので自動的に除外。
+  $$I(\hat\eta)=-\Big[\tfrac{\partial^2 Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta^\top}+\tfrac{\partial^2 Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta'^\top}\Big]_{\eta=\eta'=\hat\eta}$$
+  を `jax.jacfwd(jax.grad(...))` で計算する。ここで $Q_{\mathrm{post}}(\eta\mid\eta')=Q(\eta\mid\eta')+\log\pi(\eta)$
+  （「E-step の重みを $\eta'$ で計算し、完全データ尤度と対数事前分布を $\eta$ で評価する」2 引数関数）。
+- 代替: 直接 `jax.hessian` による観測（事後）情報行列 $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$（小規模なら最も素直。
+  Oakes の検証にも使う）、cross-product（$\sum_p c_p s_p s_p^\top$）、sandwich。
+- MAP 時は `oakes`・`hessian` とも情報行列に $-\nabla^2_\eta\log\pi(\hat\eta)$ を加え、数学的恒等性を保つ。
+  固定パラメタは $\eta$ に含まれないので自動的に除外される。
 
 ### 4.9 求積
 - **決定**: 1 次元の既定は等間隔 61 点、$[-6,6]$（EH と同じ格子を共有でき、Normal でも重みを密度から作る）。
@@ -178,10 +189,11 @@ mirt の `pars='values'` に相当する長形式の表。**全ての制約は�
 | `value` | float | 初期値（固定なら固定値） |
 | `free` | bool | 推定するか |
 | `lower`, `upper` | float | 範囲 |
-| `prior` | `Prior \| None` | 事前分布オブジェクト |
+| `prior` | `Prior \| None`（object） | 自然尺度の事前分布オブジェクト（なしは `None`、固定なら無視） |
 | `free_id` | int \| -1 | 自由パラメタ番号。**等値制約は同じ `free_id` を共有することで表す** |
 
-- ユーザーは `spec.parameter_table(data)` で表を取り出し、pandas で編集して `fit(..., table=edited)` に渡せる（mirt の pars 編集ワークフローを残す）。
+- ユーザーは `spec.parameter_table(data)` で表を取り出し、値・固定・範囲・事前分布・`free_id` を pandas で編集して
+  `fit(..., table=edited)` に渡せる（mirt の pars 編集ワークフローを残す）。同じ `free_id` を共有する行は事前分布が一致している必要がある。
 - `FreeMap` は `free_id` から「全パラメタ配列（群 × family × 項目 × パラメタ、パディング付き）」へのギャザー添字を持つ。$\eta\mapsto\xi$ は `xi = fixed_values.at[idx].set(eta[free_id])` の 1 行。
 
 ### 5.2 Core に渡す pytree
@@ -387,6 +399,33 @@ class LatentDist(Protocol):
     到達時に安全装置・退避回数を含めて報告するほか、収束した SQUAREM でも $\theta_2$ への完全退避
     （`3 * n_iter - n_em_evaluations`）が 5 回以上かつ全反復の 50% を超えた場合に発する（部分縮小しつつ加速した
     反復では不要な警告を出さない）。
+14. **事前分布と自然尺度 MAP 目的関数（M3, §4.7）**: `NormalPrior(mean, sd)`, `LogNormal(meanlog, sdlog)`,
+    `Beta(a, b)` を `priors.py` の公開 frozen dataclass とし、パラメタ検証（`SpecificationError`）と `log_pdf(x)` を
+    実装する。事前分布はヤコビアンなしの自然尺度で評価する（R mirt 1.46 の `LL.Priors` でも `expbeta` が
+    `dbeta(plogis(logit_g), a, b, log = TRUE)` を logit ヤコビアンなしで評価することを確認済み。mirt 1.46 の
+    `DerivativePriors` / `BL.LL` の不具合は VALIDATION.ja.md に記録）。`Beta.log_pdf` の $\log B(a, b)$ は
+    float64 で ~1e-7 の誤差を持つ `jax.scipy.special.betaln` ではなく `gammaln(a) + gammaln(b) - gammaln(a + b)` で
+    計算し、完全な float64 精度を保つ。
+15. **事前分布の指定・表編集・適用範囲**: `Model.prior(*, param, dist, items=None)` で選択した項目の `param` に全群
+    共通の事前分布を付ける。ParameterTable に `prior` 列（`object` 型、未指定は `None`）を追加し、`fit(..., table=...)`
+    は表で編集された事前分布を受け取って検証する（不正なオブジェクト、`__latent__` 行への指定、自由パラメタの初期値が
+    事前分布の開区間台の外にある場合、境界が台と交わらない場合、同一 `free_id` の行で事前分布が矛盾する場合は
+    `SpecificationError`）。固定パラメタは事前分布を無視し、群間で共有されるパラメタ（同一 `free_id`）は **1 回だけ**
+    数える。潜在分布パラメタへの事前分布は対象外で `SpecificationError`。
+16. **分岐なしの Core 事前分布表現**: `CompiledProblem` は自由パラメタごと（`free_id` ごとに 1 件）の
+    `priors: PriorBlock`（`kind: (n_free,) int32`、`param1/param2: (n_free,) float64`）を持ち、`eval_log_prior` が
+    全分岐で二重 `where` ガードを使って評価する（未選択分岐やパディング `PRIOR_NONE = 0` から NaN/inf 勾配が漏れない）。
+    `m_step` では `slot_free_index` で項目局所スロットへ事前分布をギャザーして `q_item` に加算し、項目ごとの分解（§14.2）と
+    共有パラメタの 1 回計上を保つ。`compile_problem` は自由スロットの `slot_lower`/`slot_upper` を事前分布の台
+    （`LogNormal` は `(0, inf)`、`Beta` は `(0, 1)`）と交差させ、ParameterTable のモデル定義域を変えずに有界 Newton と
+    SQUAREM が台を守るようにする。
+17. **MAP の結果・履歴・SQUAREM 安全装置・事後 SE**: `FitResult.loglik` は周辺対数尤度のみとし、
+    `FitResult.log_posterior` に $\ell(\hat\eta)+\log\pi(\hat\eta)$（事前分布なしでは `loglik` と同値）を返す。
+    `history` は統一スキーマ `("iter", "loglik", "log_posterior", "max_change", "em_evaluations", "safeguard")` を持ち、
+    EM・SQUAREM とも `log_posterior` が単調非減少で、SQUAREM 安全装置も `log_posterior` を比較する。自由パラメタに
+    1 つ以上事前分布がある場合、`FitResult.aic` と `FitResult.bic` は `loglik` で計算しつつ `FlexpyirtWarning` を出す。
+    `information_oakes` は $Q(\eta\mid\eta')$ に `log_prior(prob, e)` を足し、`information_hessian` は
+    `log_posterior(prob, e)` を微分することで、両者とも厳密に $-\nabla^2_\eta\log\pi(\hat\eta)$ を加える。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -397,9 +436,11 @@ class LatentDist(Protocol):
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
