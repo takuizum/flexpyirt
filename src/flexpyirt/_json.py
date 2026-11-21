@@ -1,0 +1,1076 @@
+"""Strict JSON serialization and deserialization for :class:`~flexpyirt.FitResult`.
+
+Implements the versioned plain-JSON format specified in DESIGN.md §15.26–§15.28:
+
+- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 1``, and
+  ``"flexpyirt_version"``.
+- Strict RFC 8259 JSON (``allow_nan=False`` on write; rejecting ``parse_constant`` on read).
+  Finite IEEE-754 float64 values use standard ``repr``-exact JSON numbers; non-finite values in
+  float-typed fields are encoded explicitly as ``"NaN"``, ``"Infinity"``, or ``"-Infinity"``.
+- Explicit name registries for item models, latent distributions, priors, quadrature grids, and
+  estimation methods (never ``eval`` or ``pickle``).
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+import pandas as pd
+
+from flexpyirt._compile import LATENT_ITEM, LATENT_PARAMS, TABLE_COLUMNS
+from flexpyirt._precision import check_x64
+from flexpyirt.errors import SpecificationError
+from flexpyirt.items import GPCM, GRM, PCM, FourPL, ItemModel, Rasch, ThreePL, TwoPL
+from flexpyirt.latent import Normal
+from flexpyirt.method import BAEM
+from flexpyirt.model import Model
+from flexpyirt.priors import Beta, LogNormal, NormalPrior, Prior
+from flexpyirt.quadrature import Quadrature
+
+if TYPE_CHECKING:
+    from flexpyirt.result import FitResult
+
+__all__ = [
+    "FORMAT_TAG",
+    "SCHEMA_VERSION",
+    "dump_fit_result",
+    "load_fit_result",
+]
+
+FORMAT_TAG = "flexpyirt.FitResult"
+SCHEMA_VERSION = 1
+
+_SPECIAL_FLOATS: dict[str, float] = {
+    "NaN": math.nan,
+    "Infinity": math.inf,
+    "-Infinity": -math.inf,
+}
+_VALID_SE_METHODS: tuple[str | None, ...] = (None, "oakes", "hessian")
+_PARAM_COLUMNS: tuple[str, ...] = (*TABLE_COLUMNS, "estimate", "se")
+_HISTORY_COLUMNS: tuple[str, ...] = (
+    "iter",
+    "loglik",
+    "log_posterior",
+    "max_change",
+    "em_evaluations",
+    "safeguard",
+)
+_TOP_LEVEL_KEYS: frozenset[str] = frozenset(
+    {
+        "format",
+        "schema_version",
+        "flexpyirt_version",
+        "model",
+        "quadrature",
+        "method",
+        "n_obs",
+        "se_method",
+        "loglik",
+        "log_posterior",
+        "converged",
+        "n_iter",
+        "n_em_evaluations",
+        "n_safeguards",
+        "parameters",
+        "vcov",
+        "history",
+    }
+)
+
+
+# --------------------------------------------------------------------------------------------
+# Primitive validation and float encoding
+# --------------------------------------------------------------------------------------------
+
+
+def _reject_json_constant(token: str) -> Any:
+    """Reject non-standard JSON constants (``NaN``, ``Infinity``, ``-Infinity``)."""
+    raise SpecificationError(
+        f"Non-standard JSON constant {token!r} is not allowed; "
+        "non-finite floats must be encoded as 'NaN', 'Infinity', or '-Infinity'."
+    )
+
+
+def _encode_float(value: float | np.floating[Any]) -> float | str:
+    """Encode a float64 for strict JSON: finite numbers verbatim, non-finite as tagged strings."""
+    val = float(value)
+    if math.isnan(val):
+        return "NaN"
+    if math.isinf(val):
+        return "Infinity" if val > 0.0 else "-Infinity"
+    return val
+
+
+def _decode_float(raw: Any, *, field_name: str, finite: bool = False) -> float:
+    """Decode a float from a JSON number or explicit ``'NaN'/'Infinity'/'-Infinity'`` string."""
+    if isinstance(raw, str) and raw in _SPECIAL_FLOATS:
+        val = _SPECIAL_FLOATS[raw]
+    elif isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise SpecificationError(
+            f"Expected a JSON number or 'NaN'/'Infinity'/'-Infinity' for {field_name}, got {raw!r}."
+        )
+    else:
+        val = float(raw)
+    if finite and not math.isfinite(val):
+        raise SpecificationError(f"{field_name} must be finite, got {val!r}.")
+    return val
+
+
+def _require_dict(raw: Any, *, field_name: str) -> dict[str, Any]:
+    """Ensure ``raw`` is a JSON object (``dict``)."""
+    if not isinstance(raw, dict):
+        raise SpecificationError(
+            f"Expected a JSON object for {field_name}, got {type(raw).__name__}."
+        )
+    return raw
+
+
+def _require_list(raw: Any, *, field_name: str) -> list[Any]:
+    """Ensure ``raw`` is a JSON array (``list``)."""
+    if not isinstance(raw, list):
+        raise SpecificationError(
+            f"Expected a JSON array for {field_name}, got {type(raw).__name__}."
+        )
+    return raw
+
+
+def _require_str(raw: Any, *, field_name: str) -> str:
+    """Ensure ``raw`` is a JSON string."""
+    if not isinstance(raw, str):
+        raise SpecificationError(f"Expected a string for {field_name}, got {type(raw).__name__}.")
+    return raw
+
+
+def _require_bool(raw: Any, *, field_name: str) -> bool:
+    """Ensure ``raw`` is a JSON boolean."""
+    if not isinstance(raw, bool):
+        raise SpecificationError(f"Expected a boolean for {field_name}, got {type(raw).__name__}.")
+    return raw
+
+
+def _require_int(raw: Any, *, field_name: str, min_value: int | None = None) -> int:
+    """Ensure ``raw`` is an integer (not ``bool``), optionally with a lower bound."""
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise SpecificationError(f"Expected an integer for {field_name}, got {raw!r}.")
+    if min_value is not None and raw < min_value:
+        raise SpecificationError(f"{field_name} must be >= {min_value}, got {raw}.")
+    return raw
+
+
+def _check_keys(
+    obj: dict[str, Any],
+    *,
+    required: set[str] | frozenset[str],
+    field_name: str,
+) -> None:
+    """Verify ``obj`` has exactly the ``required`` keys."""
+    keys = set(obj.keys())
+    missing = sorted(required - keys)
+    if missing:
+        raise SpecificationError(f"Missing required keys in {field_name}: {missing}.")
+    extra = sorted(keys - required)
+    if extra:
+        raise SpecificationError(f"Unexpected keys in {field_name}: {extra}.")
+
+
+def _floats_equal(a: float, b: float) -> bool:
+    """Compare two floats, treating two NaNs as equal."""
+    return (math.isnan(a) and math.isnan(b)) or a == b
+
+
+# --------------------------------------------------------------------------------------------
+# Explicit registries (DESIGN.md §15.28)
+# --------------------------------------------------------------------------------------------
+
+
+def _serialize_simple_item(model: Any) -> dict[str, Any]:
+    return {"type": str(model.name)}
+
+
+def _serialize_polytomous_item(model: Any) -> dict[str, Any]:
+    return {"type": str(model.name), "n_cat": int(model.n_cat)}
+
+
+def _make_simple_item_loader(cls: type[Any]) -> Callable[[dict[str, Any], str], ItemModel]:
+    def _load(obj: dict[str, Any], field_name: str) -> ItemModel:
+        _check_keys(obj, required={"type"}, field_name=field_name)
+        item_model: ItemModel = cls()
+        return item_model
+
+    return _load
+
+
+def _make_polytomous_item_loader(cls: type[Any]) -> Callable[[dict[str, Any], str], ItemModel]:
+    def _load(obj: dict[str, Any], field_name: str) -> ItemModel:
+        _check_keys(obj, required={"type", "n_cat"}, field_name=field_name)
+        n_cat = _require_int(obj["n_cat"], field_name=f"{field_name}.n_cat")
+        item_model: ItemModel = cls(n_cat=n_cat)
+        return item_model
+
+    return _load
+
+
+_ITEM_MODEL_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
+    TwoPL: _serialize_simple_item,
+    Rasch: _serialize_simple_item,
+    ThreePL: _serialize_simple_item,
+    FourPL: _serialize_simple_item,
+    GRM: _serialize_polytomous_item,
+    GPCM: _serialize_polytomous_item,
+    PCM: _serialize_polytomous_item,
+}
+
+_ITEM_MODEL_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], ItemModel]] = {
+    TwoPL.name: _make_simple_item_loader(TwoPL),
+    Rasch.name: _make_simple_item_loader(Rasch),
+    ThreePL.name: _make_simple_item_loader(ThreePL),
+    FourPL.name: _make_simple_item_loader(FourPL),
+    GRM.name: _make_polytomous_item_loader(GRM),
+    GPCM.name: _make_polytomous_item_loader(GPCM),
+    PCM.name: _make_polytomous_item_loader(PCM),
+}
+
+
+def _serialize_item_model(item_model: ItemModel) -> dict[str, Any]:
+    """Serialize a registered :class:`~flexpyirt.items.ItemModel`."""
+    serializer = _ITEM_MODEL_SERIALIZERS.get(type(item_model))
+    if serializer is None:
+        raise SpecificationError(
+            f"Unsupported item model {type(item_model).__name__!r} for JSON serialization."
+        )
+    return serializer(item_model)
+
+
+def _deserialize_item_model(raw: Any, *, field_name: str) -> ItemModel:
+    """Deserialize an :class:`~flexpyirt.items.ItemModel` by its registered name."""
+    obj = _require_dict(raw, field_name=field_name)
+    if "type" not in obj:
+        raise SpecificationError(f"Missing 'type' key in {field_name}.")
+    kind = _require_str(obj["type"], field_name=f"{field_name}.type")
+    loader = _ITEM_MODEL_DESERIALIZERS.get(kind)
+    if loader is None:
+        raise SpecificationError(
+            f"Unknown item model type {kind!r} in {field_name}; "
+            f"supported: {sorted(_ITEM_MODEL_DESERIALIZERS)}."
+        )
+    return loader(obj, field_name)
+
+
+def _serialize_normal_latent(dist: Normal) -> dict[str, Any]:
+    return {
+        "type": "Normal",
+        "mean": _encode_float(dist.mean),
+        "var": _encode_float(dist.var),
+        "free_mean": bool(dist.free_mean),
+        "free_var": bool(dist.free_var),
+    }
+
+
+def _deserialize_normal_latent(obj: dict[str, Any], field_name: str) -> Normal:
+    _check_keys(
+        obj,
+        required={"type", "mean", "var", "free_mean", "free_var"},
+        field_name=field_name,
+    )
+    return Normal(
+        mean=_decode_float(obj["mean"], field_name=f"{field_name}.mean", finite=True),
+        var=_decode_float(obj["var"], field_name=f"{field_name}.var", finite=True),
+        free_mean=_require_bool(obj["free_mean"], field_name=f"{field_name}.free_mean"),
+        free_var=_require_bool(obj["free_var"], field_name=f"{field_name}.free_var"),
+    )
+
+
+_LATENT_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
+    Normal: _serialize_normal_latent,
+}
+_LATENT_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], Normal]] = {
+    "Normal": _deserialize_normal_latent,
+}
+
+
+def _serialize_latent(dist: Normal) -> dict[str, Any]:
+    """Serialize a registered latent distribution."""
+    serializer = _LATENT_SERIALIZERS.get(type(dist))
+    if serializer is None:
+        raise SpecificationError(
+            f"Unsupported latent distribution {type(dist).__name__!r} for JSON serialization."
+        )
+    return serializer(dist)
+
+
+def _deserialize_latent(raw: Any, *, field_name: str) -> Normal:
+    """Deserialize a latent distribution by its registered name."""
+    obj = _require_dict(raw, field_name=field_name)
+    if "type" not in obj:
+        raise SpecificationError(f"Missing 'type' key in {field_name}.")
+    kind = _require_str(obj["type"], field_name=f"{field_name}.type")
+    loader = _LATENT_DESERIALIZERS.get(kind)
+    if loader is None:
+        raise SpecificationError(
+            f"Unknown latent distribution type {kind!r} in {field_name}; "
+            f"supported: {sorted(_LATENT_DESERIALIZERS)}."
+        )
+    return loader(obj, field_name)
+
+
+def _serialize_normal_prior(prior: NormalPrior) -> dict[str, Any]:
+    return {
+        "type": "NormalPrior",
+        "mean": _encode_float(prior.mean),
+        "sd": _encode_float(prior.sd),
+    }
+
+
+def _serialize_lognormal_prior(prior: LogNormal) -> dict[str, Any]:
+    return {
+        "type": "LogNormal",
+        "meanlog": _encode_float(prior.meanlog),
+        "sdlog": _encode_float(prior.sdlog),
+    }
+
+
+def _serialize_beta_prior(prior: Beta) -> dict[str, Any]:
+    return {
+        "type": "Beta",
+        "a": _encode_float(prior.a),
+        "b": _encode_float(prior.b),
+    }
+
+
+def _deserialize_normal_prior(obj: dict[str, Any], field_name: str) -> NormalPrior:
+    _check_keys(obj, required={"type", "mean", "sd"}, field_name=field_name)
+    return NormalPrior(
+        mean=_decode_float(obj["mean"], field_name=f"{field_name}.mean", finite=True),
+        sd=_decode_float(obj["sd"], field_name=f"{field_name}.sd", finite=True),
+    )
+
+
+def _deserialize_lognormal_prior(obj: dict[str, Any], field_name: str) -> LogNormal:
+    _check_keys(obj, required={"type", "meanlog", "sdlog"}, field_name=field_name)
+    return LogNormal(
+        meanlog=_decode_float(obj["meanlog"], field_name=f"{field_name}.meanlog", finite=True),
+        sdlog=_decode_float(obj["sdlog"], field_name=f"{field_name}.sdlog", finite=True),
+    )
+
+
+def _deserialize_beta_prior(obj: dict[str, Any], field_name: str) -> Beta:
+    _check_keys(obj, required={"type", "a", "b"}, field_name=field_name)
+    return Beta(
+        a=_decode_float(obj["a"], field_name=f"{field_name}.a", finite=True),
+        b=_decode_float(obj["b"], field_name=f"{field_name}.b", finite=True),
+    )
+
+
+_PRIOR_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
+    NormalPrior: _serialize_normal_prior,
+    LogNormal: _serialize_lognormal_prior,
+    Beta: _serialize_beta_prior,
+}
+_PRIOR_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], Prior]] = {
+    "NormalPrior": _deserialize_normal_prior,
+    "LogNormal": _deserialize_lognormal_prior,
+    "Beta": _deserialize_beta_prior,
+}
+
+
+def _serialize_prior(prior: Prior | None) -> dict[str, Any] | None:
+    """Serialize a registered prior (or ``None``)."""
+    if prior is None:
+        return None
+    serializer = _PRIOR_SERIALIZERS.get(type(prior))
+    if serializer is None:
+        raise SpecificationError(
+            f"Unsupported prior distribution {type(prior).__name__!r} for JSON serialization."
+        )
+    return serializer(prior)
+
+
+def _deserialize_prior(raw: Any, *, field_name: str) -> Prior | None:
+    """Deserialize a prior by its registered name (or ``None``)."""
+    if raw is None:
+        return None
+    obj = _require_dict(raw, field_name=field_name)
+    if "type" not in obj:
+        raise SpecificationError(f"Missing 'type' key in {field_name}.")
+    kind = _require_str(obj["type"], field_name=f"{field_name}.type")
+    loader = _PRIOR_DESERIALIZERS.get(kind)
+    if loader is None:
+        raise SpecificationError(
+            f"Unknown prior type {kind!r} in {field_name}; "
+            f"supported: {sorted(_PRIOR_DESERIALIZERS)}."
+        )
+    return loader(obj, field_name)
+
+
+def _serialize_equispaced_quadrature(quad: Quadrature) -> dict[str, Any]:
+    return {
+        "type": "equispaced",
+        "n_points": int(quad.n_points),
+        "lower": _encode_float(quad.lower),
+        "upper": _encode_float(quad.upper),
+    }
+
+
+def _deserialize_equispaced_quadrature(obj: dict[str, Any], field_name: str) -> Quadrature:
+    _check_keys(obj, required={"type", "n_points", "lower", "upper"}, field_name=field_name)
+    return Quadrature(
+        n_points=_require_int(obj["n_points"], field_name=f"{field_name}.n_points"),
+        lower=_decode_float(obj["lower"], field_name=f"{field_name}.lower", finite=True),
+        upper=_decode_float(obj["upper"], field_name=f"{field_name}.upper", finite=True),
+    )
+
+
+_QUADRATURE_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
+    Quadrature: _serialize_equispaced_quadrature,
+}
+_QUADRATURE_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], Quadrature]] = {
+    "equispaced": _deserialize_equispaced_quadrature,
+}
+
+
+def _serialize_quadrature(quad: Quadrature) -> dict[str, Any]:
+    """Serialize a registered :class:`~flexpyirt.Quadrature`."""
+    serializer = _QUADRATURE_SERIALIZERS.get(type(quad))
+    if serializer is None:
+        raise SpecificationError(
+            f"Unsupported quadrature {type(quad).__name__!r} for JSON serialization."
+        )
+    return serializer(quad)
+
+
+def _deserialize_quadrature(raw: Any, *, field_name: str) -> Quadrature:
+    """Deserialize a :class:`~flexpyirt.Quadrature` by its registered name."""
+    obj = _require_dict(raw, field_name=field_name)
+    if "type" not in obj:
+        raise SpecificationError(f"Missing 'type' key in {field_name}.")
+    kind = _require_str(obj["type"], field_name=f"{field_name}.type")
+    loader = _QUADRATURE_DESERIALIZERS.get(kind)
+    if loader is None:
+        raise SpecificationError(
+            f"Unknown quadrature type {kind!r} in {field_name}; "
+            f"supported: {sorted(_QUADRATURE_DESERIALIZERS)}."
+        )
+    return loader(obj, field_name)
+
+
+def _serialize_baem(method: BAEM) -> dict[str, Any]:
+    return {
+        "type": "BAEM",
+        "tol": _encode_float(method.tol),
+        "max_iter": int(method.max_iter),
+        "m_step_newton_steps": int(method.m_step_newton_steps),
+        "squarem": bool(method.squarem),
+    }
+
+
+def _deserialize_baem(obj: dict[str, Any], field_name: str) -> BAEM:
+    _check_keys(
+        obj,
+        required={"type", "tol", "max_iter", "m_step_newton_steps", "squarem"},
+        field_name=field_name,
+    )
+    return BAEM(
+        tol=_decode_float(obj["tol"], field_name=f"{field_name}.tol", finite=True),
+        max_iter=_require_int(obj["max_iter"], field_name=f"{field_name}.max_iter"),
+        m_step_newton_steps=_require_int(
+            obj["m_step_newton_steps"], field_name=f"{field_name}.m_step_newton_steps"
+        ),
+        squarem=_require_bool(obj["squarem"], field_name=f"{field_name}.squarem"),
+    )
+
+
+_METHOD_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
+    BAEM: _serialize_baem,
+}
+_METHOD_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], BAEM]] = {
+    "BAEM": _deserialize_baem,
+}
+
+
+def _serialize_method(method: BAEM) -> dict[str, Any]:
+    """Serialize a registered estimation method."""
+    serializer = _METHOD_SERIALIZERS.get(type(method))
+    if serializer is None:
+        raise SpecificationError(
+            f"Unsupported estimation method {type(method).__name__!r} for JSON serialization."
+        )
+    return serializer(method)
+
+
+def _deserialize_method(raw: Any, *, field_name: str) -> BAEM:
+    """Deserialize an estimation method by its registered name."""
+    obj = _require_dict(raw, field_name=field_name)
+    if "type" not in obj:
+        raise SpecificationError(f"Missing 'type' key in {field_name}.")
+    kind = _require_str(obj["type"], field_name=f"{field_name}.type")
+    loader = _METHOD_DESERIALIZERS.get(kind)
+    if loader is None:
+        raise SpecificationError(
+            f"Unknown estimation method type {kind!r} in {field_name}; "
+            f"supported: {sorted(_METHOD_DESERIALIZERS)}."
+        )
+    return loader(obj, field_name)
+
+
+# --------------------------------------------------------------------------------------------
+# Model, ParameterTable, vcov, history serialization
+# --------------------------------------------------------------------------------------------
+
+
+def _serialize_model(model: Model) -> dict[str, Any]:
+    """Serialize a :class:`~flexpyirt.Model` specification."""
+    return {
+        "items": [
+            {"name": name, "model": _serialize_item_model(item_model)}
+            for name, item_model in model.items
+        ],
+        "fixed": [
+            {"item": item, "param": param, "value": _encode_float(value)}
+            for item, param, value in model.fixed
+        ],
+        "latent": None if model.latent is None else _serialize_latent(model.latent),
+        "groups": (
+            None
+            if model.groups is None
+            else [
+                {"name": group_name, "latent": _serialize_latent(dist)}
+                for group_name, dist in model.groups
+            ]
+        ),
+        "equal": [
+            {
+                "items": list(eq_items),
+                "params": None if eq_params is None else list(eq_params),
+            }
+            for eq_items, eq_params in model.equal
+        ],
+        "priors": [
+            {"item": item, "param": param, "dist": _serialize_prior(dist)}
+            for item, param, dist in model.priors
+        ],
+    }
+
+
+def _deserialize_model(raw: Any) -> Model:
+    """Deserialize and validate a :class:`~flexpyirt.Model` specification."""
+    obj = _require_dict(raw, field_name="model")
+    _check_keys(
+        obj,
+        required={"items", "fixed", "latent", "groups", "equal", "priors"},
+        field_name="model",
+    )
+
+    items_raw = _require_list(obj["items"], field_name="model.items")
+    items_list: list[tuple[str, ItemModel]] = []
+    for idx, entry in enumerate(items_raw):
+        entry_obj = _require_dict(entry, field_name=f"model.items[{idx}]")
+        _check_keys(entry_obj, required={"name", "model"}, field_name=f"model.items[{idx}]")
+        name = _require_str(entry_obj["name"], field_name=f"model.items[{idx}].name")
+        im = _deserialize_item_model(entry_obj["model"], field_name=f"model.items[{idx}].model")
+        items_list.append((name, im))
+    items_tuple = tuple(items_list)
+    # Validates non-empty and unique item names.
+    base = Model(items=items_tuple)
+    lookup = dict(base.items)
+
+    latent = (
+        None
+        if obj["latent"] is None
+        else _deserialize_latent(obj["latent"], field_name="model.latent")
+    )
+    groups: tuple[tuple[str, Normal], ...] | None = None
+    if obj["groups"] is not None:
+        groups_raw = _require_list(obj["groups"], field_name="model.groups")
+        if len(groups_raw) < 2:
+            raise SpecificationError("model.groups must contain at least two groups.")
+        groups_list: list[tuple[str, Normal]] = []
+        seen_groups: set[str] = set()
+        for idx, entry in enumerate(groups_raw):
+            g_obj = _require_dict(entry, field_name=f"model.groups[{idx}]")
+            _check_keys(g_obj, required={"name", "latent"}, field_name=f"model.groups[{idx}]")
+            g_name = _require_str(g_obj["name"], field_name=f"model.groups[{idx}].name")
+            if g_name in seen_groups:
+                raise SpecificationError(f"Duplicated group name {g_name!r} in model.groups.")
+            seen_groups.add(g_name)
+            g_lat = _deserialize_latent(g_obj["latent"], field_name=f"model.groups[{idx}].latent")
+            groups_list.append((g_name, g_lat))
+        groups = tuple(groups_list)
+    if latent is not None and groups is not None:
+        raise SpecificationError("model cannot specify both 'latent' and 'groups'.")
+
+    fixed_raw = _require_list(obj["fixed"], field_name="model.fixed")
+    fixed_list: list[tuple[str, str, float]] = []
+    for idx, entry in enumerate(fixed_raw):
+        f_obj = _require_dict(entry, field_name=f"model.fixed[{idx}]")
+        _check_keys(f_obj, required={"item", "param", "value"}, field_name=f"model.fixed[{idx}]")
+        f_item = _require_str(f_obj["item"], field_name=f"model.fixed[{idx}].item")
+        f_param = _require_str(f_obj["param"], field_name=f"model.fixed[{idx}].param")
+        f_val = _decode_float(f_obj["value"], field_name=f"model.fixed[{idx}].value", finite=True)
+        if f_item not in lookup:
+            raise SpecificationError(f"model.fixed[{idx}] references unknown item {f_item!r}.")
+        if f_param not in lookup[f_item].kernel.param_names:
+            raise SpecificationError(
+                f"model.fixed[{idx}] references unknown parameter {f_param!r} for item {f_item!r}."
+            )
+        fixed_list.append((f_item, f_param, f_val))
+
+    equal_raw = _require_list(obj["equal"], field_name="model.equal")
+    equal_list: list[tuple[tuple[str, ...], tuple[str, ...] | None]] = []
+    for idx, entry in enumerate(equal_raw):
+        e_obj = _require_dict(entry, field_name=f"model.equal[{idx}]")
+        _check_keys(e_obj, required={"items", "params"}, field_name=f"model.equal[{idx}]")
+        eq_items_raw = _require_list(e_obj["items"], field_name=f"model.equal[{idx}].items")
+        if not eq_items_raw:
+            raise SpecificationError(f"model.equal[{idx}].items cannot be empty.")
+        eq_items = tuple(
+            _require_str(v, field_name=f"model.equal[{idx}].items[{k}]")
+            for k, v in enumerate(eq_items_raw)
+        )
+        unknown_eq = [i for i in eq_items if i not in lookup]
+        if unknown_eq:
+            raise SpecificationError(
+                f"model.equal[{idx}].items references unknown items {unknown_eq}."
+            )
+        eq_params: tuple[str, ...] | None = None
+        if e_obj["params"] is not None:
+            eq_params_raw = _require_list(e_obj["params"], field_name=f"model.equal[{idx}].params")
+            eq_params = tuple(
+                _require_str(v, field_name=f"model.equal[{idx}].params[{k}]")
+                for k, v in enumerate(eq_params_raw)
+            )
+            for item in eq_items:
+                bad = [p for p in eq_params if p not in lookup[item].kernel.param_names]
+                if bad:
+                    raise SpecificationError(
+                        f"model.equal[{idx}] references unknown parameters {bad} for item {item!r}."
+                    )
+        equal_list.append((eq_items, eq_params))
+
+    priors_raw = _require_list(obj["priors"], field_name="model.priors")
+    priors_list: list[tuple[str, str, Prior]] = []
+    for idx, entry in enumerate(priors_raw):
+        p_obj = _require_dict(entry, field_name=f"model.priors[{idx}]")
+        _check_keys(p_obj, required={"item", "param", "dist"}, field_name=f"model.priors[{idx}]")
+        p_item = _require_str(p_obj["item"], field_name=f"model.priors[{idx}].item")
+        p_param = _require_str(p_obj["param"], field_name=f"model.priors[{idx}].param")
+        p_dist = _deserialize_prior(p_obj["dist"], field_name=f"model.priors[{idx}].dist")
+        if p_dist is None:
+            raise SpecificationError(f"model.priors[{idx}].dist cannot be null.")
+        if p_item not in lookup:
+            raise SpecificationError(f"model.priors[{idx}] references unknown item {p_item!r}.")
+        if p_param not in lookup[p_item].kernel.param_names:
+            raise SpecificationError(
+                f"model.priors[{idx}] references unknown parameter {p_param!r} for item {p_item!r}."
+            )
+        priors_list.append((p_item, p_param, p_dist))
+
+    return Model(
+        items=items_tuple,
+        fixed=tuple(fixed_list),
+        latent=latent,
+        groups=groups,
+        equal=tuple(equal_list),
+        priors=tuple(priors_list),
+    )
+
+
+def _serialize_parameters(table: pd.DataFrame) -> list[dict[str, Any]]:
+    """Serialize ``FitResult.parameters`` as a list of row objects."""
+    rows: list[dict[str, Any]] = []
+    cols = [table[c].tolist() for c in _PARAM_COLUMNS]
+    for grp, item, mdl, param, val, free, lo, hi, pri, fid, est, se in zip(*cols, strict=True):
+        rows.append(
+            {
+                "group": str(grp),
+                "item": str(item),
+                "model": str(mdl),
+                "param": str(param),
+                "value": _encode_float(val),
+                "free": bool(free),
+                "lower": _encode_float(lo),
+                "upper": _encode_float(hi),
+                "prior": _serialize_prior(pri),
+                "free_id": int(fid),
+                "estimate": _encode_float(est),
+                "se": _encode_float(se),
+            }
+        )
+    return rows
+
+
+def _expected_parameter_keys(model: Model) -> dict[tuple[str, str, str], str]:
+    """Return expected ``(group, item, param) -> model_name`` entries for ``model``."""
+    expected: dict[tuple[str, str, str], str] = {}
+    for group_name, _ in model.resolved_groups():
+        for item_name, item_model in model.items:
+            for param in item_model.kernel.param_names:
+                expected[(group_name, item_name, param)] = item_model.name
+        for param in LATENT_PARAMS:
+            expected[(group_name, LATENT_ITEM, param)] = "Normal"
+    return expected
+
+
+def _deserialize_parameters(raw: Any, model: Model) -> tuple[pd.DataFrame, np.ndarray]:
+    """Deserialize ``parameters`` and reconstruct ``_eta`` with full consistency checks."""
+    rows_raw = _require_list(raw, field_name="parameters")
+    expected = _expected_parameter_keys(model)
+    required_keys = frozenset(_PARAM_COLUMNS)
+
+    groups: list[str] = []
+    items: list[str] = []
+    models: list[str] = []
+    params: list[str] = []
+    values: list[float] = []
+    frees: list[bool] = []
+    lowers: list[float] = []
+    uppers: list[float] = []
+    priors: list[Prior | None] = []
+    free_ids: list[int] = []
+    estimates: list[float] = []
+    ses: list[float] = []
+
+    seen: set[tuple[str, str, str]] = set()
+    free_meta: dict[int, tuple[str, str, Prior | None, float]] = {}
+
+    for idx, entry in enumerate(rows_raw):
+        loc = f"parameters[{idx}]"
+        row = _require_dict(entry, field_name=loc)
+        _check_keys(row, required=required_keys, field_name=loc)
+
+        grp = _require_str(row["group"], field_name=f"{loc}.group")
+        itm = _require_str(row["item"], field_name=f"{loc}.item")
+        mdl = _require_str(row["model"], field_name=f"{loc}.model")
+        prm = _require_str(row["param"], field_name=f"{loc}.param")
+        key = (grp, itm, prm)
+        if key in seen:
+            raise SpecificationError(f"Duplicated parameter row {key} in parameters.")
+        if key not in expected:
+            raise SpecificationError(
+                f"Unexpected parameter row {key} in parameters for this model."
+            )
+        if mdl != expected[key]:
+            raise SpecificationError(
+                f"Parameter row {key} has model {mdl!r}, expected {expected[key]!r}."
+            )
+        seen.add(key)
+
+        val = _decode_float(row["value"], field_name=f"{loc}.value")
+        is_free = _require_bool(row["free"], field_name=f"{loc}.free")
+        lo = _decode_float(row["lower"], field_name=f"{loc}.lower")
+        hi = _decode_float(row["upper"], field_name=f"{loc}.upper")
+        if not (lo < hi):
+            raise SpecificationError(f"lower ({lo}) must be < upper ({hi}) at {loc}.")
+        pri = _deserialize_prior(row["prior"], field_name=f"{loc}.prior")
+        if itm == LATENT_ITEM and pri is not None:
+            raise SpecificationError(
+                f"Priors on latent-distribution parameters are not supported at {loc}."
+            )
+        fid = _require_int(row["free_id"], field_name=f"{loc}.free_id")
+        if is_free:
+            if fid < 0:
+                raise SpecificationError(f"Free parameter row {key} must have free_id >= 0.")
+        elif fid != -1:
+            raise SpecificationError(
+                f"Fixed parameter row {key} must have free_id == -1, got {fid}."
+            )
+        est = _decode_float(row["estimate"], field_name=f"{loc}.estimate")
+        se_val = _decode_float(row["se"], field_name=f"{loc}.se")
+        if not is_free and not _floats_equal(est, val):
+            raise SpecificationError(
+                f"Fixed parameter row {key} has estimate ({est!r}) != value ({val!r})."
+            )
+
+        if is_free:
+            prev = free_meta.get(fid)
+            if prev is None:
+                free_meta[fid] = (itm, prm, pri, est)
+            else:
+                prev_itm, prev_prm, prev_pri, prev_est = prev
+                if prev_itm != itm or prev_prm != prm:
+                    raise SpecificationError(
+                        f"free_id {fid} is shared across incompatible rows "
+                        f"({prev_itm!r}.{prev_prm!r} vs {itm!r}.{prm!r})."
+                    )
+                if prev_pri != pri:
+                    raise SpecificationError(f"Rows sharing free_id {fid} have conflicting priors.")
+                if not _floats_equal(prev_est, est):
+                    raise SpecificationError(
+                        f"Rows sharing free_id {fid} have conflicting estimates "
+                        f"({prev_est!r} vs {est!r})."
+                    )
+
+        groups.append(grp)
+        items.append(itm)
+        models.append(mdl)
+        params.append(prm)
+        values.append(val)
+        frees.append(is_free)
+        lowers.append(lo)
+        uppers.append(hi)
+        priors.append(pri)
+        free_ids.append(fid)
+        estimates.append(est)
+        ses.append(se_val)
+
+    missing = sorted(set(expected) - seen)
+    if missing:
+        raise SpecificationError(f"Missing parameter rows for this model: {missing}.")
+
+    n_free = len(free_meta)
+    expected_fids = set(range(n_free))
+    if set(free_meta.keys()) != expected_fids:
+        raise SpecificationError(
+            f"Free parameter free_id values must be contiguous 0..{n_free - 1}, "
+            f"got {sorted(free_meta.keys())}."
+        )
+    eta = np.empty(n_free, dtype=np.float64)
+    for fid_val, (_, _, _, est_val) in free_meta.items():
+        eta[fid_val] = est_val
+
+    frame = pd.DataFrame(
+        {
+            "group": groups,
+            "item": items,
+            "model": models,
+            "param": params,
+            "value": np.array(values, dtype=np.float64),
+            "free": np.array(frees, dtype=bool),
+            "lower": np.array(lowers, dtype=np.float64),
+            "upper": np.array(uppers, dtype=np.float64),
+            "prior": pd.Series(priors, dtype=object),
+            "free_id": np.array(free_ids, dtype=int),
+            "estimate": np.array(estimates, dtype=np.float64),
+            "se": np.array(ses, dtype=np.float64),
+        }
+    )
+    return frame, eta
+
+
+def _serialize_vcov(vcov: np.ndarray | None) -> list[list[float | str]] | None:
+    """Serialize ``vcov`` as a 2-D JSON list (or ``None``)."""
+    if vcov is None:
+        return None
+    arr = np.asarray(vcov, dtype=np.float64)
+    return [[_encode_float(x) for x in row] for row in arr]
+
+
+def _deserialize_vcov(raw: Any, *, n_free: int) -> np.ndarray | None:
+    """Deserialize ``vcov`` and verify its ``(n_free, n_free)`` shape."""
+    if raw is None:
+        return None
+    rows = _require_list(raw, field_name="vcov")
+    if len(rows) != n_free:
+        raise SpecificationError(
+            f"vcov must have shape ({n_free}, {n_free}), got {len(rows)} rows."
+        )
+    out = np.empty((n_free, n_free), dtype=np.float64)
+    for i, row_raw in enumerate(rows):
+        row = _require_list(row_raw, field_name=f"vcov[{i}]")
+        if len(row) != n_free:
+            raise SpecificationError(f"vcov[{i}] must have length {n_free}, got {len(row)}.")
+        for j, val in enumerate(row):
+            out[i, j] = _decode_float(val, field_name=f"vcov[{i}][{j}]")
+    return out
+
+
+def _serialize_history(history: pd.DataFrame) -> list[dict[str, Any]]:
+    """Serialize ``FitResult.history`` as a list of per-iteration objects."""
+    rows: list[dict[str, Any]] = []
+    cols = [history[c].tolist() for c in _HISTORY_COLUMNS]
+    for it, ll, lp, chg, ev, sg in zip(*cols, strict=True):
+        rows.append(
+            {
+                "iter": int(it),
+                "loglik": _encode_float(ll),
+                "log_posterior": _encode_float(lp),
+                "max_change": _encode_float(chg),
+                "em_evaluations": int(ev),
+                "safeguard": bool(sg),
+            }
+        )
+    return rows
+
+
+def _deserialize_history(raw: Any, *, n_iter: int) -> pd.DataFrame:
+    """Deserialize ``FitResult.history`` and verify its length and column types."""
+    rows_raw = _require_list(raw, field_name="history")
+    if len(rows_raw) != n_iter:
+        raise SpecificationError(
+            f"history length ({len(rows_raw)}) does not match n_iter ({n_iter})."
+        )
+    required_keys = frozenset(_HISTORY_COLUMNS)
+    iters: list[int] = []
+    logliks: list[float] = []
+    log_posts: list[float] = []
+    changes: list[float] = []
+    em_evals: list[int] = []
+    safeguards: list[bool] = []
+    for idx, entry in enumerate(rows_raw):
+        loc = f"history[{idx}]"
+        row = _require_dict(entry, field_name=loc)
+        _check_keys(row, required=required_keys, field_name=loc)
+        iters.append(_require_int(row["iter"], field_name=f"{loc}.iter", min_value=1))
+        logliks.append(_decode_float(row["loglik"], field_name=f"{loc}.loglik"))
+        log_posts.append(_decode_float(row["log_posterior"], field_name=f"{loc}.log_posterior"))
+        changes.append(_decode_float(row["max_change"], field_name=f"{loc}.max_change"))
+        em_evals.append(
+            _require_int(row["em_evaluations"], field_name=f"{loc}.em_evaluations", min_value=0)
+        )
+        safeguards.append(_require_bool(row["safeguard"], field_name=f"{loc}.safeguard"))
+    return pd.DataFrame(
+        {
+            "iter": np.array(iters, dtype=np.int64),
+            "loglik": np.array(logliks, dtype=np.float64),
+            "log_posterior": np.array(log_posts, dtype=np.float64),
+            "max_change": np.array(changes, dtype=np.float64),
+            "em_evaluations": np.array(em_evals, dtype=np.int32),
+            "safeguard": np.array(safeguards, dtype=bool),
+        }
+    )
+
+
+# --------------------------------------------------------------------------------------------
+# Top-level entry points
+# --------------------------------------------------------------------------------------------
+
+
+def dump_fit_result(
+    result: FitResult,
+    path: str | os.PathLike[str] | None = None,
+    *,
+    indent: int | None = 2,
+) -> str:
+    """Serialize ``result`` to strict JSON and optionally write it to ``path``."""
+    if indent is not None and (
+        isinstance(indent, bool) or not isinstance(indent, int) or indent < 0
+    ):
+        raise SpecificationError(f"indent must be a non-negative integer or None, got {indent!r}.")
+    import flexpyirt
+
+    payload: dict[str, Any] = {
+        "format": FORMAT_TAG,
+        "schema_version": SCHEMA_VERSION,
+        "flexpyirt_version": str(flexpyirt.__version__),
+        "model": _serialize_model(result._model),
+        "quadrature": _serialize_quadrature(result._quadrature),
+        "method": _serialize_method(result._method),
+        "n_obs": int(result.n_obs),
+        "se_method": result.se_method,
+        "loglik": _encode_float(result.loglik),
+        "log_posterior": _encode_float(result.log_posterior),
+        "converged": bool(result.converged),
+        "n_iter": int(result.n_iter),
+        "n_em_evaluations": int(result.n_em_evaluations),
+        "n_safeguards": int(result.n_safeguards),
+        "parameters": _serialize_parameters(result.parameters),
+        "vcov": _serialize_vcov(result.vcov),
+        "history": _serialize_history(result.history),
+    }
+    text = json.dumps(payload, indent=indent, allow_nan=False)
+    if path is not None:
+        Path(path).write_text(text, encoding="utf-8")
+    return text
+
+
+def _read_source(source: str | os.PathLike[str]) -> str:
+    """Read raw JSON text from either a file path or a JSON string."""
+    if isinstance(source, os.PathLike):
+        return Path(source).read_text(encoding="utf-8")
+    if not isinstance(source, str):
+        raise SpecificationError(
+            f"from_json() expects a file path or JSON string, got {type(source).__name__}."
+        )
+    stripped = source.lstrip()
+    if stripped.startswith("{"):
+        return source
+    has_newline = "\n" in source or "\r" in source
+    if not has_newline:
+        candidate = Path(source)
+        try:
+            is_file = candidate.is_file()
+        except OSError:
+            is_file = False
+        if is_file:
+            return candidate.read_text(encoding="utf-8")
+        looks_like_path = (
+            os.sep in source
+            or (os.altsep is not None and os.altsep in source)
+            or source.lower().endswith(".json")
+        )
+        if looks_like_path:
+            return candidate.read_text(encoding="utf-8")
+    return source
+
+
+def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
+    """Load a :class:`~flexpyirt.FitResult` from a JSON file path or JSON string."""
+    check_x64()
+    text = _read_source(source)
+    try:
+        raw = json.loads(text, parse_constant=_reject_json_constant)
+    except json.JSONDecodeError as exc:
+        raise SpecificationError(f"Invalid FitResult JSON: {exc}.") from exc
+
+    obj = _require_dict(raw, field_name="FitResult")
+
+    fmt = obj.get("format")
+    if fmt != FORMAT_TAG:
+        raise SpecificationError(f"Unsupported format {fmt!r}; expected {FORMAT_TAG!r}.")
+    if "schema_version" not in obj:
+        raise SpecificationError("Missing 'schema_version' in FitResult JSON.")
+    schema_version = _require_int(obj["schema_version"], field_name="schema_version")
+    if schema_version != SCHEMA_VERSION:
+        raise SpecificationError(
+            f"Unsupported FitResult schema_version {schema_version}; "
+            f"supported version is {SCHEMA_VERSION}."
+        )
+    _check_keys(obj, required=_TOP_LEVEL_KEYS, field_name="FitResult")
+    _require_str(obj["flexpyirt_version"], field_name="flexpyirt_version")
+
+    model = _deserialize_model(obj["model"])
+    quadrature = _deserialize_quadrature(obj["quadrature"], field_name="quadrature")
+    method = _deserialize_method(obj["method"], field_name="method")
+    n_obs = _require_int(obj["n_obs"], field_name="n_obs", min_value=1)
+    se_method = obj["se_method"]
+    if se_method not in _VALID_SE_METHODS:
+        raise SpecificationError(
+            f"Unknown se_method {se_method!r}; expected one of {_VALID_SE_METHODS}."
+        )
+    loglik = _decode_float(obj["loglik"], field_name="loglik")
+    log_posterior = _decode_float(obj["log_posterior"], field_name="log_posterior")
+    converged = _require_bool(obj["converged"], field_name="converged")
+    n_iter = _require_int(obj["n_iter"], field_name="n_iter", min_value=0)
+    n_em_evaluations = _require_int(
+        obj["n_em_evaluations"], field_name="n_em_evaluations", min_value=0
+    )
+    n_safeguards = _require_int(obj["n_safeguards"], field_name="n_safeguards", min_value=0)
+
+    parameters, eta = _deserialize_parameters(obj["parameters"], model)
+    vcov = _deserialize_vcov(obj["vcov"], n_free=int(eta.shape[0]))
+    history = _deserialize_history(obj["history"], n_iter=n_iter)
+
+    from flexpyirt.result import FitResult
+
+    return FitResult(
+        parameters=parameters,
+        loglik=loglik,
+        log_posterior=log_posterior,
+        converged=converged,
+        n_iter=n_iter,
+        n_em_evaluations=n_em_evaluations,
+        n_safeguards=n_safeguards,
+        history=history,
+        vcov=vcov,
+        se_method=se_method,
+        n_obs=n_obs,
+        _model=model,
+        _eta=eta,
+        _quadrature=quadrature,
+        _method=method,
+    )
