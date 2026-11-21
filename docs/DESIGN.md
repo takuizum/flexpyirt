@@ -1,203 +1,254 @@
-# flexpyirt 設計書（DESIGN）
+# flexpyirt design (DESIGN)
 
-> 状態: ドラフト v0.2（2026-11-20、M1 実装を反映）。実装前の設計。決定事項は「決定」、未確定は §12「未決事項」に置く。
+English | [日本語](DESIGN.ja.md)
 
-## 1. 目的と非目的
+> Status: draft v0.2 (2026-11-20, reflects the M1 implementation). Decisions are marked
+> "Decision"; open questions are in §12 "Open questions".
 
-### 目的
-- **Bock–Aitkin EM（BA-EM, Bock & Aitkin, 1981）による周辺最尤推定（MMLE）** を中核にした、Python の IRT 推定ライブラリ。
-- R `mirt` が実務で担っている以下を、Python らしい API で提供する:
-  - 多母集団（multiple-group）同時推定（群間の等値制約・部分アンカー）
-  - 固定パラメタ推定（FIPC: fixed item parameter calibration）
-  - 潜在分布の柔軟な指定（Normal / Empirical Histogram / 将来 Davidian・混合正規）
-  - 項目パラメタへの事前分布（Bayes modal = MAP 推定、EM で事後モードを求める）
-  - 標準誤差（Oakes 1999 の恒等式を自動微分で）
-- JAX による jit・vmap・GPU 対応、自動微分による拡張容易性（新しい項目モデルやリンキング基準を微分を手書きせず追加できる）。
+## 1. Goals and non-goals
 
-### 非目的（少なくとも v1 では）
-- R `mirt` の全機能の網羅。MHRM, MCEM, 探索的高次元 MIRT, CDM, CAT は対象外。
-- R の `mirt.model` 文字列構文の再現。
-- 速度で mirt（C++）に勝つこと自体。小規模問題では jit のコンパイル時間で負けてよい。売りは「正しさの検証済み」＋「微分可能・拡張可能」。
+### Goals
+- A Python IRT estimation library built around **marginal maximum likelihood estimation (MMLE) with
+  the Bock–Aitkin EM algorithm (BA-EM; Bock & Aitkin, 1981)**.
+- Provide, with a Pythonic API, what R `mirt` does in practice:
+  - multiple-group calibration (equality constraints across groups, partial anchors)
+  - fixed item parameter calibration (FIPC)
+  - flexible latent distributions (Normal / Empirical Histogram / later Davidian and normal
+    mixtures)
+  - priors on item parameters (Bayes modal = MAP estimation; EM finds the posterior mode)
+  - standard errors (Oakes' 1999 identity, via automatic differentiation)
+- jit, vmap and GPU support through JAX, and easy extension through autodiff (new item models and
+  linking criteria without hand-written derivatives).
 
-## 2. レイヤ構成
+### Non-goals (at least for v1)
+- Covering every feature of R `mirt`. MHRM, MCEM, exploratory high-dimensional MIRT, CDM and CAT
+  are out of scope.
+- Reproducing R's `mirt.model` string syntax.
+- Beating mirt (C++) on speed for its own sake. Small problems may lose to jit compilation time.
+  The selling points are "verified correctness" and "differentiable, extensible".
+
+## 2. Layers
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ ① Spec 層（ユーザーが書く・不変）                              │
+│ ① Spec layer (written by the user, immutable)                │
 │   Model, ItemSpec(TwoPL, GRM, ...), Group, LatentSpec(Normal, │
-│   EmpiricalHistogram), Prior, 制約（fix / equal）              │
+│   EmpiricalHistogram), Prior, constraints (fix / equal)       │
 ├──────────────────────────────────────────────────────────────┤
-│ ② Compile 層（Python・検証）                                   │
-│   Spec + Data → ParameterTable（mirt の pars='values' 相当）   │
-│   → FreeMap（自由パラメタベクトル ⇄ 全パラメタの写像）          │
-│   → 反応パターン圧縮・パディング・識別性チェック                 │
+│ ② Compile layer (Python, validation)                         │
+│   Spec + Data → ParameterTable (like mirt's pars='values')    │
+│   → FreeMap (free-parameter vector ⇄ all parameters)          │
+│   → response-pattern compression, padding, identification     │
 ├──────────────────────────────────────────────────────────────┤
-│ ③ Core 層（純粋 JAX・jit）                                     │
+│ ③ Core layer (pure JAX, jit)                                  │
 │   e_step, m_step_items, m_step_latent, em_loop(lax.while_loop) │
 │   squarem, oakes_information, scoring                         │
 ├──────────────────────────────────────────────────────────────┤
-│ ④ Result 層（Python）                                          │
-│   FitResult: パラメタ表(DataFrame), SE, logLik, AIC/BIC,       │
-│   収束履歴, score(), summary(), _repr_html_                    │
+│ ④ Result layer (Python)                                       │
+│   FitResult: parameter tables (DataFrame), SE, logLik,        │
+│   AIC/BIC, convergence history, score(), summary(), repr_html │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**決定**: ③ は名前・文字列・DataFrame を一切知らない。③ の入出力は pytree（`jax.Array` の入れ子と
-`NamedTuple`／`flax.struct` ではなく自前の `@jax.tree_util.register_dataclass` な frozen dataclass）のみ。
+**Decision**: ③ knows nothing about names, strings or DataFrames. Its inputs and outputs are
+pytrees only (nested `jax.Array`s and our own frozen dataclasses registered with
+`@jax.tree_util.register_dataclass`, not `NamedTuple` / `flax.struct`).
 
-## 3. 記法
+## 3. Notation
 
-| 記号 | 意味 |
+| Symbol | Meaning |
 |---|---|
-| $g=1..G$ | 群（母集団）。$g=1$ を参照群とする |
-| $j=1..J$ | 項目 |
-| $p$ | 群内のユニークな反応パターン、$c_p$ はその度数 |
-| $q=1..Q$ | 求積点 $\theta_q$ |
-| $w_{gq}$ | 群 $g$ の潜在分布の求積重み（$\sum_q w_{gq}=1$） |
-| $\xi_j^{(g)}$ | 群 $g$ における項目 $j$ のパラメタ（等値制約があれば群間で同一） |
-| $\eta$ | 自由パラメタベクトル（FreeMap で $\xi,\ w$ のパラメタに展開） |
+| $g=1..G$ | Groups (populations); $g=1$ is the reference group |
+| $j=1..J$ | Items |
+| $p$ | Unique response patterns within a group; $c_p$ is its frequency |
+| $q=1..Q$ | Quadrature nodes $\theta_q$ |
+| $w_{gq}$ | Quadrature weights of group $g$'s latent distribution ($\sum_q w_{gq}=1$) |
+| $\xi_j^{(g)}$ | Parameters of item $j$ in group $g$ (identical across groups under equality constraints) |
+| $\eta$ | Free-parameter vector (expanded into the parameters of $\xi$ and $w$ by the FreeMap) |
 
-## 4. アルゴリズム
+## 4. Algorithms
 
-### 4.1 前処理: 反応パターン圧縮
-- 群ごとに反応行列（欠測は `-1`）をユニーク化し、度数 $c_p$ を得る。
-- jit の再コンパイルを抑えるため、パターン数を **2 のべき乗のバケットにパディング**（度数 0 の行で埋める）。
-- 群ごとにパターン数が違うので、全群を連結した 1 本の配列 + `group_index` で持つ（群ごとの Python ループを jit 内に持ち込まない）。
+### 4.1 Preprocessing: response-pattern compression
+- Make each group's response matrix (missing as `-1`) unique to get frequencies $c_p$.
+- To limit jit recompilation, **pad the number of patterns to a power-of-two bucket** (rows with
+  frequency 0).
+- Groups have different numbers of patterns, so all groups are concatenated into one array plus
+  a `group_index` (no per-group Python loop inside jit).
 
 ### 4.2 E-step
-各パターン・求積点で
-$$\ell_{pq}=\sum_j m_{pj}\log P_j(y_{pj}\mid\theta_q;\xi_j^{(g)}),\qquad m_{pj}=\mathbf 1[y_{pj}\ \text{観測}]$$
+For each pattern and node,
+$$\ell_{pq}=\sum_j m_{pj}\log P_j(y_{pj}\mid\theta_q;\xi_j^{(g)}),\qquad m_{pj}=\mathbf 1[y_{pj}\ \text{observed}]$$
 $$h_{pq}=\operatorname{softmax}_q\big(\ell_{pq}+\log w_{g(p)q}\big)$$
-期待度数（「人工データ」）:
+Expected counts ("artificial data"):
 $$\bar n_{gq}=\sum_{p\in g}c_p h_{pq},\qquad \bar r_{gjkq}=\sum_{p\in g}c_p h_{pq}\mathbf 1[y_{pj}=k]$$
-周辺対数尤度: $\ell(\eta)=\sum_p c_p\operatorname{logsumexp}_q(\ell_{pq}+\log w_{g(p)q})$。
+Marginal log-likelihood: $\ell(\eta)=\sum_p c_p\operatorname{logsumexp}_q(\ell_{pq}+\log w_{g(p)q})$.
 
-実装メモ: $\bar r$ は `one_hot(y)` と $c_p h_{pq}$ の einsum。メモリは $P\times J\times K\times Q$ を避け、
-`(P,Q)` の重みと `(P,J,K)` の one-hot を einsum で縮約して `(G,J,K,Q)` を直接得る。
+Implementation note: $\bar r$ is an einsum of `one_hot(y)` and $c_p h_{pq}$. To avoid
+$P\times J\times K\times Q$ memory, contract the `(P,Q)` weights with the `(P,J,K)` one-hot to get
+`(G,J,K,Q)` directly.
 
-### 4.3 M-step（項目）
-群 $g$・項目 $j$ の期待完全データ対数尤度に対数事前分布を足したもの:
+### 4.3 M-step (items)
+The expected complete-data log-likelihood of item $j$ over groups, plus the log prior:
 $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;+\;\log\pi(\xi_j)$$
-- 群間等値制約は**同一項目内**に閉じるので、項目ごとの分解は保たれる（多母集団でも項目単位に解ける）。
-- **決定（v1）**: 項目ごとの Newton–Raphson（自動微分で勾配・Hessian、$\dim\xi_j\le 5$ 程度）。
-  同じ項目モデル（"item family"）の項目は配列にまとめて `vmap`。ステップは backtracking line search
-  で $Q_j$ の増加を保証（一般化 EM として単調性を保つ）。M-step は完全収束させず、Newton 数ステップで打ち切ってよい。
-- 固定パラメタは $\eta$ に含めない（定数として ParameterTable から渡す）。
-- **項目をまたぐ等値制約**（例: 全項目共通の $a$）は分解を壊す。v1 では非対応とし、M5 で「制約で連結された項目成分ごとに同時 Newton」を実装する。
+- Equality constraints across groups stay **within one item**, so the item-wise decomposition holds
+  (multiple groups can still be solved item by item).
+- **Decision (v1)**: item-wise Newton–Raphson (gradient and Hessian by autodiff,
+  $\dim\xi_j\le 5$ or so). Items of the same item model ("item family") are stacked and `vmap`ed.
+  A backtracking line search guarantees that $Q_j$ increases (monotone, as a generalized EM). The
+  M-step need not converge fully; a few Newton steps are enough.
+- Fixed parameters are not part of $\eta$ (they come from the ParameterTable as constants).
+- **Equality constraints across items** (e.g. one common $a$ for all items) break the
+  decomposition. Not supported in v1; M5 will add "joint Newton per component of items connected
+  by constraints".
 
-### 4.4 M-step（潜在分布）
-- **Normal**（群 $g$ の平均・分散が自由な場合）:
-  **決定（M1）**: 求積重みは格子上の密度を正規化したもの
-  $w_{gq}(\mu_g,\sigma_g^2)=\phi(\theta_q;\mu_g,\sigma_g^2)/\sum_{q'}\phi(\theta_{q'};\mu_g,\sigma_g^2)$ なので、
-  M-step は離散化した期待対数尤度 $Q_g^{\text{lat}}=\sum_q\bar n_{gq}\log w_{gq}(\mu_g,\sigma_g^2)$ を
-  項目と同じマスク付き Newton（§4.3）で最大化する。閉形式のモーメント
-  $\mu_g=\frac{1}{N_g}\sum_q\bar n_{gq}\theta_q$、$\sigma_g^2=\frac{1}{N_g}\sum_q\bar n_{gq}(\theta_q-\mu_g)^2$
-  は連続密度に対する最大化であり、離散化した周辺尤度の EM としては厳密ではない（単調性の保証が崩れ、
-  Oakes の恒等式とも整合しない）。差は等間隔 61 点では無視できるほど小さいが、厳密さを優先する。
-  パラメタは自然尺度（平均・**分散**）で持ち、$\sigma^2>0$ は line search の実行可能性判定で守る。
-  （M1 で確認: mirt は閉形式で更新しており、Rasch の分散で最大 ~8e-5 の差が出る。VALIDATION.md 参照。）
-  **決定（2026-11-20, レビュー済み）**: 厳密な M-step のみを持ち、mirt 互換の閉形式更新はオプションとしても提供しない。
-  両者の差は格子の打ち切り（$V_w(\sigma^2)<\sigma^2$）から生じ、停留条件はそれぞれ
-  厳密: $V_w(\hat\sigma^2)=\hat m$、閉形式: $\hat\sigma^2=\hat m$（$\hat m$ は期待度数の 2 次モーメント）。
-  報告する `var` は格子で打ち切る前の正規分布のパラメタであり、格子上の分布の分散は $V_w(\hat\sigma^2)$ である。
-  平均・分散が大きい群（M2 の焦点群など）では打ち切りの影響が平均にも及ぶので、格子幅の選択が結果に効く。
-- **Empirical Histogram (EH)**: $w_{gq}=\bar n_{gq}/N_g$。
-  識別のため参照群 EH は各反復で平均 0・分散 1 に標準化する（Woods, 2007）。標準化の方法は §12 未決事項 1。
-- 将来: Davidian 曲線（Woods & Lin, 2009）、混合正規。いずれも `LatentDist` プロトコル（§6）に従えば Core に手を入れずに追加できる。
+### 4.4 M-step (latent distribution)
+- **Normal** (when group $g$'s mean or variance is free):
+  **Decision (M1)**: the quadrature weights are the density normalized on the grid,
+  $w_{gq}(\mu_g,\sigma_g^2)=\phi(\theta_q;\mu_g,\sigma_g^2)/\sum_{q'}\phi(\theta_{q'};\mu_g,\sigma_g^2)$, so
+  the M-step maximizes the discretized expected log-likelihood
+  $Q_g^{\text{lat}}=\sum_q\bar n_{gq}\log w_{gq}(\mu_g,\sigma_g^2)$ with the same masked Newton as the
+  items (§4.3). The closed-form moments
+  $\mu_g=\frac{1}{N_g}\sum_q\bar n_{gq}\theta_q$, $\sigma_g^2=\frac{1}{N_g}\sum_q\bar n_{gq}(\theta_q-\mu_g)^2$
+  maximize over the continuous density and are not an exact EM step for the discretized marginal
+  likelihood (monotonicity is no longer guaranteed, and they are inconsistent with Oakes'
+  identity). The difference is negligible on 61 equally spaced points, but exactness comes first.
+  Parameters are kept on their natural scale (mean and **variance**); $\sigma^2>0$ is enforced by
+  the line search's feasibility check.
+  (Confirmed in M1: mirt uses the closed form, which gives Rasch variances up to ~8e-5 apart; see
+  VALIDATION.md.)
+  **Decision (2026-11-20, reviewed)**: keep only the exact M-step; the mirt-style closed-form
+  update is not offered even as an option. The difference comes from the grid cut-off
+  ($V_w(\sigma^2)<\sigma^2$); the stationary conditions are
+  exact: $V_w(\hat\sigma^2)=\hat m$, closed form: $\hat\sigma^2=\hat m$ ($\hat m$ is the second moment of
+  the expected counts). The reported `var` is the parameter of the normal distribution before the
+  grid cuts it off; the variance of the distribution on the grid is $V_w(\hat\sigma^2)$. For groups
+  with a large mean or variance (e.g. M2 focal groups) the cut-off also affects the mean, so the
+  grid width matters.
+- **Empirical Histogram (EH)**: $w_{gq}=\bar n_{gq}/N_g$.
+  For identification, the reference group's EH is standardized to mean 0 and variance 1 at every
+  iteration (Woods, 2007). How to standardize is open question 1 in §12.
+- Later: Davidian curves (Woods & Lin, 2009), normal mixtures. Both can be added without touching
+  the Core by following the `LatentDist` protocol (§6).
 
-### 4.5 識別性ルール（Compile 層で検査）
-- 既定: 参照群は $N(0,1)$ 固定、焦点群の平均・分散は自由。焦点群を自由にするには、群間で全パラメタが等しいアンカー項目が必要
-  （2PL なら最低 1 項目で理論上は識別、実務的には複数を推奨し、少ない場合は警告）。
-- **FIPC**: 固定項目が尺度を決めるので、全群の平均・分散を自由にしてよい。固定項目が 0 なら参照群を固定。
-  潜在分布を $N(0,1)$ に固定したまま固定項目以外を推定すると尺度がずれる（Kim, 2006）ので、
-  FIPC では潜在分布（Normal の平均・分散、または EH の重み）を各 EM 反復で更新する方式（Kim の MWU-MEM に相当）を既定にする。
-- **Rasch（決定, M1）**: Rasch は $a_j=1$ 固定・$d_j$ 自由で、尺度は傾きで決まるので**潜在分布の分散を自由推定**し、
-  平均は 0 に固定する（mirt の `itemtype="Rasch"` と同じ: `a1` 固定、`MEAN_1` 固定、`COV_11` 自由）。
-  潜在分布を明示しない単一群モデルでは、**全項目が Rasch のとき既定を $N(0,\sigma^2)$（分散自由）**、
-  それ以外は $N(0,1)$ 固定とする。
-- 一般則（M1 で検査）: 分散を自由にするには傾きを固定した項目（値が 0 でない）が 1 つ以上、
-  平均を自由にするには切片を固定した項目が 1 つ以上必要。
-- 識別できない指定は `IdentificationError` を fit 前に投げる。
+### 4.5 Identification rules (checked in the Compile layer)
+- Default: the reference group is fixed at $N(0,1)$; focal groups' means and variances are free.
+  Freeing a focal group needs anchor items with all parameters equal across groups (for 2PL, one
+  item identifies in theory; several are recommended in practice, with a warning when there are
+  few).
+- **FIPC**: the fixed items set the scale, so every group's mean and variance may be free. With no
+  fixed items, the reference group is fixed. Estimating the non-fixed items with the latent
+  distribution held at $N(0,1)$ shifts the scale (Kim, 2006), so FIPC updates the latent
+  distribution (Normal mean and variance, or EH weights) at every EM iteration by default
+  (equivalent to Kim's MWU-MEM).
+- **Rasch (Decision, M1)**: Rasch fixes $a_j=1$ and frees $d_j$; the slopes set the scale, so the
+  **latent variance is estimated** and the mean is fixed at 0 (as mirt's `itemtype="Rasch"`:
+  `a1` fixed, `MEAN_1` fixed, `COV_11` free). In a single-group model without an explicit latent
+  distribution, **the default is $N(0,\sigma^2)$ (variance free) when every item is Rasch**, and
+  $N(0,1)$ fixed otherwise.
+- General rule (checked in M1): a free variance needs at least one item with a fixed slope
+  (nonzero value); a free mean needs at least one item with a fixed intercept.
+- Unidentified specifications raise `IdentificationError` before fitting.
 
-### 4.6 収束と加速
-- 収束判定: 自由パラメタ（自然尺度の $\eta$）の最大絶対変化 $<$ `tol`（既定 1e-4、mirt の `TOL` と同じ定義）。
-  対数尤度（MAP 時は対数事後）と最大変化の両方の履歴を保存し、単調性はテストで検査する。
-  **決定（M1）**: 停止条件は最大絶対変化のみとする（対数尤度の変化量を条件に足すと mirt との対応が崩れるため）。
-- **SQUAREM**（Varadhan & Roland, 2008, スキーム S3）をオプションで。外挿後に目的関数が減ったら通常の EM ステップに戻す（単調性の安全装置）。
-- EM ループは `lax.while_loop` でデバイス上に置く。進捗表示は `jax.debug.callback` を任意で。
+### 4.6 Convergence and acceleration
+- Convergence: largest absolute change of the free parameters (natural-scale $\eta$) $<$ `tol`
+  (default 1e-4, the same definition as mirt's `TOL`). The histories of the log-likelihood (log
+  posterior with MAP) and the largest change are both kept; monotonicity is checked by tests.
+  **Decision (M1)**: the stopping rule is the largest absolute change only (adding a
+  log-likelihood change condition would break the correspondence with mirt).
+- **SQUAREM** (Varadhan & Roland, 2008, scheme S3) as an option. If the objective decreases after
+  extrapolation, fall back to a plain EM step (a monotonicity safeguard).
+- The EM loop runs on device in `lax.while_loop`. Optional progress output with
+  `jax.debug.callback`.
 
-### 4.7 MAP（Bayes modal）
-- 事前分布は**自然なパラメタ尺度**（$a, b$ または $a, d$, $c$ など）で定義し、Jacobian 項は入れない（自然尺度での事後モード。mirt の Bayes modal と同じ）。
-- 内部の最適化を変換後の尺度（例: $c$ を logit）で行っても、目的関数自体は自然尺度の事前分布で評価する。
-- 結果には `loglik`（尤度のみ）と `log_posterior` を分けて返す。AIC/BIC は事前分布がある場合に警告付き。
+### 4.7 MAP (Bayes modal)
+- Priors are defined on the **natural parameter scale** ($a, b$ or $a, d$, $c$ and so on) without
+  a Jacobian term (the posterior mode on the natural scale, as in mirt's Bayes modal).
+- Even if the optimization runs on a transformed scale (e.g. $c$ on the logit scale), the
+  objective is evaluated with the natural-scale prior.
+- Results report `loglik` (likelihood only) and `log_posterior` separately. AIC/BIC come with a
+  warning when priors are present.
 
-### 4.8 標準誤差
-- **決定**: 既定は Oakes (1999) の恒等式
+### 4.8 Standard errors
+- **Decision**: the default is Oakes' (1999) identity
   $$I(\hat\eta)=-\Big[\tfrac{\partial^2 Q(\eta\mid\eta')}{\partial\eta\,\partial\eta^\top}+\tfrac{\partial^2 Q(\eta\mid\eta')}{\partial\eta\,\partial\eta'^\top}\Big]_{\eta=\eta'=\hat\eta}$$
-  を `jax.hessian` と `jax.jacfwd(jax.grad(...))` で計算。$Q$ は「E-step の重みを $\eta'$ で計算し、尤度を $\eta$ で評価する」2 引数関数として実装する。
-- 代替: 直接 `jax.hessian` で周辺対数尤度の観測情報（小規模なら最も素直。Oakes の検証にも使う）、cross-product（$\sum_p c_p s_p s_p^\top$）、sandwich。
-- MAP 時は事前分布の Hessian を加える。固定パラメタは $\eta$ に含まれないので自動的に除外。
+  computed with `jax.hessian` and `jax.jacfwd(jax.grad(...))`. $Q$ is implemented as a
+  two-argument function: "E-step weights computed at $\eta'$, likelihood evaluated at $\eta$".
+- Alternatives: the observed information of the marginal log-likelihood by `jax.hessian` directly
+  (the simplest for small problems; also used to check Oakes), cross-product
+  ($\sum_p c_p s_p s_p^\top$), sandwich.
+- With MAP, add the prior's Hessian. Fixed parameters are not in $\eta$ and are excluded
+  automatically.
 
-### 4.9 求積
-- **決定**: 1 次元の既定は等間隔 61 点、$[-6,6]$（EH と同じ格子を共有でき、Normal でも重みを密度から作る）。
-- Normal 専用に Gauss–Hermite も選べる（`Quadrature.gauss_hermite(n)`）。
-- 多次元（M4 以降）は直積格子、次元 3 まで。それ以上は対象外（非目的）。
+### 4.9 Quadrature
+- **Decision**: the unidimensional default is 61 equally spaced points on $[-6,6]$ (the same grid
+  can be shared with EH; Normal weights come from the density).
+- Gauss–Hermite is available for Normal only (`Quadrature.gauss_hermite(n)`).
+- Multidimensional models (M4 and later) use product grids, up to 3 dimensions. More is out of
+  scope (non-goal).
 
-### 4.10 初期値
-- $d_j$: 正答率の logit、$a_j$: 項目−合計の点双列相関から変換（mirt と同様の古典的初期値）。GRM の閾値はカテゴリ累積比率の logit。
-- **決定（M1, 2PL/Rasch）**: 正答率 $p_j$（$[0.01,0.99]$ に丸める）と項目−残余得点の点双列相関 $r_j$ から
-  $a_j^{(0)}=\operatorname{clip}(1.7\,r_j/\sqrt{1-r_j^2},\,0.25,\,3)$（Rasch は 1）、
-  $d_j^{(0)}=\operatorname{logit}(p_j)\sqrt{1+(a_j^{(0)}/1.7)^2}$（周辺確率を近似的に合わせるため）。
-  分散の初期値は 1。初期値は収束点に影響しない前提で、照合テストもそれを確認する。
-- ユーザー指定の初期値は ParameterTable の `value` 列で上書き可能。
+### 4.10 Starting values
+- $d_j$: logit of the proportion correct; $a_j$: converted from the item–total point-biserial
+  correlation (classical starting values as in mirt). GRM thresholds: logits of the cumulative
+  category proportions.
+- **Decision (M1, 2PL/Rasch)**: from the proportion correct $p_j$ (clipped to $[0.01,0.99]$) and
+  the item–rest point-biserial correlation $r_j$,
+  $a_j^{(0)}=\operatorname{clip}(1.7\,r_j/\sqrt{1-r_j^2},\,0.25,\,3)$ (1 for Rasch),
+  $d_j^{(0)}=\operatorname{logit}(p_j)\sqrt{1+(a_j^{(0)}/1.7)^2}$ (to roughly match the marginal
+  probability). The variance starts at 1. Starting values are assumed not to affect the converged
+  point, and the validation tests check this.
+- User starting values override these through the ParameterTable's `value` column.
 
-## 5. データ構造
+## 5. Data structures
 
-### 5.1 ParameterTable（Compile 層、ユーザーにも公開）
-mirt の `pars='values'` に相当する長形式の表。**全ての制約はこの表の列で表現する。**
+### 5.1 ParameterTable (Compile layer, also public)
+A long table like mirt's `pars='values'`. **Every constraint is expressed in its columns.**
 
-| 列 | 型 | 意味 |
+| Column | Type | Meaning |
 |---|---|---|
-| `group` | str | 群名 |
-| `item` | str | 項目名（潜在分布パラメタは `"__latent__"`） |
-| `param` | str | `a`, `d`, `g`, `u`, `d1..dK` など、内部パラメタ名 |
-| `value` | float | 初期値（固定なら固定値） |
-| `free` | bool | 推定するか |
-| `lower`, `upper` | float | 範囲 |
-| `prior` | `Prior \| None` | 事前分布オブジェクト |
-| `free_id` | int \| -1 | 自由パラメタ番号。**等値制約は同じ `free_id` を共有することで表す** |
+| `group` | str | Group name |
+| `item` | str | Item name (`"__latent__"` for latent-distribution parameters) |
+| `param` | str | Internal parameter name such as `a`, `d`, `g`, `u`, `d1..dK` |
+| `value` | float | Starting value (the fixed value if not free) |
+| `free` | bool | Whether it is estimated |
+| `lower`, `upper` | float | Bounds |
+| `prior` | `Prior \| None` | Prior object |
+| `free_id` | int \| -1 | Free-parameter number. **Equality constraints are expressed by sharing a `free_id`** |
 
-- ユーザーは `spec.parameter_table(data)` で表を取り出し、pandas で編集して `fit(..., table=edited)` に渡せる（mirt の pars 編集ワークフローを残す）。
-- `FreeMap` は `free_id` から「全パラメタ配列（群 × family × 項目 × パラメタ、パディング付き）」へのギャザー添字を持つ。$\eta\mapsto\xi$ は `xi = fixed_values.at[idx].set(eta[free_id])` の 1 行。
+- Users take the table out with `spec.parameter_table(data)`, edit it with pandas and pass it to
+  `fit(..., table=edited)` (keeping mirt's pars-editing workflow).
+- The `FreeMap` holds gather indices from `free_id` into "all parameters (group × family × item ×
+  parameter, padded)". $\eta\mapsto\xi$ is one line:
+  `xi = fixed_values.at[idx].set(eta[free_id])`.
 
-### 5.2 Core に渡す pytree
+### 5.2 The pytree passed to the Core
 ```python
 @register_dataclass
 @dataclass(frozen=True)
 class CompiledProblem:
-    y: Array  # (P, J) int, 欠測 -1, パディング行は度数 0
+    y: Array  # (P, J) int, missing -1, padding rows have frequency 0
     counts: Array  # (P,)
     group: Array  # (P,) int
     nodes: Array  # (Q, D)
-    families: tuple[FamilyBlock, ...]  # 項目モデルごとの塊（静的）
+    families: tuple[FamilyBlock, ...]  # one block per item model (static)
     free_map: FreeMap
-    latent: tuple[LatentBlock, ...]  # 群ごとの潜在分布（静的な種類 + 動的なパラメタ）
+    latent: tuple[LatentBlock, ...]  # per-group latent distribution (static kind + dynamic params)
 ```
-`families` と潜在分布の「種類」は静的（jit の static）、パラメタ値は動的。
+`families` and the latent distributions' kinds are static (jit static); parameter values are
+dynamic.
 
-## 6. 拡張プロトコル
+## 6. Extension protocols
 
 ```python
 class ItemModel(Protocol):
     name: ClassVar[str]
-    param_names: tuple[str, ...]  # 内部パラメタ名
+    param_names: tuple[str, ...]  # internal parameter names
 
     def log_prob(self, theta: Array, params: Array) -> Array:
         ...
-        # theta (Q, D), params (n_params,) -> (Q, K) 各カテゴリの対数確率
+        # theta (Q, D), params (n_params,) -> (Q, K) log-probability of each category
 
-    def init(self, y: Array) -> Array: ...  # 古典的初期値
-    def to_irt(self, params: Array) -> dict[str, Array]: ...  # a,b 表示などへの変換（表示専用）
+    def init(self, y: Array) -> Array: ...  # classical starting values
+    def to_irt(self, params: Array) -> dict[str, Array]: ...  # e.g. a, b display (display only)
     def bounds(self) -> tuple[Array, Array]: ...
 
 
@@ -206,96 +257,122 @@ class LatentDist(Protocol):
     def m_step(self, nodes: Array, n_bar: Array, params: Array) -> Array: ...
     def n_params(self) -> int: ...
 ```
-新しい項目モデルは `log_prob` を書くだけで、E-step・M-step（自動微分 Newton）・SE・スコアリングが全部動くことを設計目標にする。
+The design goal: writing `log_prob` is enough for a new item model to get the E-step, M-step
+(autodiff Newton), SEs and scoring.
 
-## 7. 対応する項目モデル（段階的）
-| モデル | 内部パラメタ | マイルストーン |
+## 7. Item models (in stages)
+| Model | Internal parameters | Milestone |
 |---|---|---|
-| Rasch / 2PL | $a, d$（$P=\sigma(a\theta+d)$） | M1 |
-| 3PL / 4PL | $a,d,g,u$（$g,u$ は logit 尺度で最適化） | M3 |
+| Rasch / 2PL | $a, d$ ($P=\sigma(a\theta+d)$) | M1 |
+| 3PL / 4PL | $a,d,g,u$ ($g,u$ optimized on the logit scale) | M3 |
 | GRM | $a, d_1>\dots>d_{K-1}$ | M2 |
 | GPCM / PCM | $a, d_1..d_{K-1}$ | M3 |
-| Nominal | M5 以降（未定） | — |
+| Nominal | M5 or later (undecided) | — |
 
-表示用の IRT パラメタ化（$b=-d/a$ など）は Result 層で変換し、SE はデルタ法で出す。
+The display IRT parameterization ($b=-d/a$ and so on) is converted in the Result layer, with SEs
+by the delta method.
 
-## 8. スコアリング
-`FitResult.score(data, method="EAP"|"MAP"|"ML"|"WLE"|"PV", group=...)`。群ごとの推定済み潜在分布を事前分布として使う。EAP の事後 SD も返す。
+## 8. Scoring
+`FitResult.score(data, method="EAP"|"MAP"|"ML"|"WLE"|"PV", group=...)`, using each group's
+estimated latent distribution as the prior. EAP also returns the posterior SD.
 
-## 9. 性能方針
-- パターン圧縮 + バケットパディングで再コンパイルを抑える。
-- item family ごとの `vmap`。異種項目混在でも family 数（静的）だけのループ。
-- 既定は CPU で十分速いことを目標。GPU は大規模（N ≥ 10^5, J ≥ 100）で効けばよい。
-- ベンチマーク: R mirt（`TOL=1e-4`, 既定設定）との wall time 比較を `benchmarks/` に置く（M3）。
+## 9. Performance
+- Pattern compression and bucket padding limit recompilation.
+- `vmap` per item family. Mixed item types loop only over the (static) families.
+- The default target is "fast enough on CPU". GPU should help for large problems
+  (N ≥ 10^5, J ≥ 100).
+- Benchmarks: wall time against R mirt (`TOL=1e-4`, default settings) in `benchmarks/` (M3).
 
-## 10. エラーと警告
-- `SpecificationError`: 仕様の矛盾（存在しない項目名を固定、カテゴリ数不一致など）
-- `IdentificationError`: 識別不能（アンカーなしで焦点群自由など）
-- `ConvergenceWarning`: 最大反復到達、SQUAREM の安全装置多発
-- `HeywoodWarning`: 境界解（$g\to0$, $a$ 発散など）
+## 10. Errors and warnings
+- `SpecificationError`: inconsistent specification (fixing an unknown item, wrong number of
+  categories, ...)
+- `IdentificationError`: not identified (focal group free without anchors, ...)
+- `ConvergenceWarning`: maximum iterations reached, frequent SQUAREM safeguard
+- `HeywoodWarning`: boundary solution ($g\to0$, diverging $a$, ...)
 
-## 11. テスト方針（詳細は VALIDATION.md）
-- 単体: 各 `log_prob` の確率和 = 1、勾配の有限差分チェック、E-step の度数保存（$\sum_q\bar n_{gq}=N_g$）。
-- 性質: hypothesis でランダムなパラメタ・データを生成し、EM の単調増加を検査。
-- 回復: シミュレーションでのパラメタ回復（バイアス・RMSE）。
-- 照合: R mirt の推定値・SE・対数尤度と許容誤差内で一致。
+## 11. Testing (details in VALIDATION.md)
+- Unit: probabilities of each `log_prob` sum to 1, finite-difference gradient checks, E-step count
+  conservation ($\sum_q\bar n_{gq}=N_g$).
+- Property: hypothesis generates random parameters and data; EM must increase monotonically.
+- Recovery: parameter recovery in simulations (bias, RMSE).
+- Agreement: estimates, SEs and log-likelihood match R mirt within tolerance.
 
-## 12. 未決事項
-1. **EH の識別の取り方**: (a) 毎反復で重みの平均・分散を 0/1 に合わせて節点をアフィン変換し項目パラメタを逆変換、(b) 参照群の EH を標準化した後で補間し直す、のどちらか。mirt の挙動を確認したうえで決める。
-2. 多母集団で群の数が多いとき（例: 学校 × 学年）の扱い。群ごとの潜在分布を vmap できる形にしておく。
-3. ~~欠測の設計~~ → MAR 前提の除外のみ（§14.8、2026-11-20）。
-4. ~~パッケージ名~~ → `flexpyirt` に決定（2026-11-20）。
-5. 項目をまたぐ等値制約の M-step（§4.3）の実装方式。
+## 12. Open questions
+1. **Identification for EH**: either (a) at every iteration, affinely transform the nodes so the
+   weights have mean 0 and variance 1, and transform the item parameters back; or (b) standardize
+   the reference group's EH and re-interpolate. Decide after checking mirt's behaviour.
+2. Many groups (e.g. school × grade). Keep the per-group latent distributions `vmap`-able.
+3. ~~Missing-data design~~ → exclusion under MAR only (§14.8, 2026-11-20).
+4. ~~Package name~~ → `flexpyirt` (2026-11-20).
+5. How to implement the M-step with equality constraints across items (§4.3).
 
-## 13. 実装上の決定（M1）
-1. **M-step の Newton**: 勾配・Hessian はすべて JAX の自動微分（`jax.grad` / `jax.hessian`）で得て、手書きの解析微分は持たない。
-   ループ（ステップ更新と line search）だけ自前で書く: 自由座標のマスク付き Newton。固定座標は Hessian を $-I$・勾配 0 に置き換えて動かさない。
-   Newton 方向が上昇方向でない（Hessian が負定値でない）ときは勾配方向に切り替える。ステップ幅は
-   $2^{-k}\ (k=0,\dots,29)$ を `vmap` で一括評価し、目的関数が減らず範囲内に収まる最大のものを採る
-   （該当なしなら動かない）。jit 内に Python 分岐を持ち込まないための形。
-2. **FreeMap**: family ごとに `free_index (J_f, P_f)`（固定は -1）と `fixed_values`。
-   $\xi=\text{where}(\text{free\_index}\ge0,\ \eta[\text{free\_index}],\ \text{fixed})$。
-   M-step 後は `eta.at[free_index].set(xi, mode="drop")` で戻す。M1 では `free_id` を異なる項目間で共有すると
-   `SpecificationError`（§4.3、M5 で対応）。
-3. **M1 の範囲外は明示的に拒否**: 多母集団（`group=`）、欠測（NaN）、等間隔以外の求積は M2 以降。
-   E-step 自体は欠測マスクを持つ形で書くが、照合（V9）が済むまでデータ層で拒否する。
-   全員が同じ反応の項目は MLE が発散するので `SpecificationError`。
-4. **依存**: pandas は必須依存（結果は DataFrame で返す）、polars は任意依存。
-5. **SE**: $\eta$（自然尺度）に対する情報行列。Oakes は $Q(\eta\mid\eta')$ を
-   `jax.jacfwd(jax.grad(Q, 0), argnums=(0, 1))` で微分。直接法は周辺対数尤度の `jax.hessian`。
-   両者は恒等式として一致するので、内部整合テストは機械精度近く（相対 1e-6）で比較する。
+## 13. Implementation decisions (M1)
+1. **Newton in the M-step**: every gradient and Hessian comes from JAX autodiff (`jax.grad` /
+   `jax.hessian`); there are no hand-written analytic derivatives. Only the loop (step update and
+   line search) is our own: Newton masked to the free coordinates. Fixed coordinates get Hessian
+   $-I$ and gradient 0 so they do not move. If the Newton direction is not an ascent direction
+   (the Hessian is not negative definite), switch to the gradient. Step sizes
+   $2^{-k}\ (k=0,\dots,29)$ are evaluated together with `vmap`, and the largest one that does not
+   decrease the objective and stays within bounds is taken (none: do not move). This shape keeps
+   Python branches out of jit.
+2. **FreeMap**: per family, `free_index (J_f, P_f)` (-1 if fixed) and `fixed_values`.
+   $\xi=\text{where}(\text{free\_index}\ge0,\ \eta[\text{free\_index}],\ \text{fixed})$.
+   After the M-step, write back with `eta.at[free_index].set(xi, mode="drop")`. In M1, sharing a
+   `free_id` between different items is a `SpecificationError` (§4.3; supported in M5).
+3. **Explicitly reject what M1 does not cover**: multiple groups (`group=`), missing data (NaN) and
+   non-equispaced quadrature come in M2 or later. The E-step itself is written with a missing-data
+   mask, but the data layer rejects missing data until validation (V9) is done. Items where
+   everyone gave the same response make the MLE diverge and raise `SpecificationError`.
+   (Multiple groups and missing data were enabled in M2, §14.)
+4. **Dependencies**: pandas is required (results are DataFrames); polars is optional.
+5. **SE**: the information matrix for $\eta$ (natural scale). Oakes differentiates
+   $Q(\eta\mid\eta')$ with `jax.jacfwd(jax.grad(Q, 0), argnums=(0, 1))`. The direct method is
+   `jax.hessian` of the marginal log-likelihood. The two agree as an identity, so the internal
+   consistency test compares them near machine precision (relative 1e-6).
 
-## 14. 実装上の決定（M2）
-1. **群ごとの項目パラメタ**: ParameterTable は群 × 項目 × パラメタの行を持ち、既定では群ごとに別の `free_id`
-   （mirt `multipleGroup` の既定と同じ）。`equal_across_groups(items=..., params=None)` は指定項目の行を群間で
-   同じ `free_id` にする。Core では family ごとに `free_index (G, J_f, P_f)`。
-2. **項目内の局所パラメタ**: 項目 $j$ が群間で共有するパラメタを含めて解くため、項目ごとに局所ベクトル
-   $u_j$（長さ $G\cdot P_f$ のパディング付き）を作り、`local_index (G, J_f, P_f)` で $\xi^{(g)}_j=u_j[\text{local}]$ と展開する。
-   M-step は $\sum_g Q_{jg}(\xi_j^{(g)}(u_j))$ を $u_j$ についてマスク付き Newton で最大化し（§13.1）、`vmap` する。
-   `free_id` は項目をまたがない（M5 まで）ので、局所ベクトルは項目内で閉じる。
-3. **E-step の群**: $\ell_{pq}$ は全群ぶん `einsum("pjk,gjqk->pgq")` で計算してから各パターンの群を取り出す
-   （$P\times J\times Q\times K$ の中間配列を作らない）。$\bar r$ は `(G, J_f, K, Q)`。
-4. **群の指定**: `Model.with_groups(**latents)` のキーワード順で群を定義し、最初が参照群。`fit(..., group=labels)`
-   の値はこの群名と一致しなければならない（過不足は `SpecificationError`）。`with_groups` なしで `group=` を
-   渡すのもエラー。
-5. **識別性（多群）**: 平均について、群を節点・切片の共有 `free_id` を辺とするグラフを作り、各連結成分に
-   「平均が固定された群」または「固定された切片」が 1 つ以上あることを要求する（分散は傾きで同様）。
-   必要条件であり十分条件ではない。自由な平均を持つ群がアンカー 1 項目だけで連結している場合は警告する。
-6. **FIPC**: `Model.fix_from(bank, items=..., parameterization="slope-intercept" | "irt")` で項目パラメタを固定し、
-   潜在分布は利用者が `with_latent(Normal.free())` で自由にする（既定は変えない。§4.5 の識別性検査で許可される）。
-   IRT 表記（$b$）は $d=-ab$ で変換する（2PL のみ。GRM は $b_k$ → $d_k=-ab_k$）。
-7. **GRM**（Samejima, 1969）: $P(y\ge k\mid\theta)=\sigma(a\theta+d_k)$、$d_1>\dots>d_{K-1}$、カテゴリは $0..K-1$。
-   対数確率は端のカテゴリを $\log\sigma(-z_1)$、$\log\sigma(z_{K-1})$、中間を
-   $\log\sigma(z_k)+\operatorname{log1mexp}(\log\sigma(z_{k+1})-\log\sigma(z_k))$ で安定に計算する
-   （log1mexp は両分岐の入力を安全域に丸める二重 where で勾配の NaN を防ぐ）。順序制約は line search で
-   有限値でない候補を棄却することで守る。family は `GRM(n_cat=K)` の $K$ ごと。データに現れないカテゴリが
-   ある項目は閾値が発散するので `SpecificationError`。
-8. **欠測（MAR）**: NaN を `-1` に符号化し、E-step で one-hot を全 0 にして尤度から除く（§4.2 の $m_{pj}$）。
-   全員欠測の項目はエラー。初期値は観測値だけから計算する。not-reached は扱わない（§12-3 はこれで決着）。
-9. **照合の格子**: 潜在分布の平均・分散が自由な照合（V4, V5）は、VALIDATION.md の方針どおり mirt・flexpyirt とも
-   81 点・$[-8,8]$（刻み 0.2 は既定と同じ）で行う。
+## 14. Implementation decisions (M2)
+1. **Per-group item parameters**: the ParameterTable has group × item × parameter rows, with a
+   separate `free_id` per group by default (as in mirt `multipleGroup`).
+   `equal_across_groups(items=..., params=None)` gives the selected items' rows the same `free_id`
+   across groups. In the Core, each family has `free_index (G, J_f, P_f)`.
+2. **Item-local parameters**: to solve item $j$ including its parameters shared across groups,
+   each item gets a local vector $u_j$ (padded to length $G\cdot P_f$), expanded with
+   `local_index (G, J_f, P_f)` as $\xi^{(g)}_j=u_j[\text{local}]$. The M-step maximizes
+   $\sum_g Q_{jg}(\xi_j^{(g)}(u_j))$ over $u_j$ with the masked Newton (§13.1), `vmap`ed. `free_id`s
+   do not cross items (until M5), so the local vector stays within the item.
+3. **Groups in the E-step**: $\ell_{pq}$ is computed for every group with
+   `einsum("pjk,gjqk->pgq")`, then each pattern's own group is selected (no
+   $P\times J\times Q\times K$ intermediate). $\bar r$ is `(G, J_f, K, Q)`.
+4. **Declaring groups**: `Model.with_groups(**latents)` defines the groups in keyword order; the
+   first is the reference group. The values of `fit(..., group=labels)` must match these group
+   names (missing or extra groups are a `SpecificationError`). Passing `group=` without
+   `with_groups` is also an error.
+5. **Identification (multiple groups)**: for the mean, build a graph with groups as nodes and
+   shared intercept `free_id`s as edges, and require every connected component to contain "a group
+   with a fixed mean" or "a fixed intercept" (likewise for the variance with slopes). This is a
+   necessary condition, not a sufficient one. Warn when a group with a free mean is connected by a
+   single anchor.
+6. **FIPC**: `Model.fix_from(bank, items=..., parameterization="slope-intercept" | "irt")` fixes the
+   item parameters, and the user frees the latent distribution with `with_latent(Normal.free())`
+   (the default does not change; the §4.5 identification check allows it). The IRT form ($b$) is
+   converted with $d=-ab$ (2PL; for GRM, $b_k$ → $d_k=-ab_k$).
+7. **GRM** (Samejima, 1969): $P(y\ge k\mid\theta)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$, categories
+   $0..K-1$. Log-probabilities are computed stably as $\log\sigma(-z_1)$ and $\log\sigma(z_{K-1})$ for
+   the end categories and
+   $\log\sigma(z_k)+\operatorname{log1mexp}(\log\sigma(z_{k+1})-\log\sigma(z_k))$ in between (log1mexp
+   clamps each branch's input to its safe domain with a double `where` so gradients have no NaN).
+   The ordering constraint is kept by the line search rejecting non-finite candidates. One family
+   per $K$ of `GRM(n_cat=K)`. Items with a category that never occurs in the data have a diverging
+   threshold and raise `SpecificationError`.
+8. **Missing data (MAR)**: NaN is coded as `-1` and the E-step's one-hot row is all zeros, which
+   drops it from the likelihood ($m_{pj}$ in §4.2). An item missing for everyone is an error.
+   Starting values use observed values only. Not-reached responses are not handled (this settles
+   §12-3).
+9. **Grid for validation**: validation cases with a free latent mean or variance (V4, V5) use
+   81 points on $[-8,8]$ (the same 0.2 spacing as the default) in both mirt and flexpyirt, as set
+   out in VALIDATION.md.
 
-## 参考文献
+## References
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).

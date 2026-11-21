@@ -1,40 +1,50 @@
-# ロードマップ
+# Roadmap
 
-各マイルストーンは「受け入れ基準」をすべて満たして完了とする。順番を飛ばさない。
+English | [日本語](ROADMAP.ja.md)
 
-## M0 足場
-- `uv` プロジェクト、`src/flexpyirt/` レイアウト、ruff / mypy / pytest の設定、GitHub Actions（Linux, Python 3.11–3.13）。
-- `flexpyirt.errors`、x64 チェック関数、空の `Model` / `fit` / `FitResult` の型だけ。
-- **受け入れ基準**: CI が通る。editable install（`uv run --isolated --no-project --with-editable .`）で import できる。環境管理は uv のみで pip は使わない。
+A milestone is complete when all of its acceptance criteria are met. Milestones are not skipped.
 
-## M1 単一群 2PL / Rasch の BA-EM
-- Compile 層: パターン圧縮、ParameterTable、FreeMap（固定・等値の仕組みはここで作る）。
-- Core: E-step、項目ごとの Newton M-step（vmap）、`lax.while_loop` の EM ループ、Normal(0,1) 固定。
-- SE: Oakes と直接 Hessian。
-- スコアリング: EAP。
-- **受け入れ基準**: V1, V2, V10(Oakes) が許容誤差内。EM 単調性テストが通る。
+## M0 Scaffold
+- `uv` project, `src/flexpyirt/` layout, ruff / mypy / pytest configuration, GitHub Actions
+  (Linux, Python 3.11–3.13).
+- `flexpyirt.errors`, the x64 check, and empty `Model` / `fit` / `FitResult` types only.
+- **Acceptance**: CI passes. The package imports after an editable install
+  (`uv run --isolated --no-project --with-editable .`). Environments are managed with uv only, no
+  pip.
 
-## M2 多母集団・FIPC・GRM・欠測
-- 群ごとの潜在分布（Normal 自由）、群間等値（`free_id` 共有）、識別性チェック。
-- FIPC（固定項目 + 潜在分布推定）。
-- GRM。欠測（MAR）。
-- **受け入れ基準**: V3, V4, V5, V9 が許容誤差内。識別不能な仕様で `IdentificationError`。
+## M1 Single-group 2PL / Rasch BA-EM
+- Compile layer: pattern compression, ParameterTable, FreeMap (the mechanism for fixing and
+  equality constraints).
+- Core: E-step, item-wise Newton M-step (vmap), EM loop in `lax.while_loop`, Normal(0,1) fixed.
+- SE: Oakes and direct Hessian.
+- Scoring: EAP.
+- **Acceptance**: V1, V2, V10 (Oakes) within tolerance. The EM monotonicity test passes.
 
-## M3 EH・MAP・3PL/4PL・GPCM・SQUAREM
-- EmpiricalHistogram（DESIGN §12-1 を決めてから）。
-- 事前分布と MAP、`log_posterior` の報告。
-- 3PL / 4PL / GPCM。SQUAREM。
-- ベンチマーク（mirt との wall time）。
-- **受け入れ基準**: V6, V7, V8 が許容誤差内。SQUAREM ありでも照合が通る。
+## M2 Multiple groups, FIPC, GRM, missing data
+- Per-group latent distributions (Normal, free), equality across groups (shared `free_id`),
+  identification checks.
+- FIPC (fixed items + latent distribution estimated).
+- GRM. Missing data (MAR).
+- **Acceptance**: V3, V4, V5, V9 within tolerance. Unidentified specifications raise
+  `IdentificationError`.
 
-## M4 結果まわり・多次元の入口
-- `FitResult` の充実（summary, `_repr_html_`, JSON 入出力, デルタ法による IRT パラメタ化の SE）。
-- スコアリング（MAP, ML, WLE, plausible values）。
-- 確認的 2–3 次元 MIRT（直積格子）。
-- **受け入れ基準**: mirt の `fscores` と EAP / MAP が一致。2 次元確認的モデルが mirt と一致。
+## M3 EH, MAP, 3PL/4PL, GPCM, SQUAREM
+- EmpiricalHistogram (after deciding DESIGN §12-1).
+- Priors and MAP, reporting `log_posterior`.
+- 3PL / 4PL / GPCM. SQUAREM.
+- Benchmarks (wall time against mirt).
+- **Acceptance**: V6, V7, V8 within tolerance. Agreement also holds with SQUAREM.
 
-## M5 以降（候補）
-- 項目をまたぐ等値制約の M-step。
-- Davidian 曲線・混合正規の潜在分布。
-- 微分可能なリンキング（Haebara / Stocking–Lord とその一般化）をライブラリの上に実装。
-- DIF（多群の尤度比検定）、項目適合（S-X2）、M2。
+## M4 Results and first multidimensional models
+- A richer `FitResult` (summary, `_repr_html_`, JSON I/O, delta-method SEs for the IRT
+  parameterization).
+- Scoring (MAP, ML, WLE, plausible values).
+- Confirmatory 2–3 dimensional MIRT (product grids).
+- **Acceptance**: EAP / MAP agree with mirt's `fscores`. A two-dimensional confirmatory model
+  agrees with mirt.
+
+## M5 and later (candidates)
+- M-step for equality constraints across items.
+- Davidian-curve and normal-mixture latent distributions.
+- Differentiable linking (Haebara / Stocking–Lord and generalizations) on top of the library.
+- DIF (multiple-group likelihood-ratio tests), item fit (S-X2), M2.

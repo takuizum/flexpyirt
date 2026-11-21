@@ -1,55 +1,151 @@
 # flexpyirt
 
-JAX による Bock–Aitkin EM の項目反応理論（IRT）推定ライブラリ — **開発中**。
+English | [日本語](README.ja.md)
 
-目標とする機能（未実装のものを含む）:
+Item response theory (IRT) estimation in Python, built on JAX. At its core is marginal maximum
+likelihood estimation (MMLE) with the Bock–Aitkin EM algorithm, including multiple-group
+calibration and fixed item parameter calibration (FIPC).
 
-- 多母集団の同時推定（部分アンカー）
-- 固定パラメタ推定（FIPC）
-- 潜在分布の指定（Normal / Empirical Histogram）
-- 事前分布つきの Bayes modal（MAP）推定
-- Oakes の恒等式による標準誤差（自動微分）
+- **Verified against R `mirt`**: every supported feature is checked numerically against mirt
+  (parameters, log-likelihood and standard errors agree to about 1e-8; see
+  [validation](docs/VALIDATION.md)).
+- **Automatic differentiation**: M-step gradients and Hessians and the standard errors (Oakes'
+  identity) all come from JAX autodiff. A new item model only needs its log-probability for
+  estimation, standard errors and scoring to work.
+- **ParameterTable**: a table like mirt's `pars = "values"` for editing fixed values, equality
+  constraints and starting values.
 
-すべての機能は R `mirt` との数値照合テストが通ってから「対応済み」とする。
+> Under development (0.x). The public API may change before 1.0.0.
 
-## ドキュメント
-- [設計書](docs/DESIGN.md)
-- [API スケッチ](docs/API.md)
-- [検証計画](docs/VALIDATION.md)
-- [ロードマップ](docs/ROADMAP.md)
-- [Claude Code への引き継ぎ](CLAUDE.md)
+## Features
 
-## ステータス
-| マイルストーン | 内容 | 状態 |
+| Feature | Details | mirt check |
 |---|---|---|
-| M0 | 足場（パッケージ・CI） | 完了 |
-| M1 | 単一群 2PL / Rasch の BA-EM、Oakes / Hessian SE、EAP | R mirt 照合（V1, V2, V10）済み |
-| M2 | 多母集団（部分アンカー）、FIPC、GRM、欠測（MAR） | R mirt 照合（V3, V4, V5, V9）済み |
+| Item models | 2PL, Rasch (latent variance estimated), GRM (graded response model) | V1, V2, V3 |
+| Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | V4 |
+| FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | V5 |
+| Missing data | Responses missing at random (MAR) | V9 |
+| Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood | V10 |
+| Scoring | EAP and posterior SD, using each group's latent distribution as the prior | V1–V5, V9 |
+| Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
-M1（すべて `tests/test_mirt_m1.py` で mirt と照合）:
-- 2PL・Rasch（Rasch は潜在分散を自由推定）の周辺最尤推定
-- 標準誤差（Oakes の恒等式／周辺対数尤度の Hessian、いずれも自動微分）
-- EAP スコア
+Not yet available ([roadmap](docs/ROADMAP.md)): 3PL / 4PL / GPCM, empirical histogram (EH)
+latent distributions, priors and MAP estimation, SQUAREM acceleration (M3); MAP / ML / WLE /
+plausible-value scoring and multidimensional models (M4).
 
-M2 で追加（`tests/test_mirt_m2.py` で mirt と照合）:
-- 多母集団の同時推定（群間等値のアンカー項目、焦点群の平均・分散を自由推定）
-- 固定項目パラメタ推定（FIPC）
-- GRM（段階反応モデル）
-- 欠測（MAR）を含むデータ
+## Installation
+
+Python 3.11 or later. flexpyirt is not on PyPI yet; install it from GitHub
+([uv](https://docs.astral.sh/uv/) recommended).
+
+```bash
+uv add git+https://github.com/takuizum/flexpyirt
+```
+
+To pin a release, add its tag: `git+https://github.com/takuizum/flexpyirt@v0.0.1`.
+
+flexpyirt computes in **64-bit floating point**. The JAX setting belongs to you, so the library
+does not change it; enable it before fitting (otherwise `fit()` raises `PrecisionError`).
 
 ```python
 import jax
 
 jax.config.update("jax_enable_x64", True)
-from flexpyirt import Model, Rasch, fit
-
-res = fit(Model.uniform(Rasch(), items=df.columns), df)
-res.items, res.latent, res.loglik
-res.score(df)
 ```
 
-## 開発
+## Quick start
+
+As an example, simulate 2PL data and fit it. With real data, pass a DataFrame with one column per
+item and one row per respondent (values 0/1, missing as NaN).
+
+```python
+import numpy as np
+import pandas as pd
+
+from flexpyirt import Model, TwoPL, fit
+
+rng = np.random.default_rng(1)
+n_persons, n_items = 1000, 10
+a = rng.lognormal(0.0, 0.3, n_items)  # slopes
+d = rng.normal(0.0, 1.0, n_items)  # intercepts
+theta = rng.normal(0.0, 1.0, n_persons)
+p = 1.0 / (1.0 + np.exp(-(np.outer(theta, a) + d)))
+df = pd.DataFrame(
+    (rng.random(p.shape) < p).astype(int),
+    columns=[f"q{j:02d}" for j in range(1, n_items + 1)],
+)
+
+spec = Model.uniform(TwoPL(), items=df.columns)
+res = fit(spec, df)
+
+print(res)  # log-likelihood, number of parameters, convergence
+print(res.items.head())  # item, model, a, d, a_se, d_se, b (= -d/a)
+print(res.loglik, res.aic, res.bic)
+scores = res.score(df)  # EAP (theta) and posterior SD (se) per respondent
+```
+
+Parameters use mirt's slope–intercept form $P(y=1\mid\theta)=\sigma(a\theta+d)$; `items` also
+shows the difficulty $b=-d/a$ for display.
+
+## Examples
+
+See the [user guide](docs/guide.md) for details and the [API reference](docs/reference.md) for
+each function.
+
+**Rasch model** (slopes fixed at 1, latent variance estimated)
+
+```python
+from flexpyirt import Rasch
+
+rasch = fit(Model.uniform(Rasch(), items=df.columns), df)
+print(rasch.latent)  # group, mean (fixed at 0), var (estimated), mean_se, var_se
+```
+
+**Multiple groups (linked by anchor items)**
+
+```python
+from flexpyirt import Normal
+
+group = np.repeat(["ref", "focal"], n_persons // 2)
+spec2 = (
+    Model.uniform(TwoPL(), items=df.columns)
+    .with_groups(ref=Normal.standard(), focal=Normal.free())  # the first group is the reference
+    .equal_across_groups(items=["q01", "q02", "q03", "q04"])  # anchor items
+)
+res2 = fit(spec2, df, group=group)
+print(res2.latent)  # the focal group's mean and variance are estimated
+```
+
+**FIPC (fix items at bank values and calibrate new items)**
+
+```python
+bank = pd.DataFrame({"item": ["q01", "q02", "q03"], "a": a[:3], "d": d[:3]})
+spec3 = Model.uniform(TwoPL(), items=df.columns).fix_from(bank).with_latent(Normal.free())
+res3 = fit(spec3, df)
+```
+
+## Documentation
+
+- [User guide](docs/guide.md) — specifying models, multiple groups, FIPC, editing the
+  ParameterTable, estimation options
+- [API reference](docs/reference.md) — public classes and functions and their arguments
+- [Validation](docs/VALIDATION.md) — how results are checked against R mirt, tolerances, known
+  differences
+- [Design](docs/DESIGN.md) — formulas, algorithms and implementation decisions
+- [Roadmap](docs/ROADMAP.md)
+- [Contributing](CONTRIBUTING.md) — branches, reviews, releases
+
+Every document is also available in Japanese (`*.ja.md`).
+
+## Development
+
 ```bash
 uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch flow and releases.
+
+## License
+
+MIT
