@@ -967,8 +967,14 @@ def _serialize_history(history: pd.DataFrame) -> list[dict[str, Any]]:
     return rows
 
 
-def _deserialize_history(raw: Any, *, n_iter: int) -> pd.DataFrame:
-    """Deserialize ``FitResult.history`` and verify its length and column types."""
+def _deserialize_history(
+    raw: Any,
+    *,
+    n_iter: int,
+    n_em_evaluations: int,
+    n_safeguards: int,
+) -> pd.DataFrame:
+    """Deserialize ``FitResult.history`` and verify its length, ordering, and totals."""
     rows_raw = _require_list(raw, field_name="history")
     if len(rows_raw) != n_iter:
         raise SpecificationError(
@@ -985,19 +991,43 @@ def _deserialize_history(raw: Any, *, n_iter: int) -> pd.DataFrame:
         loc = f"history[{idx}]"
         row = _require_dict(entry, field_name=loc)
         _check_keys(row, required=required_keys, field_name=loc)
-        iters.append(_require_int(row["iter"], field_name=f"{loc}.iter", min_value=1))
+        it_val = _require_int(row["iter"], field_name=f"{loc}.iter", min_value=1)
+        if it_val != idx + 1:
+            raise SpecificationError(f"{loc}.iter must be {idx + 1}, got {it_val}.")
+        iters.append(it_val)
         logliks.append(_decode_float(row["loglik"], field_name=f"{loc}.loglik"))
         log_posts.append(_decode_float(row["log_posterior"], field_name=f"{loc}.log_posterior"))
         changes.append(_decode_float(row["max_change"], field_name=f"{loc}.max_change"))
-        em_evals.append(
-            _require_int(
-                row["em_evaluations"],
-                field_name=f"{loc}.em_evaluations",
-                min_value=0,
-                max_value=_INT32_MAX,
-            )
+        ev_val = _require_int(
+            row["em_evaluations"],
+            field_name=f"{loc}.em_evaluations",
+            min_value=0,
+            max_value=_INT32_MAX,
         )
+        if em_evals and ev_val < em_evals[-1]:
+            raise SpecificationError(
+                f"{loc}.em_evaluations ({ev_val}) must be non-decreasing (previous {em_evals[-1]})."
+            )
+        em_evals.append(ev_val)
         safeguards.append(_require_bool(row["safeguard"], field_name=f"{loc}.safeguard"))
+
+    total_safeguards = sum(safeguards)
+    if total_safeguards != n_safeguards:
+        raise SpecificationError(
+            f"sum(history.safeguard) ({total_safeguards}) does not match "
+            f"n_safeguards ({n_safeguards})."
+        )
+    if n_iter == 0:
+        if n_em_evaluations != 0:
+            raise SpecificationError(
+                f"n_em_evaluations must be 0 when n_iter is 0, got {n_em_evaluations}."
+            )
+    elif em_evals[-1] != n_em_evaluations:
+        raise SpecificationError(
+            f"Final history.em_evaluations ({em_evals[-1]}) does not match "
+            f"n_em_evaluations ({n_em_evaluations})."
+        )
+
     return pd.DataFrame(
         {
             "iter": np.array(iters, dtype=np.int64),
@@ -1137,8 +1167,25 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
     )
 
     parameters, eta = _deserialize_parameters(obj["parameters"], model)
-    vcov = _deserialize_vcov(obj["vcov"], n_free=int(eta.shape[0]))
-    history = _deserialize_history(obj["history"], n_iter=n_iter)
+    n_free = int(eta.shape[0])
+    vcov = _deserialize_vcov(obj["vcov"], n_free=n_free)
+    expect_vcov_none = se_method is None or n_free == 0
+    if (vcov is None) != expect_vcov_none:
+        if vcov is None:
+            raise SpecificationError(
+                f"vcov cannot be null when se_method={se_method!r} and n_free={n_free}."
+            )
+        if se_method is None:
+            raise SpecificationError("vcov must be null when se_method is null.")
+        raise SpecificationError("vcov must be null when there are no free parameters.")
+    if vcov is None and not np.isnan(parameters["se"].to_numpy(dtype=float)).all():
+        raise SpecificationError("Parameter standard errors must be NaN when vcov is null.")
+    history = _deserialize_history(
+        obj["history"],
+        n_iter=n_iter,
+        n_em_evaluations=n_em_evaluations,
+        n_safeguards=n_safeguards,
+    )
 
     from flexpyirt.result import FitResult
 

@@ -895,3 +895,71 @@ def test_malformed_overflow_and_unbounded_ints(sample_payload: dict[str, Any]) -
     loaded_inf = FitResult.from_json(json.dumps(ok_nonfinite))
     assert loaded_inf.loglik == -np.inf
     assert loaded_inf.log_posterior == -np.inf
+
+
+def test_malformed_cross_field_consistency(sample_payload: dict[str, Any]) -> None:
+    # se_method=None with non-null vcov (reviewer scenario: NaN se with finite delta b_se)
+    bad_none_vcov = _clone(sample_payload)
+    bad_none_vcov["se_method"] = None
+    for row in bad_none_vcov["parameters"]:
+        row["se"] = "NaN"
+    with pytest.raises(SpecificationError, match="vcov must be null when se_method is null"):
+        FitResult.from_json(json.dumps(bad_none_vcov))
+
+    # se_method="oakes" with vcov=None when n_free > 0
+    bad_missing_vcov = _clone(sample_payload)
+    bad_missing_vcov["vcov"] = None
+    with pytest.raises(SpecificationError, match="vcov cannot be null"):
+        FitResult.from_json(json.dumps(bad_missing_vcov))
+
+    # se_method=None, vcov=None, but finite se left in parameters
+    bad_se_when_null = _clone(sample_payload)
+    bad_se_when_null["se_method"] = None
+    bad_se_when_null["vcov"] = None
+    with pytest.raises(SpecificationError, match="standard errors must be NaN"):
+        FitResult.from_json(json.dumps(bad_se_when_null))
+
+    # n_free == 0 with non-null (empty []) vcov
+    all_fixed = _clone(sample_payload)
+    for row in all_fixed["parameters"]:
+        row["free"] = False
+        row["free_id"] = -1
+        row["estimate"] = row["value"]
+        row["se"] = "NaN"
+    all_fixed["vcov"] = []
+    with pytest.raises(SpecificationError, match="no free parameters"):
+        FitResult.from_json(json.dumps(all_fixed))
+
+    # History iter sequence must be 1..n_iter
+    bad_iter_seq = _clone(sample_payload)
+    bad_iter_seq["history"][0]["iter"] = 2
+    with pytest.raises(SpecificationError, match=r"history\[0\]\.iter must be 1"):
+        FitResult.from_json(json.dumps(bad_iter_seq))
+
+    # sum(history.safeguard) must match n_safeguards
+    bad_safe_sum = _clone(sample_payload)
+    bad_safe_sum["n_safeguards"] = int(bad_safe_sum["n_safeguards"]) + 1
+    with pytest.raises(SpecificationError, match="n_safeguards"):
+        FitResult.from_json(json.dumps(bad_safe_sum))
+
+    # history.em_evaluations must be non-decreasing
+    assert len(sample_payload["history"]) >= 2
+    bad_eval_dec = _clone(sample_payload)
+    bad_eval_dec["history"][1]["em_evaluations"] = 0
+    with pytest.raises(SpecificationError, match="non-decreasing"):
+        FitResult.from_json(json.dumps(bad_eval_dec))
+
+    # Final history.em_evaluations must match n_em_evaluations
+    bad_eval_end = _clone(sample_payload)
+    bad_eval_end["n_em_evaluations"] = int(bad_eval_end["n_em_evaluations"]) + 5
+    with pytest.raises(SpecificationError, match="n_em_evaluations"):
+        FitResult.from_json(json.dumps(bad_eval_end))
+
+    # n_iter == 0 requires n_em_evaluations == 0
+    bad_zero_iter = _clone(sample_payload)
+    bad_zero_iter["n_iter"] = 0
+    bad_zero_iter["history"] = []
+    bad_zero_iter["n_safeguards"] = 0
+    bad_zero_iter["n_em_evaluations"] = 1
+    with pytest.raises(SpecificationError, match="n_em_evaluations must be 0"):
+        FitResult.from_json(json.dumps(bad_zero_iter))
