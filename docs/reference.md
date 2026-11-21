@@ -123,11 +123,10 @@ are dropped from the likelihood (and from $I(\theta)$ in WLE) for every method.
 
 **Returns**: `DataFrame` with one row per respondent (index follows `data` when it is a
 DataFrame): for unidimensional models, columns `theta`, `se` for `"EAP"`, `"MAP"`, `"ML"`, `"WLE"`
-and `pv1`…`pv{n_draws}` for `"PV"`; for multidimensional models (`method="EAP"` or `"MAP"`), columns
-`theta_<factor>` and `se_<factor>` in declared factor order.
+and `pv1`…`pv{n_draws}` for `"PV"`; for multidimensional models, columns `theta_<factor>` and `se_<factor>` in declared factor
+order (`"PV"`: `pv<m>_<factor>`).
 
-**Raises**: `SpecificationError` if `method` is unknown, `"ML"`, `"WLE"` or `"PV"` on a
-multidimensional model, `method="MAP"` with an `EmpiricalHistogram` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for a deterministic method, or
+**Raises**: `SpecificationError` if `method` is unknown, `method="MAP"` with an `EmpiricalHistogram` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for a deterministic method, or
 `n_draws` is not a positive integer.
 
 #### `FitResult.item_fit`
