@@ -27,11 +27,12 @@ calibration and fixed item parameter calibration (FIPC).
 | Missing data | Responses missing at random (MAR) | V9 |
 | Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood | V10 |
 | Scoring | EAP and posterior SD, using each group's latent distribution as the prior | V1–V5, V8, V9, V11 |
+| EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | V1–V5, V8, V9, V11 |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
 Not yet available ([roadmap](docs/ROADMAP.md)): empirical histogram (EH) latent distributions,
-priors and MAP estimation, SQUAREM acceleration (M3); MAP / ML / WLE / plausible-value scoring and
-multidimensional models (M4).
+priors and MAP estimation (M3); MAP / ML / WLE / plausible-value scoring and multidimensional models
+(M4).
 
 ## Installation
 
