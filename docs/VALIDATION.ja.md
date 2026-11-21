@@ -27,7 +27,7 @@
 | V3 | GRM 単一群（Science） | `mirt(Science, 1, "graded")` | M2 |
 | V4 | 2PL 2 群・部分アンカー・焦点群自由 | `multipleGroup(..., invariance=c(anchors, "free_means","free_var"))` | M2 |
 | V5 | FIPC（固定項目 + 潜在分布推定） | `pars='values'` で `est=FALSE` | M2 |
-| V6 | EH（単一群・2 群） | `dentype="EH"` | M3 |
+| V6 | FIPC での EH（単一群・2 群） | `mirt(..., dentype = "EH", pars = <バンク固定>)` / `multipleGroup(...)` | M3 |
 | V7 | 3PL + 事前分布（MAP） | `mirt.model` の `PRIOR = (1-30, g, expbeta, ...)` 相当 | M3 |
 | V8 | GPCM・PCM（Science + シミュレーション） | `mirt(..., "gpcm")` / `mirt(..., "Rasch")`（多値） | M3 |
 | V9 | 欠測あり（MAR） | NA を含むデータ | M2 |
@@ -65,6 +65,20 @@
   flexpyirt は自然尺度で推定するため（DESIGN §15.2）、`validation/r/m3_reference.R` では推定値を `plogis()`、
   SE をデルタ法 $SE_g = g(1-g)\,SE_{\mathrm{logit}(g)}$（$u$ も同様）で自然尺度に変換して照合し、変換前の
   logit 尺度の値も `raw_logit` に残している。内点の最尤解では観測情報行列がヤコビアンで厳密に変換される。
+- **経験ヒストグラム（V6、M3）**: mirt の `dentype = "EH"` は毎サイクルでヒストグラムを標準化せずに推定し直すので、
+  全項目が自由だと尺度が識別されず EM が漂流する（自由推定の 2PL は 50,000 サイクルで収束せず、ヒストグラムの分散は 1.5 まで
+  ずれた）。flexpyirt は代わりに参照群を標準化する（DESIGN §15.34）が mirt にはこの方式がないため、V6 は固定項目が尺度を
+  決めてどちらも標準化しない FIPC を使う: V6a（$J=20$、項目 1–10 を固定、$N=3000$、標準化した $\chi^2_4$ の特性）と
+  V6b（3000 人 × 2 群、両群で同じバンクを固定、項目 11–20 を群間等値、焦点群の特性は $0.5-1.2\,\chi^2_4$）、
+  $[-6,6]$ 上の 61 点。細かい格子では EH の尤度は多くのヒストグラム方向でほぼ平坦で最大点は尖っているため EM は這うように
+  進み（mirt は `TOL = 1e-9` で 69,683 / 62,632 サイクル）、mirt の停止規則はヒストグラムを見ない。そのため最終的な重みを
+  節点ごとには比較しない。mirt の解において: 対数尤度は mirt と 1.5e-15 で一致、flexpyirt の EM を 1 ステップ進めると
+  項目は 1e-9（mirt の `TOL`）、ヒストグラムは 4e-7 動く（mirt は E-step 1 回分遅れたヒストグラムを報告する）、
+  Hessian と Oakes の SE（ヒストグラム固定）は mirt の Richardson SE と 1.1e-7 で一致。flexpyirt の通常の推定（SQUAREM、
+  `tol = 1e-6`）は 7,162 / 2,837 反復で収束し、mirt より高い対数尤度（1.6e-3 / 7.3e-4 上）で終わり、項目は mirt と 5e-5
+  以内。mirt 1.46.1 の EH の Oakes SE は自身の Richardson SE より 0.1–1.3% 小さく（原因は未確認）、2 群 EH モデルでは
+  Richardson SE の計算が失敗するので、V6b は Oakes == Hessian（4e-16）を確認する。テスト: `tests/test_mirt_v6_eh.py`。
+  参照値の生成: `validation/r/m3_eh_reference.R`。
 - **V11 のシミュレーション設計と mirt `NR` の初期値問題（M3）**: 事前分布なしの 3PL / 4PL 最尤推定では、
   項目が易しすぎ／難しすぎたり傾きが小さかったりして $N(0,1)$ の裾で漸近線が観測できないと、有限標本でも
   境界解（$g\to 0$ や $u\to 1$、情報行列が特異）が生じやすい。さらに 4PL では、mirt 既定の傾き初期値
