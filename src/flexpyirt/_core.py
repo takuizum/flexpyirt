@@ -231,6 +231,21 @@ class ExpectedCounts(NamedTuple):
     n: Array
 
 
+def _e_step_details(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, Array, Array]:
+    """Run one E-step and return ``(counts, loglik, h)`` with ``h`` of shape ``(P, Q)``."""
+    log_joint = _log_joint(prob, eta)
+    lse = jax.scipy.special.logsumexp(log_joint, axis=1, keepdims=True)
+    h = jnp.exp(log_joint - lse)  # softmax_q(log_joint), (P, Q)
+    weighted = prob.counts[:, None] * h  # c_p h_pq, (P, Q)
+    group_one_hot = jax.nn.one_hot(prob.group, prob.n_groups, dtype=weighted.dtype)
+    n_bar = jnp.einsum("pg,pq->gq", group_one_hot, weighted)
+    r_bar = tuple(
+        jnp.einsum("pg,pjk,pq->gjkq", group_one_hot, oh, weighted) for oh in _one_hots(prob)
+    )
+    loglik = jnp.sum(prob.counts * lse[:, 0])
+    return ExpectedCounts(r_bar, n_bar), loglik, h
+
+
 def e_step(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, Array]:
     r"""E-step (DESIGN.md §4.2).
 
@@ -241,16 +256,8 @@ def e_step(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, Array]:
 
     Returns the expected counts and the marginal log-likelihood at ``eta``.
     """
-    log_joint = _log_joint(prob, eta)
-    lse = jax.scipy.special.logsumexp(log_joint, axis=1, keepdims=True)
-    weighted = prob.counts[:, None] * jnp.exp(log_joint - lse)  # c_p h_pq, (P, Q)
-    group_one_hot = jax.nn.one_hot(prob.group, prob.n_groups, dtype=weighted.dtype)
-    n_bar = jnp.einsum("pg,pq->gq", group_one_hot, weighted)
-    r_bar = tuple(
-        jnp.einsum("pg,pjk,pq->gjkq", group_one_hot, oh, weighted) for oh in _one_hots(prob)
-    )
-    loglik = jnp.sum(prob.counts * lse[:, 0])
-    return ExpectedCounts(r_bar, n_bar), loglik
+    counts, loglik, _ = _e_step_details(prob, eta)
+    return counts, loglik
 
 
 def _item_q(kernel: ItemKernel, nodes: Array, r: Array, params: Array) -> Array:
@@ -614,32 +621,271 @@ def squarem(
     )
 
 
+_HESSIAN_CHUNK_SIZE = 8
+"""Number of basis directions differentiated together in :func:`information_hessian`."""
+_OAKES_CHUNK_ELEMENTS = 4_000_000
+"""Target element budget (~32 MB in float64) for the ``(Q, B, D)`` Oakes cross-term workspace."""
+_OAKES_MAX_CHUNK = 1024
+"""Maximum number of response patterns processed per chunk in :func:`information_oakes`."""
+
+
 def information_hessian(prob: CompiledProblem, eta: Array) -> Array:
     r"""Observed posterior information :math:`-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]` (§4.8).
 
-    Reduces to :math:`-\nabla^2_\eta\ell(\eta)` when no priors are present.
+    Evaluates Hessian-vector products of :func:`log_posterior` in fixed-size batches of standard
+    basis vectors via ``jax.linearize`` and ``lax.scan`` so peak memory stays bounded on large
+    problems (DESIGN.md §15.18). Reduces to :math:`-\nabla^2_\eta\ell(\eta)` when no priors are
+    present.
     """
-    info: Array = -jax.hessian(lambda e: log_posterior(prob, e))(eta)
+    n_free = eta.shape[0]
+    if n_free == 0:
+        return jnp.zeros((0, 0), dtype=eta.dtype)
+    _, hvp = jax.linearize(jax.grad(lambda e: log_posterior(prob, e)), eta)
+    chunk = min(_HESSIAN_CHUNK_SIZE, n_free)
+    n_chunks = (n_free + chunk - 1) // chunk
+    pad = n_chunks * chunk - n_free
+    eye = jnp.eye(n_free, dtype=eta.dtype)
+    if pad:
+        eye = jnp.concatenate([eye, jnp.zeros((pad, n_free), dtype=eta.dtype)], axis=0)
+    chunks = eye.reshape(n_chunks, chunk, n_free)
+
+    def _batch(_carry: None, basis: Array) -> tuple[None, Array]:
+        return None, jax.vmap(hvp)(basis)
+
+    _, cols = jax.lax.scan(_batch, None, chunks)
+    info: Array = -cols.reshape(n_chunks * chunk, n_free)[:n_free]
     return info
 
 
+def _oakes_own_hessian(prob: CompiledProblem, eta: Array, counts: ExpectedCounts) -> Array:
+    r"""Complete-data and prior Hessian block of Oakes' identity (DESIGN.md §15.18)."""
+    n_free = eta.shape[0]
+    h_own = jnp.zeros((n_free, n_free), dtype=eta.dtype)
+    for fam, r in zip(prob.families, counts.r, strict=True):
+        u0 = _expand(eta, jnp.zeros(fam.slot_free_index.shape, eta.dtype), fam.slot_free_index)
+        r_items = jnp.swapaxes(r, 0, 1)  # (J_f, G, K_f, Q)
+        local = jnp.swapaxes(fam.local_index, 0, 1)  # (J_f, G, P_f)
+        fixed = jnp.swapaxes(fam.fixed_values, 0, 1)
+
+        def item_hess(
+            rj: Array, loc: Array, fix: Array, u: Array, k: ItemKernel = fam.kernel
+        ) -> Array:
+            def q_item(v: Array) -> Array:
+                xi = _local_to_xi(v, loc, fix)
+                return jnp.sum(jax.vmap(lambda rg, pg: _item_q(k, prob.nodes, rg, pg))(rj, xi))
+
+            out: Array = jax.hessian(q_item)(u)
+            return out
+
+        h_items = jax.vmap(item_hess)(r_items, local, fixed, u0)  # (J_f, S_f, S_f)
+        idx = jnp.where(fam.slot_free_index >= 0, fam.slot_free_index, n_free)
+        h_own = h_own.at[idx[:, :, None], idx[:, None, :]].add(h_items, mode="drop")
+
+    lat_block = prob.latent
+    lat = _expand(eta, lat_block.fixed_values, lat_block.free_index)
+
+    def group_hess(n: Array, x: Array) -> Array:
+        out: Array = jax.hessian(lambda p: _latent_q(prob.nodes, n, p))(x)
+        return out
+
+    h_lat = jax.vmap(group_hess)(counts.n, lat)  # (G, 2, 2)
+    lat_idx = jnp.where(lat_block.free_index >= 0, lat_block.free_index, n_free)
+    h_own = h_own.at[lat_idx[:, :, None], lat_idx[:, None, :]].add(h_lat, mode="drop")
+
+    def prior_d2(x: Array, kind: Array, p1: Array, p2: Array) -> Array:
+        out: Array = jax.grad(jax.grad(lambda v: eval_log_prior(v, kind, p1, p2)))(x)
+        return out
+
+    d2_prior = jax.vmap(prior_d2)(eta, prob.priors.kind, prob.priors.param1, prob.priors.param2)
+    return h_own + jnp.diag(d2_prior)
+
+
+def _oakes_cross_hessian(
+    prob: CompiledProblem, eta: Array, counts: ExpectedCounts, h: Array
+) -> Array:
+    r"""Oakes cross term :math:`\partial^2 Q(\eta\mid\eta')/\partial\eta\,\partial\eta'^\top`.
+
+    Writing :math:`Q(\eta\mid\eta')=\sum_p c_p\sum_q h_{pq}(\eta')\,\psi_{pq}(\eta)` with
+    :math:`h_{pq}(\eta')=\mathrm{softmax}_q(\psi_{pq}(\eta'))`, differentiating through the
+    E-step gives (Oakes, 1999; Louis, 1982; DESIGN.md §15.18)
+
+    .. math::
+        \left.\frac{\partial^2 Q(\eta\mid\eta')}
+            {\partial\eta\,\partial\eta'^\top}\right|_{\eta'=\eta}
+        = \sum_{p=1}^P c_p\left[
+            \sum_{q=1}^Q h_{pq}\,s_{pq}s_{pq}^\top - \bar s_p\bar s_p^\top
+          \right], \qquad
+        s_{pq}=\nabla_\eta\psi_{pq}(\eta),\quad \bar s_p=\sum_q h_{pq}s_{pq}.
+
+    Every kernel and latent derivative comes from ``jax.jacfwd``. Subtracting a
+    :math:`q`-independent weighted mean from each category's score table leaves
+    :math:`s_{pq}-\bar s_p` algebraically invariant while preventing cancellation in the
+    difference. Pattern chunks skip zero-count padding rows via ``lax.cond`` and never
+    materialize ``(P, Q, n_free)`` or ``(G, Q, D, n_free)`` intermediates.
+    """
+    n_free = eta.shape[0]
+    G = prob.n_groups
+    Q = prob.nodes.shape[0]
+    P = prob.y.shape[0]
+
+    n_g_tot = jnp.maximum(jnp.sum(counts.n, axis=1, keepdims=True), 1.0)
+    q_w_g = counts.n / n_g_tot  # (G, Q)
+
+    fam_d: list[tuple[FamilyBlock, Array]] = []
+    D = 1  # column 0 carries the per-group latent score
+    for fam, r in zip(prob.families, counts.r, strict=True):
+        u0 = _expand(eta, jnp.zeros(fam.slot_free_index.shape, eta.dtype), fam.slot_free_index)
+        local = jnp.swapaxes(fam.local_index, 0, 1)
+        fixed = jnp.swapaxes(fam.fixed_values, 0, 1)
+
+        def item_jac(loc: Array, fix: Array, u: Array, k: ItemKernel = fam.kernel) -> Array:
+            def lp_u(v: Array) -> Array:
+                xi = _local_to_xi(v, loc, fix)
+                return jax.vmap(lambda p: k.log_prob(prob.nodes, p))(xi)
+
+            out: Array = jax.jacfwd(lp_u)(u)
+            return out
+
+        d_lp = jnp.transpose(jax.vmap(item_jac)(local, fixed, u0), (1, 0, 3, 2, 4))  # (G,J,K,Q,S)
+        r_tot = jnp.sum(r, axis=-1, keepdims=True)  # (G, J, K, 1)
+        r_w = jnp.where(r_tot > 0, r / jnp.maximum(r_tot, 1.0), q_w_g[:, None, None, :])
+        d_lp = d_lp - jnp.sum(d_lp * r_w[..., None], axis=3, keepdims=True)
+        fam_d.append((fam, d_lp))
+        D += fam.columns.shape[0] * fam.kernel.n_cat
+
+    lat_block = prob.latent
+    lat = _expand(eta, lat_block.fixed_values, lat_block.free_index)
+
+    def latent_jac(p: Array) -> Array:
+        out: Array = jax.jacfwd(lambda x: normal_log_weights(prob.nodes, x[0], x[1]))(p)
+        return out
+
+    d_logw = jax.vmap(latent_jac)(lat)  # (G, Q, 2)
+    d_logw = d_logw - jnp.sum(d_logw * q_w_g[:, :, None], axis=1, keepdims=True)
+
+    target_b = max(1, _OAKES_CHUNK_ELEMENTS // max(1, Q * D))
+    B = 1 << (min(P, target_b, _OAKES_MAX_CHUNK).bit_length() - 1)
+    pad = (-P) % B
+    if pad:
+        y_pad = jnp.concatenate(
+            [prob.y, jnp.zeros((pad, prob.y.shape[1]), dtype=prob.y.dtype)], axis=0
+        )
+        g_pad = jnp.concatenate([prob.group, jnp.zeros((pad,), dtype=prob.group.dtype)], axis=0)
+        c_pad = jnp.concatenate([prob.counts, jnp.zeros((pad,), dtype=prob.counts.dtype)], axis=0)
+        h_pad = jnp.concatenate([h, jnp.zeros((pad, Q), dtype=h.dtype)], axis=0)
+    else:
+        y_pad, g_pad, c_pad, h_pad = prob.y, prob.group, prob.counts, h
+
+    n_chunks = y_pad.shape[0] // B
+    y_chunks = y_pad.reshape(n_chunks, B, -1)
+    g_chunks = g_pad.reshape(n_chunks, B)
+    c_chunks = c_pad.reshape(n_chunks, B)
+    h_chunks = h_pad.reshape(n_chunks, B, Q)
+
+    h_cross = jnp.zeros((n_free, n_free), dtype=eta.dtype)
+    lat_fids_all = jnp.where(lat_block.free_index >= 0, lat_block.free_index, n_free)
+    fam_fids = [
+        jnp.where(fam.slot_free_index >= 0, fam.slot_free_index, n_free) for fam, _ in fam_d
+    ]
+
+    for g in range(G):
+        d_flats = [jnp.transpose(d_lp[g], (2, 0, 1, 3)).reshape(Q, -1) for _, d_lp in fam_d]
+        d_logw_g = d_logw[g]
+        lat_fids_g = lat_fids_all[g]
+
+        def scan_body(
+            acc: tuple[Array, Array],
+            xs: tuple[Array, Array, Array, Array],
+            g_idx: int = g,
+            d_flats_g: list[Array] = d_flats,
+            dlw_g: Array = d_logw_g,
+            lfids_g: Array = lat_fids_g,
+        ) -> tuple[tuple[Array, Array], None]:
+            c_acc, t2_acc = acc
+            y_c, g_c, c_c, h_c = xs
+            mask_g = (g_c == g_idx) & (c_c > 0)
+
+            def do_chunk(_unused: None) -> tuple[Array, Array]:
+                cg = jnp.where(mask_g, c_c, 0.0)
+                wg = cg[:, None] * h_c  # (B, Q)
+                x_parts = [jnp.ones((B, 1), dtype=eta.dtype)]
+                s_bar = jnp.zeros((B, n_free), dtype=eta.dtype)
+                for (fam, _), fids, d_flat in zip(fam_d, fam_fids, d_flats_g, strict=True):
+                    K_f = fam.kernel.n_cat
+                    J_f = fam.columns.shape[0]
+                    S_f = fam.slot_free_index.shape[1]
+                    y_f = y_c[:, fam.columns]
+                    oh = jax.nn.one_hot(y_f, K_f, dtype=eta.dtype)
+                    x_parts.append(oh.reshape(B, J_f * K_f))
+                    hd = (h_c @ d_flat).reshape(B, J_f, K_f, S_f)
+                    y_safe = jnp.maximum(y_f, 0)
+                    picked = jnp.take_along_axis(hd, y_safe[:, :, None, None], axis=2)[:, :, 0, :]
+                    picked = jnp.where((y_f >= 0)[:, :, None], picked, 0.0)
+                    s_bar = s_bar.at[:, fids.ravel()].add(picked.reshape(B, -1), mode="drop")
+                x_c = jnp.concatenate(x_parts, axis=1)  # (B, D)
+                c_gq = jax.vmap(lambda wq: (x_c * wq[:, None]).T @ x_c, in_axes=1)(wg)
+                s_bar = s_bar.at[:, lfids_g].add(h_c @ dlw_g, mode="drop")
+                t2_g = (s_bar * cg[:, None]).T @ s_bar
+                return c_acc + c_gq, t2_acc + t2_g
+
+            next_acc: tuple[Array, Array] = jax.lax.cond(
+                jnp.any(mask_g), do_chunk, lambda _: acc, None
+            )
+            return next_acc, None
+
+        init_acc = (
+            jnp.zeros((Q, D, D), dtype=eta.dtype),
+            jnp.zeros((n_free, n_free), dtype=eta.dtype),
+        )
+        (c_q, t2_g), _ = jax.lax.scan(scan_body, init_acc, (y_chunks, g_chunks, c_chunks, h_chunks))
+
+        def t1_step(
+            t1_acc: Array,
+            q_idx: Array,
+            g_idx: int = g,
+            c_mat: Array = c_q,
+            dlw_g: Array = d_logw_g,
+            lfids_g: Array = lat_fids_g,
+        ) -> tuple[Array, None]:
+            l_q = jnp.zeros((D, n_free), dtype=eta.dtype)
+            l_q = l_q.at[0, lfids_g].add(dlw_g[q_idx], mode="drop")
+            col = 1
+            for (fam, d_lp), fids in zip(fam_d, fam_fids, strict=True):
+                J_f = fam.columns.shape[0]
+                K_f = fam.kernel.n_cat
+                n_cols = J_f * K_f
+                d_idx = (col + jnp.arange(n_cols)).reshape(J_f, K_f)
+                l_q = l_q.at[d_idx[:, :, None], fids[:, None, :]].add(
+                    d_lp[g_idx, :, :, q_idx, :], mode="drop"
+                )
+                col += n_cols
+            return t1_acc + l_q.T @ (c_mat[q_idx] @ l_q), None
+
+        t1_g, _ = jax.lax.scan(t1_step, jnp.zeros((n_free, n_free), dtype=eta.dtype), jnp.arange(Q))
+        h_cross = h_cross + (t1_g - t2_g)
+
+    return h_cross
+
+
 def information_oakes(prob: CompiledProblem, eta: Array) -> Array:
-    r"""Observed (posterior) information by Oakes' identity (Oakes, 1999; DESIGN.md §4.8).
+    r"""Observed (posterior) information by Oakes' identity (Oakes, 1999; DESIGN.md §4.8, §15.18).
 
     .. math::
         I(\hat\eta)=-\Big[\frac{\partial^2Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta^\top}
         +\frac{\partial^2Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta'^\top}\Big]_{\eta=\eta'=\hat\eta}
 
-    where :math:`Q_{\mathrm{post}}(\eta\mid\eta')=Q(\eta\mid\eta')+\log\pi(\eta)`. Adding
-    :math:`\log\pi(\eta)` contributes :math:`-\nabla^2_\eta\log\pi(\hat\eta)` and keeps the
-    exact identity with :func:`information_hessian`.
+    where :math:`Q_{\mathrm{post}}(\eta\mid\eta')=Q(\eta\mid\eta')+\log\pi(\eta)`. Reuses a
+    single E-step, exploits the item/latent/prior block structure of the first term, and evaluates
+    the cross term via pattern-chunked category co-occurrences and quadrature-node contractions
+    without materializing ``(P, Q, n_free)`` intermediates. Adding :math:`\log\pi(\eta)`
+    contributes :math:`-\nabla^2_\eta\log\pi(\hat\eta)` and keeps the exact identity with
+    :func:`information_hessian`.
     """
-
-    def q(e: Array, e_prime: Array) -> Array:
-        counts, _ = e_step(prob, e_prime)
-        return expected_complete_loglik(prob, e, counts) + log_prior(prob, e)
-
-    h_own, h_cross = jax.jacfwd(jax.grad(q, argnums=0), argnums=(0, 1))(eta, eta)
+    if eta.shape[0] == 0:
+        return jnp.zeros((0, 0), dtype=eta.dtype)
+    counts, _, h = _e_step_details(prob, eta)
+    h_own = _oakes_own_hessian(prob, eta, counts)
+    h_cross = _oakes_cross_hessian(prob, eta, counts, h)
     info: Array = -(h_own + h_cross)
     return info
 
