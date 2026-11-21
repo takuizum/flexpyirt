@@ -176,13 +176,27 @@ def _newton_1d(f: Callable[[Array], Array], x0: Array, lo: Array, hi: Array) -> 
         ok = inside & jnp.isfinite(vals) & (vals >= fx)
         any_ok = jnp.any(ok)
         best = cands[jnp.argmax(ok)]
-        x_next = jnp.where(any_ok, best, x)
+        # Near the mode, f(x) is flat to float64 rounding (~sqrt(eps) ~ 1e-8 in x); if strict
+        # value ascent hits the 1-ULP floor on a strictly concave region, allow a single Newton
+        # polish step when it strictly reduces |g| within 1-ULP objective noise.
+        polish_x = cands[0]
+        polish_val = vals[0]
+        polish_ok = (
+            (~ok[0])
+            & concave
+            & inside[0]
+            & jnp.isfinite(polish_val)
+            & (polish_val >= fx - 1e-14 * (1.0 + jnp.abs(fx)))
+            & (jnp.abs(grad_fn(polish_x)) < 0.5 * jnp.abs(g))
+        )
+        moved = polish_ok | any_ok
+        x_next = jnp.where(polish_ok, polish_x, jnp.where(any_ok, best, x))
         step_size = jnp.abs(x_next - x)
         done = (
             (~jnp.isfinite(fx))
             | (~jnp.isfinite(g))
             | (jnp.abs(g) < _GRAD_TOL)
-            | (~any_ok)
+            | (~moved)
             | (step_size < _STEP_TOL)
         )
         return x_next, it + one, done
