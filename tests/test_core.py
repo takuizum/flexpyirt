@@ -245,6 +245,10 @@ def test_specification_errors(small: pd.DataFrame) -> None:
         fit(spec, small.assign(**{"Item.1": 1}))
     with pytest.raises(SpecificationError, match="Duplicated"):
         Model.uniform(TwoPL(), items=["x", "x"])
+    with pytest.raises(SpecificationError, match="reserved"):
+        Model.uniform(TwoPL(), items=["x", "__latent__"])
+    with pytest.raises(SpecificationError, match="reserved"):
+        Model.from_items({"__latent__": TwoPL()})
 
 
 def test_free_id_shared_across_items_is_rejected(small: pd.DataFrame) -> None:

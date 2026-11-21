@@ -705,6 +705,40 @@ data-independent shapes (§15.21).
     independent draws; all-missing rows draw from the group's prior. Requires an explicit JAX PRNG
     `key` (`jax.random.key` or `jax.random.PRNGKey`, `SpecificationError` if absent or invalid) and
     is fully deterministic given `key`.
+26. **`FitResult` JSON I/O API and versioned format (M4, API §7)**:
+    `FitResult.to_json(path=None, *, indent=2) -> str` serializes a fitted result to a strict JSON
+    string and also writes UTF-8 text to `path` (`str` or `os.PathLike`) when given;
+    `FitResult.from_json(source) -> FitResult` loads from a file path or JSON string without
+    refitting. Plain JSON is used (no `pickle` and never `eval`). The top-level object carries
+    `"format": "flexpyirt.FitResult"`, `"schema_version": 1` (for future schema migrations), and
+    `"flexpyirt_version": flexpyirt.__version__`. `FitResult` stores `_method: BAEM` alongside
+    `_model` and `_quadrature` so estimation settings round-trip as well. `from_json` calls
+    `check_x64()` at entry (raising `PrecisionError` when 64-bit floating point is disabled, since
+    scoring requires float64).
+27. **Strict JSON and exact float64 round-tripping (M4)**:
+    Serialization uses `json.dumps(..., allow_nan=False)` so output is always strict RFC 8259 JSON,
+    and deserialization passes a rejecting `parse_constant` to `json.loads` so bare `NaN`/`Infinity`
+    literals are rejected with `SpecificationError`. Finite IEEE-754 float64 values are written as
+    standard JSON numbers (Python's `repr`-exact shortest decimal representation, round-tripping
+    every finite float64 bit-for-bit, including `-0.0`). Non-finite values (`NaN`, `+Inf`, `-Inf`)
+    in float-typed fields (such as unbounded `lower`/`upper`, fixed or unavailable `se`, or non-PD
+    `vcov`) are encoded explicitly as `"NaN"`, `"Infinity"`, and `"-Infinity"`; only float-typed
+    schema slots decode these strings, so string fields such as item or group names are unaffected.
+28. **Explicit registries and full state preservation (M4)**:
+    Item models (`"2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"GRM"`, `"GPCM"`, `"PCM"`, recording
+    `n_cat` for polytomous models), latent distributions (`"Normal"`), priors (`"NormalPrior"`,
+    `"LogNormal"`, `"Beta"`), quadrature (`"equispaced"`), and estimation methods (`"BAEM"`) are
+    (de)serialized through explicit name registries in `_json.py`. Unknown format tags, schema
+    versions, registry names, invalid JSON, or inconsistent table/shape invariants raise
+    `SpecificationError` with a clear message. Both the full `Model` specification (item names and
+    order, item models, `fixed`, `latent`, `groups`, `equal`, `priors`) and the validated
+    `ParameterTable` with `estimate` and `se` (preserving any user `table=` edits), `vcov`,
+    `loglik`/`log_posterior`, convergence info and `history`, `quadrature`, `method`, `se_method`,
+    and `n_obs` are stored; `_eta` is reconstructed from the validated free rows of `parameters`
+    (checking contiguous `0..n_free-1` `free_id`s, identical estimates on shared `free_id`s, and
+    matching `vcov` shape) so estimates have a single source of truth. Loaded results reproduce
+    every public attribute, `items`, `latent`, `summary()`, `_repr_html_()`, `aic`/`bic`, and
+    `score()` for every method identically.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.

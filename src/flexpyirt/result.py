@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import os
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -17,9 +18,11 @@ from jax import Array
 
 from flexpyirt import _core, _scoring
 from flexpyirt._compile import LATENT_ITEM, coerce_groups, coerce_responses, compile_problem
+from flexpyirt._json import dump_fit_result, load_fit_result
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
 from flexpyirt.items import ItemKernel
+from flexpyirt.method import BAEM
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -252,6 +255,7 @@ class FitResult:
     _model: Model = field(repr=False)
     _eta: np.ndarray = field(repr=False)
     _quadrature: Quadrature = field(repr=False)
+    _method: BAEM = field(default_factory=BAEM, repr=False)
 
     # ---- summaries ---------------------------------------------------------------------------
 
@@ -624,3 +628,71 @@ class FitResult:
             f"FitResult(loglik={self.loglik:.4f}{post}, n_params={self.n_params}, "
             f"n_obs={self.n_obs}, {status} in {self.n_iter} iterations, se={self.se_method})"
         )
+
+    # ---- JSON I/O ----------------------------------------------------------------------------
+
+    def to_json(
+        self,
+        path: str | os.PathLike[str] | None = None,
+        *,
+        indent: int | None = 2,
+    ) -> str:
+        """Serialize this result to a strict JSON string, optionally writing it to ``path``.
+
+        Writes plain, versioned RFC 8259 JSON (no ``pickle``) with top-level
+        ``"format": "flexpyirt.FitResult"``, ``"schema_version": 1``, and the ``flexpyirt``
+        version (DESIGN.md §15.26–§15.28). Finite IEEE-754 float64 values are written as
+        ``repr``-exact JSON numbers and non-finite values (``NaN``, ``+inf``, ``-inf``) are
+        encoded explicitly as ``"NaN"``, ``"Infinity"``, and ``"-Infinity"`` in float-typed
+        fields so the output is valid strict JSON and round-trips bit-for-bit.
+
+        Parameters
+        ----------
+        path : str or os.PathLike, optional
+            If provided, also write the UTF-8 JSON text to this path.
+        indent : int or None, default 2
+            Indentation level passed to :func:`json.dumps` (``None`` for compact output).
+
+        Returns
+        -------
+        str
+            The serialized JSON string.
+
+        Raises
+        ------
+        SpecificationError
+            If ``indent`` is invalid or the result contains an unregistered model/prior type.
+        """
+        return dump_fit_result(self, path=path, indent=indent)
+
+    @classmethod
+    def from_json(cls, source: str | os.PathLike[str]) -> FitResult:
+        """Load a :class:`FitResult` from a JSON file path or JSON string without refitting.
+
+        Reconstructs the model specification, validated parameter table (including estimates, SEs,
+        and priors), covariance matrix, convergence history, quadrature grid, and estimation
+        settings through explicit name registries (never ``eval`` or ``pickle``; DESIGN.md
+        §15.26–§15.28). Calls :func:`~flexpyirt._precision.check_x64` at entry because scoring
+        requires 64-bit floating point.
+
+        Parameters
+        ----------
+        source : str or os.PathLike
+            Path to a UTF-8 JSON file written by :meth:`to_json`, or the JSON string itself.
+
+        Returns
+        -------
+        FitResult
+            Reconstructed result supporting all attributes, summaries, and :meth:`score`.
+
+        Raises
+        ------
+        PrecisionError
+            If JAX is not configured for 64-bit floating point.
+        SpecificationError
+            If ``source`` is not valid strict JSON, has an unknown format tag, schema version,
+            or registered type name, or fails internal consistency validation.
+        FileNotFoundError
+            If ``source`` refers to a file path that does not exist.
+        """
+        return load_fit_result(source)

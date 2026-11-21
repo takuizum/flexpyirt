@@ -40,7 +40,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 ## M4 Results and first multidimensional models
 - [x] `FitResult.summary()`, `FitResult._repr_html_()`, and delta-method SEs for the display IRT
   parameterization (`b_se` / `bk_se`, validated in V12).
-- `FitResult` JSON I/O.
+- [x] `FitResult` JSON I/O (`FitResult.to_json`, `FitResult.from_json`).
 - [x] Scoring (MAP, ML, WLE, plausible values; validated in V13).
 - Confirmatory 2–3 dimensional MIRT (product grids).
 - **Acceptance**: EAP / MAP agree with mirt's `fscores`. A two-dimensional confirmatory model
