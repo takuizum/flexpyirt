@@ -825,8 +825,8 @@ data-independent shapes (§15.21).
     shape-static pytrees and autodiff only. `FitResult.items` displays `a1..aD`, `d` (`d1..`), and
     their SEs; `FitResult.latent` displays `mean_1..D`, `var_1..D`, `cor_ij`, and their SEs.
     `FitResult.score(data, method="EAP")` returns columns `theta_<factor>` and `se_<factor>` in
-    declared factor order; non-EAP scoring methods (`MAP`, `ML`, `WLE`, `PV`) raise
-    `SpecificationError` for $D > 1$ (planned for a later milestone).
+    declared factor order; `method="MAP"` is supported as well (§15.39), while `ML`, `WLE` and
+    `PV` raise `SpecificationError` for $D > 1$.
 33. **JSON I/O for multidimensional `FitResult` (schema version 2, M4)**: the model object in the
     JSON payload stores `"factors"` (`null`, or a list of `{"name", "items"}` in declared order)
     and `"correlated_factors"`, so `to_json()` / `from_json()` round-trip 2–3 dimensional results
@@ -920,6 +920,17 @@ data-independent shapes (§15.21).
     strictly positive, summing to 1, and matching `n_groups` and `quadrature.n_points`; omitted and
     forbidden for `Normal` models so existing schema-version-1 payloads remain unchanged). `_n_eh_params`
     is recomputed deterministically from `(model, parameters, quadrature)` on load.
+39. **MAP scoring for multidimensional models (M4, §8)**: `score(method="MAP")` for
+    $D \in \{2, 3\}$ maximizes
+    $f(\boldsymbol\theta)=\log L(\boldsymbol\theta\mid y)-\tfrac12(\boldsymbol\theta-\boldsymbol\mu)^\top\boldsymbol\Sigma^{-1}(\boldsymbol\theta-\boldsymbol\mu)$
+    with the estimated multivariate normal ($\Sigma_{ij}=\rho_{ij}\sqrt{v_iv_j}$) as a continuous
+    prior, starting from EAP, by safeguarded $D$-dimensional Newton (`_newton_nd`: Newton
+    direction when the autodiff Hessian is negative definite, otherwise the gradient; step norm
+    capped at 10; step sizes $2^{-k}$, $k=0..29$, evaluated together so $f$ never decreases).
+    SEs are $\big[(-\nabla^2 f(\hat{\boldsymbol\theta}))^{-1}\big]_{mm}^{1/2}$, as in mirt's
+    `fscores(method = "MAP")`; all-missing rows return the prior mean and $\sqrt{\Sigma_{mm}}$.
+    `ML`, `WLE` and `PV` still raise `SpecificationError` for $D > 1$ (ML/WLE need per-factor
+    handling of diverging directions).
 40. **S-X2 item fit (M5, `FitResult.item_fit`)**: Orlando and Thissen's (2000, 2003) S-X2 for
     single-group unidimensional models with a `Normal` latent distribution and complete data.
     Expected proportions

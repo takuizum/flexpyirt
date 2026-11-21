@@ -271,6 +271,10 @@
     `loglik` 相対 `4.7e-15`、項目パラメタ `1.9e-8`、相関 `4.9e-8`、項目 Oakes SE 相対 `9.0e-7`、
     相関 Oakes SE 相対 `7.3e-5`（mirt の 3 次元有限差分 Oakes ステップ由来。flexpyirt の Oakes 対 Hessian は
     `1.2e-14`）、EAP $\theta$ `1.1e-14` / SD `1.1e-14`。
+  - **MAP（4 ケースすべて）**: 全パラメタを mirt の V14 推定値に固定し、EAP のパターンと、それを 3 項目欠測にした
+    20 パターン（ケースあたり 220 パターン。mirt 1.48、`validation/r/m4_mirt_map_reference.R` →
+    `tests/reference/v14_mirt_map.json`）で `fscores(method = "MAP")` と比較: $\theta$ は `4.3e-6`、SE は相対 `3.8e-5`
+    以内で一致（mirt の `nlm` の許容誤差の水準。許容誤差は `1e-4` / `1e-3`）。
   単体テスト（カーネル・多変量正規重みと正定値性ガード・直積格子形状・2 次元 Rasch / 混在 / 事前分布 / 固定・
   Oakes == Hessian == 参照 Oakes・識別性と仕様エラー）: `tests/test_m4_mirt.py`。
 - 照合テスト: `tests/test_mirt_m1.py`（V1, V2, V10）。参照値の生成: `validation/r/m1_reference.R`。

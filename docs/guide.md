@@ -630,9 +630,9 @@ print(res_mirt.score(mirt_df.iloc[:3], method="EAP").round(3))  # theta_F1, thet
   prevent rotational indeterminacy (`IdentificationError` if all items load freely on every
   factor). Factor orientation is anchored to the positive direction by strictly positive starting
   slopes derived from factor-specific item–rest correlations.
-- **Scoring**: `method="EAP"` returns `theta_<factor>` and `se_<factor>` per declared factor.
-  Other scoring methods (`MAP`, `ML`, `WLE`, `PV`) and multiple-group multidimensional models are
-  not yet implemented and raise `SpecificationError`.
+- **Scoring**: `method="EAP"` and `method="MAP"` (with the estimated multivariate normal as the
+  prior) return `theta_<factor>` and `se_<factor>` per declared factor. `ML`, `WLE`, `PV` and
+  multiple-group multidimensional models are not yet implemented and raise `SpecificationError`.
 
 ## 15. Errors and warnings
 

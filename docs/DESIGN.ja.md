@@ -541,7 +541,7 @@ class ItemKernel(Protocol):
 31. **$D > 1$ の識別性・符号不定性・初期値（M4, §4.5, §4.10）**:
     `_check_identification_mirt` が推定前に必要条件を検査する: 各因子に有効な負荷（自由または非ゼロ固定）が 1 つ以上あること、自由な `var_m` には非ゼロ固定の `a{m}` が 1 つ以上あること、自由な `mean_m` にはその因子に負荷する項目のうち切片が固定されたものが 1 つ以上あること、確認的な回転識別のため $c_m$ 個の自由な相関に関わる因子 $m$ は少なくとも $c_m$ 個の固定負荷（通常は 0 固定）を持ち、非ゼロ固定負荷のない 2 因子が同一の自由負荷集合を共有しないこと（Bollen, 1989; Reckase, 2009）。**符号不定性**: $\theta_m$ とすべての $a_{jm}$・$\mu_m$・$\rho_{mm'}$（$m' \neq m$）の符号反転で周辺尤度は不変（1 次元と同様）。逆転項目や自然尺度 SE を不自然な境界で歪めないよう傾き自体は非有界（`(-inf, inf)`）のまま保ち、各因子の向きは因子別項目−残余相関から $1/\sqrt{L_j}$（$L_j$ は項目 $j$ が負荷する因子数。切片・漸近線には $\|\mathbf a_j^{(0)}\|$ を使用）で計算する厳密に正の既定初期傾き $a_{jm}^{(0)} \in [0.25, 3.0]$ と、常に正定値な相関初期値 `0.0`（$R^{(0)} = I_D$）によって正の方向に揃える。編集済み表である因子の初期傾きがすべて 0 の場合は `SpecificationError` で弾く。
 32. **多次元の結果・Oakes SE・EAP スコアリング（M4, §4.8, §8）**:
-    Core 層の E-step・M-step・SQUAREM・構造化 Oakes（`_oakes_own_hessian`, `_oakes_cross_hessian`）・チャンク分割 Hessian はすべて `(Q, D)` 節点と `(G, L_D)` 潜在ブロックに対して静的形状・自動微分のみでそのまま動作する。`FitResult.items` は `a1..aD`, `d`（`d1..`）とその SE を表示し、`FitResult.latent` は `mean_1..D`, `var_1..D`, `cor_ij` とその SE を表示する。`FitResult.score(data, method="EAP")` は宣言した因子順に `theta_<factor>`, `se_<factor>` 列を返す。$D > 1$ に対する EAP 以外の採点手法（`MAP`, `ML`, `WLE`, `PV`）は `SpecificationError` を送出する（今後のマイルストーンで対応予定）。
+    Core 層の E-step・M-step・SQUAREM・構造化 Oakes（`_oakes_own_hessian`, `_oakes_cross_hessian`）・チャンク分割 Hessian はすべて `(Q, D)` 節点と `(G, L_D)` 潜在ブロックに対して静的形状・自動微分のみでそのまま動作する。`FitResult.items` は `a1..aD`, `d`（`d1..`）とその SE を表示し、`FitResult.latent` は `mean_1..D`, `var_1..D`, `cor_ij` とその SE を表示する。`FitResult.score(data, method="EAP")` は宣言した因子順に `theta_<factor>`, `se_<factor>` 列を返す。`method="MAP"` も使える（§15.39）。$D > 1$ の `ML`・`WLE`・`PV` は `SpecificationError` を送出する。
 33. **多次元 `FitResult` の JSON 入出力（schema version 2、M4）**: JSON のモデルオブジェクトに `"factors"`
     （`null`、または宣言順の `{"name", "items"}` のリスト）と `"correlated_factors"` を保存し、`to_json()` /
     `from_json()` が 2–3 次元の結果（`items`・`latent`・`parameters`・`vcov`・`summary()`・EAP スコア）を厳密に
@@ -607,6 +607,14 @@ class ItemKernel(Protocol):
     を登録し、EH 結果にはトップレベルキー `"latent_weights"`（形状 `(G, Q)`。読み込み時に有限・厳密に正・和が 1・`n_groups`
     および `quadrature.n_points` との整合を検証；`Normal` モデルでは省略かつ存在すれば拒否し、既存の schema_version 1 の
     ペイロードと完全互換）を保存する。`_n_eh_params` は読み込み時に `(model, parameters, quadrature)` から決定的に再計算する。
+39. **多次元モデルの MAP スコアリング（M4, §8）**: $D \in \{2, 3\}$ の `score(method="MAP")` は、推定した多変量正規
+    （$\Sigma_{ij}=\rho_{ij}\sqrt{v_iv_j}$）を連続な事前分布として
+    $f(\boldsymbol\theta)=\log L(\boldsymbol\theta\mid y)-\tfrac12(\boldsymbol\theta-\boldsymbol\mu)^\top\boldsymbol\Sigma^{-1}(\boldsymbol\theta-\boldsymbol\mu)$
+    を EAP から出発して最大化する。安全装置つき $D$ 次元 Newton（`_newton_nd`: 自動微分の Hessian が負定値なら Newton 方向、
+    そうでなければ勾配。ステップのノルムを 10 で打ち切り、ステップ幅 $2^{-k}$（$k=0..29$）を同時に評価して $f$ が減少しない
+    ようにする）を使う。SE は mirt の `fscores(method = "MAP")` と同じく
+    $\big[(-\nabla^2 f(\hat{\boldsymbol\theta}))^{-1}\big]_{mm}^{1/2}$。全欠測行は事前分布の平均と $\sqrt{\Sigma_{mm}}$ を返す。
+    $D > 1$ の `ML`・`WLE`・`PV` は引き続き `SpecificationError`（ML/WLE は因子ごとに発散する方向の扱いが必要）。
 40. **S-X2 項目適合度（M5、`FitResult.item_fit`）**: `Normal` 潜在分布の単一群 1 次元モデルと欠測のないデータに対する
     Orlando と Thissen（2000, 2003）の S-X2。期待割合
     $E_j[s,k]=\sum_q P_{jk}(\theta_q)L_{-j}(s-k\mid\theta_q)w_q/\sum_q L(s\mid\theta_q)w_q$ を、推定時の求積格子と潜在分布の重みの上で

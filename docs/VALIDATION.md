@@ -322,6 +322,11 @@ English | [日本語](VALIDATION.ja.md)
     `loglik` rel `4.7e-15`, item params `1.9e-8`, correlations `4.9e-8`, item Oakes SE rel
     `9.0e-7`, correlation Oakes SE rel `7.3e-5` (mirt's 3D finite-difference Oakes step; flexpyirt
     Oakes vs Hessian `1.2e-14`), EAP $\theta$ `1.1e-14` / SD `1.1e-14`.
+  - **MAP (all four cases)**: with every parameter fixed at mirt's V14 estimates,
+    `fscores(method = "MAP")` on the EAP patterns plus 20 copies with 3 responses set to missing
+    (220 patterns per case; mirt 1.48, `validation/r/m4_mirt_map_reference.R` →
+    `tests/reference/v14_mirt_map.json`): $\theta$ within `4.3e-6` and SEs within `3.8e-5`
+    (relative) of mirt, at the level of mirt's `nlm` tolerance (tolerances `1e-4` / `1e-3`).
   Unit tests (kernels, MVN weights & PD guard, product grid shapes, 2D Rasch/mixed/priors/fix,
   Oakes == Hessian == reference Oakes, identification & specification errors):
   `tests/test_m4_mirt.py`.
