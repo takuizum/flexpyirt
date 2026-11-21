@@ -541,7 +541,7 @@ class ItemKernel(Protocol):
 31. **$D > 1$ の識別性・符号不定性・初期値（M4, §4.5, §4.10）**:
     `_check_identification_mirt` が推定前に必要条件を検査する: 各因子に有効な負荷（自由または非ゼロ固定）が 1 つ以上あること、自由な `var_m` には非ゼロ固定の `a{m}` が 1 つ以上あること、自由な `mean_m` にはその因子に負荷する項目のうち切片が固定されたものが 1 つ以上あること、確認的な回転識別のため $c_m$ 個の自由な相関に関わる因子 $m$ は少なくとも $c_m$ 個の固定負荷（通常は 0 固定）を持ち、非ゼロ固定負荷のない 2 因子が同一の自由負荷集合を共有しないこと（Bollen, 1989; Reckase, 2009）。**符号不定性**: $\theta_m$ とすべての $a_{jm}$・$\mu_m$・$\rho_{mm'}$（$m' \neq m$）の符号反転で周辺尤度は不変（1 次元と同様）。逆転項目や自然尺度 SE を不自然な境界で歪めないよう傾き自体は非有界（`(-inf, inf)`）のまま保ち、各因子の向きは因子別項目−残余相関から $1/\sqrt{L_j}$（$L_j$ は項目 $j$ が負荷する因子数。切片・漸近線には $\|\mathbf a_j^{(0)}\|$ を使用）で計算する厳密に正の既定初期傾き $a_{jm}^{(0)} \in [0.25, 3.0]$ と、常に正定値な相関初期値 `0.0`（$R^{(0)} = I_D$）によって正の方向に揃える。編集済み表である因子の初期傾きがすべて 0 の場合は `SpecificationError` で弾く。
 32. **多次元の結果・Oakes SE・EAP スコアリング（M4, §4.8, §8）**:
-    Core 層の E-step・M-step・SQUAREM・構造化 Oakes（`_oakes_own_hessian`, `_oakes_cross_hessian`）・チャンク分割 Hessian はすべて `(Q, D)` 節点と `(G, L_D)` 潜在ブロックに対して静的形状・自動微分のみでそのまま動作する。`FitResult.items` は `a1..aD`, `d`（`d1..`）とその SE を表示し、`FitResult.latent` は `mean_1..D`, `var_1..D`, `cor_ij` とその SE を表示する。`FitResult.score(data, method="EAP")` は宣言した因子順に `theta_<factor>`, `se_<factor>` 列を返す。`method="MAP"` も使える（§15.39）。$D > 1$ の `ML`・`WLE`・`PV` は `SpecificationError` を送出する。
+    Core 層の E-step・M-step・SQUAREM・構造化 Oakes（`_oakes_own_hessian`, `_oakes_cross_hessian`）・チャンク分割 Hessian はすべて `(Q, D)` 節点と `(G, L_D)` 潜在ブロックに対して静的形状・自動微分のみでそのまま動作する。`FitResult.items` は `a1..aD`, `d`（`d1..`）とその SE を表示し、`FitResult.latent` は `mean_1..D`, `var_1..D`, `cor_ij` とその SE を表示する。`FitResult.score(data, method="EAP")` は宣言した因子順に `theta_<factor>`, `se_<factor>` 列を返す。`"MAP"`（§15.39）、`"ML"`・`"WLE"`（§15.41）、`"PV"`（§15.42）も使える。
 33. **多次元 `FitResult` の JSON 入出力（schema version 2、M4）**: JSON のモデルオブジェクトに `"factors"`
     （`null`、または宣言順の `{"name", "items"}` のリスト）と `"correlated_factors"` を保存し、`to_json()` /
     `from_json()` が 2–3 次元の結果（`items`・`latent`・`parameters`・`vcov`・`summary()`・EAP スコア）を厳密に
@@ -614,7 +614,7 @@ class ItemKernel(Protocol):
     そうでなければ勾配。ステップのノルムを 10 で打ち切り、ステップ幅 $2^{-k}$（$k=0..29$）を同時に評価して $f$ が減少しない
     ようにする）を使う。SE は mirt の `fscores(method = "MAP")` と同じく
     $\big[(-\nabla^2 f(\hat{\boldsymbol\theta}))^{-1}\big]_{mm}^{1/2}$。全欠測行は事前分布の平均と $\sqrt{\Sigma_{mm}}$ を返す。
-    $D > 1$ の `ML`・`WLE`・`PV` は引き続き `SpecificationError`（ML/WLE は因子ごとに発散する方向の扱いが必要）。
+    $D > 1$ の `ML`・`WLE` は §15.41、`PV` は §15.42。
 40. **S-X2 項目適合度（M5、`FitResult.item_fit`）**: `Normal` 潜在分布の単一群 1 次元モデルと欠測のないデータに対する
     Orlando と Thissen（2000, 2003）の S-X2。期待割合
     $E_j[s,k]=\sum_q P_{jk}(\theta_q)L_{-j}(s-k\mid\theta_q)w_q/\sum_q L(s\mid\theta_q)w_q$ を、推定時の求積格子と潜在分布の重みの上で
@@ -625,6 +625,24 @@ class ItemKernel(Protocol):
     潜在分布のパラメタ数を引く）。RMSEA と $\chi^2$ の p 値も mirt に合わせる。表の計算は推定後の NumPy 処理（形がデータに依存
     するので `jit` の外）で、カテゴリ確率は JAX の項目カーネルから得る。多次元・多母集団・EH・欠測データは照合するまで
     `SpecificationError`（mirt は S-X2 で欠測を補完し、EH の重みを無視する）。
+41. **多次元モデルの ML・WLE スコアリング（M4, §8）**: $D \in \{2, 3\}$ で、`"ML"` は $\log L(\boldsymbol\theta\mid y)$ を、
+    `"WLE"` は Jeffreys/Firth の罰則つき $\log L(\boldsymbol\theta\mid y)+\tfrac12\log\det\mathbf I(\boldsymbol\theta)$
+    （`mirt:::WLE.mirt`; Warm, 1989; Wang, 2015。$\mathbf I$ は観測項目の期待テスト情報行列で自動微分から求める）を、
+    範囲 $|\theta_m|<20$（mirt の `max_theta`）で、範囲つきの `_newton_nd` により EAP から出発して最大化する。SE は目的関数の
+    負の Hessian の逆行列の対角の平方根。ML: 観測された反応がすべて最低（最高）の生カテゴリのパターンは全次元で
+    $-\infty$（$+\infty$）を返す（mirt も最適化の前にそうする）。範囲の端に達するか SE が 30 を超えた次元は $\pm\infty$
+    （SE は NaN）を返し、残りの次元の SE は負の Hessian のその次元のブロックの逆行列から求める。mirt はそのような次元を
+    $\pm20$ 近くの有限値で SE 0 として止めることがある（`diag(hessian) > 0` による部分選択のため）が、flexpyirt は符号付きの
+    無限大を返す。WLE は極端なパターンでも有限。全欠測行は NaN を返す。
+42. **多次元モデルの plausible values（M4, §8）**: $D \in \{2, 3\}$ で、ユニークなパターンごとの事後分布
+    $\log L(\boldsymbol\theta\mid y)-\tfrac12(\boldsymbol\theta-\boldsymbol\mu)^\top\boldsymbol\Sigma^{-1}(\boldsymbol\theta-\boldsymbol\mu)$
+    （連続な多変量正規の事前分布）を、EAP ± 6 事後 SD（推定時の格子の範囲で切る）にわたる次元あたり 61 点（2 次元）または
+    25 点（3 次元）のそのパターン専用の等間隔格子で評価する。各抽出は離散化した事後分布からセルを選び
+    （`jax.random.categorical`）、セル内で一様なゆらぎを加えるので連続な値になる。ゆらぎにより分散は $\Delta_m^2/12$
+    （2 次元で事後分散の約 0.2%、3 次元で約 0.6%）大きくなる。回答者ごとの鍵は `jax.random.split(key, N)` から作るので、
+    同じパターンの回答者でも独立で、`key` に対して決定的。メモリを抑えるためパターンと回答者を `lax.map` で分割して処理する。
+    列名は `pv<m>_<factor>`。統計的に検証する: 4,000 回抽出すると標本平均・SD・相関が格子上の事後分布とモンテカルロ誤差の
+    範囲で一致する（mirt の既定の plausible values は正規近似なので参照にはしない）。
 
 ## 16. 実装上の決定（M5）
 1. **項目をまたぐ等値制約（`Model.equal_across_items`、`free_id` の共有）**:
@@ -743,6 +761,7 @@ class ItemKernel(Protocol):
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
+- Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
