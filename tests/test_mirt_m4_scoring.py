@@ -217,3 +217,23 @@ def test_map_ml_wle_agree_with_mirt(name: str, method: str) -> None:
     fin_se = np.isfinite(ref_se)
     assert fin_se.any()
     np.testing.assert_allclose(got_se[fin_se], ref_se[fin_se], rtol=TOL_SE_REL, atol=0)
+
+
+def test_ml_3pl_bimodal_global_supremum_returns_neg_inf() -> None:
+    """Bimodal 3PL pattern where f(-inf) exceeds the interior local mode returns -inf.
+
+    Intentional difference from mirt (DESIGN.md §15.23, VALIDATION.md V13): on pattern index
+    1285 of ``v11_3pl.json`` (sum score 4/20), the log-likelihood has a strictly concave
+    interior local maximum at theta ≈ -0.9079 (f ≈ -8.6132, SE ≈ 1.2855), separated by a local
+    minimum from the lower-asymptote plateau where f(-20) ≈ -8.5319 > f(-0.9079). mirt's local
+    ``nlm()`` search starting from EAP stops at the interior local mode and returns finite
+    ``(-0.9079, 1.2855)``, whereas flexpyirt compares ``f(theta_hat)`` against ``f(±20)`` and
+    returns the true global supremum ``(-inf, NaN)`` (the actual maximum likelihood).
+    """
+    src = json.loads((REFERENCE_DIR / "v11_3pl.json").read_text())
+    items = list(src["items"])
+    pat = pd.DataFrame([src["patterns"][1285]], columns=items, dtype=float)
+    res = _fixed_at_mirt("v11_3pl")
+    ml = res.score(pat, method="ML")
+    assert ml["theta"].iloc[0] == -np.inf
+    assert np.isnan(ml["se"].iloc[0])

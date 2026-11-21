@@ -192,7 +192,12 @@
     `±Inf` ではなく `max_theta = 20`（`F1 ≈ 20`, `SE = NA`）に張り付く（挙動は観測したが、原因とした
     `fscores.internal` の欠測数の数え方は mirt の R ソースで該当箇所を確認できなかったため、説明は未確認と
     する）。どちらも V13 の照合には使っていない。flexpyirt はこれらを正しく検出し
-    `±inf` と SE `NaN` を返す。全欠測行については、mirt が全手法で `NA` に落とすのに対し、flexpyirt では
+    `±inf` と SE `NaN` を返す。これとは別に、3PL の二峰性パターンで厳密に凹な内部の局所最頻値 $\hat\theta$
+    （$\mathrm{SE} \le 30$）の対数尤度より下側漸近線 $\lim_{\theta\to-\infty}\log L(\theta)$ が厳密に大きい場合、
+    `mirt:::ML` の EAP 出発の局所 `nlm()` 探索は内部の局所最頻値で停止して有限値 `(F1, SE_F1)` を返すのに対し、
+    flexpyirt は $f(\hat\theta)$ を $f(\pm 20)$ と比較して真の大域上限である `(-inf, NaN)`（本来の最尤推定）を
+    意図的に返す。`v11_3pl` の全 3,790 ユニークパターン中 **25 パターン** でこの差異が生じる（V13d のシード付き
+    抽出には含まれておらず、`tests/test_mirt_m4_scoring.py` でパターン index 1285 を直接検証している）。全欠測行については、mirt が全手法で `NA` に落とすのに対し、flexpyirt では
     ベイズ手法（EAP・MAP・PV）は事前分布、尤度のみの手法（ML・WLE）は `(NaN, NaN)` を返す。
 
   全パラメタを mirt の推定値に固定して 6 ケースを `tests/test_mirt_m4_scoring.py` で照合した

@@ -227,10 +227,18 @@ English | [日本語](VALIDATION.ja.md)
     data, some all-extreme patterns that are missing the last item run into `max_theta = 20`
     (`F1 ≈ 20`, `SE = NA`) instead of `±Inf` (observed; the cause was attributed to how
     `fscores.internal` counts missing values, but the code could not be located in mirt's R source,
-    so treat the explanation as unconfirmed). Neither case is used in the V13 comparisons. flexpyirt detects all of these cleanly and returns
-    `±inf` with SE `NaN`. For all-missing rows, mirt strips them to `NA` for all methods, whereas
-    flexpyirt's Bayesian methods (EAP, MAP, PV) return the prior and likelihood-only methods
-    (ML, WLE) return `(NaN, NaN)`.
+    so treat the explanation as unconfirmed). Neither case is used in the V13 comparisons. flexpyirt
+    detects all of these cleanly and returns `±inf` with SE `NaN`. Separately, on bimodal 3PL
+    patterns where a strictly concave interior local mode $\hat\theta$ (with $\mathrm{SE} \le 30$)
+    has strictly smaller log-likelihood than the lower-asymptote plateau
+    $\lim_{\theta\to-\infty}\log L(\theta)$, `mirt:::ML`'s local `nlm()` search starting from EAP
+    stops at the interior local mode and returns finite `(F1, SE_F1)`, whereas flexpyirt compares
+    $f(\hat\theta)$ against $f(\pm 20)$ and intentionally returns the true global supremum
+    `(-inf, NaN)` (the actual maximum likelihood). Across all 3,790 unique patterns of `v11_3pl`,
+    this occurs on **25 patterns** (none appeared in the seeded V13d subsample; pattern index 1285
+    is verified directly in `tests/test_mirt_m4_scoring.py`). For all-missing rows, mirt strips
+    them to `NA` for all methods, whereas flexpyirt's Bayesian methods (EAP, MAP, PV) return the
+    prior and likelihood-only methods (ML, WLE) return `(NaN, NaN)`.
 
   Six cases are validated in `tests/test_mirt_m4_scoring.py` with all parameters fixed at mirt's
   estimates (reference generator `validation/r/m4_scoring_reference.R` →

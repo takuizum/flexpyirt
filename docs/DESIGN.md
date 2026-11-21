@@ -666,8 +666,15 @@ data-independent shapes (§15.21).
     patterns where $\log L(\theta)$ increases monotonically toward $-\infty$ due to guessing) are
     also detected — when $|\hat\theta|$ hits the `±20` rail, $f''(\hat\theta)\ge 0$,
     $\mathrm{SE}>30$ (mirt's threshold in `mirt:::ML`), or $f(\pm 20) > f(\hat\theta)$ — and return
-    `±inf` with SE NaN (cleanly handling the boundary cases where mirt 1.46.1's `nlm` finite-difference
-    Hessian fails to trigger its `SEest > 30` check; see VALIDATION.md V13).
+    `±inf` with SE NaN. The sign of `±inf` comes from whichever endpoint dominates when
+    $f(\pm 20) > f(\hat\theta)$, and otherwise follows $\operatorname{sign}(\hat\theta)$ (matching
+    `mirt:::ML`'s `Inf * sign(est)`). In particular, on bimodal 3PL likelihoods where the
+    $-\infty$ lower-asymptote plateau strictly exceeds a strictly concave interior local mode,
+    flexpyirt intentionally returns the true global supremum `(-inf, NaN)` (the actual maximum
+    likelihood), whereas mirt 1.46.1's local `nlm` search starting from EAP stops at the interior
+    local mode (25 of 3,790 unique patterns in `v11_3pl`; this check also cleanly handles the
+    boundary cases where `nlm`'s finite-difference Hessian fails to trigger `SEest > 30`; see
+    VALIDATION.md V13).
 24. **WLE scoring (`method="WLE"`, M4, §8)**: Warm's (1989) weighted likelihood estimator is
     implemented by maximizing the Jeffreys/Firth (1993) penalized log-likelihood
     $f_{\mathrm{WLE}}(\theta)=\log L(\theta\mid y)+\tfrac{1}{2}\log I(\theta)$ on $[-20, 20]$ with
