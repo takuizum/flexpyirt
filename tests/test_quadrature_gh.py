@@ -31,7 +31,9 @@ from flexpyirt._compile import compile_problem, prepare
 from flexpyirt.errors import SpecificationError
 
 
-def _sim_2pl(seed: int, n: int, j: int, mean: float, var: float) -> tuple[pd.DataFrame, ...]:
+def _sim_2pl(
+    seed: int, n: int, j: int, mean: float, var: float
+) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
     rng = np.random.default_rng(seed)
     a = rng.uniform(0.8, 1.8, j)
     d = rng.normal(size=j)
