@@ -904,9 +904,15 @@ def test_same_multigroup_fit_uses_joint_vcov(multigroup_anchor_fit: FitResult) -
     assert linked.converged and linked.vcov is not None
     params = res.parameters[res.parameters["item"].isin(other)]
     fid = {
-        (str(r.group), str(r.item), str(r.param)): int(r.free_id)
-        for r in params.itertuples()
-        if int(r.free_id) >= 0
+        (str(g), str(i), str(p)): int(f)
+        for g, i, p, f in zip(
+            params["group"],
+            params["item"],
+            params["param"],
+            params["free_id"].to_numpy(dtype=int),
+            strict=True,
+        )
+        if f >= 0
     }
     src_ids = [fid[("focal", i, p)] for i in other for p in ("a", "d")]
     tgt_ids = [fid[("ref", i, p)] for i in other for p in ("a", "d")]
@@ -919,11 +925,11 @@ def test_same_multigroup_fit_uses_joint_vcov(multigroup_anchor_fit: FitResult) -
         tgt_free_index=jnp.arange(2 * n, dtype=jnp.int32).reshape(n, 2),
     )
     nodes = jnp.asarray(res._quadrature.nodes(), dtype=jnp.float64)
-    lat = res.parameters[res.parameters["item"] == "__latent__"].set_index(["group", "param"])
-    mu, var = (
-        float(lat.loc[("focal", "mean"), "estimate"]),
-        float(lat.loc[("focal", "var"), "estimate"]),
-    )
+    lat = res.parameters[
+        (res.parameters["item"] == "__latent__") & (res.parameters["group"] == "focal")
+    ]
+    lat_est = dict(zip(lat["param"], lat["estimate"].to_numpy(dtype=float), strict=True))
+    mu, var = lat_est["mean"], lat_est["var"]
     w_t = jax.nn.softmax(-0.5 * nodes**2)
     w_s = jax.nn.softmax(-0.5 * (nodes - mu) ** 2 / var)
     prob = LinkingProblem(
