@@ -117,6 +117,14 @@ spec3 = Model.uniform(TwoPL(), items=df.columns).fix_from(bank).with_latent(Norm
 res3 = fit(spec3, df)
 ```
 
+## 性能
+
+R `mirt`（既定設定、`TOL = 1e-4`、CPU・61 点求積）との wall time ベンチマークを
+[benchmarks/](benchmarks/README.ja.md) に、Apple M5 での計測結果を
+[benchmarks/results/2026-11-21-takuizummbp.md](benchmarks/results/2026-11-21-takuizummbp.md) に
+置いている。初回の JAX/XLA コンパイル（EM で約 0.6–1.5 秒）以降は、テストした全ケースで warm の CPU 推定が
+`mirt` より速く（`mirt` 比 `0.12×–0.66×`）、小規模データの 1 回限りの cold 推定では `mirt` の方が速い。
+
 ## ドキュメント
 
 - [ユーザーガイド](docs/guide.ja.md) — モデルの指定、多母集団、FIPC、ParameterTable の編集、推定オプション

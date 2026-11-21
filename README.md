@@ -124,6 +124,15 @@ spec3 = Model.uniform(TwoPL(), items=df.columns).fix_from(bank).with_latent(Norm
 res3 = fit(spec3, df)
 ```
 
+## Performance
+
+Wall-time benchmarks against R `mirt` (default settings, `TOL = 1e-4`, 61 quadrature points on CPU)
+are in [benchmarks/](benchmarks/README.md) with committed Apple M5 results in
+[benchmarks/results/2026-11-21-takuizummbp.md](benchmarks/results/2026-11-21-takuizummbp.md).
+After the first-call JAX/XLA compilation (~0.6–1.5 s for EM), warm CPU fits are faster than `mirt`
+across all tested cases (`0.12×–0.66×` of `mirt` time), while `mirt` is faster for a single cold fit
+on smaller datasets.
+
 ## Documentation
 
 - [User guide](docs/guide.md) — specifying models, multiple groups, FIPC, editing the

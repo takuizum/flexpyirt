@@ -240,7 +240,21 @@ class LatentDist(Protocol):
 - パターン圧縮 + バケットパディングで再コンパイルを抑える。
 - item family ごとの `vmap`。異種項目混在でも family 数（静的）だけのループ。
 - 既定は CPU で十分速いことを目標。GPU は大規模（N ≥ 10^5, J ≥ 100）で効けばよい。
-- ベンチマーク: R mirt（`TOL=1e-4`, 既定設定）との wall time 比較を `benchmarks/` に置く（M3）。
+- ベンチマーク: R mirt（`TOL=1e-4`、既定設定および検証設定）との wall time 比較を
+  [benchmarks/](../benchmarks/README.ja.md) に置き、Apple M5 CPU での計測結果を
+  [benchmarks/results/2026-11-21-takuizummbp.md](../benchmarks/results/2026-11-21-takuizummbp.md) に
+  コミットしている。この 1 環境の計測（$[-6, 6]$ 上の 61 点求積、CPU 専用。XLA CPU は複数スレッドを
+  使う場合がある一方、mirt は既定で単一スレッド）の要約:
+  - **warm 実行**: 全 6 ケースで mirt 既定より速い（通常 EM で `0.16×–0.59×`、`squarem=True` で
+    `0.12×–0.66×`）。`TOL = 1e-4` で $|\Delta \log L| \le 1.5 \times 10^{-3}$。
+  - **cold 実行**: 初回の JAX/XLA コンパイルが EM で約 0.6–1.5 秒（`20000 × 40` の Oakes SE では
+    さらに長い）かかるため、小規模データの 1 回限りの推定では mirt の方が速い。
+  - **大規模 `(N, J)` の Oakes SE**: `2PL (20000 × 40)` では `se="oakes"` が warm で約 3.6–4.2 秒
+    （EM 本体は約 0.27–0.40 秒）と全体の大半を占め、メモリ負荷によるばらつきも大きい。
+  - **SQUAREM のトレードオフ**: `BAEM(squarem=True)` は EM 評価回数を 33–69% 削減し、warm の EM 時間を
+    通常 EM 比 `0.38×–0.83×` に短縮する（2 群 2PL と 3PL で効果が大きい）一方、cold のコンパイル時間が
+    約 0.2–0.4 秒増える。既定値（`squarem=False`）は据え置きとし、cold 遅延と warm／収束の遅いモデルの
+    どちらを優先するかはメンテナーの判断に委ねる。
 
 ## 10. エラーと警告
 - `SpecificationError`: 仕様の矛盾（存在しない項目名を固定、カテゴリ数不一致など）

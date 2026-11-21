@@ -294,7 +294,22 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
 - `vmap` per item family. Mixed item types loop only over the (static) families.
 - The default target is "fast enough on CPU". GPU should help for large problems
   (N ≥ 10^5, J ≥ 100).
-- Benchmarks: wall time against R mirt (`TOL=1e-4`, default settings) in `benchmarks/` (M3).
+- Benchmarks: wall time against R mirt (`TOL=1e-4`, default settings and validation settings) in
+  [benchmarks/](../benchmarks/README.md); committed Apple M5 CPU results are in
+  [benchmarks/results/2026-11-21-takuizummbp.md](../benchmarks/results/2026-11-21-takuizummbp.md).
+  Summary of that single-machine measurement (61 quadrature points on $[-6, 6]$, CPU only; XLA CPU
+  may use multiple threads while mirt is single-threaded by default):
+  - **Warm fits**: faster than mirt default across all six tested cases (`0.16×–0.59×` with plain
+    EM, `0.12×–0.66×` with `squarem=True`), with $|\Delta \log L| \le 1.5 \times 10^{-3}$ at
+    `TOL = 1e-4`.
+  - **Cold fits**: first-call JAX/XLA compilation adds ~0.6–1.5 s for EM (more with Oakes SE on
+    `20000 × 40`), so mirt is faster for a single one-off fit on smaller datasets.
+  - **Oakes SE at large `(N, J)`**: on `2PL (20000 × 40)`, `se="oakes"` takes ~3.6–4.2 s warm vs.
+    ~0.27–0.40 s for EM alone and shows higher run-to-run variance under memory pressure.
+  - **SQUAREM trade-off**: `BAEM(squarem=True)` reduces EM evaluations by 33–69% and warm EM time
+    (`0.38×–0.83×` of plain EM, biggest gains on 2-group 2PL and 3PL), but adds ~0.2–0.4 s of cold
+    compilation overhead. The default (`squarem=False`) is kept unchanged pending a maintainer
+    decision on cold vs. warm/slow-model priority.
 
 ## 10. Errors and warnings
 - `SpecificationError`: inconsistent specification (fixing an unknown item, wrong number of
