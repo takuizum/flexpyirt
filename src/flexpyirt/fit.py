@@ -32,8 +32,13 @@ HEYWOOD_BOUND_TOL = 1e-4
 """Distance to a finite bound below which a free parameter is reported as a boundary solution."""
 HEYWOOD_MAX_SLOPE = 20.0
 """Absolute slope above which a free slope is reported as diverging."""
+SQUAREM_FALLBACK_WARN_MIN = 5
+"""Minimum full fallbacks to ``theta_2`` before warning about frequent SQUAREM fallbacks."""
+SQUAREM_FALLBACK_WARN_RATE = 0.5
+"""Fallback fraction above which a ``ConvergenceWarning`` is emitted on a converged fit."""
 
 _em = jax.jit(_core.em, static_argnames=("max_iter", "n_newton"))
+_squarem = jax.jit(_core.squarem, static_argnames=("max_iter", "n_newton"))
 _information = {
     "oakes": jax.jit(_core.information_oakes),
     "hessian": jax.jit(_core.information_hessian),
@@ -99,7 +104,8 @@ def fit(
     compiled = compile_problem(spec, prep.y, prep.group, final_table, quadrature)
     problem = compiled.problem
 
-    out = _em(
+    runner = _squarem if method.squarem else _em
+    out = runner(
         problem,
         jnp.asarray(compiled.eta0),
         tol=method.tol,
@@ -109,9 +115,31 @@ def fit(
     eta = np.asarray(out.eta)
     converged = bool(out.converged)
     n_iter = int(out.n_iter)
+    n_em_evaluations = int(out.n_em_evaluations)
+    n_safeguards = int(out.n_safeguards)
+    n_fallbacks = 3 * n_iter - n_em_evaluations if method.squarem else 0
     if not converged:
+        extra = (
+            f"; SQUAREM safeguard fired {n_safeguards}/{n_iter} times "
+            f"({n_fallbacks} fallbacks to EM)"
+            if method.squarem and n_safeguards > 0
+            else ""
+        )
         warnings.warn(
-            f"EM did not converge in {method.max_iter} iterations (tol={method.tol}).",
+            f"EM did not converge in {method.max_iter} iterations (tol={method.tol}{extra}).",
+            ConvergenceWarning,
+            stacklevel=2,
+        )
+    elif (
+        method.squarem
+        and n_fallbacks >= SQUAREM_FALLBACK_WARN_MIN
+        and n_iter > 0
+        and n_fallbacks / n_iter > SQUAREM_FALLBACK_WARN_RATE
+    ):
+        warnings.warn(
+            f"SQUAREM fell back to plain EM frequently ({n_fallbacks}/{n_iter} iterations; "
+            f"safeguard intervened {n_safeguards} times); consider plain EM "
+            "(BAEM(squarem=False)).",
             ConvergenceWarning,
             stacklevel=2,
         )
@@ -139,6 +167,8 @@ def fit(
             "iter": np.arange(1, n_iter + 1),
             "loglik": np.asarray(out.loglik_history)[:n_iter],
             "max_change": np.asarray(out.change_history)[:n_iter],
+            "em_evaluations": np.asarray(out.em_eval_history)[:n_iter],
+            "safeguard": np.asarray(out.safeguard_history)[:n_iter],
         }
     )
     return FitResult(
@@ -146,6 +176,8 @@ def fit(
         loglik=float(out.loglik),
         converged=converged,
         n_iter=n_iter,
+        n_em_evaluations=n_em_evaluations,
+        n_safeguards=n_safeguards,
         history=history,
         vcov=vcov,
         se_method=se,

@@ -105,6 +105,16 @@ English | [日本語](VALIDATION.ja.md)
   Hessian vs mirt Richardson SEs to ~1.1e-6 (flexpyirt Oakes vs Hessian to ~1.1e-11), and EAP to
   ~8.0e-15.
   Tests: `tests/test_mirt_m3_gpcm.py`. Reference generator: `validation/r/m3_gpcm_reference.R`.
+- **SQUAREM agreement (M3)**: every mirt agreement suite (`tests/test_mirt_m1.py`,
+  `tests/test_mirt_m2.py`, `tests/test_mirt_m3.py`, `tests/test_mirt_m3_gpcm.py`) is parametrized
+  over `BAEM(squarem=False)` and `BAEM(squarem=True)` against the same unaccelerated mirt
+  references. All 13 cases converge to the same fixed point within the documented tolerances (max
+  item difference $\le 2.8\times 10^{-8}$ across 2PL/GRM/GPCM/PCM/3PL/4PL/FIPC/2-group/missing,
+  and $7.9\times 10^{-5}$ on V2's simulated Rasch latent variance from the exact vs. closed-form
+  grid cut-off, matching plain EM) with monotone log-likelihoods and 1.3×–5.0× fewer EM map
+  evaluations (e.g. `v2_lsat7_rasch`: 121 → 24, `v4_twogroup_2pl`: 302 → 113, `v8_science_gpcm`:
+  251 → 96, `v11_4pl`: 531 → 272). Unit, Hypothesis monotonicity, safeguard, and reduction tests:
+  `tests/test_m3_squarem.py`.
 - **Comparing EAP**: so that differences in the estimates do not propagate into EAP, every
   parameter is fixed at mirt's estimates (`free=False` in the ParameterTable) and only the scoring
   is compared. Tolerance 1e-5.

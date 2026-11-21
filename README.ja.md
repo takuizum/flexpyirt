@@ -23,10 +23,11 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 欠測 | 欠測（MAR）を含むデータ | V9 |
 | 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度の Hessian | V10 |
 | スコアリング | EAP と事後標準偏差（群ごとの潜在分布を事前分布に使う） | V1–V5, V8, V9, V11 |
+| EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | V1–V5, V8, V9, V11 |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
 
-まだないもの（[ロードマップ](docs/ROADMAP.ja.md)）: 経験ヒストグラム（EH）、事前分布と MAP 推定、
-SQUAREM 加速（M3）、MAP / ML / WLE / plausible values のスコアリング、多次元モデル（M4）。
+まだないもの（[ロードマップ](docs/ROADMAP.ja.md)）: 経験ヒストグラム（EH）、事前分布と MAP 推定（M3）、
+MAP / ML / WLE / plausible values のスコアリング、多次元モデル（M4）。
 
 ## インストール
 

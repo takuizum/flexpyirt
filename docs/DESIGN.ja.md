@@ -122,11 +122,15 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - 識別できない指定は `IdentificationError` を fit 前に投げる。
 
 ### 4.6 収束と加速
-- 収束判定: 自由パラメタ（自然尺度の $\eta$）の最大絶対変化 $<$ `tol`（既定 1e-4、mirt の `TOL` と同じ定義）。
-  対数尤度（MAP 時は対数事後）と最大変化の両方の履歴を保存し、単調性はテストで検査する。
+- 収束判定: 連続して採択された反復点の間での自由パラメタ（自然尺度の $\eta$）の最大絶対変化 $<$ `tol`（既定 1e-4、
+  mirt の `TOL` と同じ定義）。対数尤度（MAP 時は対数事後）・最大変化・累積 EM 写像評価回数・SQUAREM 安全装置の
+  発動履歴を保存し、単調性はテストで検査する。
   **決定（M1）**: 停止条件は最大絶対変化のみとする（対数尤度の変化量を条件に足すと mirt との対応が崩れるため）。
-- **SQUAREM**（Varadhan & Roland, 2008, スキーム S3）をオプションで。外挿後に目的関数が減ったら通常の EM ステップに戻す（単調性の安全装置）。
-- EM ループは `lax.while_loop` でデバイス上に置く。進捗表示は `jax.debug.callback` を任意で。
+- **SQUAREM**（Varadhan & Roland, 2008, スキーム S3）を `BAEM(squarem=True)` で選択可能（M3 では mirt との
+  wall-time ベンチマーク前のため既定 `False`、§15.13）。外挿候補が境界を出るか対数尤度が非有限・$\theta_2$ 未満なら
+  $\alpha$ を $-1$ 方向へ固定回数まで半減し、なお不適なら $\theta_2$ をそのまま採って単調性を保つ（§15.11–§15.12）。
+- 通常の EM・SQUAREM とも全体がデバイス上の `lax.while_loop` で走る（Python の反復ループやホストコールバックなし）。
+  `jax.debug.callback` による進捗表示は後回し。
 
 ### 4.7 MAP（Bayes modal）
 - 事前分布は**自然なパラメタ尺度**（$a, b$ または $a, d$, $c$ など）で定義し、Jacobian 項は入れない（自然尺度での事後モード。mirt の Bayes modal と同じ）。
@@ -358,6 +362,31 @@ class LatentDist(Protocol):
     $b_k=-(d_k-d_{k-1})/a$（$d_0=0$）を `b1`…`b{K-1}` として表示し、2PL / Rasch / 3PL / 4PL（`b = -d/a`）と
     GRM（`bk = -dk/a`）の表示は同一モデルに混在しても変えない。`Model.fix_from(..., parameterization="irt")` は
     これを $d_k=-a\sum_{c=1}^{k}b_c$ で逆変換し、PCM 項目では `a` 列の省略を許す。
+11. **SQUAREM スキーム S3（Varadhan & Roland, 2008）**: `lax.while_loop` 内の `_core.squarem` として実装。
+    採択点 $\theta_0$ から EM 写像 $F$ を 2 回適用して $\theta_1=F(\theta_0)$、$\theta_2=F(\theta_1)$ を得て、
+    $r=\theta_1-\theta_0$、$s=\theta_2-\theta_1$、$v=s-r$ からステップ長
+    $\alpha=\min(-\|r\|_2/\|v\|_2,\,-1)$ を計算する（$\|v\|_2=0$ または非有限なら $\alpha=-1$）。
+    $\delta=\alpha+1\le 0$ と置くと $\theta'(\alpha)=\theta_0-2\alpha r+\alpha^2 v$ は代数的に
+    $\theta'(\alpha)=\theta_2-2\delta s+\delta^2 v$ と一致し、$\delta=0$ で桁落ちなく厳密に $\theta_2$ になるうえ、
+    $-1$ への半減（$\alpha\leftarrow(\alpha-1)/2$）が単に $\delta\leftarrow\delta/2$ になる。
+12. **SQUAREM の単調性・実行可能性の安全装置**: $\alpha<-1$ のとき、ループ前に `FamilyBlock.slot_lower/upper` と
+    `LatentBlock.lower/upper` から一度だけ抽出した座標ごとの厳密境界 `(lower, upper)`（`_core._eta_bounds`）で
+    $\theta'(\alpha)$ の実行可能性を検査する（M-step と完全に同一の境界: 潜在分散 $>0$、$0<g,u<1$、ユーザー編集の
+    境界を含む）。境界内のときのみ `lax.cond` で `marginal_loglik` を評価し、有限かつ
+    $\ge\max(\ell(\theta_2),\ell(\theta_0))$ なら採択する（GRM の閾値逆転や 4PL の $g\ge u$ もカーネルが NaN を
+    返すため棄却される）。棄却された場合は内側の `lax.while_loop` で $\delta$ を最大 10 回半減する。採択された
+    $\theta'$ には安定化 EM ステップ $\theta_{\text{new}}=F(\theta')$ を 1 回適用する（その反復の EM 評価回数 3）。
+    すべて棄却された場合は $\theta_{\text{new}}=\theta_2$ をそのまま採る（EM 評価回数 2）。$F$ が単調なので、
+    採択点では常に $\ell(\theta_{\text{new}})\ge\ell(\theta_0)$ が保たれる。
+13. **SQUAREM の API 既定値・履歴・警告**: `BAEM(squarem: bool = False)` は、mirt との wall-time ベンチマーク
+    （JIT コンパイル時間や問題規模ごとの得失を含む）を M3 後半で行うまで通常の EM を既定に保つ。停止条件は
+    $\max_i|\eta^{(t+1)}_i-\eta^{(t)}_i|<\text{tol}$ のまま。`FitResult` に `n_em_evaluations`（$F$ の総評価回数、
+    通常 EM では `n_iter` と同値）と `n_safeguards`（安全装置が $\alpha$ の縮小または $\theta_2$ への退避を行った
+    反復数、通常 EM では 0）を追加し、`history` は `squarem` の有無にかかわらず統一スキーマ
+    （`iter`, `loglik`, `max_change`, `em_evaluations`, `safeguard`）を持つ。`ConvergenceWarning` は `max_iter`
+    到達時に安全装置・退避回数を含めて報告するほか、収束した SQUAREM でも $\theta_2$ への完全退避
+    （`3 * n_iter - n_em_evaluations`）が 5 回以上かつ全反復の 50% を超えた場合に発する（部分縮小しつつ加速した
+    反復では不要な警告を出さない）。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
