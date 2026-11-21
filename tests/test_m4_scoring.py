@@ -275,6 +275,43 @@ def test_ml_diverged_sign_uses_theta_hat_unless_endpoint_dominates() -> None:
     assert ml_div["theta"].iloc[1] == -np.inf and np.isnan(ml_div["se"].iloc[1])
 
 
+def test_zero_slope_items_treated_as_missing_for_pattern_flags() -> None:
+    """Items with slope a == 0 carry no information about theta and act like missing responses."""
+    a = np.array([0.0, 1.2, 1.0, 1.5, 0.9])
+    d = np.array([0.0, -0.5, 0.0, 0.5, -0.2])
+    items = [f"q{j:02d}" for j in range(1, 6)]
+    res = _fixed_2pl(a, d)
+
+    pats = pd.DataFrame(
+        [
+            [0, np.nan, np.nan, np.nan, np.nan],  # only a == 0 item observed -> all-missing
+            [1, np.nan, np.nan, np.nan, np.nan],  # only a == 0 item observed -> all-missing
+            [1, 0, 0, 0, 0],  # all informative items lowest despite y1 = 1 -> -inf
+            [0, 1, 1, 1, 1],  # all informative items highest despite y1 = 0 -> +inf
+            [0, 1, 0, 1, 0],  # mixed informative items -> same as y1 missing
+            [np.nan, 1, 0, 1, 0],
+        ],
+        columns=items,
+        dtype=float,
+    )
+
+    ml = res.score(pats, method="ML")
+    assert np.isnan(ml["theta"].iloc[0]) and np.isnan(ml["se"].iloc[0])
+    assert np.isnan(ml["theta"].iloc[1]) and np.isnan(ml["se"].iloc[1])
+    assert ml["theta"].iloc[2] == -np.inf and np.isnan(ml["se"].iloc[2])
+    assert ml["theta"].iloc[3] == np.inf and np.isnan(ml["se"].iloc[3])
+    np.testing.assert_allclose(ml["theta"].iloc[4], ml["theta"].iloc[5], rtol=0, atol=1e-12)
+    np.testing.assert_allclose(ml["se"].iloc[4], ml["se"].iloc[5], rtol=0, atol=1e-12)
+
+    wle = res.score(pats, method="WLE")
+    assert np.isnan(wle["theta"].iloc[0]) and np.isnan(wle["se"].iloc[0])
+    assert np.isnan(wle["theta"].iloc[1]) and np.isnan(wle["se"].iloc[1])
+    assert np.isfinite(wle["theta"].iloc[2]) and np.isfinite(wle["se"].iloc[2])
+    assert np.isfinite(wle["theta"].iloc[3]) and np.isfinite(wle["se"].iloc[3])
+    np.testing.assert_allclose(wle["theta"].iloc[4], wle["theta"].iloc[5], rtol=0, atol=1e-12)
+    np.testing.assert_allclose(wle["se"].iloc[4], wle["se"].iloc[5], rtol=0, atol=1e-12)
+
+
 # ---- WLE finite on extremes & stationary equation check ------------------------------------
 
 

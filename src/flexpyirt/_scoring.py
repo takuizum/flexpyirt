@@ -120,12 +120,13 @@ def _pattern_flags(
     n_high = jnp.asarray(0, dtype=jnp.int32)
     for fam, xi in zip(families, xi_list, strict=True):
         y_f = y_p[fam.columns]
-        obs = y_f >= 0
         # Every ItemKernel places the slope parameter "a" at index 0.
+        # Items with a == 0 carry zero information about theta and are treated like missing.
         a = xi[g_p, :, 0]
+        obs = (y_f >= 0) & (a != 0.0)
         top = fam.kernel.n_cat - 1
-        low_cat = jnp.where(a >= 0.0, 0, top)
-        high_cat = jnp.where(a >= 0.0, top, 0)
+        low_cat = jnp.where(a > 0.0, 0, top)
+        high_cat = jnp.where(a > 0.0, top, 0)
         n_obs = n_obs + jnp.sum(obs, dtype=jnp.int32)
         n_low = n_low + jnp.sum(obs & (y_f == low_cat), dtype=jnp.int32)
         n_high = n_high + jnp.sum(obs & (y_f == high_cat), dtype=jnp.int32)
