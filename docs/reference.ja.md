@@ -568,7 +568,7 @@ mirt の既定と同じく、1 因子で 61 点、2 因子で各軸 31 点（$31
 
 `Quadrature.gauss_hermite(n_points)` は `Normal` 潜在分布用に Gauss–Hermite 節点 $\sqrt2\,x_q$（次元あたり 3–200 点、
 2・3 次元では直積則）を使い、推定した平均・共分散に合わせて重みを付け直す（DESIGN §15.44）。`base_log_weights(n_factors)` は
-節点ごとの固定の対数重み（等間隔格子では 0）を返す。`EmpiricalHistogram` とは併用できない。
+節点ごとの固定の対数重み（等間隔格子では 0）を返す。`EmpiricalHistogram`・`DavidianCurve` とは併用できない。
 
 ---
 

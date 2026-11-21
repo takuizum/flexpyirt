@@ -660,7 +660,7 @@ the grid makes them agree ([VALIDATION.md](VALIDATION.md)).
 **Gauss–Hermite.** For `Normal` latent distributions, `Quadrature.gauss_hermite(n)` places `n`
 Gauss–Hermite nodes per dimension and reweights them for the estimated mean and variance; it is
 usually more accurate than an equispaced grid with the same number of points near $N(0,1)$, but
-loses accuracy for variances well above 1. `EmpiricalHistogram` needs an equispaced grid.
+loses accuracy for variances well above 1. `EmpiricalHistogram` and `DavidianCurve` need an equispaced grid.
 
 ```python
 gh = Quadrature.gauss_hermite(41)

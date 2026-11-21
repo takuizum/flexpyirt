@@ -616,7 +616,7 @@ mirt は分散を閉形式のモーメントで更新するため、格子の端
 
 **Gauss–Hermite.** `Normal` 潜在分布では、`Quadrature.gauss_hermite(n)` が次元あたり `n` 個の Gauss–Hermite 節点を置き、
 推定した平均・分散に合わせて重みを付け直す。$N(0,1)$ 付近では同じ点数の等間隔格子より精度が高いことが多いが、分散が
-1 より十分大きいと精度が落ちる。`EmpiricalHistogram` には等間隔格子が必要。
+1 より十分大きいと精度が落ちる。`EmpiricalHistogram` と `DavidianCurve` には等間隔格子が必要。
 
 ```python
 gh = Quadrature.gauss_hermite(41)

@@ -622,7 +622,7 @@ dimension; limits must be finite with `lower < upper`.
 `Quadrature.gauss_hermite(n_points)` uses the Gauss–Hermite nodes $\sqrt2\,x_q$ (3–200 per
 dimension, product rule in 2–3 dimensions) for `Normal` latent distributions, reweighted for the
 estimated mean and covariance (DESIGN §15.44); `base_log_weights(n_factors)` returns the fixed
-per-node log weights (0 for equispaced grids). Not available with `EmpiricalHistogram`.
+per-node log weights (0 for equispaced grids). Not available with `EmpiricalHistogram` or `DavidianCurve`.
 
 ---
 
