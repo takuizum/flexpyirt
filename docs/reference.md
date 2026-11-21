@@ -164,8 +164,8 @@ to_json(path=None, *, indent=2) -> str
 
 Serialize the fitted result to a strict RFC 8259 JSON string, and also write it (UTF-8) to `path`
 (`str` or `os.PathLike`) when `path` is given. Uses plain, versioned JSON (no `pickle`) with
-top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 2` (files with version 1 are still
-read), and `"flexpyirt_version"`. Multidimensional results store their factor structure.
+top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 3` (files with versions 1 and 2 are
+still read), and `"flexpyirt_version"`. Multidimensional results store their factor structure.
 Finite float64 values are written as `repr`-exact JSON numbers and non-finite values (`NaN`,
 `+inf`, `-inf`) are encoded explicitly as `"NaN"`, `"Infinity"`, and `"-Infinity"` in float-typed
 fields so every attribute round-trips bit-for-bit.
@@ -299,6 +299,18 @@ model.equal_across_groups(*, items, params=None) -> Model
 Make the parameters of `items` equal across groups (anchor items). Without `params`, all
 parameters; with e.g. `params=["a"]`, only those. `items` is a list of names, a `str -> bool`
 function, or `None` for every item. Can be called repeatedly.
+
+#### `Model.equal_across_items`
+
+```text
+model.equal_across_items(*, items, params) -> Model
+```
+
+Make each parameter in `params` (e.g. `["a"]`, `["a1"]`, `["d"]`, `["d1", "d2"]`) one common
+parameter for the selected `items` (at least two), within each group (as mirt's `CONSTRAIN`).
+Combine with `equal_across_groups` to share across groups as well; overlapping equalities are
+merged. Fixed parameters are not affected. The parameter's default starting value is the mean of
+the items' starting values. Equivalent to giving the rows one `free_id` in an edited table.
 
 #### `Model.prior`
 

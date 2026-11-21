@@ -527,8 +527,27 @@ print(res_edit.items.set_index("item").loc["q05", ["a", "d"]])
 ```
 
 - 行の追加・削除や識別子の変更はできない（`SpecificationError`）。
-- `free_id` の共有は**同じ項目の同じパラメタを群間で**等しくする用途に限られる。異なる項目をまたぐ等値制約
-  （例: 全項目で共通の傾き）は未対応（M5 予定）。
+- `free_id` を共有する行は群をまたいでも、**異なる項目**（異なる項目モデル、例: 2PL と GRM の項目で共通の傾き）
+  をまたいでもよい。1 つの項目の中では `free_id` は 1 つのパラメタにだけ対応し、共有する行どうしの範囲と事前分布は
+  一致しなければならない。
+
+### 項目をまたぐ等値制約
+
+`Model.equal_across_items(items=..., params=[...])` は、指定した各パラメタを選んだ項目で共通の 1 つのパラメタにする
+（mirt の `CONSTRAIN` と同じく群ごとに適用）。`equal_across_groups` と組み合わせられ、表でそれらの行に同じ
+`free_id` を与えるのと同じ。
+
+```python
+# 全項目で共通の傾き（N(0, 1) の「1PL」）。切片は項目ごと。
+common_spec = Model.uniform(TwoPL(), items=items).equal_across_items(items=None, params=["a"])
+res_common = fit(common_spec, df, se="oakes")
+print(res_common.items[["item", "a", "a_se", "d"]].head(3))
+print(res_common.n_params)  # 傾き 1 つ + 項目ごとの切片
+```
+
+- こうした制約で結ばれた項目は M-step で同時に解かれる。SE・SQUAREM・事前分布（共有パラメタごとに 1 回）・JSON など
+  ほかの機能はそのまま使える。
+- 共通の自由な傾きは、項目ごとの自由な傾きと同様に、自由な潜在分散を識別しない（`IdentificationError`）。
 
 ## 13. 求積格子の選び方
 
