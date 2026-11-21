@@ -10,6 +10,7 @@ from flexpyirt.items import GPCM, GRM, PCM, FourPL, Rasch, ThreePL, TwoPL
 from flexpyirt.latent import Normal
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
+from flexpyirt.priors import Beta, LogNormal, NormalPrior
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
 
@@ -23,10 +24,13 @@ __all__ = [
     "GPCM",
     "GRM",
     "PCM",
+    "Beta",
     "FitResult",
     "FourPL",
+    "LogNormal",
     "Model",
     "Normal",
+    "NormalPrior",
     "Quadrature",
     "Rasch",
     "ThreePL",
