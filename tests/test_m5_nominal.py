@@ -28,6 +28,7 @@ from flexpyirt import (
     fit,
 )
 from flexpyirt.errors import HeywoodWarning, IdentificationError, SpecificationError
+from flexpyirt.fit import _warn_heywood
 from flexpyirt.items import DichotomousKernel, GPCMKernel, ItemModel, NominalKernel
 
 
@@ -259,6 +260,39 @@ def test_nominal_identification_and_unobserved_category() -> None:
     df_bad.loc[df_bad["q01"] == 2, "q01"] = 1
     with pytest.raises(SpecificationError, match=r"categories \[2\]"):
         fit(Model.uniform(Nominal(4), items=df.columns), df_bad, se=None)
+
+
+def test_nominal_degenerate_item_warns() -> None:
+    """Near-zero slope (mirt's NR saddle) or diverging ak / d raise a HeywoodWarning."""
+    a_arr = np.ones(4)
+    ak_arr = np.tile(np.array([0.0, 1.0, 2.0, 3.0]), (4, 1))
+    d_arr = np.tile(np.array([0.0, 0.5, 0.2, -0.4]), (4, 1))
+    df = _sim_nominal(a_arr, ak_arr, d_arr, n=400, seed=302)
+    spec = Model.uniform(Nominal(4), items=df.columns)
+    table = spec.parameter_table(df)
+    good = table.assign(estimate=table["value"].astype(float))
+    is_a = good["param"] == "a"
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", HeywoodWarning)
+        _warn_heywood(good, spec)
+
+    saddle = good.copy()
+    saddle.loc[(saddle["item"] == "q01") & is_a, "estimate"] = -3.6e-31
+    with pytest.warns(HeywoodWarning, match=r"Degenerate nominal items \['q01'\]"):
+        _warn_heywood(saddle, spec)
+
+    diverging = good.copy()
+    diverging.loc[(diverging["item"] == "q02") & (diverging["param"] == "d3"), "estimate"] = -80.0
+    with pytest.warns(HeywoodWarning, match=r"Degenerate nominal items \['q02'\]"):
+        _warn_heywood(diverging, spec)
+
+    # A user-fixed zero slope is a deliberate choice, not a degenerate estimate.
+    fixed = saddle.copy()
+    fixed.loc[(fixed["item"] == "q01") & is_a, "free"] = False
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", HeywoodWarning)
+        _warn_heywood(fixed, spec)
 
 
 def test_nominal_fix_from() -> None:
