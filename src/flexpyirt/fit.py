@@ -191,6 +191,7 @@ def fit(
         _model=spec,
         _eta=eta,
         _quadrature=quadrature,
+        _method=method,
     )
 
 

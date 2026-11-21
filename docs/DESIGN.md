@@ -201,7 +201,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - **Decision**: the unidimensional default is 61 equally spaced points on $[-6,6]$ (the same grid
   can be shared with EH; Normal weights come from the density).
 - Gauss–Hermite is available for Normal only (`Quadrature.gauss_hermite(n)` — not yet implemented).
-- **Multidimensional product grids (M4, §15.27)**: 2- and 3-dimensional models use the Cartesian
+- **Multidimensional product grids (M4, §15.30)**: 2- and 3-dimensional models use the Cartesian
   product of the 1-D equispaced grid (`Quadrature.grid(n_factors)` → `(Q, D)`). Default points per
   dimension match mirt's `select_quadpts` via `Quadrature.default(n_factors)`: 61 for 1D, 31 per
   dimension ($31^2 = 961$) for 2D, and 15 per dimension ($15^3 = 3{,}375$) for 3D on $[-6, 6]$.
@@ -704,7 +704,41 @@ data-independent shapes (§15.21).
     independent draws; all-missing rows draw from the group's prior. Requires an explicit JAX PRNG
     `key` (`jax.random.key` or `jax.random.PRNGKey`, `SpecificationError` if absent or invalid) and
     is fully deterministic given `key`.
-26. **Confirmatory 2–3 dimensional MIRT specification and kernels (M4, §4.9, §6)**:
+26. **`FitResult` JSON I/O API and versioned format (M4, API §7)**:
+    `FitResult.to_json(path=None, *, indent=2) -> str` serializes a fitted result to a strict JSON
+    string and also writes UTF-8 text to `path` (`str` or `os.PathLike`) when given;
+    `FitResult.from_json(source) -> FitResult` loads from a file path or JSON string without
+    refitting. Plain JSON is used (no `pickle` and never `eval`). The top-level object carries
+    `"format": "flexpyirt.FitResult"`, `"schema_version": 1` (for future schema migrations), and
+    `"flexpyirt_version": flexpyirt.__version__`. `FitResult` stores `_method: BAEM` alongside
+    `_model` and `_quadrature` so estimation settings round-trip as well. `from_json` calls
+    `check_x64()` at entry (raising `PrecisionError` when 64-bit floating point is disabled, since
+    scoring requires float64).
+27. **Strict JSON and exact float64 round-tripping (M4)**:
+    Serialization uses `json.dumps(..., allow_nan=False)` so output is always strict RFC 8259 JSON,
+    and deserialization passes a rejecting `parse_constant` to `json.loads` so bare `NaN`/`Infinity`
+    literals are rejected with `SpecificationError`. Finite IEEE-754 float64 values are written as
+    standard JSON numbers (Python's `repr`-exact shortest decimal representation, round-tripping
+    every finite float64 bit-for-bit, including `-0.0`). Non-finite values (`NaN`, `+Inf`, `-Inf`)
+    in float-typed fields (such as unbounded `lower`/`upper`, fixed or unavailable `se`, or non-PD
+    `vcov`) are encoded explicitly as `"NaN"`, `"Infinity"`, and `"-Infinity"`; only float-typed
+    schema slots decode these strings, so string fields such as item or group names are unaffected.
+28. **Explicit registries and full state preservation (M4)**:
+    Item models (`"2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"GRM"`, `"GPCM"`, `"PCM"`, recording
+    `n_cat` for polytomous models), latent distributions (`"Normal"`), priors (`"NormalPrior"`,
+    `"LogNormal"`, `"Beta"`), quadrature (`"equispaced"`), and estimation methods (`"BAEM"`) are
+    (de)serialized through explicit name registries in `_json.py`. Unknown format tags, schema
+    versions, registry names, invalid JSON, or inconsistent table/shape invariants raise
+    `SpecificationError` with a clear message. Both the full `Model` specification (item names and
+    order, item models, `fixed`, `latent`, `groups`, `equal`, `priors`) and the validated
+    `ParameterTable` with `estimate` and `se` (preserving any user `table=` edits), `vcov`,
+    `loglik`/`log_posterior`, convergence info and `history`, `quadrature`, `method`, `se_method`,
+    and `n_obs` are stored; `_eta` is reconstructed from the validated free rows of `parameters`
+    (checking contiguous `0..n_free-1` `free_id`s, identical estimates on shared `free_id`s, and
+    matching `vcov` shape) so estimates have a single source of truth. Loaded results reproduce
+    every public attribute, `items`, `latent`, `summary()`, `_repr_html_()`, `aic`/`bic`, and
+    `score()` for every method identically.
+29. **Confirmatory 2–3 dimensional MIRT specification and kernels (M4, §4.9, §6)**:
     `Model.with_factors(factors, *, correlated=True)` declares a confirmatory loading pattern over
     2 or 3 named factors (`Mapping[str, ItemSelector]`). An item may load on multiple factors
     (cross-loading); every factor requires at least one item, every item must load on at least one
@@ -719,7 +753,7 @@ data-independent shapes (§15.21).
     PCM), matching mirt, and unidimensional display thresholds (`b` / `bk`) are omitted. Multiple
     groups for $D > 1$, `with_latent()` for $D > 1$, and `fix_from(..., parameterization="irt")`
     for $D > 1$ raise `SpecificationError`.
-27. **Product quadrature and exact MVN latent M-step (M4, §4.4, §4.9)**:
+30. **Product quadrature and exact MVN latent M-step (M4, §4.4, §4.9)**:
     `Quadrature.default(n_factors)` selects mirt's `select_quadpts` defaults (`61` for 1D, `31` per
     dimension for 2D → $961$ nodes, `15` per dimension for 3D → $3{,}375$ nodes on $[-6, 6]$), and
     `Quadrature.grid(n_factors)` returns the `(Q, D)` Cartesian product grid (while `nodes()` stays
@@ -739,7 +773,7 @@ data-independent shapes (§15.21).
     NaN and are rejected by bounded Newton line search and the SQUAREM safeguard. As in 1D (§4.4),
     the latent M-step maximizes the exact discretized $Q_g^{\text{lat}} = \sum_q \bar n_{gq}\log w_{gq}$
     (keeping EM strictly monotone and Oakes' identity exact).
-28. **Identification, sign indeterminacy, and starting values for $D > 1$ (M4, §4.5, §4.10)**:
+31. **Identification, sign indeterminacy, and starting values for $D > 1$ (M4, §4.5, §4.10)**:
     `_check_identification_mirt` checks necessary conditions before fitting: every factor must have
     at least one active loading (free or fixed nonzero); a free `var_m` requires at least one fixed
     nonzero slope `a{m}`; a free `mean_m` requires at least one item loading on factor $m$ with a
@@ -754,7 +788,7 @@ data-independent shapes (§15.21).
     $1/\sqrt{L_j}$ ($L_j$ = number of factors item $j$ loads on; intercepts and asymptotes use
     $\|\mathbf a_j^{(0)}\|$), starting free correlations at `0.0` ($R^{(0)} = I_D$, always PD), and
     rejecting edited tables where all starting slopes on a factor are 0 (`SpecificationError`).
-29. **Multidimensional results, Oakes SEs, and EAP scoring (M4, §4.8, §8)**:
+32. **Multidimensional results, Oakes SEs, and EAP scoring (M4, §4.8, §8)**:
     The Core E-step, M-step, SQUAREM, structured Oakes (`_oakes_own_hessian`,
     `_oakes_cross_hessian`), and chunked Hessian work identically for $D \in \{1, 2, 3\}$ with
     shape-static pytrees and autodiff only. `FitResult.items` displays `a1..aD`, `d` (`d1..`), and
@@ -762,10 +796,11 @@ data-independent shapes (§15.21).
     `FitResult.score(data, method="EAP")` returns columns `theta_<factor>` and `se_<factor>` in
     declared factor order; non-EAP scoring methods (`MAP`, `ML`, `WLE`, `PV`) raise
     `SpecificationError` for $D > 1$ (planned for a later milestone).
-30. **TODO — JSON I/O compatibility for multidimensional `FitResult` (M4)**:
-    `FitResult` JSON serialization (`to_json` / `from_json`) is developed on a separate branch; when
-    integrating with confirmatory MIRT, ensure `Model.factors`, `Model.correlated_factors`, and the
-    product `Quadrature` / multidimensional `ParameterTable` round-trip cleanly.
+33. **TODO — JSON I/O for multidimensional `FitResult` (M4)**: the JSON schema (§15.26–§15.28)
+    does not yet store `Model.factors`, `Model.correlated_factors` or the multidimensional latent
+    rows, so `FitResult.to_json()` raises `SpecificationError` for models with $D > 1$ instead of
+    writing a file that `from_json()` cannot read back. Supporting it means adding the factor
+    structure to the schema (a new `schema_version`) and round-trip tests.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.

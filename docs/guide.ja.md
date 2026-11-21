@@ -41,6 +41,7 @@ from flexpyirt import (
     GRM,
     PCM,
     Beta,
+    FitResult,
     FourPL,
     LogNormal,
     Model,
@@ -214,11 +215,36 @@ print(res.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeguar
 | `converged`, `n_iter`, `n_em_evaluations`, `n_safeguards` | 収束したか、採択された反復回数、EM 写像の評価回数の合計（通常の EM では `n_iter` と同じ）、SQUAREM の安全装置が働いた回数 |
 | `history` | 採択された反復ごとの `iter`, `loglik`, `log_posterior`, `max_change`, `em_evaluations`（累計）, `safeguard`（SQUAREM の安全装置が働いたか） |
 | `vcov`, `se_method` | 自由パラメタの共分散行列（`free_id` 順）と計算方法 |
+| `to_json(path=None, *, indent=2)` / `FitResult.from_json(source)` | 推定結果を厳格な JSON として保存（`path` 指定時はファイル書き出し）し、再推定なしで復元する |
 
 `history.loglik` は反復ごとに減らない（EM の単調性）。減っていたらバグなので報告してほしい。
 
 ```python
 assert (res.history["loglik"].diff().dropna() >= -1e-8).all()
+```
+
+### 保存と読み込み（JSON）
+
+`to_json()` で推定結果をバージョン付きの素の JSON として保存し、`FitResult.from_json()` で再推定なしに
+復元できる。`pickle` や `eval` は使わず、有限な float64 値は `repr` 厳密な JSON 数値、非有限値
+（`NaN`, `±inf`）は明示的な文字列として符号化するため、出力は厳格な JSON でありビット単位で正確に往復する。
+復元後の結果はすべての属性・`summary()`・`_repr_html_()`・`score()` で完全に一致する。`from_json()` を
+呼ぶ前に JAX の 64 ビット浮動小数点を有効にしておく必要がある（無効なら `PrecisionError`）。
+
+```python
+import tempfile
+from pathlib import Path
+
+json_str = res.to_json()  # 厳格な JSON 文字列を返す（indent=None でコンパクト出力）
+loaded_str = FitResult.from_json(json_str)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out_path = Path(tmp) / "fit_result.json"
+    res.to_json(out_path)  # UTF-8 JSON をファイルに書き出し、文字列も返す
+    loaded = FitResult.from_json(out_path)
+
+assert loaded.summary() == res.summary()
+np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_numpy())
 ```
 
 ## 6. 標準誤差

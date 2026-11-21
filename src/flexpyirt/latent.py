@@ -137,7 +137,7 @@ def mvn_log_weights(nodes: Array, params: Array) -> Array:
     correlation matrix is checked by Sylvester's criterion (leading principal minors :math:`> 0`)
     with double-``where`` guards so derivatives at valid interior points never see NaN, while
     non-positive-definite candidates return NaN and are rejected by the Newton line search and
-    SQUAREM safeguard (DESIGN.md §4.4, §15.27).
+    SQUAREM safeguard (DESIGN.md §4.4, §15.30).
 
     Parameters
     ----------
