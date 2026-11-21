@@ -86,13 +86,51 @@
   Hessian は ~1.1e-11）、EAP は ~8.0e-15。
   照合テスト: `tests/test_mirt_m3_gpcm.py`。参照値の生成: `validation/r/m3_gpcm_reference.R`。
 - **SQUAREM の照合結果（M3）**: すべての mirt 照合テスト（`tests/test_mirt_m1.py`, `tests/test_mirt_m2.py`,
-  `tests/test_mirt_m3.py`, `tests/test_mirt_m3_gpcm.py`）を `BAEM(squarem=False)` と `BAEM(squarem=True)`
-  の両方で実行し、同じ加速なし mirt 参照値と照合している。全 13 ケースが同一の不動点に許容誤差内で収束し
-  （2PL/GRM/GPCM/PCM/3PL/4PL/FIPC/2 群/欠測の項目パラメタ最大差 $\le 2.8\times 10^{-8}$、V2 シミュレーション
-  Rasch の潜在分散差は通常 EM と同じ打ち切り由来の $7.9\times 10^{-5}$）、対数尤度は単調非減少で、EM 写像の
-  評価回数を 1.3〜5.0 倍削減した（例: `v2_lsat7_rasch` 121 → 24、`v4_twogroup_2pl` 302 → 113、
-  `v8_science_gpcm` 251 → 96、`v11_4pl` 531 → 272）。単体・Hypothesis 単調性・安全装置・評価回数削減テスト:
+  `tests/test_mirt_m3.py`, `tests/test_mirt_m3_gpcm.py`, `tests/test_mirt_m3_priors.py`）を
+  `BAEM(squarem=False)` と `BAEM(squarem=True)` の両方で実行し、同じ加速なし参照値と照合している。
+  全 16 ケースが同一の不動点に許容誤差内で収束し（2PL/GRM/GPCM/PCM/3PL/4PL/FIPC/2 群/欠測/MAP の項目パラメタ最大差
+  $\le 2.8\times 10^{-8}$、V2 シミュレーション Rasch の潜在分散差は通常 EM と同じ打ち切り由来の $7.9\times 10^{-5}$）、
+  対数尤度（MAP 時は対数事後）は単調非減少で、EM 写像の評価回数を 1.3〜5.0 倍削減した（例:
+  `v2_lsat7_rasch` 121 → 24、`v4_twogroup_2pl` 302 → 113、`v8_science_gpcm` 251 → 96、
+  `v11_4pl` 531 → 272、`v7_2pl_map` 80 → 35、`v7_3pl_map` 64 → 37）。単体・Hypothesis 単調性・安全装置・評価回数削減テスト:
   `tests/test_m3_squarem.py`。
+- **事前分布・MAP と R mirt 1.46 の検証（V7、M3）**: `mirt:::LL.Priors`、`mirt:::DerivativePriors`、
+  `mirt:::BL.LL` の調査および R での数値停留・Hessian 検証により、目的関数の一致と mirt 1.46 側の 3 つの実装上の不具合を
+  特定した:
+  1. **目的関数（`mirt:::LL.Priors`）— DESIGN §4.7 と完全一致**: `norm(mu, sd)` は `dnorm(x, mu, sd, log = TRUE)`、
+     `lnorm(mu, sd)` は `dlnorm(x, mu, sd, log = TRUE)`、`expbeta(a, b)` は
+     `dbeta(plogis(logit_g), a, b, log = TRUE)` を**自然尺度・logit ヤコビアンなし**で評価する。厳密 MAP 推定値に
+     全パラメタを固定して mirt で評価すると、`mirt@Fit$logLik` と `mirt@Fit$logPrior` は flexpyirt と $\le 10^{-14}$
+     で一致する。
+  2. **mirt 1.46 の `expbeta` 微分バグ**: `mirt:::DerivativePriors`（および C++ `computeDPars`）は、自然尺度の Beta
+     微分 $(a-1)/g - (b-1)/(1-g)$ と $-(a-1)/g^2 - (b-1)/(1-g)^2$ に連鎖律係数 $g(1-g)$ を掛けずにそのまま
+     **logit 尺度**の勾配・Hessian に加算している。このため `expbeta` では `optimizer = "NR"` が収束せず、勾配ベースの最適化
+     （`BFGS`, `L-BFGS-B`, `nlminb`）は `logLik + logPrior` が真に低い非停留点（V7c では差 `4.89`、`max |Δg| = 0.095`）
+     で停止し、mirt の `SE.type = "Oakes"` も `g_se` を約 10 分の 1 に過小評価する。
+  3. **mirt 1.46 の `lnorm` Hessian 符号バグ**: `lnorm` の勾配は正確（そのため `NR` は ~1e-8 で厳密な MAP 推定値に収束する）
+     だが、`DerivativePriors` / `computeDPars` の 2 階微分第 3 項の符号が逆（`+(log(a)-mu)/(a^2*s^2)` のところが
+     `-(log(a)-mu)/(a^2*s^2)`）になっており、mirt の `Oakes` SE は真の事後 Hessian SE から約 5% ずれる（符号反転式とは
+     `8.3e-10` で一致することを確認）。一方 `norm` 事前分布は勾配・Hessian とも正確で、`Oakes` SE は真の事後 Hessian SE と
+     `9.6e-10` で一致する。
+  4. **`SE.type = "Richardson"` は事前分布を含めない**: `mirt:::BL.LL` は `LL.Priors` を呼ばず周辺対数尤度のみを計算する
+     ため、mirt の Richardson SE は**尤度のみ**の情報行列 $-\nabla^2\ell(\hat\eta_{\text{MAP}})$ に一致する（~1e-8 で確認）。
+
+  以上を踏まえ、3 件の V7 ケース（$J=15, N=1000$、61 点 $[-6,6]$）を `tests/test_mirt_m3_priors.py` で照合する
+  （参照値生成: `validation/r/m3_priors_reference.R`）:
+  - **V7a（`v7_2pl_map`）**: 2PL、$a\sim\mathrm{NormalPrior}(1.2, 0.5)$、$d\sim\mathrm{NormalPrior}(0, 2)$。mirt
+    （`NR`, `SE.type = "Oakes"`）と直接照合し、`loglik` 相対差 `3.0e-13`、`log_posterior` 相対差 `5.1e-15`、
+    パラメタ `8.0e-9`、Oakes SE 対 mirt Oakes `3.4e-9`、Oakes 対 Hessian `1.2e-12`、EAP `6.4e-15`
+    （mirt Richardson は $\hat\eta_{\text{MAP}}$ での flexpyirt 尤度のみ Hessian と一致することを確認）。
+  - **V7b（`v7_2pl_lnorm_map`）**: 2PL、$a\sim\mathrm{LogNormal}(0.2, 0.3)$、$d\sim\mathrm{NormalPrior}(0, 2)$。
+    `loglik`（`4.0e-13`）、`log_posterior`（`1.4e-14`）、パラメタ（`2.6e-9`）、EAP（`7.1e-15`）は mirt（`NR`）と直接照合し、
+    Oakes / Hessian SE は R で求めた厳密な事後 Hessian と照合（`1.8e-9`、Oakes 対 Hessian `2.3e-12`）。
+  - **V7c（`v7_3pl_map`）**: 3PL、$a\sim\mathrm{LogNormal}(0.2, 0.3)$、$d\sim\mathrm{NormalPrior}(0, 2)$、
+    $g\sim\mathrm{Beta}(5, 17)$（mirt の `expbeta`）。R 上で mirt の厳密な目的関数 `logLik + logPrior` を最大化し
+    （`max |grad| = 5.1e-13`、`mirt(..., pars = sv_fixed)` で `8.9e-15` まで相互検証、EAP は mirt の `fscores`）、
+    `loglik` 相対差 `2.5e-13`、`log_posterior` 相対差 `8.1e-16`、パラメタ `2.9e-9`、Oakes / Hessian SE `5.7e-9`
+    （Oakes 対 Hessian `5.7e-12`）、EAP `6.0e-15` で一致した。
+  単体テスト（scipy `log_pdf` 照合、自動微分ガード、固定パラメタの事前分布無視、共有 `free_id` の重複なし、表編集、AIC/BIC 警告）:
+  `tests/test_m3_priors.py`。
 - **EAP の照合**: 推定値の差が EAP に伝播しないよう、全パラメタを mirt の推定値に固定して
   （ParameterTable の `free=False`）スコアリングだけを照合する。許容誤差 1e-5。
 - 照合テスト: `tests/test_mirt_m1.py`（V1, V2, V10）。参照値の生成: `validation/r/m1_reference.R`。

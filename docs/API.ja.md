@@ -3,7 +3,7 @@
 [English](API.md) | 日本語
 
 > **実装済みの API は [API リファレンス](reference.ja.md) と [ユーザーガイド](guide.ja.md) を参照。**
-> このファイルは設計段階のスケッチで、未実装の機能（3PL、事前分布、EH など）も含む。
+> このファイルは設計段階のスケッチで、未実装の機能（EH、Gauss–Hermite、`TruncNormal`、M4 のスコアリング・MIRT など）も含む。
 
 > 目標: 「仕様（Spec）・推定（fit）・結果（FitResult）」を分ける。仕様は不変オブジェクトで、メソッドチェーンは新しい仕様を返す。
 > ここに書いたシグネチャは設計案。実装時に変える場合はこのファイルを先に更新する。
@@ -126,6 +126,16 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
   `score(data, group=labels)`。
 - FIPC: `Model.fix_from(bank, items=None, parameterization="slope-intercept" | "irt")` + `.with_latent(Normal.free())`。
 - 識別不能な仕様（アンカーなしで焦点群自由、固定項目なしで平均自由など）は fit 前に `IdentificationError`。
+
+## 6.3 M3 で追加された範囲（進行中）
+- 項目モデル: `ThreePL`, `FourPL`, `GPCM(n_cat=K)`, `PCM(n_cat=K)`（境界解で `HeywoodWarning`）。
+- SQUAREM 加速: `BAEM(squarem=True)`（スキーム S3 と単調性・実行可能性の安全装置。
+  `FitResult.n_em_evaluations`, `FitResult.n_safeguards`）。
+- 事前分布と MAP 推定: `log_pdf` を持つ `NormalPrior(mean, sd)`, `LogNormal(meanlog, sdlog)`,
+  `Beta(a, b)` を `Model.prior(*, param, dist, items=None)` または ParameterTable の `prior` 列で指定。
+  `FitResult.log_posterior`（事前分布なしでは `loglik` と同値）、`history["log_posterior"]`、
+  事前分布ありの `aic`/`bic` での `FlexpyirtWarning`、`se="oakes"`・`se="hessian"` 両方への事後情報行列。
+  潜在分布パラメタへの事前分布は `SpecificationError`。
 
 ## 7. 主なクラス・関数の一覧
 

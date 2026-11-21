@@ -22,16 +22,16 @@ calibration and fixed item parameter calibration (FIPC).
 | Feature | Details | mirt check |
 |---|---|---|
 | Item models | 2PL, Rasch (latent variance estimated), 3PL, 4PL, GRM (graded response model), GPCM, PCM (latent variance estimated) | V1, V2, V3, V8, V11 |
+| Priors and MAP | `NormalPrior`, `LogNormal`, `Beta` on item parameters (`Model.prior()`), natural scale, `FitResult.log_posterior` | V7 |
 | Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | V4 |
 | FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | V5 |
 | Missing data | Responses missing at random (MAR) | V9 |
-| Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood | V10 |
-| Scoring | EAP and posterior SD, using each group's latent distribution as the prior | V1–V5, V8, V9, V11 |
+| Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior | V7, V10 |
+| Scoring | EAP and posterior SD, using each group's latent distribution as the prior | V1–V5, V7–V9, V11 |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
-Not yet available ([roadmap](docs/ROADMAP.md)): empirical histogram (EH) latent distributions,
-priors and MAP estimation, SQUAREM acceleration (M3); MAP / ML / WLE / plausible-value scoring and
-multidimensional models (M4).
+Not yet available ([roadmap](docs/ROADMAP.md)): empirical histogram (EH) latent distributions
+(M3); MAP / ML / WLE / plausible-value scoring and multidimensional models (M4).
 
 ## Installation
 

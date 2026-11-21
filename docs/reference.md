@@ -12,6 +12,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm)
+- Priors: [`NormalPrior`](#normalprior), [`LogNormal`](#lognormal), [`Beta`](#beta)
 - Latent distribution: [`Normal`](#normal)
 - Settings: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - Exceptions and warnings: [`flexpyirt.errors`](#flexpyirterrors)
@@ -27,18 +28,19 @@ fit(spec, data, *, group=None, table=None, item_names=None, method=None,
     quadrature=None, se="oakes") -> FitResult
 ```
 
-Marginal maximum likelihood estimation with the Bock–Aitkin EM algorithm (Bock & Aitkin, 1981).
+Marginal maximum likelihood (or Bayes modal / MAP when priors are attached) estimation with the
+Bock–Aitkin EM algorithm (Bock & Aitkin, 1981).
 
 | Argument | Type | Description |
 |---|---|---|
 | `spec` | `Model` | Model specification |
 | `data` | DataFrame / polars DataFrame / 2-D array | One row per respondent, one column per item. Values `0..K-1`, missing as NaN. Columns must be exactly the model's items |
 | `group` | array (one label per row), optional | Group labels for a multiple-group model; the group names declared in `Model.with_groups()` |
-| `table` | DataFrame, optional | An edited `Model.parameter_table()`. Overrides the fixed values, equalities and starting values of `spec` |
+| `table` | DataFrame, optional | An edited `Model.parameter_table()`. Overrides the fixed values, equalities, priors and starting values of `spec` |
 | `item_names` | list[str], optional | Column names when `data` is an array |
 | `method` | `BAEM`, optional | EM settings (default `BAEM()`) |
 | `quadrature` | `Quadrature`, optional | Quadrature grid (default 61 points on $[-6, 6]$) |
-| `se` | `"oakes"` / `"hessian"` / `None` | Standard-error method; `None` skips it |
+| `se` | `"oakes"` / `"hessian"` / `None` | Standard-error method (includes prior Hessian under MAP); `None` skips it |
 
 **Returns**: [`FitResult`](#fitresult)
 
@@ -59,17 +61,28 @@ Returned by `fit()`. Immutable.
 | `items` | DataFrame | One row per item (per group × item, with a `group` column, for multiple groups): `model`, internal parameters (`a`, `d` / `d1`…, `g`, `u`), `<param>_se`, display `b` / `bk` ($-d/a$, GRM $-d_k/a$, GPCM/PCM $-(d_k-d_{k-1})/a$ with $d_0=0$; no SE) |
 | `latent` | DataFrame | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` (SEs of fixed values are NaN) |
 | `parameters` | DataFrame | The validated ParameterTable plus `estimate` (the estimate, or the fixed value) and `se` |
-| `loglik` | float | Marginal log-likelihood at the estimates |
-| `aic`, `bic` | float | $-2\ell + 2k$ and $-2\ell + k\log N$ ($k$ = `n_params`, $N$ = `n_obs`) |
+| `loglik` | float | Marginal log-likelihood at the estimates (likelihood only, excluding priors) |
+| `log_posterior` | float | Log posterior ($\ell(\hat\eta) + \log\pi(\hat\eta)$) at the estimates; equals `loglik` without priors |
+| `aic`, `bic` | float | $-2\ell + 2k$ and $-2\ell + k\log N$ ($k$ = `n_params`, $N$ = `n_obs`); emits `FlexpyirtWarning` when priors are active |
 | `n_params` | int | Number of free parameters (an equality constraint counts once) |
 | `n_obs` | int | Number of respondents |
 | `converged` | bool | Whether the convergence criterion was met |
 | `n_iter` | int | Number of accepted EM (or SQUAREM) iterations |
 | `n_em_evaluations` | int | Total number of EM map evaluations (E-step + M-step); equals `n_iter` for plain EM, and 2 or 3 per accepted iterate for SQUAREM |
 | `n_safeguards` | int | Number of SQUAREM iterations on which the monotonicity/feasibility safeguard intervened (0 for plain EM) |
-| `history` | DataFrame | `iter`, `loglik` (at the parameters entering the iteration), `max_change`, `em_evaluations` (cumulative EM map evaluations), `safeguard` (whether the SQUAREM safeguard fired) |
+| `history` | DataFrame | `iter`, `loglik`, `log_posterior` (at the parameters entering the iteration; non-decreasing across iterations), `max_change`, `em_evaluations` (cumulative EM map evaluations), `safeguard` (whether the SQUAREM safeguard fired) |
 | `vcov` | ndarray / None | Covariance matrix of the free parameters (in `free_id` order); None if `se=None` |
 | `se_method` | str / None | `"oakes"` / `"hessian"` / None |
+
+#### `FitResult.log_posterior`
+
+```text
+res.log_posterior -> float
+```
+
+The log posterior $\ell(\hat\eta) + \sum_i \log\pi_i(\hat\eta_i)$ evaluated on the natural scale
+over all free parameters (counted once per `free_id`; fixed parameters ignore their prior). Equal
+to `res.loglik` when no priors are active.
 
 #### `FitResult.score`
 
@@ -170,6 +183,24 @@ Make the parameters of `items` equal across groups (anchor items). Without `para
 parameters; with e.g. `params=["a"]`, only those. `items` is a list of names, a `str -> bool`
 function, or `None` for every item. Can be called repeatedly.
 
+#### `Model.prior`
+
+```text
+model.prior(*, param, dist, items=None) -> Model
+```
+
+Attach a prior distribution `dist` (`NormalPrior`, `LogNormal`, or `Beta`) to internal parameter
+`param` of the selected items across all groups (MAP estimation; [guide section 11](guide.md#11-priors-and-map-estimation)).
+Priors are evaluated on the natural parameter scale without a Jacobian term. Fixed parameters
+ignore their prior, and a parameter shared across groups (`free_id`) is counted once. Priors on
+latent-distribution parameters (`"mean"`, `"var"`) raise `SpecificationError`.
+
+| Argument | Description |
+|---|---|
+| `param` | Internal item parameter name (`"a"`, `"d"`, `"g"`, `"u"`, `"d1"`, …) |
+| `dist` | `NormalPrior`, `LogNormal`, or `Beta` |
+| `items` | List of item names, a `str -> bool` function, or `None` for every item |
+
 #### `Model.parameter_table`
 
 ```text
@@ -177,8 +208,8 @@ model.parameter_table(data, *, group=None, item_names=None) -> DataFrame
 ```
 
 The default ParameterTable for `data`, with columns `group`, `item`, `model`, `param`, `value`,
-`free`, `lower`, `upper`, `free_id`. Edit it and pass it to `fit(..., table=...)`
-([guide section 11](guide.md#11-editing-the-parametertable)).
+`free`, `lower`, `upper`, `prior`, `free_id`. Edit it and pass it to `fit(..., table=...)`
+([guide section 12](guide.md#12-editing-the-parametertable)).
 
 #### Other attributes
 
@@ -188,7 +219,7 @@ The default ParameterTable for `data`, with columns `group`, `item`, `model`, `p
 | `is_multigroup` | Whether groups were declared with `with_groups()` |
 | `resolved_latent()` | The single-group latent distribution, with the default rule applied |
 | `resolved_groups()` | Tuple of `(group name, Normal)`; `(("all", ...),)` for a single group |
-| `items`, `fixed`, `latent`, `groups`, `equal` | The raw specification (rarely used directly) |
+| `items`, `fixed`, `latent`, `groups`, `equal`, `priors` | The raw specification (rarely used directly) |
 
 ---
 
@@ -274,6 +305,48 @@ polytomous data). With `n_cat = 2` this equals `Rasch`. Shares `GPCMKernel` with
 
 ---
 
+## Priors
+
+Frozen dataclasses representing item-parameter priors on the natural parameter scale without a
+Jacobian term (DESIGN §4.7). Each validates its hyperparameters (`SpecificationError`), exposes
+`support`, and provides `log_pdf(x) -> Array`.
+
+### `NormalPrior`
+
+```text
+NormalPrior(mean, sd)
+```
+
+Normal prior on $(-\infty, \infty)$:
+$\log\pi(x) = -\tfrac{1}{2}\log(2\pi) - \log\sigma - \frac{(x-\mu)^2}{2\sigma^2}$
+(Mislevy, 1986; mirt `norm`). Requires finite `mean` and positive finite `sd`. Named `NormalPrior`
+to avoid clashing with the latent distribution `Normal`.
+
+### `LogNormal`
+
+```text
+LogNormal(meanlog, sdlog)
+```
+
+Log-normal prior on $(0, \infty)$ ($\log X \sim N(\mu, s^2)$):
+$\log\pi(x) = -\log x - \log s - \tfrac{1}{2}\log(2\pi) - \frac{(\log x - \mu)^2}{2s^2}$
+($-\infty$ for $x \le 0$; Mislevy, 1986; mirt `lnorm`). Requires finite `meanlog` and positive
+finite `sdlog`. Commonly used for item slopes `a`.
+
+### `Beta`
+
+```text
+Beta(a, b)
+```
+
+Beta prior on $(0, 1)$:
+$\log\pi(x) = (a - 1)\log x + (b - 1)\log(1 - x) - \log B(a, b)$
+($-\infty$ outside $(0, 1)$; Swaminathan & Gifford, 1986; mirt `expbeta` log-prior objective on
+the natural scale without a logit Jacobian). Requires positive finite `a` and `b`. Commonly used
+for 3PL/4PL asymptotes `g` and `u`.
+
+---
+
 ## Latent distribution
 
 ### `Normal`
@@ -295,7 +368,7 @@ grid. `mean` and `var` are fixed values, or starting values when estimated.
 
 `var` must be positive and `mean` finite (`SpecificationError` otherwise). An estimated `var` is
 the parameter of the normal distribution before the grid cuts it off
-([guide section 12](guide.md#12-choosing-the-quadrature-grid)).
+([guide section 13](guide.md#13-choosing-the-quadrature-grid)).
 
 ---
 
@@ -356,8 +429,8 @@ JAX's 64-bit floating point is disabled. Enable it with
 #### `FlexpyirtWarning`
 
 Base class of every warning flexpyirt emits (subclass of `UserWarning`). Emitted directly when the
-information matrix is not positive definite, or when a focal group's mean is linked by a single
-parameter.
+information matrix is not positive definite, when a focal group's mean is linked by a single
+parameter, or when `FitResult.aic` / `FitResult.bic` is accessed on a model with active priors.
 
 #### `ConvergenceWarning`
 

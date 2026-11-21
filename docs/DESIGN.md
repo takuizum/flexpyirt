@@ -153,35 +153,47 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 ### 4.6 Convergence and acceleration
 - Convergence: largest absolute change of the free parameters (natural-scale $\eta$) between
   successive accepted iterates $<$ `tol` (default 1e-4, the same definition as mirt's `TOL`). The
-  histories of the log-likelihood (log posterior with MAP), largest change, cumulative EM map
-  evaluations and SQUAREM safeguard triggers are kept; monotonicity is checked by tests.
+  histories of the log-likelihood, log posterior, largest change, cumulative EM map evaluations and
+  SQUAREM safeguard triggers are kept; monotonicity in the log posterior (log-likelihood without
+  priors) is checked by tests.
   **Decision (M1)**: the stopping rule is the largest absolute change only (adding a
   log-likelihood change condition would break the correspondence with mirt).
 - **SQUAREM** (Varadhan & Roland, 2008, scheme S3) via `BAEM(squarem=True)` (default `False` in M3
   until wall-time benchmarks against mirt are run; §15.13). If an extrapolated candidate leaves the
-  parameter bounds or yields a non-finite or lower marginal log-likelihood than $\theta_2$, $\alpha$
-  is stepped back towards $-1$ up to a fixed number of halvings; if still unacceptable, $\theta_2$
-  is used directly, guaranteeing monotone log-likelihood (§15.11–§15.12).
+  parameter bounds (intersected with any active prior support) or yields a non-finite or lower log
+  posterior than $\theta_2$, $\alpha$ is stepped back towards $-1$ up to a fixed number of halvings;
+  if still unacceptable, $\theta_2$ is used directly, guaranteeing monotone log posterior
+  (§15.11–§15.12, §15.17).
 - Both plain EM and SQUAREM run entirely on device in `lax.while_loop` (no Python iteration loop or
   host callbacks). Optional progress output with `jax.debug.callback` is left for later.
 
 ### 4.7 MAP (Bayes modal)
-- Priors are defined on the **natural parameter scale** ($a, b$ or $a, d$, $c$ and so on) without
-  a Jacobian term (the posterior mode on the natural scale, as in mirt's Bayes modal).
-- Even if the optimization runs on a transformed scale (e.g. $c$ on the logit scale), the
-  objective is evaluated with the natural-scale prior.
-- Results report `loglik` (likelihood only) and `log_posterior` separately. AIC/BIC come with a
-  warning when priors are present.
+- **Decision (M3, §15.14–§15.17)**: public frozen prior distributions `NormalPrior(mean, sd)`,
+  `LogNormal(meanlog, sdlog)`, and `Beta(a, b)` (each with `log_pdf` and parameter validation;
+  `NormalPrior` avoids clashing with the latent `Normal`).
+- Priors are defined on the **natural parameter scale** ($a, d, g, u, d_k$ and so on) without
+  a Jacobian term (the posterior mode on the natural scale; verified against R mirt 1.46's
+  `LL.Priors`, where `expbeta` evaluates `dbeta(plogis(logit_g), a, b, log = TRUE)` with no logit
+  Jacobian; see VALIDATION.md).
+- Even if optimization ran on a transformed scale, the objective is evaluated with the
+  natural-scale prior.
+- Fixed parameters ignore their priors; a parameter shared across groups (same `free_id`) is
+  counted **once**. Priors on latent-distribution parameters are out of scope (`SpecificationError`).
+- Results report `loglik` (likelihood only) and `log_posterior` (equal to `loglik` without priors)
+  separately; `history` records both `loglik` and `log_posterior`. `aic`/`bic` emit a
+  `FlexpyirtWarning` when priors are active.
 
 ### 4.8 Standard errors
 - **Decision**: the default is Oakes' (1999) identity
-  $$I(\hat\eta)=-\Big[\tfrac{\partial^2 Q(\eta\mid\eta')}{\partial\eta\,\partial\eta^\top}+\tfrac{\partial^2 Q(\eta\mid\eta')}{\partial\eta\,\partial\eta'^\top}\Big]_{\eta=\eta'=\hat\eta}$$
-  computed with `jax.hessian` and `jax.jacfwd(jax.grad(...))`. $Q$ is implemented as a
-  two-argument function: "E-step weights computed at $\eta'$, likelihood evaluated at $\eta$".
-- Alternatives: the observed information of the marginal log-likelihood by `jax.hessian` directly
-  (the simplest for small problems; also used to check Oakes), cross-product
+  $$I(\hat\eta)=-\Big[\tfrac{\partial^2 Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta^\top}+\tfrac{\partial^2 Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta'^\top}\Big]_{\eta=\eta'=\hat\eta}$$
+  computed with `jax.jacfwd(jax.grad(...))`, where
+  $Q_{\mathrm{post}}(\eta\mid\eta')=Q(\eta\mid\eta')+\log\pi(\eta)$ ("E-step weights computed at
+  $\eta'$, complete-data likelihood plus log prior evaluated at $\eta$").
+- Alternatives: the observed (posterior) information $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$ by
+  `jax.hessian` directly (the simplest for small problems; also used to check Oakes), cross-product
   ($\sum_p c_p s_p s_p^\top$), sandwich.
-- With MAP, add the prior's Hessian. Fixed parameters are not in $\eta$ and are excluded
+- With MAP, both `oakes` and `hessian` add $-\nabla^2_\eta\log\pi(\hat\eta)$ to the information
+  matrix and remain mathematically identical. Fixed parameters are not in $\eta$ and are excluded
   automatically.
 
 ### 4.9 Quadrature
@@ -224,11 +236,12 @@ A long table like mirt's `pars='values'`. **Every constraint is expressed in its
 | `value` | float | Starting value (the fixed value if not free) |
 | `free` | bool | Whether it is estimated |
 | `lower`, `upper` | float | Bounds |
-| `prior` | `Prior \| None` | Prior object |
+| `prior` | `Prior \| None` (object) | Prior distribution on the natural scale (`None` when absent; ignored if fixed) |
 | `free_id` | int \| -1 | Free-parameter number. **Equality constraints are expressed by sharing a `free_id`** |
 
-- Users take the table out with `spec.parameter_table(data)`, edit it with pandas and pass it to
-  `fit(..., table=edited)` (keeping mirt's pars-editing workflow).
+- Users take the table out with `spec.parameter_table(data)`, edit values, fixed flags, bounds,
+  priors or `free_id` with pandas and pass it to `fit(..., table=edited)` (keeping mirt's
+  pars-editing workflow). Rows sharing a `free_id` must agree on their prior.
 - The `FreeMap` holds gather indices from `free_id` into "all parameters (group × family × item ×
   parameter, padded)". $\eta\mapsto\xi$ is one line:
   `xi = fixed_values.at[idx].set(eta[free_id])`.
@@ -480,6 +493,41 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
     and also fires on a converged SQUAREM fit when full fallbacks to $\theta_2$
     (`3 * n_iter - n_em_evaluations`) are at least 5 and exceed 50% of iterations (partial
     step-backs that still accelerate do not trigger spurious warnings).
+14. **Prior distributions and natural-scale MAP objective (M3, §4.7)**: `NormalPrior(mean, sd)`,
+    `LogNormal(meanlog, sdlog)`, and `Beta(a, b)` are public frozen dataclasses in `priors.py`
+    validating their parameters (`SpecificationError`) and providing `log_pdf(x)`. Priors are
+    evaluated on the natural parameter scale without a Jacobian term — verified in R against
+    `mirt` 1.46's `LL.Priors` (`expbeta` evaluates `dbeta(plogis(logit_g), a, b, log = TRUE)` with
+    no logit Jacobian; note mirt 1.46's `DerivativePriors` / `BL.LL` defects documented in
+    VALIDATION.md). `Beta.log_pdf` computes $\log B(a, b)$ via `gammaln(a) + gammaln(b) - gammaln(a + b)`
+    rather than `jax.scipy.special.betaln`, which loses ~1e-7 accuracy in float64.
+15. **Prior attachment, table editing, and scope**: `Model.prior(*, param, dist, items=None)`
+    attaches `dist` to `param` of the selected items across all groups. The ParameterTable adds a
+    `prior` column (`object` dtype, `None` when absent); `fit(..., table=...)` accepts and validates
+    edited priors (rejecting non-`Prior` objects, priors on `__latent__` rows, starting values
+    outside the prior's open support for free parameters, bounds disjoint from the prior's support,
+    and conflicting priors on rows sharing a `free_id`). Fixed parameters ignore their prior, and
+    a parameter shared across groups (`free_id`) is counted **once**. Priors on latent-distribution
+    parameters are out of scope and raise `SpecificationError`.
+16. **Branch-free Core prior representation**: `CompiledProblem` carries `priors: PriorBlock`
+    (`kind: (n_free,) int32`, `param1/param2: (n_free,) float64`, one entry per unique `free_id`),
+    evaluated elementwise by `eval_log_prior` using double-`where` guards on every branch so
+    unselected branches and unused padding slots (`PRIOR_NONE = 0`) never produce NaN/inf
+    derivatives. Inside `m_step`, each item gathers its local-slot priors from `prob.priors` via
+    `slot_free_index` and adds them to `q_item`, keeping the item-wise decomposition (§14.2) and
+    counting shared parameters once. `compile_problem` intersects `slot_lower`/`slot_upper` with
+    each free slot's prior support (`(0, inf)` for `LogNormal`, `(0, 1)` for `Beta`) so both
+    bounded Newton and SQUAREM respect prior support without altering the ParameterTable's model
+    domain bounds.
+17. **MAP results, history, SQUAREM safeguard, and posterior SEs**: `FitResult.loglik` stays
+    marginal log-likelihood only; `FitResult.log_posterior` reports $\ell(\hat\eta)+\log\pi(\hat\eta)$
+    (equal to `loglik` when no active priors exist). `history` keeps uniform columns
+    `("iter", "loglik", "log_posterior", "max_change", "em_evaluations", "safeguard")`, where
+    `log_posterior` is non-decreasing across EM and SQUAREM iterations and SQUAREM's safeguard
+    compares `log_posterior`. `FitResult.aic` and `FitResult.bic` still use `loglik` and emit a
+    `FlexpyirtWarning` when at least one free parameter has a prior. `information_oakes` adds
+    `log_prior(prob, e)` to $Q(\eta\mid\eta')$ and `information_hessian` differentiates
+    `log_posterior(prob, e)`, adding $-\nabla^2_\eta\log\pi(\hat\eta)$ identically to both.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -490,9 +538,11 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.

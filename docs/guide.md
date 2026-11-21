@@ -16,9 +16,10 @@ function, see the [API reference](reference.md).
 8. [Latent distributions and identification](#8-latent-distributions-and-identification)
 9. [Multiple groups](#9-multiple-groups)
 10. [Fixed item parameter calibration (FIPC)](#10-fixed-item-parameter-calibration-fipc)
-11. [Editing the ParameterTable](#11-editing-the-parametertable)
-12. [Choosing the quadrature grid](#12-choosing-the-quadrature-grid)
-13. [Errors and warnings](#13-errors-and-warnings)
+11. [Priors and MAP estimation](#11-priors-and-map-estimation)
+12. [Editing the ParameterTable](#12-editing-the-parametertable)
+13. [Choosing the quadrature grid](#13-choosing-the-quadrature-grid)
+14. [Errors and warnings](#14-errors-and-warnings)
 
 ## 1. Setup
 
@@ -39,9 +40,12 @@ from flexpyirt import (
     GPCM,
     GRM,
     PCM,
+    Beta,
     FourPL,
+    LogNormal,
     Model,
     Normal,
+    NormalPrior,
     Quadrature,
     Rasch,
     ThreePL,
@@ -179,7 +183,7 @@ res = fit(
   monotone `history["loglik"]` and far fewer EM evaluations. Plain EM (`squarem=False`) stays the
   default in M3 until wall-time benchmarks against mirt are complete.
 - **`quadrature`**: the latent-variable grid. The default is 61 equally spaced points on
-  $[-6, 6]$ (mirt's default). See [section 12](#12-choosing-the-quadrature-grid) for when to
+  $[-6, 6]$ (mirt's default). See [section 13](#13-choosing-the-quadrature-grid) for when to
   widen it.
 - **`se`**: `"oakes"` (default), `"hessian"`, or `None` (skip).
 
@@ -208,11 +212,11 @@ print(res.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeguar
 |---|---|
 | `items` | One row per item (per group × item with groups): `model`, internal parameters, `<param>_se`, display `b` / `bk` |
 | `latent` | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` (SEs of fixed values are NaN) |
-| `parameters` | The ParameterTable ([section 11](#11-editing-the-parametertable)) plus `estimate` and `se` |
-| `loglik`, `aic`, `bic` | Marginal log-likelihood and information criteria ($-2\ell+2k$, $-2\ell+k\log N$) |
+| `parameters` | The ParameterTable ([section 12](#12-editing-the-parametertable)) plus `estimate` and `se` |
+| `loglik`, `log_posterior`, `aic`, `bic` | Marginal log-likelihood, log posterior (equals `loglik` without priors), and information criteria ($-2\ell+2k$, $-2\ell+k\log N$; warn with `FlexpyirtWarning` under MAP) |
 | `n_params`, `n_obs` | Number of free parameters and respondents |
 | `converged`, `n_iter`, `n_em_evaluations`, `n_safeguards` | Whether EM converged, accepted iterations, total EM map evaluations (equal to `n_iter` for plain EM), and SQUAREM safeguard interventions |
-| `history` | Per accepted iterate: `iter`, `loglik`, `max_change`, `em_evaluations` (cumulative), and `safeguard` (whether the SQUAREM safeguard fired) |
+| `history` | Per accepted iterate: `iter`, `loglik`, `log_posterior`, `max_change`, `em_evaluations` (cumulative), and `safeguard` (whether the SQUAREM safeguard fired) |
 | `vcov`, `se_method` | Covariance matrix of the free parameters (in `free_id` order) and how it was computed |
 
 `history.loglik` never decreases between iterations (EM is monotone). If it does, that is a bug;
@@ -386,7 +390,47 @@ fipc_spec_irt = (
 )
 ```
 
-## 11. Editing the ParameterTable
+## 11. Priors and MAP estimation
+
+Attach prior distributions to item parameters with `Model.prior(*, param, dist, items=None)` to
+perform Bayes modal (MAP) estimation (Mislevy, 1986; Swaminathan & Gifford, 1986). Three
+natural-scale priors are provided:
+
+| Class | Support | Typical use |
+|---|---|---|
+| `NormalPrior(mean, sd)` | $(-\infty, \infty)$ | Intercepts `d` / `dk`, or slopes `a` |
+| `LogNormal(meanlog, sdlog)` | $(0, \infty)$ | Slopes `a` ($\log a \sim N(\mu, s^2)$) |
+| `Beta(a, b)` | $(0, 1)$ | 3PL / 4PL asymptotes `g` and `u` |
+
+Priors are evaluated directly on the **natural parameter scale** without a Jacobian term
+(matching R mirt's log-prior objective `LL.Priors`). In a multiple-group model, `.prior()`
+applies to every group, and a parameter shared across groups (same `free_id`) is counted **once**.
+Fixed parameters ignore their prior. Priors on latent-distribution parameters (`"mean"`, `"var"`)
+are not supported (`SpecificationError`).
+
+```python
+map_spec = (
+    Model.uniform(ThreePL(), items=df_3pl.columns)
+    .prior(param="a", dist=LogNormal(0.2, 0.3))
+    .prior(param="d", dist=NormalPrior(0.0, 2.0))
+    .prior(param="g", dist=Beta(5, 17))
+)
+map_res = fit(map_spec, df_3pl)
+print(map_res.loglik, map_res.log_posterior)
+print(map_res.items[["item", "a", "d", "g", "g_se"]].head(3).round(3))
+assert (map_res.history["log_posterior"].diff().dropna() >= -1e-8).all()
+```
+
+- `res.loglik` stays the marginal log-likelihood only; `res.log_posterior` reports
+  $\ell(\hat\eta) + \log\pi(\hat\eta)$ (equal to `loglik` when no priors are active).
+- Both plain EM and SQUAREM are monotone in `history["log_posterior"]`.
+- Standard errors (`se="oakes"` and `se="hessian"`) add the prior's negative Hessian
+  $-\nabla^2_\eta\log\pi(\hat\eta)$ to the observed information matrix and remain identical to
+  each other.
+- `res.aic` and `res.bic` emit a `FlexpyirtWarning` when priors are active because they evaluate
+  the likelihood at the MAP estimate rather than the MLE.
+
+## 12. Editing the ParameterTable
 
 Every constraint is a column of the ParameterTable (like mirt's `pars = "values"`). Take the
 table out, edit it with pandas and pass it to `fit(..., table=...)`; the table overrides the
@@ -404,6 +448,7 @@ print(table.head(4))
 | `value` | Starting value (the fixed value if not free) |
 | `free` | Whether the parameter is estimated |
 | `lower`, `upper` | Bounds; starting values must lie strictly inside |
+| `prior` | Prior object (`NormalPrior`, `LogNormal`, `Beta`, or `None`; ignored if fixed) |
 | `free_id` | Free-parameter number. **Rows with the same number are constrained to be equal.** Newly freed rows may keep `-1` (they get a number) |
 
 ```python
@@ -422,7 +467,7 @@ print(res_edit.items.set_index("item").loc["q05", ["a", "d"]])
   groups**. Equality across different items (for example one common slope) is not supported yet
   (planned for M5).
 
-## 12. Choosing the quadrature grid
+## 13. Choosing the quadrature grid
 
 The latent weights are normalized on the grid $[\text{lower}, \text{upper}]$, so a distribution cut
 off at the grid's ends affects the estimates. The default 61 points on $[-6, 6]$ are enough near
@@ -438,16 +483,16 @@ variance of the distribution on the grid is slightly smaller. mirt updates the v
 closed-form moments, so where the grid ends matter its values differ from flexpyirt's. Widening
 the grid makes them agree ([VALIDATION.md](VALIDATION.md)).
 
-## 13. Errors and warnings
+## 14. Errors and warnings
 
 | Type | When |
 |---|---|
 | `PrecisionError` | `fit()` was called with JAX's 64-bit floating point disabled |
-| `SpecificationError` | The specification and data disagree (missing or extra columns, out-of-range values, unobserved categories, fixing an unknown item, invalid table edits, unknown group labels) |
+| `SpecificationError` | The specification and data disagree (missing or extra columns, out-of-range values, unobserved categories, fixing an unknown item, invalid table or prior edits, unknown group labels) |
 | `IdentificationError` | The scale is not identified ([section 8](#8-latent-distributions-and-identification)) |
 | `ConvergenceWarning` | EM did not converge within `max_iter`, or SQUAREM fell back to plain EM on > 50% of iterations (at least 5 times) |
 | `HeywoodWarning` | A free item parameter ended within `1e-4` of a finite bound (e.g. `g` near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$ |
-| `FlexpyirtWarning` | The information matrix is not positive definite (SEs are NaN), or an anchor is a single parameter |
+| `FlexpyirtWarning` | The information matrix is not positive definite (SEs are NaN), an anchor is a single parameter, or `aic` / `bic` is accessed under MAP |
 
 Every exception derives from `flexpyirt.errors.FlexpyirtError` and every warning from
 `flexpyirt.errors.FlexpyirtWarning`. `SpecificationError` and `IdentificationError` are also
@@ -468,7 +513,9 @@ except SpecificationError as e:
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
