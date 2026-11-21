@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+from jax import Array
 
 from flexpyirt import _core
 from flexpyirt._compile import LATENT_ITEM, coerce_groups, coerce_responses, compile_problem
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
+from flexpyirt.items import ItemKernel
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -21,6 +26,55 @@ if TYPE_CHECKING:
 __all__ = ["FitResult"]
 
 _eap = jax.jit(_core.eap)
+
+
+@cache
+def _irt_val_and_jac(kernel: ItemKernel) -> Callable[[Array], tuple[Array, Array]]:
+    """Return a jitted ``(irt_thresholds, jacfwd(irt_thresholds))`` pair for ``kernel``."""
+    jac_fn = jax.jacfwd(kernel.irt_thresholds)
+
+    @jax.jit
+    def fn(params: Array) -> tuple[Array, Array]:
+        return kernel.irt_thresholds(params), jac_fn(params)
+
+    return fn
+
+
+def _delta_irt_thresholds(
+    kernel: ItemKernel,
+    xi: np.ndarray,
+    fids: np.ndarray,
+    vcov: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    r"""Compute display IRT thresholds and delta-method SEs for one item (DESIGN.md §7).
+
+    For display transformation :math:`g(\xi)` with Jacobian :math:`J = \partial g / \partial\xi`
+    computed via JAX forward-mode automatic differentiation, the asymptotic variance of each
+    threshold is
+
+    .. math::
+        \operatorname{Var}\big(g_m(\hat\xi)\big) \approx J_m\,\Sigma_\xi\,J_m^\top,
+
+    restricted to the free parameters entering :math:`g_m` (fixed parameters contribute zero
+    variance; if no parameter entering :math:`g_m` is free, or ``vcov`` is ``None``, the SE is
+    NaN). Casella & Berger (2002); Oehlert (1992).
+    """
+    vals_j, jac_j = _irt_val_and_jac(kernel)(jnp.asarray(xi, dtype=jnp.float64))
+    b_vals = np.asarray(vals_j, dtype=float)
+    jac = np.asarray(jac_j, dtype=float)
+    b_ses = np.full(b_vals.shape, np.nan, dtype=float)
+    if vcov is None:
+        return b_vals, b_ses
+    for m, deps in enumerate(kernel.irt_dep_indices):
+        active = [p for p in deps if fids[p] >= 0]
+        if not active:
+            continue
+        active_fids = [int(fids[p]) for p in active]
+        j_m = jac[m, active]
+        v_m = vcov[np.ix_(active_fids, active_fids)]
+        var_m = float(j_m @ v_m @ j_m)
+        b_ses[m] = np.nan if np.isnan(var_m) else float(np.sqrt(max(var_m, 0.0)))
+    return b_vals, b_ses
 
 
 @dataclass(frozen=True)
@@ -114,33 +168,51 @@ class FitResult:
 
     @property
     def items(self) -> pd.DataFrame:
-        """One row per item (per group in a multiple-group model).
+        r"""One row per item (per group in a multiple-group model).
 
-        Estimates and SEs by internal parameter, plus the display IRT thresholds: ``b = -d/a``
-        (2PL/Rasch/3PL/4PL), ``bk = -dk/a`` (GRM), and step difficulties
-        ``bk = -(dk - d{k-1})/a`` with ``d0 = 0`` (GPCM/PCM). Display-only; their SEs (delta
-        method) arrive in M4.
+        Estimates and SEs by internal parameter, plus the display IRT thresholds and their
+        delta-method SEs (DESIGN.md §7): :math:`b = -d/a` (2PL/Rasch/3PL/4PL),
+        :math:`b_k = -d_k/a` (GRM), and step difficulties :math:`b_k = -(d_k - d_{k-1})/a` with
+        :math:`d_0 = 0` (GPCM/PCM), with corresponding ``b_se`` / ``bk_se`` columns computed from
+        :attr:`vcov` using JAX automatic differentiation for the Jacobian. Fixed parameters
+        contribute no variance; when ``vcov`` is ``None`` or all parameters entering a threshold
+        are fixed, its SE is NaN.
         """
         p = self.parameters[self.parameters["item"] != LATENT_ITEM]
         index = ["group", "item"]
         est = p.pivot(index=index, columns="param", values="estimate")
         se = p.pivot(index=index, columns="param", values="se").add_suffix("_se")
+        fids_piv = p.pivot(index=index, columns="param", values="free_id")
         params = list(dict.fromkeys(p["param"]))
         groups = list(dict.fromkeys(p["group"]))
         order = pd.MultiIndex.from_product([groups, list(self._model.item_names)], names=index)
         out = pd.concat([est[params], se[[f"{c}_se" for c in params]]], axis=1).loc[order]
         models = p.drop_duplicates(index).set_index(index)["model"]
         out.insert(0, "model", models.loc[order])
-        if "a" in params:
-            is_gpcm = out["model"].isin(("GPCM", "PCM"))
-            for c in params:
-                if c.startswith("d"):
-                    step = out[c]
-                    if c not in ("d", "d1"):
-                        prev = f"d{int(c[1:]) - 1}"
-                        if prev in out.columns:
-                            step = step.where(~is_gpcm, out[c] - out[prev])
-                    out["b" + c[1:]] = -step / out["a"]
+
+        kernels = {name: m.kernel for name, m in self._model.items}
+        irt_cols = list(
+            dict.fromkeys(name for _, m in self._model.items for name in m.kernel.irt_names)
+        )
+        if irt_cols:
+            b_data: dict[str, np.ndarray] = {
+                col: np.full(len(order), np.nan, dtype=float)
+                for col in (*irt_cols, *(f"{c}_se" for c in irt_cols))
+            }
+            est_ord = est.loc[order]
+            fids_ord = fids_piv.loc[order]
+            for row_idx, (grp, itm) in enumerate(order):
+                kernel = kernels[itm]
+                p_names = list(kernel.param_names)
+                xi = est_ord.loc[(grp, itm), p_names].to_numpy(dtype=float)
+                fids = fids_ord.loc[(grp, itm), p_names].to_numpy(dtype=int)
+                b_vals, b_ses = _delta_irt_thresholds(kernel, xi, fids, self.vcov)
+                for name, val, se_val in zip(kernel.irt_names, b_vals, b_ses, strict=True):
+                    b_data[name][row_idx] = val
+                    b_data[f"{name}_se"][row_idx] = se_val
+            for col, arr in b_data.items():
+                out[col] = arr
+
         out.columns.name = None
         out = out.reset_index()
         if not self._model.is_multigroup:
