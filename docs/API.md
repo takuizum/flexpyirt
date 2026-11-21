@@ -157,7 +157,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | `LogNormal`, `NormalPrior`, `Beta`, `TruncNormal` | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
 | `fit` | function | Estimation; returns a `FitResult` |
-| `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `dif`, `to_json` / `from_json`) |
+| `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `dif`, `m2`, `to_json` / `from_json`) |
 
 ## 8. Design commitments
 - Public functions are keyword-only by default (`fit(spec, data, *, group=None, ...)`).

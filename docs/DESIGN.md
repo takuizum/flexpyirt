@@ -1059,6 +1059,67 @@ data-independent shapes (§15.21).
    parameters are already equal (`"add"`) or already free (`"drop"`) raises
    `SpecificationError`. MAP fits are rejected (the statistic needs the marginal likelihood at
    the MLE). DIF is post-fit orchestration in the Result layer; only the refits run in `jit`.
+3. **Limited-information goodness of fit (`FitResult.m2`, $M_2$ / $M_2^*$)**:
+   `FitResult.m2(data, *, item_names=None, ci=0.90)` computes the limited-information
+   goodness-of-fit statistic of Maydeu-Olivares & Joe (2005, 2006) on the first- and second-order
+   item-score moments — the $J$ item means $E[y_j]$ and $\binom{J}{2}$ cross-products
+   $E[y_iy_j]$ ($i < j$, in column-major pair order, matching mirt's default `M2(type = "M2*")`;
+   for dichotomous items this is exactly $M_2$) — for single-group, unidimensional, complete-data
+   MLE fits with a `Normal` latent distribution (multidimensional, multiple-group,
+   `EmpiricalHistogram`, missing-data, or MAP fits raise `SpecificationError`).
+   With sample margins $\hat p_2$, model-implied margins $\pi_2(\hat\eta)$ integrated on the fitted
+   quadrature grid with the normalized normal weights, asymptotic covariance $\Xi_2$ of
+   $\sqrt{N}(\hat p_2-\pi_2)$ under local independence (using conditional first and second moments
+   $m_{1,jq}=\sum_k kP_{jk}(\theta_q)$ and $m_{2,jq}=\sum_k k^2P_{jk}(\theta_q)$), and Jacobian
+   $\Delta_2=\partial\pi_2/\partial\eta^\top$ by JAX forward-mode autodiff over the free vector
+   $\eta$ (shared parameters appear once, matching column summation for equality constraints):
+   $$M_2 = N\,(\hat p_2-\pi_2)^\top C_2\,(\hat p_2-\pi_2),\qquad
+     C_2 = \Delta_c(\Delta_c^\top\Xi_2\Delta_c)^{-1}\Delta_c^\top,\qquad
+     df = s - q,$$
+   where $s = J + \binom{J}{2}$, $q = \text{n\_params}$ (all free parameters, including any free
+   latent mean/variance), and $\Delta_c$ is an orthonormal basis for the orthogonal complement of
+   $\operatorname{col}(\Delta_2)$ obtained from the SVD of $\Delta_2$. The asymptotic $\chi^2_{s-q}$
+   distribution requires $df = s - q > 0$ and full column rank $\operatorname{rank}(\Delta_2) = q$
+   (local identification from first- and second-order moments; Maydeu-Olivares & Joe, 2005,
+   Theorem 1; 2006, Theorem 2). Whenever $df \le 0$ or $\operatorname{rank}(\Delta_2) < \operatorname{ncol}(\Delta_2)$
+   (for example when a polytomous item has more free parameters than items, $P_j > J$, or a fixed
+   zero slope, even if $df > 0$), flexpyirt emits a `FlexpyirtWarning` noting that the model is not
+   locally identified with residual degrees of freedom from first- and second-order moments and
+   returns `NaN` for `m2`, `p`, RMSEA, its CI, `tli` and `cfi` (keeping `df` and `srmsr` finite);
+   it never pairs an $(s - r)$-dimensional quadratic form with $df = s - q$.
+   **Free latent parameters in $\Delta_2$**: mirt 1.46.1 excludes free latent mean/variance columns
+   from $\Delta_2$ while still subtracting them in $df$. Following Maydeu-Olivares & Joe (2005,
+   2006), flexpyirt includes every free parameter (item and latent) in $\Delta_2$ by default; the
+   internal helper `_m2.m2_statistic` accepts a private `_latent_in_delta: bool = True` flag so
+   validation tests can verify both the theoretical definition and agreement with mirt when set to
+   `False` (for models with no free latent parameters both are identical).
+   **Auxiliary fit indices**:
+   - $p = P(\chi^2_{df} > M_2)$ (survival function).
+   - $\mathrm{RMSEA} = \sqrt{\max(0, M_2/df - 1)/(N - 1)}$ (`NaN` for $df \le 0$ or $N \le 1$), with
+     $(100\,\mathrm{ci})\%$ confidence interval $\sqrt{\lambda/(N\,df)}$ by inverting the
+     noncentral $\chi^2$ CDF (MacCallum, Browne & Sugawara, 1996; matching mirt's `RMSEA.CI`,
+     returning 0 when $P(\chi^2_{df}\le M_2)$ is already at or below the target probability, and
+     expanding the upper search bracket from $\max(N, 5M_2)$ if needed so the upper bound cannot
+     spuriously collapse to 0). Column names follow `ci` (e.g. `rmsea_5`, `rmsea_95` for `ci=0.90`).
+   - $\mathrm{SRMSR} = \sqrt{\binom{J}{2}^{-1}\sum_{i<j}(r_{ij} - \hat\rho_{ij})^2}$ from the
+     observed and model-implied item-score correlation matrices (diagonal variance uses
+     $E[y_j^2] - E[y_j]^2$).
+   - **Null model, TLI and CFI**: for dichotomous models ($K_j = 2$ for every item), the
+     independence (null) model has every slope fixed at 0 and $J$ free item intercepts whose MLE
+     reproduces the observed proportions; its orthogonal complement simplifies analytically to
+     $M_{2,\text{null}} = N\sum_{i<j} r_{ij}^2$ with $df_{\text{null}} = \binom{J}{2}$ (exact,
+     closed-form, matching mirt's `M2(null.mod)`). When $M_{2,\text{null}} > M_2$ and $df > 0$,
+     $\mathrm{TLI} = (M_{2,\text{null}}/df_{\text{null}} - M_2/df)/(M_{2,\text{null}}/df_{\text{null}} - 1)$
+     (uncapped) and $\mathrm{CFI} = \operatorname{clip}(1 - (M_2 - df)/(M_{2,\text{null}} - df_{\text{null}}), 0, 1)$;
+     when $M_{2,\text{null}} \le M_2$, a `FlexpyirtWarning` is emitted and both are `NaN`.
+     For models containing any polytomous item ($K_j > 2$), `tli` and `cfi` are returned as `NaN`:
+     under $M_2^*$'s item-score margins the $K_j - 1$ intercept columns of each item in the null
+     model's $\Delta_{\text{null}}$ are strictly collinear ($\operatorname{rank}(\Delta_{\text{null}}) = J < \sum_j(K_j - 1)$),
+     so the null $M_2^*$ with $df_{\text{null}} = s - \sum_j(K_j - 1)$ is ill-posed (mirt 1.46.1
+     slices `qr.Q(qr(delta), complete = TRUE)` after `ncol(delta)` without rank checking, discarding
+     arbitrary directions that depend on item order and floating-point roundoff).
+   Moment integration and $\Delta_2$ use JAX; $\Xi_2$, the SVD complement, and all summary indices
+   run in NumPy/SciPy outside `jit`.
 4. **Davidian-curve latent distributions (`DavidianCurve`, §4.4, V19)**:
    `DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)` (plus
    `DavidianCurve.free(degree, *, mean=0.0, var=1.0)`) specifies a single-group unidimensional
@@ -1154,7 +1215,10 @@ data-independent shapes (§15.21).
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
+- MacCallum, R. C., Browne, M. W., & Sugawara, H. M. (1996). Power analysis and determination of sample size for covariance structure modeling. *Psychological Methods*, 1(2), 130–149.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Maydeu-Olivares, A., & Joe, H. (2005). Limited- and full-information estimation and goodness-of-fit testing in $2^n$ contingency tables: A unified framework. *Journal of the American Statistical Association*, 100(471), 1009–1020.
+- Maydeu-Olivares, A., & Joe, H. (2006). Limited information goodness-of-fit testing in multidimensional contingency tables. *Psychometrika*, 71(4), 713–732.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
