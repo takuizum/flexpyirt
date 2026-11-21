@@ -40,6 +40,8 @@ LinkMethod = Literal["haebara", "stocking-lord"]
 
 _N_HALVINGS = 40
 """Number of backtracking step sizes ``2^-k`` evaluated in parallel during 2-D Newton."""
+_MAX_STEP = 1.0
+"""Cap on the Euclidean norm of a single Newton step to prevent jumping to flat plateaus."""
 
 
 @jax.tree_util.register_dataclass
@@ -372,12 +374,18 @@ def solve_linking(
         h_finite = jnp.all(jnp.isfinite(h))
         eigs = jnp.linalg.eigvalsh(jnp.where(h_finite, h, eye2))
         is_pd = h_finite & (eigs[0] > 1e-12)
-        lam = jnp.where(is_pd, 0.0, jnp.maximum(0.0, -eigs[0]) + 1e-4)
+        lam = jnp.where(is_pd, 0.0, jnp.maximum(0.0, -eigs[0]) + 1e-2)
         h_reg = jnp.where(h_finite, h + lam * eye2, eye2)
         d_newton = -jnp.linalg.solve(h_reg, g)
         is_descent = jnp.all(jnp.isfinite(d_newton)) & (jnp.dot(g, d_newton) < 0.0)
         neg_g = jnp.where(jnp.all(jnp.isfinite(g)), -g, jnp.zeros_like(g))
         direction = jnp.where(is_descent, d_newton, neg_g)
+        dir_norm = jnp.linalg.norm(direction)
+        direction = jnp.where(
+            dir_norm > _MAX_STEP,
+            direction * (_MAX_STEP / jnp.where(dir_norm > 0.0, dir_norm, 1.0)),
+            direction,
+        )
 
         raw = x[None, :] + steps[:, None] * direction[None, :]
         a_cand = jnp.where(raw[:, 0] <= 0.0, 0.5 * x[0], raw[:, 0])
