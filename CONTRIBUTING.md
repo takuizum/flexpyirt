@@ -78,6 +78,16 @@ Rscript validation/r/m1_reference.R
 Rscript validation/r/m2_reference.R
 ```
 
+To rerun the wall-time benchmarks against R `mirt` (see [benchmarks/README.md](benchmarks/README.md)
+for details and `--quick` mode):
+
+```bash
+uv run python benchmarks/data.py
+uv run python benchmarks/run_flexpyirt.py
+Rscript benchmarks/run_mirt.R
+uv run python benchmarks/report.py
+```
+
 ## Documentation
 
 Every document exists in English (`*.md`) and Japanese (`*.ja.md`) with the same content. Update

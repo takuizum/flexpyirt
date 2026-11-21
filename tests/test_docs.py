@@ -23,7 +23,12 @@ from flexpyirt import errors
 ROOT = Path(__file__).resolve().parents[1]
 BLOCK_RE = re.compile(r"^```python\n(.*?)^```", re.M | re.S)
 RUNNABLE = ["README.md", "README.ja.md", "docs/guide.md", "docs/guide.ja.md"]
-PAIRED = ["README", "CONTRIBUTING", *(f"docs/{p.stem}" for p in (ROOT / "docs").glob("*.md"))]
+PAIRED = [
+    "README",
+    "CONTRIBUTING",
+    "benchmarks/README",
+    *(f"docs/{p.stem}" for p in (ROOT / "docs").glob("*.md")),
+]
 
 
 def _blocks(path: Path) -> list[str]:
@@ -89,8 +94,18 @@ def test_reference_covers_public_api(doc: str) -> None:
 
 @pytest.mark.parametrize("doc", sorted(str(p.relative_to(ROOT)) for p in ROOT.rglob("*.ja.md")))
 def test_japanese_docs_link_to_japanese_docs(doc: str) -> None:
-    lines = (ROOT / doc).read_text().splitlines()
+    doc_path = ROOT / doc
+    lines = doc_path.read_text().splitlines()
     body = [line for line in lines if not line.startswith("[English](")]
     links = re.findall(r"\]\(([^)#\s]+\.md)(?:#[^)]*)?\)", "\n".join(body))
-    english = [link for link in links if not link.endswith(".ja.md")]
+    results_dir = (ROOT / "benchmarks" / "results").resolve()
+    english = []
+    for link in links:
+        if link.endswith(".ja.md"):
+            continue
+        # Generated benchmark result tables under benchmarks/results/ are language-neutral.
+        target = (doc_path.parent / link).resolve()
+        if results_dir in target.parents:
+            continue
+        english.append(link)
     assert not english, f"{doc} links to English documents: {english}"
