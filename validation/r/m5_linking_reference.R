@@ -3,12 +3,15 @@
 # Writes tests/reference/v20_linking.json. CI does not run R; the JSON is committed.
 #
 # mirt does not implement IRT scale linking (Haebara / Stocking-Lord). Each form is calibrated
-# separately with mirt (optimizer = "NR", accelerate = "none", TOL = 1e-10, N(0, 1), 61 equispaced
-# quadrature points on [-6, 6], SE.type = "Oakes"), and the linking constants (A, B), criterion
-# values, and Ogasawara (2001) delta-method SEs are computed by an independent base-R
-# implementation of the papers' formulas (Haebara, 1980; Stocking & Lord, 1983; Kim & Lee, 2006)
-# using mirt's probtrace() / expected.item() for the characteristic curves and optim(BFGS) + nlm()
-# for tight optimization.
+# separately with mirt (optimizer = "NR", accelerate = "none", TOL = 1e-10, 61 equispaced
+# quadrature points on [-6, 6], SE.type = "Oakes"; latent N(0, 1) except the source form of V20e,
+# which is calibrated under a fixed N(0.3, 1.5) so that the symmetric criterion's reverse term uses
+# a non-standard source grid), and the linking constants (A, B), criterion values, and Ogasawara
+# (2001) delta-method SEs are computed by an independent base-R implementation of the papers'
+# formulas (Haebara, 1980; Stocking & Lord, 1983; Kim & Lee, 2006) using mirt's probtrace() /
+# expected.item() for the characteristic curves and optim(BFGS) + nlm() for tight optimization.
+# Haebara sums squared differences over all categories of each item (Kim & Lee, 2006), including
+# both categories of a dichotomous item.
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -57,15 +60,16 @@ clean_item <- function(x, itemtype) {
   c(as.list(par), as.list(se))
 }
 
-extract_form <- function(m, dat, itemtype) {
+extract_form <- function(m, dat, itemtypes, n_cats) {
   cf <- coef(m, printSE = TRUE)
   items <- setdiff(names(cf), "GroupPars")
-  params <- lapply(items, function(i) clean_item(cf[[i]], itemtype))
+  params <- lapply(items, function(i) clean_item(cf[[i]], itemtypes[[i]]))
   names(params) <- items
   key <- apply(dat, 1, paste, collapse = ",")
   first <- !duplicated(key)
   patterns <- unname(as.matrix(dat[first, , drop = FALSE]))
   counts <- as.integer(table(key)[key[first]])
+  cs <- coef(m, simplify = TRUE)
   list(
     items = items,
     n_obs = nrow(dat),
@@ -75,18 +79,24 @@ extract_form <- function(m, dat, itemtype) {
     converged = extract.mirt(m, "converged"),
     iterations = extract.mirt(m, "iterations"),
     grid_check = range(m@Model$Theta),
+    latent_mean = unname(cs$means[1]),
+    latent_var = unname(cs$cov[1, 1]),
+    itemtypes = as.list(itemtypes[items]),
+    n_cats = as.list(n_cats[items]),
     params = params
   )
 }
 
 # ---- Independent base-R linking criteria using mirt's probtrace() and expected.item() ----------
+# Forward term: target curves on the target grid (theta, w_tgt) against source curves at
+# (theta - B) / A. Reverse (symmetric) term: source curves on the source grid (theta, w_src)
+# against target curves at A * theta + B (Kim & Lee, 2006).
 
-make_criterion <- function(m_src, m_tgt, common_items, theta, w, method, symmetric) {
+make_criterion <- function(m_src, m_tgt, common_items, theta, w_tgt, w_src, method, symmetric) {
   src_ext <- lapply(common_items, function(nm) extract.item(m_src, nm))
   tgt_ext <- lapply(common_items, function(nm) extract.item(m_tgt, nm))
   n_common <- length(common_items)
 
-  # Precompute target curves on theta and (if symmetric) source curves on theta.
   if (method == "haebara") {
     p_tgt_fixed <- lapply(tgt_ext, function(it) probtrace(it, matrix(theta)))
     p_src_fixed <- if (symmetric) lapply(src_ext, function(it) probtrace(it, matrix(theta))) else NULL
@@ -100,7 +110,7 @@ make_criterion <- function(m_src, m_tgt, common_items, theta, w, method, symmetr
         d <- p_tgt_fixed[[j]] - probtrace(src_ext[[j]], th_src)
         diff_fwd <- diff_fwd + rowSums(d * d)
       }
-      val <- sum(w * diff_fwd)
+      val <- sum(w_tgt * diff_fwd)
       if (symmetric) {
         th_tgt <- matrix(A * theta + B)
         diff_bwd <- numeric(length(theta))
@@ -108,7 +118,7 @@ make_criterion <- function(m_src, m_tgt, common_items, theta, w, method, symmetr
           d <- p_src_fixed[[j]] - probtrace(tgt_ext[[j]], th_tgt)
           diff_bwd <- diff_bwd + rowSums(d * d)
         }
-        val <- val + sum(w * diff_bwd)
+        val <- val + sum(w_src * diff_bwd)
       }
       val
     })
@@ -133,11 +143,11 @@ make_criterion <- function(m_src, m_tgt, common_items, theta, w, method, symmetr
     if (!is.finite(A) || !is.finite(B) || A <= 0) return(1e30)
     th_src <- matrix((theta - B) / A)
     tcc_src_moved <- Reduce(`+`, lapply(src_ext, function(it) expected.item(it, th_src)))
-    val <- sum(w * (tcc_tgt_fixed - tcc_src_moved)^2)
+    val <- sum(w_tgt * (tcc_tgt_fixed - tcc_src_moved)^2)
     if (symmetric) {
       th_tgt <- matrix(A * theta + B)
       tcc_tgt_moved <- Reduce(`+`, lapply(tgt_ext, function(it) expected.item(it, th_tgt)))
-      val <- val + sum(w * (tcc_src_fixed - tcc_tgt_moved)^2)
+      val <- val + sum(w_src * (tcc_src_fixed - tcc_tgt_moved)^2)
     }
     val
   }
@@ -180,7 +190,7 @@ solve_base_r <- function(fn, start = c(1.0, 0.0)) {
   list(A = ab[1], B = ab[2], criterion = val, grad_norm = max(abs(grad)), nlm_code = pol$code)
 }
 
-# ---- Pure-R Ogasawara (2001) delta-method SEs via central FD of the optimizer ------------------
+# ---- Pure-R Ogasawara (2001) delta-method SEs via central FD of the criterion ------------------
 
 item_probs_r <- function(par_vec, theta, itemtype, n_cat) {
   if (itemtype == "2PL") {
@@ -215,45 +225,52 @@ item_probs_r <- function(par_vec, theta, itemtype, n_cat) {
   stop("Unsupported itemtype: ", itemtype)
 }
 
-ogasawara_se_r <- function(m_src, m_tgt, common_items, itemtype, n_cat, theta, w,
-                           method, symmetric, ab_hat) {
-  # Extract common-item free parameter vectors & natural-scale covariance matrices from mirt.
-  extract_common <- function(m) {
-    sv <- mod2values(m)
-    vc <- vcov(m)
-    # Match order of free parameters in vcov(m) (parnum order where est == TRUE).
-    free_rows <- sv[sv$est, , drop = FALSE]
-    stopifnot(nrow(free_rows) == nrow(vc))
-    # mod2values(m)$value stores g on the natural scale (0..1), while vcov(m) is on the logit
-    # scale for g; convert vcov(m) to natural scale with Jacobian g * (1 - g).
-    jac <- rep(1.0, nrow(vc))
-    if (itemtype == "3PL") {
-      is_g <- free_rows$name == "g"
-      g_nat <- free_rows$value[is_g]
-      jac[is_g] <- g_nat * (1 - g_nat)
-    }
-    vc_nat <- (jac %o% jac) * vc
-    # Locate free parameter indices belonging to common_items in item order.
-    param_names <- if (itemtype == "2PL") c("a1", "d")
-                   else if (itemtype == "3PL") c("a1", "d", "g")
-                   else c("a1", paste0("d", seq_len(n_cat - 1)))
-    idx <- integer(0)
-    vals <- numeric(0)
-    for (it in common_items) {
-      for (pn in param_names) {
-        pos <- which(free_rows$item == it & free_rows$name == pn)
-        stopifnot(length(pos) == 1L)
-        idx <- c(idx, pos)
-        vals <- c(vals, free_rows$value[pos])
-      }
-    }
-    list(vals = vals, vcov = vc_nat[idx, idx, drop = FALSE], p_per_item = length(param_names))
-  }
+item_param_names <- function(itemtype, n_cat) {
+  if (itemtype == "2PL") return(c("a1", "d"))
+  if (itemtype == "3PL") return(c("a1", "d", "g"))
+  c("a1", paste0("d", seq_len(n_cat - 1)))
+}
 
-  cs <- extract_common(m_src)
-  ct <- extract_common(m_tgt)
+# Common-item free parameters (natural scale, item-major in common_items order) and their
+# covariance block from vcov(m).
+extract_common <- function(m, common_items, itemtypes, n_cats) {
+  sv <- mod2values(m)
+  vc <- vcov(m)
+  # Match order of free parameters in vcov(m) (parnum order where est == TRUE).
+  free_rows <- sv[sv$est, , drop = FALSE]
+  stopifnot(nrow(free_rows) == nrow(vc))
+  # mod2values(m)$value stores g on the natural scale (0..1), while vcov(m) is on the logit
+  # scale for g; convert vcov(m) to natural scale with Jacobian g * (1 - g).
+  jac <- rep(1.0, nrow(vc))
+  is_g <- free_rows$name == "g"
+  if (any(is_g)) {
+    g_nat <- free_rows$value[is_g]
+    jac[is_g] <- g_nat * (1 - g_nat)
+  }
+  vc_nat <- (jac %o% jac) * vc
+  idx <- integer(0)
+  vals <- numeric(0)
+  labels <- list()
+  for (it in common_items) {
+    for (pn in item_param_names(itemtypes[[it]], n_cats[[it]])) {
+      pos <- which(free_rows$item == it & free_rows$name == pn)
+      stopifnot(length(pos) == 1L)
+      idx <- c(idx, pos)
+      vals <- c(vals, free_rows$value[pos])
+      labels[[length(labels) + 1L]] <- c(it, sub("^a1$", "a", pn))
+    }
+  }
+  list(vals = vals, vcov = vc_nat[idx, idx, drop = FALSE], labels = labels)
+}
+
+ogasawara_se_r <- function(cs, ct, common_items, itemtypes, n_cats, theta, w_tgt, w_src,
+                           method, symmetric, ab_hat) {
   n_common <- length(common_items)
-  p_item <- cs$p_per_item
+  p_sizes <- vapply(
+    common_items, function(it) length(item_param_names(itemtypes[[it]], n_cats[[it]])), 1L
+  )
+  ends <- cumsum(p_sizes)
+  starts <- ends - p_sizes + 1L
 
   crit_from_vecs <- function(ab, vs, vt) {
     A <- ab[1]; B <- ab[2]
@@ -264,40 +281,39 @@ ogasawara_se_r <- function(m_src, m_tgt, common_items, itemtype, n_cat, theta, w
       dfwd <- numeric(length(theta))
       dbwd <- numeric(length(theta))
       for (j in seq_len(n_common)) {
-        rng <- ((j - 1L) * p_item + 1L):(j * p_item)
-        ps_t <- item_probs_r(vs[rng], th_s, itemtype, n_cat)
-        pt_t <- item_probs_r(vt[rng], theta, itemtype, n_cat)
-        d <- pt_t - ps_t
+        rng <- starts[j]:ends[j]
+        it <- itemtypes[[common_items[j]]]
+        kj <- n_cats[[common_items[j]]]
+        d <- item_probs_r(vt[rng], theta, it, kj) - item_probs_r(vs[rng], th_s, it, kj)
         dfwd <- dfwd + rowSums(d * d)
         if (symmetric) {
-          ps_s <- item_probs_r(vs[rng], theta, itemtype, n_cat)
-          pt_s <- item_probs_r(vt[rng], th_t, itemtype, n_cat)
-          d2 <- ps_s - pt_s
+          d2 <- item_probs_r(vs[rng], theta, it, kj) - item_probs_r(vt[rng], th_t, it, kj)
           dbwd <- dbwd + rowSums(d2 * d2)
         }
       }
-      return(sum(w * dfwd) + if (symmetric) sum(w * dbwd) else 0)
+      return(sum(w_tgt * dfwd) + if (symmetric) sum(w_src * dbwd) else 0)
     }
-    cats <- 0:(n_cat - 1L)
     tcc_t <- numeric(length(theta))
     tcc_s_on_t <- numeric(length(theta))
     tcc_s <- numeric(length(theta))
     tcc_t_on_s <- numeric(length(theta))
     for (j in seq_len(n_common)) {
-      rng <- ((j - 1L) * p_item + 1L):(j * p_item)
-      tcc_t <- tcc_t + as.numeric(item_probs_r(vt[rng], theta, itemtype, n_cat) %*% cats)
-      tcc_s_on_t <- tcc_s_on_t + as.numeric(item_probs_r(vs[rng], th_s, itemtype, n_cat) %*% cats)
+      rng <- starts[j]:ends[j]
+      it <- itemtypes[[common_items[j]]]
+      kj <- n_cats[[common_items[j]]]
+      cats <- 0:(kj - 1L)
+      tcc_t <- tcc_t + as.numeric(item_probs_r(vt[rng], theta, it, kj) %*% cats)
+      tcc_s_on_t <- tcc_s_on_t + as.numeric(item_probs_r(vs[rng], th_s, it, kj) %*% cats)
       if (symmetric) {
-        tcc_s <- tcc_s + as.numeric(item_probs_r(vs[rng], theta, itemtype, n_cat) %*% cats)
-        tcc_t_on_s <- tcc_t_on_s + as.numeric(item_probs_r(vt[rng], th_t, itemtype, n_cat) %*% cats)
+        tcc_s <- tcc_s + as.numeric(item_probs_r(vs[rng], theta, it, kj) %*% cats)
+        tcc_t_on_s <- tcc_t_on_s + as.numeric(item_probs_r(vt[rng], th_t, it, kj) %*% cats)
       }
     }
-    val <- sum(w * (tcc_t - tcc_s_on_t)^2)
-    if (symmetric) val <- val + sum(w * (tcc_s - tcc_t_on_s)^2)
+    val <- sum(w_tgt * (tcc_t - tcc_s_on_t)^2)
+    if (symmetric) val <- val + sum(w_src * (tcc_s - tcc_t_on_s)^2)
     val
   }
 
-  # Cross-check pure-R evaluator matches mirt probtrace()/expected.item() to ~1e-14.
   # Compute H_cc and H_{c, eta} by central finite differences of the gradient.
   eps_c <- 1e-5
   eps_e <- 1e-5
@@ -333,28 +349,51 @@ ogasawara_se_r <- function(m_src, m_tgt, common_items, itemtype, n_cat, theta, w
   )
 }
 
-run_linking_case <- function(case_name, description, itemtype, n_cat, dat_src, dat_tgt, common_items) {
-  m_tgt <- do.call(mirt, c(list(dat_tgt, 1, itemtype = itemtype), common_mirt))
-  m_src <- do.call(mirt, c(list(dat_src, 1, itemtype = itemtype), common_mirt))
+# itemtypes_* / n_cats_*: named per-item vectors (column names of each form's data).
+# src_latent: fixed (mean, var) of the source calibration's latent distribution (N(0, 1) by
+# default); the source-grid weights of the symmetric reverse term follow it.
+run_linking_case <- function(case_name, description, itemtypes_tgt, itemtypes_src, n_cats_tgt,
+                             n_cats_src, dat_src, dat_tgt, common_items, src_latent = c(0, 1)) {
+  m_tgt <- do.call(
+    mirt, c(list(dat_tgt, 1, itemtype = unname(itemtypes_tgt[colnames(dat_tgt)])), common_mirt)
+  )
+  sv_src <- mirt(dat_src, 1, itemtype = unname(itemtypes_src[colnames(dat_src)]), pars = "values")
+  sv_src$value[sv_src$name == "MEAN_1"] <- src_latent[1]
+  sv_src$value[sv_src$name == "COV_11"] <- src_latent[2]
+  stopifnot(!any(sv_src$est[sv_src$item == "GROUP"]))
+  m_src <- do.call(mirt, c(
+    list(dat_src, 1, itemtype = unname(itemtypes_src[colnames(dat_src)]), pars = sv_src),
+    common_mirt
+  ))
   stopifnot(extract.mirt(m_tgt, "converged"), extract.mirt(m_src, "converged"))
+  stopifnot(all(itemtypes_tgt[common_items] == itemtypes_src[common_items]))
 
   theta <- as.numeric(m_tgt@Model$Theta[, 1])
-  w <- dnorm(theta, 0, 1)
-  w <- w / sum(w)
+  w_tgt <- dnorm(theta, 0, 1)
+  w_tgt <- w_tgt / sum(w_tgt)
+  w_src <- dnorm(theta, src_latent[1], sqrt(src_latent[2]))
+  w_src <- w_src / sum(w_src)
   stopifnot(
     all(range(theta) == theta_lim),
     length(theta) == quadpts,
-    max(abs(w - as.numeric(m_tgt@Internals$Prior[[1]]))) < 1e-13
+    max(abs(theta - as.numeric(m_src@Model$Theta[, 1]))) < 1e-14,
+    max(abs(w_tgt - as.numeric(m_tgt@Internals$Prior[[1]]))) < 1e-13,
+    max(abs(w_src - as.numeric(m_src@Internals$Prior[[1]]))) < 1e-13
   )
 
   # For 3PL, confirm all estimated guessing parameters are strictly interior (no Heywood).
-  if (itemtype == "3PL") {
+  if (any(itemtypes_tgt == "3PL")) {
     for (m in list(m_tgt, m_src)) {
       cf <- coef(m, simplify = TRUE)$items
       g_vals <- cf[, "g"]
       stopifnot(all(g_vals > 0.01 & g_vals < 0.99))
     }
   }
+
+  it_common <- as.list(itemtypes_tgt[common_items])
+  k_common <- as.list(n_cats_tgt[common_items])
+  cs <- extract_common(m_src, common_items, it_common, k_common)
+  ct <- extract_common(m_tgt, common_items, it_common, k_common)
 
   variants <- list(
     stocking_lord = list(method = "stocking-lord", symmetric = FALSE),
@@ -365,10 +404,10 @@ run_linking_case <- function(case_name, description, itemtype, n_cat, dat_src, d
   linking_out <- list()
   for (vname in names(variants)) {
     v <- variants[[vname]]
-    fn <- make_criterion(m_src, m_tgt, common_items, theta, w, v$method, v$symmetric)
+    fn <- make_criterion(m_src, m_tgt, common_items, theta, w_tgt, w_src, v$method, v$symmetric)
     sol <- solve_base_r(fn, start = c(1.2, 0.5))
     se_res <- ogasawara_se_r(
-      m_src, m_tgt, common_items, itemtype, n_cat, theta, w,
+      cs, ct, common_items, it_common, k_common, theta, w_tgt, w_src,
       v$method, v$symmetric, c(sol$A, sol$B)
     )
     linking_out[[vname]] <- c(
@@ -382,26 +421,45 @@ run_linking_case <- function(case_name, description, itemtype, n_cat, dat_src, d
     ))
   }
 
+  types_common <- unique(unname(unlist(it_common)))
   list(
     meta = list(
       case = case_name,
       description = description,
-      itemtype = itemtype,
-      n_cat = n_cat,
+      itemtype = if (length(types_common) == 1L) types_common else "mixed",
+      n_cat = max(unlist(k_common)),
       quadpts = quadpts,
       theta_lim = theta_lim,
       grid_check = range(m_tgt@Model$Theta),
+      source_latent = list(mean = src_latent[1], var = src_latent[2]),
       converged = TRUE
     ),
     common_items = common_items,
-    target = extract_form(m_tgt, dat_tgt, itemtype),
-    source = extract_form(m_src, dat_src, itemtype),
+    # Common-item free parameters (natural scale; g not logit) and mirt's Oakes covariance
+    # block, item-major, for checking the delta-method SEs on identical inputs.
+    common_vcov = list(
+      source = list(labels = cs$labels, values = cs$vals, vcov = unname(cs$vcov)),
+      target = list(labels = ct$labels, values = ct$vals, vcov = unname(ct$vcov))
+    ),
+    target = extract_form(m_tgt, dat_tgt, itemtypes_tgt, n_cats_tgt),
+    source = extract_form(m_src, dat_src, itemtypes_src, n_cats_src),
     linking = linking_out
   )
 }
 
-# ---- Simulate and calibrate all four cases ------------------------------------------------------
-# True population parameters: target ~ N(0, 1), source ~ N(0.5, 1.2^2) -> true A = 1.2, B = 0.5.
+run_uniform_case <- function(case_name, description, itemtype, n_cat, dat_src, dat_tgt,
+                             common_items, src_latent = c(0, 1)) {
+  types_of <- function(dat) setNames(rep(itemtype, ncol(dat)), colnames(dat))
+  cats_of <- function(dat) setNames(rep(as.integer(n_cat), ncol(dat)), colnames(dat))
+  run_linking_case(
+    case_name, description, types_of(dat_tgt), types_of(dat_src), cats_of(dat_tgt),
+    cats_of(dat_src), dat_src, dat_tgt, common_items, src_latent
+  )
+}
+
+# ---- Simulate and calibrate all cases -----------------------------------------------------------
+# True population parameters: target ~ N(0, 1), source ~ N(0.5, 1.2^2) -> true A = 1.2, B = 0.5
+# (for source calibrations on N(0, 1)).
 
 cases <- list()
 
@@ -426,7 +484,7 @@ dat_src_2pl <- as.data.frame(simdata(
   mu = 0.5, sigma = matrix(1.2^2)
 ))
 colnames(dat_src_2pl) <- c(common_2pl, src_only_2pl)
-cases[["v20a_2pl"]] <- run_linking_case(
+cases[["v20a_2pl"]] <- run_uniform_case(
   "v20a_2pl",
   "V20a: 2PL, J=20/form, 10 common, N=2000/group, target N(0,1), source N(0.5, 1.2^2)",
   "2PL", 2L, dat_src_2pl, dat_tgt_2pl, common_2pl
@@ -457,7 +515,7 @@ dat_src_grm <- as.data.frame(simdata(
   mu = 0.5, sigma = matrix(1.2^2)
 ))
 colnames(dat_src_grm) <- c(common_p, src_only_p)
-cases[["v20b_grm"]] <- run_linking_case(
+cases[["v20b_grm"]] <- run_uniform_case(
   "v20b_grm",
   "V20b: GRM (K=4), J=16/form, 8 common, N=2000/group, target N(0,1), source N(0.5, 1.2^2)",
   "graded", K, dat_src_grm, dat_tgt_grm, common_p
@@ -486,7 +544,7 @@ dat_src_gpcm <- as.data.frame(simdata(
   mu = 0.5, sigma = matrix(1.2^2)
 ))
 colnames(dat_src_gpcm) <- c(common_p, src_only_p)
-cases[["v20c_gpcm"]] <- run_linking_case(
+cases[["v20c_gpcm"]] <- run_uniform_case(
   "v20c_gpcm",
   "V20c: GPCM (K=4), J=16/form, 8 common, N=2000/group, target N(0,1), source N(0.5, 1.2^2)",
   "gpcm", K, dat_src_gpcm, dat_tgt_gpcm, common_p
@@ -510,10 +568,59 @@ dat_src_3pl <- as.data.frame(simdata(
   mu = 0.5, sigma = matrix(1.2^2)
 ))
 colnames(dat_src_3pl) <- c(common_p, src_only_p)
-cases[["v20d_3pl"]] <- run_linking_case(
+cases[["v20d_3pl"]] <- run_uniform_case(
   "v20d_3pl",
   "V20d: 3PL, J=16/form, 8 common, N=4000/group, target N(0,1), source N(0.5, 1.2^2)",
   "3PL", 2L, dat_src_3pl, dat_tgt_3pl, common_p
+)
+
+# 5. V20e: V20a data with the source calibrated under a fixed N(0.3, 1.5) latent distribution,
+#    so the symmetric criterion's reverse term uses a non-standard source grid.
+cases[["v20e_2pl_srcgrid"]] <- run_uniform_case(
+  "v20e_2pl_srcgrid",
+  "V20e: V20a data; source calibrated with fixed N(0.3, 1.5) (non-standard source grid)",
+  "2PL", 2L, dat_src_2pl, dat_tgt_2pl, common_2pl, src_latent = c(0.3, 1.5)
+)
+
+# 6. V20f: mixed format, 2PL + GPCM (K=4). Each form has 5 dichotomous + 3 polytomous common
+#    items and 5 + 3 unique items (J = 16 per form, N = 2000 per group).
+set.seed(20261206)
+N <- 2000L
+n_d <- 15L; n_p <- 9L
+a_d <- rlnorm(n_d, meanlog = 0.1, sdlog = 0.25)
+d_d <- rnorm(n_d, mean = 0, sd = 0.9)
+a_p <- rlnorm(n_p, meanlog = 0.0, sdlog = 0.2)
+st <- cbind(rnorm(n_p, -0.9, 0.3), rnorm(n_p, 0.0, 0.3), rnorm(n_p, 0.9, 0.3))
+d_p <- cbind(0, -a_p * st[, 1], -a_p * (st[, 1] + st[, 2]), -a_p * rowSums(st))
+mixed_form <- function(id, ip, mu, s2, names_d, names_p) {
+  th <- matrix(rnorm(N, mu, sqrt(s2)))
+  dd <- simdata(matrix(a_d[id]), matrix(d_d[id]), N, itemtype = "2PL", Theta = th)
+  dp <- simdata(matrix(a_p[ip]), d_p[ip, , drop = FALSE], N, itemtype = "gpcm", Theta = th)
+  out <- as.data.frame(cbind(dd, dp))
+  colnames(out) <- c(names_d, names_p)
+  out
+}
+common_mix_d <- sprintf("cd%02d", 1:5)
+common_mix_p <- sprintf("cp%02d", 1:3)
+dat_tgt_mix <- mixed_form(
+  c(1:5, 6:10), c(1:3, 4:6), 0.0, 1.0,
+  c(common_mix_d, sprintf("td%02d", 1:5)), c(common_mix_p, sprintf("tp%02d", 1:3))
+)
+dat_src_mix <- mixed_form(
+  c(1:5, 11:15), c(1:3, 7:9), 0.5, 1.2^2,
+  c(common_mix_d, sprintf("sd%02d", 1:5)), c(common_mix_p, sprintf("sp%02d", 1:3))
+)
+mix_types <- function(dat) {
+  setNames(ifelse(grepl("^.d", colnames(dat)), "2PL", "gpcm"), colnames(dat))
+}
+mix_cats <- function(dat) {
+  setNames(ifelse(grepl("^.d", colnames(dat)), 2L, 4L), colnames(dat))
+}
+cases[["v20f_mixed"]] <- run_linking_case(
+  "v20f_mixed",
+  "V20f: mixed 2PL + GPCM (K=4), J=16/form, 5+3 common, N=2000/group, source N(0.5, 1.2^2)",
+  mix_types(dat_tgt_mix), mix_types(dat_src_mix), mix_cats(dat_tgt_mix), mix_cats(dat_src_mix),
+  dat_src_mix, dat_tgt_mix, c(common_mix_d, common_mix_p)
 )
 
 res <- list(
@@ -521,7 +628,7 @@ res <- list(
     case = "v20_linking",
     description = paste(
       "V20: characteristic-curve IRT scale linking (Haebara / Stocking-Lord, non-symmetric and",
-      "symmetric) for 2PL, GRM, GPCM, and 3PL."
+      "symmetric) for 2PL, GRM, GPCM, 3PL, a non-standard source grid, and mixed 2PL + GPCM."
     ),
     note = paste(
       "mirt does not implement IRT scale linking; each form is calibrated with mirt and the",
