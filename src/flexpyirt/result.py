@@ -795,12 +795,6 @@ class FitResult:
         SpecificationError
             If ``indent`` is invalid or the result contains an unregistered model/prior type.
         """
-        if self._model.is_multidimensional:
-            # The factor structure is not part of the JSON schema yet (DESIGN.md §15.33); refuse
-            # rather than write a file that from_json cannot read back.
-            raise SpecificationError(
-                "to_json() does not support multidimensional models yet (DESIGN.md §15.33)."
-            )
         return dump_fit_result(self, path=path, indent=indent)
 
     @classmethod
