@@ -125,9 +125,10 @@ def _pattern_flags(
         a = xi[g_p, :, 0]
         obs = (y_f >= 0) & (a != 0.0)
         if isinstance(fam.kernel, NominalKernel) and fam.kernel.n_cat > 2:
-            # ML / WLE scoring is unidimensional only (FitResult.score), so the slope is the
-            # single parameter at index 0 and ak1..ak{K-2} follow it.
-            assert fam.kernel.n_factors == 1, "nominal extreme-pattern flags are 1-D only"
+            # D = 1 only: on this branch ML / WLE scoring is unidimensional (FitResult.score), so
+            # the slope is the single parameter at index 0 and ak1..ak{K-2} follow it. A
+            # multidimensional ML / WLE path must not reuse this slicing (slopes a1..aD come
+            # first, and extremes then depend on the direction in theta-space).
             n_ak = fam.kernel.n_cat - 2
             n_j = xi.shape[1]
             ak = jnp.concatenate(
