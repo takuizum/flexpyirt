@@ -34,6 +34,7 @@ from flexpyirt.items import (
     GradedKernel,
     ItemKernel,
     ItemModel,
+    Nominal,
     Rasch,
     ThreePL,
     _asymptote_starts,
@@ -231,6 +232,11 @@ def _non_slope_starts(item_model: ItemModel, item: np.ndarray, a_eff: float) -> 
         return d
     if isinstance(item_model, (GPCM, PCM)):
         return _gpcm_intercept_starts(item, item_model.n_cat, a_eff)
+    if isinstance(item_model, Nominal):
+        return [
+            *(float(k) for k in range(1, item_model.n_cat - 1)),
+            *_gpcm_intercept_starts(item, item_model.n_cat, a_eff),
+        ]
     return [_intercept_start(p, a_eff)]
 
 

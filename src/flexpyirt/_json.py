@@ -32,7 +32,7 @@ from flexpyirt._compile import (
 )
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import SpecificationError
-from flexpyirt.items import GPCM, GRM, PCM, FourPL, ItemModel, Rasch, ThreePL, TwoPL
+from flexpyirt.items import GPCM, GRM, PCM, FourPL, ItemModel, Nominal, Rasch, ThreePL, TwoPL
 from flexpyirt.latent import EmpiricalHistogram, LatentSpec, Normal
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
@@ -282,6 +282,7 @@ _ITEM_MODEL_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
     GRM: _serialize_polytomous_item,
     GPCM: _serialize_polytomous_item,
     PCM: _serialize_polytomous_item,
+    Nominal: _serialize_polytomous_item,
 }
 
 _ITEM_MODEL_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], ItemModel]] = {
@@ -292,6 +293,7 @@ _ITEM_MODEL_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], ItemModel]]
     GRM.name: _make_polytomous_item_loader(GRM),
     GPCM.name: _make_polytomous_item_loader(GPCM),
     PCM.name: _make_polytomous_item_loader(PCM),
+    Nominal.name: _make_polytomous_item_loader(Nominal),
 }
 
 

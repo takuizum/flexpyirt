@@ -727,7 +727,11 @@ class FitResult:
         """Concise description of item models in the specification."""
         counts: dict[str, int] = {}
         for _, m in self._model.items:
-            tag = f"{m.name}({m.kernel.n_cat})" if m.name in ("GRM", "GPCM", "PCM") else m.name
+            tag = (
+                f"{m.name}({m.kernel.n_cat})"
+                if m.name in ("GRM", "GPCM", "PCM", "Nominal")
+                else m.name
+            )
             counts[tag] = counts.get(tag, 0) + 1
         if len(counts) == 1:
             return next(iter(counts))

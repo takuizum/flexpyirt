@@ -16,7 +16,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from flexpyirt._core import CompiledProblem, FamilyBlock, _expand, _log_joint, eap
-from flexpyirt.items import ItemKernel
+from flexpyirt.items import ItemKernel, NominalKernel
 
 __all__ = [
     "map_scores",
@@ -124,12 +124,31 @@ def _pattern_flags(
         # Items with a == 0 carry zero information about theta and are treated like missing.
         a = xi[g_p, :, 0]
         obs = (y_f >= 0) & (a != 0.0)
-        top = fam.kernel.n_cat - 1
-        low_cat = jnp.where(a > 0.0, 0, top)
-        high_cat = jnp.where(a > 0.0, top, 0)
+        if isinstance(fam.kernel, NominalKernel) and fam.kernel.n_cat > 2:
+            n_ak = fam.kernel.n_cat - 2
+            n_j = xi.shape[1]
+            ak = jnp.concatenate(
+                [
+                    jnp.zeros((n_j, 1), dtype=xi.dtype),
+                    xi[g_p, :, 1 : 1 + n_ak],
+                    jnp.full((n_j, 1), float(fam.kernel.n_cat - 1), dtype=xi.dtype),
+                ],
+                axis=1,
+            )
+            s = a[:, None] * ak  # (J_f, K_f)
+            y_safe = jnp.maximum(y_f, 0)
+            s_obs = s[jnp.arange(n_j), y_safe]
+            is_low = obs & (s_obs == jnp.min(s, axis=1))
+            is_high = obs & (s_obs == jnp.max(s, axis=1))
+        else:
+            top = fam.kernel.n_cat - 1
+            low_cat = jnp.where(a > 0.0, 0, top)
+            high_cat = jnp.where(a > 0.0, top, 0)
+            is_low = obs & (y_f == low_cat)
+            is_high = obs & (y_f == high_cat)
         n_obs = n_obs + jnp.sum(obs, dtype=jnp.int32)
-        n_low = n_low + jnp.sum(obs & (y_f == low_cat), dtype=jnp.int32)
-        n_high = n_high + jnp.sum(obs & (y_f == high_cat), dtype=jnp.int32)
+        n_low = n_low + jnp.sum(is_low, dtype=jnp.int32)
+        n_high = n_high + jnp.sum(is_high, dtype=jnp.int32)
     all_missing = n_obs == 0
     all_low = (n_obs > 0) & (n_low == n_obs)
     all_high = (n_obs > 0) & (n_high == n_obs)
