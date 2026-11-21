@@ -23,6 +23,9 @@ English | [日本語](VALIDATION.ja.md)
 | EAP | 1e-5 |
 | MAP / ML / WLE ($\theta$) | 1e-4 |
 | MAP / ML / WLE (SE) | 1e-3 (relative) |
+| Scale linking $(A, B)$ / criterion, on identical item estimates | 1e-9 / 1e-9 (relative) |
+| Scale linking delta-method SE / `vcov`, on identical estimates and covariance | 1e-5 (relative) |
+| Scale linking $(A, B)$ / criterion / SE, end-to-end (calibration + linking) | 1e-6 / 1e-5 (relative) / 1e-3 (relative) |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -44,7 +47,7 @@ English | [日本語](VALIDATION.ja.md)
 | V16 | Equality constraints across items (LSAT7 common slope; 2PL + graded with cross-model constraints; two groups with anchors and a common slope) | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V17 | DIF likelihood-ratio tests on the V4 data (`add` for `a`+`d` and for `d`; `drop` for `a`+`d` from the fully invariant model) | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
-| V20 | Scale linking: Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara SEs (2PL, GRM, GPCM, 3PL) | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` | M5 |
+| V20 | Scale linking: Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara SEs (2PL, GRM, GPCM, 3PL, non-standard source grid, mixed 2PL + GPCM) | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -360,29 +363,50 @@ English | [日本語](VALIDATION.ja.md)
   calibrates two separate forms with common items in `mirt` (`optimizer = "NR"`,
   `accelerate = "none"`, `TOL = 1e-10`, $N(0, 1)$, 61 equispaced nodes on $[-6, 6]$,
   `SE.type = "Oakes"`; target $\theta\sim N(0, 1)$, source $\theta\sim N(0.5, 1.2^2)$, true
-  $A = 1.2, B = 0.5$) and computes reference $(A, B)$, criterion values, and Ogasawara (2001)
+  $A = 1.2, B = 0.5$; the V20e source form is calibrated under a fixed $N(0.3, 1.5)$, so the
+  symmetric reverse term uses a non-standard source grid) and computes reference $(A, B)$,
+  criterion values, and Ogasawara (2001)
   delta-method SEs in base R directly from the formulas (Haebara, 1980; Stocking & Lord, 1983;
   Kim & Lee, 2006) using `mirt::probtrace()` / `mirt::expected.item()` and `optim(BFGS)` + `nlm`
-  with central-FD Newton polish (`max |grad| <= 1.9e-11`). Four cases are checked across all four
-  variants (Stocking–Lord and Haebara, non-symmetric and symmetric) both on identical mirt item
-  estimates (separating linking error from calibration error) and end-to-end (fitting both forms
-  in flexpyirt and linking):
-  - **V20a (`v20a_2pl`, 2PL, $J=20$/form, 10 common, $N=2000$/group)**: direct `max |Δ(A, B)| = 9.7e-13`,
-    criterion rel `1.6e-13`; end-to-end `max |Δ(A, B)| = 1.9e-10`, criterion rel `2.6e-9`,
-    Ogasawara SE rel `2.2e-8`.
+  with central-FD Newton polish (`max |grad| <= 1.9e-11`). Haebara sums over all categories,
+  including both categories of a dichotomous item (Kim & Lee, 2006). Six cases are checked across
+  all four variants (Stocking–Lord and Haebara, non-symmetric and symmetric) in three ways:
+  (i) linking on identical mirt item estimates (separating linking error from calibration error);
+  (ii) delta-method SEs from mirt's own common-item estimates and Oakes covariance blocks
+  (separating the SE formula from calibration and covariance differences); and (iii) end-to-end
+  (fitting both forms in flexpyirt and linking). The Newton solver is also run from four far-off
+  starts ($(A, B) = (0.25, -3), (4, 3), (0.5, 2.5), (3, -2)$) on every case and variant and must
+  reach the reference optimum within 1e-9. No external R linking package (e.g. `plink`,
+  `equateIRT`) is used: the criteria and SEs are checked against an independent implementation
+  of the same published formulas, not against third-party software.
+  - **V20a (`v20a_2pl`, 2PL, $J=20$/form, 10 common, $N=2000$/group)**: direct `max |Δ(A, B)| = 9.6e-13`,
+    criterion rel `1.6e-13`, SE rel on mirt's covariance `2.2e-8`; end-to-end
+    `max |Δ(A, B)| = 1.9e-10`, criterion rel `2.6e-9`, Ogasawara SE rel `2.2e-8`.
   - **V20b (`v20b_grm`, GRM $K=4$, $J=16$/form, 8 common, $N=2000$/group)**: direct `max |Δ(A, B)| = 9.1e-13`,
-    criterion rel `1.0e-13`; end-to-end `max |Δ(A, B)| = 9.5e-10`, criterion rel `2.3e-9`,
-    Ogasawara SE rel `8.1e-9`.
+    criterion rel `1.0e-13`, SE rel on mirt's covariance `8.3e-9`; end-to-end
+    `max |Δ(A, B)| = 9.5e-10`, criterion rel `2.2e-9`, Ogasawara SE rel `8.1e-9`.
   - **V20c (`v20c_gpcm`, GPCM $K=4$, $J=16$/form, 8 common, $N=2000$/group)**: direct `max |Δ(A, B)| = 2.5e-12`,
-    criterion rel `9.5e-14`; end-to-end `max |Δ(A, B)| = 1.4e-9`, criterion rel `7.1e-10`,
-    Ogasawara SE rel `1.6e-8`.
+    criterion rel `9.5e-14`, SE rel on mirt's covariance `1.6e-8`; end-to-end
+    `max |Δ(A, B)| = 1.4e-9`, criterion rel `7.1e-10`, Ogasawara SE rel `1.6e-8`.
   - **V20d (`v20d_3pl`, 3PL, $J=16$/form, 8 common, $N=4000$/group, interior $g$)**: direct
-    `max |Δ(A, B)| = 3.6e-12`, criterion rel `1.2e-13`; end-to-end `max |Δ(A, B)| = 3.0e-10`,
-    criterion rel `5.2e-9`, Ogasawara SE rel `9.4e-8`.
+    `max |Δ(A, B)| = 3.6e-12`, criterion rel `1.2e-13`, SE rel on mirt's covariance `9.4e-8`;
+    end-to-end `max |Δ(A, B)| = 3.0e-10`, criterion rel `5.2e-9`, Ogasawara SE rel `9.4e-8`.
+  - **V20e (`v20e_2pl_srcgrid`, V20a data, source calibrated under fixed $N(0.3, 1.5)$)**: direct
+    `max |Δ(A, B)| = 9.1e-13`, criterion rel `1.4e-13`, SE rel on mirt's covariance `3.4e-9`;
+    end-to-end `max |Δ(A, B)| = 4.2e-10`, criterion rel `7.0e-10`, Ogasawara SE rel `3.4e-9`.
+  - **V20f (`v20f_mixed`, mixed 2PL + GPCM $K=4$, $J=16$/form, 5 + 3 common, $N=2000$/group)**:
+    direct `max |Δ(A, B)| = 2.0e-11`, criterion rel `6.2e-14`, SE rel on mirt's covariance
+    `2.1e-8`; end-to-end `max |Δ(A, B)| = 1.3e-10`, criterion rel `3.6e-10`, Ogasawara SE rel
+    `2.1e-8`.
+  Validated item models for linking are therefore 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM; Rasch,
+  4PL and PCM share these kernels and are covered by exact-recovery unit tests only.
   Tests: `tests/test_mirt_m5_linking.py`. Unit tests (all 7 unidimensional models, ICC/threshold
   invariance, exact identity & recovery, symmetric reversibility, custom grids, EH/multiple-group,
-  `transform_theta`, finite-difference gradient & Ogasawara SE checks vs finite differences and
-  parametric bootstrap): `tests/test_m5_linking.py`.
+  joint covariance when one multiple-group fit is both source and target, no SEs without
+  convergence, Rasch/PCM slope $1/A$, `transform_theta`, finite-difference gradient & Ogasawara SE
+  checks vs finite differences and a Monte Carlo linearization check that re-solves the linking
+  for parameter draws from $N(\hat\eta, \Sigma)$ with fixed weights — not a bootstrap of the
+  calibrations): `tests/test_m5_linking.py`.
 
 ## Validation beyond agreement
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number

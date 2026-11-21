@@ -570,10 +570,12 @@ link(source, target, *, items=None, method="stocking-lord", symmetric=False,
 
 Link a separately calibrated unidimensional `source` (new) scale onto `target` (base) via common
 items by finding linear constants $(A, B)$ ($A > 0$) for $\theta^* = A\theta + B$
-([guide section 15](guide.md#15-scale-linking), [DESIGN §16.5](DESIGN.md)). Supports all
-unidimensional item models (2PL, Rasch, 3PL, 4PL, GRM, GPCM, PCM) and mixed-format tests.
-Derivatives for Newton optimization and delta-method standard errors (Ogasawara, 2001) come from
-JAX automatic differentiation.
+([guide section 15](guide.md#15-scale-linking), [DESIGN §16.5](DESIGN.md)). Validated (V20) for
+2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items; Rasch, 4PL and PCM share these kernels and
+are covered by unit tests only. Derivatives for Newton optimization and delta-method standard
+errors (Ogasawara, 2001) come from JAX automatic differentiation. SEs assume independent
+calibrations (the joint covariance is used when one multiple-group fit is both `source` and
+`target`), hold the quadrature weights fixed, and are not reported without convergence.
 
 | Argument | Type | Description |
 |---|---|---|
@@ -613,7 +615,7 @@ Returned by `link()`. Immutable.
 | `grad_norm` | float | $\|\nabla F(A, B)\|_\infty$ at `(A, B)` |
 | `common_items` | tuple[str, ...] | Source item names used as common items |
 | `items` | DataFrame | All source items transformed onto the target scale (`item`, `model`, `common`, internal slope–intercept parameters and display IRT thresholds `b` / `bk`); directly usable with `Model.fix_from()` |
-| `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | Transform source-scale ability scores via $\theta^* = A\theta + B$ (and `se` $\mapsto A\,\mathrm{se}$, or `pv1..` columns on a scoring DataFrame) |
+| `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | Transform source-scale ability scores via $\theta^* = A\theta + B$ (`theta` and all `pv1..` columns of a scoring DataFrame; `se` $\mapsto A\,\mathrm{se}$, excluding linking error) |
 | `summary(*, digits=4)` | str | Readable plain-text summary (Jupyter displays HTML via `_repr_html_()`) |
 
 ---

@@ -1021,6 +1021,11 @@ data-independent shapes (§15.21).
    hand-written derivatives:
    - **Haebara** (Haebara, 1980; polytomous form Kim & Lee, 2006):
      $H_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} \sum_{j\in\mathcal{C}} \sum_{k=0}^{K_j-1} [P_{jk}^{\mathrm{tgt}}(\theta_q^{(t)}) - P_{jk}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$.
+     The sum runs over all categories, including both categories of a dichotomous item (the
+     Kim & Lee, 2006 convention), so a dichotomous item contributes $2[P^{\mathrm{tgt}} - P^{\mathrm{src}}]^2$,
+     twice Haebara's (1980) original term: the solution is unchanged when all common items are
+     dichotomous, reported criterion values are doubled, and in mixed-format anchors dichotomous
+     items carry the Kim & Lee weight relative to polytomous items.
    - **Stocking–Lord** (Stocking & Lord, 1983; polytomous form Kim & Lee, 2006):
      $\mathrm{SL}_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} [\mathrm{TCC}^{\mathrm{tgt}}(\theta_q^{(t)}) - \mathrm{TCC}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$,
      where $\mathrm{TCC}(\theta) = \sum_{j\in\mathcal{C}}\sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)$.
@@ -1035,16 +1040,37 @@ data-independent shapes (§15.21).
    $B_0 = \bar b^{\mathrm{tgt}} - A_0 \bar b^{\mathrm{src}}$), a jitted, shape-static 2-D bounded
    monotone Newton minimizer (`_linking.solve_linking`, `lax.while_loop`) uses `jax.grad` and
    `jax.hessian` on `LinkingProblem` pytrees with $A > 0$ enforced by halfway-to-bound projection,
-   Levenberg–Marquardt fallback when the Hessian is not positive definite, 40 parallel backtracking
-   step sizes, and a 1-ULP gradient-polish step near the optimum.
+   Levenberg–Marquardt fallback when the Hessian is not positive definite, the Euclidean step
+   norm capped at `_MAX_STEP = 1` (so a poor start cannot jump onto a flat plateau where the curves
+   no longer overlap), 40 parallel backtracking step sizes, and a 1-ULP gradient-polish step near
+   the optimum. Convergence is $\|\nabla F\|_\infty \le$ `tol` (absolute, default $10^{-10}$, not
+   rescaled: $F$ uses weights summing to 1 and grows with the number of common items); a step
+   that no longer decreases $F$ before reaching `tol` ends the loop with `converged = False` and a
+   `ConvergenceWarning`. Mean/Mean is only a starting value: it sums absolute slopes and pools
+   every display threshold of every common item, so polytomous items weigh more than in per-item
+   averages.
    **Standard errors (Ogasawara, 2001)**: from the stationarity condition
    $g(c, \eta_s, \eta_t) = \nabla_c F(c, \eta_s, \eta_t) = 0$ at $\hat c = (\hat A, \hat B)$, the
    implicit function theorem gives $J_s = -H_{cc}^{-1} H_{c,\eta_s}$ and
    $J_t = -H_{cc}^{-1} H_{c,\eta_t}$ via `jax.jacfwd(g, 0)` and `jax.jacrev(g, 1/2)` over the
    common items' unique free parameters (respecting fixed parameters and shared `free_id`s), so
-   $\mathrm{Cov}(\hat A, \hat B) = J_s \Sigma_s J_s^\top + J_t \Sigma_t J_t^\top$ treating the
-   quadrature weights as fixed. Unavailable `vcov` on a side with free common-item parameters, or a
-   non-PD $H_{cc}$, yields `vcov = None` and `NaN` SEs.
+   $\mathrm{Cov}(\hat A, \hat B) = J_s \Sigma_s J_s^\top + J_t \Sigma_t J_t^\top + J_s \Sigma_{st} J_t^\top + J_t \Sigma_{st}^\top J_s^\top$.
+   Separate `FitResult`s are treated as independent calibrations ($\Sigma_{st} = 0$); when the
+   same `FitResult` is passed as `source` and `target` (two groups of one multiple-group fit),
+   $\Sigma_{st}$ is the cross block of its joint `vcov`, so equality-constrained anchors shared by
+   both groups give $(A, B) = (1, 0)$ with zero covariance. Distinct `FitResult`s fitted to
+   overlapping data are not detected. **Quadrature weights are held fixed.** By default they are
+   the fitted latent distributions (estimates when a group's mean/variance is free or the
+   distribution is EH), but this is exact to first order under a correctly specified model:
+   $\partial g/\partial w_q$ is a weighted sum of curve residuals times curve derivatives and the
+   residuals vanish at the population solution, so $H_{c,w} = 0$ there; under item parameter drift
+   or DIF (non-zero population residuals) the weights' sampling variability is ignored. SEs are
+   computed only at a converged solution; non-convergence, unavailable `vcov` on a side with free
+   common-item parameters, or a non-PD $H_{cc}$ yields `vcov = None` and `NaN` SEs.
+   **Transformed items and scores**: `LinkResult.items` holds every source item on the target
+   scale; fixed-slope models (Rasch, PCM) get $a^* = 1/A$ (not 1), and `Model.fix_from` fixes
+   that slope. `transform_theta` maps `theta` and every `pv*` column by $A\theta + B$ and `se` by
+   $A\,\mathrm{se}$, treating $(A, B)$ as known (linking error is not added).
    **Validation in the Python shell**: multidimensional fits, multiple-group fits without explicit
    `source_group` / `target_group`, mismatched item kernels or category counts on common items, and
    invalid nodes/weights raise `SpecificationError`.

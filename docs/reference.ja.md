@@ -525,8 +525,10 @@ link(source, target, *, items=None, method="stocking-lord", symmetric=False,
 
 別々に推定した 1 次元の `source`（新フォーム）尺度を、共通項目を通じて `target`（基準フォーム）尺度へ結ぶ
 線形変換 $\theta^* = A\theta + B$（$A > 0$）の係数 $(A, B)$ を推定する（[ガイド 15 節](guide.ja.md#15-尺度リンキング)、
-[設計書 §16.5](DESIGN.ja.md)）。全 1 次元項目モデル（2PL・Rasch・3PL・4PL・GRM・GPCM・PCM）および混在フォームに
-対応。Newton 最適化と Ogasawara (2001) のデルタ法標準誤差の微分は JAX の自動微分で計算する。
+[設計書 §16.5](DESIGN.ja.md)）。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目について照合済み（V20）で、
+Rasch・4PL・PCM は同じカーネルを共有し単体テストでのみ確認している。Newton 最適化と Ogasawara (2001) のデルタ法
+標準誤差の微分は JAX の自動微分で計算する。SE は独立な推定を仮定し（1 つの多母集団推定を `source` と `target` の
+両方に使うときは同時共分散を使う）、求積重みを固定し、収束しないときは報告しない。
 
 | 引数 | 型 | 説明 |
 |---|---|---|
@@ -565,7 +567,7 @@ link(source, target, *, items=None, method="stocking-lord", symmetric=False,
 | `grad_norm` | float | `(A, B)` での $\|\nabla F(A, B)\|_\infty$ |
 | `common_items` | tuple[str, ...] | 共通項目として使用した `source` 側の項目名 |
 | `items` | DataFrame | `source` の全項目を基準尺度へ変換した表（`item`, `model`, `common`、内部の傾き–切片パラメタと表示用 IRT 閾値 `b` / `bk`）。そのまま `Model.fix_from()` に渡せる |
-| `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | 能力値を $\theta^* = A\theta + B$ で変換（採点 DataFrame では `se` を $A\,\mathrm{se}$、`pv1..` 列も変換） |
+| `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | 能力値を $\theta^* = A\theta + B$ で変換（採点 DataFrame の `theta` と全 `pv1..` 列。`se` は $A\,\mathrm{se}$ でリンキング誤差を含まない） |
 | `summary(*, digits=4)` | str | 読みやすいテキスト要約（Jupyter では `_repr_html_()` で HTML 表示） |
 
 ---

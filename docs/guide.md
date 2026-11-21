@@ -701,14 +701,20 @@ print(linked_sl.items.head(4))
 print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 ```
 
-- All unidimensional item models (2PL, Rasch, 3PL, 4PL, GRM, GPCM, PCM) and mixed-format forms are
-  supported; common items must share the same kernel and category count on both sides.
+- Common items must share the same kernel and category count on both sides. Linking is validated
+  against base-R references (V20) for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items; Rasch,
+  4PL and PCM items use the same kernels and are covered by unit tests only. Haebara sums over
+  all categories (Kim & Lee, 2006), so a dichotomous item counts twice Haebara's original term.
+- Standard errors assume independent calibrations. Passing the same multiple-group fit as
+  `source` and `target` (with `source_group=` / `target_group=`) uses its joint covariance; no SEs
+  are reported when the optimizer did not converge.
 - Pass `items={source_name: target_name}` if common items have different names in the two forms,
   `nodes=` / `weights=` to override the default quadrature grid (the fitted latent distribution),
   and `source_group=` / `target_group=` when linking a group from a multiple-group fit.
 - `linked.items` transforms every source item onto the target scale (and works directly with
-  `Model.fix_from()`); `linked.transform_theta()` transforms scalars, arrays, Series, or scoring
-  DataFrames (including `se` and plausible values `pv1..`).
+  `Model.fix_from()`; Rasch/PCM items get slope $1/A$); `linked.transform_theta()` transforms
+  scalars, arrays, Series, or scoring DataFrames (`theta`, `se`, and plausible values `pv1..`),
+  treating $(A, B)$ as known (the transformed `se` excludes linking error).
 
 ## 16. Errors and warnings
 

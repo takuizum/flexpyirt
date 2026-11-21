@@ -659,13 +659,17 @@ print(linked_sl.items.head(4))
 print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 ```
 
-- すべての 1 次元項目モデル（2PL・Rasch・3PL・4PL・GRM・GPCM・PCM）および混在フォームに対応している。
-  共通項目は両側で同じ項目カーネル・カテゴリ数でなければならない。
+- 共通項目は両側で同じ項目カーネル・カテゴリ数でなければならない。リンキングは 2PL・3PL・GRM・GPCM と
+  2PL + GPCM 混在の共通項目について素の R 参照値（V20）と照合済みで、Rasch・4PL・PCM は同じカーネルを使い単体テストでのみ
+  確認している。Haebara 法は全カテゴリで和をとる（Kim & Lee, 2006）ため、2 値項目は Haebara の原式の 2 倍に数えられる。
+- 標準誤差は独立な推定を仮定する。同じ多母集団推定を `source` と `target` に渡す（`source_group=` / `target_group=`
+  を指定）と同時共分散を使う。最適化が収束しなかったときは SE を報告しない。
 - 共通項目の名前がフォーム間で異なるときは `items={source_name: target_name}` の辞書を渡す。
   既定の求積格子（推定済み潜在分布）を変えるには `nodes=` / `weights=` を指定し、多母集団結果の群を結ぶときは
   `source_group=` / `target_group=` で群を選ぶ。
-- `linked.items` は `source` の全項目を基準尺度へ変換した表で、そのまま `Model.fix_from()` に渡せる。
-  `linked.transform_theta()` はスカラー・配列・Series・採点 DataFrame（`se` や plausible values `pv1..` を含む）を変換する。
+- `linked.items` は `source` の全項目を基準尺度へ変換した表で、そのまま `Model.fix_from()` に渡せる（Rasch・PCM の
+  項目は傾きが $1/A$ になる）。`linked.transform_theta()` はスカラー・配列・Series・採点 DataFrame（`theta`、`se`、
+  plausible values `pv1..`）を変換し、$(A, B)$ を既知として扱う（変換後の `se` はリンキング誤差を含まない）。
 
 ## 16. エラーと警告
 
