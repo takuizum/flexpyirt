@@ -17,6 +17,7 @@ from jax import Array
 
 from flexpyirt import _core, _scoring
 from flexpyirt._compile import LATENT_ITEM, coerce_groups, coerce_responses, compile_problem
+from flexpyirt._precision import check_x64
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
 from flexpyirt.items import ItemKernel
 from flexpyirt.quadrature import Quadrature
@@ -426,10 +427,13 @@ class FitResult:
 
         Raises
         ------
+        PrecisionError
+            If JAX is not configured for 64-bit floating point.
         SpecificationError
             If ``method`` is unknown, ``key`` is missing or invalid for ``"PV"``, ``key`` is
             supplied for a non-PV method, or ``n_draws`` is not a positive integer.
         """
+        check_x64()
         if method not in _SCORE_METHODS:
             raise SpecificationError(
                 f"Unsupported scoring method {method!r}; use one of {_SCORE_METHODS}."

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+import textwrap
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -99,6 +104,51 @@ def test_score_validation_errors(fitted_2pl: tuple[FitResult, pd.DataFrame]) -> 
     for det_method in ("EAP", "MAP", "ML", "WLE"):
         with pytest.raises(SpecificationError, match="only used with method='PV'"):
             res.score(small, method=det_method, key=key)
+
+
+def test_score_raises_precision_error_without_x64() -> None:
+    """FitResult.score() checks float64 at entry and raises PrecisionError when x64 is off."""
+    code = textwrap.dedent(
+        """
+        import jax
+        import numpy as np
+        import pandas as pd
+        import flexpyirt
+        from flexpyirt.errors import PrecisionError
+
+        jax.config.update("jax_enable_x64", True)
+        items = ["i1", "i2"]
+        df = pd.DataFrame([[0.0, 0.0], [1.0, 1.0], [1.0, 0.0], [0.0, 1.0]], columns=items)
+        spec = flexpyirt.Model.uniform(flexpyirt.TwoPL(), items=items)
+        table = spec.parameter_table(df)
+        table["value"] = [
+            1.0 if p == "a" else (0.0 if p == "d" else (0.0 if p == "mean" else 1.0))
+            for p in table["param"]
+        ]
+        table["free"] = False
+        res = flexpyirt.fit(spec, df, table=table, se=None)
+
+        jax.config.update("jax_enable_x64", False)
+        assert not jax.config.jax_enable_x64
+        for method in ("EAP", "MAP", "ML", "WLE", "PV"):
+            kwargs = {"key": jax.random.key(0)} if method == "PV" else {}
+            try:
+                res.score(df, method=method, **kwargs)
+            except PrecisionError as exc:
+                assert "jax_enable_x64" in str(exc)
+            else:
+                raise SystemExit(f"PrecisionError not raised for method={method!r}")
+        """
+    )
+    env = {**os.environ, "JAX_ENABLE_X64": "0", "JAX_PLATFORMS": "cpu"}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
 
 
 # ---- MAP vs ML & analytic checks -----------------------------------------------------------
