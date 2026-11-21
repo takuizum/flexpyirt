@@ -186,12 +186,13 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 ### 4.8 Standard errors
 - **Decision**: the default is Oakes' (1999) identity
   $$I(\hat\eta)=-\Big[\tfrac{\partial^2 Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta^\top}+\tfrac{\partial^2 Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta'^\top}\Big]_{\eta=\eta'=\hat\eta}$$
-  computed with `jax.jacfwd(jax.grad(...))`, where
-  $Q_{\mathrm{post}}(\eta\mid\eta')=Q(\eta\mid\eta')+\log\pi(\eta)$ ("E-step weights computed at
-  $\eta'$, complete-data likelihood plus log prior evaluated at $\eta$").
+  where $Q_{\mathrm{post}}(\eta\mid\eta')=Q(\eta\mid\eta')+\log\pi(\eta)$ ("E-step weights computed
+  at $\eta'$, complete-data likelihood plus log prior evaluated at $\eta$"). All derivatives come
+  from JAX autodiff, exploiting the block structure of the first term and pattern-chunked category
+  co-occurrences for the cross term while reusing a single E-step (§15.18).
 - Alternatives: the observed (posterior) information $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$ by
-  `jax.hessian` directly (the simplest for small problems; also used to check Oakes), cross-product
-  ($\sum_p c_p s_p s_p^\top$), sandwich.
+  chunked forward-over-reverse autodiff (`jax.linearize(jax.grad(...))` over basis batches; also
+  used to check Oakes), cross-product ($\sum_p c_p s_p s_p^\top$), sandwich.
 - With MAP, both `oakes` and `hessian` add $-\nabla^2_\eta\log\pi(\hat\eta)$ to the information
   matrix and remain mathematically identical. Fixed parameters are not in $\eta$ and are excluded
   automatically.
@@ -528,6 +529,47 @@ estimated latent distribution as the prior. EAP also returns the posterior SD.
     `FlexpyirtWarning` when at least one free parameter has a prior. `information_oakes` adds
     `log_prior(prob, e)` to $Q(\eta\mid\eta')$ and `information_hessian` differentiates
     `log_posterior(prob, e)`, adding $-\nabla^2_\eta\log\pi(\hat\eta)$ identically to both.
+18. **Structured Oakes and chunked Hessian performance (M3, §4.8, §9)**: the initial
+    `information_oakes` ran `jax.jacfwd(jax.grad(q, argnums=0), argnums=(0, 1))(eta, eta)` over the
+    full problem, pushing all $n_{\text{free}}$ tangents simultaneously through the E-step and
+    materializing `(n_free, P, Q)` intermediates alongside dense $J$-item einsums per direction.
+    On a 2PL with $N=20{,}000, J=40$ ($19{,}926$ unique patterns padded to $P=32{,}768$, $Q=61$,
+    $n_{\text{free}}=80$), it took ~2.66 s warm (5.46 s cold) and ~6.11 GB peak RSS delta while EM
+    itself took ~0.43 s. The structured implementation keeps Oakes' identity exact and derives every
+    kernel, latent, and prior derivative strictly via JAX autodiff:
+    - **Single E-step**: `_e_step_details` computes `counts` and posterior responsibilities $h_{pq}$
+      once and is shared with `e_step`.
+    - **Block-structured first term** (`_oakes_own_hessian`): $\partial^2 Q_{\mathrm{post}}/\partial\eta\,\partial\eta^\top$
+      is evaluated block-by-block with `vmap(jax.hessian)` over each item's local parameter slots
+      (matching `m_step`, never differentiating fixed boundary coordinates), `vmap(jax.hessian)`
+      over each group's latent `(mean, var)`, and diagonal `vmap(jax.grad(jax.grad(...)))` over
+      `prob.priors`, scatter-adding every block into `(n_free, n_free)`.
+    - **Structured cross term** (`_oakes_cross_hessian`): writing
+      $Q(\eta\mid\eta')=\sum_p c_p\sum_q h_{pq}(\eta')\,\psi_{pq}(\eta)$ with
+      $h_{pq}(\eta')=\operatorname{softmax}_q(\psi_{pq}(\eta'))$ yields
+      $\partial^2 Q/\partial\eta\,\partial\eta'^\top|_{\eta'=\eta}=\sum_p c_p(\sum_q h_{pq}s_{pq}s_{pq}^\top-\bar s_p\bar s_p^\top)$
+      ($s_{pq}=\nabla_\eta\psi_{pq}$, $\bar s_p=\sum_q h_{pq}s_{pq}$; Oakes, 1999; Louis, 1982).
+      Per-item and latent score tables come from `jax.jacfwd` and are centered across $q$ per
+      `(g, j, k, s)` using $\bar r$ weights (algebraically invariant in $s_{pq}-\bar s_p$ while
+      preventing cancellation). For each group, a pattern-chunked `lax.scan` skips zero-count
+      padding chunks via `lax.cond` and accumulates node-level category co-occurrences
+      $C_{g,q}=\sum_{p\in g}c_p h_{pq}x_p x_p^\top$ and $\sum_{p\in g}c_p\bar s_p\bar s_p^\top$
+      (bounding the `(Q, B, D)` workspace to ~32 MB, without materializing `(P, Q, n_free)` or
+      `(P, D)`), followed by a `lax.scan` over $q$ contracting $\sum_q L_{g,q}^\top C_{g,q} L_{g,q}$
+      without materializing `(G, Q, D, n_free)`.
+    - **Chunked direct Hessian**: `information_hessian` evaluates
+      `jax.linearize(jax.grad(log_posterior), eta)` on batches of 8 basis vectors via `lax.scan`
+      instead of all $n_{\text{free}}$ directions at once.
+    - **Indicative measurements** (same 2PL $N=20{,}000, J=40$ case, CPU, median of 5 warm runs in
+      isolated subprocesses, measured on a shared machine):
+      `information_oakes`: warm **2.658 s → 0.0843 s** (~31.5× faster), cold **5.464 s → 0.365 s**
+      (~15× faster), peak RSS delta **6,110 MB → 9.6 MB**;
+      `information_hessian`: warm **0.768 s → 0.602 s** (~1.28× faster), cold **1.215 s → 0.898 s**,
+      peak RSS delta **4,991 MB → 612 MB**.
+      Across V1–V11 (2PL, Rasch, GRM, 2-group anchors, FIPC, missing data, 3PL, GPCM, PCM, MAP
+      priors), agreement with the previous `jacfwd(grad(q))` implementation is
+      $\max|\Delta I|/\max|I|\le 8.8\times 10^{-16}$ (elementwise $\le 3.1\times 10^{-12}$;
+      `tests/test_oakes.py`).
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.

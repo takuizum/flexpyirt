@@ -148,10 +148,14 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 ### 4.8 標準誤差
 - **決定**: 既定は Oakes (1999) の恒等式
   $$I(\hat\eta)=-\Big[\tfrac{\partial^2 Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta^\top}+\tfrac{\partial^2 Q_{\mathrm{post}}(\eta\mid\eta')}{\partial\eta\,\partial\eta'^\top}\Big]_{\eta=\eta'=\hat\eta}$$
-  を `jax.jacfwd(jax.grad(...))` で計算する。ここで $Q_{\mathrm{post}}(\eta\mid\eta')=Q(\eta\mid\eta')+\log\pi(\eta)$
+  で計算する。ここで $Q_{\mathrm{post}}(\eta\mid\eta')=Q(\eta\mid\eta')+\log\pi(\eta)$
   （「E-step の重みを $\eta'$ で計算し、完全データ尤度と対数事前分布を $\eta$ で評価する」2 引数関数）。
-- 代替: 直接 `jax.hessian` による観測（事後）情報行列 $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$（小規模なら最も素直。
-  Oakes の検証にも使う）、cross-product（$\sum_p c_p s_p s_p^\top$）、sandwich。
+  微分はすべて JAX の自動微分で得つつ、1 回の E-step を再利用し、第 1 項のブロック構造と第 2 項の
+  パターン分割カテゴリ共起構造を活用する（§15.18）。
+- 代替: 基底ベクトルをチャンク分割した前向き×後ろ向き自動微分
+  （`jax.linearize(jax.grad(...))`）による観測（事後）情報行列
+  $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$（Oakes の検証にも使う）、
+  cross-product（$\sum_p c_p s_p s_p^\top$）、sandwich。
 - MAP 時は `oakes`・`hessian` とも情報行列に $-\nabla^2_\eta\log\pi(\hat\eta)$ を加え、数学的恒等性を保つ。
   固定パラメタは $\eta$ に含まれないので自動的に除外される。
 
@@ -426,6 +430,40 @@ class LatentDist(Protocol):
     1 つ以上事前分布がある場合、`FitResult.aic` と `FitResult.bic` は `loglik` で計算しつつ `FlexpyirtWarning` を出す。
     `information_oakes` は $Q(\eta\mid\eta')$ に `log_prior(prob, e)` を足し、`information_hessian` は
     `log_posterior(prob, e)` を微分することで、両者とも厳密に $-\nabla^2_\eta\log\pi(\hat\eta)$ を加える。
+18. **構造化 Oakes とチャンク分割 Hessian による高速化・省メモリ化（M3, §4.8, §9）**:
+    初期の `information_oakes` は問題全体に対して `jax.jacfwd(jax.grad(q, argnums=0), argnums=(0, 1))(eta, eta)`
+    を走らせており、全 $n_{\text{free}}$ 方向を同時に E-step へ通すため `(n_free, P, Q)` の巨大中間配列と
+    方向ごとの密な $J$ 項目 einsum を生じていた。2PL・$N=20{,}000, J=40$（ユニークパターン $19{,}926$ を
+    $P=32{,}768$ にパディング、$Q=61$、$n_{\text{free}}=80$）では EM 本体が ~0.43 s なのに対し、ウォーム時 ~2.66 s
+    （コールド 5.46 s）・ピーク RSS 増分 ~6.11 GB を要していた。構造化実装は Oakes の恒等式を厳密に保ち、
+    項目カーネル・潜在分布・事前分布の微分をすべて JAX 自動微分のみから求める:
+    - **単一 E-step の再利用**: `_e_step_details` で期待度数 `counts` と事後重み $h_{pq}$ を一度だけ計算し、
+      `e_step` と共有する。
+    - **第 1 項のブロック構造**（`_oakes_own_hessian`）: $\partial^2 Q_{\mathrm{post}}/\partial\eta\,\partial\eta^\top$
+      を項目局所スロットごとの `vmap(jax.hessian)`（`m_step` と同じ構成で固定境界座標を微分しない）、
+      群ごとの潜在 `(mean, var)` に対する `vmap(jax.hessian)`、`prob.priors` に対する対角
+      `vmap(jax.grad(jax.grad(...)))` に分解し、`(n_free, n_free)` へ scatter-add する。
+    - **交差項の構造化**（`_oakes_cross_hessian`）:
+      $Q(\eta\mid\eta')=\sum_p c_p\sum_q h_{pq}(\eta')\,\psi_{pq}(\eta)$・
+      $h_{pq}(\eta')=\operatorname{softmax}_q(\psi_{pq}(\eta'))$ から
+      $\partial^2 Q/\partial\eta\,\partial\eta'^\top|_{\eta'=\eta}=\sum_p c_p(\sum_q h_{pq}s_{pq}s_{pq}^\top-\bar s_p\bar s_p^\top)$
+      （$s_{pq}=\nabla_\eta\psi_{pq}$、$\bar s_p=\sum_q h_{pq}s_{pq}$；Oakes, 1999; Louis, 1982）を得る。
+      項目・潜在のスコア表を `jax.jacfwd` で一度求め、各 `(g, j, k, s)` で $\bar r$ 重み付き $q$ 平均を引く
+      （$s_{pq}-\bar s_p$ は代数的に不変で、差の桁落ちを防ぐ）。群ごとにパターン分割 `lax.scan` で度数 0 の
+      パディングチャンクを `lax.cond` でスキップしながら節点別カテゴリ共起行列
+      $C_{g,q}=\sum_{p\in g}c_p h_{pq}x_p x_p^\top$ と $\sum_{p\in g}c_p\bar s_p\bar s_p^\top$ を蓄積し
+      （`(Q, B, D)` 作業配列を ~32 MB に抑え、`(P, Q, n_free)` や `(P, D)` を実体化しない）、
+      続けて $q$ 方向の `lax.scan` で $\sum_q L_{g,q}^\top C_{g,q} L_{g,q}$ を縮約する（`(G, Q, D, n_free)` も実体化しない）。
+    - **直接 Hessian のチャンク分割**: `information_hessian` は全 $n_{\text{free}}$ 方向を一括微分する代わりに
+      `jax.linearize(jax.grad(log_posterior), eta)` を基底ベクトル 8 本ずつ `lax.scan` で評価する。
+    - **参考計測値**（同一の 2PL $N=20{,}000, J=40$、CPU、独立サブプロセスでのウォーム 5 回中央値、他ジョブ並行稼働下）:
+      `information_oakes`: ウォーム **2.658 s → 0.0843 s**（約 31.5 倍高速）、コールド **5.464 s → 0.365 s**
+      （約 15 倍高速）、ピーク RSS 増分 **6,110 MB → 9.6 MB**；
+      `information_hessian`: ウォーム **0.768 s → 0.602 s**（約 1.28 倍高速）、コールド **1.215 s → 0.898 s**、
+      ピーク RSS 増分 **4,991 MB → 612 MB**。
+      V1–V11（2PL, Rasch, GRM, 2 群アンカー, FIPC, 欠測, 3PL, GPCM, PCM, MAP 事前分布）すべてで旧
+      `jacfwd(grad(q))` 実装との差は $\max|\Delta I|/\max|I|\le 8.8\times 10^{-16}$（要素別相対誤差
+      $\le 3.1\times 10^{-12}$、`tests/test_oakes.py`）。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
