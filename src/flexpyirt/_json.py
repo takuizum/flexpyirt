@@ -50,6 +50,13 @@ __all__ = [
 FORMAT_TAG = "flexpyirt.FitResult"
 SCHEMA_VERSION = 1
 
+_INT32_MAX = (1 << 31) - 1
+_INT64_MIN = -(1 << 63)
+_INT64_MAX = (1 << 63) - 1
+_MAX_INT_DIGITS = 20  # len(str(-2**63)) == 20
+_MAX_ITEM_CATEGORIES = 1024
+_MAX_QUADRATURE_POINTS = 100_000
+
 _SPECIAL_FLOATS: dict[str, float] = {
     "NaN": math.nan,
     "Infinity": math.inf,
@@ -101,6 +108,28 @@ def _reject_json_constant(token: str) -> Any:
     )
 
 
+def _parse_json_float(token: str) -> float:
+    """Parse a JSON float token, rejecting numeric overflow to ``+/-Infinity``."""
+    val = float(token)
+    if not math.isfinite(val):
+        raise SpecificationError(
+            f"JSON number {token!r} overflows float64; "
+            "non-finite floats must be encoded as 'NaN', 'Infinity', or '-Infinity'."
+        )
+    return val
+
+
+def _parse_json_int(token: str) -> int:
+    """Parse a JSON integer token, rejecting integers outside signed 64-bit range."""
+    if len(token) > _MAX_INT_DIGITS:
+        preview = token if len(token) <= 32 else f"{token[:32]}..."
+        raise SpecificationError(f"JSON integer {preview!r} is out of 64-bit signed range.")
+    val = int(token)
+    if val < _INT64_MIN or val > _INT64_MAX:
+        raise SpecificationError(f"JSON integer {token!r} is out of 64-bit signed range.")
+    return val
+
+
 def _encode_float(value: float | np.floating[Any]) -> float | str:
     """Encode a float64 for strict JSON: finite numbers verbatim, non-finite as tagged strings."""
     val = float(value)
@@ -120,7 +149,15 @@ def _decode_float(raw: Any, *, field_name: str, finite: bool = False) -> float:
             f"Expected a JSON number or 'NaN'/'Infinity'/'-Infinity' for {field_name}, got {raw!r}."
         )
     else:
-        val = float(raw)
+        try:
+            val = float(raw)
+        except OverflowError as exc:
+            raise SpecificationError(f"{field_name} overflows float64: {raw!r}.") from exc
+        if not math.isfinite(val):
+            raise SpecificationError(
+                f"{field_name} overflows float64; "
+                "non-finite floats must be encoded as 'NaN', 'Infinity', or '-Infinity'."
+            )
     if finite and not math.isfinite(val):
         raise SpecificationError(f"{field_name} must be finite, got {val!r}.")
     return val
@@ -158,12 +195,20 @@ def _require_bool(raw: Any, *, field_name: str) -> bool:
     return raw
 
 
-def _require_int(raw: Any, *, field_name: str, min_value: int | None = None) -> int:
-    """Ensure ``raw`` is an integer (not ``bool``), optionally with a lower bound."""
+def _require_int(
+    raw: Any,
+    *,
+    field_name: str,
+    min_value: int | None = None,
+    max_value: int | None = _INT64_MAX,
+) -> int:
+    """Ensure ``raw`` is an integer (not ``bool``), with optional lower and upper bounds."""
     if isinstance(raw, bool) or not isinstance(raw, int):
         raise SpecificationError(f"Expected an integer for {field_name}, got {raw!r}.")
     if min_value is not None and raw < min_value:
         raise SpecificationError(f"{field_name} must be >= {min_value}, got {raw}.")
+    if max_value is not None and raw > max_value:
+        raise SpecificationError(f"{field_name} must be <= {max_value}, got {raw}.")
     return raw
 
 
@@ -213,7 +258,11 @@ def _make_simple_item_loader(cls: type[Any]) -> Callable[[dict[str, Any], str], 
 def _make_polytomous_item_loader(cls: type[Any]) -> Callable[[dict[str, Any], str], ItemModel]:
     def _load(obj: dict[str, Any], field_name: str) -> ItemModel:
         _check_keys(obj, required={"type", "n_cat"}, field_name=field_name)
-        n_cat = _require_int(obj["n_cat"], field_name=f"{field_name}.n_cat")
+        n_cat = _require_int(
+            obj["n_cat"],
+            field_name=f"{field_name}.n_cat",
+            max_value=_MAX_ITEM_CATEGORIES,
+        )
         item_model: ItemModel = cls(n_cat=n_cat)
         return item_model
 
@@ -424,7 +473,11 @@ def _serialize_equispaced_quadrature(quad: Quadrature) -> dict[str, Any]:
 def _deserialize_equispaced_quadrature(obj: dict[str, Any], field_name: str) -> Quadrature:
     _check_keys(obj, required={"type", "n_points", "lower", "upper"}, field_name=field_name)
     return Quadrature(
-        n_points=_require_int(obj["n_points"], field_name=f"{field_name}.n_points"),
+        n_points=_require_int(
+            obj["n_points"],
+            field_name=f"{field_name}.n_points",
+            max_value=_MAX_QUADRATURE_POINTS,
+        ),
         lower=_decode_float(obj["lower"], field_name=f"{field_name}.lower", finite=True),
         upper=_decode_float(obj["upper"], field_name=f"{field_name}.upper", finite=True),
     )
@@ -481,9 +534,13 @@ def _deserialize_baem(obj: dict[str, Any], field_name: str) -> BAEM:
     )
     return BAEM(
         tol=_decode_float(obj["tol"], field_name=f"{field_name}.tol", finite=True),
-        max_iter=_require_int(obj["max_iter"], field_name=f"{field_name}.max_iter"),
+        max_iter=_require_int(
+            obj["max_iter"], field_name=f"{field_name}.max_iter", max_value=_INT32_MAX
+        ),
         m_step_newton_steps=_require_int(
-            obj["m_step_newton_steps"], field_name=f"{field_name}.m_step_newton_steps"
+            obj["m_step_newton_steps"],
+            field_name=f"{field_name}.m_step_newton_steps",
+            max_value=_INT32_MAX,
         ),
         squarem=_require_bool(obj["squarem"], field_name=f"{field_name}.squarem"),
     )
@@ -762,7 +819,7 @@ def _deserialize_parameters(raw: Any, model: Model) -> tuple[pd.DataFrame, np.nd
         lo = _decode_float(row["lower"], field_name=f"{loc}.lower")
         hi = _decode_float(row["upper"], field_name=f"{loc}.upper")
         pri = _deserialize_prior(row["prior"], field_name=f"{loc}.prior")
-        fid = _require_int(row["free_id"], field_name=f"{loc}.free_id")
+        fid = _require_int(row["free_id"], field_name=f"{loc}.free_id", max_value=_INT32_MAX)
         if is_free:
             if fid < 0:
                 raise SpecificationError(f"Free parameter row {key} must have free_id >= 0.")
@@ -933,7 +990,12 @@ def _deserialize_history(raw: Any, *, n_iter: int) -> pd.DataFrame:
         log_posts.append(_decode_float(row["log_posterior"], field_name=f"{loc}.log_posterior"))
         changes.append(_decode_float(row["max_change"], field_name=f"{loc}.max_change"))
         em_evals.append(
-            _require_int(row["em_evaluations"], field_name=f"{loc}.em_evaluations", min_value=0)
+            _require_int(
+                row["em_evaluations"],
+                field_name=f"{loc}.em_evaluations",
+                min_value=0,
+                max_value=_INT32_MAX,
+            )
         )
         safeguards.append(_require_bool(row["safeguard"], field_name=f"{loc}.safeguard"))
     return pd.DataFrame(
@@ -1026,7 +1088,12 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
     check_x64()
     text = _read_source(source)
     try:
-        raw = json.loads(text, parse_constant=_reject_json_constant)
+        raw = json.loads(
+            text,
+            parse_constant=_reject_json_constant,
+            parse_float=_parse_json_float,
+            parse_int=_parse_json_int,
+        )
     except json.JSONDecodeError as exc:
         raise SpecificationError(f"Invalid FitResult JSON: {exc}.") from exc
 
@@ -1049,7 +1116,7 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
     model = _deserialize_model(obj["model"])
     quadrature = _deserialize_quadrature(obj["quadrature"], field_name="quadrature")
     method = _deserialize_method(obj["method"], field_name="method")
-    n_obs = _require_int(obj["n_obs"], field_name="n_obs", min_value=1)
+    n_obs = _require_int(obj["n_obs"], field_name="n_obs", min_value=1, max_value=_INT64_MAX)
     se_method = obj["se_method"]
     if se_method not in _VALID_SE_METHODS:
         raise SpecificationError(
@@ -1058,11 +1125,16 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
     loglik = _decode_float(obj["loglik"], field_name="loglik")
     log_posterior = _decode_float(obj["log_posterior"], field_name="log_posterior")
     converged = _require_bool(obj["converged"], field_name="converged")
-    n_iter = _require_int(obj["n_iter"], field_name="n_iter", min_value=0)
+    n_iter = _require_int(obj["n_iter"], field_name="n_iter", min_value=0, max_value=_INT32_MAX)
     n_em_evaluations = _require_int(
-        obj["n_em_evaluations"], field_name="n_em_evaluations", min_value=0
+        obj["n_em_evaluations"],
+        field_name="n_em_evaluations",
+        min_value=0,
+        max_value=_INT32_MAX,
     )
-    n_safeguards = _require_int(obj["n_safeguards"], field_name="n_safeguards", min_value=0)
+    n_safeguards = _require_int(
+        obj["n_safeguards"], field_name="n_safeguards", min_value=0, max_value=_INT32_MAX
+    )
 
     parameters, eta = _deserialize_parameters(obj["parameters"], model)
     vcov = _deserialize_vcov(obj["vcov"], n_free=int(eta.shape[0]))

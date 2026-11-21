@@ -839,3 +839,59 @@ def test_malformed_asymptotes_grm_order_and_shared_bounds() -> None:
     assert list(loaded_rev.items.columns) == list(res_2g.items.columns)
     idx = [*range(10), *(n_g + i for i in range(10))]
     _assert_fit_result_identical(res_2g, loaded_rev, df3.iloc[idx], group=grp[idx])
+
+
+def test_malformed_overflow_and_unbounded_ints(sample_payload: dict[str, Any]) -> None:
+    # Overflowing decimal exponents (1e400 / -1e400) must raise SpecificationError, not become inf
+    base_text = json.dumps(sample_payload)
+    ll_token = json.dumps(sample_payload["loglik"])
+    for raw_num in ("1e400", "-1e400"):
+        bad_exp = base_text.replace(f'"loglik": {ll_token}', f'"loglik": {raw_num}', 1)
+        with pytest.raises(SpecificationError, match="overflows float64"):
+            FitResult.from_json(bad_exp)
+
+    # Huge integers (10**400, 10**5000) in float or int fields must raise SpecificationError
+    for huge_digits in ("1" + "0" * 400, "1" + "0" * 5000):
+        bad_ll_int = base_text.replace(f'"loglik": {ll_token}', f'"loglik": {huge_digits}', 1)
+        with pytest.raises(SpecificationError, match="64-bit signed range"):
+            FitResult.from_json(bad_ll_int)
+
+        bad_nobs = base_text.replace(
+            f'"n_obs": {sample_payload["n_obs"]}', f'"n_obs": {huge_digits}', 1
+        )
+        with pytest.raises(SpecificationError, match="64-bit signed range"):
+            FitResult.from_json(bad_nobs)
+
+    # Huge integer in history iter / em_evaluations (int64 / int32 overflow)
+    bad_hist_iter = _clone(sample_payload)
+    bad_hist_iter["history"][0]["iter"] = 10**100
+    with pytest.raises(SpecificationError, match="64-bit signed range"):
+        FitResult.from_json(json.dumps(bad_hist_iter))
+
+    bad_hist_eval = _clone(sample_payload)
+    bad_hist_eval["history"][0]["em_evaluations"] = 10**12
+    with pytest.raises(SpecificationError, match="em_evaluations must be <="):
+        FitResult.from_json(json.dumps(bad_hist_eval))
+
+    # Huge polytomous n_cat must fail immediately without OOM/hang
+    for model_type in ("GRM", "GPCM", "PCM"):
+        for bad_n_cat in (10**9, 1025):
+            bad_poly = _clone(sample_payload)
+            bad_poly["model"]["items"][0]["model"] = {"type": model_type, "n_cat": bad_n_cat}
+            with pytest.raises(SpecificationError, match="n_cat must be <="):
+                FitResult.from_json(json.dumps(bad_poly))
+
+    # Huge quadrature n_points must fail at load time (not MemoryError in score())
+    for bad_pts in (10**18, 100_001):
+        bad_quad = _clone(sample_payload)
+        bad_quad["quadrature"]["n_points"] = bad_pts
+        with pytest.raises(SpecificationError, match="n_points must be <="):
+            FitResult.from_json(json.dumps(bad_quad))
+
+    # Documented string-encoded non-finite floats remain accepted on non-finite slots
+    ok_nonfinite = _clone(sample_payload)
+    ok_nonfinite["loglik"] = "-Infinity"
+    ok_nonfinite["log_posterior"] = "-Infinity"
+    loaded_inf = FitResult.from_json(json.dumps(ok_nonfinite))
+    assert loaded_inf.loglik == -np.inf
+    assert loaded_inf.log_posterior == -np.inf
