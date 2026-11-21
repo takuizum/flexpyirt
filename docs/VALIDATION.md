@@ -219,13 +219,15 @@ English | [日本語](VALIDATION.ja.md)
     through `response.pattern`).
   - **Extreme patterns and mirt 1.46.1 quirks**: for ML, all-lowest / all-highest observed
     categories return `-Inf` / `+Inf` with SE `NA`, and all-missing returns `NA` / `NA`. Two
-    edge-case bugs were identified in mirt 1.46.1: (a) on diverging 3PL low-score tails where
+    edge-case behaviours were seen in mirt 1.46.1: (a) on diverging 3PL low-score tails where
     $\log L(\theta)$ has its supremum at $-\infty$, when `nlm`'s finite-difference Hessian turns
     $\le 0$ (`SE = NA`), `mirt:::ML` skips its `SEest > 30` check and returns a finite
-    `F1 ≈ -17` with `SE = NA` instead of `-Inf` (31 of 3,790 patterns in `v11_3pl`); (b) with
-    missing data, `fscores.internal` computes `isna` on `tabdata[, -ncol(tabdata)]`, dropping the
-    last item column so all-extreme patterns missing the last item are not flagged and run into
-    `max_theta = 20` (`F1 ≈ 20`, `SE = NA`). flexpyirt detects all of these cleanly and returns
+    `F1 ≈ -17` with `SE = NA` instead of `-Inf` (31 of 3,790 patterns in `v11_3pl`; confirmed in
+    `mirt:::ML`, whose NaN-SE branch skips the `SEest > 30` → `±Inf` conversion); (b) with missing
+    data, some all-extreme patterns that are missing the last item run into `max_theta = 20`
+    (`F1 ≈ 20`, `SE = NA`) instead of `±Inf` (observed; the cause was attributed to how
+    `fscores.internal` counts missing values, but the code could not be located in mirt's R source,
+    so treat the explanation as unconfirmed). Neither case is used in the V13 comparisons. flexpyirt detects all of these cleanly and returns
     `±inf` with SE `NaN`. For all-missing rows, mirt strips them to `NA` for all methods, whereas
     flexpyirt's Bayesian methods (EAP, MAP, PV) return the prior and likelihood-only methods
     (ML, WLE) return `(NaN, NaN)`.

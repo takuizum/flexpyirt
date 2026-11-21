@@ -15,7 +15,7 @@
 #     all-missing -> NA (SE NA), and diverging non-concave 3PL/4PL tails where SE > 30 -> +/-Inf
 #     (SE NA). (Note two mirt 1.46.1 bugs documented in VALIDATION.md V13: (a) in 3PL flat tails
 #     where nlm's finite-difference Hessian turns <= 0, mirt leaves F1 ~ -17 with SE = NA instead
-#     of setting -Inf; (b) with missing data on the last item column, mirt's tabdata[, -ncol()]
+#     of setting -Inf; (b, observed; cause unconfirmed in mirt's R source) with missing data on the last item column, mirt's tabdata[, -ncol()]
 #     undercounts NAs and leaves all-extreme rows at ~20 with SE = NA.)
 suppressMessages({
   library(mirt)
@@ -304,7 +304,7 @@ all_one9 <- rowSums(all9 == 1, na.rm = TRUE) == n_obs9 & n_obs9 > 0L
 last_obs9 <- !is.na(all9[, ncol(all9)])
 set.seed(20261152)
 # Include partially-missing all-0, partially-missing all-1 (with last column observed to avoid
-# mirt 1.46.1's tabdata[, -ncol()] NA-undercounting bug), and interior missing patterns with 1..5 NAs
+# mirt 1.46.1's observed last-item NA behaviour; cause unconfirmed), and interior missing patterns with 1..5 NAs
 pick9 <- sort(unique(c(
   which(all_zero9 & n_na9 > 0L & last_obs9)[1:min(3L, sum(all_zero9 & n_na9 > 0L & last_obs9))],
   which(all_one9 & n_na9 > 0L & last_obs9)[1:min(3L, sum(all_one9 & n_na9 > 0L & last_obs9))],
