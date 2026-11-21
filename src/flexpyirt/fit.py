@@ -196,17 +196,22 @@ def fit(
 def _warn_heywood(params: pd.DataFrame, spec: Model) -> None:
     """Warn about boundary solutions among the free item parameters (DESIGN.md §15.6).
 
-    A free parameter within ``HEYWOOD_BOUND_TOL`` of a finite bound (``g``, ``u`` of 3PL/4PL
-    items) or a free slope with ``|a| > HEYWOOD_MAX_SLOPE`` triggers one ``HeywoodWarning``
-    naming every affected item.
+    A free parameter within ``HEYWOOD_BOUND_TOL`` of a finite bound (model domain, table bound,
+    or attached prior support) or a free slope with ``|a| > HEYWOOD_MAX_SLOPE`` triggers one
+    ``HeywoodWarning`` naming every affected item.
     """
     items = params[(params["item"] != LATENT_ITEM) & params["free"]]
     if items.empty:
         return
     kernels = {name: m.kernel for name, m in spec.items}
     est = items["estimate"].to_numpy(dtype=float)
-    lower = items["lower"].to_numpy(dtype=float)
-    upper = items["upper"].to_numpy(dtype=float)
+    lower = items["lower"].to_numpy(dtype=float).copy()
+    upper = items["upper"].to_numpy(dtype=float).copy()
+    for idx, pri in enumerate(items["prior"].tolist()):
+        if pri is not None:
+            p_lo, p_hi = pri.support
+            lower[idx] = max(lower[idx], p_lo)
+            upper[idx] = min(upper[idx], p_hi)
     at_bound = (est - lower < HEYWOOD_BOUND_TOL) | (upper - est < HEYWOOD_BOUND_TOL)
     is_slope = np.array(
         [p in kernels[i].slope_params for i, p in zip(items["item"], items["param"], strict=True)],
@@ -224,9 +229,9 @@ def _warn_heywood(params: pd.DataFrame, spec: Model) -> None:
     ]
     warnings.warn(
         f"Boundary (Heywood) solution for items {sorted(set(flagged['item']))}: "
-        f"{', '.join(labels)}. A lower/upper asymptote within {HEYWOOD_BOUND_TOL} of its "
-        f"bound or a slope beyond ±{HEYWOOD_MAX_SLOPE} is weakly identified by the data; consider "
-        "fixing it (e.g. g=0 or u=1) or a simpler item model.",
+        f"{', '.join(labels)}. A parameter within {HEYWOOD_BOUND_TOL} of a finite bound "
+        f"or a slope beyond ±{HEYWOOD_MAX_SLOPE} is weakly identified by the data; consider "
+        "fixing it (e.g. g=0 or u=1), relaxing its bounds/prior, or using a simpler item model.",
         HeywoodWarning,
         stacklevel=3,
     )

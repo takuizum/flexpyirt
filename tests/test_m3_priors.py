@@ -594,3 +594,42 @@ def test_default_starts_adjusted_into_prior_support() -> None:
     assert ((res_grm_beta.items["d1"] < 1.0) & (res_grm_beta.items["d3"] > 0.0)).all()
     assert (res_grm_beta.items["d1"] > res_grm_beta.items["d2"]).all()
     assert (res_grm_beta.items["d2"] > res_grm_beta.items["d3"]).all()
+
+
+def test_heywood_warning_on_prior_support_boundary() -> None:
+    """Finite bounds induced by an attached prior's support also trigger HeywoodWarning."""
+    df = _simulate_2pl(
+        np.array([2.0, 1.3, 1.1, 1.4, 1.2]),
+        np.array([-1.8, 0.2, -0.3, 0.4, 0.1]),
+        n=600,
+        seed=314,
+    )
+
+    # Upper support boundary: Beta(1, 1) on a (true a = 2.0) pushes q01.a -> 1.
+    spec_upper = Model.uniform(TwoPL(), items=df.columns).prior(
+        param="a", dist=Beta(1.0, 1.0), items=["q01"]
+    )
+    with pytest.warns(HeywoodWarning, match=r"q01\.a"):
+        res_upper = fit(spec_upper, df, method=BAEM(tol=1e-7), se=None)
+    assert res_upper.converged
+    assert float(res_upper.items.set_index("item")["a"].loc["q01"]) > 1.0 - 1e-4
+
+    # Lower support boundary: Beta(1, 1) on d (true d = -1.8) pushes q01.d -> 0.
+    spec_lower = Model.uniform(TwoPL(), items=df.columns).prior(
+        param="d", dist=Beta(1.0, 1.0), items=["q01"]
+    )
+    with pytest.warns(HeywoodWarning, match=r"q01\.d"):
+        res_lower = fit(spec_lower, df, method=BAEM(tol=1e-7), se=None)
+    assert res_lower.converged
+    assert float(res_lower.items.set_index("item")["d"].loc["q01"]) < 1e-4
+
+    # Interior solution under Beta(1, 1) does NOT warn.
+    spec_interior = Model.uniform(TwoPL(), items=df.columns).prior(
+        param="d", dist=Beta(1.0, 1.0), items=["q04"]
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", HeywoodWarning)
+        res_interior = fit(spec_interior, df, method=BAEM(tol=1e-7), se=None)
+    assert res_interior.converged
+    d4 = float(res_interior.items.set_index("item")["d"].loc["q04"])
+    assert 0.1 < d4 < 0.9
