@@ -54,4 +54,6 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - Davidian-curve and normal-mixture latent distributions.
 - Differentiable linking (Haebara / Stocking–Lord and generalizations) on top of the library.
 - [x] Item fit: S-X2 (`FitResult.item_fit()`, single-group unidimensional; validated in V15).
-- DIF (multiple-group likelihood-ratio tests), M2.
+- [x] DIF: multiple-group likelihood-ratio tests (`FitResult.dif()`, schemes `add` / `drop`,
+  Holm / BH adjustment; validated in V17).
+- M2 (limited-information goodness of fit).

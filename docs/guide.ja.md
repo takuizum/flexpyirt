@@ -427,6 +427,22 @@ mg_scores = mg.score(mg_df.iloc[[0, -1]], group=["ref", "focal"])
 print(mg_scores)
 ```
 
+### 特異項目機能（DIF）
+
+`dif(data, group=..., items=...)` は多母集団の尤度比検定を行う（項目ごとに 1 回推定し直す）。`scheme="add"`
+（既定）では推定済みモデルを基準とし、その項目のパラメタを群間で等値にする。`scheme="drop"`（項目を等値にした
+モデルから始める）では自由にする。`params=["d"]` で一部のパラメタだけを検定できる。
+`x2 = 2(loglik_free - loglik_constrained)`、`df` は制約で減るパラメタ数、`aic`・`sabic`・`hq`・`bic` は項目を自由に
+したモデルから制約したモデルを引いた差（負なら DIF を支持）で、mirt の `DIF()` と同じ。`adj_p` は既定で検定した
+項目にわたる Holm の補正（`p_adjust="BH"` または `"none"` も可）。
+
+```python
+# 尤度比検定による DIF: アンカーでない各項目のパラメタを群間で等値にして推定し直す
+# （mirt の DIF(scheme = "add")）。
+dif_table = mg.dif(mg_df, group=group, items=items[6:9])
+print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
+```
+
 ## 10. 固定項目パラメタ推定（FIPC）
 
 既に尺度化された項目バンクの値で一部の項目を固定し、新しい項目と潜在分布を推定する。固定項目が尺度を

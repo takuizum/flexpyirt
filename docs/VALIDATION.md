@@ -42,6 +42,7 @@ English | [日本語](VALIDATION.ja.md)
 | V13 | Ability scoring: MAP, ML, WLE (2PL, GRM, GPCM, 3PL, 2-group, missing) | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
 | V15 | S-X2 item fit (GRM, GPCM, PCM with free variance, 3PL, FIPC 2PL; `mincell` 1 and 3) | `itemfit(m, fit_stats = "S_X2")` | M5 |
 | V16 | Equality constraints across items (LSAT7 common slope; 2PL + graded with cross-model constraints; two groups with anchors and a common slope) | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
+| V17 | DIF likelihood-ratio tests on the V4 data (`add` for `a`+`d` and for `d`; `drop` for `a`+`d` from the fully invariant model) | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 
 ## mirt settings and known differences (found in M1)
@@ -343,6 +344,16 @@ English | [日本語](VALIDATION.ja.md)
   mirt Richardson SEs to $2.9\times10^{-8}$, flexpyirt Oakes vs Hessian to $5\times10^{-15}$, and
   the number of free parameters equals mirt's `nest`. Tests: `tests/test_mirt_m5_equal_items.py`.
   Reference generator: `validation/r/m5_equal_items_reference.R`.
+- **DIF likelihood-ratio tests (V17, M5)**: mirt's `DIF()` (`optimizer = "NR"`, `TOL = 1e-10`, 81
+  points on $[-8,8]$ for the baseline and every refit) on the V4 data: `scheme = "add"` from the
+  anchored model (q01–q05 equal, focal mean and variance free) for `a1`+`d` and for `d` on
+  q06–q15, and `scheme = "drop"` for `a1`+`d` on all items from the fully invariant model. mirt
+  reports information criteria as the model with the item free minus the constrained one (in both
+  schemes) and adjusts p-values with Holm by default (`p.adjust = "holm"`); its `p` is
+  `1 - pchisq(...)`, which is exactly 0 for very large $X^2$ (ours uses the survival function).
+  Agreement (plain EM and SQUAREM): $X^2$ and the AIC/SABIC/HQ/BIC differences to $2.2\times10^{-11}$,
+  `p` and `adj_p` to $3\times10^{-11}$. Tests: `tests/test_mirt_m5_dif.py`. Reference generator:
+  `validation/r/m5_dif_reference.R`.
 
 ## Validation beyond agreement
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
