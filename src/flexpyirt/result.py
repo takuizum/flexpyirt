@@ -28,7 +28,7 @@ from flexpyirt._json import dump_fit_result, load_fit_result
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
 from flexpyirt.items import ItemKernel
-from flexpyirt.latent import eh_moments, latent_param_names
+from flexpyirt.latent import davidian_param_names, eh_moments, latent_param_names
 from flexpyirt.method import BAEM
 from flexpyirt.quadrature import Quadrature
 
@@ -396,7 +396,11 @@ class FitResult:
             return pd.DataFrame(rows)
         p = self.parameters[self.parameters["item"] == LATENT_ITEM]
         groups = list(dict.fromkeys(p["group"]))
-        lat_cols = list(latent_param_names(self._model.n_factors))
+        lat_cols = (
+            list(davidian_param_names(self._model.davidian_degree))
+            if self._model.is_davidian
+            else list(latent_param_names(self._model.n_factors))
+        )
         est = p.pivot(index="group", columns="param", values="estimate")[lat_cols]
         se = p.pivot(index="group", columns="param", values="se")[lat_cols].add_suffix("_se")
         out = pd.concat([est, se], axis=1).loc[groups]
@@ -508,6 +512,11 @@ class FitResult:
                 "method='MAP' requires a continuous latent prior and is not supported with "
                 "EmpiricalHistogram; use method='EAP', 'ML', 'WLE', or 'PV'."
             )
+        if method == "MAP" and self._model.is_davidian:
+            raise SpecificationError(
+                "method='MAP' is not supported with DavidianCurve (the density can be multimodal "
+                "and vanish at polynomial roots); use method='EAP', 'ML', 'WLE', or 'PV'."
+            )
         if self._model.is_multidimensional and method not in ("EAP", "MAP"):
             raise SpecificationError(
                 f"Scoring method {method!r} is only implemented for unidimensional models; "
@@ -612,7 +621,7 @@ class FitResult:
         """
         check_x64()
         model = self._model
-        if model.is_multidimensional or model.is_multigroup or model.is_eh:
+        if model.is_multidimensional or model.is_multigroup or model.is_eh or model.is_davidian:
             raise SpecificationError(
                 "item_fit() supports single-group unidimensional models with a Normal latent "
                 "distribution only."
@@ -822,11 +831,14 @@ class FitResult:
         ]
         if self._has_priors:
             lines.append(_PRIORS_IC_NOTE)
-        latent_title = (
-            "Latent distribution (EmpiricalHistogram)"
-            if self._model.is_eh
-            else "Latent distribution"
-        )
+        if self._model.is_eh:
+            latent_title = "Latent distribution (EmpiricalHistogram)"
+        elif self._model.is_davidian:
+            latent_title = (
+                f"Latent distribution (DavidianCurve, degree={self._model.davidian_degree})"
+            )
+        else:
+            latent_title = "Latent distribution"
         lines.extend(
             [
                 "",
@@ -889,11 +901,14 @@ class FitResult:
             if self._has_priors
             else ""
         )
-        latent_heading = (
-            "Latent distribution (EmpiricalHistogram)"
-            if self._model.is_eh
-            else "Latent distribution"
-        )
+        if self._model.is_eh:
+            latent_heading = "Latent distribution (EmpiricalHistogram)"
+        elif self._model.is_davidian:
+            latent_heading = (
+                f"Latent distribution (DavidianCurve, degree={self._model.davidian_degree})"
+            )
+        else:
+            latent_heading = "Latent distribution"
         latent_html = _df_to_html_table(self.latent, digits=digits)
         weights_section = (
             "<h4>Empirical histogram weights</h4>"
