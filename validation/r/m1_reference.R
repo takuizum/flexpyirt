@@ -51,8 +51,11 @@ write_case <- function(case, dat, itemtype, description) {
     meta = list(case = case, description = description,
                 r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
                 itemtype = itemtype, TOL = 1e-10, quadpts = 61, theta_lim = c(-6, 6),
-                accelerate = "none", optimizer = "NR", converged = extract.mirt(m_oakes, "converged"),
-                iterations = extract.mirt(m_oakes, "iterations")),
+                grid_check = range(m_oakes@Model$Theta),
+                accelerate = "none", optimizer = "NR",
+                converged = extract.mirt(m_oakes, "converged"),
+                iterations = extract.mirt(m_oakes, "iterations"),
+                converged_richardson = extract.mirt(m_rich, "converged")),
     items = colnames(dat),
     patterns = unname(patterns),
     counts = counts,
@@ -62,6 +65,12 @@ write_case <- function(case, dat, itemtype, description) {
     se_richardson = list(params = lapply(rich$params, function(p) p[c("a_se", "d_se")]),
                          latent = rich$latent[c("mean_se", "var_se")]),
     eap = list(theta = unname(eap[, "F1"]), se = unname(eap[, "SE_F1"]))
+  )
+  stopifnot(
+    isTRUE(res$meta$converged),
+    isTRUE(res$meta$converged_richardson),
+    all(res$meta$grid_check == res$meta$theta_lim),
+    all(range(m_rich@Model$Theta) == res$meta$theta_lim)
   )
   path <- file.path(out_dir, paste0(case, ".json"))
   write_json(res, path, auto_unbox = TRUE, digits = NA, pretty = TRUE, na = "null")

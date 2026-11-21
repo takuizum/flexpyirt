@@ -113,10 +113,10 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - **FIPC**: 固定項目が尺度を決めるので、全群の平均・分散を自由にしてよい。固定項目が 0 なら参照群を固定。
   潜在分布を $N(0,1)$ に固定したまま固定項目以外を推定すると尺度がずれる（Kim, 2006）ので、
   FIPC では潜在分布（Normal の平均・分散、または EH の重み）を各 EM 反復で更新する方式（Kim の MWU-MEM に相当）を既定にする。
-- **Rasch（決定, M1）**: Rasch は $a_j=1$ 固定・$d_j$ 自由で、尺度は傾きで決まるので**潜在分布の分散を自由推定**し、
-  平均は 0 に固定する（mirt の `itemtype="Rasch"` と同じ: `a1` 固定、`MEAN_1` 固定、`COV_11` 自由）。
-  潜在分布を明示しない単一群モデルでは、**全項目が Rasch のとき既定を $N(0,\sigma^2)$（分散自由）**、
-  それ以外は $N(0,1)$ 固定とする。
+- **Rasch・PCM（決定, M1/M3）**: Rasch と PCM は $a_j=1$ 固定・$d_j$（$d_{jk}$）自由で、尺度は傾きで決まるので
+  **潜在分布の分散を自由推定**し、平均は 0 に固定する（mirt の `itemtype="Rasch"` と同じ: 2 値データでは Rasch、
+  多値データでは PCM になり、`a1` 固定、`MEAN_1` 固定、`COV_11` 自由）。潜在分布を明示しない単一群モデルでは、
+  **全項目が Rasch または PCM のとき既定を $N(0,\sigma^2)$（分散自由）**、それ以外は $N(0,1)$ 固定とする。
 - 一般則（M1 で検査）: 分散を自由にするには傾きを固定した項目（値が 0 でない）が 1 つ以上、
   平均を自由にするには切片を固定した項目が 1 つ以上必要。
 - 識別できない指定は `IdentificationError` を fit 前に投げる。
@@ -155,6 +155,10 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   $u_j^{(0)}=\max(0.95,\,(1+p_j)/2)$（4PL）または $1$（3PL）とし、$g_j^{(0)}<p_j<u_j^{(0)}$ を保つ。
   $a_j^{(0)}$ は 2PL と同じ、$d_j^{(0)}$ は漸近線の幅で換算した正答率 $(p_j-g_j^{(0)})/(u_j^{(0)}-g_j^{(0)})$
   から 2PL と同じ式で求める（§15.4）。
+- **決定（M3, GPCM/PCM）**: $a_j^{(0)}$ は 2PL と同じ項目−残余相関から（PCM は 1）、
+  $d_{jk}^{(0)}=\sum_{c=1}^{k}\operatorname{logit}(p_{jc})\sqrt{1+(a_j^{(0)}/1.7)^2}$（ここで
+  $p_{jc}=\operatorname{clip}(\hat P(y_j\ge c),\,0.01,\,0.99)$、§15.9）。$K=2$ では 2PL / Rasch の初期値と
+  完全に一致する。
 - ユーザー指定の初期値は ParameterTable の `value` 列で上書き可能。
 
 ## 5. データ構造
@@ -336,6 +340,24 @@ class LatentDist(Protocol):
    `flexpyirt.errors.HeywoodWarning` を 1 回発する。
 7. **識別性**: `g`, `u` は潜在変数の尺度も位置も担わない（`slope_params=("a",)`, `intercept_params=("d",)`）。
    したがって漸近線を固定しても潜在分布の平均や分散は識別されない。
+8. **GPCM・PCM 項目モデル**: `GPCM(n_cat)`（Muraki, 1992）と `PCM(n_cat)`（Masters, 1982）は `n_cat` ごとに
+   共通カーネル `GPCMKernel(n_cat)` を共有する。カテゴリは `0..K-1`（`n_cat >= 2` を検証）で、mirt の
+   `itemtype="gpcm"` と同じ傾き・切片形式（採点係数 $\mathrm{ak}_k=k$ と $d_0=0$ を固定し、パラメタに含めない）:
+   $$P(y=k\mid\theta)=\frac{\exp(k\,a\theta+d_k)}{\sum_{c=0}^{K-1}\exp(c\,a\theta+d_c)},\qquad d_0=0.$$
+   内部パラメタは `(a, d1, ..., d{K-1})`。対数確率は `jax.nn.log_softmax` で計算する（数値安定で滑らかな微分を
+   持ち、`d` に順序制約は不要）。`PCM(n_cat)` は既定で `a = 1` を固定し、単一群の既定潜在分布ルール（§4.5）を
+   拡張して、全項目が `Rasch` または `PCM` のとき $N(0,\sigma^2)$（分散自由）とする（多値データに対する mirt の
+   `itemtype="Rasch"` と同じ）。`n_cat = 2` では `GPCM(2)` は `TwoPL` に、`PCM(2)` は `Rasch` に厳密に一致する。
+9. **GPCM/PCM の初期値・識別性・推定可能性**: $a_j^{(0)}$ は 2PL と同じ項目−残余相関の式（PCM は `1.0`）。
+   各ステップの初期値を累積比率 $p_{jc}=\operatorname{clip}(\hat P(y_j\ge c),\,0.01,\,0.99)$ から
+   $\delta_{jc}^{(0)}=\operatorname{logit}(p_{jc})\sqrt{1+(a_j^{(0)}/1.7)^2}$ とし、その累積和を
+   $d_{jk}^{(0)}=\sum_{c=1}^{k}\delta_{jc}^{(0)}$ とする。識別性は `slope_params=("a",)`、
+   `intercept_params=("d1", ..., "d{K-1}")`。自由パラメタを持つ項目では `0..K-1` の全カテゴリがデータに
+   観測されている必要がある（GRM と同じ、`_check_estimable` で検査）。
+10. **GPCM/PCM の表示と FIPC**: `FitResult.items` は GPCM / PCM 項目についてステップ困難度
+    $b_k=-(d_k-d_{k-1})/a$（$d_0=0$）を `b1`…`b{K-1}` として表示し、2PL / Rasch / 3PL / 4PL（`b = -d/a`）と
+    GRM（`bk = -dk/a`）の表示は同一モデルに混在しても変えない。`Model.fix_from(..., parameterization="irt")` は
+    これを $d_k=-a\sum_{c=1}^{k}b_c$ で逆変換し、PCM 項目では `a` 列の省略を許す。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -345,6 +367,8 @@ class LatentDist(Protocol):
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
+- Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.

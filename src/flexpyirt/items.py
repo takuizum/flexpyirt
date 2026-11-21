@@ -1,10 +1,11 @@
 """Item response models (Spec layer) and their log-probability kernels (Core layer).
 
-An *item model* (``TwoPL``, ``Rasch``, ``ThreePL``, ``FourPL``, ``GRM``) is what the user writes in
-a specification. It owns the default free/fixed pattern and starting values. Its *kernel* holds
-only the pure log-probability function used inside jit. Item models that share a kernel (``Rasch``
-and ``TwoPL``; ``ThreePL`` and ``FourPL``; ``GRM`` with the same number of categories) are
-estimated together as one "family" (DESIGN.md §4.3, §6).
+An *item model* (``TwoPL``, ``Rasch``, ``ThreePL``, ``FourPL``, ``GRM``, ``GPCM``, ``PCM``) is
+what the user writes in a specification. It owns the default free/fixed pattern and starting
+values. Its *kernel* holds only the pure log-probability function used inside jit. Item models
+that share a kernel (``Rasch`` and ``TwoPL``; ``ThreePL`` and ``FourPL``; ``GRM`` with the same
+number of categories; ``GPCM`` and ``PCM`` with the same number of categories) are estimated
+together as one "family" (DESIGN.md §4.3, §6).
 """
 
 from __future__ import annotations
@@ -20,10 +21,13 @@ from jax import Array
 from flexpyirt.errors import SpecificationError
 
 __all__ = [
+    "GPCM",
     "GRM",
+    "PCM",
     "DichotomousKernel",
     "FourPL",
     "FourPLKernel",
+    "GPCMKernel",
     "GradedKernel",
     "ItemKernel",
     "ItemModel",
@@ -227,6 +231,50 @@ class GradedKernel:
         last = log_cum[:, -1:]
         middle = log_cum[:, :-1] + _log1mexp(log_cum[:, 1:] - log_cum[:, :-1])
         return jnp.concatenate([first, middle, last], axis=1)
+
+
+@dataclass(frozen=True)
+class GPCMKernel:
+    r"""Generalized partial credit kernel (Muraki, 1992) in slope–intercept form.
+
+    .. math::
+        P(y=k\mid\theta) = \frac{\exp(k\,a\theta + d_k)}{\sum_{c=0}^{K-1}\exp(c\,a\theta + d_c)},
+        \qquad k=0,\dots,K-1,\quad d_0=0,
+
+    with fixed scoring coefficients :math:`\mathrm{ak}_k=k` and :math:`d_0=0` (not a parameter),
+    matching mirt's ``itemtype="gpcm"`` (Chalmers, 2012). Computed with ``jax.nn.log_softmax``;
+    there is no ordering constraint on :math:`d_1,\dots,d_{K-1}`. Shared by :class:`GPCM` and
+    :class:`PCM` items with the same ``n_cat`` (DESIGN.md §15.8).
+    """
+
+    n_cat: int
+
+    def __post_init__(self) -> None:
+        """Validate the number of categories."""
+        if self.n_cat < 2:
+            raise SpecificationError(f"GPCM needs at least 2 categories, got {self.n_cat}.")
+
+    @property
+    def param_names(self) -> tuple[str, ...]:
+        """``("a", "d1", ..., "d{K-1}")``."""
+        return ("a", *(f"d{k}" for k in range(1, self.n_cat)))
+
+    @property
+    def slope_params(self) -> tuple[str, ...]:
+        """``("a",)``."""
+        return ("a",)
+
+    @property
+    def intercept_params(self) -> tuple[str, ...]:
+        """``("d1", ..., "d{K-1}")``."""
+        return self.param_names[1:]
+
+    def log_prob(self, theta: Array, params: Array) -> Array:
+        """Return ``(Q, n_cat)`` category log-probabilities."""
+        categories = jnp.arange(self.n_cat, dtype=theta.dtype)
+        intercepts = jnp.concatenate([jnp.zeros((1,), dtype=params.dtype), params[1:]])
+        eta = params[0] * theta[:, None] * categories[None, :] + intercepts[None, :]
+        return jax.nn.log_softmax(eta, axis=-1)
 
 
 class ItemModel(Protocol):
@@ -461,4 +509,99 @@ class GRM:
 
     def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
         """Unbounded (ordering is enforced by the line search)."""
+        return _unbounded(self.n_cat)
+
+
+def _gpcm_intercept_starts(item: np.ndarray, n_cat: int, a: float) -> list[float]:
+    r"""Return starting :math:`d_1,\dots,d_{K-1}` for GPCM/PCM (DESIGN.md §4.10, §15.9).
+
+    Each step :math:`\delta_c^{(0)}=\mathrm{logit}(p_c)\sqrt{1+(a/1.7)^2}` uses the cumulative
+    proportion :math:`p_c=\hat P(y\ge c)` (clipped to :math:`[0.01, 0.99]`), and
+    :math:`d_k^{(0)}=\sum_{c=1}^{k}\delta_c^{(0)}`. Reduces to :func:`_intercept_start` for
+    ``n_cat == 2``.
+    """
+    steps = [_intercept_start(float((item >= c).mean()), a) for c in range(1, n_cat)]
+    return [float(v) for v in np.cumsum(steps)]
+
+
+@dataclass(frozen=True)
+class GPCM:
+    r"""Generalized partial credit model (Muraki, 1992) with ``n_cat`` categories ``0..n_cat-1``.
+
+    .. math::
+        P(y=k\mid\theta) = \frac{\exp(k\,a\theta + d_k)}{\sum_{c=0}^{K-1}\exp(c\,a\theta + d_c)},
+        \qquad d_0 = 0.
+
+    Slope :math:`a` and intercepts :math:`d_1,\dots,d_{K-1}` are estimated with no ordering
+    constraint; step difficulties displayed in :attr:`FitResult.items` are
+    :math:`b_k=-(d_k-d_{k-1})/a` with :math:`d_0=0`. Same parameterization as mirt's
+    ``itemtype="gpcm"`` (Chalmers, 2012). With ``n_cat=2`` this is identical to :class:`TwoPL`.
+    Shares :class:`GPCMKernel` with :class:`PCM` of the same ``n_cat``.
+    """
+
+    n_cat: int
+    name: ClassVar[str] = "GPCM"
+
+    def __post_init__(self) -> None:
+        """Validate the number of categories."""
+        if self.n_cat < 2:
+            raise SpecificationError(f"GPCM needs at least 2 categories, got {self.n_cat}.")
+
+    @property
+    def kernel(self) -> GPCMKernel:
+        """GPCM kernel with this number of categories."""
+        return GPCMKernel(self.n_cat)
+
+    def default_free(self) -> tuple[bool, ...]:
+        """All parameters are free."""
+        return (True,) * self.n_cat
+
+    def start_values(self, item: np.ndarray, rest: np.ndarray) -> np.ndarray:
+        """Return starting values (DESIGN.md §4.10, §15.9)."""
+        a = _slope_start(item, rest)
+        return np.array([a, *_gpcm_intercept_starts(item, self.n_cat, a)])
+
+    def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
+        """Unbounded."""
+        return _unbounded(self.n_cat)
+
+
+@dataclass(frozen=True)
+class PCM:
+    r"""Partial credit model (Masters, 1982) with ``n_cat`` categories ``0..n_cat-1``.
+
+    .. math::
+        P(y=k\mid\theta) = \frac{\exp(k\theta + d_k)}{\sum_{c=0}^{K-1}\exp(c\theta + d_c)},
+        \qquad d_0 = 0.
+
+    GPCM with slope fixed at :math:`a=1`; step difficulties are :math:`b_k=-(d_k-d_{k-1})` with
+    :math:`d_0=0`. In a single-group model whose items are all :class:`Rasch` or :class:`PCM`, the
+    latent variance is estimated by default (DESIGN.md §4.5, §15.8), matching mirt's
+    ``itemtype="Rasch"`` on polytomous data. With ``n_cat=2`` this is identical to :class:`Rasch`.
+    Shares :class:`GPCMKernel` with :class:`GPCM` of the same ``n_cat``.
+    """
+
+    n_cat: int
+    name: ClassVar[str] = "PCM"
+
+    def __post_init__(self) -> None:
+        """Validate the number of categories."""
+        if self.n_cat < 2:
+            raise SpecificationError(f"PCM needs at least 2 categories, got {self.n_cat}.")
+
+    @property
+    def kernel(self) -> GPCMKernel:
+        """Shared GPCM kernel with this number of categories."""
+        return GPCMKernel(self.n_cat)
+
+    def default_free(self) -> tuple[bool, ...]:
+        """Slope fixed (at 1), intercepts free."""
+        return (False, *(True,) * (self.n_cat - 1))
+
+    def start_values(self, item: np.ndarray, rest: np.ndarray) -> np.ndarray:
+        """Return starting values (DESIGN.md §4.10, §15.9); the slope is 1."""
+        return np.array([1.0, *_gpcm_intercept_starts(item, self.n_cat, 1.0)])
+
+    def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
+        """Unbounded."""
         return _unbounded(self.n_cat)

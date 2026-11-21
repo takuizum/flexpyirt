@@ -18,6 +18,7 @@ import pandas as pd
 import pytest
 
 from flexpyirt import BAEM, GRM, FitResult, Model, Normal, Quadrature, TwoPL, fit
+from tests._reference import check_reference_meta
 
 REFERENCE_DIR = Path(__file__).parent / "reference"
 METHOD = BAEM(tol=1e-9, max_iter=20000)
@@ -73,6 +74,7 @@ def _raw(name: str) -> dict[str, Any]:
 @cache
 def load(name: str) -> Case:
     raw = _raw(name)
+    check_reference_meta(raw["meta"], require_grid_check=True)
     items = raw["items"]
     if name == "v3_science_grm":
         return Case(name, raw, Model.uniform(GRM(n_cat=4), items=items), Quadrature.equispaced())

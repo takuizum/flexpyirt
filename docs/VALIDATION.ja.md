@@ -27,7 +27,7 @@
 | V5 | FIPC（固定項目 + 潜在分布推定） | `pars='values'` で `est=FALSE` | M2 |
 | V6 | EH（単一群・2 群） | `dentype="EH"` | M3 |
 | V7 | 3PL + 事前分布（MAP） | `mirt.model` の `PRIOR = (1-30, g, expbeta, ...)` 相当 | M3 |
-| V8 | GPCM | `"gpcm"` | M3 |
+| V8 | GPCM・PCM（Science + シミュレーション） | `mirt(..., "gpcm")` / `mirt(..., "Rasch")`（多値） | M3 |
 | V9 | 欠測あり（MAR） | NA を含むデータ | M2 |
 | V10 | SE（Oakes / crossprod / sandwich） | `SE.type=` | M1–M3 |
 | V11 | 3PL・4PL 単一群（シミュレーション） | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
@@ -74,6 +74,17 @@
   Hessian 対 mirt Richardson SE は ~6e-4（3PL: 6.8e-5、4PL: 5.6e-4。Richardson の数値微分誤差によるもので、
   flexpyirt 内の Oakes と Hessian は ~1e-11 で一致）、EAP は ~1e-15 で一致した。
   照合テスト: `tests/test_mirt_m3.py`。参照値の生成: `validation/r/m3_reference.R`。
+- **GPCM・PCM のパラメタ対応と照合結果（V8、M3）**: mirt の `itemtype = "gpcm"`（および多値データに対する
+  `itemtype = "Rasch"`。これは `a1 = 1` 固定・`COV_11` 自由推定の PCM に相当）は、`a1`、`ak0..ak{K-1}`
+  （`0..K-1` 固定）、`d0`（`0` 固定）、`d1..d{K-1}`（自由）の列を返す。`validation/r/m3_gpcm_reference.R` は
+  これらの固定値を確認したうえで、`a1` → `a`、`d1..d{K-1}` → `d1..d{K-1}` と対応付け、`ak*` と `d0` を除いて
+  保存する。照合ケースは 3 件: V8a（`Science` を `0..3` に変換、GPCM、61 点 $[-6,6]$）、V8b（シミュレーション
+  GPCM、$J=10, K=4, N=3000$、ステップ順が逆転した項目を含む、61 点 $[-6,6]$）、V8c（生成時の潜在分散 $1.5$ の
+  シミュレーション PCM、mirt `itemtype = "Rasch"`、V4/V5 と同じく格子の打ち切りを無視できる 81 点 $[-8,8]$）。
+  3 件とも許容誤差より十分に小さく一致した: 項目パラメタは ~1.4e-8（V8c の潜在分散は 6.1e-10）、対数尤度は
+  ~3.7e-15、Oakes SE は ~1.3e-8、Hessian 対 mirt Richardson SE は ~1.1e-6（flexpyirt 内の Oakes と
+  Hessian は ~1.1e-11）、EAP は ~8.0e-15。
+  照合テスト: `tests/test_mirt_m3_gpcm.py`。参照値の生成: `validation/r/m3_gpcm_reference.R`。
 - **EAP の照合**: 推定値の差が EAP に伝播しないよう、全パラメタを mirt の推定値に固定して
   （ParameterTable の `free=False`）スコアリングだけを照合する。許容誤差 1e-5。
 - 照合テスト: `tests/test_mirt_m1.py`（V1, V2, V10）。参照値の生成: `validation/r/m1_reference.R`。

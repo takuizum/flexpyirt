@@ -425,7 +425,7 @@ def _check_identification(t: pd.DataFrame, model: Model) -> None:
             if lat_free[(g, latent_param)] and find(g) not in anchored:
                 where = "" if not model.is_multigroup else f" of group {g!r}"
                 fix_hint = (
-                    "fix at least one slope (e.g. Rasch items)"
+                    "fix at least one slope (e.g. Rasch or PCM items)"
                     if kind == "slope"
                     else "fix at least one intercept"
                 )

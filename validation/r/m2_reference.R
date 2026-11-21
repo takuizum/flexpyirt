@@ -58,7 +58,8 @@ write_case <- function(case, description, dat, groups, group_labels, fit_fun, qu
                 grid_check = range(m_oakes@Model$Theta),
                 accelerate = "none", optimizer = "NR",
                 converged = extract.mirt(m_oakes, "converged"),
-                iterations = extract.mirt(m_oakes, "iterations")),
+                iterations = extract.mirt(m_oakes, "iterations"),
+                converged_richardson = extract.mirt(m_rich, "converged")),
     items = colnames(dat),
     groups = I(groups),
     patterns = unname(patterns),
@@ -68,6 +69,12 @@ write_case <- function(case, description, dat, groups, group_labels, fit_fun, qu
     estimates = ex,
     se_richardson = rich
   ), extra)
+  stopifnot(
+    isTRUE(res$meta$converged),
+    isTRUE(res$meta$converged_richardson),
+    all(res$meta$grid_check == quad$theta_lim),
+    all(range(m_rich@Model$Theta) == quad$theta_lim)
+  )
   if (eap) {
     sc <- fscores(m_oakes, method = "EAP", response.pattern = patterns,
                   quadpts = quad$quadpts, theta_lim = quad$theta_lim)

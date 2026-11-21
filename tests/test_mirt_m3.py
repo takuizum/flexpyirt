@@ -22,6 +22,7 @@ import pytest
 
 from flexpyirt import BAEM, FitResult, FourPL, Model, Quadrature, ThreePL, fit
 from flexpyirt.errors import HeywoodWarning
+from tests._reference import check_reference_meta
 
 REFERENCE_DIR = Path(__file__).parent / "reference"
 METHOD = BAEM(tol=1e-9, max_iter=20000)
@@ -65,6 +66,7 @@ class Case:
 @cache
 def load(name: str) -> Case:
     raw = dict(json.loads((REFERENCE_DIR / f"{name}.json").read_text()))
+    check_reference_meta(raw["meta"], require_richardson=True, require_grid_check=True)
     items = raw["items"]
     item_model = ThreePL() if raw["meta"]["itemtype"] == "3PL" else FourPL()
     return Case(name, raw, Model.uniform(item_model, items=items), Quadrature.equispaced())

@@ -32,7 +32,8 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - EmpiricalHistogram (after deciding DESIGN §12-1).
 - Priors and MAP, reporting `log_posterior`.
 - [x] 3PL / 4PL (`ThreePL`, `FourPL`, `HeywoodWarning`, validated in V11).
-- [ ] GPCM. SQUAREM.
+- [x] GPCM / PCM (`GPCM`, `PCM`, validated in V8).
+- [ ] SQUAREM.
 - Benchmarks (wall time against mirt).
 - **Acceptance**: V6, V7, V8, V11 within tolerance. Agreement also holds with SQUAREM.
 

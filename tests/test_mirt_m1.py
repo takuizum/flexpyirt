@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 
 from flexpyirt import BAEM, FitResult, Model, Rasch, TwoPL, fit
-from tests._reference import Case, load
+from tests._reference import Case, check_reference_meta, load
 
 CASES = ["v1_lsat7_2pl", "v1_sim_2pl", "v2_lsat7_rasch", "v2_sim_rasch"]
 METHOD = BAEM(tol=1e-9, max_iter=20000)
@@ -35,6 +35,11 @@ def _fit(name: str, se: str = "oakes") -> tuple[Case, FitResult]:
     if (name, se) not in _FITS:
         _FITS[(name, se)] = fit(_spec(case), case.data, method=METHOD, se=se)  # type: ignore[arg-type]
     return case, _FITS[(name, se)]
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_reference_metadata(name: str) -> None:
+    check_reference_meta(load(name).raw["meta"])
 
 
 @pytest.mark.parametrize("name", CASES)

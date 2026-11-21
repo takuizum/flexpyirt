@@ -11,7 +11,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Model: [`Model`](#model)
-- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm)
+- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm)
 - Latent distribution: [`Normal`](#normal)
 - Settings: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - Exceptions and warnings: [`flexpyirt.errors`](#flexpyirterrors)
@@ -55,7 +55,7 @@ Returned by `fit()`. Immutable.
 
 | Attribute | Type | Description |
 |---|---|---|
-| `items` | DataFrame | One row per item (per group × item, with a `group` column, for multiple groups): `model`, internal parameters (`a`, `d` / `d1`…, `g`, `u`), `<param>_se`, display `b` / `bk` ($= -d/a$, $-d_k/a$; no SE) |
+| `items` | DataFrame | One row per item (per group × item, with a `group` column, for multiple groups): `model`, internal parameters (`a`, `d` / `d1`…, `g`, `u`), `<param>_se`, display `b` / `bk` ($-d/a$, GRM $-d_k/a$, GPCM/PCM $-(d_k-d_{k-1})/a$ with $d_0=0$; no SE) |
 | `latent` | DataFrame | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` (SEs of fixed values are NaN) |
 | `parameters` | DataFrame | The validated ParameterTable plus `estimate` (the estimate, or the fixed value) and `se` |
 | `loglik` | float | Marginal log-likelihood at the estimates |
@@ -134,9 +134,9 @@ estimate the latent distribution.
 
 | Argument | Description |
 |---|---|
-| `bank` | A DataFrame with an `item` column and parameter columns: `a`, `d` (GRM: `d1`, `d2`, …) for `"slope-intercept"`; `a`, `b` (GRM: `b1`, …) for `"irt"`. Rasch items may omit `a`. Asymptotes `g` (3PL/4PL) and `u` (4PL) are passed unchanged in both parameterizations; `u` may be omitted for 3PL items |
+| `bank` | A DataFrame with an `item` column and parameter columns: `a`, `d` (GRM/GPCM/PCM: `d1`, `d2`, …) for `"slope-intercept"`; `a`, `b` (GRM/GPCM/PCM: `b1`, …) for `"irt"`. Rasch and PCM items may omit `a`. Asymptotes `g` (3PL/4PL) and `u` (4PL) are passed unchanged in both parameterizations; `u` may be omitted for 3PL items |
 | `items` | Items to fix (a list of names or a `str -> bool` function). Default: every bank item that is also in the model |
-| `parameterization` | `"slope-intercept"` or `"irt"` (converted with $d = -ab$) |
+| `parameterization` | `"slope-intercept"` or `"irt"` (converted with $d = -ab$, or $d_k = -a\sum_{c=1}^{k} b_c$ for GPCM/PCM) |
 
 #### `Model.with_latent`
 
@@ -243,6 +243,31 @@ Graded response model (Samejima, 1969) with categories `0..n_cat-1`:
 $P(y\ge k\mid\theta)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$. Internal parameters `a`,
 `d1`…`d{K-1}`; display $b_k=-d_k/a$. Same as mirt's `itemtype = "graded"`. GRM items with the same
 `n_cat` are estimated together.
+
+### `GPCM`
+
+```text
+GPCM(n_cat)
+```
+
+Generalized partial credit model (Muraki, 1992) with categories `0..n_cat-1` (`n_cat >= 2`):
+$P(y=k\mid\theta)=\exp(k\,a\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\,a\theta+d_c)$ with $d_0=0$ fixed.
+Internal parameters `a`, `d1`…`d{K-1}` (no ordering constraint); display step difficulties
+$b_k=-(d_k-d_{k-1})/a$ with $d_0=0$. Same as mirt's `itemtype = "gpcm"`. With `n_cat = 2` this
+equals `TwoPL`. Shares `GPCMKernel` with `PCM` of the same `n_cat`.
+
+### `PCM`
+
+```text
+PCM(n_cat)
+```
+
+Partial credit model (Masters, 1982) with categories `0..n_cat-1` (`n_cat >= 2`): GPCM with `a = 1`
+fixed, $P(y=k\mid\theta)=\exp(k\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\theta+d_c)$ with $d_0=0$ fixed.
+Display step difficulties $b_k=-(d_k-d_{k-1})$. In a single-group model whose items are all `Rasch`
+or `PCM`, the latent variance is estimated by default (same as mirt's `itemtype = "Rasch"` on
+polytomous data). With `n_cat = 2` this equals `Rasch`. Shares `GPCMKernel` with `GPCM` of the same
+`n_cat`.
 
 ---
 
