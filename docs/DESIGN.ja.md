@@ -662,6 +662,50 @@ class ItemKernel(Protocol):
    パラメタ表で行うので識別性は通常の推定と同じく検査され（唯一のアンカーを自由にすると `IdentificationError`）、
    すでに等値（`"add"`）またはすでに自由（`"drop"`）な項目は `SpecificationError`。MAP 推定は拒否する（統計量は
    最尤推定値での周辺尤度を必要とするため）。DIF は Result 層の推定後の処理で、`jit` で動くのは再推定だけ。
+3. **限定情報の適合度（`FitResult.m2`、$M_2$ / $M_2^*$）**:
+   `FitResult.m2(data, *, item_names=None, ci=0.90)` は、Maydeu-Olivares & Joe (2005, 2006) に基づく
+   項目得点の 1 次・2 次モーメント — $J$ 個の項目平均 $E[y_j]$ と $\binom{J}{2}$ 個の交差積 $E[y_iy_j]$
+   （$i < j$、列優先のペア順で mirt の既定 `M2(type = "M2*")` と同じ。2 値項目では厳密に $M_2$）— による
+   限定情報の適合度統計量を計算する。対象は単一母集団・1 次元・欠測なし・`Normal` 潜在分布の MLE 推定のみ
+   （多次元・多母集団・`EmpiricalHistogram`・欠測データ・MAP 推定は `SpecificationError`）。
+   標本周辺モーメント $\hat p_2$、推定時の求積格子と正規化した正規重みの上で積分したモデル周辺モーメント
+   $\pi_2(\hat\eta)$、局所独立のもとでの $\sqrt{N}(\hat p_2-\pi_2)$ の漸近共分散 $\Xi_2$
+   （条件付き 1 次・2 次モーメント $m_{1,jq}=\sum_k kP_{jk}(\theta_q)$、$m_{2,jq}=\sum_k k^2P_{jk}(\theta_q)$ から構成）、
+   および自由パラメタベクトル $\eta$ に関する JAX 前進モード自動微分のヤコビ行列
+   $\Delta_2=\partial\pi_2/\partial\eta^\top$（共有パラメタは 1 回だけ現れ、等値制約の列和と一致）を用いて、
+   $$M_2 = N\,(\hat p_2-\pi_2)^\top C_2\,(\hat p_2-\pi_2),\qquad
+     C_2 = \Delta_c(\Delta_c^\top\Xi_2\Delta_c)^{-1}\Delta_c^\top,\qquad
+     df = s - q,$$
+   とする。ここで $s = J + \binom{J}{2}$、$q = \text{n\_params}$（自由な潜在分布パラメタを含む全自由パラメタ数）、
+   $\Delta_c$ は $\Delta_2$ の SVD から得る $\operatorname{col}(\Delta_2)$ の直交補空間の正規直交基底である。
+   $df \le 0$（または $\Delta_c$ が空）のとき、$p$、RMSEA、その信頼区間、TLI、CFI は `NaN`（$\Delta_c$ が空のときは
+   $M_2$ も `NaN`）とする。
+   **$\Delta_2$ における自由な潜在分布パラメタ**: mirt 1.46.1 は自由な潜在平均・分散の列を $\Delta_2$ から除きつつ
+   $df$ からは引いている。flexpyirt は Maydeu-Olivares & Joe (2005, 2006) に従い、既定ではすべての自由パラメタ
+   （項目・潜在分布とも）を $\Delta_2$ に含める。内部関数 `_m2.m2_statistic` に非公開の `_latent_in_delta: bool = True`
+   引数を持ち、検証テストで理論定義と `False` 指定時の mirt 一致の両方を確認できるようにしている（自由な潜在パラメタが
+   ないモデルでは両者は一致する）。
+   **補助適合度指標**:
+   - $p = P(\chi^2_{df} > M_2)$（生存関数）。
+   - $\mathrm{RMSEA} = \sqrt{\max(0, M_2/df - 1)/(N - 1)}$（$df \le 0$ で `NaN`）。$(100\,\mathrm{ci})\%$ 信頼区間は
+     非心 $\chi^2$ 分布の CDF を逆算して $\sqrt{\lambda/(N\,df)}$ で求める（MacCallum, Browne & Sugawara, 1996。
+     mirt の `RMSEA.CI` と同じく、$[0, M_2]$ / $[0, \max(N, 5M_2)]$ に根が挟まれない端点は 0）。列名は `ci` に従う
+     （例: `ci=0.90` で `rmsea_5`, `rmsea_95`）。
+   - $\mathrm{SRMSR} = \sqrt{\binom{J}{2}^{-1}\sum_{i<j}(r_{ij} - \hat\rho_{ij})^2}$（観測とモデルから導く項目得点相関行列の差。
+     モデル分散の対角要素は $E[y_j^2] - E[y_j]^2$）。
+   - **帰無モデル・TLI・CFI**: 全項目が 2 値（全項目で $K_j = 2$）のとき、すべての傾きを 0 に固定した独立（帰無）モデルは
+     各項目 1 個の自由切片を持ち、MLE は観測比率を再現する。このとき直交補空間上の 2 次形式は解析的に
+     $M_{2,\text{null}} = N\sum_{i<j} r_{ij}^2$、$df_{\text{null}} = \binom{J}{2}$ へ簡約される（閉形式・厳密、mirt の
+     `M2(null.mod)` と一致）。$M_{2,\text{null}} > M_2$ かつ $df > 0$ のとき、
+     $\mathrm{TLI} = (M_{2,\text{null}}/df_{\text{null}} - M_2/df)/(M_{2,\text{null}}/df_{\text{null}} - 1)$（上限クリップなし）、
+     $\mathrm{CFI} = \operatorname{clip}(1 - (M_2 - df)/(M_{2,\text{null}} - df_{\text{null}}), 0, 1)$ とし、
+     $M_{2,\text{null}} \le M_2$ では `FlexpyirtWarning` を出して両者を `NaN` とする。
+     多値項目（$K_j > 2$）を含むモデルでは `tli` と `cfi` を `NaN` とする。$M_2^*$ の項目得点モーメントでは、
+     帰無モデルの $\Delta_{\text{null}}$ において各項目の $K_j - 1$ 本の切片列が厳密に線形従属となるため
+     （$\operatorname{rank}(\Delta_{\text{null}}) = J < \sum_j(K_j - 1)$）、$df_{\text{null}} = s - \sum_j(K_j - 1)$ による
+     帰無 $M_2^*$ は定義不能である（mirt 1.46.1 はランクを確認せず `qr.Q(qr(delta), complete = TRUE)` の `ncol(delta)`
+     列目以降を取り出しており、項目順や丸め誤差に依存して任意の方向を捨てている）。
+   モーメント積分と $\Delta_2$ は JAX、$\Xi_2$・SVD 直交補空間・各適合度指標は `jit` の外の NumPy/SciPy で計算する。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -679,7 +723,10 @@ class ItemKernel(Protocol):
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
+- MacCallum, R. C., Browne, M. W., & Sugawara, H. M. (1996). Power analysis and determination of sample size for covariance structure modeling. *Psychological Methods*, 1(2), 130–149.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Maydeu-Olivares, A., & Joe, H. (2005). Limited- and full-information estimation and goodness-of-fit testing in $2^n$ contingency tables: A unified framework. *Journal of the American Statistical Association*, 100(471), 1009–1020.
+- Maydeu-Olivares, A., & Joe, H. (2006). Limited information goodness-of-fit testing in multidimensional contingency tables. *Psychometrika*, 71(4), 713–732.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
