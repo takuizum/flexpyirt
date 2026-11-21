@@ -58,7 +58,7 @@ Returned by `fit()`. Immutable.
 
 | Attribute | Type | Description |
 |---|---|---|
-| `items` | DataFrame | One row per item (per group × item, with a `group` column, for multiple groups): `model`, internal parameters (`a`, `d` / `d1`…, `g`, `u`), `<param>_se`, display `b` / `bk` ($-d/a$, GRM $-d_k/a$, GPCM/PCM $-(d_k-d_{k-1})/a$ with $d_0=0$; no SE) |
+| `items` | DataFrame | One row per item (per group × item, with a `group` column, for multiple groups): `model`, internal parameters (`a`, `d` / `d1`…, `g`, `u`), `<param>_se`, display `b` / `bk` ($-d/a$, GRM $-d_k/a$, GPCM/PCM $-(d_k-d_{k-1})/a$ with $d_0=0$), and delta-method `b_se` / `bk_se` (from `vcov` via JAX autodiff; NaN when `se=None` or all parameters entering a threshold are fixed) |
 | `latent` | DataFrame | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` (SEs of fixed values are NaN) |
 | `parameters` | DataFrame | The validated ParameterTable plus `estimate` (the estimate, or the fixed value) and `se` |
 | `loglik` | float | Marginal log-likelihood at the estimates (likelihood only, excluding priors) |
@@ -83,6 +83,24 @@ res.log_posterior -> float
 The log posterior $\ell(\hat\eta) + \sum_i \log\pi_i(\hat\eta_i)$ evaluated on the natural scale
 over all free parameters (counted once per `free_id`; fixed parameters ignore their prior). Equal
 to `res.loglik` when no priors are active.
+
+#### `FitResult.summary`
+
+```text
+summary(*, digits=4) -> str
+```
+
+Return a readable plain-text summary containing the item model(s) and estimation mode (`MMLE` or
+`MAP`), sample/item/free-parameter counts, group summary, convergence status with iteration and
+EM-evaluation counts (plus SQUAREM safeguards when nonzero), SE method, quadrature grid,
+log-likelihood, log-posterior, AIC and BIC (with an inline note when priors are active, without
+emitting runtime warnings), the latent distribution table, and the item parameter table with
+standard errors (including delta-method `b_se` / `bk_se`). Raises `SpecificationError` if `digits`
+is not a non-negative integer.
+
+In Jupyter notebooks, `FitResult._repr_html_()` renders the same information in plain,
+self-contained HTML/CSS (no external assets, HTML-escaped names), while `repr(res)` remains a
+concise one-line summary.
 
 #### `FitResult.score`
 

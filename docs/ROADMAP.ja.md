@@ -32,7 +32,9 @@
 - **受け入れ基準**: V6, V7, V8, V11 が許容誤差内。SQUAREM ありでも照合が通る。
 
 ## M4 結果まわり・多次元の入口
-- `FitResult` の充実（summary, `_repr_html_`, JSON 入出力, デルタ法による IRT パラメタ化の SE）。
+- [x] `FitResult.summary()`、`FitResult._repr_html_()`、デルタ法による表示用 IRT パラメタ化の SE
+  （`b_se` / `bk_se`、V12 で照合済み）。
+- `FitResult` の JSON 入出力。
 - スコアリング（MAP, ML, WLE, plausible values）。
 - 確認的 2–3 次元 MIRT（直積格子）。
 - **受け入れ基準**: mirt の `fscores` と EAP / MAP が一致。2 次元確認的モデルが mirt と一致。

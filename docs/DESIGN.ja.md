@@ -243,7 +243,9 @@ class LatentDist(Protocol):
 | GPCM / PCM | $a, d_1..d_{K-1}$ | M3 |
 | Nominal | M5 以降（未定） | — |
 
-表示用の IRT パラメタ化（$b=-d/a$ など）は Result 層で変換し、SE はデルタ法で出す。
+表示用の IRT パラメタ化（2PL / Rasch / 3PL / 4PL は $b=-d/a$、GRM は $b_k=-d_k/a$、GPCM / PCM は
+ステップ困難度 $b_k=-(d_k-d_{k-1})/a$、$d_0=0$）は Result 層（`FitResult.items`）で計算し、SE
+（`b_se` / `bk_se`）は JAX の前向き自動微分によるヤコビアンを用いたデルタ法で求める（§15.18）。
 
 ## 8. スコアリング
 `FitResult.score(data, method="EAP"|"MAP"|"ML"|"WLE"|"PV", group=...)`。群ごとの推定済み潜在分布を事前分布として使う。EAP の事後 SD も返す。
@@ -426,6 +428,25 @@ class LatentDist(Protocol):
     1 つ以上事前分布がある場合、`FitResult.aic` と `FitResult.bic` は `loglik` で計算しつつ `FlexpyirtWarning` を出す。
     `information_oakes` は $Q(\eta\mid\eta')$ に `log_prior(prob, e)` を足し、`information_hessian` は
     `log_posterior(prob, e)` を微分することで、両者とも厳密に $-\nabla^2_\eta\log\pi(\hat\eta)$ を加える。
+18. **表示用 IRT 閾値のデルタ法 SE（M4, §7）**: 各 `ItemKernel` に `irt_names`（例: `("b",)` や
+    `("b1", ..., "b{K-1}")`）、`irt_dep_indices`（各閾値に入る内部パラメタの添字）、純粋 JAX 関数
+    `irt_thresholds(params)`（2PL / Rasch / 3PL / 4PL は $b = -d/a$、GRM は $b_k = -d_k/a$、GPCM / PCM は
+    `jnp.diff` による $b_k = -(d_k - d_{k-1})/a$、$d_0 = 0$）を持たせる。`FitResult.items` ではカーネルごとに
+    キャッシュした jit 関数 `(irt_thresholds, jax.jacfwd(irt_thresholds))` で表示値とヤコビアン
+    $J = \partial g/\partial\xi$ を手書き微分なしで同時に評価する。各閾値 $m$ について、その閾値に入る自由パラメタの
+    `free_id` で `FitResult.vcov` を参照し、$\operatorname{Var}(g_m(\hat\xi)) \approx J_m\Sigma_\xi J_m^\top$
+    （Casella & Berger, 2002; Oehlert, 1992）を計算する。固定パラメタは分散に寄与しない（$a=1$ 固定の
+    Rasch / PCM では `b_se = d_se` / `b1_se = d1_se`、PCM のステップ差は $\operatorname{Cov}(d_{k-1}, d_k)$ を含む）。
+    群間等値制約は同一の `free_id` を共有するため自動的に共有パラメタの共分散が使われる（傾き `a` のみ共有・切片 `d` は
+    群別といった部分等値も含む）。`vcov` が `None` または非正定値（NaN）のとき、および閾値に入るパラメタがすべて固定
+    （FIPC の固定項目や `a, d` 固定で `g` 自由の 3PL など）のとき、`b_se` / `bk_se` は NaN とする。
+19. **結果の要約表示（`FitResult.summary()` と `FitResult._repr_html_()`）（M4, §2 ④）**:
+    `FitResult.summary(*, digits=4)` はモデルと推定種別（`MMLE` / `MAP`）、データ規模とパラメタ数、群情報、
+    収束状況・反復回数・EM 評価回数（0 でなければ SQUAREM 安全装置回数も）、SE 手法、求積格子、対数尤度・対数事後確率・
+    AIC・BIC、潜在分布表、および項目パラメタ表（`b_se` / `bk_se` を含む）を読みやすいプレーンテキストで返す。事前分布が
+    有効なときは、AIC / BIC が MLE ではなく MAP 推定値での周辺対数尤度を使う旨を本文に注意文として記載し、描画時に重複した
+    `FlexpyirtWarning` を出さない。`FitResult._repr_html_()` は同じ内容を外部リソースなし・ライト／ダーク両対応の素の
+    HTML/CSS で描画し、すべての名前を `html.escape()` でエスケープする。`__repr__` は短い 1 行要約のまま保つ。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -433,12 +454,14 @@ class LatentDist(Protocol):
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
+- Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
+- Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
