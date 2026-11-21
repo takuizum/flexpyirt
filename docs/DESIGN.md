@@ -740,7 +740,7 @@ data-independent shapes (§15.21).
     string and also writes UTF-8 text to `path` (`str` or `os.PathLike`) when given;
     `FitResult.from_json(source) -> FitResult` loads from a file path or JSON string without
     refitting. Plain JSON is used (no `pickle` and never `eval`). The top-level object carries
-    `"format": "flexpyirt.FitResult"`, `"schema_version": 1` (for future schema migrations), and
+    `"format": "flexpyirt.FitResult"`, `"schema_version"` (2 since multidimensional models were added in §15.33; version 1 files are still read), and
     `"flexpyirt_version": flexpyirt.__version__`. `FitResult` stores `_method: BAEM` alongside
     `_model` and `_quadrature` so estimation settings round-trip as well. `from_json` calls
     `check_x64()` at entry (raising `PrecisionError` when 64-bit floating point is disabled, since
@@ -827,11 +827,16 @@ data-independent shapes (§15.21).
     `FitResult.score(data, method="EAP")` returns columns `theta_<factor>` and `se_<factor>` in
     declared factor order; non-EAP scoring methods (`MAP`, `ML`, `WLE`, `PV`) raise
     `SpecificationError` for $D > 1$ (planned for a later milestone).
-33. **TODO — JSON I/O for multidimensional `FitResult` (M4)**: the JSON schema (§15.26–§15.28)
-    does not yet store `Model.factors`, `Model.correlated_factors` or the multidimensional latent
-    rows, so `FitResult.to_json()` raises `SpecificationError` for models with $D > 1$ instead of
-    writing a file that `from_json()` cannot read back. Supporting it means adding the factor
-    structure to the schema (a new `schema_version`) and round-trip tests.
+33. **JSON I/O for multidimensional `FitResult` (schema version 2, M4)**: the model object in the
+    JSON payload stores `"factors"` (`null`, or a list of `{"name", "items"}` in declared order)
+    and `"correlated_factors"`, so `to_json()` / `from_json()` round-trip 2–3 dimensional results
+    exactly (`items`, `latent`, `parameters`, `vcov`, `summary()`, and EAP scores). On load the
+    factor structure is rebuilt through `Model.with_factors()`, so the same validation applies as
+    when it was declared, and fixed values, equalities and priors are checked against the
+    multidimensional parameter names (`a1`..`aD`); a model with factors must not carry `latent`
+    or `groups`. `schema_version` is 2; version-1 files (written before factors were stored) are
+    still read and must not contain the two new keys. `model_parameter_schema()` repeats the slope
+    bounds for `a1`..`aD` exactly as `build_table()` does.
 34. **Empirical Histogram (`EmpiricalHistogram`) specification, KKT floor, and moment-constrained reference M-step (M3, §4.4, §4.5, resolves §12-1)**:
     `EmpiricalHistogram(*, min_weight: float = 1e-10)` is a public frozen dataclass exported from
     `flexpyirt`, validating `0 < min_weight < 1` at construction and `min_weight * Q < 1` at

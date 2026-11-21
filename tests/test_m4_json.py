@@ -8,6 +8,7 @@ import subprocess
 import sys
 import textwrap
 import warnings
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
@@ -513,7 +514,7 @@ def test_malformed_format_and_schema_version(
         FitResult.from_json(json.dumps(no_fmt))
 
     # Unknown schema_version
-    for bad_ver in (0, 2, 99, "1", True):
+    for bad_ver in (0, 3, 99, "1", True):
         bad = _clone(sample_payload)
         bad["schema_version"] = bad_ver
         with pytest.raises(SpecificationError, match="schema_version"):
@@ -995,3 +996,116 @@ def test_read_source_non_utf8_and_brace_prefixed_filename(
     # Non-existent relative '{...}.json' still raises FileNotFoundError
     with pytest.raises(FileNotFoundError):
         FitResult.from_json("{missing}.json")
+
+
+# --------------------------------------------------------------------------------------------
+# Schema version 2: confirmatory multidimensional models (DESIGN.md §15.33)
+# --------------------------------------------------------------------------------------------
+
+
+def _mirt_data(n_factors: int, seed: int) -> tuple[pd.DataFrame, dict[str, list[str]]]:
+    rng = np.random.default_rng(seed)
+    n, per = 600, 4
+    j = n_factors * per
+    theta = rng.multivariate_normal(np.zeros(n_factors), 0.4 + 0.6 * np.eye(n_factors), size=n)
+    a = np.zeros((j, n_factors))
+    for m in range(n_factors):
+        a[m * per : (m + 1) * per, m] = rng.uniform(0.8, 1.6, per)
+    a[per, 0] = 0.6  # one cross-loading
+    d = rng.normal(size=j)
+    y = (rng.random((n, j)) < 1.0 / (1.0 + np.exp(-(theta @ a.T + d)))).astype(float)
+    items = [f"q{k:02d}" for k in range(j)]
+    factors = {f"F{m + 1}": items[m * per : (m + 1) * per] for m in range(n_factors)}
+    factors["F1"] = [*factors["F1"], items[per]]
+    return pd.DataFrame(y, columns=items), factors
+
+
+@pytest.mark.parametrize(("n_factors", "correlated"), [(2, True), (3, False)])
+def test_multidimensional_round_trip(n_factors: int, correlated: bool, tmp_path: Path) -> None:
+    df, factors = _mirt_data(n_factors, seed=40 + n_factors)
+    spec = Model.uniform(TwoPL(), items=df.columns).with_factors(factors, correlated=correlated)
+    spec = spec.fix(item="q00", a1=1.0)
+    res = fit(spec, df, method=BAEM(tol=1e-4), se="oakes")
+    path = tmp_path / "mirt.json"
+    res.to_json(path)
+    parsed = _assert_strict_json(path.read_text(encoding="utf-8"))
+    assert parsed["model"]["factors"] == [
+        {"name": name, "items": list(items)} for name, items in spec.factors or ()
+    ]
+    assert parsed["model"]["correlated_factors"] is correlated
+    loaded = FitResult.from_json(path)
+    assert loaded._model == res._model
+    pd.testing.assert_frame_equal(loaded.parameters, res.parameters, check_exact=True)
+    pd.testing.assert_frame_equal(loaded.items, res.items, check_exact=True)
+    pd.testing.assert_frame_equal(loaded.latent, res.latent, check_exact=True)
+    assert res.vcov is not None and loaded.vcov is not None
+    np.testing.assert_array_equal(loaded.vcov, res.vcov)
+    assert loaded.summary() == res.summary()
+    assert loaded._repr_html_() == res._repr_html_()
+    assert (loaded.aic, loaded.bic, loaded.n_params) == (res.aic, res.bic, res.n_params)
+    pd.testing.assert_frame_equal(loaded.score(df), res.score(df), check_exact=True)
+
+
+def test_schema_version_1_payload_still_loads(sample_payload: dict[str, Any]) -> None:
+    """Files written before factors were stored (schema 1) load as unidimensional models."""
+    old = _clone(sample_payload)
+    old["schema_version"] = 1
+    del old["model"]["factors"]
+    del old["model"]["correlated_factors"]
+    loaded = FitResult.from_json(json.dumps(old))
+    assert not loaded._model.is_multidimensional
+    expected = FitResult.from_json(json.dumps(sample_payload))
+    pd.testing.assert_frame_equal(loaded.items, expected.items, check_exact=True)
+    # schema 1 must not carry the new keys, and schema 2 must have them
+    with_keys = _clone(sample_payload)
+    with_keys["schema_version"] = 1
+    with pytest.raises(SpecificationError, match="factors"):
+        FitResult.from_json(json.dumps(with_keys))
+    missing = _clone(sample_payload)
+    del missing["model"]["factors"]
+    with pytest.raises(SpecificationError, match="factors"):
+        FitResult.from_json(json.dumps(missing))
+
+
+@pytest.fixture(scope="module")
+def mirt_payload() -> dict[str, Any]:
+    df, factors = _mirt_data(2, seed=7)
+    spec = Model.uniform(TwoPL(), items=df.columns).with_factors(factors)
+    return _assert_strict_json(fit(spec, df, method=BAEM(tol=1e-3), se=None).to_json())
+
+
+@pytest.mark.parametrize(
+    ("mutate", "match"),
+    [
+        (lambda m: m["factors"][0].update(items=["nope"]), "unknown items"),
+        (lambda m: m["factors"][1].update(name=m["factors"][0]["name"]), "Duplicated factor"),
+        (lambda m: m["factors"].pop(), "2 to 3 factors"),
+        (lambda m: m["factors"][1]["items"].pop(), "not assigned to any factor"),
+        (lambda m: m.update(factors=m["factors"] * 2), "Duplicated factor"),
+        (lambda m: m.update(correlated_factors="yes"), "correlated_factors"),
+        (
+            lambda m: m.update(
+                latent={
+                    "type": "Normal",
+                    "mean": 0.0,
+                    "var": 1.0,
+                    "free_mean": False,
+                    "free_var": False,
+                }
+            ),
+            "factors",
+        ),
+        (
+            lambda m: m["fixed"].append({"item": "q00", "param": "a", "value": 1.0}),
+            "unknown parameter",
+        ),
+        (lambda m: m["factors"][0].update(extra=1), "Unexpected"),
+    ],
+)
+def test_malformed_factor_structure(
+    mirt_payload: dict[str, Any], mutate: Callable[[dict[str, Any]], Any], match: str
+) -> None:
+    bad = _clone(mirt_payload)
+    mutate(bad["model"])
+    with pytest.raises(SpecificationError, match=match):
+        FitResult.from_json(json.dumps(bad))

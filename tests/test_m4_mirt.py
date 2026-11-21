@@ -658,19 +658,3 @@ def test_proportional_fixed_loadings_are_identification_error() -> None:
     spec = Model.uniform(Rasch(), items=items).with_factors({"F1": items, "F2": items})
     with pytest.raises(IdentificationError, match="proportional fixed loadings"):
         fit(spec, df)
-
-
-def test_to_json_refuses_multidimensional_results() -> None:
-    """The JSON schema does not store the factor structure yet (DESIGN §15.33)."""
-    rng = np.random.default_rng(5)
-    theta = rng.normal(size=(500, 2))
-    a = np.array([[1.2, 0.0], [1.0, 0.0], [0.8, 0.0], [0.0, 1.1], [0.0, 0.9], [0.0, 1.3]])
-    d = rng.normal(size=6)
-    y = (rng.random((500, 6)) < 1.0 / (1.0 + np.exp(-(theta @ a.T + d)))).astype(float)
-    df = pd.DataFrame(y, columns=[f"q{j}" for j in range(6)])
-    spec = Model.uniform(TwoPL(), items=df.columns).with_factors(
-        {"F1": ["q0", "q1", "q2"], "F2": ["q3", "q4", "q5"]}
-    )
-    res = fit(spec, df, se=None)
-    with pytest.raises(SpecificationError, match="multidimensional"):
-        res.to_json()

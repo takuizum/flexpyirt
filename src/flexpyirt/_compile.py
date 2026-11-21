@@ -503,7 +503,12 @@ def model_parameter_schema(model: Model) -> pd.DataFrame:
     for group_name, latent in model.resolved_groups():
         for name, item_model in model.items:
             lower, upper = item_model.bounds()
-            for param, lo, hi in zip(item_model.kernel.param_names, lower, upper, strict=True):
+            n_slopes = model.n_factors
+            # Multidimensional items repeat the slope bounds for a1..aD (as in build_table).
+            lower = (lower[0],) * n_slopes + tuple(lower[1:])
+            upper = (upper[0],) * n_slopes + tuple(upper[1:])
+            names = model.item_kernel(item_model).param_names
+            for param, lo, hi in zip(names, lower, upper, strict=True):
                 rows.append((group_name, name, param, item_model.name, float(lo), float(hi)))
         if isinstance(latent, EmpiricalHistogram):
             continue
