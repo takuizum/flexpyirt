@@ -553,7 +553,7 @@ def test_malformed_registry_types(sample_payload: dict[str, Any]) -> None:
 
     # Unknown latent distribution
     bad_lat = _clone(sample_payload)
-    bad_lat["model"]["latent"] = {"type": "DavidianCurve"}
+    bad_lat["model"]["latent"] = {"type": "UnknownLatent"}
     with pytest.raises(SpecificationError, match="Unknown latent distribution type"):
         FitResult.from_json(json.dumps(bad_lat))
 

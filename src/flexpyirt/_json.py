@@ -33,7 +33,13 @@ from flexpyirt._compile import (
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import SpecificationError
 from flexpyirt.items import GPCM, GRM, PCM, FourPL, ItemModel, Nominal, Rasch, ThreePL, TwoPL
-from flexpyirt.latent import EmpiricalHistogram, LatentSpec, Normal
+from flexpyirt.latent import (
+    MAX_DAVIDIAN_DEGREE,
+    DavidianCurve,
+    EmpiricalHistogram,
+    LatentSpec,
+    Normal,
+)
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
 from flexpyirt.priors import Beta, LogNormal, NormalPrior, Prior
@@ -362,13 +368,46 @@ def _deserialize_eh_latent(obj: dict[str, Any], field_name: str) -> EmpiricalHis
     )
 
 
+def _serialize_davidian_latent(dist: DavidianCurve) -> dict[str, Any]:
+    return {
+        "type": "DavidianCurve",
+        "degree": int(dist.degree),
+        "mean": _encode_float(dist.mean),
+        "var": _encode_float(dist.var),
+        "free_mean": bool(dist.free_mean),
+        "free_var": bool(dist.free_var),
+    }
+
+
+def _deserialize_davidian_latent(obj: dict[str, Any], field_name: str) -> DavidianCurve:
+    _check_keys(
+        obj,
+        required={"type", "degree", "mean", "var", "free_mean", "free_var"},
+        field_name=field_name,
+    )
+    return DavidianCurve(
+        degree=_require_int(
+            obj["degree"],
+            field_name=f"{field_name}.degree",
+            min_value=1,
+            max_value=MAX_DAVIDIAN_DEGREE,
+        ),
+        mean=_decode_float(obj["mean"], field_name=f"{field_name}.mean", finite=True),
+        var=_decode_float(obj["var"], field_name=f"{field_name}.var", finite=True),
+        free_mean=_require_bool(obj["free_mean"], field_name=f"{field_name}.free_mean"),
+        free_var=_require_bool(obj["free_var"], field_name=f"{field_name}.free_var"),
+    )
+
+
 _LATENT_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
     Normal: _serialize_normal_latent,
     EmpiricalHistogram: _serialize_eh_latent,
+    DavidianCurve: _serialize_davidian_latent,
 }
 _LATENT_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], LatentSpec]] = {
     "Normal": _deserialize_normal_latent,
     "EmpiricalHistogram": _deserialize_eh_latent,
+    "DavidianCurve": _deserialize_davidian_latent,
 }
 
 
@@ -1332,7 +1371,7 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
         )
     elif "latent_weights" in obj:
         raise SpecificationError(
-            "Unexpected key 'latent_weights' for a Normal latent-distribution FitResult."
+            "Unexpected key 'latent_weights' for a non-EmpiricalHistogram FitResult."
         )
     method = _deserialize_method(obj["method"], field_name="method")
     n_obs = _require_int(obj["n_obs"], field_name="n_obs", min_value=1, max_value=_INT64_MAX)

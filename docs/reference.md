@@ -126,8 +126,9 @@ DataFrame): for unidimensional models, columns `theta`, `se` for `"EAP"`, `"MAP"
 and `pv1`…`pv{n_draws}` for `"PV"`; for multidimensional models, columns `theta_<factor>` and `se_<factor>` in declared factor
 order (`"PV"`: `pv<m>_<factor>`).
 
-**Raises**: `SpecificationError` if `method` is unknown, `method="MAP"` with an `EmpiricalHistogram` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for a deterministic method, or
-`n_draws` is not a positive integer.
+**Raises**: `SpecificationError` if `method` is unknown, `method="MAP"` with an `EmpiricalHistogram`
+or `DavidianCurve` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for
+a deterministic method, or `n_draws` is not a positive integer.
 
 #### `FitResult.item_fit`
 
@@ -152,8 +153,39 @@ free latent parameters (mirt's convention).
 ($\sqrt{\max(0, X^2/df-1)/(N-1)}$) and `p`; items whose collapsed table leaves `df <= 0` get
 `df = 0` and NaN statistics.
 
-**Raises**: `SpecificationError` for multidimensional, multiple-group or `EmpiricalHistogram`
-models, missing responses, an item with an unobserved category, or a non-positive `mincell`.
+**Raises**: `SpecificationError` for multidimensional, multiple-group, `EmpiricalHistogram`, or
+`DavidianCurve` models, missing responses, an item with an unobserved category, or a non-positive
+`mincell`.
+
+#### `FitResult.m2`
+
+```text
+m2(data, *, item_names=None, ci=0.90) -> DataFrame
+```
+
+Limited-information goodness-of-fit statistic $M_2$ / $M_2^*$ of Maydeu-Olivares & Joe (2005, 2006)
+([guide section 5](guide.md#limited-information-fit-m2)), computed on the $J$ item-score means and
+$\binom{J}{2}$ pairwise cross-products (matching mirt's default `M2(type = "M2*")`; identically
+$M_2$ for dichotomous items). The Jacobian $\Delta_2 = \partial\pi_2/\partial\eta^\top$ includes
+every free item and latent parameter (shared parameters once) via JAX autodiff.
+
+| Argument | Description |
+|---|---|
+| `data` | Complete responses on the fitted items (typically the fitting data) |
+| `item_names` | Column names when `data` is an array |
+| `ci` | Confidence level strictly in `(0, 1)` for the RMSEA confidence interval (default `0.90`) |
+
+**Returns**: One-row `DataFrame` with columns `m2`, `df` ($J + \binom{J}{2} - k$), `p`, `rmsea`,
+`rmsea_<lo>`, `rmsea_<hi>` (named from `ci`, e.g. `rmsea_5`, `rmsea_95` for `0.90`), `srmsr`,
+`tli`, `cfi`. When `df <= 0` or $\Delta_2$ is rank-deficient (the model is not locally identified
+from first- and second-order moments), a `FlexpyirtWarning` is emitted and `m2`, `p`, RMSEA, its
+CI, `tli` and `cfi` are `NaN` (`df` and `srmsr` remain finite). Polytomous models return `NaN` for
+`tli` and `cfi` (DESIGN §16.3); if the dichotomous null $M_2$ is not greater than the fitted $M_2$,
+a `FlexpyirtWarning` is emitted and `tli`/`cfi` are `NaN`.
+
+**Raises**: `PrecisionError` if JAX 64-bit is disabled; `SpecificationError` for multidimensional,
+multiple-group, `EmpiricalHistogram`, or MAP (with priors) models, missing responses, invalid
+`ci`, or fewer than 2 items or respondents.
 
 #### `FitResult.dif`
 
@@ -569,6 +601,37 @@ fitted histogram. Unidimensional models only.
 `Normal` across groups, or for a multidimensional model; `IdentificationError` when intercepts are
 fixed but no nonzero slope is (a variance-only constraint is not supported).
 
+### `DavidianCurve`
+
+```text
+DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)
+DavidianCurve.free(degree, *, mean=0.0, var=1.0)
+```
+
+Seminonparametric Davidian-curve latent density of polynomial degree `degree` in `1..10`
+(Zhang & Davidian, 2001; Woods & Lin, 2009; [guide section 8](guide.md#davidian-curves)).
+Evaluates $h_k(z;\boldsymbol\phi) = P_k(z;\boldsymbol\phi)^2\varphi(z)$ in normalized probabilists'
+Hermite polynomials with unit-sphere coefficients parameterized by $k$ angles
+`phi_1`…`phi_k` ($\boldsymbol\phi = \mathbf 0$ reproduces $N(\mu,\sigma^2)$ non-singularly),
+analytically standardized by the exact continuous moments of $h_k$ so the continuous mean and
+variance equal `mean` and `var` for every $\boldsymbol\phi$. Quadrature weights are normalized on
+the grid, keeping EM monotone (non-decreasing) and Oakes / Hessian standard errors exact for all
+free item and latent parameters. Single-group unidimensional models only. The Fisher information
+is singular at $\boldsymbol\phi = \mathbf 0$ in `phi_1`, `phi_2` (in `phi_1` for `degree=1`), so
+near-normal traits give unreliable angle standard errors, a non-standard likelihood-ratio test
+against `Normal` (use AIC / BIC), and possibly several local maxima
+([guide section 8](guide.md#davidian-curves)).
+
+| Argument | Description |
+|---|---|
+| `degree` | Integer polynomial degree $k \in \{1,\dots,10\}$ (number of angle parameters `phi_1`…`phi_k`) |
+| `mean`, `var` | Value (or starting value when free) of the continuous mean and positive variance |
+| `free_mean`, `free_var` | Whether `mean` / `var` is estimated (same identification rules as `Normal`) |
+
+**Raises**: `SpecificationError` for an invalid `degree`, `mean`, `var`, or flags, or when used
+with `Model.with_groups()` or `Model.with_factors()`; `IdentificationError` when `free_mean` or
+`free_var` lacks fixed intercepts or slopes.
+
 ---
 
 ## Settings
@@ -604,7 +667,7 @@ dimension; limits must be finite with `lower < upper`.
 `Quadrature.gauss_hermite(n_points)` uses the Gauss–Hermite nodes $\sqrt2\,x_q$ (3–200 per
 dimension, product rule in 2–3 dimensions) for `Normal` latent distributions, reweighted for the
 estimated mean and covariance (DESIGN §15.44); `base_log_weights(n_factors)` returns the fixed
-per-node log weights (0 for equispaced grids). Not available with `EmpiricalHistogram`.
+per-node log weights (0 for equispaced grids). Not available with `EmpiricalHistogram` or `DavidianCurve`.
 
 ---
 

@@ -279,6 +279,20 @@ fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
 print(fit_table.round(3))
 ```
 
+### Limited-information fit (M2)
+
+`m2(data)` computes the Maydeu-Olivares & Joe (2005, 2006) limited-information goodness-of-fit
+statistic on the item-score means and pairwise cross-products (mirt's default `M2(type = "M2*")`;
+identically $M_2$ for dichotomous items), together with RMSEA and its confidence interval
+(`ci=0.90` by default), SRMSR, and — for dichotomous models — TLI and CFI against the independence
+null model (polytomous models report `NaN` for `tli` and `cfi`; see [DESIGN §16.3](DESIGN.md)).
+It requires complete data and a single-group, unidimensional, `Normal` MLE fit (no priors).
+
+```python
+m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi
+print(m2_table.round(3))
+```
+
 ## 6. Standard errors
 
 - **`se="oakes"`** (default): the observed information from Oakes' (1999) identity. The second
@@ -416,6 +430,49 @@ print(eh.latent_weights.head())  # group, node, weight
   `SpecificationError`.
 - Many histogram weights are only weakly determined, so EM converges slowly at tight tolerances;
   `BAEM(squarem=True)` helps.
+
+### Davidian curves
+
+`DavidianCurve(degree)` models a smooth non-normal unidimensional latent density
+$h_k(z;\boldsymbol\phi) = P_k(z;\boldsymbol\phi)^2\varphi(z)$ using $k \in \{1,\dots,10\}$ angle
+parameters `phi_1`…`phi_k` (Zhang & Davidian, 2001; Woods & Lin, 2009), analytically standardized
+so the continuous mean and variance equal `mean` (default `0`) and `var` (default `1`) for every
+$\boldsymbol\phi$. Unlike `EmpiricalHistogram`, it adds only $k$ latent parameters and provides
+joint Oakes and Hessian standard errors for both item and latent parameters.
+
+```python
+from flexpyirt import DavidianCurve
+
+theta_skew = (rng.chisquare(4.0, 1200) - 4.0) / np.sqrt(8.0)
+skew_df = pd.DataFrame(simulate_2pl(a_true, d_true, theta_skew, rng), columns=items)
+
+dc = fit(
+    Model.uniform(TwoPL(), items=items).with_latent(DavidianCurve(3)),
+    skew_df,
+    method=BAEM(squarem=True),
+)
+print(dc.latent.round(3))  # mean, var, phi_1..phi_3 and SEs
+print(dc.score(skew_df.iloc[:3], method="EAP").round(3))  # uses the fitted Davidian prior
+```
+
+- **Identification**: `mean` and `var` follow the same rules as `Normal` (fixed at `0` and `1` by
+  default; pass `free_var=True` for Rasch/PCM, or `DavidianCurve.free(degree)` under FIPC).
+- **Scope**: single-group unidimensional models only (`with_groups()` and `with_factors()` raise
+  `SpecificationError`).
+- **Scoring**: `"EAP"` and `"PV"` use the fitted Davidian density; `"ML"` and `"WLE"` are
+  likelihood-only; `"MAP"` raises `SpecificationError` because a Davidian density can be multimodal
+  and vanish at real roots of $P_k$.
+- **Near-normal traits and local maxima**: at $\boldsymbol\phi=\mathbf 0$ (the normal density) the
+  first-order effects of `phi_1` and `phi_2` are pure location / scale changes, which the
+  standardization removes, so the Fisher information is singular there (in `phi_1` for
+  `degree=1`). When the trait is close to normal, the angles are poorly determined, their
+  standard errors are unreliable, and a likelihood-ratio test of `DavidianCurve` against `Normal`
+  does not follow its usual $\chi^2$ distribution; compare degrees (and `Normal`) by AIC / BIC
+  instead (Woods & Lin, 2009). The likelihood can also have several local maxima (in a `degree=1`
+  example the default start reached `phi_1 = 0.50` while a start at `-1.0` reached a fit 2.2
+  log-likelihood points better), so for important analyses refit from a few starting angles
+  (edit `value` of the `phi_*` rows of `Model.parameter_table()` and pass `table=`) and keep the
+  fit with the highest `loglik`.
 
 ## 9. Multiple groups
 
@@ -630,7 +687,7 @@ the grid makes them agree ([VALIDATION.md](VALIDATION.md)).
 **Gauss–Hermite.** For `Normal` latent distributions, `Quadrature.gauss_hermite(n)` places `n`
 Gauss–Hermite nodes per dimension and reweights them for the estimated mean and variance; it is
 usually more accurate than an equispaced grid with the same number of points near $N(0,1)$, but
-loses accuracy for variances well above 1. `EmpiricalHistogram` needs an equispaced grid.
+loses accuracy for variances well above 1. `EmpiricalHistogram` and `DavidianCurve` need an equispaced grid.
 
 ```python
 gh = Quadrature.gauss_hermite(41)
@@ -737,3 +794,6 @@ except SpecificationError as e:
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
+- Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
+- Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
