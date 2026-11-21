@@ -16,7 +16,14 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from flexpyirt._core import CompiledProblem, FamilyBlock, LatentBlock, PriorBlock
+from flexpyirt._core import (
+    CompiledProblem,
+    CoupledBlock,
+    CoupledMember,
+    FamilyBlock,
+    LatentBlock,
+    PriorBlock,
+)
 from flexpyirt.errors import FlexpyirtWarning, IdentificationError, SpecificationError
 from flexpyirt.items import (
     GPCM,
@@ -479,20 +486,56 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
             )
     table = pd.DataFrame(rows)
     table["prior"] = table["prior"].astype(object)
-    ids = np.full(len(table), -1)
     free_mask = table["free"].to_numpy(dtype=bool)
-    ids[free_mask] = np.arange(int(free_mask.sum()))
-    # Across-group equalities share the free_id of the first group's row.
     item_col = table["item"].to_numpy(dtype=object)
     param_col = table["param"].to_numpy(dtype=object)
+    group_col = table["group"].to_numpy(dtype=object)
+    # Equalities (across groups, §14.1, and across items, §16.1) merge free rows by union-find.
+    parent = np.arange(len(table))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = int(parent[i])
+        return i
+
+    def union(rows_eq: np.ndarray) -> None:
+        if rows_eq.size < 2:
+            return
+        root = find(int(rows_eq[0]))
+        for r in rows_eq[1:].tolist():
+            other = find(int(r))
+            if other != root:
+                parent[max(root, other)] = min(root, other)
+                root = min(root, other)
+
     for items, params in model.equal:
         for item in items:
             mask = (item_col == item) & free_mask
             if params is not None:
                 mask &= np.isin(param_col, list(params))
             for param in set(param_col[mask].tolist()):
-                rows_p = np.flatnonzero(mask & (param_col == param))
-                ids[rows_p] = ids[rows_p[0]]
+                union(np.flatnonzero(mask & (param_col == param)))
+    for items, params in model.equal_items:
+        in_items = np.isin(item_col, list(items)) & free_mask
+        for group_name in dict.fromkeys(group_col.tolist()):
+            for param in params:
+                union(np.flatnonzero(in_items & (group_col == group_name) & (param_col == param)))
+
+    roots = np.array([find(i) for i in range(len(table))])
+    # Number the merged rows in order of first appearance (default ids follow the row order).
+    ids = np.full(len(table), -1)
+    order: dict[int, int] = {}
+    for i in np.flatnonzero(free_mask).tolist():
+        ids[i] = order.setdefault(int(roots[i]), len(order))
+    # A parameter shared across items starts at the mean of its rows' default starting values.
+    if model.equal_items:
+        values = table["value"].to_numpy(dtype=float).copy()
+        for fid in range(len(order)):
+            rows_f = np.flatnonzero(ids == fid)
+            if np.unique(item_col[rows_f]).size > 1:
+                values[rows_f] = float(np.mean(values[rows_f]))
+        table["value"] = values
     table["free_id"] = ids
     return table[list(TABLE_COLUMNS)].astype({"free": bool, "free_id": int})
 
@@ -612,20 +655,26 @@ def _validate_value_column(
 
 
 def _validate_shared_free_ids(t: pd.DataFrame) -> None:
-    """Verify rows sharing a ``free_id`` match in item, param, prior, and ``(lower, upper)``."""
+    """Verify rows sharing a ``free_id`` agree in prior and ``(lower, upper)`` (DESIGN §16.1).
+
+    A ``free_id`` may be shared across groups and across items (also of different item models),
+    but within one item it maps to a single parameter. Latent-distribution parameters cannot share
+    a ``free_id`` with item parameters.
+    """
     free_rows = t[t["free"]]
-    shared = free_rows.groupby("free_id")["item"].nunique()
-    if (shared > 1).any():
-        fid = int(shared[shared > 1].index[0])
-        items = sorted(t.loc[t["free_id"] == fid, "item"].unique())
-        raise SpecificationError(
-            f"free_id {fid} is shared by items {items}. Equality constraints across items are "
-            "not supported yet (planned for M5)."
-        )
-    within = free_rows.groupby("free_id")["param"].nunique()
+    within = free_rows.groupby(["free_id", "item"])["param"].nunique()
     if (within > 1).any():
-        fid = int(within[within > 1].index[0])
-        raise SpecificationError(f"free_id {fid} is shared by different parameters of one item.")
+        fid, item = within[within > 1].index[0]
+        raise SpecificationError(
+            f"free_id {int(fid)} is shared by different parameters of item {item!r}."
+        )
+    is_latent = (free_rows["item"] == LATENT_ITEM).to_numpy(dtype=bool)
+    fid_col = free_rows["free_id"].to_numpy(dtype=int)
+    both = np.intersect1d(fid_col[is_latent], fid_col[~is_latent])
+    if both.size:
+        raise SpecificationError(
+            f"free_id {int(both[0])} is shared by item and latent-distribution parameters."
+        )
     for fid_val, rows_f in free_rows.groupby("free_id"):
         priors_f = list(rows_f["prior"])
         first_p = priors_f[0]
@@ -706,7 +755,7 @@ def validate_table(
     """Validate a (possibly user-edited) table against the default one and normalize ``free_id``.
 
     Free rows with ``free_id < 0`` get fresh ids; ids are renumbered to ``0..n-1`` keeping any
-    sharing. Sharing an id across different items is not supported before M5 (DESIGN.md §4.3).
+    sharing, also across items (DESIGN.md §16.1).
     Also checks estimability from the data and identification (§4.5, §14.5).
     """
     missing_cols = [c for c in TABLE_COLUMNS if c not in table.columns]
@@ -1032,6 +1081,76 @@ def _check_identification_mirt(t: pd.DataFrame, model: Model) -> None:
 # --------------------------------------------------------------------------------------------
 
 
+def _coupled_blocks(
+    free_index: Sequence[np.ndarray],
+    slot_bounds: dict[int, tuple[float, float]],
+) -> tuple[CoupledBlock, ...]:
+    """Components of items connected by ``free_id``s shared across items (DESIGN.md §16.1).
+
+    ``free_index[f]`` is family ``f``'s ``(G, J_f, P_f)`` free-index array and ``slot_bounds``
+    maps each ``free_id`` to its bounds (intersected with its prior's support). Components with a
+    single item are left to the item-wise M-step.
+    """
+    item_keys = [(f, jj) for f, fi in enumerate(free_index) for jj in range(fi.shape[1])]
+    parent = list(range(len(item_keys)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    owner: dict[int, int] = {}
+    for idx, (f, jj) in enumerate(item_keys):
+        for fid in np.unique(free_index[f][:, jj, :]).tolist():
+            if fid < 0:
+                continue
+            if fid in owner:
+                a, b = find(owner[fid]), find(idx)
+                if a != b:
+                    parent[max(a, b)] = min(a, b)
+            else:
+                owner[fid] = idx
+    components: dict[int, list[int]] = {}
+    for idx in range(len(item_keys)):
+        components.setdefault(find(idx), []).append(idx)
+
+    blocks: list[CoupledBlock] = []
+    for members_idx in components.values():
+        if len(members_idx) < 2:
+            continue
+        slot_of: dict[int, int] = {}
+        by_family: dict[int, list[int]] = {}
+        for idx in members_idx:
+            f, jj = item_keys[idx]
+            by_family.setdefault(f, []).append(jj)
+            for fid in free_index[f][:, jj, :].ravel().tolist():
+                if fid >= 0 and fid not in slot_of:
+                    slot_of[fid] = len(slot_of)
+        members = []
+        for f, positions in by_family.items():
+            sub = free_index[f][:, positions, :]
+            local = np.array([slot_of.get(int(v), -1) for v in sub.ravel()], dtype=np.int32)
+            local = local.reshape(sub.shape)
+            members.append(
+                CoupledMember(
+                    positions=jnp.asarray(positions, dtype=jnp.int32),
+                    local_index=jnp.asarray(local, dtype=jnp.int32),
+                    family=f,
+                )
+            )
+        fids = list(slot_of)
+        blocks.append(
+            CoupledBlock(
+                slot_free_index=jnp.asarray(fids, dtype=jnp.int32),
+                slot_lower=jnp.asarray([slot_bounds[v][0] for v in fids], dtype=jnp.float64),
+                slot_upper=jnp.asarray([slot_bounds[v][1] for v in fids], dtype=jnp.float64),
+                members=tuple(members),
+            )
+        )
+    return tuple(blocks)
+
+
 @dataclass(frozen=True)
 class Prepared:
     """Coerced data and the validated table."""
@@ -1122,6 +1241,8 @@ def compile_problem(
         members[k].append(j)
 
     families = []
+    family_free_index: list[np.ndarray] = []
+    slot_bounds: dict[int, tuple[float, float]] = {}
     for k in kernels:
         cols = members[k]
         names = [model.items[j][0] for j in cols]
@@ -1147,6 +1268,7 @@ def compile_problem(
                                 lo = max(lo, p_lo)
                                 hi = min(hi, p_hi)
                             item_slots.append((fid, lo, hi))
+                            slot_bounds.setdefault(fid, (lo, hi))
                         local_index[gg, jj, pp] = seen[fid]
             slots.append(item_slots)
         n_slots = max(1, max(len(s) for s in slots))
@@ -1156,6 +1278,7 @@ def compile_problem(
         for jj, item_slots in enumerate(slots):
             for ss, (fid, lo, hi) in enumerate(item_slots):
                 slot_free[jj, ss], slot_lo[jj, ss], slot_hi[jj, ss] = fid, lo, hi
+        family_free_index.append(free_index)
         families.append(
             FamilyBlock(
                 columns=jnp.asarray(cols, dtype=jnp.int32),
@@ -1242,5 +1365,6 @@ def compile_problem(
         latent=latent,
         priors=priors_block,
         n_groups=n_groups,
+        coupled=_coupled_blocks(family_free_index, slot_bounds),
     )
     return Compiled(problem=problem, eta0=eta0, inverse=inverse, n_patterns=n_patterns)
