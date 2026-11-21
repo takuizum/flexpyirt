@@ -508,17 +508,30 @@ def _deserialize_equispaced_quadrature(obj: dict[str, Any], field_name: str) -> 
     )
 
 
-_QUADRATURE_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
-    Quadrature: _serialize_equispaced_quadrature,
+def _serialize_gauss_hermite_quadrature(quad: Quadrature) -> dict[str, Any]:
+    return {"type": "gauss_hermite", "n_points": int(quad.n_points)}
+
+
+def _deserialize_gauss_hermite_quadrature(obj: dict[str, Any], field_name: str) -> Quadrature:
+    _check_keys(obj, required={"type", "n_points"}, field_name=field_name)
+    return Quadrature.gauss_hermite(
+        _require_int(obj["n_points"], field_name=f"{field_name}.n_points", max_value=200)
+    )
+
+
+_QUADRATURE_SERIALIZERS: dict[str, Callable[[Any], dict[str, Any]]] = {
+    "equispaced": _serialize_equispaced_quadrature,
+    "gauss_hermite": _serialize_gauss_hermite_quadrature,
 }
 _QUADRATURE_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], Quadrature]] = {
     "equispaced": _deserialize_equispaced_quadrature,
+    "gauss_hermite": _deserialize_gauss_hermite_quadrature,
 }
 
 
 def _serialize_quadrature(quad: Quadrature) -> dict[str, Any]:
     """Serialize a registered :class:`~flexpyirt.Quadrature`."""
-    serializer = _QUADRATURE_SERIALIZERS.get(type(quad))
+    serializer = _QUADRATURE_SERIALIZERS.get(quad.kind) if isinstance(quad, Quadrature) else None
     if serializer is None:
         raise SpecificationError(
             f"Unsupported quadrature {type(quad).__name__!r} for JSON serialization."

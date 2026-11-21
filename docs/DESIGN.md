@@ -232,7 +232,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 ### 4.9 Quadrature
 - **Decision**: the unidimensional default is 61 equally spaced points on $[-6,6]$ (the same grid
   can be shared with EH; Normal weights come from the density).
-- Gauss–Hermite is available for Normal only (`Quadrature.gauss_hermite(n)` — not yet implemented).
+- Gauss–Hermite is available for Normal latent distributions (`Quadrature.gauss_hermite(n)`, §15.44).
 - **Multidimensional product grids (M4, §15.30)**: 2- and 3-dimensional models use the Cartesian
   product of the 1-D equispaced grid (`Quadrature.grid(n_factors)` → `(Q, D)`). Default points per
   dimension match mirt's `select_quadpts` via `Quadrature.default(n_factors)`: 61 for 1D, 31 per
@@ -973,6 +973,23 @@ data-independent shapes (§15.21).
     bound memory. Columns are `pv<m>_<factor>`. Validated statistically: with 4,000 draws the
     sample mean, SD and correlations match the grid posterior within Monte Carlo error (mirt's
     default plausible values use a normal approximation, so they are not a reference).
+44. **Gauss–Hermite quadrature (`Quadrature.gauss_hermite(n)`, §4.9)**: fixed nodes
+    $\theta_q=\sqrt2x_q$ from the Gauss–Hermite rule $(x_q, w_q)$ for $e^{-x^2}$ (Golub & Welsch,
+    1969; `numpy.polynomial.hermite.hermgauss`), and a fixed per-node log base weight
+    $b_q=\log(w_q/\sqrt\pi)+\tfrac12\theta_q^2$ (summed over dimensions for product rules). The
+    latent weights are $\operatorname{softmax}_q\big(b_q+\log\phi(\boldsymbol\theta_q;\boldsymbol\mu,
+    \boldsymbol\Sigma)\big)$, i.e. the Gauss–Hermite rule for $N(0,1)$ reweighted by
+    $\phi(\cdot;\boldsymbol\mu,\boldsymbol\Sigma)/\phi(\cdot;0,I)$, so nodes never move and free means,
+    variances and correlations keep the exact EM structure (E-step, exact latent M-step, Oakes,
+    SQUAREM) unchanged. `CompiledProblem.node_log_base` carries $b_q$ (0 for equispaced grids) and
+    is added wherever latent log weights are formed (`_normal_logw`). Accuracy degrades for latent
+    variances well above 1, where the reweighting factor grows in the tails. `EmpiricalHistogram`
+    requires an equispaced grid (`SpecificationError`). PV for $D=1$ samples on its own fine
+    equispaced grid (base weights 0). JSON stores `{"type": "gauss_hermite", "n_points": n}`.
+    Validated against `scipy.integrate.quad` (marginal log-likelihood with $N(0.3, 1.4)$, 61 nodes:
+    relative error $1.2\times10^{-10}$) and against fits on very fine equispaced grids (Rasch with
+    free variance, 41 nodes vs 401 points on $[-12,12]$: estimates within $2\times10^{-10}$; 2D 2PL,
+    $31^2$ vs $121^2$: within $5\times10^{-7}$); mirt does not use Gauss–Hermite in EM.
 
 ## 16. Implementation decisions (M5)
 1. **Equality constraints across items (`Model.equal_across_items`, shared `free_id`s)**:
@@ -1106,6 +1123,7 @@ data-independent shapes (§15.21).
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
+- Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
