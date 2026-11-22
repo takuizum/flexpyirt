@@ -21,7 +21,7 @@ __all__ = [
     "LatentSpec",
     "Normal",
     "NormalMixture",
-    "correlation_matrix_is_pd",
+    "correlation_matrix_is_positive_definite",
     "davidian_hermite_coeffs",
     "davidian_log_weights",
     "davidian_moments",

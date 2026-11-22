@@ -157,9 +157,9 @@ free latent parameters (mirt's convention).
 `df = 0` and NaN statistics. A multiple-group model adds a leading `group` column (one row per
 group and item).
 
-**Raises**: `SpecificationError` for multidimensional, multiple-group, `EmpiricalHistogram`,
-`DavidianCurve`, or `NormalMixture` models, missing responses, an item with an unobserved category, or a non-positive
-`mincell`.
+**Raises**: `SpecificationError` for multidimensional, `EmpiricalHistogram`, `DavidianCurve`, or
+`NormalMixture` models, missing responses, an item with an unobserved category (within a group),
+or a non-positive `min_cell`.
 
 #### `FitResult.m2`
 

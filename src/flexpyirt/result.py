@@ -695,16 +695,15 @@ class FitResult:
         PrecisionError
             If JAX is not configured for 64-bit floating point.
         SpecificationError
-            For multidimensional, multiple-group, ``EmpiricalHistogram``, ``DavidianCurve`` or
-            ``NormalMixture`` models (not yet supported), data with missing responses, or an item
-            with an unobserved category.
+            For multidimensional, ``EmpiricalHistogram``, ``DavidianCurve`` or ``NormalMixture``
+            models (not yet supported), data with missing responses, or an item with an unobserved
+            category (within a group).
         """
         check_x64()
         model = self._model
         if (
             model.is_multidimensional
-            or model.is_multigroup
-            or model.is_eh
+            or model.is_empirical_histogram
             or model.is_davidian
             or model.is_mixture
         ):
@@ -817,7 +816,12 @@ class FitResult:
         """
         check_x64()
         model = self._model
-        if model.is_multidimensional or model.is_multigroup or model.is_eh or model.is_mixture:
+        if (
+            model.is_multidimensional
+            or model.is_multigroup
+            or model.is_empirical_histogram
+            or model.is_mixture
+        ):
             raise SpecificationError(
                 "m2() supports single-group unidimensional models with a Normal latent "
                 "distribution only."

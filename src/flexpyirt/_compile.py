@@ -45,8 +45,9 @@ from flexpyirt.items import (
 from flexpyirt.latent import (
     DavidianCurve,
     EmpiricalHistogram,
+    Normal,
     NormalMixture,
-    correlation_matrix_is_pd,
+    correlation_matrix_is_positive_definite,
     davidian_param_names,
     eh_project_floor,
     latent_param_names,

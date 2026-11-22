@@ -57,23 +57,25 @@ class Case:
 
     @property
     def item_model(self) -> ItemModel:
-        n_cat = int(self.meta["n_cat"])
+        n_categories = int(self.meta["n_cat"])
         kind = self.meta["itemtype"]
         if kind == "2PL":
             return TwoPL()
         if kind == "graded":
-            return GRM(n_cat=n_cat)
-        return GPCM(n_cat=n_cat)
+            return GRM(n_categories=n_categories)
+        return GPCM(n_categories=n_categories)
 
     @property
     def quad(self) -> Quadrature:
         lim = self.meta["theta_lim"]
-        return Quadrature.equispaced(int(self.meta["quadpts"]), lim=(float(lim[0]), float(lim[1])))
+        return Quadrature.equispaced(
+            int(self.meta["quadpts"]), bounds=(float(lim[0]), float(lim[1]))
+        )
 
     @property
     def d_names(self) -> tuple[str, ...]:
-        n_cat = int(self.meta["n_cat"])
-        return ("d",) if n_cat == 2 else tuple(f"d{k}" for k in range(1, n_cat))
+        n_categories = int(self.meta["n_cat"])
+        return ("d",) if n_categories == 2 else tuple(f"d{k}" for k in range(1, n_categories))
 
     @property
     def spec(self) -> Model:
