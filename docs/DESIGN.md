@@ -13,7 +13,7 @@ English | [日本語](DESIGN.ja.md)
 - Provide, with a Pythonic API, what R `mirt` does in practice:
   - multiple-group calibration (equality constraints across groups, partial anchors)
   - fixed item parameter calibration (FIPC)
-  - flexible latent distributions (Normal / Empirical Histogram / later Davidian and normal
+  - flexible latent distributions (Normal / Empirical Histogram / Davidian curves / normal
     mixtures)
   - priors on item parameters (Bayes modal = MAP estimation; EM finds the posterior mode)
   - standard errors (Oakes' 1999 identity, via automatic differentiation)
@@ -162,8 +162,15 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   the grid, and the latent M-step maximizes $Q^{\text{lat}}=\sum_q \bar n_q\log w_q(\mu,\sigma^2,\boldsymbol\phi)$
   with the existing masked Newton (`_newton.py`), keeping EM monotone (non-decreasing), SQUAREM
   applicable, and Oakes' identity exact.
-- Later: normal mixtures. Can be added without touching the Core by following the `LatentDist`
-  protocol (§6).
+- **Normal mixtures** (`NormalMixture(n_components, *, mean=0.0, var=1.0, free_mean=False,
+  free_var=False, means=None, variances=None, weights=None)`; Mislevy, 1984; §16.7):
+  Single-group, unidimensional finite mixture of $k\in\{2,\dots,10\}$ normal components with one
+  common set of item parameters. The shape is parameterized as in mirt's `dentype = "mixture-k"`
+  (raw component 1 is $N(0,1)$; components $c\ge 2$ have raw means, raw variances and logits
+  $\log(\pi_c/\pi_1)$) and the mixture is analytically standardized by its exact continuous
+  moments so that $\theta$ has mean $\mu$ and variance $\sigma^2$, as for Davidian curves. Each
+  component is normalized on the grid and then mixed; the latent M-step maximizes
+  $Q^{\text{lat}}=\sum_q \bar n_q\log w_q$ with the same masked Newton.
 
 ### 4.5 Identification rules (checked in the Compile layer)
 - Default: the reference group is fixed at $N(0,1)$; focal groups' means and variances are free.
@@ -1369,6 +1376,109 @@ data-independent shapes (§15.21).
      are unit-tested only. mirt also leaves one true $+\infty$ V23e pattern at its `max_theta = 20`
      bound; ML extremes are checked against an independent R log-likelihood scan.
 
+7. **Normal-mixture latent distributions (`NormalMixture`, §4.4, V22)**:
+   `NormalMixture(n_components, *, mean=0.0, var=1.0, free_mean=False, free_var=False,
+   means=None, variances=None, weights=None)` (plus `NormalMixture.free(n_components, ...)`)
+   specifies a single-group unidimensional latent density that is a finite mixture of
+   $k\in\{2,\dots,10\}$ normal components (Mislevy, 1984), with **one common set of item
+   parameters**: a single population with a non-normal latent density. This is not a mixture
+   IRT model with class-specific item parameters (Rost, 1990; Bolt, Cohen & Wollack, 2001),
+   which is mirt's default for `dentype = "mixture-k"` and is out of scope.
+   Multiple-group (`Model.with_groups`) and multidimensional (`Model.with_factors`) models with
+   `NormalMixture` raise `SpecificationError`.
+   **Raw (gauge) parameterization**: with $\boldsymbol\lambda=(0,\lambda_2,\dots,\lambda_k)$ and
+   $\pi=\operatorname{softmax}(\boldsymbol\lambda)$,
+   $$h(z)=\sum_{c=1}^k\pi_c\,\phi(z;\tilde\mu_c,\tilde\sigma_c^2),\qquad
+     \tilde\mu_1=0,\ \tilde\sigma_1^2=1,$$
+   with free `rmean_c` $=\tilde\mu_c$, `rvar_c` $=\tilde\sigma_c^2>0$ and `logit_c`
+   $=\lambda_c=\log(\pi_c/\pi_1)$ for $c=2,\dots,k$. These are exactly mirt's `MEAN_1`, `COV_11`
+   and `PI` of class `MIXTURE_c` in `multipleGroup(..., dentype = "mixture-k", invariance =
+   c(<all items>, "free_means", "free_var"))`, where class 1 is fixed at $N(0,1)$ with `PI = 0`
+   and the items are constrained equal across classes (mirt stores the mixing coefficients as
+   log ratios to class 1). Raw component 1 only fixes the location/scale gauge of $z$; it is not
+   a "reference class" of the population.
+   **Analytical standardization**: the raw mixture has exact continuous moments
+   $M=\sum_c\pi_c\tilde\mu_c$ and $V=\sum_c\pi_c(\tilde\sigma_c^2+\tilde\mu_c^2)-M^2>0$. As for
+   Davidian curves (§16.4), $\theta=\mu+\sigma(Z-M)/\sqrt V$, so on the $\theta$ scale component
+   $c$ is $N(\mu_c,\sigma_c^2)$ with
+   $$\mu_c=\mu+\sigma\,\frac{\tilde\mu_c-M}{\sqrt V},\qquad \sigma_c^2=\sigma^2\,\frac{\tilde\sigma_c^2}{V},$$
+   and $\sum_c\pi_c\mu_c=\mu$, $\sum_c\pi_c(\sigma_c^2+\mu_c^2)-\mu^2=\sigma^2$ exactly for every
+   shape. `mean` $=\mu$ and `var` $=\sigma^2$ are fixed at 0 and 1 by default and follow the
+   `Normal` identification rules of §4.5 when freed (`free_var=True` for Rasch/PCM,
+   `NormalMixture.free(k)` under FIPC); the shape adds $3(k-1)$ free parameters.
+   **Why standardize (Decision)**: mirt's own parameterization fixes class 1 at $N(0,1)$ and
+   lets the item parameters carry the scale of class 1. Starting items are calibrated for an
+   overall $N(0,1)$ (§4.10), which matches no component of a bimodal population, so EM from
+   generic starts drifts through badly scaled regions and can stall at inferior stationary
+   points (for example a free component absorbing nearly all the mass, $\pi_1\to 0$, where the
+   scale is not identified). On the V22a data the same EM (node-level M-step, below) in mirt's
+   parameterization stopped 12.7–47.6 log-likelihood points below the maximum from two of four
+   starting shapes (component 2 at $+1.5$ or $-1.5$) and needed 3,848–4,505 plain EM iterations
+   from the other two; standardized, it reached the maximum from all four in 602–661 plain EM
+   iterations (28–93 with SQUAREM), while mirt itself needed 4,555 EM cycles at `TOL = 1e-10`
+   from the generating values (VALIDATION.md V22). The
+   item parameters are on the overall-standardized scale, which is the same convention as
+   `Normal`, `EmpiricalHistogram` and `DavidianCurve` fits and therefore comparable with them.
+   Equivalence with mirt: flexpyirt's model on the grid $\theta_q$ is mirt's model on the grid
+   $z_q=M+\sqrt V\theta_q$ (for $\mu=0,\sigma^2=1$) with $a=a^{\text{mirt}}\sqrt V$ and
+   $d_k=d_k^{\text{mirt}}+s_k\,a^{\text{mirt}}M$ ($s_k=1$ for 2PL/3PL/4PL/GRM, $s_k=k$ for
+   GPCM/PCM), because each normalized component density is invariant under the affine map.
+   **Grid weights**: each component is normalized on the grid and then mixed, as mirt's
+   `dentype = "mixture-k"` stacks per-class normalized densities:
+   $$\log w_q=\log\sum_{c=1}^k\pi_c\tilde w_{cq},\qquad
+     \log\tilde w_{cq}=\operatorname{log\_softmax}_q\Big(b_q-\frac{(\theta_q-\mu_c)^2}{2\sigma_c^2}\Big),$$
+   with the fixed node log base weights $b_q$ (0 on equispaced grids). Each component therefore
+   gets exactly the weights a `Normal` with $(\mu_c,\sigma_c^2)$ would get on the same grid, so
+   Gauss–Hermite grids (§15.44) are supported as for `Normal`, and $\pi_c$ is the exact grid mass
+   of component $c$. Non-positive variances return NaN (rejected by the line search and
+   SQUAREM).
+   **M-step**: the complete data are (pattern, node), as for every latent distribution: the
+   latent part $Q^{\text{lat}}=\sum_q\bar n_q\log w_q(\mu,\sigma^2,\tilde{\boldsymbol\mu},
+   \tilde{\boldsymbol\sigma}^2,\boldsymbol\lambda)$ is maximized jointly by the existing masked,
+   bounded, monotone Newton (`_newton.py`; gradient and Hessian by autodiff), so EM stays
+   monotone, SQUAREM works unchanged, and Oakes' identity (§4.8) and the observed-information
+   Hessian need no new code. mirt instead treats the class as further missing data (closed-form
+   class proportions clipped to $[10^{-4},1-10^{-4}]$ plus per-class mean/variance updates);
+   both EMs have the same fixed points, but the class augmentation adds missing information and
+   converges more slowly.
+   **Starting values**: `means`, `variances` and `weights` (length $k$; defaults
+   $(0,1.5,-1.5,3,-3,\dots)$, all 1, and $1/k$) give the starting shape in any affine scale;
+   they are mapped to the raw gauge by $\tilde\mu_c=(m_c-m_1)/\sqrt{v_1}$,
+   $\tilde\sigma_c^2=v_c/v_1$, $\lambda_c=\log(\pi_c/\pi_1)$. Identical components are a
+   stationary point (the first-order effect of separating them is a location/scale change, which
+   the standardization removes, as for Davidian curves at $\boldsymbol\phi=\mathbf 0$), so the
+   defaults are distinct.
+   **Label switching and degenerate solutions**: the likelihood is invariant to permutations of
+   the components (including which physical component is raw component 1) and can have several
+   local maxima (McLachlan & Peel, 2000); EM is deterministic and monotone, so labels do not
+   switch during a fit, and users should compare fits from several starting shapes. After
+   fitting, `fit()` emits a `HeywoodWarning` when a component's weight is below $10^{-3}$ (its
+   location and scale are then unidentified and the information matrix is near singular), when
+   a component is narrower than the grid ($\sigma_c$ below half the smallest node spacing, so the grid
+   cannot resolve it), when a component mean lies outside the grid, or when two components
+   nearly coincide ($|\mu_c-\mu_{c'}|<10^{-3}$ and $|\sigma_c^2-\sigma_{c'}^2|<10^{-3}$, a
+   collapsed mixture).
+   **Reporting, scoring and other methods**: the `ParameterTable` stores `mean`, `var`,
+   `rmean_c`, `rvar_c`, `logit_c` under `item="__latent__"`, `model="Mixture"` (priors on latent
+   parameters raise `SpecificationError`, as for every latent distribution). `FitResult.latent`
+   adds the standardized components `pi_c`, `mean_c`, `var_c` ($c=1,\dots,k$) with delta-method
+   SEs (JAX forward-mode Jacobian of the map above); `latent_weights` stays `None`. `score()`
+   uses the fitted mixture for `"EAP"` (quadrature grid) and `"PV"` (501-node fine grid, each
+   component renormalized there), keeps `"ML"` and `"WLE"` likelihood-only, and rejects `"MAP"`
+   with `SpecificationError` because a mixture prior can be multimodal (mirt 1.46.1 also rejects
+   MAP for mixtures). `item_fit()` and `m2()` reject `NormalMixture` until validated, `dif()`
+   needs a multiple-group fit, and `link()` uses the fitted mixture grid weights by default.
+   `"NormalMixture"` is registered in `_json.py` without changing the payload shape
+   (`schema_version` stays 3).
+   **Validation (V22)**: `validation/r/m5_mixture_reference.R` re-codes the standardized
+   discretized likelihood independently in R, polishes mirt's solution to its exact maximum
+   (Richardson-Hessian SEs and EAPs in R), and refits built-in `mirt(dentype = "mixture-k")` on
+   the image grid $z_q=M+\sqrt V\theta_q$ (asymmetric `theta_lim`), mapping its estimates and
+   EAPs to flexpyirt's scale: 2PL $k=2$ (bimodal), GRM $k=2$ (small component) and GPCM $k=3$
+   (VALIDATION.md V22). SEs are checked against the R Richardson Hessian, because mirt 1.46.1's
+   `SE.type = "Oakes"` for mixtures is not the observed information (its latent SEs are several
+   times too small, close to the complete-data SEs with known class membership).
+
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -1379,6 +1489,7 @@ data-independent shapes (§15.21).
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Bollen, K. A. (1989). *Structural Equations with Latent Variables*. Wiley.
+- Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
@@ -1394,6 +1505,8 @@ data-independent shapes (§15.21).
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Maydeu-Olivares, A., & Joe, H. (2005). Limited- and full-information estimation and goodness-of-fit testing in $2^n$ contingency tables: A unified framework. *Journal of the American Statistical Association*, 100(471), 1009–1020.
 - Maydeu-Olivares, A., & Joe, H. (2006). Limited information goodness-of-fit testing in multidimensional contingency tables. *Psychometrika*, 71(4), 713–732.
+- McLachlan, G. J., & Peel, D. (2000). *Finite Mixture Models*. Wiley.
+- Mislevy, R. J. (1984). Estimating latent distributions. *Psychometrika*, 49(3), 359–381.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
@@ -1403,6 +1516,7 @@ data-independent shapes (§15.21).
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.

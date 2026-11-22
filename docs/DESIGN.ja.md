@@ -11,7 +11,7 @@
 - R `mirt` が実務で担っている以下を、Python らしい API で提供する:
   - 多母集団（multiple-group）同時推定（群間の等値制約・部分アンカー）
   - 固定パラメタ推定（FIPC: fixed item parameter calibration）
-  - 潜在分布の柔軟な指定（Normal / Empirical Histogram / 将来 Davidian・混合正規）
+  - 潜在分布の柔軟な指定（Normal / Empirical Histogram / Davidian 曲線 / 混合正規）
   - 項目パラメタへの事前分布（Bayes modal = MAP 推定、EM で事後モードを求める）
   - 標準誤差（Oakes 1999 の恒等式を自動微分で）
 - JAX による jit・vmap・GPU 対応、自動微分による拡張容易性（新しい項目モデルやリンキング基準を微分を手書きせず追加できる）。
@@ -129,7 +129,13 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   を持つようにする。求積重みは格子上で正規化した密度とし、潜在分布の M-step は
   $Q^{\text{lat}}=\sum_q \bar n_q\log w_q(\mu,\sigma^2,\boldsymbol\phi)$ を既存のマスク付き Newton（`_newton.py`）で最大化する。
   これにより EM の単調性（非減少）・SQUAREM の適用・Oakes の恒等式の厳密性を保つ。
-- 将来: 混合正規。`LatentDist` プロトコル（§6）に従えば Core に手を入れずに追加できる。
+- **混合正規**（`NormalMixture(n_components, *, mean=0.0, var=1.0, free_mean=False,
+  free_var=False, means=None, variances=None, weights=None)`；Mislevy, 1984；§16.7）:
+  単一群・1 次元で、$k\in\{2,\dots,10\}$ 個の正規成分の有限混合と共通の 1 組の項目パラメタ。形状は mirt の
+  `dentype = "mixture-k"` と同じパラメタ化（素の成分 1 が $N(0,1)$、成分 $c\ge 2$ は素の平均・素の分散・ロジット
+  $\log(\pi_c/\pi_1)$）とし、混合全体を厳密な連続モーメントで解析的に標準化して $\theta$ が平均 $\mu$・分散 $\sigma^2$
+  を持つようにする（Davidian 曲線と同様）。各成分を格子上で正規化してから混合し、潜在分布の M-step は
+  $Q^{\text{lat}}=\sum_q \bar n_q\log w_q$ を同じマスク付き Newton で最大化する。
 
 ### 4.5 識別性ルール（Compile 層で検査）
 - 既定: 参照群は $N(0,1)$ 固定、焦点群の平均・分散は自由。焦点群を自由にするには、群間で全パラメタが等しいアンカー項目が必要
@@ -939,6 +945,81 @@ class ItemKernel(Protocol):
      3 因子の名義モデルは単体テストのみ。mirt は V23e の真に $+\infty$ のパタン 1 つを `max_theta = 20` の境界に残す。
      ML の極端パタンは R での独立な対数尤度走査と照合する。
 
+7. **混合正規潜在分布（`NormalMixture`、§4.4、V22）**:
+   `NormalMixture(n_components, *, mean=0.0, var=1.0, free_mean=False, free_var=False,
+   means=None, variances=None, weights=None)`（および `NormalMixture.free(n_components, ...)`）は、
+   $k\in\{2,\dots,10\}$ 個の正規成分の有限混合（Mislevy, 1984）である単一群 1 次元の潜在密度を指定し、
+   **項目パラメタは共通の 1 組**とする（潜在密度が非正規な 1 つの母集団）。クラスごとに項目パラメタを持つ混合 IRT
+   モデル（Rost, 1990；Bolt, Cohen & Wollack, 2001）ではない。後者は mirt の `dentype = "mixture-k"` の既定だが対象外。
+   多母集団（`Model.with_groups`）および多次元（`Model.with_factors`）での `NormalMixture` は `SpecificationError`
+   を投げる。
+   **素の（ゲージ）パラメタ化**: $\boldsymbol\lambda=(0,\lambda_2,\dots,\lambda_k)$、$\pi=\operatorname{softmax}(\boldsymbol\lambda)$ として
+   $$h(z)=\sum_{c=1}^k\pi_c\,\phi(z;\tilde\mu_c,\tilde\sigma_c^2),\qquad
+     \tilde\mu_1=0,\ \tilde\sigma_1^2=1$$
+   とし、$c=2,\dots,k$ について `rmean_c` $=\tilde\mu_c$、`rvar_c` $=\tilde\sigma_c^2>0$、`logit_c`
+   $=\lambda_c=\log(\pi_c/\pi_1)$ を自由にする。これは `multipleGroup(..., dentype = "mixture-k", invariance =
+   c(<全項目>, "free_means", "free_var"))` におけるクラス `MIXTURE_c` の `MEAN_1`・`COV_11`・`PI` そのものである
+   （クラス 1 は $N(0,1)$・`PI = 0` に固定され、項目はクラス間で等値。mirt は混合係数をクラス 1 との対数比で保持する）。
+   素の成分 1 は $z$ の位置・尺度のゲージを固定するだけで、母集団の「基準クラス」ではない。
+   **解析的標準化**: 素の混合は厳密な連続モーメント $M=\sum_c\pi_c\tilde\mu_c$、
+   $V=\sum_c\pi_c(\tilde\sigma_c^2+\tilde\mu_c^2)-M^2>0$ を持つ。Davidian 曲線（§16.4）と同様に
+   $\theta=\mu+\sigma(Z-M)/\sqrt V$ とすると、$\theta$ 尺度で成分 $c$ は $N(\mu_c,\sigma_c^2)$、
+   $$\mu_c=\mu+\sigma\,\frac{\tilde\mu_c-M}{\sqrt V},\qquad \sigma_c^2=\sigma^2\,\frac{\tilde\sigma_c^2}{V}$$
+   となり、任意の形状で $\sum_c\pi_c\mu_c=\mu$、$\sum_c\pi_c(\sigma_c^2+\mu_c^2)-\mu^2=\sigma^2$ が厳密に成り立つ。
+   `mean` $=\mu$ と `var` $=\sigma^2$ は既定で 0 と 1 に固定し、自由にするときは §4.5 の `Normal` の識別規則に従う
+   （Rasch/PCM では `free_var=True`、FIPC では `NormalMixture.free(k)`）。形状は $3(k-1)$ 個の自由パラメタを加える。
+   **標準化する理由（決定）**: mirt 自身のパラメタ化はクラス 1 を $N(0,1)$ に固定し、項目パラメタがクラス 1 の尺度を
+   担う。項目の初期値は全体が $N(0,1)$ である前提で求める（§4.10）ので二峰の母集団のどの成分とも合わず、一般的な
+   初期値からの EM は尺度の合わない領域を通り、劣った停留点に止まりうる（例えば自由な成分がほぼすべての質量を吸収し
+   $\pi_1\to 0$ となって尺度が識別されない点）。V22a のデータでは、mirt のパラメタ化での同じ EM（下記の節点レベルの
+   M-step）は 4 通りの初期形状のうち 2 通り（成分 2 を $+1.5$ または $-1.5$ に置く）で最大値より対数尤度で 12.7–47.6
+   低い点に止まり、残り 2 通りでも通常の EM で 3,848–4,505 反復を要した。標準化すると 4 通りすべてから最大値に達し、
+   通常の EM で 602–661 反復（SQUAREM で 28–93 反復）だった。mirt 自身は生成値から始めて `TOL = 1e-10` で 4,555 回の
+   EM サイクルを要した（VALIDATION.md V22）。
+   項目パラメタは全体を標準化した尺度にあり、`Normal`・`EmpiricalHistogram`・`DavidianCurve` の推定と同じ約束なので
+   それらと比較できる。
+   mirt との同値性: $\mu=0,\sigma^2=1$ のとき、格子 $\theta_q$ 上の flexpyirt のモデルは格子 $z_q=M+\sqrt V\theta_q$ 上の
+   mirt のモデルに一致し、$a=a^{\text{mirt}}\sqrt V$、$d_k=d_k^{\text{mirt}}+s_k\,a^{\text{mirt}}M$
+   （2PL/3PL/4PL/GRM では $s_k=1$、GPCM/PCM では $s_k=k$）である。正規化した各成分の密度はアフィン変換で不変だからである。
+   **格子の重み**: mirt の `dentype = "mixture-k"` がクラスごとに正規化した密度を積み重ねるのと同様に、各成分を
+   格子上で正規化してから混合する:
+   $$\log w_q=\log\sum_{c=1}^k\pi_c\tilde w_{cq},\qquad
+     \log\tilde w_{cq}=\operatorname{log\_softmax}_q\Big(b_q-\frac{(\theta_q-\mu_c)^2}{2\sigma_c^2}\Big)$$
+   （$b_q$ は節点ごとの固定の対数基底重みで、等間隔格子では 0）。各成分は同じ格子上で $(\mu_c,\sigma_c^2)$ の `Normal` が
+   受け取る重みそのものになるので、Gauss–Hermite 格子（§15.44）も `Normal` と同様に使え、$\pi_c$ は成分 $c$ の格子上の
+   質量に厳密に一致する。分散が正でなければ NaN を返す（直線探索と SQUAREM が退ける）。
+   **M-step**: 完全データは他の潜在分布と同じく（パタン, 節点）である。潜在部分
+   $Q^{\text{lat}}=\sum_q\bar n_q\log w_q(\mu,\sigma^2,\tilde{\boldsymbol\mu},\tilde{\boldsymbol\sigma}^2,\boldsymbol\lambda)$
+   を既存のマスク付き・有界・単調な Newton（`_newton.py`、勾配とヘッセ行列は自動微分）で同時に最大化するので、EM は
+   単調で、SQUAREM はそのまま動き、Oakes の恒等式（§4.8）と観測情報ヘッセ行列に新しいコードは要らない。mirt はクラスを
+   追加の欠測データとして扱う（クラス比率を閉形式で $[10^{-4},1-10^{-4}]$ に切り詰め、クラスごとに平均・分散を更新）。
+   両 EM の不動点は同じだが、クラスによる拡大は欠測情報を増やし収束が遅い。
+   **初期値**: `means`・`variances`・`weights`（長さ $k$。既定は $(0,1.5,-1.5,3,-3,\dots)$、すべて 1、$1/k$）は
+   任意のアフィン尺度で初期形状を与え、$\tilde\mu_c=(m_c-m_1)/\sqrt{v_1}$、$\tilde\sigma_c^2=v_c/v_1$、
+   $\lambda_c=\log(\pi_c/\pi_1)$ で素のゲージへ写す。成分がすべて同一の点は停留点である（成分を分ける 1 次の効果は
+   位置・尺度の変化で、標準化が取り除く。Davidian 曲線の $\boldsymbol\phi=\mathbf 0$ と同様）ため、既定値は互いに異なる。
+   **ラベルスイッチングと退化解**: 尤度は成分の並べ替え（どの物理的成分が素の成分 1 になるかを含む）について不変で、
+   局所最大が複数ありうる（McLachlan & Peel, 2000）。EM は決定的かつ単調なので推定中にラベルは入れ替わらないが、
+   利用者は複数の初期形状からの推定を比べるべきである。推定後、`fit()` は、成分の重みが $10^{-3}$ 未満（位置と尺度が
+   識別されず情報行列がほぼ特異）、成分が格子より細い（$\sigma_c$ が最小の節点間隔の半分未満で格子が分解できない）、
+   成分の平均が格子の外、2 つの成分がほぼ一致（$|\mu_c-\mu_{c'}|<10^{-3}$ かつ $|\sigma_c^2-\sigma_{c'}^2|<10^{-3}$、
+   潰れた混合）のいずれかで `HeywoodWarning` を出す。
+   **表示・スコアリング・その他のメソッド**: `ParameterTable` は `item="__latent__"`、`model="Mixture"` の下に
+   `mean`・`var`・`rmean_c`・`rvar_c`・`logit_c` を持つ（潜在分布パラメタへの事前分布は他の潜在分布と同様に
+   `SpecificationError`）。`FitResult.latent` は標準化した成分 `pi_c`・`mean_c`・`var_c`（$c=1,\dots,k$）とその
+   デルタ法 SE（上の写像の JAX 前進モード Jacobian）を加え、`latent_weights` は `None` のまま。`score()` は
+   `"EAP"`（求積格子）と `"PV"`（501 点細密格子、各成分をそこで再正規化）で推定した混合を用い、`"ML"` と `"WLE"` は
+   尤度のみ、`"MAP"` は混合の事前分布が多峰になりうるため `SpecificationError` とする（mirt 1.46.1 も混合モデルの MAP
+   を拒否する）。`item_fit()` と `m2()` は検証されるまで `NormalMixture` を拒否し、`dif()` は多母集団の推定を要し、
+   `link()` は既定で推定した混合の格子重みを使う。`_json.py` に `"NormalMixture"` を登録し、ペイロードの形は
+   変わらないため `schema_version` は 3 のまま。
+   **照合（V22）**: `validation/r/m5_mixture_reference.R` は標準化した離散化尤度を R で独立に書き直し、mirt の解を
+   その厳密な最大値まで磨き（Richardson ヘッセ行列による SE と EAP も R で計算）、さらに組み込みの
+   `mirt(dentype = "mixture-k")` を像の格子 $z_q=M+\sqrt V\theta_q$（非対称な `theta_lim`）で推定し直して、推定値と EAP を
+   flexpyirt の尺度へ写す。2PL $k=2$（二峰）、GRM $k=2$（小さい成分）、GPCM $k=3$（VALIDATION.md V22）。SE は R の
+   Richardson ヘッセ行列と照合する。mirt 1.46.1 の混合モデルでの `SE.type = "Oakes"` は観測情報になっていない
+   （潜在分布パラメタの SE が数倍小さく、クラス所属を既知とした完全データの SE に近い）ためである。
+
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -949,6 +1030,7 @@ class ItemKernel(Protocol):
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Bollen, K. A. (1989). *Structural Equations with Latent Variables*. Wiley.
+- Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
@@ -964,6 +1046,8 @@ class ItemKernel(Protocol):
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Maydeu-Olivares, A., & Joe, H. (2005). Limited- and full-information estimation and goodness-of-fit testing in $2^n$ contingency tables: A unified framework. *Journal of the American Statistical Association*, 100(471), 1009–1020.
 - Maydeu-Olivares, A., & Joe, H. (2006). Limited information goodness-of-fit testing in multidimensional contingency tables. *Psychometrika*, 71(4), 713–732.
+- McLachlan, G. J., & Peel, D. (2000). *Finite Mixture Models*. Wiley.
+- Mislevy, R. J. (1984). Estimating latent distributions. *Psychometrika*, 49(3), 359–381.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
@@ -973,6 +1057,7 @@ class ItemKernel(Protocol):
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
