@@ -326,7 +326,19 @@ def test_s_x2_matches_mirt(name: str) -> None:
     assert list(got["item"]) == list(ref["item"])
     np.testing.assert_array_equal(got["df"].to_numpy(), np.asarray(ref["df"]))
     np.testing.assert_allclose(got["s_x2"], ref["S_X2"], rtol=TOL_SX2_REL)
-    np.testing.assert_allclose(got["rmsea"], ref["RMSEA"], rtol=TOL_SX2_REL, atol=1e-12)
+    # RMSEA = sqrt(max(0, X2/df - 1)/(N - 1)) magnifies the relative error of X2 by
+    # X2 / (2 (X2 - df)) (13x for X2 = 6.25, df = 6), and this test evaluates S-X2 at flexpyirt's
+    # own estimates (not mirt's), so propagate the S-X2 tolerance through the formula instead of
+    # reusing it unchanged: |dRMSEA| <= X2 * tol / (2 df (N - 1) RMSEA).
+    x2 = np.asarray(ref["S_X2"], dtype=float)
+    dfs = np.asarray(ref["df"], dtype=float)
+    rmsea_ref = np.asarray(ref["RMSEA"], dtype=float)
+    n_obs = case.data.shape[0]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        tol_rmsea = np.where(
+            rmsea_ref > 0, x2 * TOL_SX2_REL / (2.0 * dfs * (n_obs - 1) * rmsea_ref), 1e-12
+        )
+    np.testing.assert_array_less(np.abs(got["rmsea"].to_numpy() - rmsea_ref), tol_rmsea + 1e-12)
     np.testing.assert_allclose(got["p"], ref["p"], rtol=1e-4, atol=1e-12)
 
 
