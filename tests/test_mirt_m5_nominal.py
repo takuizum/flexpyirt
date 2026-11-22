@@ -252,7 +252,7 @@ def test_fscores_with_mirt_parameters(name: str, method: Literal["MAP", "ML", "W
     ``+Inf`` pattern at its ``max_theta = 20`` bound with SE NA). Extreme patterns are instead
     classified from the category slopes; where that says the ML estimate is interior, flexpyirt
     is compared with the independent R log-likelihood scan in ``fscores.ml_scan`` (DESIGN.md
-    §16.8).
+    §16.6).
     """
     case = load(name)
     fsc = case.raw["fscores"]

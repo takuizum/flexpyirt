@@ -7,7 +7,7 @@
 # As in m1/m2/m3_gpcm_reference.R: optimizer = "NR", accelerate = "none", TOL = 1e-10
 # (theta_lim inside `technical`; the grid actually used is recorded in meta.grid_check).
 #
-# Parameterization mapping from mirt to flexpyirt (DESIGN.md §16.8):
+# Parameterization mapping from mirt to flexpyirt (DESIGN.md §16.6):
 #   mirt's itemtype = "nominal" (Thissen, Cai & Bock, 2010) returns columns
 #   a1, ak0..ak{K-1}, d0, d1..d{K-1}, with ak0 = 0, ak{K-1} = K - 1, and d0 = 0 fixed.
 #   flexpyirt keeps those three identification constants in NominalKernel and estimates
@@ -40,7 +40,7 @@
 # all-category-0 / all-top-category pattern, regardless of the nominal scoring coefficients. The
 # simulated and mixed cases include an all-0 pattern for which an item has an estimated ak1 < 0, so
 # category 1 (not 0) has the lowest category slope and the true ML estimate is interior;
-# flexpyirt returns that interior estimate (DESIGN.md §16.8, VALIDATION.md V23). Non-finite scores
+# flexpyirt returns that interior estimate (DESIGN.md §16.6, VALIDATION.md V23). Non-finite scores
 # are written as "Inf" / "-Inf" (as in m4_scoring_reference.R).
 suppressMessages({
   library(mirt)
@@ -419,7 +419,7 @@ write_case("v23_nominal_unordered",
 # ---- V23f: Two-factor confirmatory nominal (F1 = q01-q04, F2 = q05-q08, COV = F1*F2) -----------
 # V14-style: 31 points per dimension on [-6, 6] (961 nodes), NR, Oakes SEs, latent means 0 and
 # variances 1 fixed, correlation free. mirt's multidimensional nominal model multiplies the
-# scoring coefficients by a1*theta1 + a2*theta2 (DESIGN.md §16.8); unloaded slopes are fixed at 0.
+# scoring coefficients by a1*theta1 + a2*theta2 (DESIGN.md §16.6); unloaded slopes are fixed at 0.
 extract_latent_2d <- function(gp) {
   list(mean_1 = unname(gp["par", "MEAN_1"]), mean_2 = unname(gp["par", "MEAN_2"]),
        var_1 = unname(gp["par", "COV_11"]), var_2 = unname(gp["par", "COV_22"]),

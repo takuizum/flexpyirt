@@ -461,7 +461,7 @@ class NominalKernel:
     :math:`\mathrm{ak}_{K-1}=K-1` and intercept :math:`d_0=0` (not parameters), matching mirt's
     ``itemtype="nominal"`` (Chalmers, 2012). Computed with ``jax.nn.log_softmax``; there is no
     ordering constraint on :math:`\mathrm{ak}_1,\dots,\mathrm{ak}_{K-2}` or
-    :math:`d_1,\dots,d_{K-1}` (DESIGN.md §16.8).
+    :math:`d_1,\dots,d_{K-1}` (DESIGN.md §16.6).
     """
 
     n_cat: int
@@ -498,7 +498,7 @@ class NominalKernel:
 
     @property
     def irt_names(self) -> tuple[str, ...]:
-        """Empty tuple (the nominal model has no theta-scale display thresholds; DESIGN §16.8)."""
+        """Empty tuple (the nominal model has no theta-scale display thresholds; DESIGN §16.6)."""
         return ()
 
     @property
@@ -868,7 +868,7 @@ class Nominal:
         \qquad \mathrm{ak}_0 = 0,\quad \mathrm{ak}_{K-1} = K - 1,\quad d_0 = 0.
 
     Thissen, Cai & Bock (2010) overall-slope × scoring-function parameterization, matching
-    mirt's ``itemtype="nominal"`` (Chalmers, 2012; DESIGN.md §16.8). The overall slope :math:`a`
+    mirt's ``itemtype="nominal"`` (Chalmers, 2012; DESIGN.md §16.6). The overall slope :math:`a`
     (or :math:`a_1,\dots,a_D` for multidimensional models), interior scoring coefficients
     :math:`\mathrm{ak}_1,\dots,\mathrm{ak}_{K-2}`, and intercepts :math:`d_1,\dots,d_{K-1}` are
     estimated with no ordering constraint. Fixing :math:`\mathrm{ak}_k=k` reproduces
@@ -894,7 +894,7 @@ class Nominal:
         return (True,) * (2 * self.n_cat - 2)
 
     def start_values(self, item: np.ndarray, rest: np.ndarray) -> np.ndarray:
-        """Return starting values at the GPCM point ``ak_k = k`` (DESIGN.md §4.10, §16.8)."""
+        """Return starting values at the GPCM point ``ak_k = k`` (DESIGN.md §4.10, §16.6)."""
         a = _slope_start(item, rest)
         ak = [float(k) for k in range(1, self.n_cat - 1)]
         return np.array([a, *ak, *_gpcm_intercept_starts(item, self.n_cat, a)])

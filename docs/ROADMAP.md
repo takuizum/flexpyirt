@@ -53,7 +53,9 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   in V16).
 - [x] Davidian-curve latent distributions (`DavidianCurve`, single-group unidimensional, analytically standardized, Oakes/Hessian SEs; validated in V19).
 - Normal-mixture latent distributions.
-- Differentiable linking (Haebara / Stocking–Lord and generalizations) on top of the library.
+- [x] Differentiable linking (`link()`, `LinkResult`: Haebara / Stocking–Lord, non-symmetric and
+  symmetric, Ogasawara delta-method SEs via autodiff; validated in V20 for 2PL, 3PL, GRM, GPCM and
+  mixed 2PL + GPCM common items).
 - [x] Item fit: S-X2 (`FitResult.item_fit()`, single-group unidimensional; validated in V15).
 - [x] DIF: multiple-group likelihood-ratio tests (`FitResult.dif()`, schemes `add` / `drop`,
   Holm / BH adjustment; validated in V17).

@@ -18,6 +18,9 @@
 | EAP | 1e-5 |
 | MAP / ML / WLE（$\theta$） | 1e-4 |
 | MAP / ML / WLE（SE） | 1e-3（相対） |
+| 尺度リンキング $(A, B)$ / 目的関数（同一の項目推定値） | 1e-9 / 1e-9（相対） |
+| 尺度リンキングのデルタ法 SE / `vcov`（同一の推定値・共分散） | 1e-5（相対） |
+| 尺度リンキング $(A, B)$ / 目的関数 / SE（推定 + リンキングの一連） | 1e-6 / 1e-5（相対） / 1e-3（相対） |
 
 ## ケース一覧（マイルストーンと対応）
 | ID | 内容 | mirt 側の呼び出し | MS |
@@ -41,6 +44,7 @@
 | V18 | M2 / M2* 限定情報の適合度（LSAT7 2PL、シミュレーション 2PL、3PL、分散自由の Rasch、GRM $K=3$、GPCM $K=4$） | `M2(m, quadpts = 61, theta_lim = c(-6, 6))` | M5 |
 | V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 | V19 | Davidian 曲線潜在分布（2PL $k=3$・GRM $k=2$・平均分散自由の FIPC 2PL $k=3$） | `mirt(..., dentype = "Davidian-k")` および `mirt(..., customGroup = ..., SE.type = "Oakes")` | M5 |
+| V20 | 尺度リンキング: Haebara・Stocking–Lord（非対称・対称）と Ogasawara SE（2PL・GRM・GPCM・3PL・非標準の新フォーム格子・2PL + GPCM 混在） | 個別 `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R 実装 | M5 |
 | V23 | 名義反応モデル（Science、順序のない・負の採点係数を含むシミュレーション、名義 + 2PL の混在、大半が非単調な項目、2 因子の確認的モデル） | GPCM の点（またはより良い別の初期値）から開始する `pars` を与えた `mirt(..., "nominal")`、`itemfit(fit_stats = "S_X2")` | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -396,6 +400,48 @@
   単体テスト（単位球面・モーメント・ゼロ角での $N(0,1)$ 一致・多項式零点の自動微分ガードと求積点上に零点を持つ推定・
   初期角の符号・`degree` 1 と 10 の推定・Rasch/FIPC・識別性と仕様エラー・スコアリング・JSON 往復と不正な
   `DavidianCurve` JSON）: `tests/test_m5_davidian.py`。
+- **微分可能な IRT 尺度リンキング（V20、M5）**: `mirt` は特性曲線法リンキングを持たないため、
+  `validation/r/m5_linking_reference.R`（→ `tests/reference/v20_linking.json`）では共通項目を含む 2 つの
+  フォームをそれぞれ `mirt` で推定し（`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、$N(0, 1)$、
+  $[-6, 6]$ の等間隔 61 点、`SE.type = "Oakes"`。基準群 $\theta\sim N(0, 1)$、新群 $\theta\sim N(0.5, 1.2^2)$、
+  真値 $A = 1.2, B = 0.5$。V20e の新フォームは固定した $N(0.3, 1.5)$ の下で推定し、対称版の逆方向の項が非標準の
+  新フォーム格子を使う）、`mirt::probtrace()` / `mirt::expected.item()` と論文の定義式
+  （Haebara, 1980; Stocking & Lord, 1983; Kim & Lee, 2006）に基づく独立した素の R 実装（`optim(BFGS)` + `nlm`
+  と中心有限差分 Newton 仕上げ、`max |grad| <= 1.9e-11`）で参照値 $(A, B)$、目的関数値、および Ogasawara (2001) の
+  デルタ法 SE を算出した。Haebara 法は 2 値項目の両カテゴリを含む全カテゴリで和をとる（Kim & Lee, 2006）。
+  6 ケース × 4 方式（Stocking–Lord・Haebara の非対称・対称）について次の 3 通りで検証した:
+  (i) mirt の項目推定値をそのまま入力した直接比較（推定誤差とリンキング誤差を分離）、(ii) mirt 自身の共通項目推定値と
+  Oakes 共分散ブロックからのデルタ法 SE（SE の式を推定・共分散の差から分離）、(iii) flexpyirt で両フォームを推定して
+  リンキングする一連の比較。さらに全ケース・全方式で Newton 法を 4 つの遠い初期値
+  （$(A, B) = (0.25, -3), (4, 3), (0.5, 2.5), (3, -2)$）から走らせ、1e-9 以内で参照解に達することを確かめる。
+  外部の R リンキングパッケージ（`plink`、`equateIRT` など）は使っていない。目的関数と SE は同じ公刊式の独立実装と
+  照合しており、第三者ソフトウェアとは照合していない:
+  - **V20a（`v20a_2pl`、2PL、各フォーム $J=20$、共通 10 項目、各群 $N=2000$）**: 直接比較 `max |Δ(A, B)| = 9.6e-13`、
+    目的関数相対 `1.6e-13`、mirt の共分散での SE 相対 `2.2e-8`。一連の比較 `max |Δ(A, B)| = 1.9e-10`、目的関数相対
+    `2.6e-9`、Ogasawara SE 相対 `2.2e-8`。
+  - **V20b（`v20b_grm`、GRM $K=4$、各フォーム $J=16$、共通 8 項目、各群 $N=2000$）**: 直接比較 `max |Δ(A, B)| = 9.1e-13`、
+    目的関数相対 `1.0e-13`、mirt の共分散での SE 相対 `8.3e-9`。一連の比較 `max |Δ(A, B)| = 9.5e-10`、目的関数相対
+    `2.2e-9`、Ogasawara SE 相対 `8.1e-9`。
+  - **V20c（`v20c_gpcm`、GPCM $K=4$、各フォーム $J=16$、共通 8 項目、各群 $N=2000$）**: 直接比較 `max |Δ(A, B)| = 2.5e-12`、
+    目的関数相対 `9.5e-14`、mirt の共分散での SE 相対 `1.6e-8`。一連の比較 `max |Δ(A, B)| = 1.4e-9`、目的関数相対
+    `7.1e-10`、Ogasawara SE 相対 `1.6e-8`。
+  - **V20d（`v20d_3pl`、3PL、各フォーム $J=16$、共通 8 項目、各群 $N=4000$、内点 $g$）**: 直接比較
+    `max |Δ(A, B)| = 3.6e-12`、目的関数相対 `1.2e-13`、mirt の共分散での SE 相対 `9.4e-8`。一連の比較
+    `max |Δ(A, B)| = 3.0e-10`、目的関数相対 `5.2e-9`、Ogasawara SE 相対 `9.4e-8`。
+  - **V20e（`v20e_2pl_srcgrid`、V20a のデータ、新フォームは固定 $N(0.3, 1.5)$ の下で推定）**: 直接比較
+    `max |Δ(A, B)| = 9.1e-13`、目的関数相対 `1.4e-13`、mirt の共分散での SE 相対 `3.4e-9`。一連の比較
+    `max |Δ(A, B)| = 4.2e-10`、目的関数相対 `7.0e-10`、Ogasawara SE 相対 `3.4e-9`。
+  - **V20f（`v20f_mixed`、2PL + GPCM $K=4$ 混在、各フォーム $J=16$、共通 5 + 3 項目、各群 $N=2000$）**: 直接比較
+    `max |Δ(A, B)| = 2.0e-11`、目的関数相対 `6.2e-14`、mirt の共分散での SE 相対 `2.1e-8`。一連の比較
+    `max |Δ(A, B)| = 1.3e-10`、目的関数相対 `3.6e-10`、Ogasawara SE 相対 `2.1e-8`。
+  したがってリンキングで照合済みの項目モデルは 2PL・3PL・GRM・GPCM と 2PL + GPCM 混在である。Rasch・4PL・PCM は
+  同じカーネルを共有し、厳密回復の単体テストでのみ確認している。
+  照合テスト: `tests/test_mirt_m5_linking.py`。単体テスト（全 7 種の 1 次元モデル、ICC・閾値の不変性、恒等変換と厳密回復、
+  対称版の可逆性、独自格子、EH・多母集団、1 つの多母集団推定を `source` と `target` の両方に使うときの同時共分散、
+  非収束時に SE を出さないこと、Rasch・PCM の傾き $1/A$、`transform_theta`、勾配の有限差分検証、Ogasawara SE の
+  中心有限差分検証、および $N(\hat\eta, \Sigma)$ からのパラメタ抽出ごとに重み固定でリンキングを解き直すモンテカルロ
+  線形化検証（推定のブートストラップではない））: `tests/test_m5_linking.py`。
+
 - **名義反応モデル（V23、M5）**: mirt の `itemtype = "nominal"`（`optimizer = "NR"`、`TOL = 1e-10`、$[-6,6]$ の
   61 点。V23f は次元あたり 31 点）。V23a: `0..3` に符号化し直した `Science`。V23b: シミュレーション
   $J=10, K=4, N=3000$ で、内部の採点係数が入れ替わった項目（`q09`: $\mathrm{ak}_1=2.2 > \mathrm{ak}_2=0.7$）と
@@ -424,7 +470,6 @@
   S-X2・スコアリング・事前分布・等値制約・多群と DIF・EH・2 次元・退化項目の `HeywoodWarning`）:
   `tests/test_m5_nominal.py`。テスト: `tests/test_mirt_m5_nominal.py`。参照値生成:
   `validation/r/m5_nominal_reference.R`。
-
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。

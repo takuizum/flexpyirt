@@ -337,7 +337,7 @@ E-step, M-step (autodiff Newton), Oakes/Hessian SEs, and EAP scoring for $D \in 
 | 3PL / 4PL | $a, d, g, u$ (natural scale, $0<g<u\le 1$; §15.2) | M3 |
 | GRM | $a, d_1>\dots>d_{K-1}$ | M2 |
 | GPCM / PCM | $a, d_1..d_{K-1}$ | M3 |
-| Nominal | $a, \mathrm{ak}_1..\mathrm{ak}_{K-2}, d_1..d_{K-1}$ ($\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$; §16.8) | M5 |
+| Nominal | $a, \mathrm{ak}_1..\mathrm{ak}_{K-2}, d_1..d_{K-1}$ ($\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$; §16.6) | M5 |
 
 The display IRT parameterization ($b=-d/a$ for 2PL/Rasch/3PL/4PL, $b_k=-d_k/a$ for GRM, and
 step difficulties $b_k=-(d_k-d_{k-1})/a$ with $d_0=0$ for GPCM/PCM) is computed in the Result layer
@@ -1197,7 +1197,76 @@ data-independent shapes (§15.21).
    can be multimodal and vanish at real roots of $P_k$ (matching mirt's `use_dentype_estimate`).
    `item_fit()` rejects `DavidianCurve` until validated. `"DavidianCurve"` is registered in
    `_json.py` without changing the JSON payload shape (`schema_version` remains 3).
-8. **Nominal response model (`Nominal(n_cat)`, `NominalKernel(n_cat, n_factors=1)`, V23)**:
+5. **Differentiable IRT scale linking (`link`, `LinkResult`, V20)**:
+   Characteristic-curve linking of two separately calibrated unidimensional scales via common items
+   (§1), solving for linear transformation constants $(A, B)$ with $A > 0$ such that
+   $\theta^* = A\theta + B$ maps the `source` (new) scale onto the `target` (base) scale
+   (Kolen & Brennan, 2014). Under $\theta = (\theta^* - B)/A$, slope–intercept item parameters
+   transform with $a^* = a / A$ and:
+   - `DichotomousKernel` (2PL/Rasch) and `FourPLKernel` (3PL/4PL): $d^* = d - aB/A$ (asymptotes
+     $g, u$ unchanged);
+   - `GradedKernel` (GRM): $d_k^* = d_k - aB/A$ for $k = 1, \dots, K-1$ (preserving $d_1 > \dots > d_{K-1}$);
+   - `GPCMKernel` (GPCM/PCM): $d_k^* = d_k - k\,aB/A$ for $k = 1, \dots, K-1$ (with $d_0 = 0$),
+     preserving $k a^* \theta^* + d_k^* = k a\theta + d_k$ and step difficulties $b_k^* = A b_k + B$.
+   Because $P_j(y=k \mid \theta^*; \xi_j^*) = P_j(y=k \mid (\theta^* - B)/A; \xi_j)$ for any
+   unidimensional `ItemKernel`, the criteria are evaluated directly from `kernel.log_prob` with no
+   hand-written derivatives:
+   - **Haebara** (Haebara, 1980; polytomous form Kim & Lee, 2006):
+     $H_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} \sum_{j\in\mathcal{C}} \sum_{k=0}^{K_j-1} [P_{jk}^{\mathrm{tgt}}(\theta_q^{(t)}) - P_{jk}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$.
+     The sum runs over all categories, including both categories of a dichotomous item (the
+     Kim & Lee, 2006 convention), so a dichotomous item contributes $2[P^{\mathrm{tgt}} - P^{\mathrm{src}}]^2$,
+     twice Haebara's (1980) original term: the solution is unchanged when all common items are
+     dichotomous, reported criterion values are doubled, and in mixed-format anchors dichotomous
+     items carry the Kim & Lee weight relative to polytomous items.
+   - **Stocking–Lord** (Stocking & Lord, 1983; polytomous form Kim & Lee, 2006):
+     $\mathrm{SL}_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} [\mathrm{TCC}^{\mathrm{tgt}}(\theta_q^{(t)}) - \mathrm{TCC}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$,
+     where $\mathrm{TCC}(\theta) = \sum_{j\in\mathcal{C}}\sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)$.
+   - **Symmetric variants** (`symmetric=True`; Kim & Lee, 2006): add the reverse-direction term
+     comparing $P_{jk}^{\mathrm{src}}(\theta_q^{(s)})$ against $P_{jk}^{\mathrm{tgt}}(A\theta_q^{(s)} + B)$
+     (likewise for $\mathrm{TCC}$). By default, $(\theta^{(t)}, w^{(t)})$ is the target group's
+     fitted latent distribution on its quadrature grid and $(\theta^{(s)}, w^{(s)})$ is the source
+     group's, making symmetric linking exactly reversible: swapping `source` and `target` yields
+     $(1/A, -B/A)$. Explicit `nodes` / `weights` override the grid (weights are normalized to sum
+     to 1; uniform if `nodes` is given without `weights`).
+   **Optimization**: starting from Mean/Mean ($A_0 = \sum |a_j^{\mathrm{src}}| / \sum |a_j^{\mathrm{tgt}}|$,
+   $B_0 = \bar b^{\mathrm{tgt}} - A_0 \bar b^{\mathrm{src}}$), a jitted, shape-static 2-D bounded
+   monotone Newton minimizer (`_linking.solve_linking`, `lax.while_loop`) uses `jax.grad` and
+   `jax.hessian` on `LinkingProblem` pytrees with $A > 0$ enforced by halfway-to-bound projection,
+   Levenberg–Marquardt fallback when the Hessian is not positive definite, the Euclidean step
+   norm capped at `_MAX_STEP = 1` (so a poor start cannot jump onto a flat plateau where the curves
+   no longer overlap), 40 parallel backtracking step sizes, and a 1-ULP gradient-polish step near
+   the optimum. Convergence is $\|\nabla F\|_\infty \le$ `tol` (absolute, default $10^{-10}$, not
+   rescaled: $F$ uses weights summing to 1 and grows with the number of common items); a step
+   that no longer decreases $F$ before reaching `tol` ends the loop with `converged = False` and a
+   `ConvergenceWarning`. Mean/Mean is only a starting value: it sums absolute slopes and pools
+   every display threshold of every common item, so polytomous items weigh more than in per-item
+   averages.
+   **Standard errors (Ogasawara, 2001)**: from the stationarity condition
+   $g(c, \eta_s, \eta_t) = \nabla_c F(c, \eta_s, \eta_t) = 0$ at $\hat c = (\hat A, \hat B)$, the
+   implicit function theorem gives $J_s = -H_{cc}^{-1} H_{c,\eta_s}$ and
+   $J_t = -H_{cc}^{-1} H_{c,\eta_t}$ via `jax.jacfwd(g, 0)` and `jax.jacrev(g, 1/2)` over the
+   common items' unique free parameters (respecting fixed parameters and shared `free_id`s), so
+   $\mathrm{Cov}(\hat A, \hat B) = J_s \Sigma_s J_s^\top + J_t \Sigma_t J_t^\top + J_s \Sigma_{st} J_t^\top + J_t \Sigma_{st}^\top J_s^\top$.
+   Separate `FitResult`s are treated as independent calibrations ($\Sigma_{st} = 0$); when the
+   same `FitResult` is passed as `source` and `target` (two groups of one multiple-group fit),
+   $\Sigma_{st}$ is the cross block of its joint `vcov`, so equality-constrained anchors shared by
+   both groups give $(A, B) = (1, 0)$ with zero covariance. Distinct `FitResult`s fitted to
+   overlapping data are not detected. **Quadrature weights are held fixed.** By default they are
+   the fitted latent distributions (estimates when a group's mean/variance is free or the
+   distribution is EH), but this is exact to first order under a correctly specified model:
+   $\partial g/\partial w_q$ is a weighted sum of curve residuals times curve derivatives and the
+   residuals vanish at the population solution, so $H_{c,w} = 0$ there; under item parameter drift
+   or DIF (non-zero population residuals) the weights' sampling variability is ignored. SEs are
+   computed only at a converged solution; non-convergence, unavailable `vcov` on a side with free
+   common-item parameters, or a non-PD $H_{cc}$ yields `vcov = None` and `NaN` SEs.
+   **Transformed items and scores**: `LinkResult.items` holds every source item on the target
+   scale; fixed-slope models (Rasch, PCM) get $a^* = 1/A$ (not 1), and `Model.fix_from` fixes
+   that slope. `transform_theta` maps `theta` and every `pv*` column by $A\theta + B$ and `se` by
+   $A\,\mathrm{se}$, treating $(A, B)$ as known (linking error is not added).
+   **Validation in the Python shell**: multidimensional fits, multiple-group fits without explicit
+   `source_group` / `target_group`, mismatched item kernels or category counts on common items, and
+   invalid nodes/weights raise `SpecificationError`.
+6. **Nominal response model (`Nominal(n_cat)`, `NominalKernel(n_cat, n_factors=1)`, V23)**:
    Bock's (1972) nominal response model in Thissen, Cai & Bock's (2010) overall-slope ×
    scoring-function parameterization, matching R mirt's `itemtype = "nominal"` (Chalmers, 2012):
    $$P(y=k\mid\boldsymbol\theta)=\frac{\exp\big(\mathrm{ak}_k\,\mathbf a^\top\boldsymbol\theta+d_k\big)}{\sum_{c=0}^{K-1}\exp\big(\mathrm{ak}_c\,\mathbf a^\top\boldsymbol\theta+d_c\big)},\qquad k=0,\dots,K-1,\quad \mathrm{ak}_0=0,\ \mathrm{ak}_{K-1}=K-1,\ d_0=0,$$
@@ -1274,8 +1343,11 @@ data-independent shapes (§15.21).
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
+- Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
+- Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
+- Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - MacCallum, R. C., Browne, M. W., & Sugawara, H. M. (1996). Power analysis and determination of sample size for covariance structure modeling. *Psychological Methods*, 1(2), 130–149.
@@ -1287,10 +1359,12 @@ data-independent shapes (§15.21).
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
+- Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.

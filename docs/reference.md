@@ -10,6 +10,7 @@ The docstrings carry the same information plus the formulas and sources
 Apart from the first one or two, arguments of public functions are keyword-only (after `*`).
 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
+- Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormal`](#lognormal), [`Beta`](#beta)
@@ -631,6 +632,68 @@ against `Normal` (use AIC / BIC), and possibly several local maxima
 **Raises**: `SpecificationError` for an invalid `degree`, `mean`, `var`, or flags, or when used
 with `Model.with_groups()` or `Model.with_factors()`; `IdentificationError` when `free_mean` or
 `free_var` lacks fixed intercepts or slopes.
+
+---
+
+## Scale linking
+
+### `link`
+
+```text
+link(source, target, *, items=None, method="stocking-lord", symmetric=False,
+     nodes=None, weights=None, source_group=None, target_group=None,
+     tol=1e-10, max_iter=200) -> LinkResult
+```
+
+Link a separately calibrated unidimensional `source` (new) scale onto `target` (base) via common
+items by finding linear constants $(A, B)$ ($A > 0$) for $\theta^* = A\theta + B$
+([guide section 15](guide.md#15-scale-linking), [DESIGN §16.5](DESIGN.md)). Validated (V20) for
+2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items; Rasch, 4PL and PCM share these kernels and
+are covered by unit tests only. Derivatives for Newton optimization and delta-method standard
+errors (Ogasawara, 2001) come from JAX automatic differentiation. SEs assume independent
+calibrations (the joint covariance is used when one multiple-group fit is both `source` and
+`target`), hold the quadrature weights fixed, and are not reported without convergence.
+
+| Argument | Type | Description |
+|---|---|---|
+| `source` | `FitResult` | Fitted unidimensional model on the source (new) scale |
+| `target` | `FitResult` | Fitted unidimensional model on the target (base) scale |
+| `items` | iterable[str] / Mapping[str, str], optional | Common items (default `None`: all items sharing the same name). Pass `{source_item: target_item}` when names differ. Common pairs must share the same kernel and category count |
+| `method` | `"stocking-lord"` / `"haebara"` | Criterion: Stocking & Lord (1983) squared TCC difference (default) or Haebara (1980) squared category-curve differences (polytomous forms: Kim & Lee, 2006) |
+| `symmetric` | bool | If `True`, add the reverse-direction squared difference (Kim & Lee, 2006); default `False` |
+| `nodes` | 1-D array-like, optional | Quadrature nodes $\theta_q$ (default: target group's fitted grid, and source group's grid for the reverse direction when `symmetric=True`) |
+| `weights` | 1-D array-like, optional | Non-negative weights normalized to sum to 1 (default: fitted latent distribution weights, or uniform when `nodes` is given without `weights`) |
+| `source_group`, `target_group` | str, optional | Group name when `source` or `target` is a multiple-group `FitResult` |
+| `tol` | float | Convergence tolerance on $\|\nabla F(A, B)\|_\infty$ (default `1e-10`) |
+| `max_iter` | int | Maximum Newton iterations (default `200`) |
+
+**Returns**: [`LinkResult`](#linkresult)
+
+**Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (non-`FitResult` or
+multidimensional input, multiple-group input without selecting a group, no common items,
+mismatched item kernels/categories on common items, invalid options/nodes/weights).
+
+**Warns**: `ConvergenceWarning` if `max_iter` is reached before `grad_norm <= tol`.
+
+### `LinkResult`
+
+Returned by `link()`. Immutable.
+
+| Attribute / method | Type | Description |
+|---|---|---|
+| `A`, `B` | float | Linear linking constants ($\theta^* = A\theta + B$, $A > 0$) |
+| `A_se`, `B_se` | float | Delta-method standard errors from the implicit function theorem (Ogasawara, 2001), or NaN when unavailable |
+| `vcov` | ndarray (2, 2) / None | Asymptotic covariance matrix of `(A, B)`, or `None` when `se=None` on a side with free common-item parameters, all common parameters are fixed, or $H_{cc}$ is not positive definite |
+| `criterion` | float | Minimized criterion value at `(A, B)` |
+| `method` | `"stocking-lord"` / `"haebara"` | Criterion used |
+| `symmetric` | bool | Whether the symmetric criterion was minimized |
+| `converged` | bool | Whether `grad_norm <= tol` was met |
+| `n_iter` | int | Number of Newton iterations taken |
+| `grad_norm` | float | $\|\nabla F(A, B)\|_\infty$ at `(A, B)` |
+| `common_items` | tuple[str, ...] | Source item names used as common items |
+| `items` | DataFrame | All source items transformed onto the target scale (`item`, `model`, `common`, internal slope–intercept parameters and display IRT thresholds `b` / `bk`); directly usable with `Model.fix_from()` |
+| `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | Transform source-scale ability scores via $\theta^* = A\theta + B$ (`theta` and all `pv1..` columns of a scoring DataFrame; `se` $\mapsto A\,\mathrm{se}$, excluding linking error) |
+| `summary(*, digits=4)` | str | Readable plain-text summary (Jupyter displays HTML via `_repr_html_()`) |
 
 ---
 

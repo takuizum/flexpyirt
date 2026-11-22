@@ -230,7 +230,7 @@ class Model:
             parameterizations; ``u`` may be omitted (or NaN) for 3PL items (it stays 1), and any
             asymptote already fixed via :meth:`fix` may also be omitted (or NaN). ``Nominal``
             items take ``a``, ``ak1..ak{K-2}``, and ``d1..d{K-1}`` and support only
-            ``"slope-intercept"`` (DESIGN.md §16.8). NaN cells are treated as not given.
+            ``"slope-intercept"`` (DESIGN.md §16.6). NaN cells are treated as not given.
         items : list of str or callable, optional
             Items to fix (default: every bank item that is in the model).
         parameterization : {"slope-intercept", "irt"}

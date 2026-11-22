@@ -1,4 +1,4 @@
-"""Unit and property tests for NominalKernel and Nominal item model (DESIGN.md §16.8)."""
+"""Unit and property tests for NominalKernel and Nominal item model (DESIGN.md §16.6)."""
 
 from __future__ import annotations
 

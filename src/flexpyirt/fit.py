@@ -253,7 +253,7 @@ def _warn_heywood(params: pd.DataFrame, spec: Model) -> None:
 def _warn_nominal_degenerate(
     params: pd.DataFrame, kernels: dict[str, ItemKernel], multigroup: bool
 ) -> None:
-    r"""Warn about degenerate nominal items (DESIGN.md §16.8).
+    r"""Warn about degenerate nominal items (DESIGN.md §16.6).
 
     A ``Nominal`` item with ``n_cat >= 3`` and a free slope is degenerate when its slope norm
     :math:`\lVert\mathbf a\rVert < 10^{-3}` (the item carries no information about

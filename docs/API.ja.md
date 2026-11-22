@@ -148,6 +148,8 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | `BAEM`, `Quadrature` | frozen dataclass | 推定設定 |
 | `fit` | 関数 | 推定。`FitResult` を返す |
 | `FitResult` | クラス | 結果（`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `dif`, `m2`, `to_json` / `from_json`） |
+| `link` | 関数 | 微分可能な IRT 尺度リンキング（Haebara・Stocking–Lord の非対称・対称版）。`LinkResult` を返す |
+| `LinkResult` | クラス | 尺度リンキング結果（`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `items`, `transform_theta`, `summary`） |
 
 ## 8. 設計上の約束
 - 公開関数は keyword-only を基本にする（`fit(spec, data, *, group=None, ...)`）。

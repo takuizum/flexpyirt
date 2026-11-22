@@ -158,6 +158,8 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
 | `fit` | function | Estimation; returns a `FitResult` |
 | `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `dif`, `m2`, `to_json` / `from_json`) |
+| `link` | function | Differentiable IRT scale linking (Haebara / Stocking–Lord, non-symmetric & symmetric); returns a `LinkResult` |
+| `LinkResult` | class | Scale-linking result (`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `items`, `transform_theta`, `summary`) |
 
 ## 8. Design commitments
 - Public functions are keyword-only by default (`fit(spec, data, *, group=None, ...)`).
