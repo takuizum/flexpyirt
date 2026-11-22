@@ -10,8 +10,8 @@ from typing import Any, Literal
 import pandas as pd
 
 from flexpyirt.errors import SpecificationError
-from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, Rasch
-from flexpyirt.latent import EmpiricalHistogram, LatentSpec, Normal
+from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, NominalKernel, Rasch
+from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, LatentSpec, Normal
 from flexpyirt.priors import PRIOR_TYPES, Prior
 from flexpyirt.quadrature import MAX_FACTORS
 
@@ -45,6 +45,9 @@ class Model:
         reference group (DESIGN.md §14.4).
     equal : tuple of (items, params or None)
         Across-group equality constraints from :meth:`equal_across_groups`.
+    equal_items : tuple of (items, params)
+        Across-item equality constraints from :meth:`equal_across_items` (each parameter in
+        ``params`` is shared by ``items`` within every group; DESIGN.md §16.1).
     priors : tuple of (item, param, Prior)
         Prior distributions on item parameters from :meth:`prior` (applied across all groups;
         shared parameters are counted once and fixed parameters ignore their prior).
@@ -60,6 +63,7 @@ class Model:
     latent: LatentSpec | None = None
     groups: tuple[tuple[str, LatentSpec], ...] | None = None
     equal: tuple[tuple[tuple[str, ...], tuple[str, ...] | None], ...] = ()
+    equal_items: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = ()
     priors: tuple[tuple[str, str, Prior], ...] = ()
     factors: tuple[tuple[str, tuple[str, ...]], ...] | None = None
     correlated_factors: bool = True
@@ -76,6 +80,11 @@ class Model:
             raise SpecificationError(f"Duplicated item names: {dup}.")
         if self.groups is not None:
             kinds = {type(dist) for _, dist in self.groups}
+            if DavidianCurve in kinds:
+                raise SpecificationError(
+                    "DavidianCurve is only supported for single-group models; use "
+                    "Model.with_latent() instead of with_groups()."
+                )
             if EmpiricalHistogram in kinds and len(kinds) > 1:
                 raise SpecificationError(
                     "Cannot mix EmpiricalHistogram and Normal across groups; when "
@@ -110,6 +119,17 @@ class Model:
     def is_eh(self) -> bool:
         """Whether this model uses an :class:`~flexpyirt.EmpiricalHistogram` latent distribution."""
         return isinstance(self.resolved_groups()[0][1], EmpiricalHistogram)
+
+    @property
+    def is_davidian(self) -> bool:
+        """Whether this model uses a :class:`~flexpyirt.DavidianCurve` latent distribution."""
+        return isinstance(self.resolved_groups()[0][1], DavidianCurve)
+
+    @property
+    def davidian_degree(self) -> int:
+        """Polynomial degree of the Davidian curve, or ``0`` for non-Davidian models."""
+        dist = self.resolved_groups()[0][1]
+        return dist.degree if isinstance(dist, DavidianCurve) else 0
 
     @property
     def is_multidimensional(self) -> bool:
@@ -208,11 +228,19 @@ class Model:
             fixed on the model via :meth:`fix` (whose fixed slope is used to convert ``b`` to
             ``d``). Asymptotes ``g`` (3PL/4PL) and ``u`` (4PL) are given as they are in both
             parameterizations; ``u`` may be omitted (or NaN) for 3PL items (it stays 1), and any
-            asymptote already fixed via :meth:`fix` may also be omitted (or NaN). NaN cells are
-            treated as not given.
+            asymptote already fixed via :meth:`fix` may also be omitted (or NaN). ``Nominal``
+            items take ``a``, ``ak1..ak{K-2}``, and ``d1..d{K-1}`` and support only
+            ``"slope-intercept"`` (DESIGN.md §16.6). NaN cells are treated as not given.
         items : list of str or callable, optional
             Items to fix (default: every bank item that is in the model).
         parameterization : {"slope-intercept", "irt"}
+
+        Raises
+        ------
+        SpecificationError
+            If the bank lacks a needed column or item, if ``parameterization="irt"`` is used
+            with a multidimensional model, or if ``parameterization="irt"`` is used for a
+            ``Nominal`` item (the nominal model has no IRT thresholds).
         """
         if self.is_multidimensional and parameterization == "irt":
             raise SpecificationError(
@@ -244,6 +272,11 @@ class Model:
             row = rows[item]
             item_model = lookup[item]
             kernel = self.item_kernel(item_model)
+            if parameterization == "irt" and isinstance(kernel, NominalKernel):
+                raise SpecificationError(
+                    f"parameterization='irt' is not supported for Nominal item {item!r}; "
+                    "use parameterization='slope-intercept'."
+                )
             slope = float(row["a"]) if _has_value(row, "a") else prior_fixed.get((item, "a"), 1.0)
             is_gpcm = isinstance(kernel, GPCMKernel)
             cum_b = 0.0
@@ -383,11 +416,21 @@ class Model:
                     f"Prior on {item!r}.{param} is not valid for a {n_factors}-factor model "
                     f"(available: {list(valid)}); call with_factors() before prior()."
                 )
+        for eq_items, eq_params in self.equal_items:
+            for item in eq_items:
+                valid = candidate.item_kernel(lookup[item]).param_names
+                bad = [p for p in eq_params if p not in valid]
+                if bad:
+                    raise SpecificationError(
+                        f"Equality on {item!r}.{bad} is not valid for a {n_factors}-factor model "
+                        f"(available: {list(valid)}); call with_factors() before "
+                        "equal_across_items()."
+                    )
         return candidate
 
     def with_latent(self, dist: LatentSpec) -> Model:
         """Return a single-group model with latent distribution ``dist``."""
-        if not isinstance(dist, (Normal, EmpiricalHistogram)):
+        if not isinstance(dist, (Normal, EmpiricalHistogram, DavidianCurve)):
             raise SpecificationError(f"Unsupported latent distribution {dist!r}.")
         if self.groups is not None:
             raise SpecificationError("This model has groups; set latents with with_groups().")
@@ -403,6 +446,7 @@ class Model:
 
         Every group must use ``Normal`` or every group must use ``EmpiricalHistogram`` (mixing
         them across groups raises :class:`~flexpyirt.errors.SpecificationError`; DESIGN.md §4.4).
+        :class:`~flexpyirt.DavidianCurve` is single-group only.
 
         Examples
         --------
@@ -416,6 +460,11 @@ class Model:
         if len(latents) < 2:
             raise SpecificationError("with_groups() needs at least two groups.")
         for name, dist in latents.items():
+            if isinstance(dist, DavidianCurve):
+                raise SpecificationError(
+                    f"DavidianCurve is only supported for single-group models (group {name!r}); "
+                    "use Model.with_latent() instead of with_groups()."
+                )
             if not isinstance(dist, (Normal, EmpiricalHistogram)):
                 raise SpecificationError(f"Unsupported latent distribution for group {name!r}.")
         kinds = {type(dist) for dist in latents.values()}
@@ -449,6 +498,38 @@ class Model:
                     raise SpecificationError(f"Item {item!r} has no parameters {bad}.")
         return replace(self, equal=(*self.equal, (chosen, param_tuple)))
 
+    def equal_across_items(self, *, items: ItemSelector, params: Iterable[str]) -> Model:
+        r"""Return a model where each of ``params`` is one common parameter for ``items``.
+
+        For example ``equal_across_items(items=None, params=["a"])`` gives every item the same
+        slope (a "1PL" with the latent variance fixed). The constraint applies within each group
+        (as mirt's ``CONSTRAIN``); combine it with :meth:`equal_across_groups` to share across
+        groups too. Fixed parameters are not affected. The M-step solves the items connected by
+        such constraints jointly (DESIGN.md §4.3, §16.1).
+
+        Parameters
+        ----------
+        items : iterable of str or callable, or None
+            At least two items (``None`` selects every item).
+        params : iterable of str
+            Internal parameter names (e.g. ``"a"``, ``"a1"``, ``"d"``, ``"d1"``, ``"g"``) that every
+            selected item has. Each name is one separate common parameter.
+        """
+        chosen = self._select(items)
+        if len(chosen) < 2:
+            raise SpecificationError("equal_across_items() needs at least two items.")
+        if isinstance(params, str):
+            raise SpecificationError("params must be an iterable of parameter names, not a str.")
+        param_tuple = tuple(dict.fromkeys(str(p) for p in params))
+        if not param_tuple:
+            raise SpecificationError("equal_across_items() needs at least one parameter.")
+        lookup = dict(self.items)
+        for item in chosen:
+            bad = [p for p in param_tuple if p not in self.item_kernel(lookup[item]).param_names]
+            if bad:
+                raise SpecificationError(f"Item {item!r} has no parameters {bad}.")
+        return replace(self, equal_items=(*self.equal_items, (chosen, param_tuple)))
+
     def prior(
         self,
         *,
@@ -478,7 +559,7 @@ class Model:
             raise SpecificationError(
                 f"Unsupported prior distribution {dist!r}; use NormalPrior, LogNormal or Beta."
             )
-        if param in ("mean", "var") or param.startswith(("mean_", "var_", "cor_")):
+        if param in ("mean", "var") or param.startswith(("mean_", "var_", "cor_", "phi_")):
             raise SpecificationError(
                 f"Priors on latent-distribution parameters ({param!r}) are not supported."
             )

@@ -10,8 +10,9 @@ The docstrings carry the same information plus the formulas and sources
 Apart from the first one or two, arguments of public functions are keyword-only (after `*`).
 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
+- Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Model: [`Model`](#model)
-- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm)
+- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormal`](#lognormal), [`Beta`](#beta)
 - Latent distribution: [`Normal`](#normal)
 - Settings: [`BAEM`](#baem), [`Quadrature`](#quadrature)
@@ -126,8 +127,9 @@ DataFrame): for unidimensional models, columns `theta`, `se` for `"EAP"`, `"MAP"
 and `pv1`…`pv{n_draws}` for `"PV"`; for multidimensional models, columns `theta_<factor>` and `se_<factor>` in declared factor
 order (`"PV"`: `pv<m>_<factor>`).
 
-**Raises**: `SpecificationError` if `method` is unknown, `method="MAP"` with an `EmpiricalHistogram` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for a deterministic method, or
-`n_draws` is not a positive integer.
+**Raises**: `SpecificationError` if `method` is unknown, `method="MAP"` with an `EmpiricalHistogram`
+or `DavidianCurve` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for
+a deterministic method, or `n_draws` is not a positive integer.
 
 #### `FitResult.item_fit`
 
@@ -154,8 +156,69 @@ free latent parameters (mirt's convention).
 `df = 0` and NaN statistics. A multiple-group model adds a leading `group` column (one row per
 group and item).
 
-**Raises**: `SpecificationError` for multidimensional or `EmpiricalHistogram` models, missing
+**Raises**: `SpecificationError` for multidimensional, `EmpiricalHistogram`, or `DavidianCurve` models, missing
 responses, an item with an unobserved category (within a group), or a non-positive `mincell`.
+
+#### `FitResult.m2`
+
+```text
+m2(data, *, item_names=None, ci=0.90) -> DataFrame
+```
+
+Limited-information goodness-of-fit statistic $M_2$ / $M_2^*$ of Maydeu-Olivares & Joe (2005, 2006)
+([guide section 5](guide.md#limited-information-fit-m2)), computed on the $J$ item-score means and
+$\binom{J}{2}$ pairwise cross-products (matching mirt's default `M2(type = "M2*")`; identically
+$M_2$ for dichotomous items). The Jacobian $\Delta_2 = \partial\pi_2/\partial\eta^\top$ includes
+every free item and latent parameter (shared parameters once) via JAX autodiff.
+
+| Argument | Description |
+|---|---|
+| `data` | Complete responses on the fitted items (typically the fitting data) |
+| `item_names` | Column names when `data` is an array |
+| `ci` | Confidence level strictly in `(0, 1)` for the RMSEA confidence interval (default `0.90`) |
+
+**Returns**: One-row `DataFrame` with columns `m2`, `df` ($J + \binom{J}{2} - k$), `p`, `rmsea`,
+`rmsea_<lo>`, `rmsea_<hi>` (named from `ci`, e.g. `rmsea_5`, `rmsea_95` for `0.90`), `srmsr`,
+`tli`, `cfi`. When `df <= 0` or $\Delta_2$ is rank-deficient (the model is not locally identified
+from first- and second-order moments), a `FlexpyirtWarning` is emitted and `m2`, `p`, RMSEA, its
+CI, `tli` and `cfi` are `NaN` (`df` and `srmsr` remain finite). Polytomous models return `NaN` for
+`tli` and `cfi` (DESIGN §16.3); if the dichotomous null $M_2$ is not greater than the fitted $M_2$,
+a `FlexpyirtWarning` is emitted and `tli`/`cfi` are `NaN`.
+
+**Raises**: `PrecisionError` if JAX 64-bit is disabled; `SpecificationError` for multidimensional,
+multiple-group, `EmpiricalHistogram`, or MAP (with priors) models, missing responses, invalid
+`ci`, or fewer than 2 items or respondents.
+
+#### `FitResult.dif`
+
+```text
+dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None) -> DataFrame
+```
+
+Likelihood-ratio DIF tests across the groups of a multiple-group model
+([guide section 9](guide.md#differential-item-functioning-dif)), as mirt's `DIF()`. For each item
+the model is refitted (same `BAEM` settings and quadrature, starting from these estimates) with
+the item's `params` made equal across groups (`scheme="add"`) or freed in every group
+(`scheme="drop"`); $X^2 = 2(\ell_{\text{free}} - \ell_{\text{constrained}})$ with
+$df = |k_{\text{base}} - k_{\text{new}}|$.
+
+| Argument | Description |
+|---|---|
+| `data`, `group` | The responses and group labels this result was fitted to |
+| `items` | Items to test (one refit each) |
+| `params` | Internal parameters to test (default: all of each item's parameters) |
+| `scheme` | `"add"` (constrain; the fitted model is the baseline) or `"drop"` (free) |
+| `p_adjust` | `"holm"` (default, mirt's), `"BH"` (Benjamini–Hochberg) or `"none"` for `adj_p` |
+| `item_names` | Column names when `data` is an array |
+
+**Returns**: `DataFrame` with columns `item`, `converged`, `aic`, `sabic`, `hq`, `bic` (the model
+with the item free minus the constrained one; negative values favour DIF), `x2`, `df`, `p` and
+`adj_p`.
+
+**Raises**: `SpecificationError` for single-group models, MAP fits with priors, unknown items or
+parameters, or an item with nothing to test (already equal for `"add"`, already free for
+`"drop"`); `IdentificationError` if a refitted model is not identified (e.g. freeing the only
+anchors).
 
 #### `FitResult.to_json`
 
@@ -165,8 +228,8 @@ to_json(path=None, *, indent=2) -> str
 
 Serialize the fitted result to a strict RFC 8259 JSON string, and also write it (UTF-8) to `path`
 (`str` or `os.PathLike`) when `path` is given. Uses plain, versioned JSON (no `pickle`) with
-top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 2` (files with version 1 are still
-read), and `"flexpyirt_version"`. Multidimensional results store their factor structure.
+top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 3` (files with versions 1 and 2 are
+still read), and `"flexpyirt_version"`. Multidimensional results store their factor structure.
 Finite float64 values are written as `repr`-exact JSON numbers and non-finite values (`NaN`,
 `+inf`, `-inf`) are encoded explicitly as `"NaN"`, `"Infinity"`, and `"-Infinity"` in float-typed
 fields so every attribute round-trips bit-for-bit.
@@ -301,6 +364,18 @@ Make the parameters of `items` equal across groups (anchor items). Without `para
 parameters; with e.g. `params=["a"]`, only those. `items` is a list of names, a `str -> bool`
 function, or `None` for every item. Can be called repeatedly.
 
+#### `Model.equal_across_items`
+
+```text
+model.equal_across_items(*, items, params) -> Model
+```
+
+Make each parameter in `params` (e.g. `["a"]`, `["a1"]`, `["d"]`, `["d1", "d2"]`) one common
+parameter for the selected `items` (at least two), within each group (as mirt's `CONSTRAIN`).
+Combine with `equal_across_groups` to share across groups as well; overlapping equalities are
+merged. Fixed parameters are not affected. The parameter's default starting value is the mean of
+the items' starting values. Equivalent to giving the rows one `free_id` in an edited table.
+
 #### `Model.prior`
 
 ```text
@@ -424,6 +499,21 @@ or `PCM`, the latent variance is estimated by default (same as mirt's `itemtype 
 polytomous data). With `n_cat = 2` this equals `Rasch`. Shares `GPCMKernel` with `GPCM` of the same
 `n_cat`.
 
+### `Nominal`
+
+```text
+Nominal(n_cat)
+```
+
+Nominal response model (Bock, 1972) in Thissen, Cai & Bock's (2010) overall-slope ×
+scoring-function parameterization with categories `0..n_cat-1` (`n_cat >= 2`):
+$P(y=k\mid\theta)=\exp(a\,\mathrm{ak}_k\,\theta+d_k)/\sum_{c=0}^{K-1}\exp(a\,\mathrm{ak}_c\,\theta+d_c)$
+with $\mathrm{ak}_0=0$, $\mathrm{ak}_{K-1}=K-1$, and $d_0=0$ fixed. Internal parameters `a` (or
+`a1`…`aD` for multidimensional models), `ak1`…`ak{K-2}`, and `d1`…`d{K-1}` (all free, no ordering
+constraint; no display `b` / `bk` columns). Same as mirt's `itemtype = "nominal"`. Fixing
+$\mathrm{ak}_k=k$ reproduces `GPCM(n_cat)` identically (and with `n_cat = 2` there are no free `ak`
+parameters, so `Nominal(2)` equals `GPCM(2)` / `TwoPL`). Uses `NominalKernel(n_cat)`.
+
 ---
 
 ## Priors
@@ -513,6 +603,99 @@ fitted histogram. Unidimensional models only.
 `Normal` across groups, or for a multidimensional model; `IdentificationError` when intercepts are
 fixed but no nonzero slope is (a variance-only constraint is not supported).
 
+### `DavidianCurve`
+
+```text
+DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)
+DavidianCurve.free(degree, *, mean=0.0, var=1.0)
+```
+
+Seminonparametric Davidian-curve latent density of polynomial degree `degree` in `1..10`
+(Zhang & Davidian, 2001; Woods & Lin, 2009; [guide section 8](guide.md#davidian-curves)).
+Evaluates $h_k(z;\boldsymbol\phi) = P_k(z;\boldsymbol\phi)^2\varphi(z)$ in normalized probabilists'
+Hermite polynomials with unit-sphere coefficients parameterized by $k$ angles
+`phi_1`…`phi_k` ($\boldsymbol\phi = \mathbf 0$ reproduces $N(\mu,\sigma^2)$ non-singularly),
+analytically standardized by the exact continuous moments of $h_k$ so the continuous mean and
+variance equal `mean` and `var` for every $\boldsymbol\phi$. Quadrature weights are normalized on
+the grid, keeping EM monotone (non-decreasing) and Oakes / Hessian standard errors exact for all
+free item and latent parameters. Single-group unidimensional models only. The Fisher information
+is singular at $\boldsymbol\phi = \mathbf 0$ in `phi_1`, `phi_2` (in `phi_1` for `degree=1`), so
+near-normal traits give unreliable angle standard errors, a non-standard likelihood-ratio test
+against `Normal` (use AIC / BIC), and possibly several local maxima
+([guide section 8](guide.md#davidian-curves)).
+
+| Argument | Description |
+|---|---|
+| `degree` | Integer polynomial degree $k \in \{1,\dots,10\}$ (number of angle parameters `phi_1`…`phi_k`) |
+| `mean`, `var` | Value (or starting value when free) of the continuous mean and positive variance |
+| `free_mean`, `free_var` | Whether `mean` / `var` is estimated (same identification rules as `Normal`) |
+
+**Raises**: `SpecificationError` for an invalid `degree`, `mean`, `var`, or flags, or when used
+with `Model.with_groups()` or `Model.with_factors()`; `IdentificationError` when `free_mean` or
+`free_var` lacks fixed intercepts or slopes.
+
+---
+
+## Scale linking
+
+### `link`
+
+```text
+link(source, target, *, items=None, method="stocking-lord", symmetric=False,
+     nodes=None, weights=None, source_group=None, target_group=None,
+     tol=1e-10, max_iter=200) -> LinkResult
+```
+
+Link a separately calibrated unidimensional `source` (new) scale onto `target` (base) via common
+items by finding linear constants $(A, B)$ ($A > 0$) for $\theta^* = A\theta + B$
+([guide section 15](guide.md#15-scale-linking), [DESIGN §16.5](DESIGN.md)). Validated (V20) for
+2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items; Rasch, 4PL and PCM share these kernels and
+are covered by unit tests only. Derivatives for Newton optimization and delta-method standard
+errors (Ogasawara, 2001) come from JAX automatic differentiation. SEs assume independent
+calibrations (the joint covariance is used when one multiple-group fit is both `source` and
+`target`), hold the quadrature weights fixed, and are not reported without convergence.
+
+| Argument | Type | Description |
+|---|---|---|
+| `source` | `FitResult` | Fitted unidimensional model on the source (new) scale |
+| `target` | `FitResult` | Fitted unidimensional model on the target (base) scale |
+| `items` | iterable[str] / Mapping[str, str], optional | Common items (default `None`: all items sharing the same name). Pass `{source_item: target_item}` when names differ. Common pairs must share the same kernel and category count |
+| `method` | `"stocking-lord"` / `"haebara"` | Criterion: Stocking & Lord (1983) squared TCC difference (default) or Haebara (1980) squared category-curve differences (polytomous forms: Kim & Lee, 2006) |
+| `symmetric` | bool | If `True`, add the reverse-direction squared difference (Kim & Lee, 2006); default `False` |
+| `nodes` | 1-D array-like, optional | Quadrature nodes $\theta_q$ (default: target group's fitted grid, and source group's grid for the reverse direction when `symmetric=True`) |
+| `weights` | 1-D array-like, optional | Non-negative weights normalized to sum to 1 (default: fitted latent distribution weights, or uniform when `nodes` is given without `weights`) |
+| `source_group`, `target_group` | str, optional | Group name when `source` or `target` is a multiple-group `FitResult` |
+| `tol` | float | Convergence tolerance on $\|\nabla F(A, B)\|_\infty$ (default `1e-10`) |
+| `max_iter` | int | Maximum Newton iterations (default `200`) |
+
+**Returns**: [`LinkResult`](#linkresult)
+
+**Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (non-`FitResult` or
+multidimensional input, multiple-group input without selecting a group, no common items,
+mismatched item kernels/categories on common items, invalid options/nodes/weights).
+
+**Warns**: `ConvergenceWarning` if `max_iter` is reached before `grad_norm <= tol`.
+
+### `LinkResult`
+
+Returned by `link()`. Immutable.
+
+| Attribute / method | Type | Description |
+|---|---|---|
+| `A`, `B` | float | Linear linking constants ($\theta^* = A\theta + B$, $A > 0$) |
+| `A_se`, `B_se` | float | Delta-method standard errors from the implicit function theorem (Ogasawara, 2001), or NaN when unavailable |
+| `vcov` | ndarray (2, 2) / None | Asymptotic covariance matrix of `(A, B)`, or `None` when `se=None` on a side with free common-item parameters, all common parameters are fixed, or $H_{cc}$ is not positive definite |
+| `criterion` | float | Minimized criterion value at `(A, B)` |
+| `method` | `"stocking-lord"` / `"haebara"` | Criterion used |
+| `symmetric` | bool | Whether the symmetric criterion was minimized |
+| `converged` | bool | Whether `grad_norm <= tol` was met |
+| `n_iter` | int | Number of Newton iterations taken |
+| `grad_norm` | float | $\|\nabla F(A, B)\|_\infty$ at `(A, B)` |
+| `common_items` | tuple[str, ...] | Source item names used as common items |
+| `items` | DataFrame | All source items transformed onto the target scale (`item`, `model`, `common`, internal slope–intercept parameters and display IRT thresholds `b` / `bk`); directly usable with `Model.fix_from()` |
+| `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | Transform source-scale ability scores via $\theta^* = A\theta + B$ (`theta` and all `pv1..` columns of a scoring DataFrame; `se` $\mapsto A\,\mathrm{se}$, excluding linking error) |
+| `summary(*, digits=4)` | str | Readable plain-text summary (Jupyter displays HTML via `_repr_html_()`) |
+
 ---
 
 ## Settings
@@ -548,7 +731,7 @@ dimension; limits must be finite with `lower < upper`.
 `Quadrature.gauss_hermite(n_points)` uses the Gauss–Hermite nodes $\sqrt2\,x_q$ (3–200 per
 dimension, product rule in 2–3 dimensions) for `Normal` latent distributions, reweighted for the
 estimated mean and covariance (DESIGN §15.44); `base_log_weights(n_factors)` returns the fixed
-per-node log weights (0 for equispaced grids). Not available with `EmpiricalHistogram`.
+per-node log weights (0 for equispaced grids). Not available with `EmpiricalHistogram` or `DavidianCurve`.
 
 ---
 

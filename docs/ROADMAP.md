@@ -48,8 +48,19 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   agrees with mirt.
 
 ## M5 and later (candidates)
-- M-step for equality constraints across items.
-- Davidian-curve and normal-mixture latent distributions.
-- Differentiable linking (Haebara / Stocking–Lord and generalizations) on top of the library.
+- [x] M-step for equality constraints across items (`Model.equal_across_items()`, shared
+  `free_id`s across items and item models; joint Newton per connected component; validated
+  in V16).
+- [x] Davidian-curve latent distributions (`DavidianCurve`, single-group unidimensional, analytically standardized, Oakes/Hessian SEs; validated in V19).
+- Normal-mixture latent distributions.
+- [x] Differentiable linking (`link()`, `LinkResult`: Haebara / Stocking–Lord, non-symmetric and
+  symmetric, Ogasawara delta-method SEs via autodiff; validated in V20 for 2PL, 3PL, GRM, GPCM and
+  mixed 2PL + GPCM common items).
 - [x] Item fit: S-X2 (`FitResult.item_fit()`, unidimensional, per group for multiple groups; validated in V15).
-- DIF (multiple-group likelihood-ratio tests), M2.
+- [x] DIF: multiple-group likelihood-ratio tests (`FitResult.dif()`, schemes `add` / `drop`,
+  Holm / BH adjustment; validated in V17).
+- [x] M2 limited-information goodness of fit (`FitResult.m2()`, single-group unidimensional
+  $M_2$ / $M_2^*$, RMSEA + CI, SRMSR, dichotomous TLI / CFI; validated in V18).
+- [x] Nominal response model (`Nominal(n_cat)`, Thissen, Cai & Bock (2010) parameterization as in
+  mirt's `itemtype = "nominal"`; validated in V23 for one and two factors, three factors
+  unit-tested only).

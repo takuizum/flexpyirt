@@ -9,8 +9,9 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 公開関数の引数は、最初の 1〜2 個を除いてキーワード専用（`*` の後ろ）。
 
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
+- 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - モデル: [`Model`](#model)
-- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm)
+- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormal`](#lognormal), [`Beta`](#beta)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
@@ -116,8 +117,8 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 `"EAP"`, `"MAP"`, `"ML"`, `"WLE"` が `theta`, `se` 列、`"PV"` が `pv1`…`pv{n_draws}` 列。多次元モデルでは
 宣言した因子順に `theta_<factor>`, `se_<factor>` 列（`"PV"` は `pv<m>_<factor>`）。
 
-**例外**: 不正な `method`、`EmpiricalHistogram` で `method="MAP"` を指定した場合、`"PV"` で `key` が未指定・不正、決定的手法に
-`key` を渡した場合、または `n_draws` が正の整数でない場合に `SpecificationError`。
+**例外**: 不正な `method`、`EmpiricalHistogram` または `DavidianCurve` で `method="MAP"` を指定した場合、`"PV"` で
+`key` が未指定・不正、決定的手法に `key` を渡した場合、または `n_draws` が正の整数でない場合に `SpecificationError`。
 
 #### `FitResult.item_fit`
 
@@ -141,8 +142,63 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 **戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
 `df <= 0` になる項目は `df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
 
-**例外**: 多次元・`EmpiricalHistogram` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある項目、
-正でない `mincell` の場合に `SpecificationError`。
+**例外**: 多次元・`EmpiricalHistogram`・`DavidianCurve` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
+項目、正でない `mincell` の場合に `SpecificationError`。
+
+#### `FitResult.m2`
+
+```text
+m2(data, *, item_names=None, ci=0.90) -> DataFrame
+```
+
+Maydeu-Olivares & Joe (2005, 2006) による限定情報の適合度統計量 $M_2$ / $M_2^*$
+（[ガイド 5 節](guide.ja.md#限定情報の適合度m2)）。$J$ 個の項目得点平均と $\binom{J}{2}$ 個の交差積から計算する
+（mirt の既定 `M2(type = "M2*")` に対応。2 値項目では厳密に $M_2$）。ヤコビ行列
+$\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、すべての自由な項目・潜在分布パラメタを含む
+（共有パラメタは 1 回）。
+
+| 引数 | 説明 |
+|---|---|
+| `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
+| `item_names` | `data` が配列のときの列名 |
+| `ci` | RMSEA 信頼区間の信頼水準（`(0, 1)` の開区間、既定 `0.90`） |
+
+**戻り値**: 1 行の `DataFrame`。列は `m2`, `df`（$J + \binom{J}{2} - k$）, `p`, `rmsea`,
+`rmsea_<lo>`, `rmsea_<hi>`（`ci` に従う。例: `0.90` で `rmsea_5`, `rmsea_95`）, `srmsr`,
+`tli`, `cfi`。`df <= 0` または $\Delta_2$ がランク落ちしているとき（1 次・2 次モーメントから局所識別できないとき）は
+`FlexpyirtWarning` を出し、`m2`・`p`・RMSEA・信頼区間・`tli`・`cfi` を `NaN` とする（`df` と `srmsr` は有限のまま）。
+多値モデルでは `tli` と `cfi` を `NaN` とする（DESIGN §16.3）。2 値モデルで帰無モデルの $M_2$ が当てはめモデルの $M_2$
+以下のときは `FlexpyirtWarning` を出し `tli`・`cfi` を `NaN` とする。
+
+**例外**: JAX 64 ビットが無効なとき `PrecisionError`。多次元・多母集団・`EmpiricalHistogram`・事前分布つきの
+MAP モデル、欠測を含むデータ、不正な `ci`、項目数または回答者数が 2 未満のとき `SpecificationError`。
+
+#### `FitResult.dif`
+
+```text
+dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None) -> DataFrame
+```
+
+多母集団モデルの群間の尤度比検定による DIF（[ガイド 9 節](guide.ja.md#特異項目機能dif)）。mirt の `DIF()` に相当。
+項目ごとに、その項目の `params` を群間で等値にして（`scheme="add"`）または群ごとに自由にして（`scheme="drop"`）
+モデルを推定し直し（同じ `BAEM` 設定と求積、この推定値から開始）、
+$X^2 = 2(\ell_{\text{free}} - \ell_{\text{constrained}})$、$df = |k_{\text{base}} - k_{\text{new}}|$ を求める。
+
+| 引数 | 説明 |
+|---|---|
+| `data`, `group` | この結果を推定したときの反応と群ラベル |
+| `items` | 検定する項目（項目ごとに 1 回推定し直す） |
+| `params` | 検定する内部パラメタ（既定: 各項目の全パラメタ） |
+| `scheme` | `"add"`（制約する。推定済みモデルが基準）または `"drop"`（自由にする） |
+| `p_adjust` | `adj_p` の補正。`"holm"`（既定、mirt と同じ）、`"BH"`（Benjamini–Hochberg）、`"none"` |
+| `item_names` | `data` が配列のときの列名 |
+
+**戻り値**: `item`, `converged`, `aic`, `sabic`, `hq`, `bic`（項目を自由にしたモデル − 制約したモデル。負なら DIF を
+支持）, `x2`, `df`, `p`, `adj_p` 列の `DataFrame`。
+
+**例外**: 単一群のモデル、事前分布つきの MAP 推定、未知の項目やパラメタ、検定するものがない項目（`"add"` で
+すでに等値、`"drop"` ですでに自由）では `SpecificationError`。推定し直すモデルが識別できない（例: 唯一のアンカーを
+自由にする）と `IdentificationError`。
 
 #### `FitResult.to_json`
 
@@ -152,7 +208,7 @@ to_json(path=None, *, indent=2) -> str
 
 推定結果を厳格な RFC 8259 JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定されたときは
 UTF-8 ファイルにも書き出す。`pickle` を使わないバージョン付き JSON 形式で、最上位に
-`"format": "flexpyirt.FitResult"`、`"schema_version": 2`（version 1 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
+`"format": "flexpyirt.FitResult"`、`"schema_version": 3`（version 1・2 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
 float64 値は `repr` 厳密な JSON 数値として、非有限値（`NaN`, `+inf`, `-inf`）は浮動小数点型フィールドに
 `"NaN"`, `"Infinity"`, `"-Infinity"` として明示的に符号化するため、すべての属性がビット単位で正確に往復する。
 
@@ -274,6 +330,17 @@ model.equal_across_groups(*, items, params=None) -> Model
 `params=["a"]` のように指定するとそのパラメタだけ。`items` は名前のリストか `str -> bool` の関数、
 `None` なら全項目。何度でも重ねて呼べる。
 
+#### `Model.equal_across_items`
+
+```text
+model.equal_across_items(*, items, params) -> Model
+```
+
+`params`（例: `["a"]`, `["a1"]`, `["d"]`, `["d1", "d2"]`）の各パラメタを、選んだ `items`（2 項目以上）で共通の
+1 つのパラメタにする（mirt の `CONSTRAIN` と同じく群ごと）。`equal_across_groups` と組み合わせると群間でも共有され、
+重なる等値制約はまとめられる。固定パラメタには影響しない。共有パラメタの既定の初期値は各項目の初期値の平均。
+編集した表で該当行に同じ `free_id` を与えるのと同じ。
+
 #### `Model.prior`
 
 ```text
@@ -390,6 +457,21 @@ $P(y=k\mid\theta)=\exp(k\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\theta+d_c)$（$d_0=0$
 潜在分布の分散を推定する（多値データに対する mirt の `itemtype = "Rasch"` と同じ）。`n_cat = 2` では
 `Rasch` と一致する。`n_cat` が同じ `GPCM` と `GPCMKernel` を共有する。
 
+### `Nominal`
+
+```text
+Nominal(n_cat)
+```
+
+Thissen, Cai & Bock (2010) の全体傾き × 採点関数パラメタ化による名義反応モデル（Bock, 1972）。カテゴリは
+`0..n_cat-1`（`n_cat >= 2`）。
+$P(y=k\mid\theta)=\exp(a\,\mathrm{ak}_k\,\theta+d_k)/\sum_{c=0}^{K-1}\exp(a\,\mathrm{ak}_c\,\theta+d_c)$
+（$\mathrm{ak}_0=0$、$\mathrm{ak}_{K-1}=K-1$、$d_0=0$ 固定）。内部パラメタは `a`（多次元モデルでは
+`a1`…`aD`）、`ak1`…`ak{K-2}`、`d1`…`d{K-1}`（すべて自由推定・順序制約なし、表示用の `b` / `bk` 列はなし）。
+mirt の `itemtype = "nominal"` と同じ。$\mathrm{ak}_k=k$ に固定すると `GPCM(n_cat)` と厳密に一致する
+（`n_cat = 2` では自由な `ak` パラメタがなく、`Nominal(2)` は `GPCM(2)` / `TwoPL` と一致する）。
+`NominalKernel(n_cat)` を用いる。
+
 ---
 
 ## 事前分布
@@ -473,6 +555,91 @@ EmpiricalHistogram(*, min_weight=1e-10)
 **例外**: `min_weight` が不正、群間で `EmpiricalHistogram` と `Normal` を混在させた、または多次元モデルの場合に
 `SpecificationError`。切片を固定していて非ゼロの傾きを固定していない場合（分散のみの制約は未対応）は `IdentificationError`。
 
+### `DavidianCurve`
+
+```text
+DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)
+DavidianCurve.free(degree, *, mean=0.0, var=1.0)
+```
+
+次数 `degree`（`1..10`）の半ノンパラメトリック Davidian 曲線潜在密度（Zhang & Davidian, 2001; Woods & Lin, 2009;
+[ガイド 8 節](guide.ja.md#davidian-曲線)）。正規化確率論的 Hermite 多項式と $k$ 個の角度パラメタ `phi_1`…`phi_k`
+による単位球面係数で $h_k(z;\boldsymbol\phi) = P_k(z;\boldsymbol\phi)^2\varphi(z)$ を構成し
+（$\boldsymbol\phi = \mathbf 0$ で非特異に $N(\mu,\sigma^2)$ を再現）、$h_k$ の厳密な連続モーメントで解析的に標準化することで
+任意の $\boldsymbol\phi$ について連続平均・分散が `mean`・`var` に一致する。求積重みは格子上で正規化するため EM は
+単調（非減少）で、自由な項目パラメタ・潜在パラメタすべてに対して厳密な Oakes / Hessian 標準誤差が得られる。単一群の 1 次元モデルのみ。
+Fisher 情報行列は $\boldsymbol\phi = \mathbf 0$ で `phi_1`・`phi_2` 方向（`degree=1` では `phi_1`）に特異なため、正規に近い
+特性では角度の標準誤差が信頼できず、`Normal` に対する尤度比検定は標準的でなく（AIC / BIC を使う）、局所最大が複数ありうる
+（[ガイド 8 節](guide.ja.md#davidian-曲線)）。
+
+| 引数 | 説明 |
+|---|---|
+| `degree` | 整数の多項式次数 $k \in \{1,\dots,10\}$（角度パラメタ `phi_1`…`phi_k` の個数） |
+| `mean`, `var` | 連続平均と正の分散の値（自由推定時は初期値） |
+| `free_mean`, `free_var` | `mean`・`var` を推定するか（識別性の規則は `Normal` と同じ） |
+
+**例外**: `degree`・`mean`・`var`・フラグが不正、または `Model.with_groups()`・`Model.with_factors()` と組み合わせた場合に
+`SpecificationError`。`free_mean`・`free_var` に必要な固定切片・固定傾きがない場合は `IdentificationError`。
+
+---
+
+## 尺度リンキング
+
+### `link`
+
+```text
+link(source, target, *, items=None, method="stocking-lord", symmetric=False,
+     nodes=None, weights=None, source_group=None, target_group=None,
+     tol=1e-10, max_iter=200) -> LinkResult
+```
+
+別々に推定した 1 次元の `source`（新フォーム）尺度を、共通項目を通じて `target`（基準フォーム）尺度へ結ぶ
+線形変換 $\theta^* = A\theta + B$（$A > 0$）の係数 $(A, B)$ を推定する（[ガイド 15 節](guide.ja.md#15-尺度リンキング)、
+[設計書 §16.5](DESIGN.ja.md)）。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目について照合済み（V20）で、
+Rasch・4PL・PCM は同じカーネルを共有し単体テストでのみ確認している。Newton 最適化と Ogasawara (2001) のデルタ法
+標準誤差の微分は JAX の自動微分で計算する。SE は独立な推定を仮定し（1 つの多母集団推定を `source` と `target` の
+両方に使うときは同時共分散を使う）、求積重みを固定し、収束しないときは報告しない。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `source` | `FitResult` | 新フォーム側の 1 次元推定結果 |
+| `target` | `FitResult` | 基準フォーム側の 1 次元推定結果 |
+| `items` | iterable[str] / Mapping[str, str], 任意 | 共通項目（既定 `None`: 名前が一致する全項目）。項目名が異なるときは `{source_item: target_item}` の辞書。共通ペアは同じ項目カーネル・カテゴリ数でなければならない |
+| `method` | `"stocking-lord"` / `"haebara"` | 目的関数: Stocking & Lord (1983) の TCC 二乗差（既定）または Haebara (1980) のカテゴリ曲線二乗差（多値拡張: Kim & Lee, 2006） |
+| `symmetric` | bool | `True` で逆方向の二乗差を加えた対称版（Kim & Lee, 2006）。既定 `False` |
+| `nodes` | 1 次元配列, 任意 | 求積節点 $\theta_q$（既定: `target` 群の推定格子、`symmetric=True` の逆方向は `source` 群の格子） |
+| `weights` | 1 次元配列, 任意 | 非負の重み（和が 1 になるよう正規化。既定: 推定済み潜在分布の重み、`nodes` のみ指定時は一様重み） |
+| `source_group`, `target_group` | str, 任意 | 多母集団 `FitResult` から結ぶ群を選ぶための群名 |
+| `tol` | float | $\|\nabla F(A, B)\|_\infty$ の収束許容誤差（既定 `1e-10`） |
+| `max_iter` | int | Newton 最大反復回数（既定 `200`） |
+
+**戻り値**: [`LinkResult`](#linkresult)
+
+**例外**: `PrecisionError`（JAX 64 ビット無効）、`SpecificationError`（`FitResult` 以外や多次元結果、群指定のない
+多母集団結果、共通項目なし、共通項目でのカーネル・カテゴリ数不一致、不正な引数・格子・重み）。
+
+**警告**: `grad_norm <= tol` に達する前に `max_iter` に到達したとき `ConvergenceWarning`。
+
+### `LinkResult`
+
+`link()` の戻り値。変更不可。
+
+| 属性・メソッド | 型 | 説明 |
+|---|---|---|
+| `A`, `B` | float | 線形リンキング係数（$\theta^* = A\theta + B$, $A > 0$） |
+| `A_se`, `B_se` | float | 陰関数定理によるデルタ法標準誤差（Ogasawara, 2001）。計算できない場合は NaN |
+| `vcov` | ndarray (2, 2) / None | `(A, B)` の漸近共分散行列。自由な共通項目がある側で `se=None`、全共通パラメタが固定、または $H_{cc}$ が正定値でない場合は `None` |
+| `criterion` | float | `(A, B)` での最小化された目的関数値 |
+| `method` | `"stocking-lord"` / `"haebara"` | 使用した基準 |
+| `symmetric` | bool | 対称版かどうか |
+| `converged` | bool | `grad_norm <= tol` を満たしたか |
+| `n_iter` | int | 実行した Newton 反復回数 |
+| `grad_norm` | float | `(A, B)` での $\|\nabla F(A, B)\|_\infty$ |
+| `common_items` | tuple[str, ...] | 共通項目として使用した `source` 側の項目名 |
+| `items` | DataFrame | `source` の全項目を基準尺度へ変換した表（`item`, `model`, `common`、内部の傾き–切片パラメタと表示用 IRT 閾値 `b` / `bk`）。そのまま `Model.fix_from()` に渡せる |
+| `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | 能力値を $\theta^* = A\theta + B$ で変換（採点 DataFrame の `theta` と全 `pv1..` 列。`se` は $A\,\mathrm{se}$ でリンキング誤差を含まない） |
+| `summary(*, digits=4)` | str | 読みやすいテキスト要約（Jupyter では `_repr_html_()` で HTML 表示） |
+
 ---
 
 ## 設定
@@ -505,7 +672,7 @@ mirt の既定と同じく、1 因子で 61 点、2 因子で各軸 31 点（$31
 
 `Quadrature.gauss_hermite(n_points)` は `Normal` 潜在分布用に Gauss–Hermite 節点 $\sqrt2\,x_q$（次元あたり 3–200 点、
 2・3 次元では直積則）を使い、推定した平均・共分散に合わせて重みを付け直す（DESIGN §15.44）。`base_log_weights(n_factors)` は
-節点ごとの固定の対数重み（等間隔格子では 0）を返す。`EmpiricalHistogram` とは併用できない。
+節点ごとの固定の対数重み（等間隔格子では 0）を返す。`EmpiricalHistogram`・`DavidianCurve` とは併用できない。
 
 ---
 

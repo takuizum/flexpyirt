@@ -17,6 +17,7 @@ from tests import (
     test_mirt_m4_irtpars,
     test_mirt_m4_mirt,
     test_mirt_m4_scoring,
+    test_mirt_m5_nominal,
 )
 from tests._reference import REFERENCE_DIR, check_reference_meta
 
@@ -68,6 +69,7 @@ def test_all_committed_reference_jsons_pass_meta_checks() -> None:
         (test_mirt_m3, "v11_3pl"),
         (test_mirt_m3_gpcm, "v8_science_gpcm"),
         (test_mirt_m3_priors, "v7_2pl_map"),
+        (test_mirt_m5_nominal, "v23_nominal_science"),
     ],
 )
 @pytest.mark.parametrize(

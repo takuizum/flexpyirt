@@ -18,6 +18,9 @@
 | EAP | 1e-5 |
 | MAP / ML / WLE（$\theta$） | 1e-4 |
 | MAP / ML / WLE（SE） | 1e-3（相対） |
+| 尺度リンキング $(A, B)$ / 目的関数（同一の項目推定値） | 1e-9 / 1e-9（相対） |
+| 尺度リンキングのデルタ法 SE / `vcov`（同一の推定値・共分散） | 1e-5（相対） |
+| 尺度リンキング $(A, B)$ / 目的関数 / SE（推定 + リンキングの一連） | 1e-6 / 1e-5（相対） / 1e-3（相対） |
 
 ## ケース一覧（マイルストーンと対応）
 | ID | 内容 | mirt 側の呼び出し | MS |
@@ -36,7 +39,13 @@
 | V12 | 表示用 IRT 閾値とデルタ法 SE（2PL・Rasch・GRM・GPCM・PCM・2 群 2PL） | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | 能力値スコアリング: MAP・ML・WLE（2PL・GRM・GPCM・3PL・2 群・欠測） | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
 | V15 | S-X2 項目適合度（GRM・GPCM・分散自由の PCM・3PL・FIPC の 2PL、`mincell` 1 と 3、2 群の 2PL と GRM を群ごと） | `itemfit(m, fit_stats = "S_X2")` | M5 |
+| V16 | 項目をまたぐ等値制約（LSAT7 の共通傾き、2PL + graded のモデル間制約、アンカーつき 2 群 + 共通傾き） | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
+| V17 | V4 のデータでの尤度比検定による DIF（`a`+`d` と `d` の `add`、完全不変モデルからの `a`+`d` の `drop`） | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
+| V18 | M2 / M2* 限定情報の適合度（LSAT7 2PL、シミュレーション 2PL、3PL、分散自由の Rasch、GRM $K=3$、GPCM $K=4$） | `M2(m, quadpts = 61, theta_lim = c(-6, 6))` | M5 |
 | V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
+| V19 | Davidian 曲線潜在分布（2PL $k=3$・GRM $k=2$・平均分散自由の FIPC 2PL $k=3$） | `mirt(..., dentype = "Davidian-k")` および `mirt(..., customGroup = ..., SE.type = "Oakes")` | M5 |
+| V20 | 尺度リンキング: Haebara・Stocking–Lord（非対称・対称）と Ogasawara SE（2PL・GRM・GPCM・3PL・非標準の新フォーム格子・2PL + GPCM 混在） | 個別 `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R 実装 | M5 |
+| V23 | 名義反応モデル（Science、順序のない・負の採点係数を含むシミュレーション、名義 + 2PL の混在、大半が非単調な項目、2 因子の確認的モデル） | GPCM の点（またはより良い別の初期値）から開始する `pars` を与えた `mirt(..., "nominal")`、`itemfit(fit_stats = "S_X2")` | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -289,7 +298,184 @@
   単体テスト（カーネル・多変量正規重みと正定値性ガード・直積格子形状・2 次元 Rasch / 混在 / 事前分布 / 固定・
   Oakes == Hessian == 参照 Oakes・識別性と仕様エラー）: `tests/test_m4_mirt.py`。
 - 照合テスト: `tests/test_mirt_m1.py`（V1, V2, V10）。参照値の生成: `validation/r/m1_reference.R`。
+- **項目をまたぐ等値制約（V16、M5）**: mirt の `CONSTRAIN`（`optimizer = "NR"`、`TOL = 1e-10`）。V16a: LSAT7 の
+  2PL で全項目共通の傾き（$N(0,1)$、$[-6,6]$ の 61 点）。V16b: シミュレーション $N=2500$、項目 1–6 が 2PL・7–10 が
+  3 カテゴリの graded で、2PL と graded にまたがる共通傾き（1, 2, 7）、項目 3・4 の共通切片、8–10 の共通傾き、9・10 の
+  共通 `d1`。V16c: 各 1500 人の 2 群、アンカー q01–q05 は群間等値、q06–q10 の傾きは各群の中で共通、焦点群の平均と分散を
+  自由推定（$[-8,8]$ の 81 点）。いずれも mirt と一致（通常の EM・SQUAREM とも）: パラメタ $2.1\times10^{-8}$、
+  対数尤度 $4\times10^{-11}$、Oakes SE（相対）$1.3\times10^{-8}$、Hessian と mirt Richardson SE $2.9\times10^{-8}$、
+  flexpyirt の Oakes と Hessian $5\times10^{-15}$。自由パラメタ数は mirt の `nest` と一致。テスト:
+  `tests/test_mirt_m5_equal_items.py`。参照値生成: `validation/r/m5_equal_items_reference.R`。
+- **尤度比検定による DIF（V17、M5）**: V4 のデータで mirt の `DIF()`（`optimizer = "NR"`、`TOL = 1e-10`、基準モデルと
+  すべての再推定で $[-8,8]$ の 81 点）。アンカーつきモデル（q01–q05 を等値、焦点群の平均と分散を自由）からの
+  `scheme = "add"`（q06–q15 の `a1`+`d` と `d`）と、完全不変モデルからの `scheme = "drop"`（全項目の `a1`+`d`）。mirt は
+  情報量規準を（どちらの方式でも）項目を自由にしたモデル − 制約したモデルで報告し、p 値は既定で Holm 補正
+  （`p.adjust = "holm"`）。mirt の `p` は `1 - pchisq(...)` なので非常に大きな $X^2$ では厳密に 0（flexpyirt は生存関数）。
+  一致（通常の EM・SQUAREM とも）: $X^2$ と AIC/SABIC/HQ/BIC の差 $2.2\times10^{-11}$、`p`・`adj_p` $3\times10^{-11}$。
+  テスト: `tests/test_mirt_m5_dif.py`。参照値生成: `validation/r/m5_dif_reference.R`。
+- **M2 / M2* 限定情報の適合度（V18、M5）**: $[-6,6]$ の 61 点上の 6 ケース（`validation/r/m5_m2_reference.R` →
+  `tests/reference/v18_m2.json`、mirt 1.46.1）: `lsat7_2pl`（V1）、`sim_2pl`（V1）、`threepl`（V11 3PL）、
+  `rasch_free_var`（V2 潜在分散自由の Rasch）、`grm_sim`（GRM $K=3, J=10, N=2000$）、`gpcm_sim`
+  （GPCM $K=4, J=8, N=2000$）。mirt 1.46.1 の `M2()` との照合で、mirt 側の 4 つの相違・不具合を確認した（すべて R で検証済み）:
+  1. **$\Delta_2$ から自由な潜在分布パラメタを除外**: mirt は `M2()` 内で `GroupPars` の `est` を `FALSE` に強制する一方、
+     `df` からは引いている。flexpyirt は Maydeu-Olivares & Joe (2005, 2006) に従い既定ですべての自由パラメタを
+     $\Delta_2$ に含める。内部の `_m2.m2_statistic(..., _latent_in_delta=False)` は mirt の `rasch_free_var` の値を再現する
+     （mirt の推定値で `M2` 相対 `9.7e-16`、`SRMSR` `4.9e-17`、`TLI` `1.6e-9`）。既定（`True`）は潜在分布を含めた厳密な R 参照値と
+     一致し（mirt の推定値で `M2` 相対 `1.0e-12`、再推定では $[-6,6]$ での $7.9\times10^{-5}$ の分散差により `9.5e-6`）、
+     mirt の `M2` とは `0.035` 異なる。
+  2. **3PL/4PL での `dP("dich")` の不具合**: `dich` の `mirt:::dP` は `(a1, d)` に $(u-g)\sigma(1-\sigma)$
+     ではなく 2PL の微分 $P_0 P_1$ を使い、第 3・4 列にも $((1-\sigma)g(1-g),\, \sigma u(1-u))$ ではなく
+     カテゴリ確率 $(P_0, P_1)$ をそのまま入れている（`cbind(Theta * PQ, PQ, P)`）。このため `threepl` の `M2` が
+     4.8% ずれる（`64.82` 対 厳密値 `68.11`）。
+  3. **GPCM の `dP("gpcm")` 傾き微分の不具合**: `gpcm` の `mirt:::dP` は `a1` の微分で `den = rowSums(num)` で割るのを
+     忘れており（`rowSums(Theta[, i] * aknum[[i]])`）、`gpcm_sim` の `M2` が 10.8% ずれる（`5.27` 対 厳密値 `5.90`）。
+  4. **多値帰無モデルのランク落ち**: $K_j > 2$ では帰無 $\Delta_2$ の項目 $j$ の $K_j - 1$ 本の切片列が厳密に線形従属
+     （$\operatorname{rank}=J < \sum(K_j-1)$）になるが、mirt はランクを確認せず `qr.Q(qr(delta), complete = TRUE)` の
+     `ncol(delta)` 列目以降を取り出すため、多値帰無 $M_2^*$ が項目順に依存する。flexpyirt は多値項目を含むとき `tli` と
+     `cfi` を `NaN` とする（DESIGN §16.3）。
 
+  一致（通常の EM・SQUAREM とも、全ケースで `df` は完全一致）:
+  - **mirt と直接比較（`lsat7_2pl`, `sim_2pl`, `grm_sim`）**: `M2` 相対 $\le 3.8\times10^{-11}$、
+    `p` $\le 7.8\times10^{-11}$、`RMSEA` $\le 4.4\times10^{-13}$、信頼区間端点 $\le 1.4\times10^{-8}$、
+    `SRMSR` $\le 1.4\times10^{-12}$、2 値の `TLI` $\le 4.8\times10^{-10}$、`CFI` $\le 2.4\times10^{-10}$。
+  - **厳密な R の $M_2^*$（`threepl`, `gpcm_sim`、`expected.item()` の中心差分微分 + mirt の `buildXi2els`）**:
+    `M2` 相対 $\le 1.6\times10^{-9}$、`p` $\le 7.1\times10^{-10}$、`RMSEA` $\le 3.7\times10^{-11}$、
+    信頼区間端点 $\le 6.0\times10^{-9}$、`threepl` の `TLI` `1.8e-10` / `CFI` `0`、`SRMSR` は mirt と直接比較で
+    $\le 8.5\times10^{-13}$。
+  テスト: `tests/test_mirt_m5_m2.py`（mirt 照合）、`tests/test_m5_m2.py`（単体テスト）。
+- **Davidian 曲線潜在分布（V19、M5）**: `mirt` 1.46.1（`Theta_DC_den`, `Mstep.DC.optim`, `EM.group`,
+  `LoadGroupPars`, `updatePrior`）および `dcurver` 0.9.3 の調査から、厳密な離散化 MMLE との 4 つの相違を確認した
+  （DESIGN §16.4）:
+  1. 組み込みの `mirt(..., dentype = "Davidian-k")` は毎 EM 反復で期待度数に Woods の線形補間
+     `standardizeQuadrature` を適用してから未正規化の `dcurver::ddc` を `nlminb` で最適化するため、EM の単調性が
+     崩れ（mirt は `"Davidian"` で単調性検査を無効化）、周辺対数尤度が真に低い点で終わる（V19a の 2PL $k=3$ で
+     `21.47` 点、V19b の GRM $k=2$ で `139.32` 点低い）。V19a の終了点は mirt 自身の離散化尤度
+     （$\sum\log\sum_q L_q\,\mathrm{ddc}(\theta_q)/\sum_q\mathrm{ddc}(\theta_q)$）に対しても停留点ではない: `PHI_1..3` の
+     スコアは $(-0.54, -3.40, 56.7)$ で、mirt の項目パラメタのまま `PHI` だけを最大化すると `4.67` 改善する。V19b では
+     mirt は停留点 $N(0,1)$（`PHI_1 = 1.5707963`、スコア $(3.6\times10^{-4}, 0)$、`PHI` の再最適化で改善なし）に
+     停滞する: `PHI_2` のスコアは正弦優先座標の $\phi_1=\pi/2$ の極特異点のために 0 になり、`PHI_1` のスコアはその 1 次の
+     方向が純粋な位置・尺度の変化で自由な項目パラメタに吸収されるために 0 になる（後者はどの座標系でも生じる。
+     flexpyirt は摂動つき既定初期値で $\boldsymbol\phi=\mathbf 0$ を離れる。DESIGN §16.4）。
+  2. 組み込みの `dentype = "Davidian-k"` は `SE = TRUE`（`"No standard error method currently supported
+     for Davidian curves"`）と `MEAN_1` / `COV_11` の自由推定（`"Estimating Davidian mean-variance
+     hyper-parameters is not currently supported"`）を禁止している（いずれも `mirt:::EM.group`）。
+  3. `fscores()` は `use_dentype_estimate = TRUE` を明示しない限り $N(0,1)$ 事前分布を使う（`EAP` と plausible
+     values のみ対応し `MAP` は拒否）。
+  4. `createGroup()`（格子上で正規化した `dcurver::ddc` を呼び、`TOL = 1e-10`, `accelerate = "none"`,
+     `SE.type = "Oakes"`）経由で厳密な標準化 Davidian MMLE を mirt 内で検証する際、`createGroup` 既定の
+     `derivType = "Richardson"` は粗い 2 階差分幅（`mirt:::numerical_deriv` が `delta * 1000 = 0.01`、対角で
+     `2*delta = 0.02` を用いる）により $k=3$ の Oakes SE を最大 25.6% 歪めるため `derivType = "central"`
+     （`delta = 1e-5`）を用いた。また `mirt:::BL.LL` は `dentype == "custom"` で `pars2` ではなく `pars` を参照する
+     （潜在密度が摂動されない）不具合があるため、Richardson Hessian SE は R の厳密な周辺対数尤度から直接算出した
+     （`h = 1e-4`）。
+
+  **V19 参照値が検証するもの。** `exact` ブロックは DESIGN §16.4 の標準化 Davidian MMLE を R で書き直したもので、
+  座標系・閉形式モーメント $(\mu_Z,\sigma_Z^2)$・標準化 $z_q=\mu_Z+\sigma_Z(\theta_q-\mu)/\sigma$ は flexpyirt と同じ定義
+  （R で別途記述）であり、密度値は `dcurver::ddc`、E-step・EM・Oakes SE・EAP は `mirt`（`createGroup()`）、Hessian SE は
+  別途記述した R の周辺対数尤度による。したがってこのモデルに対する flexpyirt の推定機構（E-step・潜在 M-step・収束・
+  Oakes/Hessian SE・スコアリング）と、`dcurver` に対する密度を検証する。閉形式モーメントは独立に検査する: R スクリプトは
+  各推定解と組み込み解で $z\,\mathrm{ddc}(z)$ と $z^2\,\mathrm{ddc}(z)$ を `stats::integrate` で積分し（最大絶対誤差
+  `1.2e-9`、`moments_check` に保存。誤差が `1e-8` を超えれば停止）、`tests/test_m5_davidian.py` は台形則で検査する。
+  `mirt_builtin` ブロックは mirt のパラメタにおける密度・`Prior`・`logLik`・EAP を mirt 自身の Davidian 実装と照合する。
+  **参照値の収束。** mirt の EM（BFGS M-step、`TOL = 1e-10`）は厳密な周辺対数尤度の勾配が最大 `1.7e-3`（V19c。V19a/b
+  は `3.8e-5`・`5.8e-5`、`max_grad_r_mirt_em` に保存）の点で停止する。そこで R スクリプトは mirt の解を R の厳密な
+  周辺対数尤度上の Newton 法（中心差分の勾配と Hessian）で max|grad| < `2e-5` まで磨き（各ケース 1 ステップ、最終
+  `1.8e-6`〜`3.6e-6`、`max_grad_r`）、磨いた値で `TOL = NaN`（EM 反復なし）として `mirt` を再実行し、その点での
+  Oakes SE・`logLik`・EAP を得る。この仕上げの前は V19c の項目・潜在パラメタの差は `8.5e-6`・`7.3e-6` で、flexpyirt の
+  対数尤度が参照値より `1.8e-8` 高かった。すなわち残差は参照値側にあり、flexpyirt 側ではなかった。
+
+  歪んだ標準化 $\chi^2_4$ 特性の 3 シミュレーションケース（$N = 3000$）を `tests/test_mirt_m5_davidian.py` で照合する
+  （通常 EM・SQUAREM とも。参照値生成: `validation/r/m5_davidian_reference.R` → `tests/reference/v19_davidian_*.json`。
+  値は通常 EM と SQUAREM の最大）:
+  - **V19a（`v19_davidian_2pl_k3`、2PL、$J=20, k=3$、61 点 $[-6,6]$）**: 厳密 MMLE 対 R `mirt(customGroup)` / R
+    Hessian: `loglik` 相対 `2.3e-16`、項目パラメタ `5.7e-8`、`phi_1..3` `1.3e-8`、Oakes SE 対 mirt Oakes `4.6e-6`
+    （項目 `6.3e-7`）、Hessian SE 対 R Richardson `2.8e-6`（潜在 `3.8e-7`）、flexpyirt Oakes 対 Hessian `9.7e-16`、
+    EAP `6.2e-15`（SQUAREM で EM 評価回数 `113 → 39`）。組み込み `mirt(..., dentype="Davidian-3")` のパラメタ
+    （`mean = mu_z`, `var = var_z`）では `Prior`・`logLik`（相対 `1.4e-15`）・`fscores(..., use_dentype_estimate=TRUE)`
+    （`8.2e-15`）が完全一致し、厳密 MMLE は対数尤度を `+21.47` 改善する。
+  - **V19b（`v19_davidian_grm_k2`、GRM $K=4$、$J=10, k=2$、61 点 $[-6,6]$）**: 厳密 MMLE: `loglik` 相対 `1.9e-16`、
+    項目パラメタ `4.9e-8`、`phi_1..2` `9.1e-9`、Oakes SE 対 mirt Oakes `3.6e-7`、Hessian SE 対 R Richardson `1.9e-6`、
+    flexpyirt Oakes 対 Hessian `1.1e-15`、EAP `6.0e-15`（SQUAREM `111 → 33`）。組み込み `Davidian-2` のパラメタでは
+    `logLik`（相対 `1.9e-16`）・EAP（`6.7e-15`）が完全一致し、厳密 MMLE は対数尤度を `+139.32` 改善する。
+  - **V19c（`v19_davidian_fipc_k3`、FIPC 2PL、`q01–q10` 固定、$J=20, k=3$、`mean`/`var` 自由、移動・拡大した歪み特性
+    $0.4 + 1.2\cdot\text{skewed}$、81 点 $[-8,8]$）**: 厳密 MMLE: `loglik` 相対 `1.6e-15`、項目パラメタ `7.5e-8`、
+    潜在パラメタ（`mean, var, phi_1..3`）`1.4e-7`、Oakes SE 対 mirt Oakes `6.0e-6`、Hessian SE 対 R Richardson
+    `1.8e-6`、flexpyirt Oakes 対 Hessian `2.9e-15`、EAP `5.3e-15`（SQUAREM `107 → 33`）。
+  残る `~1e-6` の SE の差は mirt と R の有限差分微分（`delta = 1e-5`、`h = 1e-4`）によるもので、flexpyirt の SE は
+  厳密な自動微分による。許容誤差は上の表のとおり（パラメタ `1e-4`、SE 相対 `1e-3`）。
+  単体テスト（単位球面・モーメント・ゼロ角での $N(0,1)$ 一致・多項式零点の自動微分ガードと求積点上に零点を持つ推定・
+  初期角の符号・`degree` 1 と 10 の推定・Rasch/FIPC・識別性と仕様エラー・スコアリング・JSON 往復と不正な
+  `DavidianCurve` JSON）: `tests/test_m5_davidian.py`。
+- **微分可能な IRT 尺度リンキング（V20、M5）**: `mirt` は特性曲線法リンキングを持たないため、
+  `validation/r/m5_linking_reference.R`（→ `tests/reference/v20_linking.json`）では共通項目を含む 2 つの
+  フォームをそれぞれ `mirt` で推定し（`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、$N(0, 1)$、
+  $[-6, 6]$ の等間隔 61 点、`SE.type = "Oakes"`。基準群 $\theta\sim N(0, 1)$、新群 $\theta\sim N(0.5, 1.2^2)$、
+  真値 $A = 1.2, B = 0.5$。V20e の新フォームは固定した $N(0.3, 1.5)$ の下で推定し、対称版の逆方向の項が非標準の
+  新フォーム格子を使う）、`mirt::probtrace()` / `mirt::expected.item()` と論文の定義式
+  （Haebara, 1980; Stocking & Lord, 1983; Kim & Lee, 2006）に基づく独立した素の R 実装（`optim(BFGS)` + `nlm`
+  と中心有限差分 Newton 仕上げ、`max |grad| <= 1.9e-11`）で参照値 $(A, B)$、目的関数値、および Ogasawara (2001) の
+  デルタ法 SE を算出した。Haebara 法は 2 値項目の両カテゴリを含む全カテゴリで和をとる（Kim & Lee, 2006）。
+  6 ケース × 4 方式（Stocking–Lord・Haebara の非対称・対称）について次の 3 通りで検証した:
+  (i) mirt の項目推定値をそのまま入力した直接比較（推定誤差とリンキング誤差を分離）、(ii) mirt 自身の共通項目推定値と
+  Oakes 共分散ブロックからのデルタ法 SE（SE の式を推定・共分散の差から分離）、(iii) flexpyirt で両フォームを推定して
+  リンキングする一連の比較。さらに全ケース・全方式で Newton 法を 4 つの遠い初期値
+  （$(A, B) = (0.25, -3), (4, 3), (0.5, 2.5), (3, -2)$）から走らせ、1e-9 以内で参照解に達することを確かめる。
+  外部の R リンキングパッケージ（`plink`、`equateIRT` など）は使っていない。目的関数と SE は同じ公刊式の独立実装と
+  照合しており、第三者ソフトウェアとは照合していない:
+  - **V20a（`v20a_2pl`、2PL、各フォーム $J=20$、共通 10 項目、各群 $N=2000$）**: 直接比較 `max |Δ(A, B)| = 9.6e-13`、
+    目的関数相対 `1.6e-13`、mirt の共分散での SE 相対 `2.2e-8`。一連の比較 `max |Δ(A, B)| = 1.9e-10`、目的関数相対
+    `2.6e-9`、Ogasawara SE 相対 `2.2e-8`。
+  - **V20b（`v20b_grm`、GRM $K=4$、各フォーム $J=16$、共通 8 項目、各群 $N=2000$）**: 直接比較 `max |Δ(A, B)| = 9.1e-13`、
+    目的関数相対 `1.0e-13`、mirt の共分散での SE 相対 `8.3e-9`。一連の比較 `max |Δ(A, B)| = 9.5e-10`、目的関数相対
+    `2.2e-9`、Ogasawara SE 相対 `8.1e-9`。
+  - **V20c（`v20c_gpcm`、GPCM $K=4$、各フォーム $J=16$、共通 8 項目、各群 $N=2000$）**: 直接比較 `max |Δ(A, B)| = 2.5e-12`、
+    目的関数相対 `9.5e-14`、mirt の共分散での SE 相対 `1.6e-8`。一連の比較 `max |Δ(A, B)| = 1.4e-9`、目的関数相対
+    `7.1e-10`、Ogasawara SE 相対 `1.6e-8`。
+  - **V20d（`v20d_3pl`、3PL、各フォーム $J=16$、共通 8 項目、各群 $N=4000$、内点 $g$）**: 直接比較
+    `max |Δ(A, B)| = 3.6e-12`、目的関数相対 `1.2e-13`、mirt の共分散での SE 相対 `9.4e-8`。一連の比較
+    `max |Δ(A, B)| = 3.0e-10`、目的関数相対 `5.2e-9`、Ogasawara SE 相対 `9.4e-8`。
+  - **V20e（`v20e_2pl_srcgrid`、V20a のデータ、新フォームは固定 $N(0.3, 1.5)$ の下で推定）**: 直接比較
+    `max |Δ(A, B)| = 9.1e-13`、目的関数相対 `1.4e-13`、mirt の共分散での SE 相対 `3.4e-9`。一連の比較
+    `max |Δ(A, B)| = 4.2e-10`、目的関数相対 `7.0e-10`、Ogasawara SE 相対 `3.4e-9`。
+  - **V20f（`v20f_mixed`、2PL + GPCM $K=4$ 混在、各フォーム $J=16$、共通 5 + 3 項目、各群 $N=2000$）**: 直接比較
+    `max |Δ(A, B)| = 2.0e-11`、目的関数相対 `6.2e-14`、mirt の共分散での SE 相対 `2.1e-8`。一連の比較
+    `max |Δ(A, B)| = 1.3e-10`、目的関数相対 `3.6e-10`、Ogasawara SE 相対 `2.1e-8`。
+  したがってリンキングで照合済みの項目モデルは 2PL・3PL・GRM・GPCM と 2PL + GPCM 混在である。Rasch・4PL・PCM は
+  同じカーネルを共有し、厳密回復の単体テストでのみ確認している。
+  照合テスト: `tests/test_mirt_m5_linking.py`。単体テスト（全 7 種の 1 次元モデル、ICC・閾値の不変性、恒等変換と厳密回復、
+  対称版の可逆性、独自格子、EH・多母集団、1 つの多母集団推定を `source` と `target` の両方に使うときの同時共分散、
+  非収束時に SE を出さないこと、Rasch・PCM の傾き $1/A$、`transform_theta`、勾配の有限差分検証、Ogasawara SE の
+  中心有限差分検証、および $N(\hat\eta, \Sigma)$ からのパラメタ抽出ごとに重み固定でリンキングを解き直すモンテカルロ
+  線形化検証（推定のブートストラップではない））: `tests/test_m5_linking.py`。
+
+- **名義反応モデル（V23、M5）**: mirt の `itemtype = "nominal"`（`optimizer = "NR"`、`TOL = 1e-10`、$[-6,6]$ の
+  61 点。V23f は次元あたり 31 点）。V23a: `0..3` に符号化し直した `Science`。V23b: シミュレーション
+  $J=10, K=4, N=3000$ で、内部の採点係数が入れ替わった項目（`q09`: $\mathrm{ak}_1=2.2 > \mathrm{ak}_2=0.7$）と
+  負の採点係数をもつ項目（`q10`: $\mathrm{ak}_1=-0.4$）を含む。V23c: 名義 5 項目（$K=4$）と 2PL 5 項目、$N=2500$。
+  V23e: シミュレーション $J=8, K=4, N=3000$ で、$\mathrm{ak}_k<0$ や $\mathrm{ak}_k>K-1$ を含む非単調な項目が 6 つ。
+  V23f: 2 因子の確認的名義モデル（$J=8$、因子あたり 4 項目、$K=4$、$N=3000$、相関は自由推定）。
+  **初期値**: mirt の名義モデルの既定初期値（`ak1 = ... = 0.5`、`d = 0`）では減衰なしの NR が `Science` で鞍点に止まる
+  （対数尤度 $-1631.79$、Comfort の `a1` $\approx 0$。最尤解は $-1608.452$）ため、スクリプトは mirt の NR を GPCM の点
+  （$\mathrm{ak}_k=k$、$d_k=\log(p_k/p_0)$）から開始する。さらに 1 次元の各ケースで mirt の別の初期値 5 通り（既定初期値の
+  NR と BFGS、`GenRandomPars` による NR 3 通り）で推定して `alt_starts` に保存し、いずれかの方が高ければそこから NR を
+  やり直す（`meta.reference_start`）。これは V23e で起こり、GPCM の点からの NR は局所最大（$-29561.14$）に止まり、
+  既定初期値の BFGS は $-26107.48$ に達する。保存したどの初期値も参照値を上回らず、flexpyirt は常に自身の既定初期値から
+  推定してすべての参照値（V23e を含む）に到達する。**一致**（通常の EM・SQUAREM とも。V23a–c, e の最大）: 対数尤度
+  $3.6\times10^{-11}$（絶対。相対 $1.6\times10^{-15}$）、パラメタ $7.1\times10^{-8}$、Oakes SE（相対）$3.8\times10^{-8}$、
+  Hessian と mirt Richardson SE $5.6\times10^{-7}$、flexpyirt の Oakes と Hessian $1.7\times10^{-13}$、EAP
+  $8\times10^{-15}$、各ケース 40–44 パタンの MAP / ML / WLE で $\theta$ $3.7\times10^{-6}$・SE（相対）$1.9\times10^{-4}$、
+  S-X2（`itemfit(fit_stats = "S_X2")`）は相対 $5.8\times10^{-9}$ で自由度も一致（Science: $8.235, 10.223, 6.246,
+  12.483$、自由度 6, 9, 6, 9）。V23f: 対数尤度 $4.0\times10^{-11}$、パラメタ $7.0\times10^{-9}$、Oakes SE
+  $2.5\times10^{-9}$、相関 $5.4\times10^{-12}$（SE は相対 $9.3\times10^{-11}$）、EAP は $10^{-5}$ 以内。**ML の既知の差**:
+  mirt の `fscores(method = "ML")` は採点係数にかかわらず全項目カテゴリ 0 / 全項目最上位カテゴリのパタンに
+  $-\infty$ / $+\infty$ を返し、V23e の真に $+\infty$ のパタン 1 つ（全項目最上位カテゴリではない）を `max_theta = 20` の
+  境界に残す（$19.99989$、SE は NA）。flexpyirt は極端パタンをカテゴリ傾き $a\,\mathrm{ak}_c$ で判定し、テストではその
+  判定を R でのパタン対数尤度の独立な走査（`fscores.ml_scan`: $[-20,20]$ 上 0.01 刻みの格子を `optimize()` で精密化）と
+  照合し、内点の ML 推定値（V23b・V23c で 1 つ、V23e で 2 つ）をそれと比較する。多次元の名義モデルは 2 因子（V23f）で
+  照合済み、3 因子は単体テストのみ。単体テスト（確率・勾配・GPCM / 2PL への帰着・初期値・識別性・`fix_from`・JSON・
+  S-X2・スコアリング・事前分布・等値制約・多群と DIF・EH・2 次元・退化項目の `HeywoodWarning`）:
+  `tests/test_m5_nominal.py`。テスト: `tests/test_mirt_m5_nominal.py`。参照値生成:
+  `validation/r/m5_nominal_reference.R`。
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。

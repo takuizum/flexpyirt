@@ -251,12 +251,26 @@ def test_specification_errors(small: pd.DataFrame) -> None:
         Model.from_items({"__latent__": TwoPL()})
 
 
-def test_free_id_shared_across_items_is_rejected(small: pd.DataFrame) -> None:
+def test_free_id_shared_across_items_in_table(small: pd.DataFrame) -> None:
+    """Sharing a free_id across items in an edited table equals equal_across_items (§16.1)."""
     spec = Model.uniform(TwoPL(), items=small.columns)
     table = spec.parameter_table(small)
     slopes = (table["param"] == "a") & (table["item"] != "__latent__")
     table.loc[slopes, "free_id"] = 0
-    with pytest.raises(SpecificationError, match="M5"):
+    tight = BAEM(tol=1e-9, max_iter=5000)
+    by_table = fit(spec, small, table=table, method=tight, se=None)
+    by_spec = fit(spec.equal_across_items(items=None, params=["a"]), small, method=tight, se=None)
+    assert by_table.n_params == by_spec.n_params == small.shape[1] + 1
+    assert by_table.loglik == pytest.approx(by_spec.loglik, rel=1e-12)
+    np.testing.assert_allclose(by_table.items["a"], by_spec.items["a"], atol=1e-7)
+
+
+def test_free_id_shared_by_two_params_of_one_item_is_rejected(small: pd.DataFrame) -> None:
+    spec = Model.uniform(TwoPL(), items=small.columns)
+    table = spec.parameter_table(small)
+    first = table["item"] == "Item.1"
+    table.loc[first, "free_id"] = 0
+    with pytest.raises(SpecificationError, match="different parameters of item"):
         fit(spec, small, table=table)
 
 
