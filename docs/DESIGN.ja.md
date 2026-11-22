@@ -1016,7 +1016,7 @@ class ItemKernel(Protocol):
    **照合（V22）**: `validation/r/m5_mixture_reference.R` は標準化した離散化尤度を R で独立に書き直し、mirt の解を
    その厳密な最大値まで磨き（Richardson ヘッセ行列による SE と EAP も R で計算）、さらに組み込みの
    `mirt(dentype = "mixture-k")` を像の格子 $z_q=M+\sqrt V\theta_q$（非対称な `theta_lim`）で推定し直して、推定値と EAP を
-   flexpyirt の尺度へ写す。2PL $k=2$（二峰）、GRM $k=2$（小さい成分）、GPCM $k=3$（VALIDATION.md V22）。SE は R の
+   flexpyirt の尺度へ写す。2PL $k=2$（二峰）、GRM $k=2$（小さい成分）、GPCM $k=3$（格子 121 点。VALIDATION.md V22）。SE は R の
    Richardson ヘッセ行列と照合する。mirt 1.46.1 の混合モデルでの `SE.type = "Oakes"` は観測情報になっていない
    （潜在分布パラメタの SE が数倍小さく、クラス所属を既知とした完全データの SE に近い）ためである。
 

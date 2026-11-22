@@ -1475,7 +1475,7 @@ data-independent shapes (§15.21).
    (Richardson-Hessian SEs and EAPs in R), and refits built-in `mirt(dentype = "mixture-k")` on
    the image grid $z_q=M+\sqrt V\theta_q$ (asymmetric `theta_lim`), mapping its estimates and
    EAPs to flexpyirt's scale: 2PL $k=2$ (bimodal), GRM $k=2$ (small component) and GPCM $k=3$
-   (VALIDATION.md V22). SEs are checked against the R Richardson Hessian, because mirt 1.46.1's
+   (121 grid points; VALIDATION.md V22). SEs are checked against the R Richardson Hessian, because mirt 1.46.1's
    `SE.type = "Oakes"` for mixtures is not the observed information (its latent SEs are several
    times too small, close to the complete-data SEs with known class membership).
 
