@@ -11,7 +11,7 @@ import pandas as pd
 
 from flexpyirt.errors import SpecificationError
 from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, Rasch
-from flexpyirt.latent import EmpiricalHistogram, LatentSpec, Normal
+from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, LatentSpec, Normal
 from flexpyirt.priors import PRIOR_TYPES, Prior
 from flexpyirt.quadrature import MAX_FACTORS
 
@@ -80,6 +80,11 @@ class Model:
             raise SpecificationError(f"Duplicated item names: {dup}.")
         if self.groups is not None:
             kinds = {type(dist) for _, dist in self.groups}
+            if DavidianCurve in kinds:
+                raise SpecificationError(
+                    "DavidianCurve is only supported for single-group models; use "
+                    "Model.with_latent() instead of with_groups()."
+                )
             if EmpiricalHistogram in kinds and len(kinds) > 1:
                 raise SpecificationError(
                     "Cannot mix EmpiricalHistogram and Normal across groups; when "
@@ -114,6 +119,17 @@ class Model:
     def is_eh(self) -> bool:
         """Whether this model uses an :class:`~flexpyirt.EmpiricalHistogram` latent distribution."""
         return isinstance(self.resolved_groups()[0][1], EmpiricalHistogram)
+
+    @property
+    def is_davidian(self) -> bool:
+        """Whether this model uses a :class:`~flexpyirt.DavidianCurve` latent distribution."""
+        return isinstance(self.resolved_groups()[0][1], DavidianCurve)
+
+    @property
+    def davidian_degree(self) -> int:
+        """Polynomial degree of the Davidian curve, or ``0`` for non-Davidian models."""
+        dist = self.resolved_groups()[0][1]
+        return dist.degree if isinstance(dist, DavidianCurve) else 0
 
     @property
     def is_multidimensional(self) -> bool:
@@ -401,7 +417,7 @@ class Model:
 
     def with_latent(self, dist: LatentSpec) -> Model:
         """Return a single-group model with latent distribution ``dist``."""
-        if not isinstance(dist, (Normal, EmpiricalHistogram)):
+        if not isinstance(dist, (Normal, EmpiricalHistogram, DavidianCurve)):
             raise SpecificationError(f"Unsupported latent distribution {dist!r}.")
         if self.groups is not None:
             raise SpecificationError("This model has groups; set latents with with_groups().")
@@ -417,6 +433,7 @@ class Model:
 
         Every group must use ``Normal`` or every group must use ``EmpiricalHistogram`` (mixing
         them across groups raises :class:`~flexpyirt.errors.SpecificationError`; DESIGN.md §4.4).
+        :class:`~flexpyirt.DavidianCurve` is single-group only.
 
         Examples
         --------
@@ -430,6 +447,11 @@ class Model:
         if len(latents) < 2:
             raise SpecificationError("with_groups() needs at least two groups.")
         for name, dist in latents.items():
+            if isinstance(dist, DavidianCurve):
+                raise SpecificationError(
+                    f"DavidianCurve is only supported for single-group models (group {name!r}); "
+                    "use Model.with_latent() instead of with_groups()."
+                )
             if not isinstance(dist, (Normal, EmpiricalHistogram)):
                 raise SpecificationError(f"Unsupported latent distribution for group {name!r}.")
         kinds = {type(dist) for dist in latents.values()}
@@ -524,7 +546,7 @@ class Model:
             raise SpecificationError(
                 f"Unsupported prior distribution {dist!r}; use NormalPrior, LogNormal or Beta."
             )
-        if param in ("mean", "var") or param.startswith(("mean_", "var_", "cor_")):
+        if param in ("mean", "var") or param.startswith(("mean_", "var_", "cor_", "phi_")):
             raise SpecificationError(
                 f"Priors on latent-distribution parameters ({param!r}) are not supported."
             )

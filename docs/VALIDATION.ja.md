@@ -40,6 +40,7 @@
 | V17 | V4 のデータでの尤度比検定による DIF（`a`+`d` と `d` の `add`、完全不変モデルからの `a`+`d` の `drop`） | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V18 | M2 / M2* 限定情報の適合度（LSAT7 2PL、シミュレーション 2PL、3PL、分散自由の Rasch、GRM $K=3$、GPCM $K=4$） | `M2(m, quadpts = 61, theta_lim = c(-6, 6))` | M5 |
 | V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
+| V19 | Davidian 曲線潜在分布（2PL $k=3$・GRM $k=2$・平均分散自由の FIPC 2PL $k=3$） | `mirt(..., dentype = "Davidian-k")` および `mirt(..., customGroup = ..., SE.type = "Oakes")` | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -331,6 +332,69 @@
     信頼区間端点 $\le 6.0\times10^{-9}$、`threepl` の `TLI` `1.8e-10` / `CFI` `0`、`SRMSR` は mirt と直接比較で
     $\le 8.5\times10^{-13}$。
   テスト: `tests/test_mirt_m5_m2.py`（mirt 照合）、`tests/test_m5_m2.py`（単体テスト）。
+- **Davidian 曲線潜在分布（V19、M5）**: `mirt` 1.46.1（`Theta_DC_den`, `Mstep.DC.optim`, `EM.group`,
+  `LoadGroupPars`, `updatePrior`）および `dcurver` 0.9.3 の調査から、厳密な離散化 MMLE との 4 つの相違を確認した
+  （DESIGN §16.4）:
+  1. 組み込みの `mirt(..., dentype = "Davidian-k")` は毎 EM 反復で期待度数に Woods の線形補間
+     `standardizeQuadrature` を適用してから未正規化の `dcurver::ddc` を `nlminb` で最適化するため、EM の単調性が
+     崩れ（mirt は `"Davidian"` で単調性検査を無効化）、周辺対数尤度が真に低い点で終わる（V19a の 2PL $k=3$ で
+     `21.47` 点、V19b の GRM $k=2$ で `139.32` 点低い）。V19a の終了点は mirt 自身の離散化尤度
+     （$\sum\log\sum_q L_q\,\mathrm{ddc}(\theta_q)/\sum_q\mathrm{ddc}(\theta_q)$）に対しても停留点ではない: `PHI_1..3` の
+     スコアは $(-0.54, -3.40, 56.7)$ で、mirt の項目パラメタのまま `PHI` だけを最大化すると `4.67` 改善する。V19b では
+     mirt は停留点 $N(0,1)$（`PHI_1 = 1.5707963`、スコア $(3.6\times10^{-4}, 0)$、`PHI` の再最適化で改善なし）に
+     停滞する: `PHI_2` のスコアは正弦優先座標の $\phi_1=\pi/2$ の極特異点のために 0 になり、`PHI_1` のスコアはその 1 次の
+     方向が純粋な位置・尺度の変化で自由な項目パラメタに吸収されるために 0 になる（後者はどの座標系でも生じる。
+     flexpyirt は摂動つき既定初期値で $\boldsymbol\phi=\mathbf 0$ を離れる。DESIGN §16.4）。
+  2. 組み込みの `dentype = "Davidian-k"` は `SE = TRUE`（`"No standard error method currently supported
+     for Davidian curves"`）と `MEAN_1` / `COV_11` の自由推定（`"Estimating Davidian mean-variance
+     hyper-parameters is not currently supported"`）を禁止している（いずれも `mirt:::EM.group`）。
+  3. `fscores()` は `use_dentype_estimate = TRUE` を明示しない限り $N(0,1)$ 事前分布を使う（`EAP` と plausible
+     values のみ対応し `MAP` は拒否）。
+  4. `createGroup()`（格子上で正規化した `dcurver::ddc` を呼び、`TOL = 1e-10`, `accelerate = "none"`,
+     `SE.type = "Oakes"`）経由で厳密な標準化 Davidian MMLE を mirt 内で検証する際、`createGroup` 既定の
+     `derivType = "Richardson"` は粗い 2 階差分幅（`mirt:::numerical_deriv` が `delta * 1000 = 0.01`、対角で
+     `2*delta = 0.02` を用いる）により $k=3$ の Oakes SE を最大 25.6% 歪めるため `derivType = "central"`
+     （`delta = 1e-5`）を用いた。また `mirt:::BL.LL` は `dentype == "custom"` で `pars2` ではなく `pars` を参照する
+     （潜在密度が摂動されない）不具合があるため、Richardson Hessian SE は R の厳密な周辺対数尤度から直接算出した
+     （`h = 1e-4`）。
+
+  **V19 参照値が検証するもの。** `exact` ブロックは DESIGN §16.4 の標準化 Davidian MMLE を R で書き直したもので、
+  座標系・閉形式モーメント $(\mu_Z,\sigma_Z^2)$・標準化 $z_q=\mu_Z+\sigma_Z(\theta_q-\mu)/\sigma$ は flexpyirt と同じ定義
+  （R で別途記述）であり、密度値は `dcurver::ddc`、E-step・EM・Oakes SE・EAP は `mirt`（`createGroup()`）、Hessian SE は
+  別途記述した R の周辺対数尤度による。したがってこのモデルに対する flexpyirt の推定機構（E-step・潜在 M-step・収束・
+  Oakes/Hessian SE・スコアリング）と、`dcurver` に対する密度を検証する。閉形式モーメントは独立に検査する: R スクリプトは
+  各推定解と組み込み解で $z\,\mathrm{ddc}(z)$ と $z^2\,\mathrm{ddc}(z)$ を `stats::integrate` で積分し（最大絶対誤差
+  `1.2e-9`、`moments_check` に保存。誤差が `1e-8` を超えれば停止）、`tests/test_m5_davidian.py` は台形則で検査する。
+  `mirt_builtin` ブロックは mirt のパラメタにおける密度・`Prior`・`logLik`・EAP を mirt 自身の Davidian 実装と照合する。
+  **参照値の収束。** mirt の EM（BFGS M-step、`TOL = 1e-10`）は厳密な周辺対数尤度の勾配が最大 `1.7e-3`（V19c。V19a/b
+  は `3.8e-5`・`5.8e-5`、`max_grad_r_mirt_em` に保存）の点で停止する。そこで R スクリプトは mirt の解を R の厳密な
+  周辺対数尤度上の Newton 法（中心差分の勾配と Hessian）で max|grad| < `2e-5` まで磨き（各ケース 1 ステップ、最終
+  `1.8e-6`〜`3.6e-6`、`max_grad_r`）、磨いた値で `TOL = NaN`（EM 反復なし）として `mirt` を再実行し、その点での
+  Oakes SE・`logLik`・EAP を得る。この仕上げの前は V19c の項目・潜在パラメタの差は `8.5e-6`・`7.3e-6` で、flexpyirt の
+  対数尤度が参照値より `1.8e-8` 高かった。すなわち残差は参照値側にあり、flexpyirt 側ではなかった。
+
+  歪んだ標準化 $\chi^2_4$ 特性の 3 シミュレーションケース（$N = 3000$）を `tests/test_mirt_m5_davidian.py` で照合する
+  （通常 EM・SQUAREM とも。参照値生成: `validation/r/m5_davidian_reference.R` → `tests/reference/v19_davidian_*.json`。
+  値は通常 EM と SQUAREM の最大）:
+  - **V19a（`v19_davidian_2pl_k3`、2PL、$J=20, k=3$、61 点 $[-6,6]$）**: 厳密 MMLE 対 R `mirt(customGroup)` / R
+    Hessian: `loglik` 相対 `2.3e-16`、項目パラメタ `5.7e-8`、`phi_1..3` `1.3e-8`、Oakes SE 対 mirt Oakes `4.6e-6`
+    （項目 `6.3e-7`）、Hessian SE 対 R Richardson `2.8e-6`（潜在 `3.8e-7`）、flexpyirt Oakes 対 Hessian `9.7e-16`、
+    EAP `6.2e-15`（SQUAREM で EM 評価回数 `113 → 39`）。組み込み `mirt(..., dentype="Davidian-3")` のパラメタ
+    （`mean = mu_z`, `var = var_z`）では `Prior`・`logLik`（相対 `1.4e-15`）・`fscores(..., use_dentype_estimate=TRUE)`
+    （`8.2e-15`）が完全一致し、厳密 MMLE は対数尤度を `+21.47` 改善する。
+  - **V19b（`v19_davidian_grm_k2`、GRM $K=4$、$J=10, k=2$、61 点 $[-6,6]$）**: 厳密 MMLE: `loglik` 相対 `1.9e-16`、
+    項目パラメタ `4.9e-8`、`phi_1..2` `9.1e-9`、Oakes SE 対 mirt Oakes `3.6e-7`、Hessian SE 対 R Richardson `1.9e-6`、
+    flexpyirt Oakes 対 Hessian `1.1e-15`、EAP `6.0e-15`（SQUAREM `111 → 33`）。組み込み `Davidian-2` のパラメタでは
+    `logLik`（相対 `1.9e-16`）・EAP（`6.7e-15`）が完全一致し、厳密 MMLE は対数尤度を `+139.32` 改善する。
+  - **V19c（`v19_davidian_fipc_k3`、FIPC 2PL、`q01–q10` 固定、$J=20, k=3$、`mean`/`var` 自由、移動・拡大した歪み特性
+    $0.4 + 1.2\cdot\text{skewed}$、81 点 $[-8,8]$）**: 厳密 MMLE: `loglik` 相対 `1.6e-15`、項目パラメタ `7.5e-8`、
+    潜在パラメタ（`mean, var, phi_1..3`）`1.4e-7`、Oakes SE 対 mirt Oakes `6.0e-6`、Hessian SE 対 R Richardson
+    `1.8e-6`、flexpyirt Oakes 対 Hessian `2.9e-15`、EAP `5.3e-15`（SQUAREM `107 → 33`）。
+  残る `~1e-6` の SE の差は mirt と R の有限差分微分（`delta = 1e-5`、`h = 1e-4`）によるもので、flexpyirt の SE は
+  厳密な自動微分による。許容誤差は上の表のとおり（パラメタ `1e-4`、SE 相対 `1e-3`）。
+  単体テスト（単位球面・モーメント・ゼロ角での $N(0,1)$ 一致・多項式零点の自動微分ガードと求積点上に零点を持つ推定・
+  初期角の符号・`degree` 1 と 10 の推定・Rasch/FIPC・識別性と仕様エラー・スコアリング・JSON 往復と不正な
+  `DavidianCurve` JSON）: `tests/test_m5_davidian.py`。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

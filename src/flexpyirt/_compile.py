@@ -42,8 +42,10 @@ from flexpyirt.items import (
     _slope_start,
 )
 from flexpyirt.latent import (
+    DavidianCurve,
     EmpiricalHistogram,
     correlation_matrix_is_pd,
+    davidian_param_names,
     eh_project_floor,
     latent_param_names,
 )
@@ -362,6 +364,30 @@ def _order_grm_intercepts(
     return out
 
 
+def _davidian_phi_starts(degree: int, y: np.ndarray) -> list[float]:
+    """Return small skewness-aligned starting angles for ``DavidianCurve`` (DESIGN.md §16.4).
+
+    ``phi = 0`` is a stationary point of the standardized likelihood (the scores in ``phi_1`` and
+    ``phi_2`` vanish there), so the start is moved off it. The sign is chosen so that the
+    standardized start density has a third standardized moment with the same sign as the
+    total-score skewness: to leading order ``+4 phi_1**3`` for ``degree == 1`` (``+0.0039`` at
+    ``phi_1 = 0.1``) and ``-8.3 phi_1 phi_2`` for ``degree >= 2`` (``+0.083`` at
+    ``(phi_1, phi_2) = (-0.1, 0.1)``).
+    """
+    obs = y >= 0
+    has_obs = obs.any(axis=1)
+    sign = 1.0
+    if int(has_obs.sum()) >= 3:
+        totals = np.where(obs, y, 0).sum(axis=1)[has_obs].astype(float)
+        sd = float(np.std(totals))
+        if sd > 0.0:
+            skew = float(np.mean(((totals - float(np.mean(totals))) / sd) ** 3))
+            sign = 1.0 if skew >= 0.0 else -1.0
+    if degree == 1:
+        return [0.1 * sign]
+    return [-0.1 * sign, 0.1, *([0.0] * (degree - 2))]
+
+
 def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
     """Build the default ParameterTable (DESIGN.md §5.1, §14.1) from the spec and responses."""
     rows: list[dict[str, Any]] = []
@@ -453,8 +479,19 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                 )
         if isinstance(latent, EmpiricalHistogram):
             continue
-        if not model.is_multidimensional:
+        if isinstance(latent, DavidianCurve):
+            phi_starts = _davidian_phi_starts(latent.degree, y)
             latent_rows: list[tuple[str, float, bool, float, float]] = [
+                ("mean", latent.mean, latent.free_mean, -np.inf, np.inf),
+                ("var", latent.var, latent.free_var, 0.0, np.inf),
+                *(
+                    (f"phi_{j}", phi_starts[j - 1], True, -np.inf, np.inf)
+                    for j in range(1, latent.degree + 1)
+                ),
+            ]
+            lat_model = "Davidian"
+        elif not model.is_multidimensional:
+            latent_rows = [
                 ("mean", latent.mean, latent.free_mean, -np.inf, np.inf),
                 ("var", latent.var, latent.free_var, 0.0, np.inf),
             ]
@@ -554,6 +591,12 @@ def model_parameter_schema(model: Model) -> pd.DataFrame:
             for param, lo, hi in zip(names, lower, upper, strict=True):
                 rows.append((group_name, name, param, item_model.name, float(lo), float(hi)))
         if isinstance(latent, EmpiricalHistogram):
+            continue
+        if isinstance(latent, DavidianCurve):
+            rows.append((group_name, LATENT_ITEM, "mean", "Davidian", -np.inf, np.inf))
+            rows.append((group_name, LATENT_ITEM, "var", "Davidian", 0.0, np.inf))
+            for j in range(1, latent.degree + 1):
+                rows.append((group_name, LATENT_ITEM, f"phi_{j}", "Davidian", -np.inf, np.inf))
             continue
         if not model.is_multidimensional:
             rows.append((group_name, LATENT_ITEM, "mean", "Normal", -np.inf, np.inf))
@@ -1299,6 +1342,11 @@ def compile_problem(
             "EmpiricalHistogram needs an equispaced quadrature grid (its weights are histogram "
             "bins); Gauss-Hermite quadrature is for Normal latent distributions."
         )
+    if model.is_davidian and quad.kind != "equispaced":
+        raise SpecificationError(
+            "DavidianCurve is validated on equispaced quadrature grids only; Gauss-Hermite "
+            "quadrature is for Normal latent distributions."
+        )
     if model.is_eh:
         min_w_list: list[float] = []
         for g_name, dist in resolved:
@@ -1339,6 +1387,25 @@ def compile_problem(
             is_eh=True,
             standardize_mean=std_mean,
             standardize_var=std_var,
+            davidian_degree=0,
+        )
+    elif model.is_davidian:
+        degree = model.davidian_degree
+        lat_params = davidian_param_names(degree)
+        lat_vals = np.array(
+            [[lookup[(g, LATENT_ITEM, p)][:4] for p in lat_params] for g in groups], dtype=float
+        )
+        latent = LatentBlock(
+            fixed_values=jnp.asarray(lat_vals[:, :, 0], dtype=jnp.float64),
+            free_index=jnp.asarray(lat_vals[:, :, 1].astype(np.int32)),
+            lower=jnp.asarray(lat_vals[:, :, 2], dtype=jnp.float64),
+            upper=jnp.asarray(lat_vals[:, :, 3], dtype=jnp.float64),
+            eh_weights=jnp.ones((n_groups, 1), dtype=jnp.float64),
+            eh_min_weight=jnp.zeros((n_groups,), dtype=jnp.float64),
+            is_eh=False,
+            standardize_mean=False,
+            standardize_var=False,
+            davidian_degree=degree,
         )
     else:
         lat_params = latent_param_names(model.n_factors)
@@ -1355,6 +1422,7 @@ def compile_problem(
             is_eh=False,
             standardize_mean=False,
             standardize_var=False,
+            davidian_degree=0,
         )
     priors_block = PriorBlock(
         kind=jnp.asarray(prior_kind, dtype=jnp.int32),
