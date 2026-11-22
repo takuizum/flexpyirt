@@ -981,3 +981,51 @@ def test_link_requires_x64() -> None:
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert proc.returncode == 0, proc.stderr + proc.stdout
+
+
+# ---- Default integration grid = the fitted latent distribution (issue #39) ----------------------
+
+
+@pytest.mark.parametrize(("mean", "var"), [(0.0, 1.0), (0.4, 1.6)])
+def test_fitted_grid_keeps_gauss_hermite_base_weights(mean: float, var: float) -> None:
+    from flexpyirt.linking import _fitted_grid
+
+    n = 21
+    res = _make_fixed_fit(
+        Model.uniform(TwoPL(), items=[f"i{j}" for j in range(4)]),
+        {f"i{j}": np.array([1.2, 0.3 * j - 0.4]) for j in range(4)},
+        latent_mean=mean,
+        latent_var=var,
+        quadrature=Quadrature.gauss_hermite(n),
+    )
+    nodes, w = _fitted_grid(res, str(res.parameters["group"].iloc[0]), 0)
+    # Independent rule: GH base weights reweighted by phi(theta; mean, var) / phi(theta; 0, 1).
+    x, gw = np.polynomial.hermite.hermgauss(n)
+    np.testing.assert_allclose(nodes, np.sqrt(2.0) * x, rtol=0, atol=1e-13)
+    expected = gw * np.exp(-0.5 * (nodes - mean) ** 2 / var + 0.5 * nodes**2)
+    np.testing.assert_allclose(w, expected / expected.sum(), rtol=1e-12, atol=1e-15)
+    if (mean, var) == (0.0, 1.0):  # GH integrates N(0, 1) moments exactly
+        assert abs(float(w @ nodes)) < 1e-13
+        assert float(w @ nodes**2) == pytest.approx(1.0, abs=1e-13)
+
+
+def test_fitted_grid_uses_the_fitted_davidian_density() -> None:
+    from flexpyirt import DavidianCurve
+    from flexpyirt.latent import davidian_log_weights, davidian_param_names
+    from flexpyirt.linking import _fitted_grid
+
+    rng = np.random.default_rng(20261122)
+    theta = (rng.chisquare(4.0, size=800) - 4.0) / np.sqrt(8.0)
+    a, d = rng.uniform(0.9, 1.8, size=10), np.linspace(-1.6, 1.6, 10)
+    y = (rng.random((800, 10)) < 1 / (1 + np.exp(-(theta[:, None] * a + d)))).astype(int)
+    df = pd.DataFrame(y, columns=[f"q{j:02d}" for j in range(10)])
+    spec = Model.uniform(TwoPL(), items=df.columns).with_latent(DavidianCurve(2))
+    res = fit(spec, df, method=BAEM(tol=1e-7, max_iter=1000, squarem=True), se=None)
+
+    nodes, w = _fitted_grid(res, str(res.parameters["group"].iloc[0]), 0)
+    lat = res.parameters[res.parameters["item"] == "__latent__"].set_index("param")["estimate"]
+    params = jnp.asarray(lat.loc[list(davidian_param_names(2))].to_numpy(dtype=float))
+    expected = np.exp(np.asarray(davidian_log_weights(jnp.asarray(nodes)[:, None], params)))
+    np.testing.assert_allclose(w, expected / expected.sum(), rtol=1e-12, atol=1e-15)
+    normal = np.exp(-0.5 * (nodes - lat["mean"]) ** 2 / lat["var"])
+    assert np.max(np.abs(w - normal / normal.sum())) > 1e-3  # skewed: not N(mean, var)
