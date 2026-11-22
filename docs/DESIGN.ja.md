@@ -545,7 +545,7 @@ class ItemKernel(Protocol):
 27. **厳格な JSON と正確な float64 往復保存（M4）**: 書き出しは `json.dumps(..., allow_nan=False)` で厳格な RFC 8259 JSON のみを出力し、読み込みは `json.loads` に `parse_constant` を渡して生の `NaN`/`Infinity` リテラルを `SpecificationError` で拒否する。有限な IEEE-754 float64 値は通常の JSON 数値（Python の `repr` 厳密な最短 10 進表現）として書き出し、`-0.0` を含むすべての有限 float64 をビット単位で正確に往復保存する。浮動小数点型のフィールド（無制約の `lower`/`upper`、固定または未計算の `se`、非正定値の `vcov` など）に現れる非有限値（`NaN`, `+Inf`, `-Inf`）は明示的に文字列 `"NaN"`, `"Infinity"`, `"-Infinity"` として符号化する。これらを浮動小数点へ復号するのはスキーマ上 float 型のスロットのみであるため、項目名や群名などの文字列フィールドとは衝突しない。
 28. **明示的レジストリと完全な状態保存（M4）**: 項目モデル（`"2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"GRM"`, `"GPCM"`, `"PCM"`、多値モデルでは `n_categories` を含む）、潜在分布（`"Normal"`）、事前分布（`"NormalPrior"`, `"LogNormalPrior"`, `"BetaPrior"`）、求積（`"equispaced"`）、推定手法（`"BAEM"`）は `_json.py` の明示的な名前レジストリで（逆）直列化する。未知の `format` タグ・スキーマ版・レジストリ名・不正な JSON・整合しない表や行列形状は明確なメッセージつきで `SpecificationError` を送出する。完全な `Model` 仕様（項目名と順序、項目モデル、`fixed`, `latent`, `groups`, `equal`, `priors`）と、`estimate`・`se` を含む検証済み `ParameterTable`（ユーザーによる `table=` 編集もそのまま保持）、`vcov`、`loglik`/`log_posterior`、収束情報と `history`、`quadrature`、`method`、`se_method`、`n_obs` をすべて保存する。`_eta` は `parameters` の検証済み自由行から直接復元し（`free_id` が `0..n_free-1` に連続であること、共有 `free_id` の `estimate` が一致すること、`vcov` 形状が整合することを検証）、推定値の重複を持たせない。復元後の `FitResult` はすべての公開属性・`items`・`latent`・`summary()`・`_repr_html_()`・`aic`/`bic`・全 5 手法の `score()` で完全に同一の結果を返す。
 29. **確認的 2–3 次元 MIRT の仕様とカーネル（M4, §4.9, §6）**:
-    `Model.with_factors(factors, *, correlated=True)` で 2 または 3 個の名前つき因子と負荷項目の確認的パターン（`Mapping[str, ItemSelector]`）を指定する。1 項目が複数因子に負荷すること（交差負荷）を許し、各因子には 1 項目以上が必要で、すべてのモデル項目がいずれか 1 因子以上に負荷しなければならない。負荷しない因子の傾きは 0 に固定する。`with_factors()` を呼ばない `Model.uniform(...)` / `Model.from_items(...)` は厳密に 1 次元（`n_factors=1`）のままビット単位で挙動を変えない。4 つのカーネル（`DichotomousKernel`, `FourPLKernel`, `GradedKernel`, `GPCMKernel`）はすべて静的な `n_factors: int = 1` と `with_factors(n_factors)` を持ち、線形予測子 $z = \mathbf a^\top\boldsymbol\theta + d$（$D=1$ は `params[0] * theta[:, 0]`、$D \in \{2, 3\}$ は `theta @ params[:D]`）を評価するため、既存の 7 項目モデル（`TwoPL`, `Rasch`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`）がすべて 2・3 次元でそのまま動作する。$D > 1$ では内部パラメタ名が mirt に合わせて `a1..aD`, `d`（GRM / GPCM / PCM は `d1..d{K-1}`）となり、1 次元用の表示閾値（`b` / `bk`）は省略する。$D > 1$ での多母集団、`with_latent()`、`fix_from(..., parameterization="irt")` は M4 では対象外とし `SpecificationError` を送出する。
+    `Model.with_factors(factors, *, correlated=True)` で 2 または 3 個の名前つき因子と負荷項目の確認的パターン（`Mapping[str, ItemSelector]`）を指定する。1 項目が複数因子に負荷すること（交差負荷）を許し、各因子には 1 項目以上が必要で、すべてのモデル項目がいずれか 1 因子以上に負荷しなければならない。負荷しない因子の傾きは 0 に固定する。`with_factors()` を呼ばない `Model.uniform(...)` / `Model.from_items(...)` は厳密に 1 次元（`n_factors=1`）のままビット単位で挙動を変えない。4 つのカーネル（`DichotomousKernel`, `FourPLKernel`, `GradedKernel`, `GPCMKernel`）はすべて静的な `n_factors: int = 1` と `with_factors(n_factors)` を持ち、線形予測子 $z = \mathbf a^\top\boldsymbol\theta + d$（$D=1$ は `params[0] * theta[:, 0]`、$D \in \{2, 3\}$ は `theta @ params[:D]`）を評価するため、既存の 7 項目モデル（`TwoPL`, `Rasch`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`）がすべて 2・3 次元でそのまま動作する。$D > 1$ では内部パラメタ名が mirt に合わせて `a1..aD`, `d`（GRM / GPCM / PCM は `d1..d{K-1}`）となり、1 次元用の表示閾値（`b` / `bk`）は省略する。$D > 1$ での `with_latent()` と `fix_from(..., parameterization="irt")` は `SpecificationError` を送出する（$D > 1$ の多母集団は §15.43）。
 30. **直積求積と多変量正規潜在分布の厳密 M-step（M4, §4.4, §4.9）**:
     `Quadrature.default(n_factors)` は mirt の `select_quadpts` に合わせた既定値（1 次元 `61`、2 次元 `31` → $961$ 点、3 次元 `15` → $3{,}375$ 点、区間 $[-6, 6]$）を返し、`Quadrature.grid(n_factors)` が `(Q, D)` の直積格子を返す（`nodes()` は 1 次元の `(n_points,)` のまま）。`CompiledProblem.nodes` の形状は `(Q, D)`。$D \in \{2, 3\}$ の多変量正規潜在分布は `ParameterTable` と `LatentBlock` 上で自然尺度の `(mean_1..D, var_1..D, cor_ij...)`（$L_2 = 5$, $L_3 = 9$、$1 \le i < j \le D$）としてパラメタ化する: $\Sigma_{ii} = v_i > 0$（`lower = 0`）、$\Sigma_{ij} = \rho_{ij}\sqrt{v_i v_j}$ かつ $\rho_{ij} \in (-1, 1)$（`lower = -1, upper = 1`）。分散が 1 固定（2PL / GRM / 3PL / 4PL / GPCM の既定）では `cor_ij` が $\Sigma_{ij}$ と一致するため mirt の `COV_ji` およびその SE と直接一致し、全項目が `Rasch` または `PCM` の場合は `cor_ij` に加えて `var_1..var_D` も既定で自由推定とする。`mvn_log_weights(nodes, params)` は $D = 1$ では従来の `normal_log_weights` にそのまま振り分け、$D \in \{2, 3\}$ では相関行列の正定値性を Sylvester の判定法（主座小行列式 $> 0$）と二重 `where` で保護しつつ、閉形式二次形式（$D = 2$）または Cholesky + `solve_triangular`（$D = 3$）と `log_softmax` で格子上の正規化対数重みを計算する。正定値領域内部では滑らかで NaN のない微分を与え、非正定値候補は NaN を返して境界つき Newton の直線探索および SQUAREM の安全装置で棄却される。1 次元（§4.4）と同様、潜在 M-step は離散化後の厳密な $Q_g^{\text{lat}} = \sum_q \bar n_{gq}\log w_{gq}$ を最大化する（EM の単調性と Oakes 恒等式の厳密性を保つ）。
 31. **$D > 1$ の識別性・符号不定性・初期値（M4, §4.5, §4.10）**:
@@ -633,8 +633,8 @@ class ItemKernel(Protocol):
     計算した行のフラグを後で使う点も含め、統計量と自由度が一致するようにヒューリスティックをそのまま再現する）。
     $df_j$ = 残ったセル数 − 行数 − 項目 $j$ の自由パラメタ数 − 潜在分布の自由パラメタ数で、mirt と同じ（mirt はすべての項目から
     潜在分布のパラメタ数を引く）。RMSEA と $\chi^2$ の p 値も mirt に合わせる。表の計算は推定後の NumPy 処理（形がデータに依存
-    するので `jit` の外）で、カテゴリ確率は JAX の項目カーネルから得る。多次元・多母集団・EH・欠測データは照合するまで
-    `SpecificationError`（mirt は S-X2 で欠測を補完し、EH の重みを無視する）。
+    するので `jit` の外）で、カテゴリ確率は JAX の項目カーネルから得る。多次元・EH・欠測データは照合するまで
+    `SpecificationError`（mirt は S-X2 で欠測を補完し、EH の重みを無視する）。多母集団は §15.45。
 41. **多次元モデルの ML・WLE スコアリング（M4, §8）**: $D \in \{2, 3\}$ で、`"ML"` は $\log L(\boldsymbol\theta\mid y)$ を、
     `"WLE"` は Jeffreys/Firth の罰則つき $\log L(\boldsymbol\theta\mid y)+\tfrac12\log\det\mathbf I(\boldsymbol\theta)$
     （`mirt:::WLE.mirt`; Warm, 1989; Wang, 2015。$\mathbf I$ は観測項目の期待テスト情報行列で自動微分から求める）を、
@@ -653,6 +653,15 @@ class ItemKernel(Protocol):
     同じパターンの回答者でも独立で、`key` に対して決定的。メモリを抑えるためパターンと回答者を `lax.map` で分割して処理する。
     列名は `pv<m>_<factor>`。統計的に検証する: 4,000 回抽出すると標本平均・SD・相関が格子上の事後分布とモンテカルロ誤差の
     範囲で一致する（mirt の既定の plausible values は正規近似なので参照にはしない）。
+43. **多次元の多母集団モデル（M4, §4.5, §4.9）**: `with_factors()` と `with_groups()` は順序を問わず組み合わせられる
+    （潜在分布は `Normal` のみ。`EmpiricalHistogram` は 1 次元のまま）。各群の `Normal` はすべての因子に適用され、その
+    `mean` / `var` と `free_mean` / `free_var` がその群の `mean_1..D` / `var_1..D` を決め、`cor_ij` はすべての群で
+    `with_factors(correlated=...)` に従う（mirt の `COV = F1*F2` での `multipleGroup(..., invariance = c(anchors, "free_means",
+    "free_var"))` と同じ）。識別性は、§15.31 の回転の検査を群ごとに行い、尺度・位置のつながりを因子ごとに群をまたいで調べる:
+    群は共有する自由な `a{m}`（尺度）や因子 $m$ に負荷する項目の共有する自由な切片（位置）でつながり、自由な `var_m` / `mean_m`
+    は固定された非ゼロの `a{m}`・固定された切片・そのパラメタを固定した群のいずれかにつながっていなければならない（なければ
+    群と因子を示して `IdentificationError`）。JSON の形式はすでに群と因子を保存する（§15.33）。因子を持つモデルは `Normal` の
+    群を持てる。
 44. **Gauss–Hermite 求積（`Quadrature.gauss_hermite(n)`、§4.9）**: $e^{-x^2}$ に対する Gauss–Hermite 則 $(x_q, w_q)$
     （Golub & Welsch, 1969; `numpy.polynomial.hermite.hermgauss`）から固定節点 $\theta_q=\sqrt2x_q$ と、節点ごとの固定の
     対数基準重み $b_q=\log(w_q/\sqrt\pi)+\tfrac12\theta_q^2$（直積則では次元について和）を作る。潜在分布の重みは
@@ -666,6 +675,14 @@ class ItemKernel(Protocol):
     61 節点で相対誤差 $1.2\times10^{-10}$）し、非常に細かい等間隔格子での推定とも比べた（分散自由の Rasch、41 節点と
     $[-12,12]$ の 401 点: 推定値は $2\times10^{-10}$ 以内。2 次元 2PL、$31^2$ と $121^2$: $5\times10^{-7}$ 以内）。
     mirt は EM で Gauss–Hermite を使わない。
+45. **多母集団モデルの S-X2（M5, §15.40）**: `item_fit(data, group=...)` は、mirt の `itemfit()` が `multipleGroup` の
+    推定結果に対して行う（`MGC2SC`）のと同じく、群ごとに S-X2 を計算する。群 $g$ の回答者から観測表と $N_s$ を作り、
+    期待割合には群 $g$ の項目パラメタと潜在分布の重み $w_{gq}$ を使い、$df_{gj}$ = 残ったセル数 − 行数 − 群 $g$ での
+    項目 $j$ の自由パラメタ数 − 群 $g$ の潜在分布の自由パラメタ数（群間で共有するアンカーはどの群でも数え、平均 0・分散 1
+    を固定した参照群は引かない）。RMSEA は群の $N_g$ を使う。各群ですべてのカテゴリが観測されている必要がある。結果の先頭に
+    `group` 列がつく。mirt 1.48 と照合した（V15）: V4 の 2 群 2PL を mirt の推定値で、Science（GRM）をすべての項目を等値にして
+    2 群に分けたものを mirt の推定値で（mirt はそこで項目パラメタが約 2e-4 収束しきらない）評価し、自由度は一致、S-X2 は
+    相対 1e-6 以内。
 
 46. **命名のリファクタ（スキーマ版 4）**: 公開名を mirt/R の引数名ではなく Python の慣習に合わせる。項目モデルは
     `n_categories`（旧 `n_cat`）、`Quadrature.equispaced`・`Quadrature.default` は `bounds=(lower, upper)`（旧 `lim`）を

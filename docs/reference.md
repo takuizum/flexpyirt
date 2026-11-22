@@ -134,7 +134,7 @@ a deterministic method, or `n_draws` is not a positive integer.
 #### `FitResult.item_fit`
 
 ```text
-item_fit(data, *, min_cell=1.0, item_names=None) -> DataFrame
+item_fit(data, *, min_cell=1.0, group=None, item_names=None) -> DataFrame
 ```
 
 Orlando–Thissen S-X2 item fit ([guide section 5](guide.md#item-fit-s-x2)). For each item,
@@ -148,15 +148,16 @@ free latent parameters (mirt's convention).
 |---|---|
 | `data` | Complete responses on the fitted items (typically the fitting data) |
 | `min_cell` | Minimum expected count per cell before collapsing (default `1.0`) |
+| `group` | Group labels (required for a multiple-group model; S-X2 is computed within each group, DESIGN §15.45) |
 | `item_names` | Column names when `data` is an array |
 
 **Returns**: `DataFrame` with columns `item`, `s_x2`, `df`, `rmsea`
 ($\sqrt{\max(0, X^2/df-1)/(N-1)}$) and `p`; items whose collapsed table leaves `df <= 0` get
-`df = 0` and NaN statistics.
+`df = 0` and NaN statistics. A multiple-group model adds a leading `group` column (one row per
+group and item).
 
-**Raises**: `SpecificationError` for multidimensional, multiple-group, `EmpiricalHistogram`, or
-`DavidianCurve` models, missing responses, an item with an unobserved category, or a non-positive
-`min_cell`.
+**Raises**: `SpecificationError` for multidimensional, `EmpiricalHistogram`, or `DavidianCurve` models, missing
+responses, an item with an unobserved category (within a group), or a non-positive `min_cell`.
 
 #### `FitResult.m2`
 
@@ -330,8 +331,10 @@ must have at least one item, every model item must load on at least one factor, 
 slopes are fixed at `0`. Item parameters become `a1`…`aD`, `d` (or `d1`…). The latent
 distribution is multivariate normal with means fixed at `0`, variances fixed at `1` (or free when
 all items are `Rasch` or `PCM`), and correlations free when `correlated=True` (matching mirt's
-`COV = F1*F2`) or fixed at `0` when `correlated=False`. Multiple groups (`with_groups()`) and
-`with_latent()` are not supported for multidimensional models (`SpecificationError`).
+`COV = F1*F2`) or fixed at `0` when `correlated=False`. With `with_groups()` (either order), each
+group's `Normal` applies to every factor ([guide section 14](guide.md#14-confirmatory-multidimensional-models)).
+`with_latent()` and `EmpiricalHistogram` are not supported for multidimensional models
+(`SpecificationError`).
 
 #### `Model.with_latent`
 

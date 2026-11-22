@@ -43,7 +43,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - [x] `FitResult` JSON I/O (`FitResult.to_json`, `FitResult.from_json`).
 - [x] Scoring (MAP, ML, WLE, plausible values; validated in V13).
 - [x] Confirmatory 2–3 dimensional MIRT (`Model.with_factors()`, product grids, MVN correlations,
-  Oakes/Hessian SEs, EAP, MAP, ML and WLE scoring; validated in V14).
+  Oakes/Hessian SEs, EAP, MAP, ML and WLE scoring; validated in V14; multiple groups validated in V21).
 - **Acceptance**: EAP / MAP agree with mirt's `fscores`. A two-dimensional confirmatory model
   agrees with mirt.
 
@@ -56,7 +56,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - [x] Differentiable linking (`link()`, `LinkResult`: Haebara / Stocking–Lord, non-symmetric and
   symmetric, Ogasawara delta-method SEs via autodiff; validated in V20 for 2PL, 3PL, GRM, GPCM and
   mixed 2PL + GPCM common items).
-- [x] Item fit: S-X2 (`FitResult.item_fit()`, single-group unidimensional; validated in V15).
+- [x] Item fit: S-X2 (`FitResult.item_fit()`, unidimensional, per group for multiple groups; validated in V15).
 - [x] DIF: multiple-group likelihood-ratio tests (`FitResult.dif()`, schemes `add` / `drop`,
   Holm / BH adjustment; validated in V17).
 - [x] M2 limited-information goodness of fit (`FitResult.m2()`, single-group unidimensional

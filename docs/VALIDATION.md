@@ -43,13 +43,14 @@ English | [日本語](VALIDATION.ja.md)
 | V11 | 3PL and 4PL, single group (simulated) | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 | V12 | Display IRT thresholds and delta-method SEs (2PL, Rasch, GRM, GPCM, PCM, 2-group 2PL) | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | Ability scoring: MAP, ML, WLE (2PL, GRM, GPCM, 3PL, 2-group, missing) | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
-| V15 | S-X2 item fit (GRM, GPCM, PCM with free variance, 3PL, FIPC 2PL; `mincell` 1 and 3) | `itemfit(m, fit_stats = "S_X2")` | M5 |
+| V15 | S-X2 item fit (GRM, GPCM, PCM with free variance, 3PL, FIPC 2PL; `mincell` 1 and 3; two-group 2PL and GRM, per group) | `itemfit(m, fit_stats = "S_X2")` | M5 |
 | V16 | Equality constraints across items (LSAT7 common slope; 2PL + graded with cross-model constraints; two groups with anchors and a common slope) | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V17 | DIF likelihood-ratio tests on the V4 data (`add` for `a`+`d` and for `d`; `drop` for `a`+`d` from the fully invariant model) | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V18 | M2 / M2* limited-information goodness of fit (LSAT7 2PL, simulated 2PL, 3PL, Rasch with free variance, GRM $K=3$, GPCM $K=4$) | `M2(m, quadpts = 61, theta_lim = c(-6, 6))` | M5 |
 | V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 | V19 | Davidian-curve latent distributions (2PL $k=3$, GRM $k=2$, FIPC 2PL $k=3$ with free mean/var) | `mirt(..., dentype = "Davidian-k")` & `mirt(..., customGroup = ..., SE.type = "Oakes")` | M5 |
 | V20 | Scale linking: Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara SEs (2PL, GRM, GPCM, 3PL, non-standard source grid, mixed 2PL + GPCM) | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` | M5 |
+| V21 | Multiple-group confirmatory 2D MIRT (simple structure, cross-loading; anchors on both factors, focal means/variances free) | `multipleGroup(..., invariance = c(anchors, "free_means", "free_var"))` with `COV = F1*F2` | M4 |
 | V23 | Nominal response model (Science; simulated with unordered/negative scoring coefficients; nominal + 2PL mixed; mostly non-monotone items; two-factor confirmatory) | `mirt(..., "nominal")` with `pars` starting at the GPCM point (or the best alternative start); `itemfit(fit_stats = "S_X2")` | M5 |
 
 ## mirt settings and known differences (found in M1)
@@ -299,6 +300,20 @@ English | [日本語](VALIDATION.ja.md)
   mean/SD matching EAP and posterior SD within Monte-Carlo error), alongside unit tests for
   flat-prior MAP $\approx$ ML, WLE Warm-equation stationarity across all seven item models, extreme
   patterns, multiple groups, missing data, and input validation.
+- **Multiple-group 2D MIRT (V21, M4)**: two simulated cases (2 × 1,500 respondents; simple
+  structure with anchors q01–q03 / q07–q09, and a cross-loading q07 with anchors q01–q03 /
+  q08–q10), focal means and variances free, correlations free in both groups, 81 points per
+  dimension on $[-6, 6]$ (`validation/r/m4_mirt_multigroup_reference.R` →
+  `tests/reference/v21_mirt_multigroup.json`, mirt 1.48, `NR`, `TOL = 1e-10`). mirt stops short of
+  the maximum along one factor's ridge (that factor's focal mean/variance traded against its
+  slopes): flexpyirt reproduces mirt's log-likelihood at mirt's estimates exactly, yet its own
+  solution is 3.2e-5 higher, and the score at mirt's estimates is ~0.035 / ~0.018 for that
+  factor's focal variance / mean (< 1e-3 elsewhere) while flexpyirt's is < 1e-6. The gap did not
+  shrink from 31 to 81 points per dimension (issue #20, item 13). Hence parameters and SEs
+  outside that factor's block (its items' slopes and intercepts, its focal mean/variance) are
+  compared at the usual tolerances (`1e-4`, SE `1e-3` relative), and the block is checked by
+  likelihood (flexpyirt higher) and stationarity. Oakes equals the direct Hessian, EM and SQUAREM
+  are monotone, scoring and JSON round-trip work. Tests: `tests/test_mirt_m4_multigroup.py`.
 - **S-X2 item fit (V15, M5)**: six cases reuse existing references (V3 GRM and V8 GPCM on
   Science, V8 PCM with a free latent variance, V11 3PL, V5 FIPC 2PL with eight fixed items, and
   V3 again with `mincell = 3`). mirt evaluates `itemfit(m, fit_stats = "S_X2")` at its reference
@@ -308,7 +323,15 @@ English | [日本語](VALIDATION.ja.md)
   every case, S-X2 agrees to `2.2e-8` (relative) and p-values to `1.3e-8`, the level at which the
   estimates themselves agree. Unit tests check the Lord–Wingersky recursion against brute-force
   enumeration and that expected rows are conditional probabilities. Tests:
-  `tests/test_mirt_m5_itemfit.py`.
+  `tests/test_mirt_m5_itemfit.py`. Multiple groups (DESIGN §15.45): mirt's per-group `itemfit()`
+  on V4's two-group 2PL at its estimates (rebuilt with every parameter fixed, then each `est`
+  flag restored, because `multipleGroup(TOL = NaN)` still takes one EM step), and on Science (GRM)
+  split into two groups by row parity with all items invariant and the focal mean/variance free
+  (`validation/r/m5_itemfit_multigroup_reference.R` → `tests/reference/v15_sx2_multigroup.json`).
+  mirt stops ~2e-4 short in Science's item parameters (flexpyirt's log-likelihood is higher), so
+  flexpyirt is evaluated at mirt's estimates there. Degrees of freedom are identical and S-X2
+  agrees within `1e-6` (relative) in both groups of both cases. Tests:
+  `tests/test_mirt_m5_itemfit_multigroup.py`.
 - **Confirmatory 2–3 dimensional MIRT (V14, M4)**: four simulated cases are validated in
   `tests/test_mirt_m4_mirt.py` (with both plain EM and SQUAREM; reference generator
   `validation/r/m4_mirt_reference.R` → `tests/reference/v14_mirt2d.json`, `accelerate = "none"`,

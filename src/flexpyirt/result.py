@@ -582,6 +582,7 @@ class FitResult:
         data: Any,
         *,
         min_cell: float = 1.0,
+        group: Any = None,
         item_names: list[str] | None = None,
     ) -> pd.DataFrame:
         r"""Orlando–Thissen S-X2 item fit statistics (DESIGN.md §15.40).
@@ -606,14 +607,20 @@ class FitResult:
         data : DataFrame or array-like
             Complete responses on the fitted items (typically the fitting data).
         min_cell : float, default 1.0
-            Minimum expected count per cell before collapsing (mirt's ``mincell``).
+            Minimum expected count per cell before collapsing (mirt's ``min_cell``).
+        group : array-like, optional
+            Group labels (required for a multiple-group model). S-X2 is computed within each
+            group from that group's responses, item parameters and latent distribution, with
+            :math:`df` net of that group's free item and latent parameters (shared anchors count
+            in every group), as mirt's ``itemfit()`` does for ``multipleGroup`` fits.
         item_names : list of str, optional
             Column names when ``data`` is an array.
 
         Returns
         -------
         DataFrame
-            One row per item: ``item``, ``s_x2``, ``df``, ``rmsea``, ``p``. Items whose
+            One row per item (per group and item, with a leading ``group`` column, in a
+            multiple-group model): ``item``, ``s_x2``, ``df``, ``rmsea``, ``p``. Items whose
             collapsed table leaves ``df <= 0`` get ``df = 0`` and NaN statistics.
 
         Raises
@@ -621,20 +628,15 @@ class FitResult:
         PrecisionError
             If JAX is not configured for 64-bit floating point.
         SpecificationError
-            For multidimensional, multiple-group or ``EmpiricalHistogram`` models (not yet
-            supported), data with missing responses, or an item with an unobserved category.
+            For multidimensional, ``EmpiricalHistogram`` or ``DavidianCurve`` models (not yet
+            supported), data with missing responses, or an item with an unobserved category
+            (within a group).
         """
         check_x64()
         model = self._model
-        if (
-            model.is_multidimensional
-            or model.is_multigroup
-            or model.is_empirical_histogram
-            or model.is_davidian
-        ):
+        if model.is_multidimensional or model.is_empirical_histogram or model.is_davidian:
             raise SpecificationError(
-                "item_fit() supports single-group unidimensional models with a Normal latent "
-                "distribution only."
+                "item_fit() supports unidimensional models with Normal latent distributions only."
             )
         if isinstance(min_cell, bool) or not (isinstance(min_cell, (int, float)) and min_cell > 0):
             raise SpecificationError(f"min_cell must be a positive number, got {min_cell!r}.")
@@ -643,35 +645,44 @@ class FitResult:
             raise SpecificationError(
                 "item_fit() requires complete data; S-X2 is not defined with missing responses."
             )
+        codes, group_names = coerce_groups(group, model, y.shape[0], require_all=False)
         n_categories = [m.kernel.n_categories for _, m in model.items]
-        for j, (name, _) in enumerate(model.items):
-            if np.unique(y[:, j]).size != n_categories[j]:
-                raise SpecificationError(
-                    f"Item {name!r} does not have every response category observed; S-X2 "
-                    "needs all categories (as in mirt)."
-                )
-        codes, _ = coerce_groups(None, model, y.shape[0], require_all=False)
         compiled = compile_problem(model, y, codes, self.parameters, self._quadrature)
         prob = compiled.problem
         eta = jnp.asarray(self._eta)
-        traces: list[np.ndarray] = [np.empty(0)] * len(model.items)
-        for fam, lp in zip(prob.families, _core._item_log_probs(prob, eta), strict=True):
-            lp_np = np.exp(np.asarray(lp[0]))  # (J_f, Q, K_f)
-            for pos, col in enumerate(np.asarray(fam.columns)):
-                traces[int(col)] = lp_np[pos]
-        weights = np.exp(np.asarray(_core._latent_log_weights(prob, eta))[0])
-
-        observed = _itemfit.observed_tables(y, n_categories)
-        expected = _itemfit.s_x2_expected_tables(traces, weights)
-        n_s = observed[0].sum(axis=1)
+        log_probs = [np.exp(np.asarray(lp)) for lp in _core._item_log_probs(prob, eta)]
+        all_weights = np.exp(np.asarray(_core._latent_log_weights(prob, eta)))
         params = self.parameters
-        n_free_latent = int(params.loc[params["item"] == LATENT_ITEM, "free"].sum())
         rows = []
-        for j, (name, _) in enumerate(model.items):
-            o, e = _itemfit.collapse_cells(observed[j], expected[j] * n_s[:, None], min_cell)
-            n_free_item = int(params.loc[params["item"] == name, "free"].sum())
-            stat, df, rmsea, pval = _itemfit.s_x2(o, e, n_free_item, n_free_latent, y.shape[0])
-            rows.append({"item": name, "s_x2": stat, "df": df, "rmsea": rmsea, "p": pval})
+        for g, g_name in enumerate(group_names):
+            y_g = y[codes == g]
+            if y_g.shape[0] == 0:
+                continue
+            for j, (name, _) in enumerate(model.items):
+                if np.unique(y_g[:, j]).size != n_categories[j]:
+                    where = f" in group {g_name!r}" if model.is_multigroup else ""
+                    raise SpecificationError(
+                        f"Item {name!r} does not have every response category observed{where}; "
+                        "S-X2 needs all categories (as in mirt)."
+                    )
+            traces: list[np.ndarray] = [np.empty(0)] * len(model.items)
+            for fam, lp_np in zip(prob.families, log_probs, strict=True):
+                for pos, col in enumerate(np.asarray(fam.columns)):
+                    traces[int(col)] = lp_np[g, pos]  # (Q, K_j)
+            observed = _itemfit.observed_tables(y_g, n_categories)
+            expected = _itemfit.s_x2_expected_tables(traces, all_weights[g])
+            n_s = observed[0].sum(axis=1)
+            in_group = params["group"] == g_name
+            is_latent = params["item"] == LATENT_ITEM
+            n_free_latent = int(params.loc[in_group & is_latent, "free"].sum())
+            for j, (name, _) in enumerate(model.items):
+                o, e = _itemfit.collapse_cells(observed[j], expected[j] * n_s[:, None], min_cell)
+                n_free_item = int(params.loc[in_group & (params["item"] == name), "free"].sum())
+                stat, df, rmsea, pval = _itemfit.s_x2(
+                    o, e, n_free_item, n_free_latent, y_g.shape[0]
+                )
+                row = {"item": name, "s_x2": stat, "df": df, "rmsea": rmsea, "p": pval}
+                rows.append({"group": g_name, **row} if model.is_multigroup else row)
         return pd.DataFrame(rows)
 
     def m2(

@@ -123,7 +123,7 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 #### `FitResult.item_fit`
 
 ```text
-item_fit(data, *, min_cell=1.0, item_names=None) -> DataFrame
+item_fit(data, *, min_cell=1.0, group=None, item_names=None) -> DataFrame
 ```
 
 Orlando–Thissen の S-X2 項目適合度（[ガイド 5 節](guide.ja.md#項目適合度s-x2)）。各項目について、合計得点
@@ -136,12 +136,13 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 |---|---|
 | `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
 | `min_cell` | まとめる前のセルあたり最小期待度数（既定 `1.0`） |
+| `group` | 群ラベル（多母集団モデルでは必須。群ごとに S-X2 を計算する、DESIGN §15.45） |
 | `item_names` | `data` が配列のときの列名 |
 
 **戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
-`df <= 0` になる項目は `df = 0` で統計量は NaN。
+`df <= 0` になる項目は `df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
 
-**例外**: 多次元・多母集団・`EmpiricalHistogram`・`DavidianCurve` のモデル、欠測を含むデータ、観測されないカテゴリがある
+**例外**: 多次元・`EmpiricalHistogram`・`DavidianCurve` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
 項目、正でない `min_cell` の場合に `SpecificationError`。
 
 #### `FitResult.m2`
@@ -299,8 +300,9 @@ model.with_factors(factors, *, correlated=True) -> Model
 辞書。交差負荷を許し、各因子は 1 項目以上を持ち、すべてのモデル項目が 1 因子以上に負荷する必要がある。負荷しない因子の
 傾きは `0` に固定され、項目パラメタ名は `a1`…`aD`, `d`（または `d1`…）になる。潜在分布は多変量正規分布（平均 `0` 固定、
 分散 `1` 固定。全項目が `Rasch` / `PCM` の場合は分散も自由）で、`correlated=True` のとき既定で因子間相関を自由推定
-（mirt の `COV = F1*F2` 相当）、`correlated=False` で `0` に固定する。多次元モデルでの多母集団（`with_groups()`）と
-`with_latent()` は未対応（`SpecificationError`）。
+（mirt の `COV = F1*F2` 相当）、`correlated=False` で `0` に固定する。`with_groups()`（順序は問わない）と
+組み合わせると、各群の `Normal` がすべての因子に適用される（[ガイド 14 節](guide.ja.md#14-確認的多次元モデル)）。多次元モデルでの
+`with_latent()` と `EmpiricalHistogram` は未対応（`SpecificationError`）。
 
 #### `Model.with_latent`
 

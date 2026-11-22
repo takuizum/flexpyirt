@@ -274,7 +274,9 @@ np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_nump
 `item_fit(data)` computes Orlando and Thissen's S-X2 for every item: observed versus model-implied
 counts of each response category at each summed score, with sparse cells collapsed exactly as
 mirt's `itemfit()` does (`min_cell=1` by default). It needs complete data, every response category
-observed, and a single-group unidimensional model with a `Normal` latent distribution.
+observed, and a unidimensional model with `Normal` latent distributions. For a multiple-group
+model pass `group=`: S-X2 is computed within each group (as mirt does), with a leading `group`
+column.
 
 ```python
 fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
@@ -751,8 +753,30 @@ print(res_mirt.score(mirt_df.iloc[:3], method="EAP").round(3))  # theta_F1, thet
   slopes derived from factor-specific item–rest correlations.
 - **Scoring**: `"EAP"`, `"MAP"` (with the estimated multivariate normal as the prior), `"ML"`
   and `"WLE"` return `theta_<factor>` and `se_<factor>` per declared factor; ML gives $\pm\infty$
-  on a dimension whose estimate diverges. `"PV"` returns `pv<m>_<factor>` columns. Multiple-group
-  multidimensional models are not yet implemented and raise `SpecificationError`.
+  on a dimension whose estimate diverges. `"PV"` returns `pv<m>_<factor>` columns.
+- **Multiple groups**: combine `with_factors()` with `with_groups()` (in either order) and anchor
+  items. Each group's `Normal` applies to every factor (`Normal.free()` frees all of that group's
+  factor means and variances), and correlations follow `with_factors(correlated=...)` in every
+  group. Each free focal mean / variance needs anchors on that factor (`IdentificationError`
+  otherwise). `EmpiricalHistogram` is unidimensional only.
+
+```python
+mg_spec = (
+    Model.uniform(TwoPL(), items=mirt_items)
+    .with_factors({"F1": mirt_items[:6], "F2": mirt_items[5:]})
+    .with_groups(ref=Normal.standard(), focal=Normal.free())
+    .equal_across_groups(items=[mirt_items[0], mirt_items[1], mirt_items[7], mirt_items[8]])
+)
+mg_group = np.repeat(["ref", "focal"], len(mirt_df) // 2)
+res_mg = fit(
+    mg_spec,
+    mirt_df,
+    group=mg_group,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(21, bounds=(-6, 6)),
+)
+print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
+```
 
 ## 15. Scale linking
 

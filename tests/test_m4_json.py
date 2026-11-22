@@ -514,7 +514,7 @@ def test_malformed_format_and_schema_version(
         FitResult.from_json(json.dumps(no_fmt))
 
     # Unknown schema_version
-    for bad_ver in (0, 4, 99, "1", True):
+    for bad_ver in (0, 5, 99, "1", True):
         bad = _clone(sample_payload)
         bad["schema_version"] = bad_ver
         with pytest.raises(SpecificationError, match="schema_version"):
@@ -536,18 +536,18 @@ def test_malformed_registry_types(sample_payload: dict[str, Any]) -> None:
 
     # Invalid polytomous n_categories
     bad_ncat = _clone(sample_payload)
-    bad_ncat["model"]["items"][0]["model"] = {"type": "GRM", "n_cat": 1}
+    bad_ncat["model"]["items"][0]["model"] = {"type": "GRM", "n_categories": 1}
     with pytest.raises(SpecificationError, match="at least 2 categories"):
         FitResult.from_json(json.dumps(bad_ncat))
 
     bad_ncat_bool = _clone(sample_payload)
-    bad_ncat_bool["model"]["items"][0]["model"] = {"type": "GRM", "n_cat": True}
+    bad_ncat_bool["model"]["items"][0]["model"] = {"type": "GRM", "n_categories": True}
     with pytest.raises(SpecificationError, match="Expected an integer"):
         FitResult.from_json(json.dumps(bad_ncat_bool))
 
     # Extra key on simple item model
     extra_item_key = _clone(sample_payload)
-    extra_item_key["model"]["items"][0]["model"] = {"type": "2PL", "n_cat": 2}
+    extra_item_key["model"]["items"][0]["model"] = {"type": "2PL", "n_categories": 2}
     with pytest.raises(SpecificationError, match="Unexpected keys"):
         FitResult.from_json(json.dumps(extra_item_key))
 
@@ -886,8 +886,11 @@ def test_malformed_overflow_and_unbounded_ints(sample_payload: dict[str, Any]) -
     for model_type in ("GRM", "GPCM", "PCM"):
         for bad_n_categories in (10**9, 1025):
             bad_poly = _clone(sample_payload)
-            bad_poly["model"]["items"][0]["model"] = {"type": model_type, "n_cat": bad_n_categories}
-            with pytest.raises(SpecificationError, match="n_cat must be <="):
+            bad_poly["model"]["items"][0]["model"] = {
+                "type": model_type,
+                "n_categories": bad_n_categories,
+            }
+            with pytest.raises(SpecificationError, match="n_categories must be <="):
                 FitResult.from_json(json.dumps(bad_poly))
 
     # Huge quadrature n_points must fail at load time (not MemoryError in score())
