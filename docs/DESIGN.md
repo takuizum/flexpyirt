@@ -795,9 +795,9 @@ data-independent shapes (§15.21).
     theta[:, 0]` for $D=1$ and `theta @ params[:D]` for $D \in \{2, 3\}$), so all seven item models
     (`TwoPL`, `Rasch`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`) work in 2D and 3D automatically.
     For $D > 1$, internal item parameters are named `a1..aD` and `d` (`d1..d{K-1}` for GRM / GPCM /
-    PCM), matching mirt, and unidimensional display thresholds (`b` / `bk`) are omitted. Multiple
-    groups for $D > 1$, `with_latent()` for $D > 1$, and `fix_from(..., parameterization="irt")`
-    for $D > 1$ raise `SpecificationError`.
+    PCM), matching mirt, and unidimensional display thresholds (`b` / `bk`) are omitted. 
+    `with_latent()` for $D > 1$ and `fix_from(..., parameterization="irt")` for $D > 1$ raise
+    `SpecificationError` (multiple groups for $D > 1$: §15.43).
 30. **Product quadrature and exact MVN latent M-step (M4, §4.4, §4.9)**:
     `Quadrature.default(n_factors)` selects mirt's `select_quadpts` defaults (`61` for 1D, `31` per
     dimension for 2D → $961$ nodes, `15` per dimension for 3D → $3{,}375$ nodes on $[-6, 6]$), and
@@ -985,6 +985,18 @@ data-independent shapes (§15.21).
     bound memory. Columns are `pv<m>_<factor>`. Validated statistically: with 4,000 draws the
     sample mean, SD and correlations match the grid posterior within Monte Carlo error (mirt's
     default plausible values use a normal approximation, so they are not a reference).
+43. **Multiple-group multidimensional models (M4, §4.5, §4.9)**: `with_factors()` and
+    `with_groups()` combine in either order (Normal latents only; `EmpiricalHistogram` stays
+    unidimensional). Each group's `Normal` applies to every factor: its `mean` / `var` and
+    `free_mean` / `free_var` set `mean_1..D` / `var_1..D` of that group, and `cor_ij` follow
+    `with_factors(correlated=...)` in every group, as in mirt's `multipleGroup(...,
+    invariance = c(anchors, "free_means", "free_var"))` with `COV = F1*F2`. Identification runs
+    the rotational checks of §15.31 within each group, and scale/location linking per factor across
+    groups: groups are connected by shared free `a{m}` (scale) or shared free intercepts of items
+    loading on factor $m$ (location), and every free `var_m` / `mean_m` must be connected to a fixed
+    nonzero `a{m}`, a fixed intercept, or a group with that parameter fixed (`IdentificationError`
+    naming the group and factor otherwise). The JSON schema already stores groups and factors
+    (§15.33); a model with factors may carry `Normal` groups.
 44. **Gauss–Hermite quadrature (`Quadrature.gauss_hermite(n)`, §4.9)**: fixed nodes
     $\theta_q=\sqrt2x_q$ from the Gauss–Hermite rule $(x_q, w_q)$ for $e^{-x^2}$ (Golub & Welsch,
     1969; `numpy.polynomial.hermite.hermgauss`), and a fixed per-node log base weight

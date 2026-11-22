@@ -300,8 +300,9 @@ model.with_factors(factors, *, correlated=True) -> Model
 辞書。交差負荷を許し、各因子は 1 項目以上を持ち、すべてのモデル項目が 1 因子以上に負荷する必要がある。負荷しない因子の
 傾きは `0` に固定され、項目パラメタ名は `a1`…`aD`, `d`（または `d1`…）になる。潜在分布は多変量正規分布（平均 `0` 固定、
 分散 `1` 固定。全項目が `Rasch` / `PCM` の場合は分散も自由）で、`correlated=True` のとき既定で因子間相関を自由推定
-（mirt の `COV = F1*F2` 相当）、`correlated=False` で `0` に固定する。多次元モデルでの多母集団（`with_groups()`）と
-`with_latent()` は未対応（`SpecificationError`）。
+（mirt の `COV = F1*F2` 相当）、`correlated=False` で `0` に固定する。`with_groups()`（順序は問わない）と
+組み合わせると、各群の `Normal` がすべての因子に適用される（[ガイド 14 節](guide.ja.md#14-確認的多次元モデル)）。多次元モデルでの
+`with_latent()` と `EmpiricalHistogram` は未対応（`SpecificationError`）。
 
 #### `Model.with_latent`
 

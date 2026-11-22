@@ -702,7 +702,28 @@ print(res_mirt.score(mirt_df.iloc[:3], method="EAP").round(3))  # theta_F1, thet
   計算する厳密に正の初期傾きによって正の方向へ揃える。
 - **スコアリング**: `"EAP"`・`"MAP"`（推定した多変量正規を事前分布とする）・`"ML"`・`"WLE"` が宣言した因子ごとの
   `theta_<factor>`, `se_<factor>` 列を返す。ML は推定値が発散する次元で $\pm\infty$ を返す。`"PV"` は `pv<m>_<factor>` 列を返す。
-  多次元の多母集団モデルは未対応で `SpecificationError` を送出する。
+- **多母集団**: `with_factors()` と `with_groups()`（順序は問わない）とアンカー項目を組み合わせる。各群の `Normal` は
+  すべての因子に適用され（`Normal.free()` はその群のすべての因子の平均と分散を自由にする）、相関はすべての群で
+  `with_factors(correlated=...)` に従う。焦点群の自由な平均・分散には、その因子のアンカー項目が必要
+  （なければ `IdentificationError`）。`EmpiricalHistogram` は 1 次元のみ。
+
+```python
+mg_spec = (
+    Model.uniform(TwoPL(), items=mirt_items)
+    .with_factors({"F1": mirt_items[:6], "F2": mirt_items[5:]})
+    .with_groups(ref=Normal.standard(), focal=Normal.free())
+    .equal_across_groups(items=[mirt_items[0], mirt_items[1], mirt_items[7], mirt_items[8]])
+)
+mg_group = np.repeat(["ref", "focal"], len(mirt_df) // 2)
+res_mg = fit(
+    mg_spec,
+    mirt_df,
+    group=mg_group,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(21, lim=(-6, 6)),
+)
+print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
+```
 
 ## 15. 尺度リンキング
 

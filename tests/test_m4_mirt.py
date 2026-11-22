@@ -18,6 +18,7 @@ from flexpyirt import (
     GPCM,
     GRM,
     PCM,
+    EmpiricalHistogram,
     FourPL,
     LogNormal,
     Model,
@@ -554,12 +555,11 @@ def test_mirt_specification_errors() -> None:
         base.with_factors({"F1": ["q1", "nope"], "F2": items[1:]})
 
     m2 = base.with_factors({"F1": items[:3], "F2": items[3:]})
-    with pytest.raises(SpecificationError, match="Multiple-group"):
-        m2.with_groups(ref=Normal.standard(), focal=Normal.free())
-    with pytest.raises(SpecificationError, match="Multiple-group"):
-        base.with_groups(ref=Normal.standard(), focal=Normal.free()).with_factors(
-            {"F1": items[:3], "F2": items[3:]}
-        )
+    eh = EmpiricalHistogram()
+    with pytest.raises(SpecificationError, match="unidimensional"):
+        m2.with_groups(ref=eh, focal=eh)
+    with pytest.raises(SpecificationError, match="unidimensional"):
+        base.with_groups(ref=eh, focal=eh).with_factors({"F1": items[:3], "F2": items[3:]})
     with pytest.raises(SpecificationError, match="unidimensional"):
         m2.with_latent(Normal.standard())
     with pytest.raises(SpecificationError, match="unidimensional"):
