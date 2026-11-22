@@ -21,9 +21,9 @@ from flexpyirt import (
     GPCM,
     GRM,
     PCM,
-    Beta,
+    BetaPrior,
     FourPL,
-    LogNormal,
+    LogNormalPrior,
     Model,
     Normal,
     NormalPrior,
@@ -204,10 +204,10 @@ def test_oakes_matches_reference_mixed_multigroup_missing_priors_away_from_mle()
         )
         .with_groups(ref=Normal.standard(), focal=Normal.free())
         .equal_across_groups(items=["m_2pl", "m_grm", "m_gpcm"])
-        .prior(param="a", dist=LogNormal(0.2, 0.3), items=["m_2pl", "m_3pl", "m_4pl", "m_grm"])
+        .prior(param="a", dist=LogNormalPrior(0.2, 0.3), items=["m_2pl", "m_3pl", "m_4pl", "m_grm"])
         .prior(param="d", dist=NormalPrior(0.0, 2.0), items=["m_2pl", "m_rasch", "m_3pl"])
-        .prior(param="g", dist=Beta(4.0, 16.0), items=["m_3pl", "m_4pl"])
-        .prior(param="u", dist=Beta(18.0, 2.0), items=["m_4pl"])
+        .prior(param="g", dist=BetaPrior(4.0, 16.0), items=["m_3pl", "m_4pl"])
+        .prior(param="u", dist=BetaPrior(18.0, 2.0), items=["m_4pl"])
     )
     prob, eta = _compile_case(spec, df, group=grp)
     _assert_matches_reference(prob, eta)

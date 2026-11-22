@@ -31,17 +31,17 @@ res.score(df, method="EAP")  # DataFrame: theta, se
 ## 2. 混合形式 + 事前分布（MAP）
 
 ```python
-from flexpyirt import Model, ThreePL, GRM, LogNormal, Beta, fit
+from flexpyirt import Model, ThreePL, GRM, LogNormalPrior, BetaPrior, fit
 
 spec = (
     Model.from_items(
         {
             **{f"mc{i:02d}": ThreePL() for i in range(1, 31)},
-            **{f"cr{i}": GRM(n_cat=4) for i in range(1, 6)},
+            **{f"cr{i}": GRM(n_categories=4) for i in range(1, 6)},
         }
     )
-    .prior(param="a", dist=LogNormal(0.0, 0.5))
-    .prior(param="g", dist=Beta(5, 17), items=lambda name: name.startswith("mc"))
+    .prior(param="a", dist=LogNormalPrior(0.0, 0.5))
+    .prior(param="g", dist=BetaPrior(5, 17), items=lambda name: name.startswith("mc"))
 )
 res = fit(spec, df)
 res.log_posterior, res.loglik
@@ -100,7 +100,7 @@ res = fit(
     spec,
     df,
     method=BAEM(tol=1e-4, max_iter=2000, squarem=True, m_step_newton_steps=5),
-    quadrature=Quadrature.equispaced(61, lim=(-6, 6)),  # または Quadrature.gauss_hermite(41)
+    quadrature=Quadrature.equispaced(61, bounds=(-6, 6)),  # または Quadrature.gauss_hermite(41)
     se="oakes",  # "oakes" | "hessian" | "crossprod" | "sandwich" | None
     verbose=False,
 )
@@ -113,26 +113,26 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 - `fit(spec, data, *, group=None, table=None, item_names=None, method=None, quadrature=None, se="oakes")`。
   `se` は `"oakes" | "hessian" | None`。`group=` は M2 まで `NotImplementedError`。
 - `BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3)`（`squarem` は M3）。
-  `Quadrature.equispaced(n_points=61, lim=(-6, 6))`。Gauss–Hermite は `Quadrature.gauss_hermite(n)`（DESIGN §15.44）。
+  `Quadrature.equispaced(n_points=61, bounds=(-6, 6))`。Gauss–Hermite は `Quadrature.gauss_hermite(n)`（DESIGN §15.44）。
 - `Model.uniform`, `Model.from_items`, `.fix(item=..., a=..., d=...)`, `.with_latent(...)`, `.parameter_table(data)`。
 - `FitResult`: `items`, `latent`, `parameters`（表 + `estimate`, `se`）, `vcov`, `loglik`, `aic`, `bic`,
   `converged`, `n_iter`, `history`, `score(data, method="EAP")`。
 - 入力は 0/1 の pandas / polars DataFrame または numpy 配列（`item_names=`）。欠測は M2 まで `SpecificationError`。
 
 ## 6.2 M2 で追加された範囲
-- 項目モデル `GRM(n_cat=K)`（カテゴリ $0..K-1$）。欠測（NaN, MAR）を受け付ける。
+- 項目モデル `GRM(n_categories=K)`（カテゴリ $0..K-1$）。欠測（NaN, MAR）を受け付ける。
 - 多母集団: `Model.with_groups(ref=Normal.standard(), focal=Normal.free())`（最初が参照群）、
   `.equal_across_groups(items=..., params=None)`、`fit(..., group=labels)`。`FitResult.items` は `group` 列つき、
   `score(data, group=labels)`。
-- FIPC: `Model.fix_from(bank, items=None, parameterization="slope-intercept" | "irt")` + `.with_latent(Normal.free())`。
+- FIPC: `Model.fix_from(bank, items=None, parameterization="slope_intercept" | "irt")` + `.with_latent(Normal.free())`。
 - 識別不能な仕様（アンカーなしで焦点群自由、固定項目なしで平均自由など）は fit 前に `IdentificationError`。
 
 ## 6.3 M3 で追加された範囲（進行中）
-- 項目モデル: `ThreePL`, `FourPL`, `GPCM(n_cat=K)`, `PCM(n_cat=K)`（境界解で `HeywoodWarning`）。
+- 項目モデル: `ThreePL`, `FourPL`, `GPCM(n_categories=K)`, `PCM(n_categories=K)`（境界解で `HeywoodWarning`）。
 - SQUAREM 加速: `BAEM(squarem=True)`（スキーム S3 と単調性・実行可能性の安全装置。
   `FitResult.n_em_evaluations`, `FitResult.n_safeguards`）。
-- 事前分布と MAP 推定: `log_pdf` を持つ `NormalPrior(mean, sd)`, `LogNormal(meanlog, sdlog)`,
-  `Beta(a, b)` を `Model.prior(*, param, dist, items=None)` または ParameterTable の `prior` 列で指定。
+- 事前分布と MAP 推定: `log_pdf` を持つ `NormalPrior(mean, sd)`, `LogNormalPrior(mean_log, sd_log)`,
+  `BetaPrior(a, b)` を `Model.prior(*, param, dist, items=None)` または ParameterTable の `prior` 列で指定。
   `FitResult.log_posterior`（事前分布なしでは `loglik` と同値）、`history["log_posterior"]`、
   事前分布ありの `aic`/`bic` での `FlexpyirtWarning`、`se="oakes"`・`se="hessian"` 両方への事後情報行列。
   潜在分布パラメタへの事前分布は `SpecificationError`。
@@ -144,7 +144,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | `Model` | frozen dataclass | 仕様全体。`uniform`, `from_items` で生成、`.fix`, `.fix_from`, `.prior`, `.equal_across_groups`, `.equal_across_items`, `.with_groups`, `.with_latent`, `.parameter_table` |
 | `Rasch`, `TwoPL`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`, `Nominal` | frozen dataclass（`ItemModel` を満たす） | 項目モデル |
 | `Normal`, `EmpiricalHistogram`, `DavidianCurve` | frozen dataclass（`LatentDist` を満たす） | 潜在分布。`Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)` |
-| `LogNormal`, `NormalPrior`, `Beta`, `TruncNormal` | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
+| `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
 | `BAEM`, `Quadrature` | frozen dataclass | 推定設定 |
 | `fit` | 関数 | 推定。`FitResult` を返す |
 | `FitResult` | クラス | 結果（`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `dif`, `m2`, `to_json` / `from_json`） |

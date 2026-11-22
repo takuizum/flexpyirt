@@ -88,6 +88,32 @@ Rscript benchmarks/run_mirt.R
 uv run python benchmarks/report.py
 ```
 
+## Naming
+
+Names follow PEP 8 and read as Python, not as R (DESIGN.md §15.46). `ruff` checks the `N` rules.
+
+- `snake_case` for functions, methods, arguments and variables; `CapWords` for classes;
+  `UPPER_SNAKE_CASE` for module constants.
+- Do not copy R/mirt argument names. Use the Python spelling and mention mirt's name in the
+  docstring: `n_categories` (not `n_cat`), `min_cell` (mirt `mincell`), `mean_log`/`sd_log` (R
+  `meanlog`/`sdlog`), `bounds=(lower, upper)` (mirt `theta_lim`).
+- Spell public names out (`is_empirical_histogram`, not `is_eh`). Well-known abbreviations are
+  fine: model names (`TwoPL`, `GRM`, `GPCM`), the `n_` prefix for counts, and `se`, `vcov`,
+  `loglik`, `theta`, `eta`. Avoid abbreviations that collide with common aliases, such as `pd`
+  (pandas) or `df` (degrees of freedom vs DataFrame).
+- Use one name for one concept across the whole API (`n_points`, `n_factors`, `n_categories`).
+  Members of a family share a suffix (`NormalPrior`, `LogNormalPrior`, `BetaPrior`).
+- `Literal` string options are lowercase `snake_case` (`"slope_intercept"`, `"stocking_lord"`).
+  Established acronyms stay upper case (`"EAP"`, `"MAP"`, `"BH"`).
+- Mathematical notation is allowed where it mirrors the formulas in DESIGN.md: upper-case symbols
+  inside jitted kernels (`G`, `Q`, `D`, `K_f`; ruff `N803`/`N806` are ignored for this) and
+  standard constants such as `LinkResult.A`/`B`.
+- Name local closures by their role (`objective`, `backtrack_body`, `interp_weights`), not `obj`
+  or `tmp`. Line-by-line ports of mirt code (e.g. `_itemfit.collapse_cells`) may keep mirt's local
+  names so they can be compared; say so in a comment.
+- Renaming anything that is stored in `FitResult` JSON needs a new `schema_version`, and older
+  files must still load (rename the old keys on read).
+
 ## Documentation
 
 Every document exists in English (`*.md`) and Japanese (`*.ja.md`) with the same content. Update

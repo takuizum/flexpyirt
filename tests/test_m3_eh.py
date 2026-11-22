@@ -17,11 +17,11 @@ from flexpyirt import (
     GPCM,
     GRM,
     PCM,
-    Beta,
+    BetaPrior,
     EmpiricalHistogram,
     FitResult,
     FourPL,
-    LogNormal,
+    LogNormalPrior,
     Model,
     Normal,
     Quadrature,
@@ -87,7 +87,7 @@ def test_eh_min_weight_exceeds_grid_raises() -> None:
     df, _, _ = _skewed_2pl_data(n=300, j=5)
     spec = Model.uniform(TwoPL(), items=df.columns).with_latent(EmpiricalHistogram(min_weight=0.1))
     with pytest.raises(SpecificationError, match="min_weight"):
-        fit(spec, df, quadrature=Quadrature.equispaced(11, lim=(-4, 4)), se=None)
+        fit(spec, df, quadrature=Quadrature.equispaced(11, bounds=(-4, 4)), se=None)
 
 
 def test_mixing_eh_and_normal_across_groups_raises() -> None:
@@ -248,7 +248,7 @@ def test_reference_mean_zero_var_one_after_every_iteration() -> None:
     """Reference group EH satisfies mean=0, var=1 after EVERY EM iteration."""
     df, _, _ = _skewed_2pl_data(seed=101, n=800, j=8)
     spec = Model.uniform(TwoPL(), items=df.columns).with_latent(EmpiricalHistogram())
-    quad = Quadrature.equispaced(61, lim=(-6, 6))
+    quad = Quadrature.equispaced(61, bounds=(-6, 6))
     prep = prepare(spec, df, group=None, item_names=None, table=None)
     comp = compile_problem(spec, prep.y, prep.group, prep.table, quad)
     assert comp.problem.latent.standardize_mean is True
@@ -288,7 +288,7 @@ def test_fipc_does_not_standardize_and_recovers_shifted_moments() -> None:
     prep = prepare(spec, df, group=None, item_names=None, table=None)
     assert eh_standardization_flags(prep.table, spec) == (False, False)
 
-    quad = Quadrature.equispaced(61, lim=(-6, 6))
+    quad = Quadrature.equispaced(61, bounds=(-6, 6))
     res = fit(spec, df, method=BAEM(tol=1e-4, max_iter=2000), quadrature=quad)
     assert res.converged
     # n_params: 5 free items * 2 + (Q - 1) = 10 + 60 = 70
@@ -312,7 +312,7 @@ def test_rasch_and_pcm_with_eh_standardize_mean_only() -> None:
     prep = prepare(spec, df, group=None, item_names=None, table=None)
     assert eh_standardization_flags(prep.table, spec) == (True, False)
 
-    quad = Quadrature.equispaced(41, lim=(-6, 6))
+    quad = Quadrature.equispaced(41, bounds=(-6, 6))
     res = fit(spec, df, method=BAEM(tol=1e-4, max_iter=2000), quadrature=quad)
     assert res.converged
     # n_params: J free intercepts + (Q - 2)
@@ -330,7 +330,7 @@ def test_eh_monotone_and_squarem_matches_plain_em() -> None:
     it is run for a fixed budget and must stay below (and close to) the SQUAREM optimum.
     """
     df, _, _ = _skewed_2pl_data(seed=404, n=1200, j=10)
-    quad = Quadrature.equispaced(9, lim=(-3.5, 3.5))
+    quad = Quadrature.equispaced(9, bounds=(-3.5, 3.5))
     spec = Model.uniform(TwoPL(), items=df.columns).with_latent(EmpiricalHistogram(min_weight=1e-6))
 
     with warnings.catch_warnings():
@@ -358,7 +358,7 @@ def test_eh_monotone_and_squarem_matches_plain_em() -> None:
 def test_eh_n_params_aic_bic_and_oakes_equals_hessian() -> None:
     """Verify n_params, AIC/BIC, and exact Oakes == Hessian conditional SEs on 1G and 2G EH."""
     df, _, _ = _skewed_2pl_data(seed=505, n=1000, j=8)
-    quad = Quadrature.equispaced(31, lim=(-5, 5))
+    quad = Quadrature.equispaced(31, bounds=(-5, 5))
     spec1 = Model.uniform(TwoPL(), items=df.columns).with_latent(EmpiricalHistogram())
     res1_o = fit(spec1, df, method=BAEM(tol=1e-4), quadrature=quad, se="oakes")
     res1_h = fit(spec1, df, method=BAEM(tol=1e-4), quadrature=quad, se="hessian")
@@ -426,11 +426,11 @@ def test_eh_works_with_all_families_missing_and_priors() -> None:
         .with_latent(EmpiricalHistogram())
         .prior(
             param="a",
-            dist=LogNormal(0.2, 0.4),
+            dist=LogNormalPrior(0.2, 0.4),
             items=["i_2pl", "i_3pl", "i_4pl", "i_grm", "i_gpcm"],
         )
-        .prior(param="g", dist=Beta(5.0, 17.0), items=["i_3pl", "i_4pl"])
-        .prior(param="u", dist=Beta(17.0, 3.0), items=["i_4pl"])
+        .prior(param="g", dist=BetaPrior(5.0, 17.0), items=["i_3pl", "i_4pl"])
+        .prior(param="u", dist=BetaPrior(17.0, 3.0), items=["i_4pl"])
     )
     with warnings.catch_warnings():
         warnings.simplefilter("error", HeywoodWarning)
@@ -438,7 +438,7 @@ def test_eh_works_with_all_families_missing_and_priors() -> None:
             spec,
             df,
             method=BAEM(tol=1e-4, max_iter=1500),
-            quadrature=Quadrature.equispaced(25, lim=(-5, 5)),
+            quadrature=Quadrature.equispaced(25, bounds=(-5, 5)),
             se="oakes",
         )
     assert res.converged
@@ -456,7 +456,7 @@ def test_eh_works_with_all_families_missing_and_priors() -> None:
 def test_eh_scoring_methods() -> None:
     """EAP, ML, WLE, PV work with EH (PV matches EAP); MAP raises SpecificationError."""
     df, _, _ = _skewed_2pl_data(seed=707, n=1000, j=8)
-    quad = Quadrature.equispaced(41, lim=(-5, 5))
+    quad = Quadrature.equispaced(41, bounds=(-5, 5))
     spec = Model.uniform(TwoPL(), items=df.columns).with_latent(EmpiricalHistogram())
     res = fit(spec, df, method=BAEM(tol=1e-4), quadrature=quad, se=None)
 
@@ -488,7 +488,7 @@ def test_eh_summary_html_and_json_roundtrip(tmp_path: Path) -> None:
     """summary(), _repr_html_(), and strict JSON round-trip preserve EH results identically."""
     df, _, _ = _skewed_2pl_data(seed=808, n=800, j=6)
     grp = np.repeat(["ref", "focal"], 400)
-    quad = Quadrature.equispaced(21, lim=(-4, 4))
+    quad = Quadrature.equispaced(21, bounds=(-4, 4))
     spec = (
         Model.uniform(TwoPL(), items=df.columns)
         .with_groups(
@@ -589,4 +589,4 @@ def test_eh_variance_only_standardization_is_rejected() -> None:
         .with_latent(EmpiricalHistogram())
     )
     with pytest.raises(IdentificationError, match="variance-only"):
-        fit(spec, df, quadrature=Quadrature.equispaced(21, lim=(-5, 5)))
+        fit(spec, df, quadrature=Quadrature.equispaced(21, bounds=(-5, 5)))

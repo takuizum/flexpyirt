@@ -24,7 +24,7 @@
 
 ## M3 EH・MAP・3PL/4PL・GPCM・SQUAREM
 - [x] EmpiricalHistogram（`EmpiricalHistogram`、モーメント制約付き M-step による参照群の標準化、平方根尺度の SQUAREM。V6 で照合済み）。
-- [x] 事前分布と MAP（`NormalPrior`, `LogNormal`, `Beta`, `Model.prior()`, `FitResult.log_posterior`、V7 で照合済み）。
+- [x] 事前分布と MAP（`NormalPrior`, `LogNormalPrior`, `BetaPrior`, `Model.prior()`, `FitResult.log_posterior`、V7 で照合済み）。
 - [x] 3PL / 4PL（`ThreePL`, `FourPL`, `HeywoodWarning`、V11 で照合済み）。
 - [x] GPCM / PCM（`GPCM`, `PCM`、V8 で照合済み）。
 - [x] SQUAREM（`BAEM(squarem=True)`、スキーム S3 と単調性・実行可能性の安全装置。全 mirt 照合スイートが SQUAREM あり・なしで通過）。
@@ -47,4 +47,4 @@
 - [x] 項目適合度: S-X2（`FitResult.item_fit()`、1 次元、多母集団は群ごと。V15 で照合済み）。
 - [x] DIF: 多群の尤度比検定（`FitResult.dif()`、`add` / `drop` の 2 方式、Holm / BH 補正。V17 で照合済み）。
 - [x] M2 限定情報の適合度（`FitResult.m2()`、単一群 1 次元の $M_2$ / $M_2^*$、RMSEA と信頼区間、SRMSR、2 値の TLI / CFI。V18 で照合済み）。
-- [x] 名義反応モデル（`Nominal(n_cat)`、mirt の `itemtype = "nominal"` と同じ Thissen, Cai & Bock (2010) のパラメタ化。V23 で 1 因子・2 因子を照合済み、3 因子は単体テストのみ）。
+- [x] 名義反応モデル（`Nominal(n_categories)`、mirt の `itemtype = "nominal"` と同じ Thissen, Cai & Bock (2010) のパラメタ化。V23 で 1 因子・2 因子を照合済み、3 因子は単体テストのみ）。

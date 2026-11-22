@@ -124,7 +124,7 @@ class PriorBlock:
     Attributes
     ----------
     kind : (n_free,) int32
-        ``0`` none, ``1`` NormalPrior, ``2`` LogNormal, ``3`` Beta.
+        ``0`` none, ``1`` NormalPrior, ``2`` LogNormalPrior, ``3`` BetaPrior.
     param1, param2 : (n_free,) float64
         Distribution parameters (unused entries hold ``0.0`` and ``1.0``).
     """
@@ -246,7 +246,7 @@ def _item_log_probs(prob: CompiledProblem, eta: Array) -> list[Array]:
 def _one_hots(prob: CompiledProblem) -> list[Array]:
     """Per family, ``(P, J_f, K_f)`` one-hot responses; a missing response is an all-zero row."""
     return [
-        jax.nn.one_hot(prob.y[:, fam.columns], fam.kernel.n_cat, dtype=prob.nodes.dtype)
+        jax.nn.one_hot(prob.y[:, fam.columns], fam.kernel.n_categories, dtype=prob.nodes.dtype)
         for fam in prob.families
     ]
 
@@ -444,7 +444,7 @@ def _m_step_coupled(
         p1 = prob.priors.param1[fids]
         p2 = prob.priors.param2[fids]
 
-        def q_comp(
+        def coupled_q(
             v: Array, blk: CoupledBlock = block, sk: Array = kind, sp1: Array = p1, sp2: Array = p2
         ) -> Array:
             total = jnp.sum(eval_log_prior(v, sk, sp1, sp2))
@@ -461,7 +461,7 @@ def _m_step_coupled(
             return total
 
         mask = jnp.ones(fids.shape, dtype=jnp.bool_)
-        u_new = newton_ascent(q_comp, u0, mask, block.slot_lower, block.slot_upper, n_steps)
+        u_new = newton_ascent(coupled_q, u0, mask, block.slot_lower, block.slot_upper, n_steps)
         new_eta = new_eta.at[fids].set(u_new)
     return new_eta
 
@@ -813,11 +813,13 @@ def _squarem_eh(
             lp2 = _eval_lp_pair(eta2, w2)
             lp_ref = jnp.maximum(lp2, lp0)
 
-            def bt_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
+            def backtrack_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
                 k, _, ok, _ = bt
                 return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
 
-            def bt_body(bt: tuple[Array, Array, Array, Array]) -> tuple[Array, Array, Array, Array]:
+            def backtrack_body(
+                bt: tuple[Array, Array, Array, Array],
+            ) -> tuple[Array, Array, Array, Array]:
                 k, delta, _, _ = bt
                 cand = v2 - 2.0 * delta * s + (delta * delta) * v
                 ok = _is_acceptable(cand, lp_ref)
@@ -826,7 +828,7 @@ def _squarem_eh(
                 return next_k, next_delta, ok, cand
 
             init_bt = (zero, alpha + 1.0, jnp.asarray(False), v2)
-            k_out, _, ok, cand = jax.lax.while_loop(bt_cond, bt_body, init_bt)
+            k_out, _, ok, cand = jax.lax.while_loop(backtrack_cond, backtrack_body, init_bt)
             fired = k_out > zero
             v_p = jnp.where(ok, cand, v2)
             return v_p, ok, fired
@@ -980,11 +982,13 @@ def squarem(
             lp2 = log_posterior(prob, theta2)
             lp_ref = jnp.maximum(lp2, lp0)
 
-            def bt_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
+            def backtrack_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
                 k, _, ok, _ = bt
                 return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
 
-            def bt_body(bt: tuple[Array, Array, Array, Array]) -> tuple[Array, Array, Array, Array]:
+            def backtrack_body(
+                bt: tuple[Array, Array, Array, Array],
+            ) -> tuple[Array, Array, Array, Array]:
                 k, delta, _, _ = bt
                 cand = theta2 - 2.0 * delta * s + (delta * delta) * v
                 ok = _is_acceptable(cand, lp_ref)
@@ -993,7 +997,7 @@ def squarem(
                 return next_k, next_delta, ok, cand
 
             init_bt = (zero, alpha + 1.0, jnp.asarray(False), theta2)
-            k_out, _, ok, cand = jax.lax.while_loop(bt_cond, bt_body, init_bt)
+            k_out, _, ok, cand = jax.lax.while_loop(backtrack_cond, backtrack_body, init_bt)
             fired = k_out > zero
             theta_p = jnp.where(ok, cand, theta2)
             return theta_p, ok, fired
@@ -1188,11 +1192,11 @@ def _oakes_cross_hessian(
         fixed = jnp.swapaxes(fam.fixed_values, 0, 1)
 
         def item_jac(loc: Array, fix: Array, u: Array, k: ItemKernel = fam.kernel) -> Array:
-            def lp_u(v: Array) -> Array:
+            def log_prob_of_slots(v: Array) -> Array:
                 xi = _local_to_xi(v, loc, fix)
                 return jax.vmap(lambda p: k.log_prob(prob.nodes, p))(xi)
 
-            out: Array = jax.jacfwd(lp_u)(u)
+            out: Array = jax.jacfwd(log_prob_of_slots)(u)
             return out
 
         d_lp = jnp.transpose(jax.vmap(item_jac)(local, fixed, u0), (1, 0, 3, 2, 4))  # (G,J,K,Q,S)
@@ -1200,7 +1204,7 @@ def _oakes_cross_hessian(
         r_w = jnp.where(r_tot > 0, r / jnp.where(r_tot > 0, r_tot, 1.0), q_w_g[:, None, None, :])
         d_lp = d_lp - jnp.sum(d_lp * r_w[..., None], axis=3, keepdims=True)
         fam_d.append((fam, d_lp))
-        D += fam.columns.shape[0] * fam.kernel.n_cat
+        D += fam.columns.shape[0] * fam.kernel.n_categories
 
     lat_block = prob.latent
     if lat_block.is_eh:
@@ -1266,7 +1270,7 @@ def _oakes_cross_hessian(
                 x_parts = [jnp.ones((B, 1), dtype=eta.dtype)]
                 s_bar = jnp.zeros((B, n_free), dtype=eta.dtype)
                 for (fam, _), fids, d_flat in zip(fam_d, fam_fids, d_flats_g, strict=True):
-                    K_f = fam.kernel.n_cat
+                    K_f = fam.kernel.n_categories
                     J_f = fam.columns.shape[0]
                     S_f = fam.slot_free_index.shape[1]
                     y_f = y_c[:, fam.columns]
@@ -1294,7 +1298,7 @@ def _oakes_cross_hessian(
         )
         (c_q, t2_g), _ = jax.lax.scan(scan_body, init_acc, (y_chunks, g_chunks, c_chunks, h_chunks))
 
-        def t1_step(
+        def accumulate_t1(
             t1_acc: Array,
             q_idx: Array,
             g_idx: int = g,
@@ -1307,7 +1311,7 @@ def _oakes_cross_hessian(
             col = 1
             for (fam, d_lp), fids in zip(fam_d, fam_fids, strict=True):
                 J_f = fam.columns.shape[0]
-                K_f = fam.kernel.n_cat
+                K_f = fam.kernel.n_categories
                 n_cols = J_f * K_f
                 d_idx = (col + jnp.arange(n_cols)).reshape(J_f, K_f)
                 l_q = l_q.at[d_idx[:, :, None], fids[:, None, :]].add(
@@ -1316,7 +1320,9 @@ def _oakes_cross_hessian(
                 col += n_cols
             return t1_acc + l_q.T @ (c_mat[q_idx] @ l_q), None
 
-        t1_g, _ = jax.lax.scan(t1_step, jnp.zeros((n_free, n_free), dtype=eta.dtype), jnp.arange(Q))
+        t1_g, _ = jax.lax.scan(
+            accumulate_t1, jnp.zeros((n_free, n_free), dtype=eta.dtype), jnp.arange(Q)
+        )
         h_cross = h_cross + (t1_g - t2_g)
 
     return h_cross

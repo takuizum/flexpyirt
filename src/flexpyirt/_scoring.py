@@ -128,18 +128,18 @@ def _pattern_flags(
         # Items with a == 0 carry zero information about theta and are treated like missing.
         a = xi[g_p, :, 0]
         obs = (y_f >= 0) & (a != 0.0)
-        if isinstance(fam.kernel, NominalKernel) and fam.kernel.n_cat > 2:
+        if isinstance(fam.kernel, NominalKernel) and fam.kernel.n_categories > 2:
             # D = 1 only: on this branch ML / WLE scoring is unidimensional (FitResult.score), so
             # the slope is the single parameter at index 0 and ak1..ak{K-2} follow it. A
             # multidimensional ML / WLE path must not reuse this slicing (slopes a1..aD come
             # first, and extremes then depend on the direction in theta-space).
-            n_ak = fam.kernel.n_cat - 2
+            n_ak = fam.kernel.n_categories - 2
             n_j = xi.shape[1]
             ak = jnp.concatenate(
                 [
                     jnp.zeros((n_j, 1), dtype=xi.dtype),
                     xi[g_p, :, 1 : 1 + n_ak],
-                    jnp.full((n_j, 1), float(fam.kernel.n_cat - 1), dtype=xi.dtype),
+                    jnp.full((n_j, 1), float(fam.kernel.n_categories - 1), dtype=xi.dtype),
                 ],
                 axis=1,
             )
@@ -149,7 +149,7 @@ def _pattern_flags(
             is_low = obs & (s_obs == jnp.min(s, axis=1))
             is_high = obs & (s_obs == jnp.max(s, axis=1))
         else:
-            top = fam.kernel.n_cat - 1
+            top = fam.kernel.n_categories - 1
             low_cat = jnp.where(a > 0.0, 0, top)
             high_cat = jnp.where(a > 0.0, top, 0)
             is_low = obs & (y_f == low_cat)
@@ -263,7 +263,7 @@ def _newton_nd(f: Callable[[Array], Array], x0: Array, bound: float | None = Non
     grad_fn = jax.grad(f)
     hess_fn = jax.hessian(f)
 
-    def f_box(x: Array) -> Array:
+    def f_in_box(x: Array) -> Array:
         if bound is None:
             return f(x)
         inside = jnp.all(jnp.abs(x) < bound)
@@ -294,7 +294,7 @@ def _newton_nd(f: Callable[[Array], Array], x0: Array, bound: float | None = Non
         direction = direction * jnp.minimum(1.0, _MAX_STEP / jnp.where(norm > 0.0, norm, 1.0))
 
         cands = x[None, :] + steps[:, None] * direction[None, :]
-        vals = jax.vmap(f_box)(cands)
+        vals = jax.vmap(f_in_box)(cands)
         ok = jnp.isfinite(vals) & (vals >= fx)
         any_ok = jnp.any(ok)
         best = cands[jnp.argmax(ok)]
@@ -343,13 +343,13 @@ def _map_scores_multidim(prob: CompiledProblem, eta: Array) -> tuple[Array, Arra
         mu, cov = _mvn_mean_cov(lat[g_p], n_factors)
         prec = jnp.linalg.inv(cov)
 
-        def obj(t: Array) -> Array:
+        def objective(t: Array) -> Array:
             dev = t - mu
             quad: Array = dev @ prec @ dev
             return _pattern_loglik(t, y_p, g_p, prob.families, xi_list) - 0.5 * quad
 
-        theta_hat = _newton_nd(obj, t0)
-        h = jax.hessian(obj)(theta_hat)
+        theta_hat = _newton_nd(objective, t0)
+        h = jax.hessian(objective)(theta_hat)
         finite = jnp.all(jnp.isfinite(h))
         h_safe = jnp.where(finite, h, -jnp.eye(n_factors, dtype=h.dtype))
         neg_def = finite & (jnp.max(jnp.linalg.eigvalsh(h_safe)) < 0.0)
@@ -388,11 +388,11 @@ def map_scores(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
         mu = lat[g_p, 0]
         var = lat[g_p, 1]
 
-        def obj(t: Array) -> Array:
+        def objective(t: Array) -> Array:
             return _pattern_loglik(t, y_p, g_p, prob.families, xi_list) - 0.5 * (t - mu) ** 2 / var
 
-        theta_hat = _newton_1d(obj, t0, neg_inf, pos_inf)
-        h = jax.grad(jax.grad(obj))(theta_hat)
+        theta_hat = _newton_1d(objective, t0, neg_inf, pos_inf)
+        h = jax.grad(jax.grad(objective))(theta_hat)
         ok_h = jnp.isfinite(h) & (h < 0.0)
         se = jnp.where(ok_h, 1.0 / jnp.sqrt(jnp.where(ok_h, -h, 1.0)), jnp.nan)
         return theta_hat, se
@@ -448,7 +448,7 @@ def _pattern_flags_multidim(
         obs = y_f >= 0
         n_obs = n_obs + jnp.sum(obs, dtype=jnp.int32)
         n_low = n_low + jnp.sum(obs & (y_f == 0), dtype=jnp.int32)
-        n_high = n_high + jnp.sum(obs & (y_f == fam.kernel.n_cat - 1), dtype=jnp.int32)
+        n_high = n_high + jnp.sum(obs & (y_f == fam.kernel.n_categories - 1), dtype=jnp.int32)
     return n_obs == 0, (n_obs > 0) & (n_low == n_obs), (n_obs > 0) & (n_high == n_obs)
 
 
@@ -483,11 +483,11 @@ def _ml_scores_multidim(prob: CompiledProblem, eta: Array) -> tuple[Array, Array
     def solve_one(y_p: Array, g_p: Array, t0: Array) -> tuple[Array, Array]:
         all_missing, all_low, all_high = _pattern_flags_multidim(y_p, prob.families)
 
-        def obj(t: Array) -> Array:
+        def objective(t: Array) -> Array:
             return _pattern_loglik(t, y_p, g_p, prob.families, xi_list)
 
-        theta_hat = _newton_nd(obj, t0, bound=_MAX_THETA)
-        h = jax.hessian(obj)(theta_hat)
+        theta_hat = _newton_nd(objective, t0, bound=_MAX_THETA)
+        h = jax.hessian(objective)(theta_hat)
         all_dims = jnp.ones((n_factors,), dtype=bool)
         se_full, nd_full = _inv_neg_hessian_se(h, all_dims)
         near = jnp.abs(theta_hat) >= _MAX_THETA - 1e-2
@@ -522,14 +522,14 @@ def _wle_scores_multidim(prob: CompiledProblem, eta: Array) -> tuple[Array, Arra
     def solve_one(y_p: Array, g_p: Array, t0: Array) -> tuple[Array, Array]:
         all_missing, _, _ = _pattern_flags_multidim(y_p, prob.families)
 
-        def obj(t: Array) -> Array:
+        def objective(t: Array) -> Array:
             info = _pattern_info_matrix(t, y_p, g_p, prob.families, xi_list)
             sign, logdet = jnp.linalg.slogdet(info)
             log_det = jnp.where(sign > 0.0, logdet, jnp.nan)
             return _pattern_loglik(t, y_p, g_p, prob.families, xi_list) + 0.5 * log_det
 
-        theta_hat = _newton_nd(obj, t0, bound=_MAX_THETA)
-        h = jax.hessian(obj)(theta_hat)
+        theta_hat = _newton_nd(objective, t0, bound=_MAX_THETA)
+        h = jax.hessian(objective)(theta_hat)
         se, nd = _inv_neg_hessian_se(h, jnp.ones((n_factors,), dtype=bool))
         ok = (~all_missing) & nd & jnp.all(jnp.isfinite(theta_hat))
         theta_out = jnp.where(all_missing, jnp.nan, theta_hat)
@@ -560,17 +560,17 @@ def ml_scores(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
     def solve_one(y_p: Array, g_p: Array, t0: Array) -> tuple[Array, Array]:
         all_missing, all_low, all_high = _pattern_flags(y_p, g_p, prob.families, xi_list)
 
-        def obj(t: Array) -> Array:
+        def objective(t: Array) -> Array:
             return _pattern_loglik(t, y_p, g_p, prob.families, xi_list)
 
-        theta_hat = _newton_1d(obj, t0, lo, hi)
-        h = jax.grad(jax.grad(obj))(theta_hat)
+        theta_hat = _newton_1d(objective, t0, lo, hi)
+        h = jax.grad(jax.grad(objective))(theta_hat)
         ok_h = jnp.isfinite(h) & (h < 0.0)
         se_raw = jnp.where(ok_h, 1.0 / jnp.sqrt(jnp.where(ok_h, -h, 1.0)), jnp.inf)
 
-        f_hat = obj(theta_hat)
-        f_lo = obj(lo)
-        f_hi = obj(hi)
+        f_hat = objective(theta_hat)
+        f_lo = objective(lo)
+        f_hi = objective(hi)
         lo_beats_hat = f_lo > f_hat + 1e-12
         hi_beats_hat = f_hi > f_hat + 1e-12
         endpoint_beats_hat = lo_beats_hat | hi_beats_hat
@@ -632,14 +632,14 @@ def wle_scores(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
     def solve_one(y_p: Array, g_p: Array, t0: Array) -> tuple[Array, Array]:
         all_missing, _, _ = _pattern_flags(y_p, g_p, prob.families, xi_list)
 
-        def obj(t: Array) -> Array:
+        def objective(t: Array) -> Array:
             info = _pattern_info(t, y_p, g_p, prob.families, xi_list)
             pos = info > 0.0
             log_info = jnp.where(pos, jnp.log(jnp.where(pos, info, 1.0)), jnp.nan)
             return _pattern_loglik(t, y_p, g_p, prob.families, xi_list) + 0.5 * log_info
 
-        theta_hat = _newton_1d(obj, t0, lo, hi)
-        h = jax.grad(jax.grad(obj))(theta_hat)
+        theta_hat = _newton_1d(objective, t0, lo, hi)
+        h = jax.grad(jax.grad(objective))(theta_hat)
         ok = (~all_missing) & jnp.isfinite(theta_hat) & jnp.isfinite(h) & (h < 0.0)
         theta_out = jnp.where(all_missing, jnp.nan, theta_hat)
         se_out = jnp.where(ok, 1.0 / jnp.sqrt(jnp.where(ok, -h, 1.0)), jnp.nan)
@@ -675,11 +675,11 @@ def plausible_values(
     if prob.latent.is_eh:
         nodes_1d = prob.nodes[:, 0] if prob.nodes.ndim == 2 else prob.nodes
 
-        def _interp_w(w_g: Array) -> Array:
+        def interp_weights(w_g: Array) -> Array:
             w_fine = jnp.interp(grid, nodes_1d, w_g)
             return w_fine / jnp.sum(w_fine)
 
-        eh_fine = jax.vmap(_interp_w)(prob.latent.eh_weights)
+        eh_fine = jax.vmap(interp_weights)(prob.latent.eh_weights)
         prob_fine = replace(
             prob,
             nodes=fine_nodes,

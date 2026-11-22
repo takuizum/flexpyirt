@@ -68,13 +68,13 @@ def _case_data(name: str) -> tuple[pd.DataFrame, Quadrature, list[str], dict[str
         df = pats.loc[pats.index.repeat(src["counts"])].reset_index(drop=True)
         quad = Quadrature.equispaced(
             int(src["meta"]["quadpts"]),
-            lim=(float(src["meta"]["theta_lim"][0]), float(src["meta"]["theta_lim"][1])),
+            bounds=(float(src["meta"]["theta_lim"][0]), float(src["meta"]["theta_lim"][1])),
         )
         return df, quad, items, src
     items = list(ref["items"])
     pats = pd.DataFrame(np.asarray(ref["patterns"], dtype=float), columns=items)
     df = pats.loc[pats.index.repeat(ref["counts"])].reset_index(drop=True)
-    quad = Quadrature.equispaced(61, lim=(-6.0, 6.0))
+    quad = Quadrature.equispaced(61, bounds=(-6.0, 6.0))
     return df, quad, items, ref
 
 
@@ -84,8 +84,8 @@ def _build_spec(name: str, items: list[str]) -> Model:
         "sim_2pl": lambda: Model.uniform(TwoPL(), items=items),
         "threepl": lambda: Model.uniform(ThreePL(), items=items),
         "rasch_free_var": lambda: Model.uniform(Rasch(), items=items),
-        "grm_sim": lambda: Model.uniform(GRM(n_cat=3), items=items),
-        "gpcm_sim": lambda: Model.uniform(GPCM(n_cat=4), items=items),
+        "grm_sim": lambda: Model.uniform(GRM(n_categories=3), items=items),
+        "gpcm_sim": lambda: Model.uniform(GPCM(n_categories=4), items=items),
     }[name]()
 
 
@@ -197,7 +197,7 @@ def test_m2_rasch_free_var_latent_in_delta(squarem: bool) -> None:
     y = coerce_responses(df, res._model)
     codes, _ = coerce_groups(None, res._model, y.shape[0], require_all=False)
     compiled = compile_problem(res._model, y, codes, res.parameters, quad)
-    n_cat = [m.kernel.n_cat for _, m in res._model.items]
+    n_categories = [m.kernel.n_categories for _, m in res._model.items]
 
     # Map mirt's estimates into eta order.
     eta_mirt = np.empty_like(res._eta)
@@ -212,7 +212,12 @@ def test_m2_rasch_free_var_latent_in_delta(squarem: bool) -> None:
 
     # _latent_in_delta=False reproduces mirt's raw M2() to machine/reference precision.
     m2_nolat = _m2.m2_statistic(
-        compiled.problem, eta_j, y, n_params=res.n_params, n_cat=n_cat, _latent_in_delta=False
+        compiled.problem,
+        eta_j,
+        y,
+        n_params=res.n_params,
+        n_categories=n_categories,
+        _latent_in_delta=False,
     )
     assert m2_nolat.df == int(ref["df"])
     np.testing.assert_allclose(m2_nolat.m2, ref["M2"], rtol=1e-9)
@@ -226,7 +231,12 @@ def test_m2_rasch_free_var_latent_in_delta(squarem: bool) -> None:
 
     # _latent_in_delta=True at mirt's estimates reproduces exact_with_latent to ~1e-8.
     m2_lat = _m2.m2_statistic(
-        compiled.problem, eta_j, y, n_params=res.n_params, n_cat=n_cat, _latent_in_delta=True
+        compiled.problem,
+        eta_j,
+        y,
+        n_params=res.n_params,
+        n_categories=n_categories,
+        _latent_in_delta=True,
     )
     np.testing.assert_allclose(m2_lat.m2, ex_lat["M2"], rtol=1e-7)
     np.testing.assert_allclose(m2_lat.p, ex_lat["p"], rtol=1e-7, atol=1e-8)

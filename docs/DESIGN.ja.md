@@ -163,8 +163,8 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   `jax.debug.callback` による進捗表示は後回し。
 
 ### 4.7 MAP（Bayes modal）
-- **決定（M3, §15.14–§15.17）**: 公開の不変事前分布 `NormalPrior(mean, sd)`, `LogNormal(meanlog, sdlog)`,
-  `Beta(a, b)` を提供する（各々 `log_pdf` とパラメタ検証を持つ。潜在分布 `Normal` との衝突を避けるため `NormalPrior`）。
+- **決定（M3, §15.14–§15.17）**: 公開の不変事前分布 `NormalPrior(mean, sd)`, `LogNormalPrior(mean_log, sd_log)`,
+  `BetaPrior(a, b)` を提供する（各々 `log_pdf` とパラメタ検証を持つ。潜在分布 `Normal` との衝突を避けるため `NormalPrior`）。
 - 事前分布は**自然なパラメタ尺度**（$a, d, g, u, d_k$ など）で定義し、Jacobian 項は入れない（自然尺度での事後モード。
   R mirt 1.46 の `LL.Priors` でも `expbeta` は `dbeta(plogis(logit_g), a, b, log = TRUE)` を logit ヤコビアンなしで
   評価していることを確認済み。VALIDATION.ja.md 参照）。
@@ -243,7 +243,7 @@ class CompiledProblem:
     priors: PriorBlock  # free_id ごとの事前分布パラメタ
     n_groups: int  # 静的
 ```
-`families`（各カーネルの `n_factors`・`n_cat` を含む）と `n_groups` は静的（jit の static）、パラメタ値と配列は動的。
+`families`（各カーネルの `n_factors`・`n_categories` を含む）と `n_groups` は静的（jit の static）、パラメタ値と配列は動的。
 
 ## 6. 拡張プロトコル
 
@@ -251,11 +251,11 @@ class CompiledProblem:
 class ItemKernel(Protocol):
     n_factors: int  # 1, 2, または 3
     param_names: tuple[str, ...]  # ("a", "d") または ("a1", ..., "aD", "d")
-    n_cat: int
+    n_categories: int
     slope_params: tuple[str, ...]
     intercept_params: tuple[str, ...]
     irt_names: tuple[str, ...]  # 表示用閾値（D > 1 では空）
-    irt_dep_indices: tuple[tuple[int, ...], ...]
+    irt_dependency_indices: tuple[tuple[int, ...], ...]
 
     def with_factors(self, n_factors: int) -> ItemKernel: ...
     def irt_thresholds(self, params: Array) -> Array: ...
@@ -362,14 +362,14 @@ class ItemKernel(Protocol):
 5. **識別性（多群）**: 平均について、群を節点・切片の共有 `free_id` を辺とするグラフを作り、各連結成分に
    「平均が固定された群」または「固定された切片」が 1 つ以上あることを要求する（分散は傾きで同様）。
    必要条件であり十分条件ではない。自由な平均を持つ群がアンカー 1 項目だけで連結している場合は警告する。
-6. **FIPC**: `Model.fix_from(bank, items=..., parameterization="slope-intercept" | "irt")` で項目パラメタを固定し、
+6. **FIPC**: `Model.fix_from(bank, items=..., parameterization="slope_intercept" | "irt")` で項目パラメタを固定し、
    潜在分布は利用者が `with_latent(Normal.free())` で自由にする（既定は変えない。§4.5 の識別性検査で許可される）。
    IRT 表記（$b$）は $d=-ab$ で変換する（2PL のみ。GRM は $b_k$ → $d_k=-ab_k$）。
 7. **GRM**（Samejima, 1969）: $P(y\ge k\mid\theta)=\sigma(a\theta+d_k)$、$d_1>\dots>d_{K-1}$、カテゴリは $0..K-1$。
    対数確率は端のカテゴリを $\log\sigma(-z_1)$、$\log\sigma(z_{K-1})$、中間を
    $\log\sigma(z_k)+\operatorname{log1mexp}(\log\sigma(z_{k+1})-\log\sigma(z_k))$ で安定に計算する
    （log1mexp は両分岐の入力を安全域に丸める二重 where で勾配の NaN を防ぐ）。順序制約は line search で
-   有限値でない候補を棄却することで守る。family は `GRM(n_cat=K)` の $K$ ごと。データに現れないカテゴリが
+   有限値でない候補を棄却することで守る。family は `GRM(n_categories=K)` の $K$ ごと。データに現れないカテゴリが
    ある項目は閾値が発散するので `SpecificationError`。
 8. **欠測（MAR）**: NaN を `-1` に符号化し、E-step で one-hot を全 0 にして尤度から除く（§4.2 の $m_{pj}$）。
    全員欠測の項目はエラー。初期値は観測値だけから計算する。not-reached は扱わない（§12-3 はこれで決着）。
@@ -402,21 +402,21 @@ class ItemKernel(Protocol):
    $a_j^{(0)}$ は 2PL と同じ項目−残余相関の式（§4.10）、$d_j^{(0)}$ は漸近線の幅で換算した正答率
    $(p_j-g_j^{(0)})/(u_j^{(0)}-g_j^{(0)})$ に 2PL の切片の式を適用する。
 5. **表示と FIPC**: `FitResult.items` は引き続き `b = -d/a` を追加し、`g`, `u`, `g_se`, `u_se` は
-   ParameterTable から自動的に現れる。`Model.fix_from()` は `"slope-intercept"`・`"irt"` のどちらでも
+   ParameterTable から自動的に現れる。`Model.fix_from()` は `"slope_intercept"`・`"irt"` のどちらでも
    `g`, `u` をそのまま渡し、3PL 項目では `u` 列を省略できる。
 6. **HeywoodWarning**: 推定後、`fit()` はすべての自由な項目パラメタを検査し、有限の境界から `1e-4` 以内に
    到達したパラメタ（0 や 1 に近い `g`, `u`）または $|a|>20$ の自由な傾きがあれば、該当する項目名を列挙した
    `flexpyirt.errors.HeywoodWarning` を 1 回発する。
 7. **識別性**: `g`, `u` は潜在変数の尺度も位置も担わない（`slope_params=("a",)`, `intercept_params=("d",)`）。
    したがって漸近線を固定しても潜在分布の平均や分散は識別されない。
-8. **GPCM・PCM 項目モデル**: `GPCM(n_cat)`（Muraki, 1992）と `PCM(n_cat)`（Masters, 1982）は `n_cat` ごとに
-   共通カーネル `GPCMKernel(n_cat)` を共有する。カテゴリは `0..K-1`（`n_cat >= 2` を検証）で、mirt の
+8. **GPCM・PCM 項目モデル**: `GPCM(n_categories)`（Muraki, 1992）と `PCM(n_categories)`（Masters, 1982）は `n_categories` ごとに
+   共通カーネル `GPCMKernel(n_categories)` を共有する。カテゴリは `0..K-1`（`n_categories >= 2` を検証）で、mirt の
    `itemtype="gpcm"` と同じ傾き・切片形式（採点係数 $\mathrm{ak}_k=k$ と $d_0=0$ を固定し、パラメタに含めない）:
    $$P(y=k\mid\theta)=\frac{\exp(k\,a\theta+d_k)}{\sum_{c=0}^{K-1}\exp(c\,a\theta+d_c)},\qquad d_0=0.$$
    内部パラメタは `(a, d1, ..., d{K-1})`。対数確率は `jax.nn.log_softmax` で計算する（数値安定で滑らかな微分を
-   持ち、`d` に順序制約は不要）。`PCM(n_cat)` は既定で `a = 1` を固定し、単一群の既定潜在分布ルール（§4.5）を
+   持ち、`d` に順序制約は不要）。`PCM(n_categories)` は既定で `a = 1` を固定し、単一群の既定潜在分布ルール（§4.5）を
    拡張して、全項目が `Rasch` または `PCM` のとき $N(0,\sigma^2)$（分散自由）とする（多値データに対する mirt の
-   `itemtype="Rasch"` と同じ）。`n_cat = 2` では `GPCM(2)` は `TwoPL` に、`PCM(2)` は `Rasch` に厳密に一致する。
+   `itemtype="Rasch"` と同じ）。`n_categories = 2` では `GPCM(2)` は `TwoPL` に、`PCM(2)` は `Rasch` に厳密に一致する。
 9. **GPCM/PCM の初期値・識別性・推定可能性**: $a_j^{(0)}$ は 2PL と同じ項目−残余相関の式（PCM は `1.0`）。
    各ステップの初期値を累積比率 $p_{jc}=\operatorname{clip}(\hat P(y_j\ge c),\,0.01,\,0.99)$ から
    $\delta_{jc}^{(0)}=\operatorname{logit}(p_{jc})\sqrt{1+(a_j^{(0)}/1.7)^2}$ とし、その累積和を
@@ -452,11 +452,11 @@ class ItemKernel(Protocol):
     到達時に安全装置・退避回数を含めて報告するほか、収束した SQUAREM でも $\theta_2$ への完全退避
     （`3 * n_iter - n_em_evaluations`）が 5 回以上かつ全反復の 50% を超えた場合に発する（部分縮小しつつ加速した
     反復では不要な警告を出さない）。
-14. **事前分布と自然尺度 MAP 目的関数（M3, §4.7）**: `NormalPrior(mean, sd)`, `LogNormal(meanlog, sdlog)`,
-    `Beta(a, b)` を `priors.py` の公開 frozen dataclass とし、パラメタ検証（`SpecificationError`）と `log_pdf(x)` を
+14. **事前分布と自然尺度 MAP 目的関数（M3, §4.7）**: `NormalPrior(mean, sd)`, `LogNormalPrior(mean_log, sd_log)`,
+    `BetaPrior(a, b)` を `priors.py` の公開 frozen dataclass とし、パラメタ検証（`SpecificationError`）と `log_pdf(x)` を
     実装する。事前分布はヤコビアンなしの自然尺度で評価する（R mirt 1.46 の `LL.Priors` でも `expbeta` が
     `dbeta(plogis(logit_g), a, b, log = TRUE)` を logit ヤコビアンなしで評価することを確認済み。mirt 1.46 の
-    `DerivativePriors` / `BL.LL` の不具合は VALIDATION.ja.md に記録）。`Beta.log_pdf` の $\log B(a, b)$ は
+    `DerivativePriors` / `BL.LL` の不具合は VALIDATION.ja.md に記録）。`BetaPrior.log_pdf` の $\log B(a, b)$ は
     float64 で ~1e-7 の誤差を持つ `jax.scipy.special.betaln` ではなく `gammaln(a) + gammaln(b) - gammaln(a + b)` で
     計算し、完全な float64 精度を保つ。
 15. **事前分布の指定・表編集・適用範囲**: `Model.prior(*, param, dist, items=None)` で選択した項目の `param` に全群
@@ -470,7 +470,7 @@ class ItemKernel(Protocol):
     全分岐で二重 `where` ガードを使って評価する（未選択分岐やパディング `PRIOR_NONE = 0` から NaN/inf 勾配が漏れない）。
     `m_step` では `slot_free_index` で項目局所スロットへ事前分布をギャザーして `q_item` に加算し、項目ごとの分解（§14.2）と
     共有パラメタの 1 回計上を保つ。`compile_problem` は自由スロットの `slot_lower`/`slot_upper` を事前分布の台
-    （`LogNormal` は `(0, inf)`、`Beta` は `(0, 1)`）と交差させ、ParameterTable のモデル定義域を変えずに有界 Newton と
+    （`LogNormalPrior` は `(0, inf)`、`BetaPrior` は `(0, 1)`）と交差させ、ParameterTable のモデル定義域を変えずに有界 Newton と
     SQUAREM が台を守るようにする。
 17. **MAP の結果・履歴・SQUAREM 安全装置・事後 SE**: `FitResult.loglik` は周辺対数尤度のみとし、
     `FitResult.log_posterior` に $\ell(\hat\eta)+\log\pi(\hat\eta)$（事前分布なしでは `loglik` と同値）を返す。
@@ -480,7 +480,7 @@ class ItemKernel(Protocol):
     `information_oakes` は $Q(\eta\mid\eta')$ に `log_prior(prob, e)` を足し、`information_hessian` は
     `log_posterior(prob, e)` を微分することで、両者とも厳密に $-\nabla^2_\eta\log\pi(\hat\eta)$ を加える。
 18. **表示用 IRT 閾値のデルタ法 SE（M4, §7）**: 各 `ItemKernel` に `irt_names`（例: `("b",)` や
-    `("b1", ..., "b{K-1}")`）、`irt_dep_indices`（各閾値に入る内部パラメタの添字）、純粋 JAX 関数
+    `("b1", ..., "b{K-1}")`）、`irt_dependency_indices`（各閾値に入る内部パラメタの添字）、純粋 JAX 関数
     `irt_thresholds(params)`（2PL / Rasch / 3PL / 4PL は $b = -d/a$、GRM は $b_k = -d_k/a$、GPCM / PCM は
     `jnp.diff` による $b_k = -(d_k - d_{k-1})/a$、$d_0 = 0$）を持たせる。`FitResult.items` ではカーネルごとに
     キャッシュした jit 関数 `(irt_thresholds, jax.jacfwd(irt_thresholds))` で表示値とヤコビアン
@@ -541,9 +541,9 @@ class ItemKernel(Protocol):
 23. **ML スコアリング（`method="ML"`、M4, §8）**: 同じ `vmap` 済み安全装置つき 1 次元 Newton（初期値 EAP）で $[-20, 20]$ 上（mirt の既定 `max_theta = 20` に対応）において $f_{\mathrm{ML}}(\theta)=\log L(\theta\mid y)$ を最大化し、観測情報量から $\mathrm{SE}=(-f''_{\mathrm{ML}}(\hat\theta))^{-1/2}$ を求める（mirt 既定の `expected.info = FALSE` に一致）。極端パターンの規約: 全欠測は `(NaN, NaN)`、全観測項目が低 $\theta$ 側の端カテゴリ（$a_j>0$ なら `0`、$a_j<0$ なら `K_j-1`）のときは `(-inf, NaN)`、高 $\theta$ 側の端カテゴリのときは `(+inf, NaN)`。非凹モデル（3PL / 4PL）で全端カテゴリ以外でも有限の内部最大値を持たないパターン（当て推量により低得点パターンで $\log L(\theta)$ が $\theta\to -\infty$ へ単調増加する場合など）も検出し、$|\hat\theta|$ が `±20` の上限に達した・$f''(\hat\theta)\ge 0$・$\mathrm{SE}>30$（`mirt:::ML` の閾値）・$f(\pm 20) > f(\hat\theta)$ のいずれかで `±inf` と SE NaN を返す。`±inf` の符号は、$f(\pm 20) > f(\hat\theta)$ が成り立つときにのみ優越する端点から決め、それ以外は $\operatorname{sign}(\hat\theta)$ に従う（`mirt:::ML` の `Inf * sign(est)` に一致）。特に、3PL の二峰性対数尤度で $-\infty$ の下側漸近線が厳密に凹な内部の局所最頻値を上回る場合、flexpyirt は真の大域上限である `(-inf, NaN)`（本来の最尤推定）を意図的に返すのに対し、mirt 1.46.1 の EAP 出発の局所 `nlm` 探索は内部の局所最頻値で停止するため両者は異なる（`v11_3pl` の 3,790 ユニークパターン中 25 件。この判定により、`nlm` 有限差分 Hessian が `SEest > 30` 判定をすり抜ける境界ケースもあわせて正しく扱える。VALIDATION.ja.md V13 参照）。
 24. **WLE スコアリング（`method="WLE"`、M4, §8）**: Warm (1989) の重み付き最尤推定を、Jeffreys / Firth (1993) の罰則付き対数尤度 $f_{\mathrm{WLE}}(\theta)=\log L(\theta\mid y)+\tfrac{1}{2}\log I(\theta)$ の $[-20, 20]$ 上での最大化として同じ `vmap` 済み安全装置つき 1 次元 Newton（初期値 EAP）で解く。ここで $I(\theta)=\sum_{j:\,y_j\ge 0}\sum_k P_{jk}(\theta)\,(\partial\log P_{jk}/\partial\theta)^2$ は観測項目にわたる Fisher テスト情報量であり、各カーネルの `log_prob` に対する `jax.jacfwd` のみで計算する（手書き微分なし、全項目ファミリーで動作）。停留条件は $\partial\log L/\partial\theta + J(\theta)/(2I(\theta)) = 0$（$J(\theta)=\partial I/\partial\theta$）と恒等的に一致し、2PL・Rasch・GRM・GPCM・PCM・3PL・4PL のすべてで `mirt:::WLE.mirt` と一致する（指数型分布族では $J=\partial I/\partial\theta$ が Warm の $\sum P'P''/P$ と恒等的に一致し、3PL / 4PL / GRM では Firth の Jeffreys 事前分布バイアス補正および mirt と一致する）。極端パターン（全最低・全最高）でも有限の推定値を与え、全欠測パターンは $I(\theta)=0$ のため `(NaN, NaN)` を返す。SE は JAX 自動微分による $(-f''_{\mathrm{WLE}}(\hat\theta))^{-1/2}$ であり、mirt の既定 `fscores(..., method="WLE", full.scores.SE=TRUE)` と一致する（Warm の漸近式 $I(\hat\theta)^{-1/2}$ は mirt の `expected.info=TRUE` に対応し、短いテストや極端パターンで差が出る。VALIDATION.ja.md V13 参照）。
 25. **Plausible values（`method="PV"`、M4, §8）**: 回答者ごとに事後分布 $p(\theta\mid y_i;\mu_{g(i)},\sigma_{g(i)}^2)$ から独立な `n_draws` 個（既定 `5`）の標本を抽出し、`pv1..pvM` 列の DataFrame を返す。求積格子による離散化を避けて連続な標本を得つつ `jit` 内で静的形状・高速動作を保つため、圧縮・2 のべき乗パディングしたユニークパターンごとに推定済みモデルの求積区間 `[quad.lower, quad.upper]` 上の細かい等間隔格子（`501` 点）で事後密度を評価し、台形則で $[0, 1]$ 上の区分線形 CDF を構成したうえで、`jax.random.uniform(key, (N_pad, n_draws))`（回答者数 `N` も 2 のべき乗 `N_pad` へパディングして `N` にスライス）に対し分岐なしの `searchsorted(..., side="right")` 線形補間で逆 CDF 抽出を行う。同じ反応パターンの回答者は事後 CDF を共有しつつ独立な一様乱数を用いるため独立な標本となり、全欠測行は群の事前分布から抽出される。明示的な JAX PRNG の `key`（`jax.random.key` または `jax.random.PRNGKey`、未指定・不正は `SpecificationError`）が必須で、`key` に対して完全に決定的。
-26. **`FitResult` の JSON 入出力 API とバージョン付き形式（M4, API §7）**: `FitResult.to_json(path=None, *, indent=2) -> str` は推定結果を厳格な JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定された場合は UTF-8 ファイルにも書き出す。`FitResult.from_json(source) -> FitResult` はファイルパスまたは JSON 文字列から再推定なしで復元する。素の JSON のみを使い、`pickle` や `eval` は一切使わない。最上位オブジェクトには `"format": "flexpyirt.FitResult"`、`"schema_version"`（§15.33 で多次元モデルを加えてから 2。version 1 のファイルも読める）、および書き出した版を記録する `"flexpyirt_version": flexpyirt.__version__` を持たせる。`FitResult` は `_model`・`_quadrature` とあわせて推定設定 `_method: BAEM` も保持し、メタデータ全体が往復保存できるようにする。`from_json` は入口で `check_x64()` を呼ぶ（スコアリングに float64 が必要なため、無効なら `PrecisionError`）。
+26. **`FitResult` の JSON 入出力 API とバージョン付き形式（M4, API §7）**: `FitResult.to_json(path=None, *, indent=2) -> str` は推定結果を厳格な JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定された場合は UTF-8 ファイルにも書き出す。`FitResult.from_json(source) -> FitResult` はファイルパスまたは JSON 文字列から再推定なしで復元する。素の JSON のみを使い、`pickle` や `eval` は一切使わない。最上位オブジェクトには `"format": "flexpyirt.FitResult"`、`"schema_version"`（§15.46 の命名リファクタから 4。version 1–3 のファイルも読める）、および書き出した版を記録する `"flexpyirt_version": flexpyirt.__version__` を持たせる。`FitResult` は `_model`・`_quadrature` とあわせて推定設定 `_method: BAEM` も保持し、メタデータ全体が往復保存できるようにする。`from_json` は入口で `check_x64()` を呼ぶ（スコアリングに float64 が必要なため、無効なら `PrecisionError`）。
 27. **厳格な JSON と正確な float64 往復保存（M4）**: 書き出しは `json.dumps(..., allow_nan=False)` で厳格な RFC 8259 JSON のみを出力し、読み込みは `json.loads` に `parse_constant` を渡して生の `NaN`/`Infinity` リテラルを `SpecificationError` で拒否する。有限な IEEE-754 float64 値は通常の JSON 数値（Python の `repr` 厳密な最短 10 進表現）として書き出し、`-0.0` を含むすべての有限 float64 をビット単位で正確に往復保存する。浮動小数点型のフィールド（無制約の `lower`/`upper`、固定または未計算の `se`、非正定値の `vcov` など）に現れる非有限値（`NaN`, `+Inf`, `-Inf`）は明示的に文字列 `"NaN"`, `"Infinity"`, `"-Infinity"` として符号化する。これらを浮動小数点へ復号するのはスキーマ上 float 型のスロットのみであるため、項目名や群名などの文字列フィールドとは衝突しない。
-28. **明示的レジストリと完全な状態保存（M4）**: 項目モデル（`"2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"GRM"`, `"GPCM"`, `"PCM"`、多値モデルでは `n_cat` を含む）、潜在分布（`"Normal"`）、事前分布（`"NormalPrior"`, `"LogNormal"`, `"Beta"`）、求積（`"equispaced"`）、推定手法（`"BAEM"`）は `_json.py` の明示的な名前レジストリで（逆）直列化する。未知の `format` タグ・スキーマ版・レジストリ名・不正な JSON・整合しない表や行列形状は明確なメッセージつきで `SpecificationError` を送出する。完全な `Model` 仕様（項目名と順序、項目モデル、`fixed`, `latent`, `groups`, `equal`, `priors`）と、`estimate`・`se` を含む検証済み `ParameterTable`（ユーザーによる `table=` 編集もそのまま保持）、`vcov`、`loglik`/`log_posterior`、収束情報と `history`、`quadrature`、`method`、`se_method`、`n_obs` をすべて保存する。`_eta` は `parameters` の検証済み自由行から直接復元し（`free_id` が `0..n_free-1` に連続であること、共有 `free_id` の `estimate` が一致すること、`vcov` 形状が整合することを検証）、推定値の重複を持たせない。復元後の `FitResult` はすべての公開属性・`items`・`latent`・`summary()`・`_repr_html_()`・`aic`/`bic`・全 5 手法の `score()` で完全に同一の結果を返す。
+28. **明示的レジストリと完全な状態保存（M4）**: 項目モデル（`"2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"GRM"`, `"GPCM"`, `"PCM"`、多値モデルでは `n_categories` を含む）、潜在分布（`"Normal"`）、事前分布（`"NormalPrior"`, `"LogNormalPrior"`, `"BetaPrior"`）、求積（`"equispaced"`）、推定手法（`"BAEM"`）は `_json.py` の明示的な名前レジストリで（逆）直列化する。未知の `format` タグ・スキーマ版・レジストリ名・不正な JSON・整合しない表や行列形状は明確なメッセージつきで `SpecificationError` を送出する。完全な `Model` 仕様（項目名と順序、項目モデル、`fixed`, `latent`, `groups`, `equal`, `priors`）と、`estimate`・`se` を含む検証済み `ParameterTable`（ユーザーによる `table=` 編集もそのまま保持）、`vcov`、`loglik`/`log_posterior`、収束情報と `history`、`quadrature`、`method`、`se_method`、`n_obs` をすべて保存する。`_eta` は `parameters` の検証済み自由行から直接復元し（`free_id` が `0..n_free-1` に連続であること、共有 `free_id` の `estimate` が一致すること、`vcov` 形状が整合することを検証）、推定値の重複を持たせない。復元後の `FitResult` はすべての公開属性・`items`・`latent`・`summary()`・`_repr_html_()`・`aic`/`bic`・全 5 手法の `score()` で完全に同一の結果を返す。
 29. **確認的 2–3 次元 MIRT の仕様とカーネル（M4, §4.9, §6）**:
     `Model.with_factors(factors, *, correlated=True)` で 2 または 3 個の名前つき因子と負荷項目の確認的パターン（`Mapping[str, ItemSelector]`）を指定する。1 項目が複数因子に負荷すること（交差負荷）を許し、各因子には 1 項目以上が必要で、すべてのモデル項目がいずれか 1 因子以上に負荷しなければならない。負荷しない因子の傾きは 0 に固定する。`with_factors()` を呼ばない `Model.uniform(...)` / `Model.from_items(...)` は厳密に 1 次元（`n_factors=1`）のままビット単位で挙動を変えない。4 つのカーネル（`DichotomousKernel`, `FourPLKernel`, `GradedKernel`, `GPCMKernel`）はすべて静的な `n_factors: int = 1` と `with_factors(n_factors)` を持ち、線形予測子 $z = \mathbf a^\top\boldsymbol\theta + d$（$D=1$ は `params[0] * theta[:, 0]`、$D \in \{2, 3\}$ は `theta @ params[:D]`）を評価するため、既存の 7 項目モデル（`TwoPL`, `Rasch`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`）がすべて 2・3 次元でそのまま動作する。$D > 1$ では内部パラメタ名が mirt に合わせて `a1..aD`, `d`（GRM / GPCM / PCM は `d1..d{K-1}`）となり、1 次元用の表示閾値（`b` / `bk`）は省略する。$D > 1$ での `with_latent()` と `fix_from(..., parameterization="irt")` は `SpecificationError` を送出する（$D > 1$ の多母集団は §15.43）。
 30. **直積求積と多変量正規潜在分布の厳密 M-step（M4, §4.4, §4.9）**:
@@ -683,6 +683,19 @@ class ItemKernel(Protocol):
     `group` 列がつく。mirt 1.48 と照合した（V15）: V4 の 2 群 2PL を mirt の推定値で、Science（GRM）をすべての項目を等値にして
     2 群に分けたものを mirt の推定値で（mirt はそこで項目パラメタが約 2e-4 収束しきらない）評価し、自由度は一致、S-X2 は
     相対 1e-6 以内。
+
+46. **命名のリファクタ（スキーマ版 4）**: 公開名を mirt/R の引数名ではなく Python の慣習に合わせる。項目モデルは
+    `n_categories`（旧 `n_cat`）、`Quadrature.equispaced`・`Quadrature.default` は `bounds=(lower, upper)`（旧 `lim`）を
+    取り、既定の点数は `quadrature.DEFAULT_N_POINTS`。事前分布はすべて `Prior` で終わる（`NormalPrior`、
+    `LogNormalPrior(mean_log, sd_log)`、`BetaPrior(a, b)`。旧 `LogNormal(meanlog, sdlog)`・`Beta`）。
+    `FitResult.item_fit(min_cell=...)`（旧 `mincell`、mirt の名前）。文字列の選択肢は snake_case
+    （`parameterization="slope_intercept"`、`link(method="stocking_lord")`）。`Model.is_eh` は
+    `Model.is_empirical_histogram` にする。未リリースのため旧名は非推奨エイリアスを残さずに削除する。JSON の
+    `schema_version` は 4 で、項目モデルは `n_categories` を保存し、事前分布は `"NormalPrior"`・`"LogNormalPrior"`
+    （キー `mean_log`・`sd_log`）・`"BetaPrior"` で登録する。version 1–3 のファイルも読める: 検証の前に
+    `_upgrade_legacy_names` が `n_cat`・`LogNormal`/`meanlog`/`sdlog`・`Beta` を version 4 の名前に置き換える。
+    内部カーネルの数式記号（`G`, `Q`, `K_f` など）と `LinkResult.A`/`B`（Kolen & Brennan, 2014 のリンキング定数）は
+    そのまま残し、mirt のセル併合の移植（`_itemfit.collapse_cells`）は行ごとに照合できるよう mirt の局所変数名を保つ。
 
 ## 16. 実装上の決定（M5）
 1. **項目をまたぐ等値制約（`Model.equal_across_items`、`free_id` の共有）**:
@@ -876,11 +889,11 @@ class ItemKernel(Protocol):
    $A\theta + B$、`se` を $A\,\mathrm{se}$ で写し、$(A, B)$ を既知として扱う（リンキング誤差は加えない）。
    **Python シェル層での検証**: 多次元結果、群指定のない多母集団結果、共通項目でカーネルまたはカテゴリ数が一致しない場合、
    および不正な `nodes` / `weights` は `SpecificationError` を送出する。
-6. **名義反応モデル（`Nominal(n_cat)`、`NominalKernel(n_cat, n_factors=1)`、V23）**:
+6. **名義反応モデル（`Nominal(n_categories)`、`NominalKernel(n_categories, n_factors=1)`、V23）**:
    Thissen, Cai & Bock (2010) の全体傾き × 採点関数パラメタ化による Bock (1972) の名義反応モデルで、R mirt の
    `itemtype = "nominal"`（Chalmers, 2012）に対応する:
    $$P(y=k\mid\boldsymbol\theta)=\frac{\exp\big(\mathrm{ak}_k\,\mathbf a^\top\boldsymbol\theta+d_k\big)}{\sum_{c=0}^{K-1}\exp\big(\mathrm{ak}_c\,\mathbf a^\top\boldsymbol\theta+d_c\big)},\qquad k=0,\dots,K-1,\quad \mathrm{ak}_0=0,\ \mathrm{ak}_{K-1}=K-1,\ d_0=0.$$
-   カテゴリは `0..K-1`（`n_cat >= 2` を検証）で、$D\in\{1,2,3\}$ に対応する（`_linear_predictor(theta, params[:D], D)`
+   カテゴリは `0..K-1`（`n_categories >= 2` を検証）で、$D\in\{1,2,3\}$ に対応する（`_linear_predictor(theta, params[:D], D)`
    に採点ベクトル $\mathrm{ak}$ を掛け、`jax.nn.log_softmax` で数値安定に評価する）。
    - **内部パラメタと範囲**: mirt の `coef(m)` / `pars = "values"` は `a1`（`a1..aD`）、`ak0..ak{K-1}`、
      `d0..d{K-1}` を返し、`ak0 = 0`・`ak{K-1} = K - 1`・`d0 = 0` を固定（`est = FALSE`）、範囲はすべて
@@ -893,7 +906,7 @@ class ItemKernel(Protocol):
    - **初期値・識別性・推定可能性**: mirt の既定初期値（`a1 = 0.851`、`ak1 = ... = ak{K-2} = 0.5`、
      `d1 = ... = d{K-1} = 0`）は反復 0 で中間カテゴリ $1,\dots,K-2$ の予測子が同一になり、減衰なしの
      `optimizer = "NR"` では同時 Hessian が不定になって `a1 = 0` に捕捉されることがある（`Science` など）。
-     flexpyirt では `Nominal(n_cat)` を GPCM の初期値から開始する: $a_j^{(0)}$ は項目−残余相関（§4.10。$D>1$ では
+     flexpyirt では `Nominal(n_categories)` を GPCM の初期値から開始する: $a_j^{(0)}$ は項目−残余相関（§4.10。$D>1$ では
      因子別項目−残余相関、§15.31）、採点係数は互いに異なる $\mathrm{ak}_{jk}^{(0)}=k$（$k=1,\dots,K-2$）、切片は GPCM の
      初期切片 $d_{jk}^{(0)}$（`_gpcm_intercept_starts`、§15.9）。これにより反復 0 でのカテゴリ対称性を破りつつ、真の
      $\mathrm{ak}_k$ が非単調や負の項目も順序制約なしの最尤解へ収束する。§4.5 / §15.31 の識別性検査では
@@ -905,8 +918,8 @@ class ItemKernel(Protocol):
      尺度の閾値 $b_k$ ではなく Bock (1972) のゼロ和パラメタ $a_k^*=a\,\mathrm{ak}_{k-1}-\overline{a\,\mathrm{ak}}$
      （`a1..aK`）と $c_k^*=d_{k-1}-\bar d$（`c1..cK`）を返し、隣接カテゴリの交点
      $-(d_k-d_{k-1})/[a(\mathrm{ak}_k-\mathrm{ak}_{k-1})]$ も $\mathrm{ak}_k=\mathrm{ak}_{k-1}$ で特異になる。そのため
-     `NominalKernel` は `irt_names = ()`・`irt_dep_indices = ()`（`FitResult.items` に `b` / `bk` 列を追加しない）
-     とし、`Model.fix_from()` は `Nominal` 項目に対して `parameterization="slope-intercept"` を受け付け、
+     `NominalKernel` は `irt_names = ()`・`irt_dependency_indices = ()`（`FitResult.items` に `b` / `bk` 列を追加しない）
+     とし、`Model.fix_from()` は `Nominal` 項目に対して `parameterization="slope_intercept"` を受け付け、
      `parameterization="irt"` は `SpecificationError` とする。`_json.py` の多値項目レジストリに `"Nominal"` を追加する
      （スキーマバージョン 3 および旧バージョン 1–2 の読み込み互換を維持）。1 次元 ML スコアリング
      （`_scoring._pattern_flags`）では、各カテゴリの有効傾き $s_c=a\,\mathrm{ak}_c$ から最低・最高 $\theta$ カテゴリ

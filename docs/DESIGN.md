@@ -213,7 +213,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 
 ### 4.7 MAP (Bayes modal)
 - **Decision (M3, §15.14–§15.17)**: public frozen prior distributions `NormalPrior(mean, sd)`,
-  `LogNormal(meanlog, sdlog)`, and `Beta(a, b)` (each with `log_pdf` and parameter validation;
+  `LogNormalPrior(mean_log, sd_log)`, and `BetaPrior(a, b)` (each with `log_pdf` and parameter validation;
   `NormalPrior` avoids clashing with the latent `Normal`).
 - Priors are defined on the **natural parameter scale** ($a, d, g, u, d_k$ and so on) without
   a Jacobian term (the posterior mode on the natural scale; verified against R mirt 1.46's
@@ -308,7 +308,7 @@ class CompiledProblem:
     priors: PriorBlock  # per free_id prior parameters
     n_groups: int  # static
 ```
-`families` (including each kernel's `n_factors` and `n_cat`) and `n_groups` are static (jit
+`families` (including each kernel's `n_factors` and `n_categories`) and `n_groups` are static (jit
 static); parameter values and arrays are dynamic.
 
 ## 6. Extension protocols
@@ -317,11 +317,11 @@ static); parameter values and arrays are dynamic.
 class ItemKernel(Protocol):
     n_factors: int  # 1, 2, or 3
     param_names: tuple[str, ...]  # ("a", "d") or ("a1", ..., "aD", "d")
-    n_cat: int
+    n_categories: int
     slope_params: tuple[str, ...]
     intercept_params: tuple[str, ...]
     irt_names: tuple[str, ...]  # display thresholds (empty for D > 1)
-    irt_dep_indices: tuple[tuple[int, ...], ...]
+    irt_dependency_indices: tuple[tuple[int, ...], ...]
 
     def with_factors(self, n_factors: int) -> ItemKernel: ...
     def irt_thresholds(self, params: Array) -> Array: ...
@@ -462,7 +462,7 @@ data-independent shapes (§15.21).
    with a fixed mean" or "a fixed intercept" (likewise for the variance with slopes). This is a
    necessary condition, not a sufficient one. Warn when a group with a free mean is connected by a
    single anchor.
-6. **FIPC**: `Model.fix_from(bank, items=..., parameterization="slope-intercept" | "irt")` fixes the
+6. **FIPC**: `Model.fix_from(bank, items=..., parameterization="slope_intercept" | "irt")` fixes the
    item parameters, and the user frees the latent distribution with `with_latent(Normal.free())`
    (the default does not change; the §4.5 identification check allows it). The IRT form ($b$) is
    converted with $d=-ab$ (2PL; for GRM, $b_k$ → $d_k=-ab_k$).
@@ -472,7 +472,7 @@ data-independent shapes (§15.21).
    $\log\sigma(z_k)+\operatorname{log1mexp}(\log\sigma(z_{k+1})-\log\sigma(z_k))$ in between (log1mexp
    clamps each branch's input to its safe domain with a double `where` so gradients have no NaN).
    The ordering constraint is kept by the line search rejecting non-finite candidates. One family
-   per $K$ of `GRM(n_cat=K)`. Items with a category that never occurs in the data have a diverging
+   per $K$ of `GRM(n_categories=K)`. Items with a category that never occurs in the data have a diverging
    threshold and raise `SpecificationError`.
 8. **Missing data (MAR)**: NaN is coded as `-1` and the E-step's one-hot row is all zeros, which
    drops it from the likelihood ($m_{pj}$ in §4.2). An item missing for everyone is an error.
@@ -514,23 +514,23 @@ data-independent shapes (§15.21).
    $(p_j-g_j^{(0)})/(u_j^{(0)}-g_j^{(0)})$.
 5. **Display**: `FitResult.items` keeps adding `b = -d/a`; `g`, `u`, `g_se`, `u_se` appear
    automatically from the parameter table. `Model.fix_from()` passes `g` and `u` through unchanged
-   in both `"slope-intercept"` and `"irt"` parameterizations, and allows omitting `u` for 3PL items.
+   in both `"slope_intercept"` and `"irt"` parameterizations, and allows omitting `u` for 3PL items.
 6. **HeywoodWarning**: after fitting, `fit()` checks every free item parameter and emits one
    `flexpyirt.errors.HeywoodWarning` naming all affected items whenever a free parameter ends within
    `1e-4` of a finite bound (`g` or `u` near 0 or 1) or a free slope has $|a|>20$.
 7. **Identification**: `g` and `u` carry neither latent scale nor location
    (`slope_params=("a",)`, `intercept_params=("d",)`), so fixing asymptotes alone does not identify
    a free latent mean or variance.
-8. **GPCM and PCM item models**: `GPCM(n_cat)` (Muraki, 1992) and `PCM(n_cat)` (Masters, 1982)
-   share one kernel per `n_cat`, `GPCMKernel(n_cat)`, with categories `0..K-1` (`n_cat >= 2`
+8. **GPCM and PCM item models**: `GPCM(n_categories)` (Muraki, 1992) and `PCM(n_categories)` (Masters, 1982)
+   share one kernel per `n_categories`, `GPCMKernel(n_categories)`, with categories `0..K-1` (`n_categories >= 2`
    validated) and slope–intercept form matching mirt's `itemtype="gpcm"` (scoring coefficients
    $\mathrm{ak}_k=k$ and $d_0=0$ fixed, not parameters):
    $$P(y=k\mid\theta)=\frac{\exp(k\,a\theta+d_k)}{\sum_{c=0}^{K-1}\exp(c\,a\theta+d_c)},\qquad d_0=0.$$
    Internal parameters are `(a, d1, ..., d{K-1})`. Log-probabilities are computed with
    `jax.nn.log_softmax` (numerically stable, smooth derivatives, no ordering constraint on `d`).
-   `PCM(n_cat)` fixes `a = 1` by default, and the single-group default latent rule (§4.5) is
+   `PCM(n_categories)` fixes `a = 1` by default, and the single-group default latent rule (§4.5) is
    extended so that a model whose items are all `Rasch` or `PCM` gets $N(0,\sigma^2)$ with the
-   variance free (matching mirt's `itemtype="Rasch"` on polytomous data). With `n_cat = 2`,
+   variance free (matching mirt's `itemtype="Rasch"` on polytomous data). With `n_categories = 2`,
    `GPCM(2)` equals `TwoPL` and `PCM(2)` equals `Rasch` exactly.
 9. **GPCM/PCM starting values, identification, and estimability**: $a_j^{(0)}$ uses the item–rest
    correlation as for 2PL (`1.0` for PCM); each step starts at
@@ -577,12 +577,12 @@ data-independent shapes (§15.21).
     (`3 * n_iter - n_em_evaluations`) are at least 5 and exceed 50% of iterations (partial
     step-backs that still accelerate do not trigger spurious warnings).
 14. **Prior distributions and natural-scale MAP objective (M3, §4.7)**: `NormalPrior(mean, sd)`,
-    `LogNormal(meanlog, sdlog)`, and `Beta(a, b)` are public frozen dataclasses in `priors.py`
+    `LogNormalPrior(mean_log, sd_log)`, and `BetaPrior(a, b)` are public frozen dataclasses in `priors.py`
     validating their parameters (`SpecificationError`) and providing `log_pdf(x)`. Priors are
     evaluated on the natural parameter scale without a Jacobian term — verified in R against
     `mirt` 1.46's `LL.Priors` (`expbeta` evaluates `dbeta(plogis(logit_g), a, b, log = TRUE)` with
     no logit Jacobian; note mirt 1.46's `DerivativePriors` / `BL.LL` defects documented in
-    VALIDATION.md). `Beta.log_pdf` computes $\log B(a, b)$ via `gammaln(a) + gammaln(b) - gammaln(a + b)`
+    VALIDATION.md). `BetaPrior.log_pdf` computes $\log B(a, b)$ via `gammaln(a) + gammaln(b) - gammaln(a + b)`
     rather than `jax.scipy.special.betaln`, which loses ~1e-7 accuracy in float64.
 15. **Prior attachment, table editing, and scope**: `Model.prior(*, param, dist, items=None)`
     attaches `dist` to `param` of the selected items across all groups. The ParameterTable adds a
@@ -599,7 +599,7 @@ data-independent shapes (§15.21).
     derivatives. Inside `m_step`, each item gathers its local-slot priors from `prob.priors` via
     `slot_free_index` and adds them to `q_item`, keeping the item-wise decomposition (§14.2) and
     counting shared parameters once. `compile_problem` intersects `slot_lower`/`slot_upper` with
-    each free slot's prior support (`(0, inf)` for `LogNormal`, `(0, 1)` for `Beta`) so both
+    each free slot's prior support (`(0, inf)` for `LogNormalPrior`, `(0, 1)` for `BetaPrior`) so both
     bounded Newton and SQUAREM respect prior support without altering the ParameterTable's model
     domain bounds.
 17. **MAP results, history, SQUAREM safeguard, and posterior SEs**: `FitResult.loglik` stays
@@ -612,7 +612,7 @@ data-independent shapes (§15.21).
     `log_prior(prob, e)` to $Q(\eta\mid\eta')$ and `information_hessian` differentiates
     `log_posterior(prob, e)`, adding $-\nabla^2_\eta\log\pi(\hat\eta)$ identically to both.
 18. **Delta-method SEs for display IRT thresholds (M4, §7)**: each `ItemKernel` defines
-    `irt_names` (e.g. `("b",)` or `("b1", ..., "b{K-1}")`), `irt_dep_indices` (which internal
+    `irt_names` (e.g. `("b",)` or `("b1", ..., "b{K-1}")`), `irt_dependency_indices` (which internal
     parameters enter each threshold), and pure JAX `irt_thresholds(params)` ($b = -d/a$ for
     2PL/Rasch/3PL/4PL, $b_k = -d_k/a$ for GRM, and $b_k = -(d_k - d_{k-1})/a$ with $d_0 = 0$ via
     `jnp.diff` for GPCM/PCM). In `FitResult.items`, a per-kernel cached jitted
@@ -754,7 +754,7 @@ data-independent shapes (§15.21).
     string and also writes UTF-8 text to `path` (`str` or `os.PathLike`) when given;
     `FitResult.from_json(source) -> FitResult` loads from a file path or JSON string without
     refitting. Plain JSON is used (no `pickle` and never `eval`). The top-level object carries
-    `"format": "flexpyirt.FitResult"`, `"schema_version"` (2 since multidimensional models were added in §15.33; version 1 files are still read), and
+    `"format": "flexpyirt.FitResult"`, `"schema_version"` (4 since the naming refactor of §15.46; versions 1–3 are still read), and
     `"flexpyirt_version": flexpyirt.__version__`. `FitResult` stores `_method: BAEM` alongside
     `_model` and `_quadrature` so estimation settings round-trip as well. `from_json` calls
     `check_x64()` at entry (raising `PrecisionError` when 64-bit floating point is disabled, since
@@ -770,8 +770,8 @@ data-independent shapes (§15.21).
     schema slots decode these strings, so string fields such as item or group names are unaffected.
 28. **Explicit registries and full state preservation (M4)**:
     Item models (`"2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"GRM"`, `"GPCM"`, `"PCM"`, recording
-    `n_cat` for polytomous models), latent distributions (`"Normal"`), priors (`"NormalPrior"`,
-    `"LogNormal"`, `"Beta"`), quadrature (`"equispaced"`), and estimation methods (`"BAEM"`) are
+    `n_categories` for polytomous models), latent distributions (`"Normal"`), priors (`"NormalPrior"`,
+    `"LogNormalPrior"`, `"BetaPrior"`), quadrature (`"equispaced"`), and estimation methods (`"BAEM"`) are
     (de)serialized through explicit name registries in `_json.py`. Unknown format tags, schema
     versions, registry names, invalid JSON, or inconsistent table/shape invariants raise
     `SpecificationError` with a clear message. Both the full `Model` specification (item names and
@@ -1025,6 +1025,23 @@ data-independent shapes (§15.21).
     against mirt 1.48 (V15): V4's two-group 2PL at mirt's estimates, and Science (GRM) split into
     two groups with all items invariant, at mirt's estimates (mirt stops ~2e-4 short in the item
     parameters there): df identical, S-X2 within 1e-6 relative.
+
+46. **Naming refactor (schema version 4)**: public names follow Python conventions rather than
+    mirt/R argument names. Item models take `n_categories` (was `n_cat`); `Quadrature.equispaced`
+    and `Quadrature.default` take `bounds=(lower, upper)` (was `lim`), and the default point
+    counts are `quadrature.DEFAULT_N_POINTS`; all priors end in `Prior` (`NormalPrior`,
+    `LogNormalPrior(mean_log, sd_log)`, `BetaPrior(a, b)`, were `LogNormal(meanlog, sdlog)` and
+    `Beta`); `FitResult.item_fit(min_cell=...)` (was `mincell`, mirt's name); string options are
+    snake_case (`parameterization="slope_intercept"`, `link(method="stocking_lord")`); and
+    `Model.is_empirical_histogram` replaces `Model.is_eh`. Nothing had been released, so the old
+    names are removed without deprecation aliases. JSON `schema_version` is 4: item models store
+    `n_categories` and priors are registered as `"NormalPrior"`, `"LogNormalPrior"` (keys
+    `mean_log`, `sd_log`) and `"BetaPrior"`. Files with versions 1–3 are still read: before
+    validation, `_upgrade_legacy_names` renames `n_cat`, `LogNormal`/`meanlog`/`sdlog` and `Beta`
+    to their version-4 names. Mathematical notation stays in internal kernels (`G`, `Q`, `K_f`, …)
+    and in `LinkResult.A`/`B` (the linking constants of Kolen & Brennan, 2014), and the port of
+    mirt's cell collapsing (`_itemfit.collapse_cells`) keeps mirt's local names so it can be
+    compared line by line.
 
 ## 16. Implementation decisions (M5)
 1. **Equality constraints across items (`Model.equal_across_items`, shared `free_id`s)**:
@@ -1289,11 +1306,11 @@ data-independent shapes (§15.21).
    **Validation in the Python shell**: multidimensional fits, multiple-group fits without explicit
    `source_group` / `target_group`, mismatched item kernels or category counts on common items, and
    invalid nodes/weights raise `SpecificationError`.
-6. **Nominal response model (`Nominal(n_cat)`, `NominalKernel(n_cat, n_factors=1)`, V23)**:
+6. **Nominal response model (`Nominal(n_categories)`, `NominalKernel(n_categories, n_factors=1)`, V23)**:
    Bock's (1972) nominal response model in Thissen, Cai & Bock's (2010) overall-slope ×
    scoring-function parameterization, matching R mirt's `itemtype = "nominal"` (Chalmers, 2012):
    $$P(y=k\mid\boldsymbol\theta)=\frac{\exp\big(\mathrm{ak}_k\,\mathbf a^\top\boldsymbol\theta+d_k\big)}{\sum_{c=0}^{K-1}\exp\big(\mathrm{ak}_c\,\mathbf a^\top\boldsymbol\theta+d_c\big)},\qquad k=0,\dots,K-1,\quad \mathrm{ak}_0=0,\ \mathrm{ak}_{K-1}=K-1,\ d_0=0,$$
-   for categories `0..K-1` (`n_cat >= 2` validated) and $D\in\{1,2,3\}$ (evaluated with
+   for categories `0..K-1` (`n_categories >= 2` validated) and $D\in\{1,2,3\}$ (evaluated with
    `_linear_predictor(theta, params[:D], D)` multiplying the scoring vector $\mathrm{ak}$ and
    `jax.nn.log_softmax`).
    - **Parameters and bounds**: mirt's `coef(m)` / `pars = "values"` reports `a1` (`a1..aD`),
@@ -1310,7 +1327,7 @@ data-independent shapes (§15.21).
      (`a1 = 0.851`, `ak1 = ... = ak{K-2} = 0.5`, `d1 = ... = d{K-1} = 0`) give interior
      categories $1,\dots,K-2$ identical predictors at iteration 0 and can cause mirt's undamped
      `optimizer = "NR"` to hit an indefinite joint Hessian and trap `a1 = 0` (e.g. on `Science`).
-     flexpyirt starts `Nominal(n_cat)` at the GPCM starting point: $a_j^{(0)}$ from the item–rest
+     flexpyirt starts `Nominal(n_categories)` at the GPCM starting point: $a_j^{(0)}$ from the item–rest
      correlation (§4.10; factor-specific item–rest correlations for $D>1$, §15.31), distinct
      scoring coefficients $\mathrm{ak}_{jk}^{(0)}=k$ ($k=1,\dots,K-2$), and GPCM starting
      intercepts $d_{jk}^{(0)}$ (`_gpcm_intercept_starts`, §15.9). This breaks category symmetry at
@@ -1326,8 +1343,8 @@ data-independent shapes (§15.21).
      (`c1..cK`) rather than $\theta$-scale difficulty thresholds $b_k$, and adjacent category
      intersections $-(d_k-d_{k-1})/[a(\mathrm{ak}_k-\mathrm{ak}_{k-1})]$ are singular whenever
      $\mathrm{ak}_k=\mathrm{ak}_{k-1}$. `NominalKernel` therefore sets `irt_names = ()` and
-     `irt_dep_indices = ()` (no `b` / `bk` columns in `FitResult.items`), and `Model.fix_from()`
-     supports `Nominal` items with `parameterization="slope-intercept"` while raising
+     `irt_dependency_indices = ()` (no `b` / `bk` columns in `FitResult.items`), and `Model.fix_from()`
+     supports `Nominal` items with `parameterization="slope_intercept"` while raising
      `SpecificationError` for `parameterization="irt"` on `Nominal` items. `"Nominal"` is added to
      the polytomous item registry in `_json.py` (keeping schema version 3 and older versions 1–2
      readable). In 1-D ML scoring (`_scoring._pattern_flags`), an item's lowest- and

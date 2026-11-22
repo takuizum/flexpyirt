@@ -6,13 +6,13 @@ points on [-6, 6]:
 - ``v7_2pl_map``: 2PL (J=15, N=1000) with ``a ~ NormalPrior(1.2, 0.5)``,
   ``d ~ NormalPrior(0, 2)``. Fitted directly with R mirt (``optimizer = "NR"``, ``TOL = 1e-10``):
   parameters, log-likelihood, log-posterior, and Oakes SEs all match mirt directly.
-- ``v7_2pl_lnorm_map``: 2PL (J=15, N=1000) with ``a ~ LogNormal(0.2, 0.3)``,
+- ``v7_2pl_lnorm_map``: 2PL (J=15, N=1000) with ``a ~ LogNormalPrior(0.2, 0.3)``,
   ``d ~ NormalPrior(0, 2)``. Fitted directly with R mirt (``optimizer = "NR"``): parameters,
   log-likelihood and log-posterior match mirt directly; posterior SEs are checked against the
   exact R posterior Hessian (mirt 1.46's ``DerivativePriors`` has a sign bug in the ``lnorm``
   Hessian).
-- ``v7_3pl_map``: 3PL (J=15, N=1000) with ``a ~ LogNormal(0.2, 0.3)``,
-  ``d ~ NormalPrior(0, 2)``, ``g ~ Beta(5, 17)`` (``expbeta`` in mirt, natural scale without
+- ``v7_3pl_map``: 3PL (J=15, N=1000) with ``a ~ LogNormalPrior(0.2, 0.3)``,
+  ``d ~ NormalPrior(0, 2)``, ``g ~ BetaPrior(5, 17)`` (``expbeta`` in mirt, natural scale without
   Jacobian). Maximizes mirt's exact ``logLik + logPrior`` objective in R (cross-checked via mirt
   with fixed parameters to ~1e-14, plus EAP from mirt ``fscores``), because mirt 1.46's
   ``DerivativePriors`` omits the logit chain-rule factor ``g*(1-g)`` for ``expbeta``.
@@ -38,9 +38,9 @@ import pytest
 
 from flexpyirt import (
     BAEM,
-    Beta,
+    BetaPrior,
     FitResult,
-    LogNormal,
+    LogNormalPrior,
     Model,
     NormalPrior,
     Quadrature,
@@ -68,9 +68,9 @@ def _build_prior(spec: dict[str, Any]) -> Prior:
     if dist == "NormalPrior":
         return NormalPrior(mean=float(spec["mean"]), sd=float(spec["sd"]))
     if dist == "LogNormal":
-        return LogNormal(meanlog=float(spec["meanlog"]), sdlog=float(spec["sdlog"]))
+        return LogNormalPrior(mean_log=float(spec["meanlog"]), sd_log=float(spec["sdlog"]))
     if dist == "Beta":
-        return Beta(a=float(spec["a"]), b=float(spec["b"]))
+        return BetaPrior(a=float(spec["a"]), b=float(spec["b"]))
     raise ValueError(f"Unknown prior spec {spec!r}")
 
 

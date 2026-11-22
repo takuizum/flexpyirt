@@ -41,7 +41,7 @@ class BenchmarkCase:
         Total number of respondents (for ``twogroup_2pl``, split equally across 2 groups).
     n_items : int
         Number of items.
-    n_cat : int
+    n_categories : int
         Number of response categories (2 for dichotomous, 4 for GRM).
     seed : int
         NumPy ``default_rng`` seed.
@@ -56,7 +56,7 @@ class BenchmarkCase:
     model: ModelKind
     n_persons: int
     n_items: int
-    n_cat: int
+    n_categories: int
     seed: int
     n_groups: int = 1
     n_anchors: int = 0
@@ -79,7 +79,7 @@ CASES: tuple[BenchmarkCase, ...] = (
         model="2pl",
         n_persons=1000,
         n_items=20,
-        n_cat=2,
+        n_categories=2,
         seed=202601,
     ),
     BenchmarkCase(
@@ -88,7 +88,7 @@ CASES: tuple[BenchmarkCase, ...] = (
         model="2pl",
         n_persons=5000,
         n_items=40,
-        n_cat=2,
+        n_categories=2,
         seed=202602,
     ),
     BenchmarkCase(
@@ -97,7 +97,7 @@ CASES: tuple[BenchmarkCase, ...] = (
         model="2pl",
         n_persons=20000,
         n_items=40,
-        n_cat=2,
+        n_categories=2,
         seed=202603,
     ),
     BenchmarkCase(
@@ -106,7 +106,7 @@ CASES: tuple[BenchmarkCase, ...] = (
         model="grm",
         n_persons=2000,
         n_items=20,
-        n_cat=4,
+        n_categories=4,
         seed=202604,
     ),
     BenchmarkCase(
@@ -115,7 +115,7 @@ CASES: tuple[BenchmarkCase, ...] = (
         model="3pl",
         n_persons=5000,
         n_items=30,
-        n_cat=2,
+        n_categories=2,
         seed=202605,
     ),
     BenchmarkCase(
@@ -124,7 +124,7 @@ CASES: tuple[BenchmarkCase, ...] = (
         model="twogroup_2pl",
         n_persons=6000,
         n_items=30,
-        n_cat=2,
+        n_categories=2,
         seed=202606,
         n_groups=2,
         n_anchors=10,
@@ -157,7 +157,7 @@ def simulate_case(case: BenchmarkCase) -> pd.DataFrame:
         y = (rng.random(p.shape) < p).astype(np.int64)
         df = pd.DataFrame(y, columns=cols)
     elif case.model == "grm":
-        k = case.n_cat
+        k = case.n_categories
         a = rng.lognormal(0.0, 0.3, j)
         d1 = rng.normal(1.2, 0.3, j)
         gaps = rng.uniform(0.8, 1.4, (j, k - 2))
@@ -203,7 +203,7 @@ def simulate_case(case: BenchmarkCase) -> pd.DataFrame:
 
 
 def _validate_categories(df: pd.DataFrame, case: BenchmarkCase) -> None:
-    expected = set(range(case.n_cat))
+    expected = set(range(case.n_categories))
     if case.n_groups > 1:
         for grp, sub in df.groupby("group", sort=False):
             for col in case.item_names:

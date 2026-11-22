@@ -64,12 +64,16 @@ class Case:
         return int(self.raw["meta"]["degree"])
 
     @property
-    def n_cat(self) -> int:
+    def n_categories(self) -> int:
         return int(self.raw["meta"]["n_cat"])
 
     @property
     def d_names(self) -> tuple[str, ...]:
-        return ("d",) if self.n_cat == 2 else tuple(f"d{k}" for k in range(1, self.n_cat))
+        return (
+            ("d",)
+            if self.n_categories == 2
+            else tuple(f"d{k}" for k in range(1, self.n_categories))
+        )
 
     @property
     def data(self) -> pd.DataFrame:
@@ -91,10 +95,10 @@ def load(name: str) -> Case:
     check_reference_meta(raw["meta"], require_grid_check=True)
     meta = raw["meta"]
     lim = meta["theta_lim"]
-    quad = Quadrature.equispaced(int(meta["quadpts"]), lim=(float(lim[0]), float(lim[1])))
+    quad = Quadrature.equispaced(int(meta["quadpts"]), bounds=(float(lim[0]), float(lim[1])))
     degree = int(meta["degree"])
-    n_cat = int(meta["n_cat"])
-    item_model = TwoPL() if meta["itemtype"] == "2PL" else GRM(n_cat=n_cat)
+    n_categories = int(meta["n_cat"])
+    item_model = TwoPL() if meta["itemtype"] == "2PL" else GRM(n_categories=n_categories)
     spec = Model.uniform(item_model, items=raw["items"])
     if "bank" in raw:
         spec = spec.fix_from(pd.DataFrame(raw["bank"]))

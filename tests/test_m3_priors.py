@@ -16,9 +16,9 @@ from scipy import stats
 from flexpyirt import (
     BAEM,
     GRM,
-    Beta,
+    BetaPrior,
     FourPL,
-    LogNormal,
+    LogNormalPrior,
     Model,
     Normal,
     NormalPrior,
@@ -70,9 +70,9 @@ def test_normal_prior_log_pdf_matches_scipy() -> None:
 
 def test_lognormal_prior_log_pdf_matches_scipy() -> None:
     xs = np.array([0.05, 0.5, 1.0, 1.8, 5.0])
-    pri = LogNormal(meanlog=0.2, sdlog=0.35)
+    pri = LogNormalPrior(mean_log=0.2, sd_log=0.35)
     got = np.asarray(pri.log_pdf(xs))
-    # scipy.stats.lognorm(s=sdlog, scale=exp(meanlog)) matches R dlnorm(x, meanlog, sdlog).
+    # scipy.stats.lognorm(s=sd_log, scale=exp(mean_log)) matches R dlnorm(x, mean_log, sd_log).
     expected = stats.lognorm.logpdf(xs, s=0.35, scale=np.exp(0.2))
     np.testing.assert_allclose(got, expected, rtol=1e-14, atol=1e-14)
     assert float(pri.log_pdf(0.0)) == -np.inf
@@ -81,7 +81,7 @@ def test_lognormal_prior_log_pdf_matches_scipy() -> None:
 
 def test_beta_prior_log_pdf_matches_scipy() -> None:
     xs = np.array([0.01, 0.15, 0.25, 0.5, 0.92])
-    pri = Beta(a=5.0, b=17.0)
+    pri = BetaPrior(a=5.0, b=17.0)
     got = np.asarray(pri.log_pdf(xs))
     expected = stats.beta.logpdf(xs, a=5.0, b=17.0)
     np.testing.assert_allclose(got, expected, rtol=1e-13, atol=1e-13)
@@ -114,11 +114,11 @@ def test_prior_parameter_validation() -> None:
         with pytest.raises(SpecificationError):
             NormalPrior(0.0, bad)
         with pytest.raises(SpecificationError):
-            LogNormal(0.0, bad)
+            LogNormalPrior(0.0, bad)
         with pytest.raises(SpecificationError):
-            Beta(bad, 2.0)
+            BetaPrior(bad, 2.0)
         with pytest.raises(SpecificationError):
-            Beta(2.0, bad)
+            BetaPrior(2.0, bad)
     bad_loc: tuple[Any, ...] = (
         np.nan,
         np.inf,
@@ -136,25 +136,25 @@ def test_prior_parameter_validation() -> None:
         with pytest.raises(SpecificationError):
             NormalPrior(bad, 1.0)
         with pytest.raises(SpecificationError):
-            LogNormal(bad, 1.0)
+            LogNormalPrior(bad, 1.0)
 
 
 def test_prior_accepts_real_numeric_scalars_and_stores_python_floats() -> None:
     """Python and NumPy real scalars (non-bool) are accepted and normalized to Python float."""
-    beta_i64 = Beta(np.int64(5), np.int64(17))
-    assert beta_i64 == Beta(5.0, 17.0)
+    beta_i64 = BetaPrior(np.int64(5), np.int64(17))
+    assert beta_i64 == BetaPrior(5.0, 17.0)
     assert type(beta_i64.a) is float and type(beta_i64.b) is float
 
     norm_np = NormalPrior(np.int32(-2), np.float32(1.5))
     assert norm_np == NormalPrior(-2.0, 1.5)
     assert type(norm_np.mean) is float and type(norm_np.sd) is float
 
-    ln_np = LogNormal(np.float16(0.5), np.uint8(2))
-    assert ln_np == LogNormal(0.5, 2.0)
-    assert type(ln_np.meanlog) is float and type(ln_np.sdlog) is float
+    ln_np = LogNormalPrior(np.float16(0.5), np.uint8(2))
+    assert ln_np == LogNormalPrior(0.5, 2.0)
+    assert type(ln_np.mean_log) is float and type(ln_np.sd_log) is float
 
-    beta_frac = Beta(Fraction(5, 2), 3)
-    assert beta_frac == Beta(2.5, 3.0)
+    beta_frac = BetaPrior(Fraction(5, 2), 3)
+    assert beta_frac == BetaPrior(2.5, 3.0)
     assert type(beta_frac.a) is float and type(beta_frac.b) is float
 
 
@@ -172,8 +172,8 @@ def test_eval_log_prior_branch_free_gradients_and_hessians() -> None:
     vals = eval_log_prior(x, kind, p1, p2)
     np.testing.assert_allclose(vals[:3], 0.0, atol=0.0)
     assert float(vals[3]) == pytest.approx(float(NormalPrior(0.0, 2.0).log_pdf(-1.3)), rel=1e-14)
-    assert float(vals[4]) == pytest.approx(float(LogNormal(0.2, 0.3).log_pdf(1.4)), rel=1e-14)
-    assert float(vals[5]) == pytest.approx(float(Beta(5.0, 17.0).log_pdf(0.22)), rel=1e-14)
+    assert float(vals[4]) == pytest.approx(float(LogNormalPrior(0.2, 0.3).log_pdf(1.4)), rel=1e-14)
+    assert float(vals[5]) == pytest.approx(float(BetaPrior(5.0, 17.0).log_pdf(0.22)), rel=1e-14)
 
     def total(v: jax.Array) -> jax.Array:
         return jnp.sum(eval_log_prior(v, kind, p1, p2))
@@ -216,17 +216,17 @@ def test_model_prior_validation_and_table_column() -> None:
     with pytest.raises(SpecificationError, match="latent-distribution"):
         spec.prior(param="mean", dist=NormalPrior(0.0, 1.0))
     with pytest.raises(SpecificationError, match="latent-distribution"):
-        spec.prior(param="var", dist=LogNormal(0.0, 0.5))
+        spec.prior(param="var", dist=LogNormalPrior(0.0, 0.5))
     with pytest.raises(SpecificationError, match="no parameter"):
-        spec.prior(param="g", dist=Beta(5.0, 17.0))
+        spec.prior(param="g", dist=BetaPrior(5.0, 17.0))
     with pytest.raises(SpecificationError, match="selected no items"):
-        spec.prior(param="a", dist=LogNormal(0.0, 0.5), items=[])
+        spec.prior(param="a", dist=LogNormalPrior(0.0, 0.5), items=[])
     with pytest.raises(SpecificationError, match="Unknown items"):
-        spec.prior(param="a", dist=LogNormal(0.0, 0.5), items=["missing"])
+        spec.prior(param="a", dist=LogNormalPrior(0.0, 0.5), items=["missing"])
 
     # Callable selector + override on one item
     spec_p = (
-        spec.prior(param="a", dist=LogNormal(0.0, 0.5))
+        spec.prior(param="a", dist=LogNormalPrior(0.0, 0.5))
         .prior(param="a", dist=NormalPrior(1.0, 0.5), items=["Item.1"])
         .prior(param="d", dist=NormalPrior(0.0, 2.0), items=lambda n: n.endswith(("1", "2")))
     )
@@ -235,7 +235,7 @@ def test_model_prior_validation_and_table_column() -> None:
     assert table["prior"].dtype == object
     idx = table.set_index(["item", "param"])["prior"]
     assert idx[("Item.1", "a")] == NormalPrior(1.0, 0.5)
-    assert idx[("Item.2", "a")] == LogNormal(0.0, 0.5)
+    assert idx[("Item.2", "a")] == LogNormalPrior(0.0, 0.5)
     assert idx[("Item.1", "d")] == NormalPrior(0.0, 2.0)
     assert idx[("Item.3", "d")] is None
     assert idx[("__latent__", "mean")] is None
@@ -248,7 +248,7 @@ def test_model_prior_validation_and_table_column() -> None:
 def test_prior_on_fixed_parameter_has_no_effect() -> None:
     df = load_m1("v1_lsat7_2pl").data
     base = Model.uniform(TwoPL(), items=df.columns).fix(item="Item.1", a=1.0, d=0.0)
-    with_fixed_prior = base.prior(param="a", dist=LogNormal(0.2, 0.3), items=["Item.1"]).prior(
+    with_fixed_prior = base.prior(param="a", dist=LogNormalPrior(0.2, 0.3), items=["Item.1"]).prior(
         param="d", dist=NormalPrior(5.0, 0.1), items=["Item.1"]
     )
 
@@ -273,7 +273,7 @@ def test_prior_on_fixed_parameter_has_no_effect() -> None:
     neg_fixed = (
         Model.uniform(TwoPL(), items=df.columns)
         .fix(item="Item.1", a=-0.5)
-        .prior(param="a", dist=LogNormal(0.0, 0.5), items=["Item.1"])
+        .prior(param="a", dist=LogNormalPrior(0.0, 0.5), items=["Item.1"])
     )
     r_neg = fit(neg_fixed, df, se=None)
     assert r_neg.converged
@@ -296,7 +296,7 @@ def test_shared_free_id_prior_counted_once_across_groups() -> None:
         Model.uniform(TwoPL(), items=df.columns)
         .with_groups(ref=Normal.standard(), focal=Normal.free())
         .equal_across_groups(items=anchors)
-        .prior(param="a", dist=LogNormal(0.2, 0.3))
+        .prior(param="a", dist=LogNormalPrior(0.2, 0.3))
         .prior(param="d", dist=NormalPrior(0.0, 2.0))
     )
     res_oakes = fit(spec, df, group=group, method=BAEM(tol=1e-9, max_iter=5000), se="oakes")
@@ -327,7 +327,7 @@ def test_shared_free_id_prior_counted_once_across_groups() -> None:
     row_foc_q01_a = (
         (bad_table["group"] == "focal") & (bad_table["item"] == "q01") & (bad_table["param"] == "a")
     )
-    bad_table.loc[row_foc_q01_a, "prior"] = LogNormal(0.5, 0.5)  # type: ignore[call-overload]
+    bad_table.loc[row_foc_q01_a, "prior"] = LogNormalPrior(0.5, 0.5)  # type: ignore[call-overload]
     with pytest.raises(SpecificationError, match="conflicting priors"):
         fit(spec, df, group=group, table=bad_table, se=None)
 
@@ -338,13 +338,13 @@ def test_shared_free_id_prior_counted_once_across_groups() -> None:
 def test_edited_table_priors_match_spec_and_validate() -> None:
     df = load_m1("v1_lsat7_2pl").data
     spec_plain = Model.uniform(TwoPL(), items=df.columns)
-    spec_pri = spec_plain.prior(param="a", dist=LogNormal(0.1, 0.4)).prior(
+    spec_pri = spec_plain.prior(param="a", dist=LogNormalPrior(0.1, 0.4)).prior(
         param="d", dist=NormalPrior(0.0, 2.0)
     )
 
     table = spec_plain.parameter_table(df)
     items_mask = table["item"] != "__latent__"
-    table.loc[items_mask & (table["param"] == "a"), "prior"] = LogNormal(0.1, 0.4)  # type: ignore[call-overload]
+    table.loc[items_mask & (table["param"] == "a"), "prior"] = LogNormalPrior(0.1, 0.4)  # type: ignore[call-overload]
     table.loc[items_mask & (table["param"] == "d"), "prior"] = NormalPrior(0.0, 2.0)  # type: ignore[call-overload]
 
     r_spec = fit(spec_pri, df, method=BAEM(tol=1e-9), se="oakes")
@@ -378,14 +378,14 @@ def test_edited_table_priors_match_spec_and_validate() -> None:
     t_oob = spec_plain.parameter_table(df)
     row_a = (t_oob["item"] == "Item.1") & (t_oob["param"] == "a")
     t_oob.loc[row_a, "value"] = -0.5
-    t_oob.loc[row_a, "prior"] = LogNormal(0.0, 0.5)  # type: ignore[call-overload]
+    t_oob.loc[row_a, "prior"] = LogNormalPrior(0.0, 0.5)  # type: ignore[call-overload]
     with pytest.raises(SpecificationError, match="outside the support"):
         fit(spec_plain, df, table=t_oob, se=None)
 
     t_beta_oob = spec_plain.parameter_table(df)
     row_d = (t_beta_oob["item"] == "Item.1") & (t_beta_oob["param"] == "d")
     t_beta_oob.loc[row_d, "value"] = 1.5
-    t_beta_oob.loc[row_d, "prior"] = Beta(5.0, 17.0)  # type: ignore[call-overload]
+    t_beta_oob.loc[row_d, "prior"] = BetaPrior(5.0, 17.0)  # type: ignore[call-overload]
     with pytest.raises(SpecificationError, match="outside the support"):
         fit(spec_plain, df, table=t_beta_oob, se=None)
 
@@ -403,7 +403,9 @@ def test_aic_bic_warn_when_priors_present_and_silent_without() -> None:
         _ = r_mle.aic
         _ = r_mle.bic
 
-    spec_map = Model.uniform(TwoPL(), items=df.columns).prior(param="a", dist=LogNormal(0.0, 0.5))
+    spec_map = Model.uniform(TwoPL(), items=df.columns).prior(
+        param="a", dist=LogNormalPrior(0.0, 0.5)
+    )
     r_map = fit(spec_map, df, se=None)
     assert r_map.log_posterior != pytest.approx(r_map.loglik)
     assert "log_posterior=" in repr(r_map)
@@ -424,9 +426,9 @@ def test_posterior_information_adds_prior_hessian_exactly() -> None:
 
     spec_lik = Model.uniform(ThreePL(), items=df.columns)
     spec_map = (
-        spec_lik.prior(param="a", dist=LogNormal(0.2, 0.3))
+        spec_lik.prior(param="a", dist=LogNormalPrior(0.2, 0.3))
         .prior(param="d", dist=NormalPrior(0.0, 2.0))
-        .prior(param="g", dist=Beta(5.0, 17.0))
+        .prior(param="g", dist=BetaPrior(5.0, 17.0))
     )
     prep_lik = prepare(spec_lik, df, group=None, item_names=None, table=None)
     prep_map = prepare(spec_map, df, group=None, item_names=None, table=None)
@@ -457,9 +459,9 @@ def test_map_3pl_monotone_and_prevents_heywood(squarem: bool) -> None:
 
     spec = (
         Model.uniform(ThreePL(), items=df.columns)
-        .prior(param="a", dist=LogNormal(0.2, 0.3))
+        .prior(param="a", dist=LogNormalPrior(0.2, 0.3))
         .prior(param="d", dist=NormalPrior(0.0, 2.0))
-        .prior(param="g", dist=Beta(5.0, 17.0))
+        .prior(param="g", dist=BetaPrior(5.0, 17.0))
     )
     with warnings.catch_warnings():
         warnings.simplefilter("error", HeywoodWarning)
@@ -486,10 +488,10 @@ def _simulate_grm(a: np.ndarray, d: np.ndarray, n: int, seed: int) -> pd.DataFra
 
 def test_default_starts_adjusted_into_prior_support() -> None:
     """Default starts move strictly into (model bounds ∩ prior support) for 2PL, 3PL/4PL, GRM."""
-    # 1. Beta(2, 2) on 2PL slopes (heuristic a0 > 1 on LSAT7 Item.2).
+    # 1. BetaPrior(2, 2) on 2PL slopes (heuristic a0 > 1 on LSAT7 Item.2).
     df_lsat = load_m1("v1_lsat7_2pl").data
     spec_beta_a = Model.uniform(TwoPL(), items=df_lsat.columns).prior(
-        param="a", dist=Beta(2.0, 2.0)
+        param="a", dist=BetaPrior(2.0, 2.0)
     )
     tbl_beta_a = spec_beta_a.parameter_table(df_lsat)
     a_starts = tbl_beta_a.loc[tbl_beta_a["param"] == "a", "value"].to_numpy()
@@ -498,7 +500,8 @@ def test_default_starts_adjusted_into_prior_support() -> None:
     assert res_beta_a.converged
     assert ((res_beta_a.items["a"] > 0.0) & (res_beta_a.items["a"] < 1.0)).all()
 
-    # 2. LogNormal(0, 0.5) on 2PL intercepts when items have proportion correct <= 0.5 (d0 <= 0).
+    # 2. LogNormalPrior(0, 0.5) on 2PL intercepts when items have proportion correct <= 0.5
+    #    (d0 <= 0).
     df_hard = _simulate_2pl(
         np.array([1.1, 1.3, 1.0, 1.2, 1.4]),
         np.array([-1.2, -0.5, 0.0, 0.4, -0.8]),
@@ -506,7 +509,7 @@ def test_default_starts_adjusted_into_prior_support() -> None:
         seed=42,
     )
     spec_ln_d = Model.uniform(TwoPL(), items=df_hard.columns).prior(
-        param="d", dist=LogNormal(0.0, 0.5)
+        param="d", dist=LogNormalPrior(0.0, 0.5)
     )
     tbl_ln_d = spec_ln_d.parameter_table(df_hard)
     d_starts = tbl_ln_d.loc[tbl_ln_d["param"] == "d", "value"].to_numpy()
@@ -515,11 +518,11 @@ def test_default_starts_adjusted_into_prior_support() -> None:
     assert res_ln_d.converged
     assert (res_ln_d.items["d"] > 0.0).all()
 
-    # Extreme LogNormal meanlog (exp overflow / underflow) still yields a finite > 0 start.
+    # Extreme LogNormalPrior mean_log (exp overflow / underflow) still yields a finite > 0 start.
     for extreme_meanlog in (1000.0, -1000.0):
         t_ext = (
             Model.uniform(TwoPL(), items=df_hard.columns)
-            .prior(param="d", dist=LogNormal(extreme_meanlog, 1.0))
+            .prior(param="d", dist=LogNormalPrior(extreme_meanlog, 1.0))
             .parameter_table(df_hard)
         )
         d_ext = t_ext.loc[t_ext["param"] == "d", "value"].to_numpy()
@@ -536,7 +539,7 @@ def test_default_starts_adjusted_into_prior_support() -> None:
     spec_3pl = (
         Model.uniform(ThreePL(), items=df_3pl.columns)
         .fix(item="q01", u=0.15)
-        .prior(param="g", dist=Beta(2.0, 2.0))
+        .prior(param="g", dist=BetaPrior(2.0, 2.0))
     )
     t_3pl = spec_3pl.parameter_table(df_3pl).set_index(["item", "param"])
     assert 0.0 < float(t_3pl["value"].loc[("q01", "g")]) < 0.15
@@ -544,8 +547,8 @@ def test_default_starts_adjusted_into_prior_support() -> None:
     spec_4pl = (
         Model.uniform(FourPL(), items=df_3pl.columns)
         .fix(item="q01", g=0.96)
-        .prior(param="g", dist=Beta(2.0, 2.0))
-        .prior(param="u", dist=Beta(2.0, 2.0))
+        .prior(param="g", dist=BetaPrior(2.0, 2.0))
+        .prior(param="u", dist=BetaPrior(2.0, 2.0))
     )
     t_4pl = spec_4pl.parameter_table(df_3pl).set_index(["item", "param"])
     for item in df_3pl.columns:
@@ -553,7 +556,8 @@ def test_default_starts_adjusted_into_prior_support() -> None:
         u0 = float(t_4pl["value"].loc[(item, "u")])
         assert 0.0 < g0 < u0 < 1.0
 
-    # 4. GRM keeps d1 > d2 > ... > d(K-1) strictly inside prior support (LogNormal, Beta, fixed).
+    # 4. GRM keeps d1 > d2 > ... > d(K-1) strictly inside prior support
+    #    (LogNormalPrior, BetaPrior, fixed).
     df_grm = _simulate_grm(
         np.array([1.1, 1.3, 1.0, 1.2]),
         np.array([[1.0, -0.2, -1.2], [0.8, 0.0, -1.0], [1.2, 0.1, -0.9], [0.6, -0.3, -1.4]]),
@@ -561,10 +565,10 @@ def test_default_starts_adjusted_into_prior_support() -> None:
         seed=88,
     )
     spec_grm_ln = (
-        Model.uniform(GRM(n_cat=4), items=df_grm.columns)
-        .prior(param="d1", dist=LogNormal(0.0, 0.5))
-        .prior(param="d2", dist=LogNormal(0.0, 0.5))
-        .prior(param="d3", dist=LogNormal(0.0, 0.5))
+        Model.uniform(GRM(n_categories=4), items=df_grm.columns)
+        .prior(param="d1", dist=LogNormalPrior(0.0, 0.5))
+        .prior(param="d2", dist=LogNormalPrior(0.0, 0.5))
+        .prior(param="d3", dist=LogNormalPrior(0.0, 0.5))
     )
     t_grm_ln = spec_grm_ln.parameter_table(df_grm).set_index(["item", "param"])
     for item in df_grm.columns:
@@ -578,11 +582,11 @@ def test_default_starts_adjusted_into_prior_support() -> None:
     assert (res_grm_ln.items["d3"] > 0.0).all()
 
     spec_grm_beta = (
-        Model.uniform(GRM(n_cat=4), items=df_grm.columns)
+        Model.uniform(GRM(n_categories=4), items=df_grm.columns)
         .fix(item="q01", d1=0.8)
-        .prior(param="d1", dist=Beta(2.0, 2.0))
-        .prior(param="d2", dist=Beta(2.0, 2.0))
-        .prior(param="d3", dist=Beta(2.0, 2.0))
+        .prior(param="d1", dist=BetaPrior(2.0, 2.0))
+        .prior(param="d2", dist=BetaPrior(2.0, 2.0))
+        .prior(param="d3", dist=BetaPrior(2.0, 2.0))
     )
     t_grm_beta = spec_grm_beta.parameter_table(df_grm).set_index(["item", "param"])
     for item in df_grm.columns:
@@ -605,27 +609,27 @@ def test_heywood_warning_on_prior_support_boundary() -> None:
         seed=314,
     )
 
-    # Upper support boundary: Beta(1, 1) on a (true a = 2.0) pushes q01.a -> 1.
+    # Upper support boundary: BetaPrior(1, 1) on a (true a = 2.0) pushes q01.a -> 1.
     spec_upper = Model.uniform(TwoPL(), items=df.columns).prior(
-        param="a", dist=Beta(1.0, 1.0), items=["q01"]
+        param="a", dist=BetaPrior(1.0, 1.0), items=["q01"]
     )
     with pytest.warns(HeywoodWarning, match=r"q01\.a"):
         res_upper = fit(spec_upper, df, method=BAEM(tol=1e-7), se=None)
     assert res_upper.converged
     assert float(res_upper.items.set_index("item")["a"].loc["q01"]) > 1.0 - 1e-4
 
-    # Lower support boundary: Beta(1, 1) on d (true d = -1.8) pushes q01.d -> 0.
+    # Lower support boundary: BetaPrior(1, 1) on d (true d = -1.8) pushes q01.d -> 0.
     spec_lower = Model.uniform(TwoPL(), items=df.columns).prior(
-        param="d", dist=Beta(1.0, 1.0), items=["q01"]
+        param="d", dist=BetaPrior(1.0, 1.0), items=["q01"]
     )
     with pytest.warns(HeywoodWarning, match=r"q01\.d"):
         res_lower = fit(spec_lower, df, method=BAEM(tol=1e-7), se=None)
     assert res_lower.converged
     assert float(res_lower.items.set_index("item")["d"].loc["q01"]) < 1e-4
 
-    # Interior solution under Beta(1, 1) does NOT warn.
+    # Interior solution under BetaPrior(1, 1) does NOT warn.
     spec_interior = Model.uniform(TwoPL(), items=df.columns).prior(
-        param="d", dist=Beta(1.0, 1.0), items=["q04"]
+        param="d", dist=BetaPrior(1.0, 1.0), items=["q04"]
     )
     with warnings.catch_warnings():
         warnings.simplefilter("error", HeywoodWarning)

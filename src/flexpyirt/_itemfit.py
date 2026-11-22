@@ -51,16 +51,16 @@ def lord_wingersky(traces: list[np.ndarray]) -> np.ndarray:
     return lik
 
 
-def observed_tables(y: np.ndarray, n_cat: list[int]) -> list[np.ndarray]:
+def observed_tables(y: np.ndarray, n_categories: list[int]) -> list[np.ndarray]:
     """Observed counts ``O[s, k]`` of category ``k`` at summed score ``s`` for every item.
 
     Rows are summed scores ``1 .. S - 1`` (the minimum and maximum scores are dropped, as in
     mirt's ``makeObstables``); ``y`` holds complete responses coded ``0 .. K_j - 1``.
     """
-    total = int(sum(k - 1 for k in n_cat))
+    total = int(sum(k - 1 for k in n_categories))
     scores = y.sum(axis=1)
     out = []
-    for j, k_j in enumerate(n_cat):
+    for j, k_j in enumerate(n_categories):
         tab = np.zeros((total + 1, k_j))
         np.add.at(tab, (scores, y[:, j]), 1.0)
         out.append(tab[1:-1])
@@ -101,7 +101,7 @@ def _merge_rows(o: np.ndarray, e: np.ndarray, src: int, dst: int) -> tuple[np.nd
 
 
 def collapse_cells(
-    o_in: np.ndarray, e_in: np.ndarray, mincell: float = 1.0
+    o_in: np.ndarray, e_in: np.ndarray, min_cell: float = 1.0
 ) -> tuple[np.ndarray, np.ndarray]:
     """Collapse sparse cells of one item's S-X2 table exactly as mirt's ``collapseCells``.
 
@@ -109,9 +109,9 @@ def collapse_cells(
     degrees of freedom match mirt: (1) merge the leading/trailing rows that contain impossible
     (NaN) cells into their inner neighbours; (2) drop rows with no observations; (3) merge rows
     with a single observation into the next row; (4) for polytomous items, merge the smallest
-    expected categories within rows that had a cell below ``mincell``; (5) merge sparse top
+    expected categories within rows that had a cell below ``min_cell``; (5) merge sparse top
     categories and categories that are nonzero in fewer than 5% of rows; (6) merge rows with a
-    nonzero expected cell below ``mincell`` into the neighbour with fewer observations. Cells
+    nonzero expected cell below ``min_cell`` into the neighbour with fewer observations. Cells
     whose expected count is 0 are returned as NaN (excluded from the statistic and its df).
     """
     o = np.array(o_in, dtype=float)
@@ -140,7 +140,7 @@ def collapse_cells(
     # (2) rows without observations.
     nonempty = o.sum(axis=1) != 0
     o, e = o[nonempty], e[nonempty]
-    low_cells = e < mincell  # computed here and reused below, as in mirt
+    low_cells = e < min_cell  # computed here and reused below, as in mirt
 
     # (3) rows with a single observation merge into the next row.
     single = []
@@ -176,7 +176,7 @@ def collapse_cells(
                 tmp2[pick] += tmp2[whc]
                 del tmp[whc]
                 del tmp2[whc]
-                if all(v >= mincell for v in tmp):
+                if all(v >= min_cell for v in tmp):
                     break
             e[j] = tmp + [np.nan] * (n_col - len(tmp))
             o[j] = tmp2 + [0.0] * (n_col - len(tmp2))
@@ -185,7 +185,7 @@ def collapse_cells(
     # (5a) sparse top categories.
     if e.shape[1] > 2:
         while True:
-            pick = e.sum(axis=0) < mincell * math.ceil(e.shape[0] * 0.1)
+            pick = e.sum(axis=0) < min_cell * math.ceil(e.shape[0] * 0.1)
             if not pick[-1] or e.shape[1] == 2:
                 break
             o[:, -2] += o[:, -1]
@@ -200,9 +200,9 @@ def collapse_cells(
             o[:, j - 1] += o[:, j]
     e, o = e[:, ~dropcol], o[:, ~dropcol]
 
-    # (6) rows with a nonzero expected cell below mincell.
+    # (6) rows with a nonzero expected cell below min_cell.
     while e.shape[0] > 1:
-        flagged = ((e < mincell) & (e != 0)).any(axis=1)
+        flagged = ((e < min_cell) & (e != 0)).any(axis=1)
         if not flagged.any():
             break
         whc = int(np.argmax(flagged))

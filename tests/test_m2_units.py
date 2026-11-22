@@ -73,7 +73,7 @@ def test_grm_unobserved_category_is_rejected() -> None:
     df = pd.DataFrame({"x": [0, 1, 2, 0, 1, 2], "y": [0, 1, 1, 0, 2, 2]}, dtype=float)
     df.loc[df["x"] == 2, "x"] = 1  # category 2 never observed for x
     with pytest.raises(SpecificationError, match=r"categories \[2\]"):
-        fit(Model.uniform(GRM(n_cat=3), items=["x", "y"]), df)
+        fit(Model.uniform(GRM(n_categories=3), items=["x", "y"]), df)
 
 
 # ---- groups and equality -------------------------------------------------------------------
@@ -184,7 +184,9 @@ def test_fix_from_irt_parameterization() -> None:
 
 def test_fix_from_grm_irt() -> None:
     bank = pd.DataFrame({"item": ["g"], "a": [2.0], "b1": [-1.0], "b2": [0.5]})
-    spec = Model.uniform(GRM(n_cat=3), items=["g", "h"]).fix_from(bank, parameterization="irt")
+    spec = Model.uniform(GRM(n_categories=3), items=["g", "h"]).fix_from(
+        bank, parameterization="irt"
+    )
     fixed = {(i, p): v for i, p, v in spec.fixed}
     assert fixed[("g", "d1")] == pytest.approx(2.0) and fixed[("g", "d2")] == pytest.approx(-1.0)
 

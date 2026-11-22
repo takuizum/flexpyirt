@@ -36,7 +36,7 @@ RIDGE_FACTOR = {"mg2d_simple": 1, "mg2d_cross": 2}
 TOL_LOGLIK_REL = 1e-6
 TOL_PARAM = 1e-4
 TOL_SE_REL = 1e-3
-QUAD = Quadrature.equispaced(81, lim=(-6, 6))
+QUAD = Quadrature.equispaced(81, bounds=(-6, 6))
 
 
 @cache

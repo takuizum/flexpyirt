@@ -3978,7 +3978,7 @@
       },
       "linking": {
         "stocking_lord": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": false,
           "A": 1.23070992852373,
           "B": 0.541819603041366,
@@ -3993,7 +3993,7 @@
           ]
         },
         "stocking_lord_sym": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": true,
           "A": 1.2320729584545,
           "B": 0.542588732504014,
@@ -8603,7 +8603,7 @@
       },
       "linking": {
         "stocking_lord": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": false,
           "A": 1.20610984215495,
           "B": 0.516768231994939,
@@ -8618,7 +8618,7 @@
           ]
         },
         "stocking_lord_sym": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": true,
           "A": 1.20729509365811,
           "B": 0.517242640678846,
@@ -13205,7 +13205,7 @@
       },
       "linking": {
         "stocking_lord": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": false,
           "A": 1.23985161753078,
           "B": 0.486347665503273,
@@ -13220,7 +13220,7 @@
           ]
         },
         "stocking_lord_sym": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": true,
           "A": 1.23886564150734,
           "B": 0.485762935441743,
@@ -20208,7 +20208,7 @@
       },
       "linking": {
         "stocking_lord": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": false,
           "A": 1.17659811573382,
           "B": 0.499222268090452,
@@ -20223,7 +20223,7 @@
           ]
         },
         "stocking_lord_sym": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": true,
           "A": 1.17888120331923,
           "B": 0.499496022268312,
@@ -24232,7 +24232,7 @@
       },
       "linking": {
         "stocking_lord": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": false,
           "A": 1.00487309250113,
           "B": 0.240360271551382,
@@ -24247,7 +24247,7 @@
           ]
         },
         "stocking_lord_sym": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": true,
           "A": 1.00598603751018,
           "B": 0.240795543987899,
@@ -28434,7 +28434,7 @@
       },
       "linking": {
         "stocking_lord": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": false,
           "A": 1.16671259084878,
           "B": 0.537130811218251,
@@ -28449,7 +28449,7 @@
           ]
         },
         "stocking_lord_sym": {
-          "method": "stocking-lord",
+          "method": "stocking_lord",
           "symmetric": true,
           "A": 1.16846400671261,
           "B": 0.538195251367209,

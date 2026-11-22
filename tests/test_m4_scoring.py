@@ -176,10 +176,10 @@ def test_map_with_flat_prior_matches_ml_on_finite_patterns() -> None:
 def test_map_uses_continuous_prior_not_grid() -> None:
     """MAP maximizes with the exact continuous normal prior even on a coarse grid."""
     res_coarse = _fixed_2pl(
-        A_2PL, D_2PL, mean=0.7, var=1.5, quadrature=Quadrature.equispaced(15, lim=(-6, 6))
+        A_2PL, D_2PL, mean=0.7, var=1.5, quadrature=Quadrature.equispaced(15, bounds=(-6, 6))
     )
     res_fine = _fixed_2pl(
-        A_2PL, D_2PL, mean=0.7, var=1.5, quadrature=Quadrature.equispaced(81, lim=(-8, 8))
+        A_2PL, D_2PL, mean=0.7, var=1.5, quadrature=Quadrature.equispaced(81, bounds=(-8, 8))
     )
     pats = pd.DataFrame(
         [[0, 0, 0, 0, 0, 0, 0, 0], [1, 0, 1, 1, 0, 1, 0, 0], [1, 1, 1, 1, 1, 1, 1, 1]],
@@ -366,7 +366,7 @@ def test_zero_slope_items_treated_as_missing_for_pattern_flags() -> None:
 
 
 @pytest.mark.parametrize(
-    ("model_cls", "n_cat", "params_by_name"),
+    ("model_cls", "n_categories", "params_by_name"),
     [
         (TwoPL, 2, {"a": 1.4, "d": -0.3}),
         (Rasch, 2, {"a": 1.0, "d": 0.2}),
@@ -379,13 +379,13 @@ def test_zero_slope_items_treated_as_missing_for_pattern_flags() -> None:
 )
 def test_wle_finite_on_extremes_and_satisfies_warm_equation(
     model_cls: type,
-    n_cat: int,
+    n_categories: int,
     params_by_name: dict[str, float],
 ) -> None:
     """WLE is finite on all-lowest/all-highest patterns and solves dL/dtheta + I'/(2I) = 0."""
-    item_model = model_cls(n_cat=n_cat) if n_cat > 2 else model_cls()
+    item_model = model_cls(n_categories=n_categories) if n_categories > 2 else model_cls()
     items = [f"x{j}" for j in range(5)]
-    dummy = pd.DataFrame(np.tile(np.arange(n_cat), (5, 1)).T, columns=items, dtype=float)
+    dummy = pd.DataFrame(np.tile(np.arange(n_categories), (5, 1)).T, columns=items, dtype=float)
     spec = Model.uniform(item_model, items=items)
     table = spec.parameter_table(dummy)
     vals = []
@@ -403,8 +403,8 @@ def test_wle_finite_on_extremes_and_satisfies_warm_equation(
     pats = pd.DataFrame(
         [
             [0] * 5,  # all lowest
-            [n_cat - 1] * 5,  # all highest
-            [0, n_cat - 1, 0, n_cat - 1, 0],  # mixed
+            [n_categories - 1] * 5,  # all highest
+            [0, n_categories - 1, 0, n_categories - 1, 0],  # mixed
             [np.nan] * 5,  # all missing -> NaN
         ],
         columns=items,
@@ -477,7 +477,7 @@ def test_pv_reproducibility_keys_and_independence(
 def test_pv_moments_match_eap_within_mc_error() -> None:
     """With large n_draws, PV sample mean and SD match EAP and posterior SD within MC error."""
     res = _fixed_2pl(
-        A_2PL, D_2PL, mean=0.3, var=1.2, quadrature=Quadrature.equispaced(81, lim=(-8, 8))
+        A_2PL, D_2PL, mean=0.3, var=1.2, quadrature=Quadrature.equispaced(81, bounds=(-8, 8))
     )
     pats = pd.DataFrame(
         [
@@ -526,7 +526,7 @@ def test_all_methods_with_groups_missing_and_permutation_invariance() -> None:
         df,
         group=grp,
         method=BAEM(tol=1e-6),
-        quadrature=Quadrature.equispaced(81, lim=(-8, 8)),
+        quadrature=Quadrature.equispaced(81, bounds=(-8, 8)),
         se=None,
     )
 

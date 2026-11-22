@@ -94,7 +94,7 @@ def _delta_irt_thresholds(
     b_ses = np.full(b_vals.shape, np.nan, dtype=float)
     if vcov is None:
         return b_vals, b_ses
-    for m, deps in enumerate(kernel.irt_dep_indices):
+    for m, deps in enumerate(kernel.irt_dependency_indices):
         active = [p for p in deps if fids[p] >= 0]
         if not active:
             continue
@@ -184,7 +184,7 @@ _HTML_STYLE = """<style>
 </style>"""
 
 
-def _df_to_html_table(df: pd.DataFrame, *, digits: int = 4) -> str:
+def _frame_to_html_table(df: pd.DataFrame, *, digits: int = 4) -> str:
     """Render a DataFrame as an escaped plain HTML table with tabular numeric formatting."""
     is_num = [pd.api.types.is_numeric_dtype(df[col].dtype) for col in df.columns]
     head_cells = [
@@ -376,7 +376,7 @@ class FitResult:
         a normal distribution; DESIGN.md §15.38). See :attr:`latent_weights` for the full
         ``(group, node, weight)`` table.
         """
-        if self._model.is_eh:
+        if self._model.is_empirical_histogram:
             assert self._eh_weights is not None
             nodes = self._quadrature.nodes()
             groups = [g for g, _ in self._model.resolved_groups()]
@@ -410,7 +410,7 @@ class FitResult:
     @property
     def latent_weights(self) -> pd.DataFrame | None:
         """Per-group EH weights ``(group, node, weight)``, or ``None`` for ``Normal`` models."""
-        if not self._model.is_eh:
+        if not self._model.is_empirical_histogram:
             return None
         assert self._eh_weights is not None
         nodes = self._quadrature.nodes()
@@ -507,7 +507,7 @@ class FitResult:
             raise SpecificationError(
                 f"Unsupported scoring method {method!r}; use one of {_SCORE_METHODS}."
             )
-        if method == "MAP" and self._model.is_eh:
+        if method == "MAP" and self._model.is_empirical_histogram:
             raise SpecificationError(
                 "method='MAP' requires a continuous latent prior and is not supported with "
                 "EmpiricalHistogram; use method='EAP', 'ML', 'WLE', or 'PV'."
@@ -581,7 +581,7 @@ class FitResult:
         self,
         data: Any,
         *,
-        mincell: float = 1.0,
+        min_cell: float = 1.0,
         group: Any = None,
         item_names: list[str] | None = None,
     ) -> pd.DataFrame:
@@ -606,8 +606,8 @@ class FitResult:
         ----------
         data : DataFrame or array-like
             Complete responses on the fitted items (typically the fitting data).
-        mincell : float, default 1.0
-            Minimum expected count per cell before collapsing (mirt's ``mincell``).
+        min_cell : float, default 1.0
+            Minimum expected count per cell before collapsing (mirt's ``min_cell``).
         group : array-like, optional
             Group labels (required for a multiple-group model). S-X2 is computed within each
             group from that group's responses, item parameters and latent distribution, with
@@ -634,19 +634,19 @@ class FitResult:
         """
         check_x64()
         model = self._model
-        if model.is_multidimensional or model.is_eh or model.is_davidian:
+        if model.is_multidimensional or model.is_empirical_histogram or model.is_davidian:
             raise SpecificationError(
                 "item_fit() supports unidimensional models with Normal latent distributions only."
             )
-        if isinstance(mincell, bool) or not (isinstance(mincell, (int, float)) and mincell > 0):
-            raise SpecificationError(f"mincell must be a positive number, got {mincell!r}.")
+        if isinstance(min_cell, bool) or not (isinstance(min_cell, (int, float)) and min_cell > 0):
+            raise SpecificationError(f"min_cell must be a positive number, got {min_cell!r}.")
         y = coerce_responses(data, model, item_names=item_names)
         if (y < 0).any():
             raise SpecificationError(
                 "item_fit() requires complete data; S-X2 is not defined with missing responses."
             )
         codes, group_names = coerce_groups(group, model, y.shape[0], require_all=False)
-        n_cat = [m.kernel.n_cat for _, m in model.items]
+        n_categories = [m.kernel.n_categories for _, m in model.items]
         compiled = compile_problem(model, y, codes, self.parameters, self._quadrature)
         prob = compiled.problem
         eta = jnp.asarray(self._eta)
@@ -659,7 +659,7 @@ class FitResult:
             if y_g.shape[0] == 0:
                 continue
             for j, (name, _) in enumerate(model.items):
-                if np.unique(y_g[:, j]).size != n_cat[j]:
+                if np.unique(y_g[:, j]).size != n_categories[j]:
                     where = f" in group {g_name!r}" if model.is_multigroup else ""
                     raise SpecificationError(
                         f"Item {name!r} does not have every response category observed{where}; "
@@ -669,14 +669,14 @@ class FitResult:
             for fam, lp_np in zip(prob.families, log_probs, strict=True):
                 for pos, col in enumerate(np.asarray(fam.columns)):
                     traces[int(col)] = lp_np[g, pos]  # (Q, K_j)
-            observed = _itemfit.observed_tables(y_g, n_cat)
+            observed = _itemfit.observed_tables(y_g, n_categories)
             expected = _itemfit.s_x2_expected_tables(traces, all_weights[g])
             n_s = observed[0].sum(axis=1)
             in_group = params["group"] == g_name
             is_latent = params["item"] == LATENT_ITEM
             n_free_latent = int(params.loc[in_group & is_latent, "free"].sum())
             for j, (name, _) in enumerate(model.items):
-                o, e = _itemfit.collapse_cells(observed[j], expected[j] * n_s[:, None], mincell)
+                o, e = _itemfit.collapse_cells(observed[j], expected[j] * n_s[:, None], min_cell)
                 n_free_item = int(params.loc[in_group & (params["item"] == name), "free"].sum())
                 stat, df, rmsea, pval = _itemfit.s_x2(
                     o, e, n_free_item, n_free_latent, y_g.shape[0]
@@ -743,7 +743,7 @@ class FitResult:
         """
         check_x64()
         model = self._model
-        if model.is_multidimensional or model.is_multigroup or model.is_eh:
+        if model.is_multidimensional or model.is_multigroup or model.is_empirical_histogram:
             raise SpecificationError(
                 "m2() supports single-group unidimensional models with a Normal latent "
                 "distribution only."
@@ -767,13 +767,13 @@ class FitResult:
 
         codes, _ = coerce_groups(None, model, y.shape[0], require_all=False)
         compiled = compile_problem(model, y, codes, self.parameters, self._quadrature)
-        n_cat = [m.kernel.n_cat for _, m in model.items]
+        n_categories = [m.kernel.n_categories for _, m in model.items]
         res = _m2.m2_statistic(
             compiled.problem,
             jnp.asarray(self._eta),
             y,
             n_params=self.n_params,
-            n_cat=n_cat,
+            n_categories=n_categories,
             level=ci_f,
         )
         lo_col, hi_col = _m2.ci_column_names(ci_f)
@@ -866,7 +866,7 @@ class FitResult:
         counts: dict[str, int] = {}
         for _, m in self._model.items:
             tag = (
-                f"{m.name}({m.kernel.n_cat})"
+                f"{m.name}({m.kernel.n_categories})"
                 if m.name in ("GRM", "GPCM", "PCM", "Nominal")
                 else m.name
             )
@@ -964,7 +964,7 @@ class FitResult:
         ]
         if self._has_priors:
             lines.append(_PRIORS_IC_NOTE)
-        if self._model.is_eh:
+        if self._model.is_empirical_histogram:
             latent_title = "Latent distribution (EmpiricalHistogram)"
         elif self._model.is_davidian:
             latent_title = (
@@ -1034,7 +1034,7 @@ class FitResult:
             if self._has_priors
             else ""
         )
-        if self._model.is_eh:
+        if self._model.is_empirical_histogram:
             latent_heading = "Latent distribution (EmpiricalHistogram)"
         elif self._model.is_davidian:
             latent_heading = (
@@ -1042,14 +1042,14 @@ class FitResult:
             )
         else:
             latent_heading = "Latent distribution"
-        latent_html = _df_to_html_table(self.latent, digits=digits)
+        latent_html = _frame_to_html_table(self.latent, digits=digits)
         weights_section = (
             "<h4>Empirical histogram weights</h4>"
-            f"{_df_to_html_table(self.latent_weights, digits=digits)}"
+            f"{_frame_to_html_table(self.latent_weights, digits=digits)}"
             if self.latent_weights is not None
             else ""
         )
-        items_html = _df_to_html_table(self.items, digits=digits)
+        items_html = _frame_to_html_table(self.items, digits=digits)
         return (
             f"{_HTML_STYLE}"
             '<div class="flexpyirt-result">'

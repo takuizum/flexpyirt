@@ -93,7 +93,7 @@ def test_rasch_free_variance_matches_fine_equispaced_fit() -> None:
     df = pd.DataFrame(y, columns=[f"i{k}" for k in range(10)])
     spec = Model.uniform(Rasch(), items=df.columns)
     method = BAEM(tol=1e-10, max_iter=5000)
-    ref = fit(spec, df, method=method, quadrature=Quadrature.equispaced(401, lim=(-12, 12)))
+    ref = fit(spec, df, method=method, quadrature=Quadrature.equispaced(401, bounds=(-12, 12)))
     res = fit(spec, df, method=method, quadrature=Quadrature.gauss_hermite(41))
     assert res.loglik == pytest.approx(ref.loglik, abs=1e-7)
     np.testing.assert_allclose(res.items["d"], ref.items["d"], atol=1e-8)
@@ -115,7 +115,9 @@ def test_two_dimensional_product_rule_matches_fine_grid() -> None:
     spec = Model.uniform(TwoPL(), items=df.columns).with_factors(
         {"F1": list(df.columns[:4]), "F2": list(df.columns[4:])}
     )
-    ref = fit(spec, df, method=BAEM(tol=1e-9), quadrature=Quadrature.equispaced(121, lim=(-8, 8)))
+    ref = fit(
+        spec, df, method=BAEM(tol=1e-9), quadrature=Quadrature.equispaced(121, bounds=(-8, 8))
+    )
     res = fit(spec, df, method=BAEM(tol=1e-9), quadrature=Quadrature.gauss_hermite(31))
     assert res.loglik == pytest.approx(ref.loglik, abs=1e-5)
     cols = ["a1", "a2", "d"]

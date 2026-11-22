@@ -19,7 +19,7 @@ __all__ = [
     "EmpiricalHistogram",
     "LatentSpec",
     "Normal",
-    "correlation_matrix_is_pd",
+    "correlation_matrix_is_positive_definite",
     "davidian_hermite_coeffs",
     "davidian_log_weights",
     "davidian_moments",
@@ -583,7 +583,7 @@ def latent_param_names(n_factors: int) -> tuple[str, ...]:
     return (*means, *vars_, *cors)
 
 
-def correlation_matrix_is_pd(cors: Sequence[float], n_factors: int) -> bool:
+def correlation_matrix_is_positive_definite(cors: Sequence[float], n_factors: int) -> bool:
     """Return True iff the ``n_factors`` × ``n_factors`` correlation matrix is positive definite."""
     if n_factors == 1:
         return True

@@ -50,7 +50,7 @@ def _case(name: str) -> tuple[FitResult, pd.DataFrame, np.ndarray]:
     if name == "twogroup_2pl":
         raw = json.loads((REFERENCE_DIR / f"{ref['source']}.json").read_text())
         df, grp = _expand(raw)
-        quad = Quadrature.equispaced(raw["meta"]["quadpts"], lim=tuple(raw["meta"]["theta_lim"]))
+        quad = Quadrature.equispaced(raw["meta"]["quadpts"], bounds=tuple(raw["meta"]["theta_lim"]))
         spec = (
             Model.uniform(TwoPL(), items=raw["items"])
             .with_groups(ref=Normal.standard(), focal=Normal.free())
@@ -58,9 +58,9 @@ def _case(name: str) -> tuple[FitResult, pd.DataFrame, np.ndarray]:
         )
     else:
         df, grp = _expand(ref)
-        quad = Quadrature.equispaced(ref["quadpts"], lim=tuple(ref["theta_lim"]))
+        quad = Quadrature.equispaced(ref["quadpts"], bounds=tuple(ref["theta_lim"]))
         spec = (
-            Model.uniform(GRM(n_cat=4), items=ref["items"])
+            Model.uniform(GRM(n_categories=4), items=ref["items"])
             .with_groups(ref=Normal.standard(), focal=Normal.free())
             .equal_across_groups(items=ref["items"])
         )
@@ -99,7 +99,7 @@ def test_s_x2_per_group_matches_mirt(name: str) -> None:
     res, df, grp = _case(name)
     if name == "science_grm_2g":
         res = _at_mirt(res, ref["estimates"])
-    out = res.item_fit(df, group=grp, mincell=ref["mincell"])
+    out = res.item_fit(df, group=grp, min_cell=ref["mincell"])
     assert list(out.columns) == ["group", "item", "s_x2", "df", "rmsea", "p"]
     assert list(dict.fromkeys(out["group"])) == ["ref", "focal"]
     for g, expected in ref["groups"].items():

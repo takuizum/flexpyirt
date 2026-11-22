@@ -27,6 +27,7 @@ from flexpyirt import (
 )
 from flexpyirt._compile import _davidian_phi_starts
 from flexpyirt._core import information_hessian, information_oakes
+from flexpyirt._json import SCHEMA_VERSION
 from flexpyirt.errors import IdentificationError, SpecificationError
 from flexpyirt.latent import (
     MAX_DAVIDIAN_DEGREE,
@@ -421,7 +422,7 @@ def test_scoring_reporting_item_fit_and_json_roundtrip(tmp_path: Path) -> None:
     out_path = tmp_path / "dc3.json"
     raw_str = res.to_json(out_path)
     payload = json.loads(raw_str)
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == SCHEMA_VERSION
     assert payload["model"]["latent"]["type"] == "DavidianCurve"
     assert "latent_weights" not in payload
 

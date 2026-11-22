@@ -70,7 +70,7 @@ def load(name: str) -> Case:
     items = list(raw["items"])
     if name == "v16_mixed_constraints":
         spec = Model.from_items(
-            {i: (TwoPL() if k < 6 else GRM(n_cat=3)) for k, i in enumerate(items)}
+            {i: (TwoPL() if k < 6 else GRM(n_categories=3)) for k, i in enumerate(items)}
         )
         quad = Quadrature.equispaced()
     elif name == "v16_twogroup_common_slope":
@@ -79,7 +79,7 @@ def load(name: str) -> Case:
             .with_groups(ref=Normal.standard(), focal=Normal.free())
             .equal_across_groups(items=raw["anchors"])
         )
-        quad = Quadrature.equispaced(81, lim=(-8, 8))
+        quad = Quadrature.equispaced(81, bounds=(-8, 8))
     else:
         spec = Model.uniform(TwoPL(), items=items)
         quad = Quadrature.equispaced()

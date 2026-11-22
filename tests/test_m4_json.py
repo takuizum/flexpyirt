@@ -24,10 +24,10 @@ from flexpyirt import (
     GPCM,
     GRM,
     PCM,
-    Beta,
+    BetaPrior,
     FitResult,
     FourPL,
-    LogNormal,
+    LogNormalPrior,
     Model,
     Normal,
     NormalPrior,
@@ -124,7 +124,7 @@ def _assert_fit_result_identical(
 
     # All supported scoring methods (MAP is Normal-only)
     det_methods: tuple[Literal["EAP", "MAP", "ML", "WLE"], ...] = (
-        ("EAP", "ML", "WLE") if orig._model.is_eh else ("EAP", "MAP", "ML", "WLE")
+        ("EAP", "ML", "WLE") if orig._model.is_empirical_histogram else ("EAP", "MAP", "ML", "WLE")
     )
     for method in det_methods:
         s_orig = orig.score(score_data, method=method, group=group)
@@ -244,12 +244,12 @@ def test_roundtrip_3pl_4pl_and_priors_map(tmp_path: Path) -> None:
     df = pd.DataFrame((rng.random(p.shape) < p).astype(float), columns=cols)
     score_sub = df.iloc[:25]
 
-    # 3PL with all three prior families (LogNormal, NormalPrior, Beta)
+    # 3PL with all three prior families (LogNormalPrior, NormalPrior, BetaPrior)
     spec3 = (
         Model.uniform(ThreePL(), items=cols)
-        .prior(param="a", dist=LogNormal(0.4, 0.3))
+        .prior(param="a", dist=LogNormalPrior(0.4, 0.3))
         .prior(param="d", dist=NormalPrior(-0.7, 1.5))
-        .prior(param="g", dist=Beta(5.0, 20.0))
+        .prior(param="g", dist=BetaPrior(5.0, 20.0))
     )
     res3 = fit(spec3, df, method=BAEM(tol=1e-6))
     assert res3.log_posterior != res3.loglik
@@ -260,9 +260,9 @@ def test_roundtrip_3pl_4pl_and_priors_map(tmp_path: Path) -> None:
     # 4PL with interior priors on a, g, u
     spec4 = (
         Model.uniform(FourPL(), items=cols)
-        .prior(param="a", dist=LogNormal(0.4, 0.3))
-        .prior(param="g", dist=Beta(5.0, 20.0))
-        .prior(param="u", dist=Beta(22.0, 3.0))
+        .prior(param="a", dist=LogNormalPrior(0.4, 0.3))
+        .prior(param="g", dist=BetaPrior(5.0, 20.0))
+        .prior(param="u", dist=BetaPrior(22.0, 3.0))
     )
     res4 = fit(spec4, df, method=BAEM(tol=1e-6))
     from_file4, from_str4, _ = _roundtrip(res4, tmp_path, "4pl_map")
@@ -299,7 +299,7 @@ def test_roundtrip_two_group_with_anchors(tmp_path: Path) -> None:
         df,
         group=grp,
         method=BAEM(tol=1e-6),
-        quadrature=Quadrature.equispaced(81, lim=(-8, 8)),
+        quadrature=Quadrature.equispaced(81, bounds=(-8, 8)),
     )
     from_file, from_str, _ = _roundtrip(res, tmp_path, "two_group")
     idx = [*range(15), *(n_g + i for i in range(15))]
@@ -315,7 +315,7 @@ def test_roundtrip_fipc(tmp_path: Path) -> None:
         spec,
         case.data,
         method=BAEM(tol=1e-6),
-        quadrature=Quadrature.equispaced(81, lim=(-8, 8)),
+        quadrature=Quadrature.equispaced(81, bounds=(-8, 8)),
     )
     from_file, from_str, _ = _roundtrip(res, tmp_path, "fipc")
     _assert_fit_result_identical(res, from_file, case.data.iloc[:25])
@@ -435,7 +435,7 @@ def test_roundtrip_special_item_and_group_names(tmp_path: Path) -> None:
         .with_groups(**{"g<ref>&1": Normal.standard(), "NaN": Normal.free()})
         .equal_across_groups(items=tricky[:3])
     )
-    res = fit(spec, df, group=grp, se=None, quadrature=Quadrature.equispaced(81, lim=(-8, 8)))
+    res = fit(spec, df, group=grp, se=None, quadrature=Quadrature.equispaced(81, bounds=(-8, 8)))
     from_file, from_str, _ = _roundtrip(res, tmp_path, "special_names")
     _assert_fit_result_identical(res, from_file, df.iloc[:20], group=grp[:20])
     _assert_fit_result_identical(res, from_str, df.iloc[:20], group=grp[:20])
@@ -486,7 +486,7 @@ def test_from_json_raises_precision_error_without_x64(tmp_path: Path) -> None:
 @pytest.fixture(scope="module")
 def sample_payload() -> dict[str, Any]:
     case = load("v1_lsat7_2pl")
-    spec = Model.uniform(TwoPL(), items=case.items).prior(param="a", dist=LogNormal(0.0, 0.5))
+    spec = Model.uniform(TwoPL(), items=case.items).prior(param="a", dist=LogNormalPrior(0.0, 0.5))
     res = fit(spec, case.data, method=BAEM(tol=1e-5), se="oakes")
     return _assert_strict_json(res.to_json())
 
@@ -514,7 +514,7 @@ def test_malformed_format_and_schema_version(
         FitResult.from_json(json.dumps(no_fmt))
 
     # Unknown schema_version
-    for bad_ver in (0, 4, 99, "1", True):
+    for bad_ver in (0, 5, 99, "1", True):
         bad = _clone(sample_payload)
         bad["schema_version"] = bad_ver
         with pytest.raises(SpecificationError, match="schema_version"):
@@ -534,20 +534,20 @@ def test_malformed_registry_types(sample_payload: dict[str, Any]) -> None:
     with pytest.raises(SpecificationError, match="Unknown item model type '5PL'"):
         FitResult.from_json(json.dumps(bad_item))
 
-    # Invalid polytomous n_cat
+    # Invalid polytomous n_categories
     bad_ncat = _clone(sample_payload)
-    bad_ncat["model"]["items"][0]["model"] = {"type": "GRM", "n_cat": 1}
+    bad_ncat["model"]["items"][0]["model"] = {"type": "GRM", "n_categories": 1}
     with pytest.raises(SpecificationError, match="at least 2 categories"):
         FitResult.from_json(json.dumps(bad_ncat))
 
     bad_ncat_bool = _clone(sample_payload)
-    bad_ncat_bool["model"]["items"][0]["model"] = {"type": "GRM", "n_cat": True}
+    bad_ncat_bool["model"]["items"][0]["model"] = {"type": "GRM", "n_categories": True}
     with pytest.raises(SpecificationError, match="Expected an integer"):
         FitResult.from_json(json.dumps(bad_ncat_bool))
 
     # Extra key on simple item model
     extra_item_key = _clone(sample_payload)
-    extra_item_key["model"]["items"][0]["model"] = {"type": "2PL", "n_cat": 2}
+    extra_item_key["model"]["items"][0]["model"] = {"type": "2PL", "n_categories": 2}
     with pytest.raises(SpecificationError, match="Unexpected keys"):
         FitResult.from_json(json.dumps(extra_item_key))
 
@@ -715,7 +715,7 @@ def test_malformed_parameter_invariants_and_se(sample_payload: dict[str, Any]) -
         FitResult.from_json(json.dumps(bad_bounds))
 
     bad_prior_est = _clone(sample_payload)
-    # parameters[0] is Item.1.a with LogNormal prior -> support (0, inf)
+    # parameters[0] is Item.1.a with LogNormalPrior prior -> support (0, inf)
     bad_prior_est["parameters"][0]["estimate"] = -0.5
     with pytest.raises(SpecificationError, match="outside the support"):
         FitResult.from_json(json.dumps(bad_prior_est))
@@ -745,8 +745,8 @@ def test_malformed_asymptotes_grm_order_and_shared_bounds() -> None:
     df3 = pd.DataFrame((rng.random(p.shape) < p).astype(float), columns=cols)
     res3 = fit(
         Model.uniform(ThreePL(), items=cols)
-        .prior(param="a", dist=LogNormal(0.4, 0.3))
-        .prior(param="g", dist=Beta(5.0, 20.0)),
+        .prior(param="a", dist=LogNormalPrior(0.4, 0.3))
+        .prior(param="g", dist=BetaPrior(5.0, 20.0)),
         df3,
         method=BAEM(tol=1e-4),
         se=None,
@@ -816,7 +816,7 @@ def test_malformed_asymptotes_grm_order_and_shared_bounds() -> None:
         group=grp,
         method=BAEM(tol=1e-4),
         se="oakes",
-        quadrature=Quadrature.equispaced(41, lim=(-6, 6)),
+        quadrature=Quadrature.equispaced(41, bounds=(-6, 6)),
     )
     payload_2g = _assert_strict_json(res_2g.to_json())
 
@@ -882,12 +882,15 @@ def test_malformed_overflow_and_unbounded_ints(sample_payload: dict[str, Any]) -
     with pytest.raises(SpecificationError, match="em_evaluations must be <="):
         FitResult.from_json(json.dumps(bad_hist_eval))
 
-    # Huge polytomous n_cat must fail immediately without OOM/hang
+    # Huge polytomous n_categories must fail immediately without OOM/hang
     for model_type in ("GRM", "GPCM", "PCM"):
-        for bad_n_cat in (10**9, 1025):
+        for bad_n_categories in (10**9, 1025):
             bad_poly = _clone(sample_payload)
-            bad_poly["model"]["items"][0]["model"] = {"type": model_type, "n_cat": bad_n_cat}
-            with pytest.raises(SpecificationError, match="n_cat must be <="):
+            bad_poly["model"]["items"][0]["model"] = {
+                "type": model_type,
+                "n_categories": bad_n_categories,
+            }
+            with pytest.raises(SpecificationError, match="n_categories must be <="):
                 FitResult.from_json(json.dumps(bad_poly))
 
     # Huge quadrature n_points must fail at load time (not MemoryError in score())
@@ -1111,3 +1114,38 @@ def test_malformed_factor_structure(
     mutate(bad["model"])
     with pytest.raises(SpecificationError, match=match):
         FitResult.from_json(json.dumps(bad))
+
+
+def test_schema_version_3_names_still_load() -> None:
+    """Schema 1-3 files use ``n_cat`` and ``LogNormal(meanlog, sdlog)`` / ``Beta`` (§15.46)."""
+    rng = np.random.default_rng(5046)
+    theta = rng.normal(0.0, 1.0, 600)
+    a = np.array([1.5, 1.2, 1.8, 1.4])
+    p = 0.2 + 0.8 / (1.0 + np.exp(-(np.outer(theta, a) - 0.3)))
+    df = pd.DataFrame((rng.random(p.shape) < p).astype(float), columns=["q1", "q2", "q3", "q4"])
+    df["s1"] = np.digitize(theta + rng.normal(0.0, 0.8, theta.size), [-0.6, 0.6]).astype(float)
+    spec = (
+        Model.from_items({**{c: ThreePL() for c in df.columns[:4]}, "s1": GRM(n_categories=3)})
+        .prior(param="a", dist=LogNormalPrior(0.3, 0.4), items=list(df.columns[:4]))
+        .prior(param="g", dist=BetaPrior(5.0, 17.0), items=list(df.columns[:4]))
+    )
+    res = fit(spec, df, method=BAEM(tol=1e-6), se=None)
+    text = res.to_json()
+    old = text.replace(f'"schema_version": {SCHEMA_VERSION}', '"schema_version": 3')
+    for new_name, old_name in [
+        ('"n_categories"', '"n_cat"'),
+        ('"LogNormalPrior"', '"LogNormal"'),
+        ('"BetaPrior"', '"Beta"'),
+        ('"mean_log"', '"meanlog"'),
+        ('"sd_log"', '"sdlog"'),
+    ]:
+        assert new_name in text
+        old = old.replace(new_name, old_name)
+    loaded = FitResult.from_json(old)
+    assert loaded._model == res._model
+    _assert_fit_result_identical(res, loaded, df.iloc[:20])
+    # Version 4 files must use the new names.
+    with pytest.raises(SpecificationError):
+        FitResult.from_json(
+            old.replace('"schema_version": 3', f'"schema_version": {SCHEMA_VERSION}')
+        )

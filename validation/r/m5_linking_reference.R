@@ -396,8 +396,8 @@ run_linking_case <- function(case_name, description, itemtypes_tgt, itemtypes_sr
   ct <- extract_common(m_tgt, common_items, it_common, k_common)
 
   variants <- list(
-    stocking_lord = list(method = "stocking-lord", symmetric = FALSE),
-    stocking_lord_sym = list(method = "stocking-lord", symmetric = TRUE),
+    stocking_lord = list(method = "stocking_lord", symmetric = FALSE),
+    stocking_lord_sym = list(method = "stocking_lord", symmetric = TRUE),
     haebara = list(method = "haebara", symmetric = FALSE),
     haebara_sym = list(method = "haebara", symmetric = TRUE)
   )

@@ -78,15 +78,17 @@ class Case:
         return dict(self.raw[key]["all"]["latent"])
 
 
-def _build_spec(items: list[str], itemtype: str | list[str], n_cat: int | list[int]) -> Model:
+def _build_spec(
+    items: list[str], itemtype: str | list[str], n_categories: int | list[int]
+) -> Model:
     if isinstance(itemtype, str):
-        assert isinstance(n_cat, int)
-        return Model.uniform(Nominal(n_cat=n_cat), items=items)
-    assert isinstance(n_cat, list)
+        assert isinstance(n_categories, int)
+        return Model.uniform(Nominal(n_categories=n_categories), items=items)
+    assert isinstance(n_categories, list)
     item_models: dict[str, ItemModel] = {}
-    for name, it, k in zip(items, itemtype, n_cat, strict=True):
+    for name, it, k in zip(items, itemtype, n_categories, strict=True):
         if it == "nominal":
-            item_models[name] = Nominal(n_cat=int(k))
+            item_models[name] = Nominal(n_categories=int(k))
         elif it == "2PL":
             item_models[name] = TwoPL()
         else:
@@ -102,7 +104,7 @@ def load(name: str) -> Case:
     items = list(raw["items"])
     spec = _build_spec(items, meta["itemtype"], meta["n_cat"])
     lim = (float(meta["theta_lim"][0]), float(meta["theta_lim"][1]))
-    quad = Quadrature.equispaced(int(meta["quadpts"]), lim=lim)
+    quad = Quadrature.equispaced(int(meta["quadpts"]), bounds=lim)
     return Case(name, raw, spec, quad)
 
 
@@ -371,7 +373,7 @@ def _load_2d() -> tuple[dict[str, Any], Model, Quadrature, pd.DataFrame]:
     factors = {k: list(v) for k, v in raw["factors"].items()}
     spec = Model.uniform(Nominal(int(meta["n_cat"])), items=items).with_factors(factors)
     lo, hi = meta["theta_lim"]
-    quad = Quadrature.equispaced(int(meta["quadpts"]), lim=(float(lo), float(hi)))
+    quad = Quadrature.equispaced(int(meta["quadpts"]), bounds=(float(lo), float(hi)))
     assert quad.n_points**spec.n_factors == int(meta["n_nodes"])
     pats = pd.DataFrame(np.asarray(raw["patterns"], dtype=float), columns=items)
     data = pats.loc[pats.index.repeat(np.asarray(raw["counts"], dtype=int))]

@@ -12,7 +12,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
-- 事前分布: [`NormalPrior`](#normalprior), [`LogNormal`](#lognormal), [`Beta`](#beta)
+- 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormal), [`BetaPrior`](#beta)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - 例外と警告: [`flexpyirt.errors`](#flexpyirterrors)
@@ -123,19 +123,19 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 #### `FitResult.item_fit`
 
 ```text
-item_fit(data, *, mincell=1.0, group=None, item_names=None) -> DataFrame
+item_fit(data, *, min_cell=1.0, group=None, item_names=None) -> DataFrame
 ```
 
 Orlando–Thissen の S-X2 項目適合度（[ガイド 5 節](guide.ja.md#項目適合度s-x2)）。各項目について、合計得点
 $1,\dots,S-1$ ごとの各カテゴリの観測度数とモデルによる期待度数を比べる。期待度数は、その項目を除いた
 Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在分布の重みで計算する。度数の少ないセルは mirt の
-`itemfit()` と同じ方法でまとめ（`mincell` は mirt の引数）、$df_j$ = 残ったセル数 − 行数 − その項目の自由パラメタ数 −
+`itemfit()` と同じ方法でまとめ（`min_cell` は mirt の `mincell`）、$df_j$ = 残ったセル数 − 行数 − その項目の自由パラメタ数 −
 潜在分布の自由パラメタ数（mirt の約束）。
 
 | 引数 | 説明 |
 |---|---|
 | `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
-| `mincell` | まとめる前のセルあたり最小期待度数（既定 `1.0`） |
+| `min_cell` | まとめる前のセルあたり最小期待度数（既定 `1.0`） |
 | `group` | 群ラベル（多母集団モデルでは必須。群ごとに S-X2 を計算する、DESIGN §15.45） |
 | `item_names` | `data` が配列のときの列名 |
 
@@ -143,7 +143,7 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 `df <= 0` になる項目は `df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
 
 **例外**: 多次元・`EmpiricalHistogram`・`DavidianCurve` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
-項目、正でない `mincell` の場合に `SpecificationError`。
+項目、正でない `min_cell` の場合に `SpecificationError`。
 
 #### `FitResult.m2`
 
@@ -208,7 +208,7 @@ to_json(path=None, *, indent=2) -> str
 
 推定結果を厳格な RFC 8259 JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定されたときは
 UTF-8 ファイルにも書き出す。`pickle` を使わないバージョン付き JSON 形式で、最上位に
-`"format": "flexpyirt.FitResult"`、`"schema_version": 3`（version 1・2 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
+`"format": "flexpyirt.FitResult"`、`"schema_version": 4`（version 1–3 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
 float64 値は `repr` 厳密な JSON 数値として、非有限値（`NaN`, `+inf`, `-inf`）は浮動小数点型フィールドに
 `"NaN"`, `"Infinity"`, `"-Infinity"` として明示的に符号化するため、すべての属性がビット単位で正確に往復する。
 
@@ -278,16 +278,16 @@ model.fix(*, item, **values) -> Model
 #### `Model.fix_from`
 
 ```text
-model.fix_from(bank, *, items=None, parameterization="slope-intercept") -> Model
+model.fix_from(bank, *, items=None, parameterization="slope_intercept") -> Model
 ```
 
 項目バンクの値で項目パラメタを固定する（FIPC）。潜在分布を推定するには `.with_latent(Normal.free())` を併用する。
 
 | 引数 | 説明 |
 |---|---|
-| `bank` | `item` 列と、パラメタの列を持つ DataFrame。`"slope-intercept"` なら `a`, `d`（GRM/GPCM/PCM は `d1`, `d2`, …）、`"irt"` なら `a`, `b`（GRM/GPCM/PCM は `b1`, …）。Rasch・PCM 項目は `a` 列がなくてよい。漸近線 `g`（3PL/4PL）・`u`（4PL）はどちらのパラメタ化でもそのまま渡す（3PL 項目では `u` 列を省略できる） |
+| `bank` | `item` 列と、パラメタの列を持つ DataFrame。`"slope_intercept"` なら `a`, `d`（GRM/GPCM/PCM は `d1`, `d2`, …）、`"irt"` なら `a`, `b`（GRM/GPCM/PCM は `b1`, …）。Rasch・PCM 項目は `a` 列がなくてよい。漸近線 `g`（3PL/4PL）・`u`（4PL）はどちらのパラメタ化でもそのまま渡す（3PL 項目では `u` 列を省略できる） |
 | `items` | 固定する項目（名前のリストか `str -> bool` の関数）。既定はバンクにあってモデルにもある項目すべて |
-| `parameterization` | `"slope-intercept"` または `"irt"`（$d = -ab$、GPCM/PCM は $d_k = -a\sum_{c=1}^{k} b_c$ に変換） |
+| `parameterization` | `"slope_intercept"` または `"irt"`（$d = -ab$、GPCM/PCM は $d_k = -a\sum_{c=1}^{k} b_c$ に変換） |
 
 #### `Model.with_factors`
 
@@ -348,7 +348,7 @@ model.equal_across_items(*, items, params) -> Model
 model.prior(*, param, dist, items=None) -> Model
 ```
 
-選択した項目の内部パラメタ `param` に事前分布 `dist`（`NormalPrior`, `LogNormal`, `Beta`）を全群共通で付ける
+選択した項目の内部パラメタ `param` に事前分布 `dist`（`NormalPrior`, `LogNormalPrior`, `BetaPrior`）を全群共通で付ける
 （MAP 推定、[ガイド 11 節](guide.ja.md#11-事前分布と-map-推定)）。事前分布はヤコビアンなしの自然尺度で評価される。
 固定パラメタの事前分布は無視され、群間で共有されるパラメタ（同じ `free_id`）は 1 回だけ数えられる。潜在分布パラメタ
 （`"mean"`, `"var"`）への指定は `SpecificationError`。
@@ -356,7 +356,7 @@ model.prior(*, param, dist, items=None) -> Model
 | 引数 | 説明 |
 |---|---|
 | `param` | 内部項目パラメタ名（`"a"`, `"d"`, `"g"`, `"u"`, `"d1"`, …） |
-| `dist` | `NormalPrior`, `LogNormal`, `Beta` のいずれか |
+| `dist` | `NormalPrior`, `LogNormalPrior`, `BetaPrior` のいずれか |
 | `items` | 項目名のリスト、`str -> bool` の関数、または全項目を表す `None` |
 
 #### `Model.parameter_table`
@@ -427,51 +427,51 @@ mirt の `itemtype = "4PL"` と同じ。`ThreePL` と `FourPLKernel` を共有�
 ### `GRM`
 
 ```text
-GRM(n_cat)
+GRM(n_categories)
 ```
 
-段階反応モデル（Samejima, 1969）。カテゴリは `0..n_cat-1`。
+段階反応モデル（Samejima, 1969）。カテゴリは `0..n_categories-1`。
 $P(y\ge k\mid\theta)=\sigma(a\theta+d_k)$、$d_1>\dots>d_{K-1}$。内部パラメタ `a`, `d1`…`d{K-1}`、
-表示用に $b_k=-d_k/a$。mirt の `itemtype = "graded"` と同じ。`n_cat` が同じ GRM 項目はまとめて推定される。
+表示用に $b_k=-d_k/a$。mirt の `itemtype = "graded"` と同じ。`n_categories` が同じ GRM 項目はまとめて推定される。
 
 ### `GPCM`
 
 ```text
-GPCM(n_cat)
+GPCM(n_categories)
 ```
 
-一般化部分採点モデル（Muraki, 1992）。カテゴリは `0..n_cat-1`（`n_cat >= 2`）。
+一般化部分採点モデル（Muraki, 1992）。カテゴリは `0..n_categories-1`（`n_categories >= 2`）。
 $P(y=k\mid\theta)=\exp(k\,a\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\,a\theta+d_c)$（$d_0=0$ 固定）。
 内部パラメタ `a`, `d1`…`d{K-1}`（順序制約なし）、表示用にステップ困難度 $b_k=-(d_k-d_{k-1})/a$（$d_0=0$）。
-mirt の `itemtype = "gpcm"` と同じ。`n_cat = 2` では `TwoPL` と一致する。`n_cat` が同じ `PCM` と
+mirt の `itemtype = "gpcm"` と同じ。`n_categories = 2` では `TwoPL` と一致する。`n_categories` が同じ `PCM` と
 `GPCMKernel` を共有する。
 
 ### `PCM`
 
 ```text
-PCM(n_cat)
+PCM(n_categories)
 ```
 
-部分採点モデル（Masters, 1982）。カテゴリは `0..n_cat-1`（`n_cat >= 2`）。`a = 1` に固定した GPCM で、
+部分採点モデル（Masters, 1982）。カテゴリは `0..n_categories-1`（`n_categories >= 2`）。`a = 1` に固定した GPCM で、
 $P(y=k\mid\theta)=\exp(k\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\theta+d_c)$（$d_0=0$ 固定）。
 表示用にステップ困難度 $b_k=-(d_k-d_{k-1})$。全項目が `Rasch` または `PCM` の単一群モデルでは、既定で
-潜在分布の分散を推定する（多値データに対する mirt の `itemtype = "Rasch"` と同じ）。`n_cat = 2` では
-`Rasch` と一致する。`n_cat` が同じ `GPCM` と `GPCMKernel` を共有する。
+潜在分布の分散を推定する（多値データに対する mirt の `itemtype = "Rasch"` と同じ）。`n_categories = 2` では
+`Rasch` と一致する。`n_categories` が同じ `GPCM` と `GPCMKernel` を共有する。
 
 ### `Nominal`
 
 ```text
-Nominal(n_cat)
+Nominal(n_categories)
 ```
 
 Thissen, Cai & Bock (2010) の全体傾き × 採点関数パラメタ化による名義反応モデル（Bock, 1972）。カテゴリは
-`0..n_cat-1`（`n_cat >= 2`）。
+`0..n_categories-1`（`n_categories >= 2`）。
 $P(y=k\mid\theta)=\exp(a\,\mathrm{ak}_k\,\theta+d_k)/\sum_{c=0}^{K-1}\exp(a\,\mathrm{ak}_c\,\theta+d_c)$
 （$\mathrm{ak}_0=0$、$\mathrm{ak}_{K-1}=K-1$、$d_0=0$ 固定）。内部パラメタは `a`（多次元モデルでは
 `a1`…`aD`）、`ak1`…`ak{K-2}`、`d1`…`d{K-1}`（すべて自由推定・順序制約なし、表示用の `b` / `bk` 列はなし）。
-mirt の `itemtype = "nominal"` と同じ。$\mathrm{ak}_k=k$ に固定すると `GPCM(n_cat)` と厳密に一致する
-（`n_cat = 2` では自由な `ak` パラメタがなく、`Nominal(2)` は `GPCM(2)` / `TwoPL` と一致する）。
-`NominalKernel(n_cat)` を用いる。
+mirt の `itemtype = "nominal"` と同じ。$\mathrm{ak}_k=k$ に固定すると `GPCM(n_categories)` と厳密に一致する
+（`n_categories = 2` では自由な `ak` パラメタがなく、`Nominal(2)` は `GPCM(2)` / `TwoPL` と一致する）。
+`NominalKernel(n_categories)` を用いる。
 
 ---
 
@@ -491,21 +491,21 @@ $\log\pi(x) = -\tfrac{1}{2}\log(2\pi) - \log\sigma - \frac{(x-\mu)^2}{2\sigma^2}
 （Mislevy, 1986、mirt の `norm`）。有限な `mean` と正の有限な `sd` が必要。潜在分布 `Normal` と名前が衝突しないよう
 `NormalPrior` としている。
 
-### `LogNormal`
+### `LogNormalPrior`
 
 ```text
-LogNormal(meanlog, sdlog)
+LogNormalPrior(mean_log, sd_log)
 ```
 
 $(0, \infty)$ 上の対数正規事前分布（$\log X \sim N(\mu, s^2)$）:
 $\log\pi(x) = -\log x - \log s - \tfrac{1}{2}\log(2\pi) - \frac{(\log x - \mu)^2}{2s^2}$
-（$x \le 0$ で $-\infty$。Mislevy, 1986、mirt の `lnorm`）。有限な `meanlog` と正の有限な `sdlog` が必要。
+（$x \le 0$ で $-\infty$。Mislevy, 1986、mirt の `lnorm`）。有限な `mean_log` と正の有限な `sd_log` が必要。
 傾き `a` によく使う。
 
-### `Beta`
+### `BetaPrior`
 
 ```text
-Beta(a, b)
+BetaPrior(a, b)
 ```
 
 $(0, 1)$ 上のベータ事前分布:
@@ -589,7 +589,7 @@ Fisher 情報行列は $\boldsymbol\phi = \mathbf 0$ で `phi_1`・`phi_2` 方�
 ### `link`
 
 ```text
-link(source, target, *, items=None, method="stocking-lord", symmetric=False,
+link(source, target, *, items=None, method="stocking_lord", symmetric=False,
      nodes=None, weights=None, source_group=None, target_group=None,
      tol=1e-10, max_iter=200) -> LinkResult
 ```
@@ -606,7 +606,7 @@ Rasch・4PL・PCM は同じカーネルを共有し単体テストでのみ確�
 | `source` | `FitResult` | 新フォーム側の 1 次元推定結果 |
 | `target` | `FitResult` | 基準フォーム側の 1 次元推定結果 |
 | `items` | iterable[str] / Mapping[str, str], 任意 | 共通項目（既定 `None`: 名前が一致する全項目）。項目名が異なるときは `{source_item: target_item}` の辞書。共通ペアは同じ項目カーネル・カテゴリ数でなければならない |
-| `method` | `"stocking-lord"` / `"haebara"` | 目的関数: Stocking & Lord (1983) の TCC 二乗差（既定）または Haebara (1980) のカテゴリ曲線二乗差（多値拡張: Kim & Lee, 2006） |
+| `method` | `"stocking_lord"` / `"haebara"` | 目的関数: Stocking & Lord (1983) の TCC 二乗差（既定）または Haebara (1980) のカテゴリ曲線二乗差（多値拡張: Kim & Lee, 2006） |
 | `symmetric` | bool | `True` で逆方向の二乗差を加えた対称版（Kim & Lee, 2006）。既定 `False` |
 | `nodes` | 1 次元配列, 任意 | 求積節点 $\theta_q$（既定: `target` 群の推定格子、`symmetric=True` の逆方向は `source` 群の格子） |
 | `weights` | 1 次元配列, 任意 | 非負の重み（和が 1 になるよう正規化。既定: 推定済み潜在分布の重み、`nodes` のみ指定時は一様重み） |
@@ -631,7 +631,7 @@ Rasch・4PL・PCM は同じカーネルを共有し単体テストでのみ確�
 | `A_se`, `B_se` | float | 陰関数定理によるデルタ法標準誤差（Ogasawara, 2001）。計算できない場合は NaN |
 | `vcov` | ndarray (2, 2) / None | `(A, B)` の漸近共分散行列。自由な共通項目がある側で `se=None`、全共通パラメタが固定、または $H_{cc}$ が正定値でない場合は `None` |
 | `criterion` | float | `(A, B)` での最小化された目的関数値 |
-| `method` | `"stocking-lord"` / `"haebara"` | 使用した基準 |
+| `method` | `"stocking_lord"` / `"haebara"` | 使用した基準 |
 | `symmetric` | bool | 対称版かどうか |
 | `converged` | bool | `grad_norm <= tol` を満たしたか |
 | `n_iter` | int | 実行した Newton 反復回数 |
@@ -661,8 +661,8 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 ### `Quadrature`
 
 ```text
-Quadrature.equispaced(n_points=61, *, lim=(-6.0, 6.0))
-Quadrature.default(n_factors=1, *, lim=(-6.0, 6.0))
+Quadrature.equispaced(n_points=61, *, bounds=(-6.0, 6.0))
+Quadrature.default(n_factors=1, *, bounds=(-6.0, 6.0))
 Quadrature.gauss_hermite(n_points=21)
 ```
 

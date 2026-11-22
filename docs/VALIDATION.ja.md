@@ -151,10 +151,10 @@
     （`NR`, `SE.type = "Oakes"`）と直接照合し、`loglik` 相対差 `3.0e-13`、`log_posterior` 相対差 `5.1e-15`、
     パラメタ `8.0e-9`、Oakes SE 対 mirt Oakes `3.4e-9`、Oakes 対 Hessian `1.2e-12`、EAP `6.4e-15`
     （mirt Richardson は $\hat\eta_{\text{MAP}}$ での flexpyirt 尤度のみ Hessian と一致することを確認）。
-  - **V7b（`v7_2pl_lnorm_map`）**: 2PL、$a\sim\mathrm{LogNormal}(0.2, 0.3)$、$d\sim\mathrm{NormalPrior}(0, 2)$。
+  - **V7b（`v7_2pl_lnorm_map`）**: 2PL、$a\sim\mathrm{LogNormalPrior}(0.2, 0.3)$、$d\sim\mathrm{NormalPrior}(0, 2)$。
     `loglik`（`4.0e-13`）、`log_posterior`（`1.4e-14`）、パラメタ（`2.6e-9`）、EAP（`7.1e-15`）は mirt（`NR`）と直接照合し、
     Oakes / Hessian SE は R で求めた厳密な事後 Hessian と照合（`1.8e-9`、Oakes 対 Hessian `2.3e-12`）。
-  - **V7c（`v7_3pl_map`）**: 3PL、$a\sim\mathrm{LogNormal}(0.2, 0.3)$、$d\sim\mathrm{NormalPrior}(0, 2)$、
+  - **V7c（`v7_3pl_map`）**: 3PL、$a\sim\mathrm{LogNormalPrior}(0.2, 0.3)$、$d\sim\mathrm{NormalPrior}(0, 2)$、
     $g\sim\mathrm{Beta}(5, 17)$（mirt の `expbeta`）。R 上で mirt の厳密な目的関数 `logLik + logPrior` を最大化し
     （`max |grad| = 5.1e-13`、`mirt(..., pars = sv_fixed)` で `8.9e-15` まで相互検証、EAP は mirt の `fscores`）、
     `loglik` 相対差 `2.5e-13`、`log_posterior` 相対差 `8.1e-16`、パラメタ `2.9e-9`、Oakes / Hessian SE `5.7e-9`

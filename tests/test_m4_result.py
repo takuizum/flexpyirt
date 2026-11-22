@@ -17,7 +17,7 @@ from flexpyirt import (
     PCM,
     FitResult,
     FourPL,
-    LogNormal,
+    LogNormalPrior,
     Model,
     Normal,
     NormalPrior,
@@ -228,7 +228,7 @@ def test_delta_se_3pl_4pl_and_fixed_a_d_free_g() -> None:
     # 3PL with MAP priors to keep interior estimates clean (no HeywoodWarning).
     spec3 = (
         Model.uniform(ThreePL(), items=cols)
-        .prior(param="a", dist=LogNormal(0.4, 0.3))
+        .prior(param="a", dist=LogNormalPrior(0.4, 0.3))
         .prior(param="g", dist=NormalPrior(0.2, 0.1))
     )
     res3 = fit(spec3, df, method=BAEM(tol=1e-8))
@@ -257,7 +257,7 @@ def test_delta_se_3pl_4pl_and_fixed_a_d_free_g() -> None:
     # 4PL (interior via priors).
     spec4 = (
         Model.uniform(FourPL(), items=cols)
-        .prior(param="a", dist=LogNormal(0.4, 0.3))
+        .prior(param="a", dist=LogNormalPrior(0.4, 0.3))
         .prior(param="g", dist=NormalPrior(0.18, 0.08))
         .prior(param="u", dist=NormalPrior(0.88, 0.08))
     )
@@ -289,7 +289,7 @@ def test_delta_se_fixed_items_fixed_d_and_vcov_none_or_nan() -> None:
         spec,
         case.data,
         method=BAEM(tol=1e-8),
-        quadrature=Quadrature.equispaced(81, lim=(-8, 8)),
+        quadrature=Quadrature.equispaced(81, bounds=(-8, 8)),
     )
     items = res.items.set_index("item")
     assert np.isnan(_cell(items, "Item.1", "b_se"))
@@ -345,7 +345,7 @@ def test_delta_se_multigroup_shared_and_partial_equality() -> None:
         df,
         group=grp,
         method=BAEM(tol=1e-8),
-        quadrature=Quadrature.equispaced(81, lim=(-8, 8)),
+        quadrature=Quadrature.equispaced(81, bounds=(-8, 8)),
     )
     assert res.vcov is not None
     fids = _free_id_map(res)
@@ -469,7 +469,7 @@ def test_summary_and_repr_html_map_priors_warning_and_no_extra_warning() -> None
     case = load("v1_lsat7_2pl")
     spec = (
         Model.uniform(TwoPL(), items=case.items)
-        .prior(param="a", dist=LogNormal(0.0, 0.5))
+        .prior(param="a", dist=LogNormalPrior(0.0, 0.5))
         .prior(param="d", dist=NormalPrior(0.0, 2.0))
     )
     res = fit(spec, case.data)
@@ -511,7 +511,7 @@ def test_summary_and_repr_html_multigroup_and_mixed() -> None:
         .with_groups(ref=Normal.standard(), focal=Normal.free())
         .equal_across_groups(items=["i1", "i2"])
     )
-    res = fit(spec, df, group=grp, quadrature=Quadrature.equispaced(81, lim=(-8, 8)))
+    res = fit(spec, df, group=grp, quadrature=Quadrature.equispaced(81, bounds=(-8, 8)))
     for out in (res.summary(), res._repr_html_()):
         assert "2PL (3)" in out
         assert "GRM(4) (1)" in out
@@ -560,7 +560,7 @@ def test_repr_html_escapes_special_characters() -> None:
         .with_groups(**{"g<ref>&1": Normal.standard(), "g<foc>&2": Normal.free()})
         .equal_across_groups(items=tricky[:3])
     )
-    res = fit(spec, df, group=grp, se=None, quadrature=Quadrature.equispaced(81, lim=(-8, 8)))
+    res = fit(spec, df, group=grp, se=None, quadrature=Quadrature.equispaced(81, bounds=(-8, 8)))
     html_out = res._repr_html_()
     assert 'q<1>&"a"' not in html_out
     assert "q&lt;1&gt;&amp;&quot;a&quot;" in html_out
