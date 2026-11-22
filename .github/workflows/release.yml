@@ -6,7 +6,8 @@ name: Release
 #
 # Security (CONTRIBUTING.md): only repository admins can update main (ruleset
 # "main-release-gate"), and the publish job runs in the "release" environment, which needs the
-# owner's approval and only deploys from main.
+# owner's approval and only deploys from main. The pypi job uploads the same files to PyPI with
+# Trusted Publishing (OIDC, no API token) from the "pypi" environment.
 on:
   push:
     branches: [main]
@@ -85,6 +86,7 @@ jobs:
         run: |
           uv build
           ls dist
+          uvx twine check --strict dist/*
 
   publish:
     needs: plan
@@ -113,6 +115,15 @@ jobs:
           uv build
           ls dist
           test -f "dist/flexpyirt-$VERSION-py3-none-any.whl"
+          test -f "dist/flexpyirt-$VERSION.tar.gz"
+          uvx twine check --strict dist/*
+          uv run --isolated --no-project --with "dist/flexpyirt-$VERSION-py3-none-any.whl" \
+            python -c "import flexpyirt; assert flexpyirt.__version__ == '$VERSION'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
       - name: Push the tag and publish the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -141,3 +152,18 @@ jobs:
               fi
             done
           done
+
+  pypi:
+    needs: [plan, publish]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/flexpyirt/${{ needs.plan.outputs.version }}/
+    permissions:
+      id-token: write  # Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

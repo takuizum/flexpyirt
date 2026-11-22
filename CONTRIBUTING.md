@@ -40,6 +40,10 @@ releasing means tagging. Untagged development commits get versions like `0.0.2.d
       it on the Actions page, it tags `main` with `vX.Y.Z`, runs `uv build` and creates a GitHub
       Release (wheel and sdist attached, release notes generated). It then closes the issues that
       fix PRs in this release `Closes`d.
+   3. `pypi` job: **publishes the same wheel and sdist to PyPI** (`pypi` environment, Trusted
+      Publishing; no API token).
+   4. The same push to `main` runs `.github/workflows/docs.yml`, which deploys the documentation
+      site to GitHub Pages.
 3. **The first release** (no `v*` tag yet) is **v0.0.1**, whatever bump the title asks for.
 4. Manual runs (`workflow_dispatch`) are dry runs only: they compute the next version and build.
 
@@ -57,6 +61,10 @@ Versions follow [Semantic Versioning](https://semver.org/). The public API may c
 - **The `publish` job runs in the `release` environment and needs the designated reviewer's (the
   owner's) approval.** The environment deploys from `main` only, so other branches and forks cannot
   create tags or Releases.
+- **PyPI uploads use Trusted Publishing** (OIDC). PyPI trusts only the publisher "repository
+  `takuizum/flexpyirt`, workflow `release.yml`, environment `pypi`", so no API token lives in the
+  repository. Restrict the `pypi` environment to deployments from `main` as well. A version
+  number uploaded to PyPI can never be reused, even after deleting it.
 - Workflow `GITHUB_TOKEN`s are read-only by default (`permissions: contents: read`); only the
   `publish` job writes. PRs from forks get a read-only token and run only CI and PR rules.
 - Give new collaborators write access only. Every additional admin is another person who can
@@ -124,3 +132,19 @@ Names follow PEP 8 and read as Python, not as R (DESIGN.md §15.46). `ruff` chec
 Every document exists in English (`*.md`) and Japanese (`*.ja.md`) with the same content. Update
 both when you change one. The PR and issue templates under `.github/` are single bilingual files
 (English and Japanese side by side), because GitHub uses one default template.
+
+The files in `docs/` also make up the bilingual documentation site
+(<https://takuizum.github.io/flexpyirt/>, Japanese under `/ja/`; MkDocs, `mkdocs.yml`). The site is
+deployed from `main`, so it shows the released state. To check it locally:
+
+```bash
+uv run --group docs mkdocs serve           # preview
+uv run --group docs mkdocs build --strict  # the CI check (fails on broken links and anchors)
+```
+
+- Write links between documents as relative links (they work on GitHub and on the site). On the
+  site, links that leave `docs/` point to the file on GitHub (`scripts/mkdocs_hooks.py`).
+- `README.md` / `README.ja.md` are also shown on the PyPI project page, so their links are absolute
+  (site URLs for documents, GitHub URLs for everything else).
+- When you add a document to `docs/`, add it to `nav` in `mkdocs.yml` (and to the Japanese
+  `nav_translations`).

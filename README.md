@@ -1,6 +1,6 @@
 # flexpyirt
 
-English | [日本語](README.ja.md)
+English | [日本語](https://github.com/takuizum/flexpyirt/blob/main/README.ja.md)
 
 Item response theory (IRT) estimation in Python, built on JAX. At its core is marginal maximum
 likelihood estimation (MMLE) with the Bock–Aitkin EM algorithm, including multiple-group
@@ -8,7 +8,7 @@ calibration and fixed item parameter calibration (FIPC).
 
 - **Verified against R `mirt`**: every supported feature is checked numerically against mirt
   (parameters, log-likelihood and standard errors agree to about 1e-8; see
-  [validation](docs/VALIDATION.md)).
+  [validation](https://takuizum.github.io/flexpyirt/VALIDATION/)).
 - **Automatic differentiation**: M-step gradients and Hessians and the standard errors (Oakes'
   identity) all come from JAX autodiff. A new item model only needs its log-probability for
   estimation, standard errors and scoring to work.
@@ -16,6 +16,8 @@ calibration and fixed item parameter calibration (FIPC).
   constraints and starting values.
 
 > Under development (0.x). The public API may change before 1.0.0.
+
+**Documentation: <https://takuizum.github.io/flexpyirt/>**
 
 ## Features
 
@@ -41,18 +43,18 @@ calibration and fixed item parameter calibration (FIPC).
 | Scale linking | Differentiable characteristic-curve linking (`link()`, `LinkResult`: Haebara and Stocking–Lord, non-symmetric and symmetric, Ogasawara delta-method SEs, transformed items and $\theta$ scores; validated for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items) | V20 |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
-See the [roadmap](docs/ROADMAP.md) for what comes next.
+See the [roadmap](https://takuizum.github.io/flexpyirt/ROADMAP/) for what comes next.
 
 ## Installation
 
-Python 3.11 or later. flexpyirt is not on PyPI yet; install it from GitHub
-([uv](https://docs.astral.sh/uv/) recommended).
+Python 3.11 or later.
 
 ```bash
-uv add git+https://github.com/takuizum/flexpyirt
+pip install flexpyirt  # or: uv add flexpyirt
 ```
 
-To pin a release, add its tag: `git+https://github.com/takuizum/flexpyirt@v0.0.1`.
+For polars input, install `flexpyirt[polars]`. For GPUs, install a CUDA build of `jax` first
+(see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)).
 
 flexpyirt computes in **64-bit floating point**. The JAX setting belongs to you, so the library
 does not change it; enable it before fitting (otherwise `fit()` raises `PrecisionError`).
@@ -99,7 +101,7 @@ shows the difficulty $b=-d/a$ for display.
 
 ## Examples
 
-See the [user guide](docs/guide.md) for details and the [API reference](docs/reference.md) for
+See the [user guide](https://takuizum.github.io/flexpyirt/guide/) for details and the [API reference](https://takuizum.github.io/flexpyirt/reference/) for
 each function.
 
 **Rasch model** (slopes fixed at 1, latent variance estimated)
@@ -137,24 +139,24 @@ res3 = fit(spec3, df)
 ## Performance
 
 Wall-time benchmarks against R `mirt` (default settings, `TOL = 1e-4`, 61 quadrature points on CPU)
-are in [benchmarks/](benchmarks/README.md) with committed Apple M5 results in
-[benchmarks/results/2026-11-21-apple-m5.md](benchmarks/results/2026-11-21-apple-m5.md).
+are in [benchmarks/](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/README.md) with committed Apple M5 results in
+[benchmarks/results/2026-11-21-apple-m5.md](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/results/2026-11-21-apple-m5.md).
 After the first-call JAX/XLA compilation (a cold EM fit takes ~0.8–1.1 s), warm CPU fits are faster
 than `mirt` across all tested cases (`0.12×–0.60×` of `mirt` time), while `mirt` is faster for a
 single cold fit without standard errors.
 
 ## Documentation
 
-- [User guide](docs/guide.md) — specifying models, multiple groups, FIPC, editing the
+- [User guide](https://takuizum.github.io/flexpyirt/guide/) — specifying models, multiple groups, FIPC, editing the
   ParameterTable, estimation options
-- [API reference](docs/reference.md) — public classes and functions and their arguments
-- [Validation](docs/VALIDATION.md) — how results are checked against R mirt, tolerances, known
+- [API reference](https://takuizum.github.io/flexpyirt/reference/) — public classes and functions and their arguments
+- [Validation](https://takuizum.github.io/flexpyirt/VALIDATION/) — how results are checked against R mirt, tolerances, known
   differences
-- [Design](docs/DESIGN.md) — formulas, algorithms and implementation decisions
-- [Roadmap](docs/ROADMAP.md)
-- [Contributing](CONTRIBUTING.md) — branches, reviews, releases
+- [Design](https://takuizum.github.io/flexpyirt/DESIGN/) — formulas, algorithms and implementation decisions
+- [Roadmap](https://takuizum.github.io/flexpyirt/ROADMAP/)
+- [Contributing](https://github.com/takuizum/flexpyirt/blob/main/CONTRIBUTING.md) — branches, reviews, releases
 
-Every document is also available in Japanese (`*.ja.md`).
+Every document is also available in Japanese ([日本語サイト](https://takuizum.github.io/flexpyirt/ja/)).
 
 ## Development
 
@@ -163,7 +165,7 @@ uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch flow and releases.
+See [CONTRIBUTING.md](https://github.com/takuizum/flexpyirt/blob/main/CONTRIBUTING.md) for the branch flow and releases.
 
 ## License
 
