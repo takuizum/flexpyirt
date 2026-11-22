@@ -81,6 +81,29 @@ Rscript benchmarks/run_mirt.R
 uv run python benchmarks/report.py
 ```
 
+## 命名
+
+名前は PEP 8 に従い、R ではなく Python として読めるものにする（DESIGN.md §15.46）。`ruff` が `N` 規則を検査する。
+
+- 関数・メソッド・引数・変数は `snake_case`、クラスは `CapWords`、モジュール定数は `UPPER_SNAKE_CASE`。
+- R/mirt の引数名をそのまま使わない。Python の綴りにし、対応する mirt の名前は docstring に書く:
+  `n_categories`（`n_cat` ではない）、`min_cell`（mirt の `mincell`）、`mean_log`/`sd_log`（R の `meanlog`/`sdlog`）、
+  `bounds=(lower, upper)`（mirt の `theta_lim`）。
+- 公開名は略さない（`is_eh` ではなく `is_empirical_histogram`）。定着した略語は使ってよい: モデル名（`TwoPL`, `GRM`,
+  `GPCM`）、個数を表す接頭辞 `n_`、`se`, `vcov`, `loglik`, `theta`, `eta`。よく使う別名とぶつかる略語は避ける
+  （`pd` は pandas、`df` は自由度と DataFrame で紛らわしい）。
+- 同じ概念には API 全体で同じ名前を使う（`n_points`, `n_factors`, `n_categories`）。同じ系統のクラスは接尾辞を揃える
+  （`NormalPrior`, `LogNormalPrior`, `BetaPrior`）。
+- `Literal` の文字列の選択肢は小文字の `snake_case`（`"slope_intercept"`, `"stocking_lord"`）。定着した頭字語は大文字のまま
+  （`"EAP"`, `"MAP"`, `"BH"`）。
+- DESIGN.md の数式に対応する場所では数式記号を使ってよい: jit されるカーネル内の大文字の記号（`G`, `Q`, `D`, `K_f`。
+  このため ruff の `N803`/`N806` は無視している）や、`LinkResult.A`/`B` のような標準的な定数。
+- ローカルのクロージャは役割で名付ける（`objective`, `backtrack_body`, `interp_weights`。`obj` や `tmp` は使わない）。
+  mirt のコードを行ごとに移植した箇所（例: `_itemfit.collapse_cells`）は照合のため mirt の局所変数名を残してよく、
+  その旨をコメントに書く。
+- `FitResult` の JSON に保存される名前を変えるときは `schema_version` を上げ、古いファイルも読めるようにする
+  （読み込み時に旧キーを置き換える）。
+
 ## ドキュメント
 
 すべての文書は英語版（`*.md`）と日本語版（`*.ja.md`）があり、内容は同じ。片方を変えたら両方を直す。
