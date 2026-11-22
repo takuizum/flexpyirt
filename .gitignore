@@ -10,3 +10,4 @@ build/
 validation/r/.Rhistory
 .hypothesis/
 benchmarks/data/
+site/

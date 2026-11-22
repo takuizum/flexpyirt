@@ -1,17 +1,19 @@
 # flexpyirt
 
-[English](README.md) | 日本語
+[English](https://github.com/takuizum/flexpyirt/blob/main/README.md) | 日本語
 
 JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin EM による周辺最尤推定（MMLE）を中核に、
 多母集団の同時推定や固定項目パラメタ推定（FIPC）を Python から扱えるようにする。
 
 - **正しさを検証済み**: 対応済みの機能はすべて R `mirt` と数値照合している（パラメタ・対数尤度・標準誤差が
-  おおむね 1e-8 で一致。[検証の詳細](docs/VALIDATION.ja.md)）。
+  おおむね 1e-8 で一致。[検証の詳細](https://takuizum.github.io/flexpyirt/ja/VALIDATION/)）。
 - **自動微分**: M-step の勾配・Hessian も標準誤差（Oakes の恒等式）も JAX の自動微分で計算する。
   新しい項目モデルは対数確率を書くだけで推定・SE・スコアリングが動く設計。
 - **ParameterTable**: mirt の `pars = "values"` に相当する表で、固定・等値・初期値を編集できる。
 
 > 開発中（0.x）。公開 API は 1.0.0 まで変わることがある。
+
+**ドキュメント: <https://takuizum.github.io/flexpyirt/ja/>**
 
 ## できること
 
@@ -37,17 +39,18 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 尺度リンキング | 微分可能な特性曲線法リンキング（`link()`, `LinkResult`: Haebara・Stocking–Lord の非対称・対称版、Ogasawara デルタ法 SE、項目・$\theta$ の変換。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目で照合済み） | V20 |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
 
-今後の予定は[ロードマップ](docs/ROADMAP.ja.md)を参照。
+今後の予定は[ロードマップ](https://takuizum.github.io/flexpyirt/ja/ROADMAP/)を参照。
 
 ## インストール
 
-Python 3.11 以上。PyPI にはまだ公開していないので GitHub から入れる（[uv](https://docs.astral.sh/uv/) を推奨）。
+Python 3.11 以上。
 
 ```bash
-uv add git+https://github.com/takuizum/flexpyirt
+pip install flexpyirt  # または uv add flexpyirt
 ```
 
-特定のリリースを使う場合は `git+https://github.com/takuizum/flexpyirt@v0.0.1` のようにタグを付ける。
+polars の DataFrame を使う場合は `flexpyirt[polars]`。GPU を使う場合は、先に CUDA 版の `jax` を入れる
+（[JAX のインストール手順](https://docs.jax.dev/en/latest/installation.html)）。
 
 flexpyirt は **64 ビット浮動小数点**で計算する。JAX の設定はユーザーのものなのでライブラリからは変えない。
 推定の前に有効にしておく（無効なら `fit()` が `PrecisionError` を出す）。
@@ -94,7 +97,7 @@ scores = res.score(df)  # 回答者ごとの EAP（theta）と事後標準偏差
 
 ## 使い方の例
 
-詳しくは [ユーザーガイド](docs/guide.ja.md)、関数ごとの説明は [API リファレンス](docs/reference.ja.md)。
+詳しくは [ユーザーガイド](https://takuizum.github.io/flexpyirt/ja/guide/)、関数ごとの説明は [API リファレンス](https://takuizum.github.io/flexpyirt/ja/reference/)。
 
 **Rasch モデル**（傾きは 1 に固定、潜在分布の分散を推定）
 
@@ -131,20 +134,20 @@ res3 = fit(spec3, df)
 ## 性能
 
 R `mirt`（既定設定、`TOL = 1e-4`、CPU・61 点求積）との wall time ベンチマークを
-[benchmarks/](benchmarks/README.ja.md) に、Apple M5 での計測結果を
-[benchmarks/results/2026-11-21-apple-m5.md](benchmarks/results/2026-11-21-apple-m5.md) に
+[benchmarks/](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/README.ja.md) に、Apple M5 での計測結果を
+[benchmarks/results/2026-11-21-apple-m5.md](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/results/2026-11-21-apple-m5.md) に
 置いている。初回の JAX/XLA コンパイル（cold の EM 推定で約 0.8–1.1 秒）以降は、テストした全ケースで
 warm の CPU 推定が `mirt` より速く（`mirt` 比 `0.12×–0.60×`）、標準誤差なしの 1 回限りの cold 推定では
 `mirt` の方が速い。
 
 ## ドキュメント
 
-- [ユーザーガイド](docs/guide.ja.md) — モデルの指定、多母集団、FIPC、ParameterTable の編集、推定オプション
-- [API リファレンス](docs/reference.ja.md) — 公開クラス・関数の一覧と引数
-- [検証](docs/VALIDATION.ja.md) — R mirt との照合方法、許容誤差、判明した違い
-- [設計書](docs/DESIGN.ja.md) — 数式とアルゴリズム、実装上の決定
-- [ロードマップ](docs/ROADMAP.ja.md)
-- [開発フロー](CONTRIBUTING.ja.md) — ブランチ運用、レビュー、リリース
+- [ユーザーガイド](https://takuizum.github.io/flexpyirt/ja/guide/) — モデルの指定、多母集団、FIPC、ParameterTable の編集、推定オプション
+- [API リファレンス](https://takuizum.github.io/flexpyirt/ja/reference/) — 公開クラス・関数の一覧と引数
+- [検証](https://takuizum.github.io/flexpyirt/ja/VALIDATION/) — R mirt との照合方法、許容誤差、判明した違い
+- [設計書](https://takuizum.github.io/flexpyirt/ja/DESIGN/) — 数式とアルゴリズム、実装上の決定
+- [ロードマップ](https://takuizum.github.io/flexpyirt/ja/ROADMAP/)
+- [開発フロー](https://github.com/takuizum/flexpyirt/blob/main/CONTRIBUTING.ja.md) — ブランチ運用、レビュー、リリース
 
 すべての文書に英語版（`*.md`）がある。
 
@@ -155,7 +158,7 @@ uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
 
-ブランチ運用とリリースの手順は [CONTRIBUTING.md](CONTRIBUTING.ja.md) を参照。
+ブランチ運用とリリースの手順は [CONTRIBUTING.md](https://github.com/takuizum/flexpyirt/blob/main/CONTRIBUTING.ja.md) を参照。
 
 ## ライセンス
 

@@ -36,6 +36,9 @@
    2. `publish` ジョブ: **`release` 環境の承認待ちになる**。オーナーが Actions 画面で承認すると、
       `main` にタグ `vX.Y.Z` を打って `uv build` し、GitHub Release を作成する（wheel / sdist 添付、
       リリースノート自動生成）。このリリースに含まれる fix PR が `Closes` していた issue を閉じる。
+   3. `pypi` ジョブ: 同じ wheel / sdist を **PyPI に公開する**（`pypi` 環境、Trusted Publishing。
+      API トークンは使わない）。
+   4. 同じ `main` への push で `.github/workflows/docs.yml` がドキュメントサイトを GitHub Pages に公開する。
 3. **最初のリリース**（`v*` タグがまだない）は、タイトルの上げ方に関係なく **v0.0.1**。
 4. 手動実行（`workflow_dispatch`）は dry run 専用で、次のバージョンの計算とビルドだけを行う。
 
@@ -51,6 +54,10 @@
   マージできる管理者だけ。
 - **`publish` ジョブは `release` 環境で動き、指定レビュアー（オーナー）の承認が必要**。環境は `main` からしか
   デプロイできないので、他のブランチやフォークからはタグも Release も作れない。
+- **PyPI への公開は Trusted Publishing**（OIDC）。PyPI 側には「リポジトリ `takuizum/flexpyirt`、
+  ワークフロー `release.yml`、環境 `pypi`」だけを信頼する publisher を登録しているので、API トークンは
+  リポジトリに置かない。`pypi` 環境もデプロイ元を `main` に限定しておく。PyPI に一度上げた番号は
+  削除しても再利用できない。
 - ワークフローの `GITHUB_TOKEN` は既定で読み取り専用（`permissions: contents: read`）。書き込みは
   `publish` ジョブだけ。フォークからの PR は読み取り専用トークンで CI と PR rules だけが走る。
 - 協力者を追加するときは write 権限にとどめる。管理者を増やすとリリースできる人が増える。
@@ -113,3 +120,18 @@ uv run python benchmarks/report.py
 すべての文書は英語版（`*.md`）と日本語版（`*.ja.md`）があり、内容は同じ。片方を変えたら両方を直す。
 `.github/` の PR・issue テンプレートは、GitHub が既定のテンプレートを 1 つしか使わないため、英日を併記した
 1 つのファイルにしている。
+
+`docs/` の文書はそのまま英日 2 言語のサイト（<https://takuizum.github.io/flexpyirt/>、日本語は `/ja/`）
+にもなる（MkDocs、`mkdocs.yml`）。サイトは `main` から公開されるので、リリース済みの状態を表す。
+ローカルでの確認:
+
+```bash
+uv run --group docs mkdocs serve           # プレビュー
+uv run --group docs mkdocs build --strict  # CI と同じ検査（リンク切れ・アンカー切れで失敗）
+```
+
+- 文書内のリンクは相対リンクで書く（GitHub でもサイトでも動く）。`docs/` の外を指すリンクは、サイトでは
+  GitHub 上のファイルに書き換わる（`scripts/mkdocs_hooks.py`）。
+- `README.md` / `README.ja.md` は PyPI のプロジェクトページにも表示されるので、リンクは絶対 URL で書く
+  （文書はサイトの URL、それ以外は GitHub の URL）。
+- `docs/` に文書を足したら `mkdocs.yml` の `nav`（と日本語の `nav_translations`）にも足す。

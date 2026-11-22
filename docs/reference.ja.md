@@ -12,7 +12,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
-- 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormal), [`BetaPrior`](#beta)
+- 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - 例外と警告: [`flexpyirt.errors`](#flexpyirterrors)

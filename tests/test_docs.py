@@ -1,12 +1,14 @@
 """Keep the documentation honest, in both languages.
 
-- Every ```python block in README / docs/guide (English and Japanese) runs, top to bottom, in one
-  namespace per file (later blocks may use names from earlier ones).
+- Every ```python block in README / docs/index / docs/guide (English and Japanese) runs, top to
+  bottom, in one namespace per file (later blocks may use names from earlier ones).
 - English and Japanese versions have the same code (comments and docstrings aside).
 - Every document has its counterpart (``X.md`` <-> ``X.ja.md``).
 - Every public name in ``flexpyirt.__all__`` and ``flexpyirt.errors.__all__`` is documented in
   docs/reference.md and docs/reference.ja.md.
-- Japanese documents link to Japanese documents (except the language switcher).
+- Japanese documents link to Japanese documents (except the language switcher), including absolute
+  links to GitHub files and to the documentation site (README links are absolute so they work on
+  PyPI).
 """
 
 from __future__ import annotations
@@ -22,7 +24,16 @@ from flexpyirt import errors
 
 ROOT = Path(__file__).resolve().parents[1]
 BLOCK_RE = re.compile(r"^```python\n(.*?)^```", re.M | re.S)
-RUNNABLE = ["README.md", "README.ja.md", "docs/guide.md", "docs/guide.ja.md"]
+RUNNABLE = [
+    "README.md",
+    "README.ja.md",
+    "docs/index.md",
+    "docs/index.ja.md",
+    "docs/guide.md",
+    "docs/guide.ja.md",
+]
+GITHUB_BLOB = "https://github.com/takuizum/flexpyirt/blob/main/"
+DOCS_SITE = "https://takuizum.github.io/flexpyirt/"
 PAIRED = [
     "README",
     "CONTRIBUTING",
@@ -97,15 +108,22 @@ def test_japanese_docs_link_to_japanese_docs(doc: str) -> None:
     doc_path = ROOT / doc
     lines = doc_path.read_text().splitlines()
     body = [line for line in lines if not line.startswith("[English](")]
-    links = re.findall(r"\]\(([^)#\s]+\.md)(?:#[^)]*)?\)", "\n".join(body))
+    text = "\n".join(body)
+    links = re.findall(r"\]\(([^)#\s]+\.md)(?:#[^)]*)?\)", text)
     results_dir = (ROOT / "benchmarks" / "results").resolve()
     english = []
     for link in links:
         if link.endswith(".ja.md"):
             continue
         # Generated benchmark result tables under benchmarks/results/ are language-neutral.
-        target = (doc_path.parent / link).resolve()
+        if link.startswith(GITHUB_BLOB):
+            target = (ROOT / link.removeprefix(GITHUB_BLOB)).resolve()
+        else:
+            target = (doc_path.parent / link).resolve()
         if results_dir in target.parents:
             continue
         english.append(link)
+    # Pages of the documentation site: the Japanese site lives under /ja/.
+    site_links = re.findall(rf"\]\(({re.escape(DOCS_SITE)}[^)\s]*)\)", text)
+    english += [s for s in site_links if not s.startswith(DOCS_SITE + "ja/")]
     assert not english, f"{doc} links to English documents: {english}"

@@ -6,12 +6,40 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [{ name = "takuizum" }]
+keywords = [
+    "item response theory",
+    "IRT",
+    "psychometrics",
+    "EM algorithm",
+    "marginal maximum likelihood",
+    "JAX",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Typing :: Typed",
+]
 dependencies = [
     "jax>=0.4.30",
     "numpy>=1.26",
     "scipy>=1.11",
     "pandas>=2.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/takuizum/flexpyirt"
+Documentation = "https://takuizum.github.io/flexpyirt/"
+Repository = "https://github.com/takuizum/flexpyirt"
+Issues = "https://github.com/takuizum/flexpyirt/issues"
+Releases = "https://github.com/takuizum/flexpyirt/releases"
 
 [project.optional-dependencies]
 polars = ["polars>=1.0"]
@@ -24,6 +52,10 @@ dev = [
     "mypy>=1.11",
     "pandas-stubs>=2.1",
     "pytest-xdist>=3.8.0",
+]
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocs-static-i18n>=1.2",
 ]
 
 [build-system]
@@ -39,6 +71,11 @@ fallback_version = "0.0.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/flexpyirt"]
+
+# The sdist carries the sources, tests (with the mirt reference values), R validation scripts,
+# benchmarks and documentation; repository tooling stays out.
+[tool.hatch.build.targets.sdist]
+exclude = ["/.github", "/.python-version", "/CLAUDE.md", "/uv.lock", "/site"]
 
 [tool.ruff]
 line-length = 100

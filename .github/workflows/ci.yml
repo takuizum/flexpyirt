@@ -45,3 +45,22 @@ jobs:
         run: uv run pytest --durations=15 -m "$MARKEXPR"
       - name: Editable install smoke test (isolated env)
         run: uv run --isolated --no-project --with-editable . python -c "import flexpyirt; print(flexpyirt.__version__)"
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs derives the version from tags
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Build sdist and wheel
+        run: uv build
+      - name: Check metadata (PyPI rendering of README.md)
+        run: uvx twine check --strict dist/*
+      - name: Smoke test the wheel (isolated env)
+        run: |
+          uv run --isolated --no-project --with dist/*.whl python -c \
+            "import flexpyirt; print(flexpyirt.__version__)"
