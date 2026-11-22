@@ -23,6 +23,9 @@ English | [日本語](VALIDATION.ja.md)
 | EAP | 1e-5 |
 | MAP / ML / WLE ($\theta$) | 1e-4 |
 | MAP / ML / WLE (SE) | 1e-3 (relative) |
+| Scale linking $(A, B)$ / criterion, on identical item estimates | 1e-9 / 1e-9 (relative) |
+| Scale linking delta-method SE / `vcov`, on identical estimates and covariance | 1e-5 (relative) |
+| Scale linking $(A, B)$ / criterion / SE, end-to-end (calibration + linking) | 1e-6 / 1e-5 (relative) / 1e-3 (relative) |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -41,8 +44,14 @@ English | [日本語](VALIDATION.ja.md)
 | V12 | Display IRT thresholds and delta-method SEs (2PL, Rasch, GRM, GPCM, PCM, 2-group 2PL) | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | Ability scoring: MAP, ML, WLE (2PL, GRM, GPCM, 3PL, 2-group, missing) | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
 | V15 | S-X2 item fit (GRM, GPCM, PCM with free variance, 3PL, FIPC 2PL; `mincell` 1 and 3) | `itemfit(m, fit_stats = "S_X2")` | M5 |
-| V16 | Multiple-group confirmatory 2D MIRT (simple structure, cross-loading; anchors on both factors, focal means/variances free) | `multipleGroup(..., invariance = c(anchors, "free_means", "free_var"))` with `COV = F1*F2` | M4 |
+| V16 | Equality constraints across items (LSAT7 common slope; 2PL + graded with cross-model constraints; two groups with anchors and a common slope) | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
+| V17 | DIF likelihood-ratio tests on the V4 data (`add` for `a`+`d` and for `d`; `drop` for `a`+`d` from the fully invariant model) | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
+| V18 | M2 / M2* limited-information goodness of fit (LSAT7 2PL, simulated 2PL, 3PL, Rasch with free variance, GRM $K=3$, GPCM $K=4$) | `M2(m, quadpts = 61, theta_lim = c(-6, 6))` | M5 |
 | V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
+| V19 | Davidian-curve latent distributions (2PL $k=3$, GRM $k=2$, FIPC 2PL $k=3$ with free mean/var) | `mirt(..., dentype = "Davidian-k")` & `mirt(..., customGroup = ..., SE.type = "Oakes")` | M5 |
+| V20 | Scale linking: Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara SEs (2PL, GRM, GPCM, 3PL, non-standard source grid, mixed 2PL + GPCM) | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` | M5 |
+| V21 | Multiple-group confirmatory 2D MIRT (simple structure, cross-loading; anchors on both factors, focal means/variances free) | `multipleGroup(..., invariance = c(anchors, "free_means", "free_var"))` with `COV = F1*F2` | M4 |
+| V23 | Nominal response model (Science; simulated with unordered/negative scoring coefficients; nominal + 2PL mixed; mostly non-monotone items; two-factor confirmatory) | `mirt(..., "nominal")` with `pars` starting at the GPCM point (or the best alternative start); `itemfit(fit_stats = "S_X2")` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -291,11 +300,11 @@ English | [日本語](VALIDATION.ja.md)
   mean/SD matching EAP and posterior SD within Monte-Carlo error), alongside unit tests for
   flat-prior MAP $\approx$ ML, WLE Warm-equation stationarity across all seven item models, extreme
   patterns, multiple groups, missing data, and input validation.
-- **Multiple-group 2D MIRT (V16, M4)**: two simulated cases (2 × 1,500 respondents; simple
+- **Multiple-group 2D MIRT (V21, M4)**: two simulated cases (2 × 1,500 respondents; simple
   structure with anchors q01–q03 / q07–q09, and a cross-loading q07 with anchors q01–q03 /
   q08–q10), focal means and variances free, correlations free in both groups, 81 points per
   dimension on $[-6, 6]$ (`validation/r/m4_mirt_multigroup_reference.R` →
-  `tests/reference/v16_mirt_multigroup.json`, mirt 1.48, `NR`, `TOL = 1e-10`). mirt stops short of
+  `tests/reference/v21_mirt_multigroup.json`, mirt 1.48, `NR`, `TOL = 1e-10`). mirt stops short of
   the maximum along one factor's ridge (that factor's focal mean/variance traded against its
   slopes): flexpyirt reproduces mirt's log-likelihood at mirt's estimates exactly, yet its own
   solution is 3.2e-5 higher, and the score at mirt's estimates is ~0.035 / ~0.018 for that
@@ -354,8 +363,236 @@ English | [日本語](VALIDATION.ja.md)
   Oakes == Hessian == reference Oakes, identification & specification errors):
   `tests/test_m4_mirt.py`.
 - Tests: `tests/test_mirt_m1.py` (V1, V2, V10). Reference generator: `validation/r/m1_reference.R`.
+- **Equality constraints across items (V16, M5)**: mirt's `CONSTRAIN` with `optimizer = "NR"`,
+  `TOL = 1e-10`. V16a: LSAT7 2PL with one common slope ($N(0,1)$, 61 points on $[-6,6]$). V16b:
+  simulated $N=2500$, items 1–6 2PL and 7–10 graded with 3 categories, with a slope shared by
+  2PL and graded items (1, 2, 7), an intercept shared by items 3 and 4, a slope shared by 8–10 and
+  `d1` shared by 9 and 10. V16c: two groups of 1500, anchors q01–q05 equal across groups, the
+  slopes of q06–q10 one common slope within each group, focal mean and variance free (81 points on
+  $[-8,8]$). All agree with mirt (plain EM and SQUAREM): parameters to $2.1\times10^{-8}$,
+  log-likelihood to $4\times10^{-11}$, Oakes SEs to $1.3\times10^{-8}$ (relative), Hessian vs
+  mirt Richardson SEs to $2.9\times10^{-8}$, flexpyirt Oakes vs Hessian to $5\times10^{-15}$, and
+  the number of free parameters equals mirt's `nest`. Tests: `tests/test_mirt_m5_equal_items.py`.
+  Reference generator: `validation/r/m5_equal_items_reference.R`.
+- **DIF likelihood-ratio tests (V17, M5)**: mirt's `DIF()` (`optimizer = "NR"`, `TOL = 1e-10`, 81
+  points on $[-8,8]$ for the baseline and every refit) on the V4 data: `scheme = "add"` from the
+  anchored model (q01–q05 equal, focal mean and variance free) for `a1`+`d` and for `d` on
+  q06–q15, and `scheme = "drop"` for `a1`+`d` on all items from the fully invariant model. mirt
+  reports information criteria as the model with the item free minus the constrained one (in both
+  schemes) and adjusts p-values with Holm by default (`p.adjust = "holm"`); its `p` is
+  `1 - pchisq(...)`, which is exactly 0 for very large $X^2$ (ours uses the survival function).
+  Agreement (plain EM and SQUAREM): $X^2$ and the AIC/SABIC/HQ/BIC differences to $2.2\times10^{-11}$,
+  `p` and `adj_p` to $3\times10^{-11}$. Tests: `tests/test_mirt_m5_dif.py`. Reference generator:
+  `validation/r/m5_dif_reference.R`.
+- **M2 / M2* limited-information goodness of fit (V18, M5)**: six cases on 61 points over $[-6,6]$
+  (`validation/r/m5_m2_reference.R` → `tests/reference/v18_m2.json`, mirt 1.46.1): `lsat7_2pl` (V1),
+  `sim_2pl` (V1), `threepl` (V11 3PL), `rasch_free_var` (V2 Rasch with free latent variance),
+  `grm_sim` (GRM $K=3, J=10, N=2000$), and `gpcm_sim` (GPCM $K=4, J=8, N=2000$). Comparing against
+  mirt 1.46.1's `M2()` uncovered four discrepancies in mirt 1.46.1 (all verified in R):
+  1. **Free latent parameters omitted from $\Delta_2$**: mirt forces `GroupPars` entries to
+     `est = FALSE` inside `M2()` while still subtracting them from `df`. flexpyirt includes all
+     free parameters (item and latent) in $\Delta_2$ by default (Maydeu-Olivares & Joe, 2005,
+     2006); internal `_m2.m2_statistic(..., _latent_in_delta=False)` reproduces mirt's
+     `rasch_free_var` value (`M2` rel `9.7e-16`, `SRMSR` `4.9e-17`, `TLI` `1.6e-9` at mirt's
+     estimates), while the default (`True`) matches R's exact-with-latent reference (`M2` rel
+     `1.0e-12` at mirt's estimates, `9.5e-6` on refit due to the documented $7.9\times10^{-5}$
+     latent variance difference on $[-6,6]$) and differs from mirt's `M2` by `0.035`.
+  2. **`dP("dich")` bug for 3PL/4PL**: `mirt:::dP` for `dich` uses the 2PL derivative
+     $P_0 P_1$ for `(a1, d)` instead of $(u-g)\sigma(1-\sigma)$ and places raw category
+     probabilities $(P_0, P_1)$ in columns 3–4 (`cbind(Theta * PQ, PQ, P)`) instead of
+     $((1-\sigma)g(1-g),\, \sigma u(1-u))$, shifting `threepl`'s `M2` by 4.8% (`64.82` vs exact
+     `68.11`).
+  3. **`dP("gpcm")` slope-derivative bug**: `mirt:::dP` for `gpcm` omits division by
+     `den = rowSums(num)` in the `a1` derivative (`rowSums(Theta[, i] * aknum[[i]])`), shifting
+     `gpcm_sim`'s `M2` by 10.8% (`5.27` vs exact `5.90`).
+  4. **Polytomous null model rank deficiency**: for $K_j > 2$, item $j$'s $K_j - 1$ intercept
+     columns in the null $\Delta_2$ are strictly collinear ($\operatorname{rank}=J < \sum(K_j-1)$);
+     mirt slices `qr.Q(qr(delta), complete = TRUE)` after `ncol(delta)` without checking rank,
+     making its polytomous null $M_2^*$ depend on item ordering. flexpyirt returns `NaN` for
+     `tli` and `cfi` when any item is polytomous (DESIGN §16.3).
+
+  Agreement (both plain EM and SQUAREM, exact `df` in every case):
+  - **Direct vs mirt (`lsat7_2pl`, `sim_2pl`, `grm_sim`)**: `M2` rel $\le 3.8\times10^{-11}$,
+    `p` $\le 7.8\times10^{-11}$, `RMSEA` $\le 4.4\times10^{-13}$, CI bounds $\le 1.4\times10^{-8}$,
+    `SRMSR` $\le 1.4\times10^{-12}$; dichotomous `TLI` $\le 4.8\times10^{-10}$, `CFI` $\le 2.4\times10^{-10}$.
+  - **Exact R $M_2^*$ (`threepl`, `gpcm_sim`, using central-difference derivatives of
+    `expected.item()` + mirt's `buildXi2els`)**: `M2` rel $\le 1.6\times10^{-9}$, `p` $\le 7.1\times10^{-10}$,
+    `RMSEA` $\le 3.7\times10^{-11}$, CI bounds $\le 6.0\times10^{-9}$, `threepl` `TLI` `1.8e-10` /
+    `CFI` `0`, and `SRMSR` directly vs mirt $\le 8.5\times10^{-13}$.
+  Tests: `tests/test_mirt_m5_m2.py` (mirt agreement), `tests/test_m5_m2.py` (unit tests).
+- **Davidian-curve latent distributions (V19, M5)**: inspecting `mirt` 1.46.1 (`Theta_DC_den`,
+  `Mstep.DC.optim`, `EM.group`, `LoadGroupPars`, `updatePrior`) and `dcurver` 0.9.3 established
+  four key differences from exact discretized MMLE (DESIGN §16.4):
+  1. Built-in `mirt(..., dentype = "Davidian-k")` applies Woods' linear-interpolation
+     `standardizeQuadrature` to expected counts at every EM cycle before running `nlminb` on
+     unnormalized `dcurver::ddc`, which breaks EM monotonicity (mirt disables its monotonicity
+     check for `"Davidian"`) and ends with a strictly lower marginal log-likelihood (by `21.47`
+     points on V19a's 2PL $k=3$, and by `139.32` points on V19b's GRM $k=2$). On V19a mirt's end
+     point is not stationary even for its own discretized likelihood ($\sum\log\sum_q L_q\,
+     \mathrm{ddc}(\theta_q)/\sum_q\mathrm{ddc}(\theta_q)$): the score in `PHI_1..3` is
+     $(-0.54, -3.40, 56.7)$, and maximizing over `PHI` alone with mirt's item parameters gains
+     `4.67`. On V19b mirt stalls at the stationary point $N(0,1)$ (`PHI_1 = 1.5707963`, score
+     $(3.6\times10^{-4}, 0)$, no gain from re-optimizing `PHI`): the score in `PHI_2` vanishes
+     because of the sine-first chart's polar singularity at $\phi_1=\pi/2$, and the score in
+     `PHI_1` vanishes because its first-order direction is a pure location/scale change, which the
+     free items absorb. (The second reason applies to any chart; flexpyirt leaves
+     $\boldsymbol\phi=\mathbf 0$ through its perturbed default starts, DESIGN §16.4.)
+  2. Built-in `dentype = "Davidian-k"` forbids `SE = TRUE` (`"No standard error method currently
+     supported for Davidian curves"`) and forbids freeing `MEAN_1` / `COV_11` (`"Estimating
+     Davidian mean-variance hyper-parameters is not currently supported"`), both in
+     `mirt:::EM.group`.
+  3. In `fscores()`, mirt defaults to an $N(0,1)$ prior unless `use_dentype_estimate = TRUE` is
+     passed (which supports `EAP` and plausible values, and rejects `MAP`).
+  4. When validating the exact standardized Davidian MMLE inside `mirt` via `createGroup()`
+     (calling `dcurver::ddc` normalized on the grid, `TOL = 1e-10`, `accelerate = "none"`,
+     `SE.type = "Oakes"`), `createGroup`'s default `derivType = "Richardson"` uses a coarse
+     second-derivative step (`mirt:::numerical_deriv` uses `delta * 1000 = 0.01`, and
+     `2*delta = 0.02` on the diagonal) that corrupts `k = 3` Oakes SEs by up to 25.6%, so
+     `derivType = "central"` (`delta = 1e-5`) is used; and `mirt:::BL.LL` reads `pars` instead of
+     `pars2` for `dentype == "custom"` (the latent density is not perturbed), so Richardson
+     Hessian SEs are computed directly on the exact R marginal log-likelihood (`h = 1e-4`).
+
+  **What the V19 references validate.** The `exact` block is the standardized Davidian MMLE
+  of DESIGN §16.4, re-coded in R: the chart, the closed-form moments $(\mu_Z,\sigma_Z^2)$ and the
+  standardization $z_q=\mu_Z+\sigma_Z(\theta_q-\mu)/\sigma$ are the same definitions as
+  flexpyirt's (written separately in R), while the density values come from `dcurver::ddc`, the
+  E-step, EM, Oakes SEs and EAP from `mirt` (`createGroup()`), and the Hessian SEs from a
+  separately written R marginal log-likelihood. It therefore validates flexpyirt's estimation
+  machinery (E-step, latent M-step, convergence, Oakes/Hessian SEs, scoring) for that model, and
+  the density against `dcurver`. The closed-form moments are checked independently: the R script
+  integrates $z\,\mathrm{ddc}(z)$ and $z^2\,\mathrm{ddc}(z)$ with `stats::integrate` at every
+  fitted and built-in solution (max abs error `1.2e-9`, stored as `moments_check`; it stops if
+  the error exceeds `1e-8`), and `tests/test_m5_davidian.py` checks them by trapezoidal
+  integration. The `mirt_builtin` block checks the density, `Prior`, `logLik` and EAP against
+  mirt's own Davidian implementation at mirt's parameters.
+  **Convergence of the reference.** mirt's EM (BFGS M-step, `TOL = 1e-10`) stops with a gradient
+  of the exact marginal log-likelihood of up to `1.7e-3` (V19c; `3.8e-5` and `5.8e-5` for V19a/b,
+  stored as `max_grad_r_mirt_em`). The R script therefore polishes mirt's solution by Newton
+  steps on the exact R marginal log-likelihood (central-difference gradient and Hessian) until
+  max|grad| < `2e-5` (one step in each case, final `1.8e-6`–`3.6e-6`, `max_grad_r`) and re-runs
+  `mirt` at the polished values with `TOL = NaN` (no EM cycles) to obtain Oakes SEs, `logLik` and
+  EAP there. Before this polish the V19c item and latent differences were `8.5e-6` and `7.3e-6`,
+  with flexpyirt's log-likelihood `1.8e-8` above the reference, i.e. the residual was in the
+  reference, not in flexpyirt.
+
+  Three simulated cases with skewed standardized $\chi^2_4$ traits ($N = 3000$) are validated
+  in `tests/test_mirt_m5_davidian.py` (plain EM and SQUAREM, `validation/r/m5_davidian_reference.R`
+  → `tests/reference/v19_davidian_*.json`; maxima over plain EM and SQUAREM):
+  - **V19a (`v19_davidian_2pl_k3`, 2PL, $J=20, k=3$, 61 pts $[-6,6]$)**: exact MMLE vs R
+    `mirt(customGroup)` / R Hessian: `loglik` rel `2.3e-16`, item params `5.7e-8`, `phi_1..3`
+    `1.3e-8`, Oakes SE vs mirt Oakes `4.6e-6` (items `6.3e-7`), Hessian SE vs R Richardson
+    `2.8e-6` (latent `3.8e-7`), flexpyirt Oakes vs Hessian `9.7e-16`, EAP `6.2e-15` (SQUAREM
+    reduces EM evaluations `113 → 39`). At built-in `mirt(..., dentype="Davidian-3")` parameters
+    (with `mean = mu_z`, `var = var_z`), flexpyirt reproduces mirt's `Prior`, `logLik` (`1.4e-15`
+    rel), and `fscores(..., use_dentype_estimate=TRUE)` (`8.2e-15`), while exact MMLE gains
+    `+21.47` log-likelihood points.
+  - **V19b (`v19_davidian_grm_k2`, GRM $K=4$, $J=10, k=2$, 61 pts $[-6,6]$)**: exact MMLE:
+    `loglik` rel `1.9e-16`, item params `4.9e-8`, `phi_1..2` `9.1e-9`, Oakes SE vs mirt Oakes
+    `3.6e-7`, Hessian SE vs R Richardson `1.9e-6`, flexpyirt Oakes vs Hessian `1.1e-15`, EAP
+    `6.0e-15` (SQUAREM `111 → 33`). At built-in `mirt(..., dentype="Davidian-2")` parameters,
+    `logLik` (`1.9e-16` rel) and EAP (`6.7e-15`) match identically, while exact MMLE gains
+    `+139.32` log-likelihood points.
+  - **V19c (`v19_davidian_fipc_k3`, FIPC 2PL, `q01–q10` fixed, $J=20, k=3$, free `mean`/`var`,
+    shifted/scaled trait $0.4 + 1.2\cdot\text{skewed}$, 81 pts $[-8,8]$)**: exact MMLE: `loglik`
+    rel `1.6e-15`, item params `7.5e-8`, latent params (`mean, var, phi_1..3`) `1.4e-7`, Oakes SE
+    vs mirt Oakes `6.0e-6`, Hessian SE vs R Richardson `1.8e-6`, flexpyirt Oakes vs Hessian
+    `2.9e-15`, EAP `5.3e-15` (SQUAREM `107 → 33`).
+  The remaining `~1e-6` SE differences come from mirt's and R's finite-difference derivatives
+  (`delta = 1e-5`, `h = 1e-4`); flexpyirt's SEs use exact autodiff. Tolerances are those of the
+  table above (`1e-4` parameters, `1e-3` relative SEs).
+  Unit tests (unit sphere, moments, zero-angle $N(0,1)$ equivalence, polynomial-root autodiff
+  guard and fits with a root on a quadrature node, start-angle signs, fits with `degree` 1 and
+  10, Rasch/FIPC, identification/spec errors, scoring, JSON round trip and malformed
+  `DavidianCurve` JSON): `tests/test_m5_davidian.py`.
+- **Differentiable IRT scale linking (V20, M5)**: `mirt` does not implement characteristic-curve
+  linking, so `validation/r/m5_linking_reference.R` (→ `tests/reference/v20_linking.json`)
+  calibrates two separate forms with common items in `mirt` (`optimizer = "NR"`,
+  `accelerate = "none"`, `TOL = 1e-10`, $N(0, 1)$, 61 equispaced nodes on $[-6, 6]$,
+  `SE.type = "Oakes"`; target $\theta\sim N(0, 1)$, source $\theta\sim N(0.5, 1.2^2)$, true
+  $A = 1.2, B = 0.5$; the V20e source form is calibrated under a fixed $N(0.3, 1.5)$, so the
+  symmetric reverse term uses a non-standard source grid) and computes reference $(A, B)$,
+  criterion values, and Ogasawara (2001)
+  delta-method SEs in base R directly from the formulas (Haebara, 1980; Stocking & Lord, 1983;
+  Kim & Lee, 2006) using `mirt::probtrace()` / `mirt::expected.item()` and `optim(BFGS)` + `nlm`
+  with central-FD Newton polish (`max |grad| <= 1.9e-11`). Haebara sums over all categories,
+  including both categories of a dichotomous item (Kim & Lee, 2006). Six cases are checked across
+  all four variants (Stocking–Lord and Haebara, non-symmetric and symmetric) in three ways:
+  (i) linking on identical mirt item estimates (separating linking error from calibration error);
+  (ii) delta-method SEs from mirt's own common-item estimates and Oakes covariance blocks
+  (separating the SE formula from calibration and covariance differences); and (iii) end-to-end
+  (fitting both forms in flexpyirt and linking). The Newton solver is also run from four far-off
+  starts ($(A, B) = (0.25, -3), (4, 3), (0.5, 2.5), (3, -2)$) on every case and variant and must
+  reach the reference optimum within 1e-9. No external R linking package (e.g. `plink`,
+  `equateIRT`) is used: the criteria and SEs are checked against an independent implementation
+  of the same published formulas, not against third-party software.
+  - **V20a (`v20a_2pl`, 2PL, $J=20$/form, 10 common, $N=2000$/group)**: direct `max |Δ(A, B)| = 9.6e-13`,
+    criterion rel `1.6e-13`, SE rel on mirt's covariance `2.2e-8`; end-to-end
+    `max |Δ(A, B)| = 1.9e-10`, criterion rel `2.6e-9`, Ogasawara SE rel `2.2e-8`.
+  - **V20b (`v20b_grm`, GRM $K=4$, $J=16$/form, 8 common, $N=2000$/group)**: direct `max |Δ(A, B)| = 9.1e-13`,
+    criterion rel `1.0e-13`, SE rel on mirt's covariance `8.3e-9`; end-to-end
+    `max |Δ(A, B)| = 9.5e-10`, criterion rel `2.2e-9`, Ogasawara SE rel `8.1e-9`.
+  - **V20c (`v20c_gpcm`, GPCM $K=4$, $J=16$/form, 8 common, $N=2000$/group)**: direct `max |Δ(A, B)| = 2.5e-12`,
+    criterion rel `9.5e-14`, SE rel on mirt's covariance `1.6e-8`; end-to-end
+    `max |Δ(A, B)| = 1.4e-9`, criterion rel `7.1e-10`, Ogasawara SE rel `1.6e-8`.
+  - **V20d (`v20d_3pl`, 3PL, $J=16$/form, 8 common, $N=4000$/group, interior $g$)**: direct
+    `max |Δ(A, B)| = 3.6e-12`, criterion rel `1.2e-13`, SE rel on mirt's covariance `9.4e-8`;
+    end-to-end `max |Δ(A, B)| = 3.0e-10`, criterion rel `5.2e-9`, Ogasawara SE rel `9.4e-8`.
+  - **V20e (`v20e_2pl_srcgrid`, V20a data, source calibrated under fixed $N(0.3, 1.5)$)**: direct
+    `max |Δ(A, B)| = 9.1e-13`, criterion rel `1.4e-13`, SE rel on mirt's covariance `3.4e-9`;
+    end-to-end `max |Δ(A, B)| = 4.2e-10`, criterion rel `7.0e-10`, Ogasawara SE rel `3.4e-9`.
+  - **V20f (`v20f_mixed`, mixed 2PL + GPCM $K=4$, $J=16$/form, 5 + 3 common, $N=2000$/group)**:
+    direct `max |Δ(A, B)| = 2.0e-11`, criterion rel `6.2e-14`, SE rel on mirt's covariance
+    `2.1e-8`; end-to-end `max |Δ(A, B)| = 1.3e-10`, criterion rel `3.6e-10`, Ogasawara SE rel
+    `2.1e-8`.
+  Validated item models for linking are therefore 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM; Rasch,
+  4PL and PCM share these kernels and are covered by exact-recovery unit tests only.
+  Tests: `tests/test_mirt_m5_linking.py`. Unit tests (all 7 unidimensional models, ICC/threshold
+  invariance, exact identity & recovery, symmetric reversibility, custom grids, EH/multiple-group,
+  joint covariance when one multiple-group fit is both source and target, no SEs without
+  convergence, Rasch/PCM slope $1/A$, `transform_theta`, finite-difference gradient & Ogasawara SE
+  checks vs finite differences and a Monte Carlo linearization check that re-solves the linking
+  for parameter draws from $N(\hat\eta, \Sigma)$ with fixed weights — not a bootstrap of the
+  calibrations): `tests/test_m5_linking.py`.
 
 ## Validation beyond agreement
+- **Nominal response model (V23, M5)**: mirt's `itemtype = "nominal"` (`optimizer = "NR"`,
+  `TOL = 1e-10`, 61 points on $[-6,6]$; 31 per dimension for V23f). V23a: `Science` recoded to
+  `0..3`. V23b: simulated $J=10, K=4, N=3000$ with swapped interior scoring coefficients (`q09`:
+  $\mathrm{ak}_1=2.2 > \mathrm{ak}_2=0.7$) and a negative one (`q10`: $\mathrm{ak}_1=-0.4$). V23c:
+  five nominal items ($K=4$) and five 2PL items, $N=2500$. V23e: simulated $J=8, K=4, N=3000$ with
+  six non-monotone items, including $\mathrm{ak}_k<0$ and $\mathrm{ak}_k>K-1$. V23f: two-factor
+  confirmatory nominal model ($J=8$, four items per factor, $K=4$, $N=3000$, correlation free).
+  **Starting values**: mirt's default nominal starting values (`ak1 = ... = 0.5`, `d = 0`) make
+  undamped NR stop at a saddle on `Science` (log-likelihood $-1631.79$ with Comfort's `a1`
+  $\approx 0$, versus $-1608.452$), so the script starts mirt's NR at the GPCM point
+  ($\mathrm{ak}_k=k$, $d_k=\log(p_k/p_0)$). It also fits five alternative mirt starts per
+  unidimensional case (default-start NR and BFGS, three `GenRandomPars` NR starts) and stores them
+  in `alt_starts`; when one of them is higher, NR is restarted from it (`meta.reference_start`).
+  This happens on V23e, where the GPCM-point NR stops at a local maximum ($-29561.14$) and the
+  default-start BFGS reaches $-26107.48$. No stored start exceeds any reference, and flexpyirt,
+  always fitting from its own default starting values, reaches every reference (including V23e).
+  **Agreement** (plain EM and SQUAREM; maxima over V23a–c, e): log-likelihood to
+  $3.6\times10^{-11}$ absolute ($1.6\times10^{-15}$ relative), parameters to $7.1\times10^{-8}$,
+  Oakes SEs to $3.8\times10^{-8}$ (relative), Hessian vs mirt Richardson SEs to
+  $5.6\times10^{-7}$, flexpyirt Oakes vs Hessian to $1.7\times10^{-13}$, EAP to $8\times10^{-15}$,
+  MAP / ML / WLE on 40–44 patterns per case to $3.7\times10^{-6}$ in $\theta$ and
+  $1.9\times10^{-4}$ (relative) in SE, and S-X2 (`itemfit(fit_stats = "S_X2")`) to
+  $5.8\times10^{-9}$ (relative) with identical degrees of freedom (Science: $8.235, 10.223, 6.246,
+  12.483$ on 6, 9, 6, 9 df). V23f: log-likelihood to $4.0\times10^{-11}$, parameters to
+  $7.0\times10^{-9}$, Oakes SEs to $2.5\times10^{-9}$, correlation to $5.4\times10^{-12}$ (SE
+  $9.3\times10^{-11}$ relative), EAP within $10^{-5}$. **Known ML difference**: mirt's
+  `fscores(method = "ML")` returns $-\infty$ / $+\infty$ for every all-category-0 /
+  all-top-category pattern regardless of the scoring coefficients, and leaves one true $+\infty$
+  V23e pattern (not all-top-category) at its `max_theta = 20` bound ($19.99989$, SE NA).
+  flexpyirt classifies extreme patterns by the category slopes $a\,\mathrm{ak}_c$; the tests
+  check that classification against an independent R scan of the pattern log-likelihood
+  (`fscores.ml_scan`: 0.01 grid on $[-20,20]$ refined with `optimize()`) and compare the interior
+  ML estimates (one in V23b and V23c, two in V23e) with it. Multidimensional nominal models are
+  validated for two factors (V23f); three factors are unit-tested only. Unit tests (probabilities,
+  gradients, reduction to GPCM / 2PL, starting values, identification, `fix_from`, JSON, S-X2,
+  scoring, priors, equality constraints, multiple groups and DIF, EH, 2D, the degenerate-item
+  `HeywoodWarning`): `tests/test_m5_nominal.py`. Tests: `tests/test_mirt_m5_nominal.py`.
+  Reference generator: `validation/r/m5_nominal_reference.R`.
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is

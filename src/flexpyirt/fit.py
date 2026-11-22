@@ -19,6 +19,7 @@ from flexpyirt.errors import (
     HeywoodWarning,
     SpecificationError,
 )
+from flexpyirt.items import ItemKernel, NominalKernel
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
 from flexpyirt.quadrature import Quadrature
@@ -32,6 +33,10 @@ HEYWOOD_BOUND_TOL = 1e-4
 """Distance to a finite bound below which a free parameter is reported as a boundary solution."""
 HEYWOOD_MAX_SLOPE = 20.0
 """Absolute slope above which a free slope is reported as diverging."""
+NOMINAL_MIN_SLOPE = 1e-3
+"""Slope norm below which a nominal item with a free slope is reported as degenerate."""
+NOMINAL_MAX_PARAM = 50.0
+"""Absolute ``ak`` or ``d`` above which a nominal item is reported as degenerate."""
 SQUAREM_FALLBACK_WARN_MIN = 5
 """Minimum full fallbacks to ``theta_2`` before warning about frequent SQUAREM fallbacks."""
 SQUAREM_FALLBACK_WARN_RATE = 0.5
@@ -207,10 +212,11 @@ def _warn_heywood(params: pd.DataFrame, spec: Model) -> None:
     or attached prior support) or a free slope with ``|a| > HEYWOOD_MAX_SLOPE`` triggers one
     ``HeywoodWarning`` naming every affected item.
     """
+    kernels = {name: spec.item_kernel(m) for name, m in spec.items}
+    _warn_nominal_degenerate(params, kernels, spec.is_multigroup)
     items = params[(params["item"] != LATENT_ITEM) & params["free"]]
     if items.empty:
         return
-    kernels = {name: spec.item_kernel(m) for name, m in spec.items}
     est = items["estimate"].to_numpy(dtype=float)
     lower = items["lower"].to_numpy(dtype=float).copy()
     upper = items["upper"].to_numpy(dtype=float).copy()
@@ -242,6 +248,47 @@ def _warn_heywood(params: pd.DataFrame, spec: Model) -> None:
         HeywoodWarning,
         stacklevel=3,
     )
+
+
+def _warn_nominal_degenerate(
+    params: pd.DataFrame, kernels: dict[str, ItemKernel], multigroup: bool
+) -> None:
+    r"""Warn about degenerate nominal items (DESIGN.md §16.6).
+
+    A ``Nominal`` item with ``n_cat >= 3`` and a free slope is degenerate when its slope norm
+    :math:`\lVert\mathbf a\rVert < 10^{-3}` (the item carries no information about
+    :math:`\theta` and :math:`\mathrm{ak}_1..\mathrm{ak}_{K-2}` are not identified: the saddle
+    that traps mirt's Newton–Raphson from its default starting values) or when some
+    :math:`|\mathrm{ak}_k|` or :math:`|d_k|` exceeds ``NOMINAL_MAX_PARAM`` (diverging
+    category parameters). One ``HeywoodWarning`` names every affected item.
+    """
+    rows = params[params["item"] != LATENT_ITEM]
+    labels: list[str] = []
+    items: set[str] = set()
+    for (group, item), sub in rows.groupby(["group", "item"], sort=False):
+        kernel = kernels[str(item)]
+        if not isinstance(kernel, NominalKernel) or kernel.n_cat < 3:
+            continue
+        if not bool(sub.loc[sub["param"].isin(kernel.slope_params), "free"].any()):
+            continue
+        value = dict(zip(sub["param"], sub["estimate"].astype(float), strict=True))
+        slope = float(np.sqrt(sum(value[p] ** 2 for p in kernel.slope_params)))
+        others = [abs(value[p]) for p in kernel.param_names if p not in kernel.slope_params]
+        largest = max(others)
+        if slope < NOMINAL_MIN_SLOPE or largest > NOMINAL_MAX_PARAM:
+            where = f" (group {group!r})" if multigroup else ""
+            labels.append(f"{item}: |a|={slope:.3g}, max|ak|,|d|={largest:.4g}{where}")
+            items.add(str(item))
+    if labels:
+        warnings.warn(
+            f"Degenerate nominal items {sorted(items)}: {'; '.join(labels)}. A slope below "
+            f"{NOMINAL_MIN_SLOPE} leaves the scoring coefficients unidentified, and scoring "
+            f"coefficients or intercepts beyond ±{NOMINAL_MAX_PARAM} indicate diverging "
+            "categories; check for sparse categories, consider other starting values, fix the "
+            "scoring coefficients (e.g. ak_k = k, the GPCM), or use a simpler item model.",
+            HeywoodWarning,
+            stacklevel=4,
+        )
 
 
 def _invert_information(info: np.ndarray) -> np.ndarray:

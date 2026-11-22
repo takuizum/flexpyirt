@@ -1,4 +1,4 @@
-"""V16: multiple-group confirmatory 2D MIRT vs R mirt ``multipleGroup()`` (DESIGN.md §15.43).
+"""V21: multiple-group confirmatory 2D MIRT vs R mirt ``multipleGroup()`` (DESIGN.md §15.43).
 
 Reference values come from ``validation/r/m4_mirt_multigroup_reference.R``: two groups, anchors on
 both factors, focal means and variances free (``invariance = c(anchors, "free_means",
@@ -7,7 +7,7 @@ both factors, focal means and variances free (``invariance = c(anchors, "free_me
 mirt 1.48 stops short of the maximum along one factor's ridge (that factor's focal mean/variance
 traded against its anchor slopes): at mirt's estimates the score of the shared log-likelihood is
 ~0.03 for that factor's focal variance and mean, while flexpyirt's solution is stationary and has
-a higher log-likelihood (VALIDATION.md V16). Those ridge parameters are therefore checked by
+a higher log-likelihood (VALIDATION.md V21). Those ridge parameters are therefore checked by
 likelihood and stationarity; every other parameter agrees with mirt to 1e-4.
 """
 
@@ -29,7 +29,7 @@ from flexpyirt._compile import compile_problem, prepare
 from flexpyirt.errors import IdentificationError
 from tests._reference import check_reference_meta
 
-REFERENCE = Path(__file__).parent / "reference" / "v16_mirt_multigroup.json"
+REFERENCE = Path(__file__).parent / "reference" / "v21_mirt_multigroup.json"
 CASES = ["mg2d_simple", "mg2d_cross"]
 RIDGE_FACTOR = {"mg2d_simple": 1, "mg2d_cross": 2}
 """Factor whose focal mean/variance mirt does not fully optimize (see module docstring)."""

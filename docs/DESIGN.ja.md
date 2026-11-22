@@ -85,7 +85,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   同じ項目モデル（"item family"）の項目は配列にまとめて `vmap`。ステップは backtracking line search
   で $Q_j$ の増加を保証（一般化 EM として単調性を保つ）。M-step は完全収束させず、Newton 数ステップで打ち切ってよい。
 - 固定パラメタは $\eta$ に含めない（定数として ParameterTable から渡す）。
-- **項目をまたぐ等値制約**（例: 全項目共通の $a$）は分解を壊す。v1 では非対応とし、M5 で「制約で連結された項目成分ごとに同時 Newton」を実装する。
+- **項目をまたぐ等値制約**（例: 全項目共通の $a$）は分解を壊す。**決定（M5、§16.1）**: `free_id` の共有で連結された項目の成分ごとに、その自由パラメタ全体について同時にマスク付き Newton を解く。成分に属さない項目は従来どおり項目ごとの `vmap`。
 
 ### 4.4 M-step（潜在分布）
 - **Normal**（群 $g$ の平均・分散が自由な場合）:
@@ -119,7 +119,17 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   対数尤度が減少し SQUAREM が停滞したため、リリース前に置き換えた。）
   多母集団モデルで EH を指定するときは
   **全群が EH を使う**（`EmpiricalHistogram` と `Normal` の混在は `SpecificationError`）。
-- 将来: Davidian 曲線（Woods & Lin, 2009）、混合正規。いずれも `LatentDist` プロトコル（§6）に従えば Core に手を入れずに追加できる。
+- **Davidian 曲線**（`DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)`；
+  Zhang & Davidian, 2001；Woods & Lin, 2009；§16.4）:
+  単一群・1 次元の半ノンパラメトリック密度 $h_k(z;\boldsymbol\phi)=P_k(z;\boldsymbol\phi)^2\varphi(z)$ を、
+  正規化確率論的 Hermite 多項式 $He_j(z)/\sqrt{j!}$ と単位球面上の係数 $\mathbf c(\boldsymbol\phi)\in S^k$
+  （$k\in\{1,\dots,10\}$ 個の角度 $\boldsymbol\phi=(\phi_1,\dots,\phi_k)$ で表現し、$\boldsymbol\phi=\mathbf 0$ が非特異に
+  $N(0,1)$ を与える）で展開する。$h_k$ の閉形式の連続モーメント $(\mu_Z(\boldsymbol\phi),\sigma_Z^2(\boldsymbol\phi))$ で
+  解析的に標準化し、$\theta=\mu+\sigma(Z-\mu_Z)/\sigma_Z$ が任意の $\boldsymbol\phi$ で厳密に連続平均 $\mu$・分散 $\sigma^2$
+  を持つようにする。求積重みは格子上で正規化した密度とし、潜在分布の M-step は
+  $Q^{\text{lat}}=\sum_q \bar n_q\log w_q(\mu,\sigma^2,\boldsymbol\phi)$ を既存のマスク付き Newton（`_newton.py`）で最大化する。
+  これにより EM の単調性（非減少）・SQUAREM の適用・Oakes の恒等式の厳密性を保つ。
+- 将来: 混合正規。`LatentDist` プロトコル（§6）に従えば Core に手を入れずに追加できる。
 
 ### 4.5 識別性ルール（Compile 層で検査）
 - 既定: 参照群は $N(0,1)$ 固定、焦点群の平均・分散は自由。焦点群を自由にするには、群間で全パラメタが等しいアンカー項目が必要
@@ -260,7 +270,7 @@ class ItemKernel(Protocol):
 | 3PL / 4PL | $a, d, g, u$（自然尺度、$0<g<u\le 1$、§15.2） | M3 |
 | GRM | $a, d_1>\dots>d_{K-1}$ | M2 |
 | GPCM / PCM | $a, d_1..d_{K-1}$ | M3 |
-| Nominal | M5 以降（未定） | — |
+| Nominal | $a, \mathrm{ak}_1..\mathrm{ak}_{K-2}, d_1..d_{K-1}$（$\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$、§16.6） | M5 |
 
 表示用の IRT パラメタ化（2PL / Rasch / 3PL / 4PL は $b=-d/a$、GRM は $b_k=-d_k/a$、GPCM / PCM は
 ステップ困難度 $b_k=-(d_k-d_{k-1})/a$、$d_0=0$）は Result 層（`FitResult.items`）で計算し、SE
@@ -315,7 +325,7 @@ class ItemKernel(Protocol):
 2. 多母集団で群の数が多いとき（例: 学校 × 学年）の扱い。群ごとの潜在分布を vmap できる形にしておく。
 3. ~~欠測の設計~~ → MAR 前提の除外のみ（§14.8、2026-11-20）。
 4. ~~パッケージ名~~ → `flexpyirt` に決定（2026-11-20）。
-5. 項目をまたぐ等値制約の M-step（§4.3）の実装方式。
+5. ~~項目をまたぐ等値制約の M-step（§4.3）の実装方式~~ → 項目の連結成分ごとの同時 Newton（§16.1、2026-11-21）。
 
 ## 13. 実装上の決定（M1）
 1. **M-step の Newton**: 勾配・Hessian はすべて JAX の自動微分（`jax.grad` / `jax.hessian`）で得て、手書きの解析微分は持たない。
@@ -666,10 +676,254 @@ class ItemKernel(Protocol):
     $[-12,12]$ の 401 点: 推定値は $2\times10^{-10}$ 以内。2 次元 2PL、$31^2$ と $121^2$: $5\times10^{-7}$ 以内）。
     mirt は EM で Gauss–Hermite を使わない。
 
+## 16. 実装上の決定（M5）
+1. **項目をまたぐ等値制約（`Model.equal_across_items`、`free_id` の共有）**:
+   `Model.equal_across_items(*, items, params)` は、選んだ項目（2 つ以上）の `params` の各パラメタを各群の中で等値にする。
+   自由な行に同じ `free_id` を与えて表す（mirt の `CONSTRAIN = (items, param)` に相当。多母集団では `multipleGroup` の
+   `CONSTRAIN` と同じく群ごとに適用）。`equal_across_groups` と組み合わせられ、モデルのすべての等値制約は行の
+   union–find でまとめるので、重なる制約は 1 つの id を共有する。固定された行は影響を受けない。`free_id` を共有する行は
+   （モデルからでも編集した表からでも）異なる項目・異なる項目モデルにまたがってよい（例: 2PL と GRM の共通傾き）。
+   ただし 1 つの項目の中では `free_id` は 1 つのパラメタにだけ対応し、行どうしの範囲と事前分布は一致しなければならない
+   （従来どおり）。共有パラメタの既定の初期値は、各行の既定初期値の平均。
+   **M-step**: 期待完全データ対数事後は $Q(\eta)=\sum_j Q_j(\xi_j(\eta))+\log\pi(\eta)$ なので、項目ごとの分解（§4.3）は
+   項目どうしではなく、「`free_id` の共有を辺とする項目グラフの連結成分」どうしの間で成り立つ。Compile 層は項目の
+   union–find で成分を求め、2 項目以上の成分を `CoupledBlock` にする（メンバーの family ごとに静的な family 番号・動的な
+   項目位置・成分の自由パラメタベクトル $u_c$ への `(G, n, P_f)` の局所インデックス、および $u_c$ の `free_id` と範囲）。
+   その M-step は $\sum_{j\in c}\sum_g Q_{jg}(\xi_j^{(g)}(u_c))+\sum_s\log\pi(u_{cs})$ を $u_c$ について同じマスク付き・範囲つき・
+   単調な Newton（§13.1、§15.2。勾配と Hessian は自動微分、メンバー family ごとに項目を `vmap`）で最大化する。共有
+   パラメタの事前分布は 1 回だけ数えられ、EM の単調性も保たれる。成分の項目は項目ごとの `vmap` ではマスクして
+   （スロットを動かさず）、成分のステップをその後に実行する。成分のパラメタは前の反復値から読む（ほかのブロックと
+   重ならない）。成分は静的な Python ループなので、小さな成分が多いモデルは成分ごとに Newton ブロックをトレースする。
+   2PL の $J$ 項目共通傾きは $1+J$ パラメタの 1 ブロックで、密な Hessian でも想定する規模では軽い。
+   **標準誤差と SQUAREM**: Oakes の第 1 項は各項目の Hessian ブロックを `free_id` で足し込み、交差項もスコアを
+   `free_id` で集計するので、項目をまたぐ共有パラメタは変更なしで厳密に合算される（周辺対数事後を直接微分する
+   `information_hessian` と SQUAREM の範囲も同様）。デルタ法 SE、`n_params`（`free_id` ごとに 1 回）、JSON
+   （モデルの `equal_items` フィールド、スキーマバージョン 3）は表から従う。
+   **識別**: §4.5・§14.5 の必要条件は変えない（例: 共通の自由傾きと自由な潜在分散は、固定された傾きがないので引き続き拒否）。
+2. **多母集団の尤度比検定による DIF（`FitResult.dif`）**:
+   `FitResult.dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None)` は、推定済みの多母集団モデルの
+   群間で `items` の各項目の特異項目機能（DIF）を検定する（Thissen, Steinberg & Wainer, 1993。mirt の `DIF()` に相当）。
+   `scheme="add"` では推定済みモデルを基準とし、各項目の `params`（既定: その項目の全パラメタ）を群間で等値にする。
+   `scheme="drop"` では逆に群ごとに自由にする（群ごとに別の `free_id`）。変更したモデルを同じ `BAEM` 設定・求積で
+   基準の推定値から推定し直し、$X^2=2(\ell_{\text{free}}-\ell_{\text{constrained}})$、$df=|k_{\text{base}}-k_{\text{new}}|$
+   から $p=P(\chi^2_{df}>X^2)$ を求める。結果は項目ごとに 1 行で、`item`、`converged`、AIC・SABIC
+   （$-2\ell+k\log((N+2)/24)$）・HQ（$-2\ell+2k\log\log N$）・BIC の差（項目を自由にしたモデル − 制約したモデル。mirt と同じ符号で、負なら DIF を支持）、`x2`、`df`、
+   `p`、`adj_p`（検定した項目にわたる補正。既定は mirt の `p.adjust = "holm"` と同じ Holm (1979)、`p_adjust="BH"` で Benjamini & Hochberg (1995)、`"none"` で補正なし）。変更は
+   パラメタ表で行うので識別性は通常の推定と同じく検査され（唯一のアンカーを自由にすると `IdentificationError`）、
+   すでに等値（`"add"`）またはすでに自由（`"drop"`）な項目は `SpecificationError`。MAP 推定は拒否する（統計量は
+   最尤推定値での周辺尤度を必要とするため）。DIF は Result 層の推定後の処理で、`jit` で動くのは再推定だけ。
+3. **限定情報の適合度（`FitResult.m2`、$M_2$ / $M_2^*$）**:
+   `FitResult.m2(data, *, item_names=None, ci=0.90)` は、Maydeu-Olivares & Joe (2005, 2006) に基づく
+   項目得点の 1 次・2 次モーメント — $J$ 個の項目平均 $E[y_j]$ と $\binom{J}{2}$ 個の交差積 $E[y_iy_j]$
+   （$i < j$、列優先のペア順で mirt の既定 `M2(type = "M2*")` と同じ。2 値項目では厳密に $M_2$）— による
+   限定情報の適合度統計量を計算する。対象は単一母集団・1 次元・欠測なし・`Normal` 潜在分布の MLE 推定のみ
+   （多次元・多母集団・`EmpiricalHistogram`・欠測データ・MAP 推定は `SpecificationError`）。
+   標本周辺モーメント $\hat p_2$、推定時の求積格子と正規化した正規重みの上で積分したモデル周辺モーメント
+   $\pi_2(\hat\eta)$、局所独立のもとでの $\sqrt{N}(\hat p_2-\pi_2)$ の漸近共分散 $\Xi_2$
+   （条件付き 1 次・2 次モーメント $m_{1,jq}=\sum_k kP_{jk}(\theta_q)$、$m_{2,jq}=\sum_k k^2P_{jk}(\theta_q)$ から構成）、
+   および自由パラメタベクトル $\eta$ に関する JAX 前進モード自動微分のヤコビ行列
+   $\Delta_2=\partial\pi_2/\partial\eta^\top$（共有パラメタは 1 回だけ現れ、等値制約の列和と一致）を用いて、
+   $$M_2 = N\,(\hat p_2-\pi_2)^\top C_2\,(\hat p_2-\pi_2),\qquad
+     C_2 = \Delta_c(\Delta_c^\top\Xi_2\Delta_c)^{-1}\Delta_c^\top,\qquad
+     df = s - q,$$
+   とする。ここで $s = J + \binom{J}{2}$、$q = \text{n\_params}$（自由な潜在分布パラメタを含む全自由パラメタ数）、
+   $\Delta_c$ は $\Delta_2$ の SVD から得る $\operatorname{col}(\Delta_2)$ の直交補空間の正規直交基底である。
+   漸近 $\chi^2_{s-q}$ 分布が成り立つには $df = s - q > 0$ かつ列フルランク $\operatorname{rank}(\Delta_2) = q$
+   （1 次・2 次モーメントからの局所識別可能性。Maydeu-Olivares & Joe, 2005, Theorem 1; 2006, Theorem 2）が
+   必要である。$df \le 0$ または $\operatorname{rank}(\Delta_2) < \operatorname{ncol}(\Delta_2)$（例: 多値項目の自由
+   パラメタ数が項目数を超える $P_j > J$ や傾きが 0 に固定された場合、$df > 0$ であっても起こりうる）のときは、
+   1 次・2 次モーメントからは局所識別できない（または残差自由度がない）旨の `FlexpyirtWarning` を出し、
+   `m2`・`p`・RMSEA・信頼区間・`tli`・`cfi` をすべて `NaN` とする（`df` と `srmsr` は有限のまま）。
+   $(s - r)$ 次元の 2 次形式を $df = s - q$ と組み合わせることは決してしない。
+   **$\Delta_2$ における自由な潜在分布パラメタ**: mirt 1.46.1 は自由な潜在平均・分散の列を $\Delta_2$ から除きつつ
+   $df$ からは引いている。flexpyirt は Maydeu-Olivares & Joe (2005, 2006) に従い、既定ではすべての自由パラメタ
+   （項目・潜在分布とも）を $\Delta_2$ に含める。内部関数 `_m2.m2_statistic` に非公開の `_latent_in_delta: bool = True`
+   引数を持ち、検証テストで理論定義と `False` 指定時の mirt 一致の両方を確認できるようにしている（自由な潜在パラメタが
+   ないモデルでは両者は一致する）。
+   **補助適合度指標**:
+   - $p = P(\chi^2_{df} > M_2)$（生存関数）。
+   - $\mathrm{RMSEA} = \sqrt{\max(0, M_2/df - 1)/(N - 1)}$（$df \le 0$ または $N \le 1$ で `NaN`）。$(100\,\mathrm{ci})\%$ 信頼区間は
+     非心 $\chi^2$ 分布の CDF を逆算して $\sqrt{\lambda/(N\,df)}$ で求める（MacCallum, Browne & Sugawara, 1996。
+     mirt の `RMSEA.CI` と同じく、$P(\chi^2_{df}\le M_2)$ がすでに目標確率以下のときは 0 とし、上側端点の探索区間は
+     $\max(N, 5M_2)$ で根が挟まれない場合に倍増して拡張し、上端が誤って 0 に潰れないようにする）。列名は `ci` に従う
+     （例: `ci=0.90` で `rmsea_5`, `rmsea_95`）。
+   - $\mathrm{SRMSR} = \sqrt{\binom{J}{2}^{-1}\sum_{i<j}(r_{ij} - \hat\rho_{ij})^2}$（観測とモデルから導く項目得点相関行列の差。
+     モデル分散の対角要素は $E[y_j^2] - E[y_j]^2$）。
+   - **帰無モデル・TLI・CFI**: 全項目が 2 値（全項目で $K_j = 2$）のとき、すべての傾きを 0 に固定した独立（帰無）モデルは
+     各項目 1 個の自由切片を持ち、MLE は観測比率を再現する。このとき直交補空間上の 2 次形式は解析的に
+     $M_{2,\text{null}} = N\sum_{i<j} r_{ij}^2$、$df_{\text{null}} = \binom{J}{2}$ へ簡約される（閉形式・厳密、mirt の
+     `M2(null.mod)` と一致）。$M_{2,\text{null}} > M_2$ かつ $df > 0$ のとき、
+     $\mathrm{TLI} = (M_{2,\text{null}}/df_{\text{null}} - M_2/df)/(M_{2,\text{null}}/df_{\text{null}} - 1)$（上限クリップなし）、
+     $\mathrm{CFI} = \operatorname{clip}(1 - (M_2 - df)/(M_{2,\text{null}} - df_{\text{null}}), 0, 1)$ とし、
+     $M_{2,\text{null}} \le M_2$ では `FlexpyirtWarning` を出して両者を `NaN` とする。
+     多値項目（$K_j > 2$）を含むモデルでは `tli` と `cfi` を `NaN` とする。$M_2^*$ の項目得点モーメントでは、
+     帰無モデルの $\Delta_{\text{null}}$ において各項目の $K_j - 1$ 本の切片列が厳密に線形従属となるため
+     （$\operatorname{rank}(\Delta_{\text{null}}) = J < \sum_j(K_j - 1)$）、$df_{\text{null}} = s - \sum_j(K_j - 1)$ による
+     帰無 $M_2^*$ は定義不能である（mirt 1.46.1 はランクを確認せず `qr.Q(qr(delta), complete = TRUE)` の `ncol(delta)`
+     列目以降を取り出しており、項目順や丸め誤差に依存して任意の方向を捨てている）。
+   モーメント積分と $\Delta_2$ は JAX、$\Xi_2$・SVD 直交補空間・各適合度指標は `jit` の外の NumPy/SciPy で計算する。
+4. **Davidian 曲線潜在分布（`DavidianCurve`、§4.4、V19）**:
+   `DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)`（および
+   `DavidianCurve.free(degree, *, mean=0.0, var=1.0)`）は、次数 $k\in\{1,\dots,10\}$ の単一群 1 次元 Davidian 曲線密度を
+   指定する（Zhang & Davidian, 2001；Woods & Lin, 2009）。多母集団（`Model.with_groups`）および多次元
+   （`Model.with_factors`）での `DavidianCurve` は `SpecificationError` を投げる（mirt 1.46.1 は Davidian 曲線の自由平均・
+   分散パラメタと標準誤差を禁止しているため）。
+   **密度と解析的標準化**:
+   $\psi_j(z)=He_j(z)/\sqrt{j!}$（$j=0,\dots,k$）を正規化確率論的 Hermite 多項式（$\varphi(z)=(2\pi)^{-1/2}e^{-z^2/2}$ に対して
+   正規直交）とし、$P_k(z;\boldsymbol\phi)=\sum_{j=0}^k c_j(\boldsymbol\phi)\psi_j(z)$ により
+   $h_k(z;\boldsymbol\phi)=P_k(z;\boldsymbol\phi)^2\varphi(z)$ とする。単位ベクトル $\mathbf c(\boldsymbol\phi)\in S^k$ には
+   余弦優先の球面座標 $c_0=\prod_{m=1}^k\cos\phi_m$、$c_j=\sin\phi_j\prod_{m=j+1}^k\cos\phi_m$（$j=1,\dots,k$）を採用する。
+   `dcurver` の正弦優先座標（$c_0=\sin\phi_1$）は $N(0,1)$ を $\partial\mathbf c/\partial\phi_{2:k}=\mathbf 0$ となる極特異点
+   $\phi_1=\pi/2$ に置く。本座標系は $N(0,1)$ をヤコビアンが単位行列 $\partial c_j/\partial\phi_m|_{\mathbf 0}=\delta_{jm}$
+   となる $\boldsymbol\phi=\mathbf 0$ に置き、かつ $\phi_k=0$ で次数 $k-1$ を厳密に内包する。両座標系はともに $S^k$ 全体を覆うため
+   同一の密度族を張る（$P_k^2$ を変えない $\mathbf c\mapsto-\mathbf c$ を除いて識別される）。ただし座標系だけでは $N(0,1)$ は
+   停留点でなくならない: 1 次の摂動 $\psi_1(z)\varphi(z)$ と $\psi_2(z)\varphi(z)$ は純粋な位置・尺度の変化であり、解析的標準化で
+   除去される（mirt の未標準化パラメタ化では自由な項目パラメタが吸収する）ため、$\boldsymbol\phi=\mathbf 0$ における
+   $\phi_1,\phi_2$ のスコアはどのデータでも恒等的に 0 になる（$k=1$ では $\phi=0$ が常に停留点）。mirt 1.46.1 が V19b
+   （$k=2$）で $N(0,1)$ に停滞するのはこの理由と $\phi_2$ の極特異点の組み合わせによる。flexpyirt は後述の摂動つき既定初期値で
+   これを脱する。
+   **$\boldsymbol\phi=\mathbf 0$ での情報行列の特異性**: このため Fisher 情報行列は $\boldsymbol\phi=\mathbf 0$ で
+   $(\phi_1,\phi_2)$ 方向に特異になる（$k=1$ では $\phi_1$ 方向）。真の潜在密度が正規に近いと $\hat{\boldsymbol\phi}$ は
+   不安定に定まり、尤度が複数の局所最大を持ちうるうえ、角度の SE（とそれに基づく Wald 検定）は信頼できず、`Normal` に対する
+   `DavidianCurve` の尤度比検定は通常の $\chi^2$ 参照分布に従わない（帰無仮説がモデルの 1 次の識別が失われる点にある）。
+   次数の比較は `Normal` との尤度比検定ではなく AIC/BIC で行う（Woods & Lin, 2009 と同様）。
+   Hermite の 3 項漸化式より $Z\sim h_k(\cdot;\boldsymbol\phi)$ の連続モーメントは閉形式で
+   $$\mu_Z(\boldsymbol\phi)=2\sum_{j=0}^{k-1}\sqrt{j+1}\,c_jc_{j+1},\qquad
+     \sigma_Z^2(\boldsymbol\phi)=\sum_{j=0}^k(2j+1)c_j^2+2\sum_{j=0}^{k-2}\sqrt{(j+1)(j+2)}\,c_jc_{j+2}-\mu_Z(\boldsymbol\phi)^2>0$$
+   と与えられる。$\theta=\mu+\sigma(Z-\mu_Z)/\sigma_Z$ により解析的に標準化すると、密度
+   $f_k(\theta;\mu,\sigma^2,\boldsymbol\phi)=(\sigma_Z/\sigma)h_k(z(\theta);\boldsymbol\phi)$
+   （$z(\theta)=\mu_Z(\boldsymbol\phi)+\sigma_Z(\boldsymbol\phi)(\theta-\mu)/\sigma$）は任意の $\boldsymbol\phi\in\mathbb R^k$ で
+   厳密な連続平均 $\mu$・分散 $\sigma^2$ を持つ（また $\mu=\mu_Z$、$\sigma^2=\sigma_Z^2$ と置けば `dcurver::ddc` に厳密一致する）。
+   **格子重み・M-step・mirt との比較**:
+   求積対数重みは $\log w_q=\operatorname{log\_softmax}_q(\log(P_k(z_q)^2)-\tfrac12 z_q^2)$ で格子上に正規化する
+   （多項式の厳密な零点 $P_k(z_q)=0$ は二重 `where` でガードする）。角度 $\phi_1,\dots,\phi_k$ は最適化中 `(-inf, inf)` の
+   無制約とし、係数 $c_j$ の符号反転を Newton や SQUAREM が妨げられないようにする。`ParameterTable` は
+   `item="__latent__"`、`model="Davidian"` の下に `mean`・`var`・`phi_1..phi_k` を持ち、識別性検査は §4.5
+   （`Normal` と同じ平均・分散ルール、潜在パラメタへの事前分布は `SpecificationError`）に従う。解析的標準化により
+   $\boldsymbol\phi=\mathbf 0$ で $\phi_1,\phi_2$ の 1 次微分が相殺するため、既定初期値には合計得点の経験的歪度の符号 `sign` に
+   合わせた微小摂動（$k=1$ で `phi_1 = 0.1 * sign`、$k\ge 2$ で `phi_1 = -0.1 * sign, phi_2 = 0.1, phi_{3..k} = 0`）を与える。
+   これらの初期値では、標準化した初期密度の 3 次標準化モーメントが `sign` と同符号になる: 主要項は $k=1$ で
+   $\approx 4\phi_1^3$（$\phi_1=0.1$ で `+0.0039`）、$k\ge 2$ で $\approx -8.3\,\phi_1\phi_2$（$(\phi_1,\phi_2)=(-0.1,0.1)$ で
+   `+0.083`）であり、$\phi_2=0.1$ は初期値を $\boldsymbol\phi=\mathbf 0$ の停留点から外す（`tests/test_m5_davidian.py` で検査）。
+   潜在分布の M-step は $Q^{\text{lat}}=\sum_q \bar n_q\log w_q$ を既存のマスク付き Newton（`_newton.py`）で最大化し、
+   EM の単調性（非減少）・特別処理なしの SQUAREM・相対 $\sim 10^{-12}$ での Oakes == Hessian SE を保つ（対照的に mirt 1.46.1 は
+   期待度数に Woods の線形補間 `standardizeQuadrature` をかけてから未正規化の `ddc` を `nlminb` で最適化するため、EM 単調性が
+   崩れ、`SE = TRUE` と自由平均・分散が禁止される。V19a では mirt 自身の離散化尤度に対しても停留点でない点（`PHI_3` の
+   スコア $\approx 56.7$）で停止し、V19b では $N(0,1)$ の停留点に停滞する。いずれも対数尤度は真に低い。VALIDATION.ja.md V19 参照）。
+   **スコアリング・出力・JSON**:
+   `FitResult.latent` は `mean`・`var`・`phi_1..phi_k` とその SE を返し、`latent_weights` はパラメトリック分布のため `None`。
+   `score()` は `"EAP"`（求積格子上）と `"PV"`（501 点細密格子上）で推定した Davidian 密度を用い、`"ML"` と `"WLE"` は尤度のみ、
+   `"MAP"` は $P_k(z)^2\varphi(z)$ が多峰になったり実根で密度 0 になったりするため `SpecificationError`（mirt の
+   `use_dentype_estimate` の制限と同じ）。`item_fit()` は検証されるまで `DavidianCurve` を拒否する。`_json.py` に
+   `"DavidianCurve"` を登録し、JSON ペイロードの形は変わらないため `schema_version` は 3 のままとする。
+5. **微分可能な IRT 尺度リンキング（`link`、`LinkResult`、V20）**:
+   別々に推定した 2 つの 1 次元尺度を共通項目を介して結ぶ特性曲線法（§1）。`source`（新フォーム）の尺度を
+   `target`（基準フォーム）の尺度へ写す線形変換 $\theta^* = A\theta + B$（$A > 0$）の係数 $(A, B)$ を求める
+   （Kolen & Brennan, 2014）。$\theta = (\theta^* - B)/A$ より、傾き–切片パラメタ化での項目パラメタは
+   $a^* = a / A$ および以下で変換される。
+   - `DichotomousKernel`（2PL/Rasch）・`FourPLKernel`（3PL/4PL）: $d^* = d - aB/A$（漸近線 $g, u$ は不変）。
+   - `GradedKernel`（GRM）: $d_k^* = d_k - aB/A$（$k = 1, \dots, K-1$。順序 $d_1 > \dots > d_{K-1}$ を保存）。
+   - `GPCMKernel`（GPCM/PCM）: $d_k^* = d_k - k\,aB/A$（$k = 1, \dots, K-1$、$d_0 = 0$）。
+     $k a^* \theta^* + d_k^* = k a\theta + d_k$ とステップ困難度 $b_k^* = A b_k + B$ を保存する。
+   任意の 1 次元 `ItemKernel` で $P_j(y=k \mid \theta^*; \xi_j^*) = P_j(y=k \mid (\theta^* - B)/A; \xi_j)$ が成り立つため、
+   目的関数は `kernel.log_prob` から直接計算し、手書きの導関数を持たない。
+   - **Haebara 法**（Haebara, 1980; 多値拡張 Kim & Lee, 2006）:
+     $H_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} \sum_{j\in\mathcal{C}} \sum_{k=0}^{K_j-1} [P_{jk}^{\mathrm{tgt}}(\theta_q^{(t)}) - P_{jk}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$。
+     和は 2 値項目の両カテゴリを含む全カテゴリにわたる（Kim & Lee, 2006 の流儀）。そのため 2 値項目の寄与は
+     $2[P^{\mathrm{tgt}} - P^{\mathrm{src}}]^2$ で Haebara (1980) の原式の 2 倍になる。共通項目がすべて 2 値なら解は変わらず
+     報告される目的関数値が 2 倍になり、混在形式のアンカーでは 2 値項目は多値項目に対して Kim & Lee の重みを持つ。
+   - **Stocking–Lord 法**（Stocking & Lord, 1983; 多値拡張 Kim & Lee, 2006）:
+     $\mathrm{SL}_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} [\mathrm{TCC}^{\mathrm{tgt}}(\theta_q^{(t)}) - \mathrm{TCC}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$。
+     ただし $\mathrm{TCC}(\theta) = \sum_{j\in\mathcal{C}}\sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)$。
+   - **対称版**（`symmetric=True`; Kim & Lee, 2006）: 逆方向（$P_{jk}^{\mathrm{src}}(\theta_q^{(s)})$ と
+     $P_{jk}^{\mathrm{tgt}}(A\theta_q^{(s)} + B)$、$\mathrm{TCC}$ も同様）の二乗差を加える。既定では $(\theta^{(t)}, w^{(t)})$ は
+     `target` 群の推定済み潜在分布の求積格子・重み、$(\theta^{(s)}, w^{(s)})$ は `source` 群のものを使うため、対称版は
+     `source` と `target` を入れ替えると厳密に $(1/A, -B/A)$ になる。`nodes` / `weights` を明示すると格子を上書きする
+     （重みは和が 1 になるよう正規化し、`nodes` のみ指定時は一様重み）。
+   **最適化**: Mean/Mean 初期値（$A_0 = \sum |a_j^{\mathrm{src}}| / \sum |a_j^{\mathrm{tgt}}|$、
+   $B_0 = \bar b^{\mathrm{tgt}} - A_0 \bar b^{\mathrm{src}}$）から出発し、`LinkingProblem` pytree 上の jit 済み・
+   形状静的な 2 次元範囲付き単調 Newton 最小化器（`_linking.solve_linking`、`lax.while_loop`）で `jax.grad` と
+   `jax.hessian` を用いて解く。$A > 0$ は境界の中点への射影で保ち、Hessian が正定値でないときは
+   Levenberg–Marquardt 減衰にフォールバックし、ステップのユークリッドノルムを `_MAX_STEP = 1` で打ち切り
+   （悪い初期値から曲線が重ならない平坦な領域へ飛ばないため）、40 段階の並列バックトラッキングと最適点近傍での
+   1-ULP 勾配仕上げを行う。収束判定は $\|\nabla F\|_\infty \le$ `tol`（絶対値、既定 $10^{-10}$。重みの和が 1 で
+   $F$ は共通項目数とともに大きくなるが、スケール調整はしない）。`tol` に達する前に $F$ を減らすステップがなくなると
+   `converged = False` で終了し `ConvergenceWarning` を出す。Mean/Mean は初期値にすぎず、傾きの絶対値を合計し、
+   全共通項目の表示用閾値をすべてまとめて平均するため、多値項目は項目単位の平均より重みが大きい。
+   **標準誤差（Ogasawara, 2001）**: 最適点 $\hat c = (\hat A, \hat B)$ の停留条件
+   $g(c, \eta_s, \eta_t) = \nabla_c F(c, \eta_s, \eta_t) = 0$ に陰関数定理を適用し、共通項目に現れる一意な自由パラメタ
+   （固定パラメタや共有 `free_id` をそのまま反映）に対して `jax.jacfwd(g, 0)` と `jax.jacrev(g, 1/2)` から
+   $J_s = -H_{cc}^{-1} H_{c,\eta_s}$、$J_t = -H_{cc}^{-1} H_{c,\eta_t}$ を得て、
+   $\mathrm{Cov}(\hat A, \hat B) = J_s \Sigma_s J_s^\top + J_t \Sigma_t J_t^\top + J_s \Sigma_{st} J_t^\top + J_t \Sigma_{st}^\top J_s^\top$
+   を計算する。別々の `FitResult` は独立な推定とみなす（$\Sigma_{st} = 0$）。同じ `FitResult` を `source` と `target` の
+   両方に渡したとき（1 つの多母集団推定の 2 群）は、その同時 `vcov` の交差ブロックを $\Sigma_{st}$ とするため、両群で
+   共有される等値制約アンカーでは $(A, B) = (1, 0)$、共分散 0 になる。重なるデータで推定した別々の `FitResult` は
+   検出しない。**求積重みは固定とする。** 既定の重みは推定済み潜在分布（群の平均・分散が自由なときや EH では推定値）
+   だが、正しく指定されたモデルの下では 1 次まで厳密である: $\partial g/\partial w_q$ は曲線残差と曲線の導関数の積の
+   重み付き和で、母集団の解では残差が 0 なので $H_{c,w} = 0$ になる。項目パラメタのドリフトや DIF（母集団の残差が
+   0 でない）の下では重みの標本変動を無視する。SE は収束した解でのみ計算する。収束しない場合、自由な共通項目パラメタが
+   ある側の `vcov` がない場合、$H_{cc}$ が正定値でない場合は `vcov = None`、SE は `NaN` とする。
+   **変換後の項目と得点**: `LinkResult.items` は `source` の全項目を基準尺度で表す。傾き固定のモデル（Rasch・PCM）は
+   $a^* = 1/A$（1 ではない）となり、`Model.fix_from` はその傾きで固定する。`transform_theta` は `theta` と全 `pv*` 列を
+   $A\theta + B$、`se` を $A\,\mathrm{se}$ で写し、$(A, B)$ を既知として扱う（リンキング誤差は加えない）。
+   **Python シェル層での検証**: 多次元結果、群指定のない多母集団結果、共通項目でカーネルまたはカテゴリ数が一致しない場合、
+   および不正な `nodes` / `weights` は `SpecificationError` を送出する。
+6. **名義反応モデル（`Nominal(n_cat)`、`NominalKernel(n_cat, n_factors=1)`、V23）**:
+   Thissen, Cai & Bock (2010) の全体傾き × 採点関数パラメタ化による Bock (1972) の名義反応モデルで、R mirt の
+   `itemtype = "nominal"`（Chalmers, 2012）に対応する:
+   $$P(y=k\mid\boldsymbol\theta)=\frac{\exp\big(\mathrm{ak}_k\,\mathbf a^\top\boldsymbol\theta+d_k\big)}{\sum_{c=0}^{K-1}\exp\big(\mathrm{ak}_c\,\mathbf a^\top\boldsymbol\theta+d_c\big)},\qquad k=0,\dots,K-1,\quad \mathrm{ak}_0=0,\ \mathrm{ak}_{K-1}=K-1,\ d_0=0.$$
+   カテゴリは `0..K-1`（`n_cat >= 2` を検証）で、$D\in\{1,2,3\}$ に対応する（`_linear_predictor(theta, params[:D], D)`
+   に採点ベクトル $\mathrm{ak}$ を掛け、`jax.nn.log_softmax` で数値安定に評価する）。
+   - **内部パラメタと範囲**: mirt の `coef(m)` / `pars = "values"` は `a1`（`a1..aD`）、`ak0..ak{K-1}`、
+     `d0..d{K-1}` を返し、`ak0 = 0`・`ak{K-1} = K - 1`・`d0 = 0` を固定（`est = FALSE`）、範囲はすべて
+     `(-Inf, Inf)` とする。`GPCMKernel`（§15.8）と同様、これら 3 つの固定識別定数は `ParameterTable` の行ではなく
+     カーネル内部の定数として持つ（`_check_identification` が固定傾きや固定切片と誤認しないようにするため）。したがって
+     `param_names` は $D=1$ で `("a", "ak1", ..., "ak{K-2}", "d1", ..., "d{K-1}")`、$D\in\{2,3\}$ で
+     `("a1", ..., "aD", "ak1", ..., "ak{K-2}", "d1", ..., "d{K-1}")` となり、既定ですべて自由推定・非有界
+     `(-inf, inf)` とする。$\mathrm{ak}_k=k$（$k=1,\dots,K-2$）に固定すると `Nominal(K)` は `GPCM(K)` に厳密に
+     一致する（`Nominal(2)` は自由な `ak` を持たず、`GPCM(2)` / `TwoPL` と一致する）。
+   - **初期値・識別性・推定可能性**: mirt の既定初期値（`a1 = 0.851`、`ak1 = ... = ak{K-2} = 0.5`、
+     `d1 = ... = d{K-1} = 0`）は反復 0 で中間カテゴリ $1,\dots,K-2$ の予測子が同一になり、減衰なしの
+     `optimizer = "NR"` では同時 Hessian が不定になって `a1 = 0` に捕捉されることがある（`Science` など）。
+     flexpyirt では `Nominal(n_cat)` を GPCM の初期値から開始する: $a_j^{(0)}$ は項目−残余相関（§4.10。$D>1$ では
+     因子別項目−残余相関、§15.31）、採点係数は互いに異なる $\mathrm{ak}_{jk}^{(0)}=k$（$k=1,\dots,K-2$）、切片は GPCM の
+     初期切片 $d_{jk}^{(0)}$（`_gpcm_intercept_starts`、§15.9）。これにより反復 0 でのカテゴリ対称性を破りつつ、真の
+     $\mathrm{ak}_k$ が非単調や負の項目も順序制約なしの最尤解へ収束する。§4.5 / §15.31 の識別性検査では
+     `slope_params` を `("a",)`（`("a1", ..., "aD")`）、`intercept_params` を `("d1", ..., "d{K-1}")` とする
+     （`ak1..ak{K-2}` はカテゴリ間の相対形状を担い、$\mathrm{ak}_k=k$ を固定しても GPCM になるだけで自由な潜在分散や
+     潜在平均を識別しない）。自由パラメタを持つ項目では `0..K-1` の全カテゴリが観測されている必要がある
+     （`_check_estimable`）。
+   - **表示用閾値・FIPC・JSON・ML スコアリング**: mirt の `coef(m, IRTpars = TRUE)` は名義反応項目について $\theta$
+     尺度の閾値 $b_k$ ではなく Bock (1972) のゼロ和パラメタ $a_k^*=a\,\mathrm{ak}_{k-1}-\overline{a\,\mathrm{ak}}$
+     （`a1..aK`）と $c_k^*=d_{k-1}-\bar d$（`c1..cK`）を返し、隣接カテゴリの交点
+     $-(d_k-d_{k-1})/[a(\mathrm{ak}_k-\mathrm{ak}_{k-1})]$ も $\mathrm{ak}_k=\mathrm{ak}_{k-1}$ で特異になる。そのため
+     `NominalKernel` は `irt_names = ()`・`irt_dep_indices = ()`（`FitResult.items` に `b` / `bk` 列を追加しない）
+     とし、`Model.fix_from()` は `Nominal` 項目に対して `parameterization="slope-intercept"` を受け付け、
+     `parameterization="irt"` は `SpecificationError` とする。`_json.py` の多値項目レジストリに `"Nominal"` を追加する
+     （スキーマバージョン 3 および旧バージョン 1–2 の読み込み互換を維持）。1 次元 ML スコアリング
+     （`_scoring._pattern_flags`）では、各カテゴリの有効傾き $s_c=a\,\mathrm{ak}_c$ から最低・最高 $\theta$ カテゴリ
+     （$a\neq 0$ のもとで $s_{y_j}=\min_c s_c$ および $s_{y_j}=\max_c s_c$）を判定し、非単調なカテゴリ
+     （$\mathrm{ak}_k<0$ や $\mathrm{ak}_k>K-1$）を正しく扱いつつ $0\le\mathrm{ak}_k\le K-1$ では $0$ と $K-1$ に
+     帰着させる。これは mirt 1.46.1 と意図的に異なる。mirt の `fscores(method = "ML")` は $\mathrm{ak}$ にかかわらず
+     全項目カテゴリ 0 / 全項目最上位カテゴリのパタンに $\mp\infty$ を返すが、$\mathrm{ak}_1<0$ では全 0 パタンの
+     ML 推定値は内点にあり、flexpyirt はその値を返す（VALIDATION.md V23）。
+   - **退化項目**: `fit()` は、傾きが自由な `Nominal` 項目（$K\ge 3$）について、傾きのノルムが $10^{-3}$ 未満
+     （項目が情報を持たず $\mathrm{ak}_1..\mathrm{ak}_{K-2}$ が識別されない。mirt の NR が既定初期値から陥る鞍点）か、
+     $|\mathrm{ak}_k|$ または $|d_k|$ が 50 を超える（カテゴリの発散）ときに `HeywoodWarning` を出す。
+   - **照合（V23）**: mirt の名義モデルの既定初期値では NR が `Science` で鞍点に止まるため、
+     `validation/r/m5_nominal_reference.R` は mirt の NR を GPCM の点から開始し、mirt の別の初期値 5 通りのうち最良のものが
+     より高ければそこから NR をやり直す（大半が非単調な V23e では GPCM の点からの NR は局所最大に止まる）。flexpyirt は
+     自身の既定初期値から推定し、1 次元（`Science`、順序のない・負の $\mathrm{ak}$ を含むシミュレーション、名義 + 2PL、
+     大半が非単調な項目）と 2 因子の確認的モデル（V23f）のすべてで VALIDATION.md の許容誤差内で mirt の解に到達する。
+     3 因子の名義モデルは単体テストのみ。mirt は V23e の真に $+\infty$ のパタン 1 つを `max_theta = 20` の境界に残す。
+     ML の極端パタンは R での独立な対数尤度走査と照合する。
+
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
+- Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
+- Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
@@ -678,22 +932,34 @@ class ItemKernel(Protocol):
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
+- Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
+- Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
+- Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
+- Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
+- MacCallum, R. C., Browne, M. W., & Sugawara, H. M. (1996). Power analysis and determination of sample size for covariance structure modeling. *Psychological Methods*, 1(2), 130–149.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Maydeu-Olivares, A., & Joe, H. (2005). Limited- and full-information estimation and goodness-of-fit testing in $2^n$ contingency tables: A unified framework. *Journal of the American Statistical Association*, 100(471), 1009–1020.
+- Maydeu-Olivares, A., & Joe, H. (2006). Limited information goodness-of-fit testing in multidimensional contingency tables. *Psychometrika*, 71(4), 713–732.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
+- Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
+- Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
+- Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.

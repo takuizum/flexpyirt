@@ -98,8 +98,9 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   M-step need not converge fully; a few Newton steps are enough.
 - Fixed parameters are not part of $\eta$ (they come from the ParameterTable as constants).
 - **Equality constraints across items** (e.g. one common $a$ for all items) break the
-  decomposition. Not supported in v1; M5 will add "joint Newton per component of items connected
-  by constraints".
+  decomposition. **Decision (M5, §16.1)**: items connected by shared `free_id`s form a component
+  that is solved by one joint masked Newton over the union of its free parameters; items outside
+  such components keep the item-wise `vmap` path.
 
 ### 4.4 M-step (latent distribution)
 - **Normal** (when group $g$'s mean or variance is free):
@@ -149,8 +150,20 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   before release.)
   When EH is used in a multiple-group model, **every group uses
   EH** (mixing `EmpiricalHistogram` and `Normal` raises `SpecificationError`).
-- Later: Davidian curves (Woods & Lin, 2009), normal mixtures. Both can be added without touching
-  the Core by following the `LatentDist` protocol (§6).
+- **Davidian curves** (`DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)`;
+  Zhang & Davidian, 2001; Woods & Lin, 2009; §16.4):
+  Single-group, unidimensional seminonparametric density $h_k(z;\boldsymbol\phi)=P_k(z;\boldsymbol\phi)^2\varphi(z)$
+  expanded in normalized probabilists' Hermite polynomials $He_j(z)/\sqrt{j!}$ with unit-sphere
+  coefficients $\mathbf c(\boldsymbol\phi)\in S^k$ parameterized by $k\in\{1,\dots,10\}$ angles
+  $\boldsymbol\phi=(\phi_1,\dots,\phi_k)$ ($\boldsymbol\phi=\mathbf 0$ gives $N(0,1)$ non-singularly).
+  Analytically standardized by the closed-form continuous moments $(\mu_Z(\boldsymbol\phi),\sigma_Z^2(\boldsymbol\phi))$
+  of $h_k$ so that $\theta=\mu+\sigma(Z-\mu_Z)/\sigma_Z$ has exact continuous mean $\mu$ and
+  variance $\sigma^2$ for every $\boldsymbol\phi$. Quadrature weights are the density normalized on
+  the grid, and the latent M-step maximizes $Q^{\text{lat}}=\sum_q \bar n_q\log w_q(\mu,\sigma^2,\boldsymbol\phi)$
+  with the existing masked Newton (`_newton.py`), keeping EM monotone (non-decreasing), SQUAREM
+  applicable, and Oakes' identity exact.
+- Later: normal mixtures. Can be added without touching the Core by following the `LatentDist`
+  protocol (§6).
 
 ### 4.5 Identification rules (checked in the Compile layer)
 - Default: the reference group is fixed at $N(0,1)$; focal groups' means and variances are free.
@@ -324,7 +337,7 @@ E-step, M-step (autodiff Newton), Oakes/Hessian SEs, and EAP scoring for $D \in 
 | 3PL / 4PL | $a, d, g, u$ (natural scale, $0<g<u\le 1$; §15.2) | M3 |
 | GRM | $a, d_1>\dots>d_{K-1}$ | M2 |
 | GPCM / PCM | $a, d_1..d_{K-1}$ | M3 |
-| Nominal | M5 or later (undecided) | — |
+| Nominal | $a, \mathrm{ak}_1..\mathrm{ak}_{K-2}, d_1..d_{K-1}$ ($\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$; §16.6) | M5 |
 
 The display IRT parameterization ($b=-d/a$ for 2PL/Rasch/3PL/4PL, $b_k=-d_k/a$ for GRM, and
 step difficulties $b_k=-(d_k-d_{k-1})/a$ with $d_0=0$ for GPCM/PCM) is computed in the Result layer
@@ -400,7 +413,8 @@ data-independent shapes (§15.21).
 2. Many groups (e.g. school × grade). Keep the per-group latent distributions `vmap`-able.
 3. ~~Missing-data design~~ → exclusion under MAR only (§14.8, 2026-11-20).
 4. ~~Package name~~ → `flexpyirt` (2026-11-20).
-5. How to implement the M-step with equality constraints across items (§4.3).
+5. ~~How to implement the M-step with equality constraints across items (§4.3)~~ → joint
+   Newton per connected component of items (§16.1, 2026-11-21).
 
 ## 13. Implementation decisions (M1)
 1. **Newton in the M-step**: every gradient and Hessian comes from JAX autodiff (`jax.grad` /
@@ -1001,10 +1015,338 @@ data-independent shapes (§15.21).
     free variance, 41 nodes vs 401 points on $[-12,12]$: estimates within $2\times10^{-10}$; 2D 2PL,
     $31^2$ vs $121^2$: within $5\times10^{-7}$); mirt does not use Gauss–Hermite in EM.
 
+## 16. Implementation decisions (M5)
+1. **Equality constraints across items (`Model.equal_across_items`, shared `free_id`s)**:
+   `Model.equal_across_items(*, items, params)` makes each parameter in `params` of the selected
+   items (at least two) equal within every group, by giving their free rows one `free_id` (as
+   mirt's `CONSTRAIN = (items, param)`; in a multiple-group model the constraint applies within
+   each group, as `CONSTRAIN` does in `multipleGroup`). It combines with `equal_across_groups`:
+   all equalities of the model are merged by union–find over rows, so overlapping constraints
+   share one id. Fixed rows are not affected. Rows sharing a `free_id` (from the model or from an
+   edited table) may now belong to different items and different item models (e.g. a common
+   slope for 2PL and GRM items), but within one item a `free_id` still maps to one parameter, and
+   the rows must agree on bounds and prior (as before). The default starting value of a shared
+   parameter is the mean of its rows' default starting values.
+   **M-step**: the expected complete-data log posterior is
+   $Q(\eta)=\sum_j Q_j(\xi_j(\eta))+\log\pi(\eta)$, so the item-wise decomposition (§4.3) holds
+   between connected components of the item graph whose edges are shared `free_id`s, not between
+   items. The Compile layer finds the components by union–find over items; a component with two
+   or more items becomes a `CoupledBlock` (per member family: the static family index, the
+   dynamic item positions and a `(G, n, P_f)` local index into the component's vector $u_c$ of
+   free parameters; plus $u_c$'s `free_id`s and bounds). Its M-step maximizes
+   $\sum_{j\in c}\sum_g Q_{jg}(\xi_j^{(g)}(u_c))+\sum_{s}\log\pi(u_{cs})$ over $u_c$ with the
+   same masked, bounded, monotone Newton (§13.1, §15.2; gradient and Hessian by autodiff, each
+   member family's items `vmap`ed), so each shared prior is counted once and EM stays monotone.
+   Items of a component are masked out of the item-wise `vmap` (their slots are held) and the
+   component step runs after it, reading the component's parameters from the previous iterate
+   (they are disjoint from every other block's). Components are a static Python loop, so a model
+   with many small components traces one Newton block per component. A common slope over $J$
+   2PL items gives one block of $1+J$ parameters, whose dense Hessian is cheap at the sizes of
+   interest.
+   **Standard errors and SQUAREM**: Oakes' first term scatter-adds each item's Hessian block by
+   `free_id`, and the cross term accumulates scores by `free_id`, so parameters shared across
+   items are summed exactly with no change (likewise `information_hessian`, which differentiates
+   the marginal log posterior directly, and the SQUAREM bounds). Delta-method SEs, `n_params`
+   (counted once per `free_id`) and JSON (model field `equal_items`, schema version 3) follow
+   from the table.
+   **Identification**: the necessary conditions of §4.5 and §14.5 are unchanged (for example a
+   common free slope with a free latent variance is still rejected, because no slope is fixed).
+2. **DIF by multiple-group likelihood-ratio tests (`FitResult.dif`)**:
+   `FitResult.dif(data, *, group, items, params=None, scheme="add", p_adjust="holm",
+   item_names=None)` tests each
+   item in `items` for differential item functioning across the groups of a fitted
+   multiple-group model (Thissen, Steinberg & Wainer, 1993), as mirt's `DIF()`. For
+   `scheme="add"` the fitted model is the baseline and each item's `params` (default: all of
+   its parameters) are made equal across groups; for `scheme="drop"` they are freed (one
+   `free_id` per group). Each modified model is refitted with the same `BAEM` settings and
+   quadrature, starting from the baseline estimates, and
+   $X^2=2(\ell_{\text{free}}-\ell_{\text{constrained}})$ with
+   $df=|k_{\text{base}}-k_{\text{new}}|$ gives $p=P(\chi^2_{df}>X^2)$. The result has one row per
+   item with `item`, `converged`, the differences (item free minus item constrained, mirt's sign,
+   so negative values favour DIF) of AIC,
+   SABIC ($-2\ell+k\log((N+2)/24)$), HQ ($-2\ell+2k\log\log N$) and BIC, `x2`, `df`, `p` and
+   `adj_p` (adjusted over the tested items: Holm, 1979, by default as mirt's `p.adjust = "holm"`;
+   `p_adjust="BH"` for Benjamini & Hochberg, 1995, or `"none"`). Changes are made in the parameter table, so identification is checked as
+   for any fit (freeing the only anchors raises `IdentificationError`), and an item whose
+   parameters are already equal (`"add"`) or already free (`"drop"`) raises
+   `SpecificationError`. MAP fits are rejected (the statistic needs the marginal likelihood at
+   the MLE). DIF is post-fit orchestration in the Result layer; only the refits run in `jit`.
+3. **Limited-information goodness of fit (`FitResult.m2`, $M_2$ / $M_2^*$)**:
+   `FitResult.m2(data, *, item_names=None, ci=0.90)` computes the limited-information
+   goodness-of-fit statistic of Maydeu-Olivares & Joe (2005, 2006) on the first- and second-order
+   item-score moments — the $J$ item means $E[y_j]$ and $\binom{J}{2}$ cross-products
+   $E[y_iy_j]$ ($i < j$, in column-major pair order, matching mirt's default `M2(type = "M2*")`;
+   for dichotomous items this is exactly $M_2$) — for single-group, unidimensional, complete-data
+   MLE fits with a `Normal` latent distribution (multidimensional, multiple-group,
+   `EmpiricalHistogram`, missing-data, or MAP fits raise `SpecificationError`).
+   With sample margins $\hat p_2$, model-implied margins $\pi_2(\hat\eta)$ integrated on the fitted
+   quadrature grid with the normalized normal weights, asymptotic covariance $\Xi_2$ of
+   $\sqrt{N}(\hat p_2-\pi_2)$ under local independence (using conditional first and second moments
+   $m_{1,jq}=\sum_k kP_{jk}(\theta_q)$ and $m_{2,jq}=\sum_k k^2P_{jk}(\theta_q)$), and Jacobian
+   $\Delta_2=\partial\pi_2/\partial\eta^\top$ by JAX forward-mode autodiff over the free vector
+   $\eta$ (shared parameters appear once, matching column summation for equality constraints):
+   $$M_2 = N\,(\hat p_2-\pi_2)^\top C_2\,(\hat p_2-\pi_2),\qquad
+     C_2 = \Delta_c(\Delta_c^\top\Xi_2\Delta_c)^{-1}\Delta_c^\top,\qquad
+     df = s - q,$$
+   where $s = J + \binom{J}{2}$, $q = \text{n\_params}$ (all free parameters, including any free
+   latent mean/variance), and $\Delta_c$ is an orthonormal basis for the orthogonal complement of
+   $\operatorname{col}(\Delta_2)$ obtained from the SVD of $\Delta_2$. The asymptotic $\chi^2_{s-q}$
+   distribution requires $df = s - q > 0$ and full column rank $\operatorname{rank}(\Delta_2) = q$
+   (local identification from first- and second-order moments; Maydeu-Olivares & Joe, 2005,
+   Theorem 1; 2006, Theorem 2). Whenever $df \le 0$ or $\operatorname{rank}(\Delta_2) < \operatorname{ncol}(\Delta_2)$
+   (for example when a polytomous item has more free parameters than items, $P_j > J$, or a fixed
+   zero slope, even if $df > 0$), flexpyirt emits a `FlexpyirtWarning` noting that the model is not
+   locally identified with residual degrees of freedom from first- and second-order moments and
+   returns `NaN` for `m2`, `p`, RMSEA, its CI, `tli` and `cfi` (keeping `df` and `srmsr` finite);
+   it never pairs an $(s - r)$-dimensional quadratic form with $df = s - q$.
+   **Free latent parameters in $\Delta_2$**: mirt 1.46.1 excludes free latent mean/variance columns
+   from $\Delta_2$ while still subtracting them in $df$. Following Maydeu-Olivares & Joe (2005,
+   2006), flexpyirt includes every free parameter (item and latent) in $\Delta_2$ by default; the
+   internal helper `_m2.m2_statistic` accepts a private `_latent_in_delta: bool = True` flag so
+   validation tests can verify both the theoretical definition and agreement with mirt when set to
+   `False` (for models with no free latent parameters both are identical).
+   **Auxiliary fit indices**:
+   - $p = P(\chi^2_{df} > M_2)$ (survival function).
+   - $\mathrm{RMSEA} = \sqrt{\max(0, M_2/df - 1)/(N - 1)}$ (`NaN` for $df \le 0$ or $N \le 1$), with
+     $(100\,\mathrm{ci})\%$ confidence interval $\sqrt{\lambda/(N\,df)}$ by inverting the
+     noncentral $\chi^2$ CDF (MacCallum, Browne & Sugawara, 1996; matching mirt's `RMSEA.CI`,
+     returning 0 when $P(\chi^2_{df}\le M_2)$ is already at or below the target probability, and
+     expanding the upper search bracket from $\max(N, 5M_2)$ if needed so the upper bound cannot
+     spuriously collapse to 0). Column names follow `ci` (e.g. `rmsea_5`, `rmsea_95` for `ci=0.90`).
+   - $\mathrm{SRMSR} = \sqrt{\binom{J}{2}^{-1}\sum_{i<j}(r_{ij} - \hat\rho_{ij})^2}$ from the
+     observed and model-implied item-score correlation matrices (diagonal variance uses
+     $E[y_j^2] - E[y_j]^2$).
+   - **Null model, TLI and CFI**: for dichotomous models ($K_j = 2$ for every item), the
+     independence (null) model has every slope fixed at 0 and $J$ free item intercepts whose MLE
+     reproduces the observed proportions; its orthogonal complement simplifies analytically to
+     $M_{2,\text{null}} = N\sum_{i<j} r_{ij}^2$ with $df_{\text{null}} = \binom{J}{2}$ (exact,
+     closed-form, matching mirt's `M2(null.mod)`). When $M_{2,\text{null}} > M_2$ and $df > 0$,
+     $\mathrm{TLI} = (M_{2,\text{null}}/df_{\text{null}} - M_2/df)/(M_{2,\text{null}}/df_{\text{null}} - 1)$
+     (uncapped) and $\mathrm{CFI} = \operatorname{clip}(1 - (M_2 - df)/(M_{2,\text{null}} - df_{\text{null}}), 0, 1)$;
+     when $M_{2,\text{null}} \le M_2$, a `FlexpyirtWarning` is emitted and both are `NaN`.
+     For models containing any polytomous item ($K_j > 2$), `tli` and `cfi` are returned as `NaN`:
+     under $M_2^*$'s item-score margins the $K_j - 1$ intercept columns of each item in the null
+     model's $\Delta_{\text{null}}$ are strictly collinear ($\operatorname{rank}(\Delta_{\text{null}}) = J < \sum_j(K_j - 1)$),
+     so the null $M_2^*$ with $df_{\text{null}} = s - \sum_j(K_j - 1)$ is ill-posed (mirt 1.46.1
+     slices `qr.Q(qr(delta), complete = TRUE)` after `ncol(delta)` without rank checking, discarding
+     arbitrary directions that depend on item order and floating-point roundoff).
+   Moment integration and $\Delta_2$ use JAX; $\Xi_2$, the SVD complement, and all summary indices
+   run in NumPy/SciPy outside `jit`.
+4. **Davidian-curve latent distributions (`DavidianCurve`, §4.4, V19)**:
+   `DavidianCurve(degree, *, mean=0.0, var=1.0, free_mean=False, free_var=False)` (plus
+   `DavidianCurve.free(degree, *, mean=0.0, var=1.0)`) specifies a single-group unidimensional
+   Davidian-curve density of degree $k\in\{1,\dots,10\}$ (Zhang & Davidian, 2001; Woods & Lin,
+   2009). Multiple-group (`Model.with_groups`) and multidimensional (`Model.with_factors`) models
+   with `DavidianCurve` raise `SpecificationError` (mirt 1.46.1 forbids free mean/variance
+   hyper-parameters and standard errors for Davidian curves).
+   **Density and analytical standardization**:
+   Let $\psi_j(z)=He_j(z)/\sqrt{j!}$ ($j=0,\dots,k$) be the normalized probabilists' Hermite
+   polynomials (orthonormal under $\varphi(z)=(2\pi)^{-1/2}e^{-z^2/2}$) and let
+   $h_k(z;\boldsymbol\phi)=P_k(z;\boldsymbol\phi)^2\varphi(z)$ with
+   $P_k(z;\boldsymbol\phi)=\sum_{j=0}^k c_j(\boldsymbol\phi)\psi_j(z)$, where the unit vector
+   $\mathbf c(\boldsymbol\phi)\in S^k$ uses the cosine-first spherical chart
+   $c_0=\prod_{m=1}^k\cos\phi_m$, $c_j=\sin\phi_j\prod_{m=j+1}^k\cos\phi_m$ ($j=1,\dots,k$).
+   `dcurver`'s sine-first chart ($c_0=\sin\phi_1$) places $N(0,1)$ at the polar singularity
+   $\phi_1=\pi/2$, where $\partial\mathbf c/\partial\phi_{2:k}=\mathbf 0$; this chart places
+   $N(0,1)$ at $\boldsymbol\phi=\mathbf 0$ with identity Jacobian
+   $\partial c_j/\partial\phi_m|_{\mathbf 0}=\delta_{jm}$ and nests degree $k-1$ at $\phi_k=0$.
+   Both charts cover all of $S^k$ and therefore span the exact same family of densities
+   (identified up to $\mathbf c\mapsto-\mathbf c$, which leaves $P_k^2$ unchanged). The chart alone
+   does **not** make $N(0,1)$ a non-stationary point: the first-order perturbations
+   $\psi_1(z)\varphi(z)$ and $\psi_2(z)\varphi(z)$ are pure location and scale changes, which
+   analytical standardization removes (and which free items absorb in mirt's unstandardized
+   parameterization), so the score in $\phi_1,\phi_2$ is identically zero at
+   $\boldsymbol\phi=\mathbf 0$ for every data set (for $k=1$, $\phi=0$ is always stationary).
+   mirt 1.46.1 stalls at $N(0,1)$ on V19b ($k=2$) for the same reason combined with the polar
+   singularity in $\phi_2$; flexpyirt escapes it through the perturbed default starts below.
+   **Singular information at $\boldsymbol\phi=\mathbf 0$**: consequently the Fisher information
+   is singular in the $(\phi_1,\phi_2)$ directions at $\boldsymbol\phi=\mathbf 0$ (in $\phi_1$
+   for $k=1$). When the true latent density is close to normal, $\hat{\boldsymbol\phi}$ is
+   poorly determined, the likelihood can have several local maxima, the angle SEs (and the
+   Wald tests built on them) are unreliable, and a likelihood-ratio test of `DavidianCurve`
+   against `Normal` does not have its usual $\chi^2$ reference distribution (the null lies
+   where the model is not first-order identified). Users should compare degrees with
+   AIC/BIC (as in Woods & Lin, 2009) rather than with LR tests against `Normal`.
+   From the Hermite three-term recurrence, $Z\sim h_k(\cdot;\boldsymbol\phi)$ has closed-form
+   continuous moments
+   $$\mu_Z(\boldsymbol\phi)=2\sum_{j=0}^{k-1}\sqrt{j+1}\,c_jc_{j+1},\qquad
+     \sigma_Z^2(\boldsymbol\phi)=\sum_{j=0}^k(2j+1)c_j^2+2\sum_{j=0}^{k-2}\sqrt{(j+1)(j+2)}\,c_jc_{j+2}-\mu_Z(\boldsymbol\phi)^2>0.$$
+   Standardizing analytically to $\theta=\mu+\sigma(Z-\mu_Z)/\sigma_Z$ gives the density
+   $f_k(\theta;\mu,\sigma^2,\boldsymbol\phi)=(\sigma_Z/\sigma)h_k(z(\theta);\boldsymbol\phi)$
+   with $z(\theta)=\mu_Z(\boldsymbol\phi)+\sigma_Z(\boldsymbol\phi)(\theta-\mu)/\sigma$, which
+   has exact continuous mean $\mu$ and variance $\sigma^2$ for every $\boldsymbol\phi\in\mathbb R^k$
+   (and reduces identically to `dcurver::ddc` when $\mu=\mu_Z$, $\sigma^2=\sigma_Z^2$).
+   **Grid weights, M-step, and comparison with mirt**:
+   Quadrature log-weights are normalized on the grid via
+   $\log w_q=\operatorname{log\_softmax}_q(\log(P_k(z_q)^2)-\tfrac12 z_q^2)$ (with double-`where`
+   guards for exact polynomial roots $P_k(z_q)=0$). Angles $\phi_1,\dots,\phi_k$ are unbounded in
+   `(-inf, inf)` during optimization so Newton and SQUAREM are never blocked when a coefficient
+   $c_j$ changes sign. The `ParameterTable` stores `mean`, `var`, and `phi_1..phi_k` under
+   `item="__latent__"`, `model="Davidian"`; identification follows §4.5 (`mean`/`var` follow the
+   same rules as `Normal`, and priors on latent parameters raise `SpecificationError`). Because
+   analytical standardization cancels the first-order derivative in $\phi_1,\phi_2$ at
+   $\boldsymbol\phi=\mathbf 0$, default starts apply a small skewness-aligned perturbation
+   (`phi_1 = 0.1 * sign` for $k=1$; `phi_1 = -0.1 * sign, phi_2 = 0.1, phi_{3..k} = 0` for
+   $k\ge 2$, where `sign` comes from empirical total-score skewness). These starts give the
+   standardized start density a third standardized moment with the same sign as `sign`: to
+   leading order it is $\approx 4\phi_1^3$ for $k=1$ (`+0.0039` at $\phi_1=0.1$) and
+   $\approx -8.3\,\phi_1\phi_2$ for $k\ge 2$ (`+0.083` at $(\phi_1,\phi_2)=(-0.1,0.1)$), while
+   $\phi_2=0.1$ moves the start off the stationary point at $\boldsymbol\phi=\mathbf 0$ (checked
+   in `tests/test_m5_davidian.py`). The latent M-step maximizes
+   $Q^{\text{lat}}=\sum_q \bar n_q\log w_q$ with the existing masked Newton (`_newton.py`),
+   keeping EM monotone (non-decreasing), SQUAREM working without special cases, and Oakes == Hessian SEs
+   exact to $\sim 10^{-12}$ (by contrast, mirt 1.46.1 applies Woods' linear-interpolation
+   `standardizeQuadrature` to expected counts before calling `nlminb` on unnormalized `ddc`,
+   which breaks EM monotonicity, disables `SE = TRUE`, and forbids free mean/variance; on V19a it
+   stops at a point that is non-stationary for mirt's own discretized likelihood (score
+   $\approx 56.7$ in `PHI_3`), and on V19b it stalls at the $N(0,1)$ stationary point; both
+   with strictly lower log-likelihood; see VALIDATION.md V19).
+   **Scoring, reporting, and JSON**:
+   `FitResult.latent` displays `mean`, `var`, `phi_1..phi_k` and their SEs; `latent_weights`
+   stays `None` (parametric). `score()` uses the fitted Davidian density for `"EAP"` (on the
+   quadrature grid) and `"PV"` (on the 501-node fine grid), keeps `"ML"` and `"WLE"`
+   likelihood-only, and rejects `"MAP"` with `SpecificationError` because $P_k(z)^2\varphi(z)$
+   can be multimodal and vanish at real roots of $P_k$ (matching mirt's `use_dentype_estimate`).
+   `item_fit()` rejects `DavidianCurve` until validated. `"DavidianCurve"` is registered in
+   `_json.py` without changing the JSON payload shape (`schema_version` remains 3).
+5. **Differentiable IRT scale linking (`link`, `LinkResult`, V20)**:
+   Characteristic-curve linking of two separately calibrated unidimensional scales via common items
+   (§1), solving for linear transformation constants $(A, B)$ with $A > 0$ such that
+   $\theta^* = A\theta + B$ maps the `source` (new) scale onto the `target` (base) scale
+   (Kolen & Brennan, 2014). Under $\theta = (\theta^* - B)/A$, slope–intercept item parameters
+   transform with $a^* = a / A$ and:
+   - `DichotomousKernel` (2PL/Rasch) and `FourPLKernel` (3PL/4PL): $d^* = d - aB/A$ (asymptotes
+     $g, u$ unchanged);
+   - `GradedKernel` (GRM): $d_k^* = d_k - aB/A$ for $k = 1, \dots, K-1$ (preserving $d_1 > \dots > d_{K-1}$);
+   - `GPCMKernel` (GPCM/PCM): $d_k^* = d_k - k\,aB/A$ for $k = 1, \dots, K-1$ (with $d_0 = 0$),
+     preserving $k a^* \theta^* + d_k^* = k a\theta + d_k$ and step difficulties $b_k^* = A b_k + B$.
+   Because $P_j(y=k \mid \theta^*; \xi_j^*) = P_j(y=k \mid (\theta^* - B)/A; \xi_j)$ for any
+   unidimensional `ItemKernel`, the criteria are evaluated directly from `kernel.log_prob` with no
+   hand-written derivatives:
+   - **Haebara** (Haebara, 1980; polytomous form Kim & Lee, 2006):
+     $H_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} \sum_{j\in\mathcal{C}} \sum_{k=0}^{K_j-1} [P_{jk}^{\mathrm{tgt}}(\theta_q^{(t)}) - P_{jk}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$.
+     The sum runs over all categories, including both categories of a dichotomous item (the
+     Kim & Lee, 2006 convention), so a dichotomous item contributes $2[P^{\mathrm{tgt}} - P^{\mathrm{src}}]^2$,
+     twice Haebara's (1980) original term: the solution is unchanged when all common items are
+     dichotomous, reported criterion values are doubled, and in mixed-format anchors dichotomous
+     items carry the Kim & Lee weight relative to polytomous items.
+   - **Stocking–Lord** (Stocking & Lord, 1983; polytomous form Kim & Lee, 2006):
+     $\mathrm{SL}_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} [\mathrm{TCC}^{\mathrm{tgt}}(\theta_q^{(t)}) - \mathrm{TCC}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$,
+     where $\mathrm{TCC}(\theta) = \sum_{j\in\mathcal{C}}\sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)$.
+   - **Symmetric variants** (`symmetric=True`; Kim & Lee, 2006): add the reverse-direction term
+     comparing $P_{jk}^{\mathrm{src}}(\theta_q^{(s)})$ against $P_{jk}^{\mathrm{tgt}}(A\theta_q^{(s)} + B)$
+     (likewise for $\mathrm{TCC}$). By default, $(\theta^{(t)}, w^{(t)})$ is the target group's
+     fitted latent distribution on its quadrature grid and $(\theta^{(s)}, w^{(s)})$ is the source
+     group's, making symmetric linking exactly reversible: swapping `source` and `target` yields
+     $(1/A, -B/A)$. Explicit `nodes` / `weights` override the grid (weights are normalized to sum
+     to 1; uniform if `nodes` is given without `weights`).
+   **Optimization**: starting from Mean/Mean ($A_0 = \sum |a_j^{\mathrm{src}}| / \sum |a_j^{\mathrm{tgt}}|$,
+   $B_0 = \bar b^{\mathrm{tgt}} - A_0 \bar b^{\mathrm{src}}$), a jitted, shape-static 2-D bounded
+   monotone Newton minimizer (`_linking.solve_linking`, `lax.while_loop`) uses `jax.grad` and
+   `jax.hessian` on `LinkingProblem` pytrees with $A > 0$ enforced by halfway-to-bound projection,
+   Levenberg–Marquardt fallback when the Hessian is not positive definite, the Euclidean step
+   norm capped at `_MAX_STEP = 1` (so a poor start cannot jump onto a flat plateau where the curves
+   no longer overlap), 40 parallel backtracking step sizes, and a 1-ULP gradient-polish step near
+   the optimum. Convergence is $\|\nabla F\|_\infty \le$ `tol` (absolute, default $10^{-10}$, not
+   rescaled: $F$ uses weights summing to 1 and grows with the number of common items); a step
+   that no longer decreases $F$ before reaching `tol` ends the loop with `converged = False` and a
+   `ConvergenceWarning`. Mean/Mean is only a starting value: it sums absolute slopes and pools
+   every display threshold of every common item, so polytomous items weigh more than in per-item
+   averages.
+   **Standard errors (Ogasawara, 2001)**: from the stationarity condition
+   $g(c, \eta_s, \eta_t) = \nabla_c F(c, \eta_s, \eta_t) = 0$ at $\hat c = (\hat A, \hat B)$, the
+   implicit function theorem gives $J_s = -H_{cc}^{-1} H_{c,\eta_s}$ and
+   $J_t = -H_{cc}^{-1} H_{c,\eta_t}$ via `jax.jacfwd(g, 0)` and `jax.jacrev(g, 1/2)` over the
+   common items' unique free parameters (respecting fixed parameters and shared `free_id`s), so
+   $\mathrm{Cov}(\hat A, \hat B) = J_s \Sigma_s J_s^\top + J_t \Sigma_t J_t^\top + J_s \Sigma_{st} J_t^\top + J_t \Sigma_{st}^\top J_s^\top$.
+   Separate `FitResult`s are treated as independent calibrations ($\Sigma_{st} = 0$); when the
+   same `FitResult` is passed as `source` and `target` (two groups of one multiple-group fit),
+   $\Sigma_{st}$ is the cross block of its joint `vcov`, so equality-constrained anchors shared by
+   both groups give $(A, B) = (1, 0)$ with zero covariance. Distinct `FitResult`s fitted to
+   overlapping data are not detected. **Quadrature weights are held fixed.** By default they are
+   the fitted latent distributions (estimates when a group's mean/variance is free or the
+   distribution is EH), but this is exact to first order under a correctly specified model:
+   $\partial g/\partial w_q$ is a weighted sum of curve residuals times curve derivatives and the
+   residuals vanish at the population solution, so $H_{c,w} = 0$ there; under item parameter drift
+   or DIF (non-zero population residuals) the weights' sampling variability is ignored. SEs are
+   computed only at a converged solution; non-convergence, unavailable `vcov` on a side with free
+   common-item parameters, or a non-PD $H_{cc}$ yields `vcov = None` and `NaN` SEs.
+   **Transformed items and scores**: `LinkResult.items` holds every source item on the target
+   scale; fixed-slope models (Rasch, PCM) get $a^* = 1/A$ (not 1), and `Model.fix_from` fixes
+   that slope. `transform_theta` maps `theta` and every `pv*` column by $A\theta + B$ and `se` by
+   $A\,\mathrm{se}$, treating $(A, B)$ as known (linking error is not added).
+   **Validation in the Python shell**: multidimensional fits, multiple-group fits without explicit
+   `source_group` / `target_group`, mismatched item kernels or category counts on common items, and
+   invalid nodes/weights raise `SpecificationError`.
+6. **Nominal response model (`Nominal(n_cat)`, `NominalKernel(n_cat, n_factors=1)`, V23)**:
+   Bock's (1972) nominal response model in Thissen, Cai & Bock's (2010) overall-slope ×
+   scoring-function parameterization, matching R mirt's `itemtype = "nominal"` (Chalmers, 2012):
+   $$P(y=k\mid\boldsymbol\theta)=\frac{\exp\big(\mathrm{ak}_k\,\mathbf a^\top\boldsymbol\theta+d_k\big)}{\sum_{c=0}^{K-1}\exp\big(\mathrm{ak}_c\,\mathbf a^\top\boldsymbol\theta+d_c\big)},\qquad k=0,\dots,K-1,\quad \mathrm{ak}_0=0,\ \mathrm{ak}_{K-1}=K-1,\ d_0=0,$$
+   for categories `0..K-1` (`n_cat >= 2` validated) and $D\in\{1,2,3\}$ (evaluated with
+   `_linear_predictor(theta, params[:D], D)` multiplying the scoring vector $\mathrm{ak}$ and
+   `jax.nn.log_softmax`).
+   - **Parameters and bounds**: mirt's `coef(m)` / `pars = "values"` reports `a1` (`a1..aD`),
+     `ak0..ak{K-1}`, and `d0..d{K-1}` with `ak0 = 0`, `ak{K-1} = K - 1`, and `d0 = 0` fixed
+     (`est = FALSE`) and all bounds `(-Inf, Inf)`. As in `GPCMKernel` (§15.8), the three fixed
+     identification constants are part of the kernel rather than `ParameterTable` rows (so
+     `_check_identification` does not treat them as user-fixed slopes or intercepts):
+     `param_names` is `("a", "ak1", ..., "ak{K-2}", "d1", ..., "d{K-1}")` for $D=1$ and
+     `("a1", ..., "aD", "ak1", ..., "ak{K-2}", "d1", ..., "d{K-1}")` for $D\in\{2,3\}$, all free
+     by default and unbounded `(-inf, inf)`. Fixing $\mathrm{ak}_k=k$ ($k=1,\dots,K-2$) reduces
+     `Nominal(K)` to `GPCM(K)` identically (`Nominal(2)` has no free `ak` parameters and equals
+     `GPCM(2)` / `TwoPL`).
+   - **Starting values, identification, and estimability**: mirt's default starting values
+     (`a1 = 0.851`, `ak1 = ... = ak{K-2} = 0.5`, `d1 = ... = d{K-1} = 0`) give interior
+     categories $1,\dots,K-2$ identical predictors at iteration 0 and can cause mirt's undamped
+     `optimizer = "NR"` to hit an indefinite joint Hessian and trap `a1 = 0` (e.g. on `Science`).
+     flexpyirt starts `Nominal(n_cat)` at the GPCM starting point: $a_j^{(0)}$ from the item–rest
+     correlation (§4.10; factor-specific item–rest correlations for $D>1$, §15.31), distinct
+     scoring coefficients $\mathrm{ak}_{jk}^{(0)}=k$ ($k=1,\dots,K-2$), and GPCM starting
+     intercepts $d_{jk}^{(0)}$ (`_gpcm_intercept_starts`, §15.9). This breaks category symmetry at
+     iteration 0 while allowing items with non-monotone or negative true $\mathrm{ak}_k$ to
+     converge to the unordered MLE. For §4.5 / §15.31 identification checks, `slope_params` is
+     `("a",)` (`("a1", ..., "aD")`) and `intercept_params` is `("d1", ..., "d{K-1}")`;
+     `ak1..ak{K-2}` carry relative category shape (fixing $\mathrm{ak}_k=k$ yields GPCM and does
+     not identify a free latent variance or mean). Every category `0..K-1` must be observed for
+     items with free parameters (`_check_estimable`).
+   - **Display thresholds, FIPC, JSON, and ML scoring**: mirt's `coef(m, IRTpars = TRUE)` converts
+     nominal items to Bock's (1972) zero-sum slopes and intercepts
+     $a_k^*=a\,\mathrm{ak}_{k-1}-\overline{a\,\mathrm{ak}}$ (`a1..aK`) and $c_k^*=d_{k-1}-\bar d$
+     (`c1..cK`) rather than $\theta$-scale difficulty thresholds $b_k$, and adjacent category
+     intersections $-(d_k-d_{k-1})/[a(\mathrm{ak}_k-\mathrm{ak}_{k-1})]$ are singular whenever
+     $\mathrm{ak}_k=\mathrm{ak}_{k-1}$. `NominalKernel` therefore sets `irt_names = ()` and
+     `irt_dep_indices = ()` (no `b` / `bk` columns in `FitResult.items`), and `Model.fix_from()`
+     supports `Nominal` items with `parameterization="slope-intercept"` while raising
+     `SpecificationError` for `parameterization="irt"` on `Nominal` items. `"Nominal"` is added to
+     the polytomous item registry in `_json.py` (keeping schema version 3 and older versions 1–2
+     readable). In 1-D ML scoring (`_scoring._pattern_flags`), an item's lowest- and
+     highest-$\theta$ categories are determined from the effective category slopes
+     $s_c=a\,\mathrm{ak}_c$ ($s_{y_j}=\min_c s_c$ and $s_{y_j}=\max_c s_c$ with $a\neq 0$), which
+     handles non-monotone categories ($\mathrm{ak}_k<0$ or $\mathrm{ak}_k>K-1$) and reduces to
+     $0$ and $K-1$ when $0\le\mathrm{ak}_k\le K-1$. This deliberately differs from mirt 1.46.1,
+     whose `fscores(method = "ML")` returns $\mp\infty$ for every all-category-0 /
+     all-top-category pattern regardless of $\mathrm{ak}$: with $\mathrm{ak}_1<0$ the all-0 pattern
+     has an interior ML estimate, which flexpyirt returns (VALIDATION.md V23).
+   - **Degenerate items**: `fit()` emits a `HeywoodWarning` for a `Nominal` item ($K\ge 3$) with a
+     free slope whose slope norm is below $10^{-3}$ (the item carries no information and
+     $\mathrm{ak}_1..\mathrm{ak}_{K-2}$ are unidentified: the saddle that traps mirt's NR from its
+     default starts) or whose $|\mathrm{ak}_k|$ or $|d_k|$ exceeds 50 (diverging categories).
+   - **Validation (V23)**: `validation/r/m5_nominal_reference.R` starts mirt's NR at the GPCM point
+     (mirt's default nominal starting values stop NR at a saddle on `Science`) and restarts it from
+     the best of five alternative mirt starts when that is higher (on the mostly non-monotone V23e
+     data the GPCM-point NR stops at a local maximum). flexpyirt fits from its own defaults and
+     reaches mirt's solution in all cases within the VALIDATION.md tolerances: unidimensional
+     (`Science`, simulated with unordered / negative $\mathrm{ak}$, nominal + 2PL, mostly
+     non-monotone items) and a two-factor confirmatory model (V23f). Three-factor nominal models
+     are unit-tested only. mirt also leaves one true $+\infty$ V23e pattern at its `max_theta = 20`
+     bound; ML extremes are checked against an independent R log-likelihood scan.
+
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
+- Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
+- Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
@@ -1013,22 +1355,34 @@ data-independent shapes (§15.21).
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
+- Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
+- Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
+- Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
+- Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
+- MacCallum, R. C., Browne, M. W., & Sugawara, H. M. (1996). Power analysis and determination of sample size for covariance structure modeling. *Psychological Methods*, 1(2), 130–149.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Maydeu-Olivares, A., & Joe, H. (2005). Limited- and full-information estimation and goodness-of-fit testing in $2^n$ contingency tables: A unified framework. *Journal of the American Statistical Association*, 100(471), 1009–1020.
+- Maydeu-Olivares, A., & Joe, H. (2006). Limited information goodness-of-fit testing in multidimensional contingency tables. *Psychometrika*, 71(4), 713–732.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
+- Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
+- Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
+- Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.

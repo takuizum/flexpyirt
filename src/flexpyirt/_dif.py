@@ -1,0 +1,198 @@
+"""Multiple-group likelihood-ratio DIF tests (Result layer, DESIGN.md §16.2).
+
+Post-fit Python orchestration: each tested item refits the model with one change to the
+parameter table (its parameters made equal across groups, or freed), and compares the two
+marginal log-likelihoods. Nothing here runs inside ``jit`` except the refits themselves.
+"""
+
+from __future__ import annotations
+
+import warnings
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Literal
+
+import numpy as np
+import pandas as pd
+from scipy import stats
+
+from flexpyirt._compile import TABLE_COLUMNS
+from flexpyirt.errors import ConvergenceWarning, SpecificationError
+
+if TYPE_CHECKING:
+    from flexpyirt.result import FitResult
+
+__all__ = ["DIFScheme", "PAdjust", "adjust_p", "dif_tests"]
+
+DIFScheme = Literal["add", "drop"]
+PAdjust = Literal["holm", "BH", "none"]
+
+DIF_COLUMNS = (
+    "item",
+    "converged",
+    "aic",
+    "sabic",
+    "hq",
+    "bic",
+    "x2",
+    "df",
+    "p",
+    "adj_p",
+)
+
+
+def adjust_p(p: np.ndarray, method: PAdjust) -> np.ndarray:
+    r"""Adjust p-values for multiple tests, as R's ``p.adjust`` (NaN entries are left out).
+
+    With :math:`p_{(1)}\le\dots\le p_{(m)}`:
+
+    - ``"holm"`` (Holm, 1979): :math:`\tilde p_{(i)}=\max_{k\le i}\min\{1,(m-k+1)\,p_{(k)}\}`
+      (mirt's ``DIF()`` default);
+    - ``"BH"`` (Benjamini & Hochberg, 1995): :math:`\tilde p_{(i)}=\min_{k\ge i}\min\{1,
+      \tfrac{m}{k}\,p_{(k)}\}`;
+    - ``"none"``: unchanged.
+    """
+    p = np.asarray(p, dtype=float)
+    if method == "none":
+        return p.copy()
+    out = np.full(p.shape, np.nan)
+    ok = np.flatnonzero(np.isfinite(p))
+    m = ok.size
+    if m == 0:
+        return out
+    order = ok[np.argsort(p[ok], kind="stable")]
+    ranks = np.arange(1, m + 1)
+    if method == "holm":
+        adj = np.maximum.accumulate((m - ranks + 1) * p[order])
+    elif method == "BH":
+        adj = np.minimum.accumulate((p[order] * m / ranks)[::-1])[::-1]
+    else:
+        raise SpecificationError(f"Unknown p_adjust={method!r}; use 'holm', 'BH' or 'none'.")
+    out[order] = np.minimum(adj, 1.0)
+    return out
+
+
+def _criteria(loglik: float, k: int, n: int) -> dict[str, float]:
+    """AIC, sample-size adjusted BIC, Hannan–Quinn and BIC of one fit (mirt's definitions)."""
+    m2 = -2.0 * loglik
+    return {
+        "aic": m2 + 2.0 * k,
+        "sabic": m2 + k * float(np.log((n + 2.0) / 24.0)),
+        "hq": m2 + 2.0 * k * float(np.log(np.log(n))),
+        "bic": m2 + k * float(np.log(n)),
+    }
+
+
+def _set_shared(table: pd.DataFrame, rows: np.ndarray, *, shared: bool) -> pd.DataFrame:
+    """Give the free ``rows`` (one item, several groups) one ``free_id`` per param, or one each."""
+    t = table.copy()
+    next_id = int(t["free_id"].max()) + 1
+    sub = t.loc[rows]
+    for _, idx in sub.groupby("param", sort=False).groups.items():
+        if shared:
+            t.loc[idx, "free_id"] = int(t.loc[idx, "free_id"].min())
+        else:
+            for k, i in enumerate(idx):
+                if k > 0:
+                    t.loc[i, "free_id"] = next_id
+                    next_id += 1
+    return t
+
+
+def dif_tests(
+    result: FitResult,
+    data: Any,
+    *,
+    group: Any,
+    items: Iterable[str],
+    params: Sequence[str] | None,
+    scheme: DIFScheme,
+    p_adjust: PAdjust,
+    item_names: list[str] | None,
+) -> pd.DataFrame:
+    """Run the likelihood-ratio DIF tests of :meth:`FitResult.dif` (see there)."""
+    from flexpyirt.fit import fit
+
+    model = result._model
+    if not model.is_multigroup:
+        raise SpecificationError("dif() needs a multiple-group model (Model.with_groups()).")
+    if result._has_priors:
+        raise SpecificationError(
+            "dif() compares marginal likelihoods; it is not defined for MAP fits with priors."
+        )
+    if scheme not in ("add", "drop"):
+        raise SpecificationError(f"Unknown scheme={scheme!r}; use 'add' or 'drop'.")
+    if p_adjust not in ("holm", "BH", "none"):
+        raise SpecificationError(f"Unknown p_adjust={p_adjust!r}; use 'holm', 'BH' or 'none'.")
+    if isinstance(items, str):
+        raise SpecificationError("items must be an iterable of item names, not a str.")
+    tested = list(dict.fromkeys(str(i) for i in items))
+    if not tested:
+        raise SpecificationError("dif() needs at least one item to test.")
+    unknown = [i for i in tested if i not in model.item_names]
+    if unknown:
+        raise SpecificationError(f"Unknown items: {unknown}.")
+    if isinstance(params, str):
+        raise SpecificationError("params must be an iterable of parameter names, not a str.")
+
+    base = result.parameters[list(TABLE_COLUMNS)].copy()
+    # Start every refit at the base estimates (same fixed point, fewer iterations).
+    base["value"] = result.parameters["estimate"].to_numpy(dtype=float)
+    k_base = result.n_params
+    n = result.n_obs
+    base_crit = _criteria(result.loglik, k_base, n)
+    lookup = dict(model.items)
+
+    rows_out = []
+    for item in tested:
+        names = model.item_kernel(lookup[item]).param_names
+        chosen = names if params is None else tuple(params)
+        bad = [p for p in chosen if p not in names]
+        if bad:
+            raise SpecificationError(f"Item {item!r} has no parameters {bad}.")
+        mask = ((base["item"] == item) & base["param"].isin(list(chosen)) & base["free"]).to_numpy()
+        rows = np.flatnonzero(mask)
+        table = _set_shared(base, rows, shared=(scheme == "add"))
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ConvergenceWarning)
+            new = fit(
+                model,
+                data,
+                group=group,
+                table=table,
+                item_names=item_names,
+                method=result._method,
+                quadrature=result._quadrature,
+                se=None,
+            )
+        for w in caught:
+            if not issubclass(w.category, ConvergenceWarning):
+                warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
+        k_new = new.n_params
+        df = abs(k_base - k_new)
+        if df == 0:
+            raise SpecificationError(
+                f"Item {item!r}: parameters {list(chosen)} are already "
+                f"{'equal across groups' if scheme == 'add' else 'free in every group'}; "
+                f"nothing to test with scheme={scheme!r}."
+            )
+        new_crit = _criteria(new.loglik, k_new, n)
+        # mirt's sign: criteria of the model with the item free minus the constrained one, so a
+        # negative difference favours DIF in both schemes.
+        if scheme == "add":
+            ll_free, ll_con, crit_free, crit_con = result.loglik, new.loglik, base_crit, new_crit
+        else:
+            ll_free, ll_con, crit_free, crit_con = new.loglik, result.loglik, new_crit, base_crit
+        x2 = max(0.0, 2.0 * (ll_free - ll_con))
+        rows_out.append(
+            {
+                "item": item,
+                "converged": bool(new.converged),
+                **{key: crit_free[key] - crit_con[key] for key in ("aic", "sabic", "hq", "bic")},
+                "x2": x2,
+                "df": int(df),
+                "p": float(stats.chi2.sf(x2, df)),
+            }
+        )
+    out = pd.DataFrame(rows_out)
+    out["adj_p"] = adjust_p(out["p"].to_numpy(), p_adjust)
+    return out[list(DIF_COLUMNS)]

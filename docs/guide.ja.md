@@ -20,7 +20,8 @@ flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめ�
 12. [ParameterTable を編集する](#12-parametertable-を編集する)
 13. [求積格子の選び方](#13-求積格子の選び方)
 14. [確認的多次元モデル](#14-確認的多次元モデル)
-15. [エラーと警告](#15-エラーと警告)
+15. [尺度リンキング](#15-尺度リンキング)
+16. [エラーと警告](#16-エラーと警告)
 
 ## 1. 準備
 
@@ -45,6 +46,7 @@ from flexpyirt import (
     FourPL,
     LogNormal,
     Model,
+    Nominal,
     Normal,
     NormalPrior,
     Quadrature,
@@ -112,11 +114,14 @@ print(spec.item_names[:3], mixed.item_names)
 | `GRM(n_cat=K)` | $P(y\ge k)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$ | `a`, `d1`…`d{K-1}` | `bk = -dk/a` |
 | `GPCM(n_cat=K)` | $P(y=k)\propto\exp(k\,a\theta+d_k)$, $d_0=0$ | `a`, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})/a` |
 | `PCM(n_cat=K)` | $P(y=k)\propto\exp(k\theta+d_k)$（$a=1$ 固定、$d_0=0$） | `a`（固定）, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})` |
+| `Nominal(n_cat=K)` | $P(y=k)\propto\exp(a\,\mathrm{ak}_k\,\theta+d_k)$（$\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$） | `a`, `ak1`…`ak{K-2}`, `d1`…`d{K-1}` | — |
 
-パラメタ化は mirt（`itemtype = "2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"graded"`, `"gpcm"`。多値に対する
+パラメタ化は mirt（`itemtype = "2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"graded"`, `"gpcm"`, `"nominal"`。多値に対する
 `"Rasch"` は `PCM`）と同じ傾き・切片形式。3PL / 4PL の `g`, `u` は自然尺度（$0 < g < u \le 1$）で推定する
 （mirt は logit 尺度で最適化するが、内点の最尤推定値は一致する）。多値項目のカテゴリは 0 始まり（mirt の
-`Science` のように 1 始まりのデータは 1 を引く）。
+`Science` のように 1 始まりのデータは 1 を引く）。`Nominal` には表示用の `b` 列がない。カテゴリに順序がない
+ため $	heta$ 尺度の隣接カテゴリ閾値は一般には定義できず（$\mathrm{ak}_k=\mathrm{ak}_{k-1}$ で特異になる）、mirt の
+`coef(m, IRTpars = TRUE)` も代わりに Bock のゼロ和の傾きと切片を返す。
 
 ```python
 theta3 = rng.normal(0, 1, 2000)
@@ -146,6 +151,11 @@ print(grm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
 ```python
 gpcm = fit(Model.uniform(GPCM(n_cat=n_cat), items=grm_df.columns), grm_df)
 print(gpcm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
+```
+
+```python
+nominal = fit(Model.uniform(Nominal(n_cat=n_cat), items=grm_df.columns), grm_df)
+print(nominal.items[["item", "a", "ak1", "ak2", "d1", "d2", "d3"]].round(3))
 ```
 
 ### パラメタを固定する
@@ -258,6 +268,19 @@ fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
 print(fit_table.round(3))
 ```
 
+### 限定情報の適合度（M2）
+
+`m2(data)` は Maydeu-Olivares & Joe (2005, 2006) の限定情報の適合度統計量を、項目得点の平均とペアごとの交差積
+（mirt の既定 `M2(type = "M2*")`。2 値項目では厳密に $M_2$）から計算する。あわせて RMSEA とその信頼区間（既定
+`ci=0.90`）、SRMSR、および 2 値モデルでは独立帰無モデルに対する TLI と CFI を返す（多値モデルでは `tli`・`cfi` は
+`NaN`。[DESIGN §16.3](DESIGN.ja.md) 参照）。欠測のないデータと、`Normal` 潜在分布の単一群 1 次元 MLE 推定
+（事前分布なし）が必要。
+
+```python
+m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi
+print(m2_table.round(3))
+```
+
 ## 6. 標準誤差
 
 - **`se="oakes"`**（既定）: Oakes (1999) の恒等式で観測情報行列を求める。E-step の期待度数を通した
@@ -303,6 +326,9 @@ print(vcov.iloc[:2, :2])
   `"WLE"` は項目尤度のみを使う。
 - どの手法でも欠測反応は尤度（`"WLE"` ではテスト情報量 $I(\theta)$ も）から除かれる。3PL / 4PL では、
   当て推量により尤度が $-\infty$ へ向かって単調増加する低得点パターンも `"ML"` で $-\infty$・SE NaN となる。
+  `Nominal` 項目の「最低」「最高」はカテゴリ傾き $a\,\mathrm{ak}_c$ が最小・最大のカテゴリで、カテゴリ 0 / $K-1$
+  とは限らない（例: $\mathrm{ak}_1<0$ では全 0 パターンの ML 推定値は有限。mirt はそこで $-\infty$ を返す。
+  [VALIDATION.md](VALIDATION.ja.md) V23）。
 - **`method="PV"` は明示的な JAX PRNG の `key`（例: `jax.random.key(0)`）が必須**: flexpyirt は
   グローバルな乱数状態を持たないため、同じ `key` で完全に再現可能であり、同じ反応パターンの回答者にも互いに
   独立な標本を与える。
@@ -383,6 +409,41 @@ print(eh.latent_weights.head())  # group, node, weight
 - 採点: EAP・ML・WLE・PV はヒストグラムを使う。MAP は連続な事前分布が必要なので `SpecificationError`。
 - ヒストグラムの重みの多くは弱くしか決まらないため、厳しい収束基準では EM の収束が遅い。`BAEM(squarem=True)` が有効。
 
+### Davidian 曲線
+
+`DavidianCurve(degree)` は $k \in \{1,\dots,10\}$ 個の角度パラメタ `phi_1`…`phi_k` で滑らかな非正規 1 次元潜在密度
+$h_k(z;\boldsymbol\phi) = P_k(z;\boldsymbol\phi)^2\varphi(z)$ を表す（Zhang & Davidian, 2001; Woods & Lin, 2009）。
+解析的に標準化しているため、任意の $\boldsymbol\phi$ で連続平均・分散が `mean`（既定 `0`）・`var`（既定 `1`）に一致する。
+`EmpiricalHistogram` と異なり増える潜在パラメタは $k$ 個だけで、項目パラメタと潜在パラメタの同時 Oakes / Hessian 標準誤差が得られる。
+
+```python
+from flexpyirt import DavidianCurve
+
+theta_skew = (rng.chisquare(4.0, 1200) - 4.0) / np.sqrt(8.0)
+skew_df = pd.DataFrame(simulate_2pl(a_true, d_true, theta_skew, rng), columns=items)
+
+dc = fit(
+    Model.uniform(TwoPL(), items=items).with_latent(DavidianCurve(3)),
+    skew_df,
+    method=BAEM(squarem=True),
+)
+print(dc.latent.round(3))  # mean, var, phi_1..phi_3 とその SE
+print(dc.score(skew_df.iloc[:3], method="EAP").round(3))  # 推定した Davidian 事前分布を使う
+```
+
+- **識別性**: `mean` と `var` は `Normal` と同じ規則に従う（既定は `0`・`1` 固定。Rasch / PCM では `free_var=True`、
+  FIPC では `DavidianCurve.free(degree)` を使う）。
+- **対象範囲**: 単一群の 1 次元モデルのみ（`with_groups()` と `with_factors()` は `SpecificationError`）。
+- **採点**: `"EAP"` と `"PV"` は推定した Davidian 密度を使い、`"ML"` と `"WLE"` は尤度のみ。Davidian 密度は多峰に
+  なったり $P_k$ の実根で 0 になったりするため、`"MAP"` は `SpecificationError`。
+- **正規に近い特性と局所最大**: $\boldsymbol\phi=\mathbf 0$（正規密度）では `phi_1` と `phi_2` の 1 次の効果が純粋な
+  位置・尺度の変化で標準化により除去されるため、Fisher 情報行列はそこで特異になる（`degree=1` では `phi_1`）。特性が
+  正規に近いと角度は不安定に定まり、その標準誤差は信頼できず、`Normal` に対する `DavidianCurve` の尤度比検定は通常の
+  $\chi^2$ 分布に従わない。次数（と `Normal`）の比較は AIC / BIC で行う（Woods & Lin, 2009）。尤度は複数の局所最大を
+  持つこともある（`degree=1` の例では既定の初期値が `phi_1 = 0.50` に達した一方、`-1.0` から始めると対数尤度が 2.2 点
+  高い解に達した）。重要な分析では複数の初期角度から推定し直し（`Model.parameter_table()` の `phi_*` 行の `value` を
+  変えて `table=` に渡す）、`loglik` が最も高い結果を採る。
+
 ## 9. 多母集団
 
 複数の集団（学年、受験年度、言語版など）の回答を同時に推定する。アンカー項目のパラメタを群間で等しくして
@@ -425,6 +486,22 @@ print(mg.items[mg.items["item"] == "q01"])  # アンカーは両群で同じ値
 ```python
 mg_scores = mg.score(mg_df.iloc[[0, -1]], group=["ref", "focal"])
 print(mg_scores)
+```
+
+### 特異項目機能（DIF）
+
+`dif(data, group=..., items=...)` は多母集団の尤度比検定を行う（項目ごとに 1 回推定し直す）。`scheme="add"`
+（既定）では推定済みモデルを基準とし、その項目のパラメタを群間で等値にする。`scheme="drop"`（項目を等値にした
+モデルから始める）では自由にする。`params=["d"]` で一部のパラメタだけを検定できる。
+`x2 = 2(loglik_free - loglik_constrained)`、`df` は制約で減るパラメタ数、`aic`・`sabic`・`hq`・`bic` は項目を自由に
+したモデルから制約したモデルを引いた差（負なら DIF を支持）で、mirt の `DIF()` と同じ。`adj_p` は既定で検定した
+項目にわたる Holm の補正（`p_adjust="BH"` または `"none"` も可）。
+
+```python
+# 尤度比検定による DIF: アンカーでない各項目のパラメタを群間で等値にして推定し直す
+# （mirt の DIF(scheme = "add")）。
+dif_table = mg.dif(mg_df, group=group, items=items[6:9])
+print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
 ```
 
 ## 10. 固定項目パラメタ推定（FIPC）
@@ -527,8 +604,27 @@ print(res_edit.items.set_index("item").loc["q05", ["a", "d"]])
 ```
 
 - 行の追加・削除や識別子の変更はできない（`SpecificationError`）。
-- `free_id` の共有は**同じ項目の同じパラメタを群間で**等しくする用途に限られる。異なる項目をまたぐ等値制約
-  （例: 全項目で共通の傾き）は未対応（M5 予定）。
+- `free_id` を共有する行は群をまたいでも、**異なる項目**（異なる項目モデル、例: 2PL と GRM の項目で共通の傾き）
+  をまたいでもよい。1 つの項目の中では `free_id` は 1 つのパラメタにだけ対応し、共有する行どうしの範囲と事前分布は
+  一致しなければならない。
+
+### 項目をまたぐ等値制約
+
+`Model.equal_across_items(items=..., params=[...])` は、指定した各パラメタを選んだ項目で共通の 1 つのパラメタにする
+（mirt の `CONSTRAIN` と同じく群ごとに適用）。`equal_across_groups` と組み合わせられ、表でそれらの行に同じ
+`free_id` を与えるのと同じ。
+
+```python
+# 全項目で共通の傾き（N(0, 1) の「1PL」）。切片は項目ごと。
+common_spec = Model.uniform(TwoPL(), items=items).equal_across_items(items=None, params=["a"])
+res_common = fit(common_spec, df, se="oakes")
+print(res_common.items[["item", "a", "a_se", "d"]].head(3))
+print(res_common.n_params)  # 傾き 1 つ + 項目ごとの切片
+```
+
+- こうした制約で結ばれた項目は M-step で同時に解かれる。SE・SQUAREM・事前分布（共有パラメタごとに 1 回）・JSON など
+  ほかの機能はそのまま使える。
+- 共通の自由な傾きは、項目ごとの自由な傾きと同様に、自由な潜在分散を識別しない（`IdentificationError`）。
 
 ## 13. 求積格子の選び方
 
@@ -546,7 +642,7 @@ mirt は分散を閉形式のモーメントで更新するため、格子の端
 
 **Gauss–Hermite.** `Normal` 潜在分布では、`Quadrature.gauss_hermite(n)` が次元あたり `n` 個の Gauss–Hermite 節点を置き、
 推定した平均・分散に合わせて重みを付け直す。$N(0,1)$ 付近では同じ点数の等間隔格子より精度が高いことが多いが、分散が
-1 より十分大きいと精度が落ちる。`EmpiricalHistogram` には等間隔格子が必要。
+1 より十分大きいと精度が落ちる。`EmpiricalHistogram` と `DavidianCurve` には等間隔格子が必要。
 
 ```python
 gh = Quadrature.gauss_hermite(41)
@@ -628,7 +724,46 @@ res_mg = fit(
 print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
 ```
 
-## 15. エラーと警告
+## 15. 尺度リンキング
+
+共通項目を含む 2 つのフォームを別々の標本で推定したあと、`flexpyirt.link(source, target)` を使うと、
+`source`（新フォーム）の尺度を `target`（基準フォーム）の尺度に写す線形変換 $\theta^* = A\theta + B$（$A > 0$）の
+係数を特性曲線法で推定できる（既定は Stocking & Lord, 1983、`method="haebara"` で Haebara, 1980、`symmetric=True` で
+Kim & Lee, 2006 の対称版）。Newton 最適化と Ogasawara (2001) のデルタ法標準誤差の微分はすべて JAX の自動微分で行う。
+
+```python
+from flexpyirt import link
+
+new_items = [*items[:6], "n01", "n02", "n03", "n04"]
+a_new = np.concatenate([a_true[:6], rng.lognormal(0.0, 0.3, 4)])
+d_new = np.concatenate([d_true[:6], rng.normal(0.0, 1.0, 4)])
+src_df = pd.DataFrame(simulate_2pl(a_new, d_new, rng.normal(0.5, 1.2, 800), rng), columns=new_items)
+src_res = fit(Model.uniform(TwoPL(), items=new_items), src_df, method=BAEM(squarem=True))
+
+linked_sl = link(src_res, res, method="stocking-lord")
+linked_hb = link(src_res, res, method="haebara", symmetric=True)
+print(linked_sl)
+print(
+    f"SL: A={linked_sl.A:.3f} (SE={linked_sl.A_se:.3f}), B={linked_sl.B:.3f} (SE={linked_sl.B_se:.3f})"
+)
+print(f"HB sym: A={linked_hb.A:.3f}, B={linked_hb.B:.3f}")
+print(linked_sl.items.head(4))
+print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
+```
+
+- 共通項目は両側で同じ項目カーネル・カテゴリ数でなければならない。リンキングは 2PL・3PL・GRM・GPCM と
+  2PL + GPCM 混在の共通項目について素の R 参照値（V20）と照合済みで、Rasch・4PL・PCM は同じカーネルを使い単体テストでのみ
+  確認している。Haebara 法は全カテゴリで和をとる（Kim & Lee, 2006）ため、2 値項目は Haebara の原式の 2 倍に数えられる。
+- 標準誤差は独立な推定を仮定する。同じ多母集団推定を `source` と `target` に渡す（`source_group=` / `target_group=`
+  を指定）と同時共分散を使う。最適化が収束しなかったときは SE を報告しない。
+- 共通項目の名前がフォーム間で異なるときは `items={source_name: target_name}` の辞書を渡す。
+  既定の求積格子（推定済み潜在分布）を変えるには `nodes=` / `weights=` を指定し、多母集団結果の群を結ぶときは
+  `source_group=` / `target_group=` で群を選ぶ。
+- `linked.items` は `source` の全項目を基準尺度へ変換した表で、そのまま `Model.fix_from()` に渡せる（Rasch・PCM の
+  項目は傾きが $1/A$ になる）。`linked.transform_theta()` はスカラー・配列・Series・採点 DataFrame（`theta`、`se`、
+  plausible values `pv1..`）を変換し、$(A, B)$ を既知として扱う（変換後の `se` はリンキング誤差を含まない）。
+
+## 16. エラーと警告
 
 | 種類 | いつ出るか |
 |---|---|
@@ -653,17 +788,27 @@ except SpecificationError as e:
 
 ## 参考文献
 
+- Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
+- Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
+- Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
+- Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
+- Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
+- Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
+- Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
+- Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.

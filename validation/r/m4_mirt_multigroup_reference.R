@@ -1,6 +1,6 @@
-# Multiple-group confirmatory 2D MIRT reference (VALIDATION.md V16) from R mirt.
+# Multiple-group confirmatory 2D MIRT reference (VALIDATION.md V21) from R mirt.
 # Run from the repository root:  Rscript validation/r/m4_mirt_multigroup_reference.R
-# Writes tests/reference/v16_mirt_multigroup.json. CI does not run R; the JSON is committed.
+# Writes tests/reference/v21_mirt_multigroup.json. CI does not run R; the JSON is committed.
 #
 # Two groups, F1 = items 1-6, F2 = items 7-12 (case b: item 7 also loads on F1), COV = F1*F2,
 # anchors (equal across groups) on both factors, invariance "free_means" and "free_var" for the
@@ -101,8 +101,8 @@ cases$mg2d_cross <- run_case("mg2d_cross", "2 groups, 2D 2PL with cross-loading 
                              dat2, grp, "F1 = 1-7\nF2 = 7-12\nCOV = F1*F2", sprintf("q%02d", c(1:3, 8:10)),
                              list(F1 = sprintf("q%02d", 1:7), F2 = sprintf("q%02d", 7:12)))
 
-res <- list(meta = list(case = "v16_mirt_multigroup", mirt_version = as.character(packageVersion("mirt")),
+res <- list(meta = list(case = "v21_mirt_multigroup", mirt_version = as.character(packageVersion("mirt")),
                         converged = TRUE), cases = cases)
-write_json(res, file.path("tests", "reference", "v16_mirt_multigroup.json"), auto_unbox = TRUE,
+write_json(res, file.path("tests", "reference", "v21_mirt_multigroup.json"), auto_unbox = TRUE,
            digits = NA, pretty = TRUE, na = "null")
-cat("wrote tests/reference/v16_mirt_multigroup.json\n")
+cat("wrote tests/reference/v21_mirt_multigroup.json\n")

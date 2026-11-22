@@ -2,9 +2,9 @@
 
 Implements the versioned plain-JSON format specified in DESIGN.md §15.26–§15.28:
 
-- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 2`` (version 1,
-  written before multidimensional models were supported, is still read), and
-  ``"flexpyirt_version"``.
+- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 3`` (versions 1
+  and 2, written before multidimensional models and across-item equalities were stored, are still
+  read), and ``"flexpyirt_version"``.
 - Strict RFC 8259 JSON (``allow_nan=False`` on write; rejecting ``parse_constant`` on read).
   Finite IEEE-754 float64 values use standard ``repr``-exact JSON numbers; non-finite values in
   float-typed fields are encoded explicitly as ``"NaN"``, ``"Infinity"``, or ``"-Infinity"``.
@@ -32,8 +32,14 @@ from flexpyirt._compile import (
 )
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import SpecificationError
-from flexpyirt.items import GPCM, GRM, PCM, FourPL, ItemModel, Rasch, ThreePL, TwoPL
-from flexpyirt.latent import EmpiricalHistogram, LatentSpec, Normal
+from flexpyirt.items import GPCM, GRM, PCM, FourPL, ItemModel, Nominal, Rasch, ThreePL, TwoPL
+from flexpyirt.latent import (
+    MAX_DAVIDIAN_DEGREE,
+    DavidianCurve,
+    EmpiricalHistogram,
+    LatentSpec,
+    Normal,
+)
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
 from flexpyirt.priors import Beta, LogNormal, NormalPrior, Prior
@@ -50,9 +56,9 @@ __all__ = [
 ]
 
 FORMAT_TAG = "flexpyirt.FitResult"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 """Schema version written by :func:`dump_fit_result` (2 adds the confirmatory factor structure)."""
-SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2})
+SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3})
 """Schema versions accepted by :func:`load_fit_result`; version 1 has no factor keys."""
 
 _INT32_MAX = (1 << 31) - 1
@@ -282,6 +288,7 @@ _ITEM_MODEL_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
     GRM: _serialize_polytomous_item,
     GPCM: _serialize_polytomous_item,
     PCM: _serialize_polytomous_item,
+    Nominal: _serialize_polytomous_item,
 }
 
 _ITEM_MODEL_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], ItemModel]] = {
@@ -292,6 +299,7 @@ _ITEM_MODEL_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], ItemModel]]
     GRM.name: _make_polytomous_item_loader(GRM),
     GPCM.name: _make_polytomous_item_loader(GPCM),
     PCM.name: _make_polytomous_item_loader(PCM),
+    Nominal.name: _make_polytomous_item_loader(Nominal),
 }
 
 
@@ -360,13 +368,46 @@ def _deserialize_eh_latent(obj: dict[str, Any], field_name: str) -> EmpiricalHis
     )
 
 
+def _serialize_davidian_latent(dist: DavidianCurve) -> dict[str, Any]:
+    return {
+        "type": "DavidianCurve",
+        "degree": int(dist.degree),
+        "mean": _encode_float(dist.mean),
+        "var": _encode_float(dist.var),
+        "free_mean": bool(dist.free_mean),
+        "free_var": bool(dist.free_var),
+    }
+
+
+def _deserialize_davidian_latent(obj: dict[str, Any], field_name: str) -> DavidianCurve:
+    _check_keys(
+        obj,
+        required={"type", "degree", "mean", "var", "free_mean", "free_var"},
+        field_name=field_name,
+    )
+    return DavidianCurve(
+        degree=_require_int(
+            obj["degree"],
+            field_name=f"{field_name}.degree",
+            min_value=1,
+            max_value=MAX_DAVIDIAN_DEGREE,
+        ),
+        mean=_decode_float(obj["mean"], field_name=f"{field_name}.mean", finite=True),
+        var=_decode_float(obj["var"], field_name=f"{field_name}.var", finite=True),
+        free_mean=_require_bool(obj["free_mean"], field_name=f"{field_name}.free_mean"),
+        free_var=_require_bool(obj["free_var"], field_name=f"{field_name}.free_var"),
+    )
+
+
 _LATENT_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
     Normal: _serialize_normal_latent,
     EmpiricalHistogram: _serialize_eh_latent,
+    DavidianCurve: _serialize_davidian_latent,
 }
 _LATENT_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], LatentSpec]] = {
     "Normal": _deserialize_normal_latent,
     "EmpiricalHistogram": _deserialize_eh_latent,
+    "DavidianCurve": _deserialize_davidian_latent,
 }
 
 
@@ -657,6 +698,10 @@ def _serialize_model(model: Model) -> dict[str, Any]:
             else [{"name": name, "items": list(items)} for name, items in model.factors]
         ),
         "correlated_factors": bool(model.correlated_factors),
+        "equal_items": [
+            {"items": list(eq_items), "params": list(eq_params)}
+            for eq_items, eq_params in model.equal_items
+        ],
     }
 
 
@@ -664,14 +709,18 @@ def _deserialize_model(raw: Any, *, schema_version: int = SCHEMA_VERSION) -> Mod
     """Deserialize and validate a :class:`~flexpyirt.Model` specification.
 
     Schema version 2 adds ``factors`` and ``correlated_factors``; version 1 payloads have neither
-    and are unidimensional. A factor structure is rebuilt through :meth:`Model.with_factors`, so
-    the same validation applies as when it was first declared, and the fixed values, equalities
-    and priors are checked against the multidimensional parameter names (``a1``..``aD``).
+    and are unidimensional. Schema version 3 adds ``equal_items`` (equalities across items,
+    DESIGN.md §16.1), rebuilt through :meth:`Model.equal_across_items`. A factor structure is
+    rebuilt through :meth:`Model.with_factors`, so the same validation applies as when it was
+    first declared, and the fixed values, equalities and priors are checked against the
+    multidimensional parameter names (``a1``..``aD``).
     """
     obj = _require_dict(raw, field_name="model")
     required = {"items", "fixed", "latent", "groups", "equal", "priors"}
     if schema_version >= 2:
         required |= {"factors", "correlated_factors"}
+    if schema_version >= 3:
+        required |= {"equal_items"}
     _check_keys(obj, required=required, field_name="model")
 
     items_raw = _require_list(obj["items"], field_name="model.items")
@@ -815,12 +864,33 @@ def _deserialize_model(raw: Any, *, schema_version: int = SCHEMA_VERSION) -> Mod
             )
         priors_list.append((p_item, p_param, p_dist))
 
+    with_items = base
+    if schema_version >= 3:
+        eq_items_raw = _require_list(obj["equal_items"], field_name="model.equal_items")
+        for idx, entry in enumerate(eq_items_raw):
+            loc = f"model.equal_items[{idx}]"
+            ei_obj = _require_dict(entry, field_name=loc)
+            _check_keys(ei_obj, required={"items", "params"}, field_name=loc)
+            ei_items = [
+                _require_str(v, field_name=f"{loc}.items[{k}]")
+                for k, v in enumerate(_require_list(ei_obj["items"], field_name=f"{loc}.items"))
+            ]
+            ei_params = [
+                _require_str(v, field_name=f"{loc}.params[{k}]")
+                for k, v in enumerate(_require_list(ei_obj["params"], field_name=f"{loc}.params"))
+            ]
+            unknown_ei = [i for i in ei_items if i not in lookup]
+            if unknown_ei:
+                raise SpecificationError(f"{loc}.items references unknown items {unknown_ei}.")
+            with_items = with_items.equal_across_items(items=ei_items, params=ei_params)
+
     return replace(
         base,
         fixed=tuple(fixed_list),
         latent=latent,
         groups=groups,
         equal=tuple(equal_list),
+        equal_items=with_items.equal_items,
         priors=tuple(priors_list),
     )
 
@@ -1306,7 +1376,7 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
         )
     elif "latent_weights" in obj:
         raise SpecificationError(
-            "Unexpected key 'latent_weights' for a Normal latent-distribution FitResult."
+            "Unexpected key 'latent_weights' for a non-EmpiricalHistogram FitResult."
         )
     method = _deserialize_method(obj["method"], field_name="method")
     n_obs = _require_int(obj["n_obs"], field_name="n_obs", min_value=1, max_value=_INT64_MAX)

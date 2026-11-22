@@ -36,12 +36,15 @@
   （`b_se` / `bk_se`、V12 で照合済み）。
 - [x] `FitResult` の JSON 入出力（`FitResult.to_json`, `FitResult.from_json`）。
 - [x] スコアリング（MAP, ML, WLE, plausible values。V13 で照合済み）。
-- [x] 確認的 2–3 次元 MIRT（`Model.with_factors()`、直積格子、多変量正規の因子間相関、Oakes/Hessian SE、EAP・MAP・ML・WLE スコアリング。V14 で照合済み。多母集団は V16 で照合済み）。
+- [x] 確認的 2–3 次元 MIRT（`Model.with_factors()`、直積格子、多変量正規の因子間相関、Oakes/Hessian SE、EAP・MAP・ML・WLE スコアリング。V14 で照合済み。多母集団は V21 で照合済み）。
 - **受け入れ基準**: mirt の `fscores` と EAP / MAP が一致。2 次元確認的モデルが mirt と一致。
 
 ## M5 以降（候補）
-- 項目をまたぐ等値制約の M-step。
-- Davidian 曲線・混合正規の潜在分布。
-- 微分可能なリンキング（Haebara / Stocking–Lord とその一般化）をライブラリの上に実装。
+- [x] 項目をまたぐ等値制約の M-step（`Model.equal_across_items()`、項目・項目モデルをまたぐ `free_id` の共有、連結成分ごとの同時 Newton。V16 で照合済み）。
+- [x] Davidian 曲線の潜在分布（`DavidianCurve`、単一群 1 次元、解析的標準化、Oakes/Hessian SE。V19 で照合済み）。
+- 混合正規の潜在分布。
+- [x] 微分可能なリンキング（`link()`, `LinkResult`: Haebara / Stocking–Lord の非対称・対称版、自動微分による Ogasawara デルタ法 SE。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目について V20 で照合済み）。
 - [x] 項目適合度: S-X2（`FitResult.item_fit()`、単一群 1 次元。V15 で照合済み）。
-- DIF（多群の尤度比検定）、M2。
+- [x] DIF: 多群の尤度比検定（`FitResult.dif()`、`add` / `drop` の 2 方式、Holm / BH 補正。V17 で照合済み）。
+- [x] M2 限定情報の適合度（`FitResult.m2()`、単一群 1 次元の $M_2$ / $M_2^*$、RMSEA と信頼区間、SRMSR、2 値の TLI / CFI。V18 で照合済み）。
+- [x] 名義反応モデル（`Nominal(n_cat)`、mirt の `itemtype = "nominal"` と同じ Thissen, Cai & Bock (2010) のパラメタ化。V23 で 1 因子・2 因子を照合済み、3 因子は単体テストのみ）。
