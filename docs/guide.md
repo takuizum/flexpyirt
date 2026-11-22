@@ -452,6 +452,23 @@ mg_scores = mg.score(mg_df.iloc[[0, -1]], group=["ref", "focal"])
 print(mg_scores)
 ```
 
+### Differential item functioning (DIF)
+
+`dif(data, group=..., items=...)` runs multiple-group likelihood-ratio tests, one refit per item.
+With `scheme="add"` (default) the fitted model is the baseline and the item's parameters are made
+equal across groups; with `scheme="drop"` (start from a model with the items equal) they are freed.
+`params=["d"]` tests only some parameters. `x2 = 2(loglik_free - loglik_constrained)`, `df` is the
+number of parameters the constraint removes, and `aic`, `sabic`, `hq`, `bic` are the model with
+the item free minus the constrained one (negative values favour DIF), as in mirt's `DIF()`.
+`adj_p` is Holm-adjusted over the tested items by default (`p_adjust="BH"` or `"none"`).
+
+```python
+# Likelihood-ratio DIF tests: constrain each non-anchor item's parameters to be equal across
+# groups and refit (mirt's DIF(scheme = "add")).
+dif_table = mg.dif(mg_df, group=group, items=items[6:9])
+print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
+```
+
 ## 10. Fixed item parameter calibration (FIPC)
 
 Fix some items at the values of an already scaled item bank and estimate the new items and the

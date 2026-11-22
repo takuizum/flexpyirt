@@ -143,6 +143,33 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 **例外**: 多次元・多母集団・`EmpiricalHistogram` のモデル、欠測を含むデータ、観測されないカテゴリがある項目、
 正でない `mincell` の場合に `SpecificationError`。
 
+#### `FitResult.dif`
+
+```text
+dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None) -> DataFrame
+```
+
+多母集団モデルの群間の尤度比検定による DIF（[ガイド 9 節](guide.ja.md#特異項目機能dif)）。mirt の `DIF()` に相当。
+項目ごとに、その項目の `params` を群間で等値にして（`scheme="add"`）または群ごとに自由にして（`scheme="drop"`）
+モデルを推定し直し（同じ `BAEM` 設定と求積、この推定値から開始）、
+$X^2 = 2(\ell_{\text{free}} - \ell_{\text{constrained}})$、$df = |k_{\text{base}} - k_{\text{new}}|$ を求める。
+
+| 引数 | 説明 |
+|---|---|
+| `data`, `group` | この結果を推定したときの反応と群ラベル |
+| `items` | 検定する項目（項目ごとに 1 回推定し直す） |
+| `params` | 検定する内部パラメタ（既定: 各項目の全パラメタ） |
+| `scheme` | `"add"`（制約する。推定済みモデルが基準）または `"drop"`（自由にする） |
+| `p_adjust` | `adj_p` の補正。`"holm"`（既定、mirt と同じ）、`"BH"`（Benjamini–Hochberg）、`"none"` |
+| `item_names` | `data` が配列のときの列名 |
+
+**戻り値**: `item`, `converged`, `aic`, `sabic`, `hq`, `bic`（項目を自由にしたモデル − 制約したモデル。負なら DIF を
+支持）, `x2`, `df`, `p`, `adj_p` 列の `DataFrame`。
+
+**例外**: 単一群のモデル、事前分布つきの MAP 推定、未知の項目やパラメタ、検定するものがない項目（`"add"` で
+すでに等値、`"drop"` ですでに自由）では `SpecificationError`。推定し直すモデルが識別できない（例: 唯一のアンカーを
+自由にする）と `IdentificationError`。
+
 #### `FitResult.to_json`
 
 ```text

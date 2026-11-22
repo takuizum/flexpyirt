@@ -37,6 +37,7 @@
 | V13 | 能力値スコアリング: MAP・ML・WLE（2PL・GRM・GPCM・3PL・2 群・欠測） | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
 | V15 | S-X2 項目適合度（GRM・GPCM・分散自由の PCM・3PL・FIPC の 2PL、`mincell` 1 と 3） | `itemfit(m, fit_stats = "S_X2")` | M5 |
 | V16 | 項目をまたぐ等値制約（LSAT7 の共通傾き、2PL + graded のモデル間制約、アンカーつき 2 群 + 共通傾き） | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
+| V17 | V4 のデータでの尤度比検定による DIF（`a`+`d` と `d` の `add`、完全不変モデルからの `a`+`d` の `drop`） | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -292,6 +293,13 @@
   対数尤度 $4\times10^{-11}$、Oakes SE（相対）$1.3\times10^{-8}$、Hessian と mirt Richardson SE $2.9\times10^{-8}$、
   flexpyirt の Oakes と Hessian $5\times10^{-15}$。自由パラメタ数は mirt の `nest` と一致。テスト:
   `tests/test_mirt_m5_equal_items.py`。参照値生成: `validation/r/m5_equal_items_reference.R`。
+- **尤度比検定による DIF（V17、M5）**: V4 のデータで mirt の `DIF()`（`optimizer = "NR"`、`TOL = 1e-10`、基準モデルと
+  すべての再推定で $[-8,8]$ の 81 点）。アンカーつきモデル（q01–q05 を等値、焦点群の平均と分散を自由）からの
+  `scheme = "add"`（q06–q15 の `a1`+`d` と `d`）と、完全不変モデルからの `scheme = "drop"`（全項目の `a1`+`d`）。mirt は
+  情報量規準を（どちらの方式でも）項目を自由にしたモデル − 制約したモデルで報告し、p 値は既定で Holm 補正
+  （`p.adjust = "holm"`）。mirt の `p` は `1 - pchisq(...)` なので非常に大きな $X^2$ では厳密に 0（flexpyirt は生存関数）。
+  一致（通常の EM・SQUAREM とも）: $X^2$ と AIC/SABIC/HQ/BIC の差 $2.2\times10^{-11}$、`p`・`adj_p` $3\times10^{-11}$。
+  テスト: `tests/test_mirt_m5_dif.py`。参照値生成: `validation/r/m5_dif_reference.R`。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

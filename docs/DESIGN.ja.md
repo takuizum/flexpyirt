@@ -681,9 +681,22 @@ class ItemKernel(Protocol):
    `information_hessian` と SQUAREM の範囲も同様）。デルタ法 SE、`n_params`（`free_id` ごとに 1 回）、JSON
    （モデルの `equal_items` フィールド、スキーマバージョン 3）は表から従う。
    **識別**: §4.5・§14.5 の必要条件は変えない（例: 共通の自由傾きと自由な潜在分散は、固定された傾きがないので引き続き拒否）。
+2. **多母集団の尤度比検定による DIF（`FitResult.dif`）**:
+   `FitResult.dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None)` は、推定済みの多母集団モデルの
+   群間で `items` の各項目の特異項目機能（DIF）を検定する（Thissen, Steinberg & Wainer, 1993。mirt の `DIF()` に相当）。
+   `scheme="add"` では推定済みモデルを基準とし、各項目の `params`（既定: その項目の全パラメタ）を群間で等値にする。
+   `scheme="drop"` では逆に群ごとに自由にする（群ごとに別の `free_id`）。変更したモデルを同じ `BAEM` 設定・求積で
+   基準の推定値から推定し直し、$X^2=2(\ell_{\text{free}}-\ell_{\text{constrained}})$、$df=|k_{\text{base}}-k_{\text{new}}|$
+   から $p=P(\chi^2_{df}>X^2)$ を求める。結果は項目ごとに 1 行で、`item`、`converged`、AIC・SABIC
+   （$-2\ell+k\log((N+2)/24)$）・HQ（$-2\ell+2k\log\log N$）・BIC の差（項目を自由にしたモデル − 制約したモデル。mirt と同じ符号で、負なら DIF を支持）、`x2`、`df`、
+   `p`、`adj_p`（検定した項目にわたる補正。既定は mirt の `p.adjust = "holm"` と同じ Holm (1979)、`p_adjust="BH"` で Benjamini & Hochberg (1995)、`"none"` で補正なし）。変更は
+   パラメタ表で行うので識別性は通常の推定と同じく検査され（唯一のアンカーを自由にすると `IdentificationError`）、
+   すでに等値（`"add"`）またはすでに自由（`"drop"`）な項目は `SpecificationError`。MAP 推定は拒否する（統計量は
+   最尤推定値での周辺尤度を必要とするため）。DIF は Result 層の推定後の処理で、`jit` で動くのは再推定だけ。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
+- Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
@@ -694,6 +707,7 @@ class ItemKernel(Protocol):
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
+- Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -708,6 +722,7 @@ class ItemKernel(Protocol):
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
+- Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.

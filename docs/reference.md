@@ -155,6 +155,37 @@ free latent parameters (mirt's convention).
 **Raises**: `SpecificationError` for multidimensional, multiple-group or `EmpiricalHistogram`
 models, missing responses, an item with an unobserved category, or a non-positive `mincell`.
 
+#### `FitResult.dif`
+
+```text
+dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None) -> DataFrame
+```
+
+Likelihood-ratio DIF tests across the groups of a multiple-group model
+([guide section 9](guide.md#differential-item-functioning-dif)), as mirt's `DIF()`. For each item
+the model is refitted (same `BAEM` settings and quadrature, starting from these estimates) with
+the item's `params` made equal across groups (`scheme="add"`) or freed in every group
+(`scheme="drop"`); $X^2 = 2(\ell_{\text{free}} - \ell_{\text{constrained}})$ with
+$df = |k_{\text{base}} - k_{\text{new}}|$.
+
+| Argument | Description |
+|---|---|
+| `data`, `group` | The responses and group labels this result was fitted to |
+| `items` | Items to test (one refit each) |
+| `params` | Internal parameters to test (default: all of each item's parameters) |
+| `scheme` | `"add"` (constrain; the fitted model is the baseline) or `"drop"` (free) |
+| `p_adjust` | `"holm"` (default, mirt's), `"BH"` (Benjamini–Hochberg) or `"none"` for `adj_p` |
+| `item_names` | Column names when `data` is an array |
+
+**Returns**: `DataFrame` with columns `item`, `converged`, `aic`, `sabic`, `hq`, `bic` (the model
+with the item free minus the constrained one; negative values favour DIF), `x2`, `df`, `p` and
+`adj_p`.
+
+**Raises**: `SpecificationError` for single-group models, MAP fits with priors, unknown items or
+parameters, or an item with nothing to test (already equal for `"add"`, already free for
+`"drop"`); `IdentificationError` if a refitted model is not identified (e.g. freeing the only
+anchors).
+
 #### `FitResult.to_json`
 
 ```text
