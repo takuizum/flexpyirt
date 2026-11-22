@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from benchmarks import data as bench_data
 from benchmarks import report as bench_report
 from benchmarks import run_flexpyirt
 
 
+@pytest.mark.slow
 def test_python_benchmark_pipeline_quick_smallest_case(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     results_dir = tmp_path / "results"

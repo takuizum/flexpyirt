@@ -23,6 +23,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "pandas-stubs>=2.1",
+    "pytest-xdist>=3.8.0",
 ]
 
 [build-system]
@@ -69,5 +70,11 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = ["-ra", "--strict-markers", "--strict-config"]
+# Parallel by default (pytest-xdist). `loadfile` keeps each module on one worker so JAX
+# compilations are reused within a module (conftest clears the cache between modules).
+# Use `-n 0` to run serially, e.g. when debugging.
+addopts = ["-ra", "--strict-markers", "--strict-config", "-n", "auto", "--dist", "loadfile"]
+markers = [
+    "slow: long-running (>~10 s) test; skipped on PR CI, run on pushes to develop/main. Deselect locally with -m 'not slow'.",
+]
 xfail_strict = true

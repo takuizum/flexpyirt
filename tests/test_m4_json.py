@@ -194,6 +194,7 @@ def test_roundtrip_rasch_free_variance(tmp_path: Path) -> None:
     _assert_fit_result_identical(res, from_str, score_sub)
 
 
+@pytest.mark.slow
 def test_roundtrip_grm_gpcm_pcm_and_mixed(tmp_path: Path) -> None:
     rng = np.random.default_rng(5001)
     n = 600

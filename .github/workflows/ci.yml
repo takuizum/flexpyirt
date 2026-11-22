@@ -4,9 +4,15 @@ on:
   push:
     branches: [main, develop]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# A new push to the same PR cancels the run in progress (pushes to develop/main always finish).
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -31,7 +37,11 @@ jobs:
         run: uv run ruff format --check .
       - name: Mypy
         run: uv run mypy
+      # PRs skip @pytest.mark.slow tests; pushes to develop/main and manual runs run everything.
+      # Parallelism (pytest-xdist, -n auto) is set in pyproject.toml.
       - name: Pytest
-        run: uv run pytest
+        env:
+          MARKEXPR: ${{ github.event_name == 'pull_request' && 'not slow' || '' }}
+        run: uv run pytest --durations=15 -m "$MARKEXPR"
       - name: Editable install smoke test (isolated env)
         run: uv run --isolated --no-project --with-editable . python -c "import flexpyirt; print(flexpyirt.__version__)"

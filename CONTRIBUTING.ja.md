@@ -64,6 +64,10 @@ uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
 
+テストは pytest-xdist で並列に走る（`-n auto`）。直列にしたいときは `-n 0` を付ける。
+10 秒程度を超えるテストには `@pytest.mark.slow` を付ける。PR の CI はこれを飛ばし（`-m "not slow"`）、
+`develop`/`main` への push では全テストを走らせる。手元で素早く確かめるなら `uv run pytest -m "not slow"`。新しく 10 秒を超えるテストを書いたら `slow` を付ける。
+
 mirt の参照値を作り直すとき（R 4.4+ と mirt が必要）:
 
 ```bash
