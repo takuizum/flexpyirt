@@ -45,11 +45,12 @@ from flexpyirt.items import (
 from flexpyirt.latent import (
     DavidianCurve,
     EmpiricalHistogram,
-    Normal,
-    correlation_matrix_is_positive_definite,
+    NormalMixture,
+    correlation_matrix_is_pd,
     davidian_param_names,
     eh_project_floor,
     latent_param_names,
+    mixture_param_names,
 )
 from flexpyirt.model import LATENT_ITEM
 from flexpyirt.priors import (
@@ -379,6 +380,26 @@ def _order_grm_intercepts(
     return out
 
 
+def _mixture_latent_rows(dist: NormalMixture) -> list[tuple[str, float, bool, float, float]]:
+    """Latent ``(param, value, free, lower, upper)`` rows of a ``NormalMixture`` (DESIGN §16.7).
+
+    ``mean`` and ``var`` behave as for ``Normal``; the raw shape parameters ``rmean_c``,
+    ``rvar_c`` and ``logit_c`` (``c >= 2``) are free, starting at
+    :meth:`~flexpyirt.NormalMixture.raw_starts`.
+    """
+    rows: list[tuple[str, float, bool, float, float]] = [
+        ("mean", dist.mean, dist.free_mean, -np.inf, np.inf),
+        ("var", dist.var, dist.free_var, 0.0, np.inf),
+    ]
+    starts = dist.raw_starts()
+    for c in range(2, dist.n_components + 1):
+        rmean, rvar, logit = starts[3 * (c - 2) : 3 * (c - 1)]
+        rows.append((f"rmean_{c}", rmean, True, -np.inf, np.inf))
+        rows.append((f"rvar_{c}", rvar, True, 0.0, np.inf))
+        rows.append((f"logit_{c}", logit, True, -np.inf, np.inf))
+    return rows
+
+
 def _davidian_phi_starts(degree: int, y: np.ndarray) -> list[float]:
     """Return small skewness-aligned starting angles for ``DavidianCurve`` (DESIGN.md §16.4).
 
@@ -505,6 +526,9 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                 ),
             ]
             lat_model = "Davidian"
+        elif isinstance(latent, NormalMixture):
+            latent_rows = _mixture_latent_rows(latent)
+            lat_model = "Mixture"
         elif not model.is_multidimensional:
             latent_rows = [
                 ("mean", latent.mean, latent.free_mean, -np.inf, np.inf),
@@ -624,6 +648,12 @@ def model_parameter_schema(model: Model) -> pd.DataFrame:
             for j in range(1, latent.degree + 1):
                 rows.append((group_name, LATENT_ITEM, f"phi_{j}", "Davidian", -np.inf, np.inf))
             continue
+        if isinstance(latent, NormalMixture):
+            for lat_param in mixture_param_names(latent.n_components):
+                positive = lat_param == "var" or lat_param.startswith("rvar_")
+                lo_hi = (0.0, np.inf) if positive else (-np.inf, np.inf)
+                rows.append((group_name, LATENT_ITEM, lat_param, "Mixture", *lo_hi))
+            continue
         if not model.is_multidimensional:
             rows.append((group_name, LATENT_ITEM, "mean", "Normal", -np.inf, np.inf))
             rows.append((group_name, LATENT_ITEM, "var", "Normal", 0.0, np.inf))
@@ -671,7 +701,7 @@ def _validate_value_column(
             )
         if (
             item_col[i] == LATENT_ITEM
-            and (param_col[i] == "var" or str(param_col[i]).startswith("var_"))
+            and (param_col[i] == "var" or str(param_col[i]).startswith(("var_", "rvar_")))
             and not value[i] > 0
         ):
             raise SpecificationError(f"Latent variance must be positive at {where}.")
@@ -1488,6 +1518,25 @@ def compile_problem(
             standardize_mean=std_mean,
             standardize_var=std_var,
             davidian_degree=0,
+        )
+    elif model.is_mixture:
+        n_comp = model.mixture_components
+        lat_params = mixture_param_names(n_comp)
+        lat_vals = np.array(
+            [[lookup[(g, LATENT_ITEM, p)][:4] for p in lat_params] for g in groups], dtype=float
+        )
+        latent = LatentBlock(
+            fixed_values=jnp.asarray(lat_vals[:, :, 0], dtype=jnp.float64),
+            free_index=jnp.asarray(lat_vals[:, :, 1].astype(np.int32)),
+            lower=jnp.asarray(lat_vals[:, :, 2], dtype=jnp.float64),
+            upper=jnp.asarray(lat_vals[:, :, 3], dtype=jnp.float64),
+            eh_weights=jnp.ones((n_groups, 1), dtype=jnp.float64),
+            eh_min_weight=jnp.zeros((n_groups,), dtype=jnp.float64),
+            is_eh=False,
+            standardize_mean=False,
+            standardize_var=False,
+            davidian_degree=0,
+            mixture_components=n_comp,
         )
     elif model.is_davidian:
         degree = model.davidian_degree

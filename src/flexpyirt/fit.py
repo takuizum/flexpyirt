@@ -20,6 +20,7 @@ from flexpyirt.errors import (
     SpecificationError,
 )
 from flexpyirt.items import ItemKernel, NominalKernel
+from flexpyirt.latent import mixture_components, mixture_param_names
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
 from flexpyirt.quadrature import Quadrature
@@ -37,6 +38,10 @@ NOMINAL_MIN_SLOPE = 1e-3
 """Slope norm below which a nominal item with a free slope is reported as degenerate."""
 NOMINAL_MAX_PARAM = 50.0
 """Absolute ``ak`` or ``d`` above which a nominal item is reported as degenerate."""
+MIXTURE_MIN_WEIGHT = 1e-3
+"""Mixing proportion below which a ``NormalMixture`` component is reported as degenerate."""
+MIXTURE_COLLAPSE_TOL = 1e-3
+"""Mean and variance distance below which two mixture components are reported as collapsed."""
 SQUAREM_FALLBACK_WARN_MIN = 5
 """Minimum full fallbacks to ``theta_2`` before warning about frequent SQUAREM fallbacks."""
 SQUAREM_FALLBACK_WARN_RATE = 0.5
@@ -178,6 +183,8 @@ def fit(
     params["estimate"] = estimate
     params["se"] = se_column
     _warn_heywood(params, spec)
+    if spec.is_mixture:
+        _warn_mixture_degenerate(params, spec, quadrature)
 
     history = pd.DataFrame(
         {
@@ -292,6 +299,51 @@ def _warn_nominal_degenerate(
             "scoring coefficients (e.g. ak_k = k, the GPCM), or use a simpler item model.",
             HeywoodWarning,
             stacklevel=4,
+        )
+
+
+def _warn_mixture_degenerate(params: pd.DataFrame, spec: Model, quadrature: Quadrature) -> None:
+    r"""Warn about degenerate ``NormalMixture`` solutions (DESIGN.md §16.7).
+
+    With the standardized components :math:`(\pi_c,\mu_c,\sigma_c^2)`, one ``HeywoodWarning``
+    lists every component with :math:`\pi_c<` ``MIXTURE_MIN_WEIGHT`` (its location and scale
+    are unidentified), :math:`\sigma_c` below half the smallest node spacing (narrower than the grid
+    can resolve), or :math:`\mu_c` outside the grid, and every pair of components whose means and
+    variances both differ by less than ``MIXTURE_COLLAPSE_TOL`` (a collapsed mixture).
+    """
+    names = list(mixture_param_names(spec.mixture_components))
+    lat = params[params["item"] == LATENT_ITEM].set_index("param")["estimate"]
+    pi, means, variances = (
+        np.asarray(x, dtype=float)
+        for x in mixture_components(jnp.asarray(lat.loc[names].to_numpy(dtype=float)))
+    )
+    nodes = np.sort(np.asarray(quadrature.nodes(), dtype=float))
+    spacing = float(np.min(np.diff(nodes)))
+    issues: list[str] = []
+    for c in range(len(pi)):
+        label = f"component {c + 1} (pi={pi[c]:.3g}, mean={means[c]:.4g}, var={variances[c]:.3g})"
+        if pi[c] < MIXTURE_MIN_WEIGHT:
+            issues.append(f"{label}: weight below {MIXTURE_MIN_WEIGHT}")
+        if not variances[c] >= (0.5 * spacing) ** 2:
+            issues.append(f"{label}: sd below half the grid spacing {spacing:.3g}")
+        if not nodes[0] <= means[c] <= nodes[-1]:
+            issues.append(f"{label}: mean outside the grid [{nodes[0]:g}, {nodes[-1]:g}]")
+    for c in range(len(pi)):
+        for c2 in range(c + 1, len(pi)):
+            if (
+                abs(means[c] - means[c2]) < MIXTURE_COLLAPSE_TOL
+                and abs(variances[c] - variances[c2]) < MIXTURE_COLLAPSE_TOL
+            ):
+                issues.append(f"components {c + 1} and {c2 + 1} coincide")
+    if issues:
+        warnings.warn(
+            "Degenerate normal-mixture solution: "
+            + "; ".join(issues)
+            + ". The mixture is not identified there (a component can be dropped or its "
+            "parameters are not determined by the data); try other starting values (means=, "
+            "variances=, weights=) or fewer components.",
+            HeywoodWarning,
+            stacklevel=3,
         )
 
 
