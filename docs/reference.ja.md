@@ -123,7 +123,7 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 #### `FitResult.item_fit`
 
 ```text
-item_fit(data, *, mincell=1.0, item_names=None) -> DataFrame
+item_fit(data, *, mincell=1.0, group=None, item_names=None) -> DataFrame
 ```
 
 Orlando–Thissen の S-X2 項目適合度（[ガイド 5 節](guide.ja.md#項目適合度s-x2)）。各項目について、合計得点
@@ -136,12 +136,13 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 |---|---|
 | `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
 | `mincell` | まとめる前のセルあたり最小期待度数（既定 `1.0`） |
+| `group` | 群ラベル（多母集団モデルでは必須。群ごとに S-X2 を計算する、DESIGN §15.45） |
 | `item_names` | `data` が配列のときの列名 |
 
 **戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
-`df <= 0` になる項目は `df = 0` で統計量は NaN。
+`df <= 0` になる項目は `df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
 
-**例外**: 多次元・多母集団・`EmpiricalHistogram`・`DavidianCurve` のモデル、欠測を含むデータ、観測されないカテゴリがある
+**例外**: 多次元・`EmpiricalHistogram`・`DavidianCurve` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
 項目、正でない `mincell` の場合に `SpecificationError`。
 
 #### `FitResult.m2`

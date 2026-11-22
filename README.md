@@ -34,7 +34,7 @@ calibration and fixed item parameter calibration (FIPC).
 | Davidian curves | `DavidianCurve(degree)` seminonparametric latent distributions (Zhang & Davidian, 2001; Woods & Lin, 2009) for single-group unidimensional models; analytically standardized to exact continuous `mean`/`var` (optional `free_mean`/`free_var` for Rasch, PCM, FIPC) with joint Oakes/Hessian SEs and EAP/PV scoring | V19 |
 | Saving results | `FitResult.to_json()` / `FitResult.from_json()` (strict schema, no pickle) | — |
 | EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | V1–V5, V7–V9, V11, V14 |
-| Item fit | Orlando–Thissen S-X2 (`FitResult.item_fit()`) with mirt's cell collapsing, df, RMSEA and p-values | V15 |
+| Item fit | Orlando–Thissen S-X2 (`FitResult.item_fit()`, per group for multiple groups) with mirt's cell collapsing, df, RMSEA and p-values | V15 |
 | Limited-information fit | Maydeu-Olivares & Joe M2 / M2* (`FitResult.m2()`) with df, p-value, RMSEA + CI, SRMSR and dichotomous TLI / CFI | V18 |
 | DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | V17 |
 | Scale linking | Differentiable characteristic-curve linking (`link()`, `LinkResult`: Haebara and Stocking–Lord, non-symmetric and symmetric, Ogasawara delta-method SEs, transformed items and $\theta$ scores; validated for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items) | V20 |
