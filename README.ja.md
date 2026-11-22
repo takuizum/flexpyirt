@@ -28,6 +28,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 多次元モデル | 確認的 2–3 因子 MIRT（`Model.with_factors()`、多母集団も可）。交差負荷、相関／直交の多変量正規因子、直積求積格子、Oakes/Hessian SE、EAP・MAP・ML・WLE スコアリング | V14, V21 |
 | 経験ヒストグラム | 歪んだ・多峰の潜在分布のための `EmpiricalHistogram()`（Woods, 2007）。参照群は厳密な制約付き M-step で平均 0・分散 1 に標準化、FIPC では自由。重みと 4 次までのモーメントを報告 | V6 |
 | Davidian 曲線 | 単一群 1 次元モデル向けの半ノンパラメトリック潜在分布 `DavidianCurve(degree)`（Zhang & Davidian, 2001; Woods & Lin, 2009）。厳密な連続 `mean`/`var` へ解析的に標準化（Rasch・PCM・FIPC で `free_mean`/`free_var` 可）、項目・潜在パラメタの同時 Oakes/Hessian SE と EAP/PV 採点に対応 | V19 |
+| 混合正規 | 単一群 1 次元モデル向けの、項目を共通とする有限混合正規潜在密度 `NormalMixture(n_components)`（Mislevy, 1984）。mirt の `dentype = "mixture-k"` のクラスのパラメタ化を厳密な連続 `mean`/`var` へ解析的に標準化、標準化した成分（`pi_c`・`mean_c`・`var_c`）とデルタ法 SE、項目・潜在パラメタの同時 Oakes/Hessian SE、EAP/PV 採点、退化解の警告 | V22 |
 | 結果の保存 | `FitResult.to_json()` / `FitResult.from_json()`（厳密なスキーマ、pickle 不使用） | — |
 | EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | V1–V5, V7–V9, V11, V14 |
 | 項目適合度 | Orlando–Thissen の S-X2（`FitResult.item_fit()`、多母集団は群ごと）。mirt と同じセルのまとめ方・自由度・RMSEA・p 値 | V15 |

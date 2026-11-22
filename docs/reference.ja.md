@@ -46,7 +46,7 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 **例外**: `PrecisionError`（JAX の 64 ビットが無効）、`SpecificationError`（仕様やデータの誤り）、
 `IdentificationError`（識別不能）。いずれも推定を始める前に出る。
 
-**警告**: `ConvergenceWarning`（`max_iter` に到達、または SQUAREM が通常 EM へ頻繁に退避）、`HeywoodWarning`（自由な漸近線が境界から `1e-4` 以内、または自由な傾きが $|a| > 20$）、`FlexpyirtWarning`（情報行列が正定値でない、アンカーが 1 パラメタだけ）。
+**警告**: `ConvergenceWarning`（`max_iter` に到達、または SQUAREM が通常 EM へ頻繁に退避）、`HeywoodWarning`（自由な漸近線が境界から `1e-4` 以内、自由な傾きが $|a| > 20$、または `NormalMixture` の成分の退化）、`FlexpyirtWarning`（情報行列が正定値でない、アンカーが 1 パラメタだけ）。
 
 ### `FitResult`
 
@@ -55,7 +55,7 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 | 属性 | 型 | 説明 |
 |---|---|---|
 | `items` | DataFrame | 1 項目 1 行（多母集団では `group` 列つきで群 × 項目）。`model`、内部パラメタ（`a` または `a1`…`aD`、`d` / `d1`…、`g`, `u`）、`<param>_se`、および 1 次元モデルでは表示用の `b` / `bk`（$-d/a$、GRM は $-d_k/a$、GPCM/PCM は $-(d_k-d_{k-1})/a$、$d_0=0$）とデルタ法による `b_se` / `bk_se`（`vcov` と JAX 自動微分から計算。`se=None` または閾値に入るパラメタがすべて固定なら NaN） |
-| `latent` | DataFrame | 1 群 1 行。1 因子では `group`, `mean`, `var`, `mean_se`, `var_se`、2–3 因子では `group`, `mean_1`…`mean_D`, `var_1`…`var_D`, `cor_12`… とその `_se` 列（固定値の SE は NaN）。`EmpiricalHistogram` では各ヒストグラムの `group`, `mean`, `var`, `sd`, `skewness`, `kurtosis`（超過尖度） |
+| `latent` | DataFrame | 1 群 1 行。1 因子では `group`, `mean`, `var`, `mean_se`, `var_se`、2–3 因子では `group`, `mean_1`…`mean_D`, `var_1`…`var_D`, `cor_12`… とその `_se` 列（固定値の SE は NaN）。`EmpiricalHistogram` では各ヒストグラムの `group`, `mean`, `var`, `sd`, `skewness`, `kurtosis`（超過尖度）。`NormalMixture` では `mean`, `var`、素の形状 `rmean_c`, `rvar_c`, `logit_c` とその SE、続いて標準化した成分 `pi_c`, `mean_c`, `var_c`（$c = 1..k$）とデルタ法の `_se` 列 |
 | `latent_weights` | DataFrame / None | `EmpiricalHistogram` のみ: `group`, `node`, `weight`（群 × 求積節点ごとに 1 行）。`Normal` では None |
 | `parameters` | DataFrame | 検証済みの ParameterTable に `estimate`（推定値。固定なら固定値）と `se` を足したもの |
 | `loglik` | float | 推定値での周辺対数尤度（尤度のみ、事前分布は含めない） |
@@ -117,7 +117,7 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 `"EAP"`, `"MAP"`, `"ML"`, `"WLE"` が `theta`, `se` 列、`"PV"` が `pv1`…`pv{n_draws}` 列。多次元モデルでは
 宣言した因子順に `theta_<factor>`, `se_<factor>` 列（`"PV"` は `pv<m>_<factor>`）。
 
-**例外**: 不正な `method`、`EmpiricalHistogram` または `DavidianCurve` で `method="MAP"` を指定した場合、`"PV"` で
+**例外**: 不正な `method`、`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` で `method="MAP"` を指定した場合、`"PV"` で
 `key` が未指定・不正、決定的手法に `key` を渡した場合、または `n_draws` が正の整数でない場合に `SpecificationError`。
 
 #### `FitResult.item_fit`
@@ -142,7 +142,7 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 **戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
 `df <= 0` になる項目は `df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
 
-**例外**: 多次元・`EmpiricalHistogram`・`DavidianCurve` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
+**例外**: 多次元・`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
 項目、正でない `min_cell` の場合に `SpecificationError`。
 
 #### `FitResult.m2`
@@ -170,7 +170,7 @@ $\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、す
 多値モデルでは `tli` と `cfi` を `NaN` とする（DESIGN §16.3）。2 値モデルで帰無モデルの $M_2$ が当てはめモデルの $M_2$
 以下のときは `FlexpyirtWarning` を出し `tli`・`cfi` を `NaN` とする。
 
-**例外**: JAX 64 ビットが無効なとき `PrecisionError`。多次元・多母集団・`EmpiricalHistogram`・事前分布つきの
+**例外**: JAX 64 ビットが無効なとき `PrecisionError`。多次元・多母集団・`EmpiricalHistogram`・`NormalMixture`・事前分布つきの
 MAP モデル、欠測を含むデータ、不正な `ci`、項目数または回答者数が 2 未満のとき `SpecificationError`。
 
 #### `FitResult.dif`
@@ -310,7 +310,7 @@ model.with_factors(factors, *, correlated=True) -> Model
 model.with_latent(dist) -> Model
 ```
 
-単一群モデルの潜在分布を `Normal` または `EmpiricalHistogram`（1 次元モデルのみ）で指定する。多母集団モデルでは使えない（`with_groups()` で指定する）。
+単一群モデルの潜在分布を `Normal`・`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture`（1 次元モデルのみ）で指定する。多母集団モデルでは使えない（`with_groups()` で指定する）。
 
 #### `Model.with_groups`
 
@@ -351,7 +351,7 @@ model.prior(*, param, dist, items=None) -> Model
 選択した項目の内部パラメタ `param` に事前分布 `dist`（`NormalPrior`, `LogNormalPrior`, `BetaPrior`）を全群共通で付ける
 （MAP 推定、[ガイド 11 節](guide.ja.md#11-事前分布と-map-推定)）。事前分布はヤコビアンなしの自然尺度で評価される。
 固定パラメタの事前分布は無視され、群間で共有されるパラメタ（同じ `free_id`）は 1 回だけ数えられる。潜在分布パラメタ
-（`"mean"`, `"var"`）への指定は `SpecificationError`。
+（`"mean"`, `"var"`, `"phi_*"`, `"rmean_*"`, `"rvar_*"`, `"logit_*"` など）への指定は `SpecificationError`。
 
 | 引数 | 説明 |
 |---|---|
@@ -582,6 +582,35 @@ Fisher 情報行列は $\boldsymbol\phi = \mathbf 0$ で `phi_1`・`phi_2` 方�
 **例外**: `degree`・`mean`・`var`・フラグが不正、または `Model.with_groups()`・`Model.with_factors()` と組み合わせた場合に
 `SpecificationError`。`free_mean`・`free_var` に必要な固定切片・固定傾きがない場合は `IdentificationError`。
 
+### `NormalMixture`
+
+```text
+NormalMixture(n_components, *, mean=0.0, var=1.0, free_mean=False, free_var=False,
+              means=None, variances=None, weights=None)
+NormalMixture.free(n_components, *, mean=0.0, var=1.0, means=None, variances=None, weights=None)
+```
+
+成分数 $k$ = `n_components`（`2..10`）の有限混合正規潜在密度で、項目パラメタは共通の 1 組（Mislevy, 1984;
+[ガイド 8 節](guide.ja.md#混合正規)）。形状は mirt の `dentype = "mixture-k"` のクラスのパラメタ化に従い、素の成分 1 が
+$N(0,1)$、成分 $c \ge 2$ は素の平均 `rmean_c`・素の分散 `rvar_c`・ロジット `logit_c` $=\log(\pi_c/\pi_1)$ を持つ。
+混合を厳密なモーメントで解析的に標準化し、任意の形状で連続平均・分散が `mean`・`var` に一致する。各成分を格子上で
+正規化してから混合する。`FitResult.latent` は標準化した成分 `pi_c`・`mean_c`・`var_c` とデルタ法の SE を返す。
+Oakes / Hessian 標準誤差は項目パラメタと潜在分布パラメタの両方を含む。単一群の 1 次元モデルのみで、等間隔格子と
+Gauss–Hermite 格子に対応する。成分は交換可能（ラベルスイッチング）で、尤度に局所最大が複数ありうるので、いくつかの
+初期形状から推定し直して `loglik` が最も高いものを採る。`score(method="MAP")`・`item_fit()`・`m2()` は
+`SpecificationError`。
+
+| 引数 | 説明 |
+|---|---|
+| `n_components` | 整数の成分数 $k \in \{2,\dots,10\}$ |
+| `mean`, `var` | 混合の連続平均と正の分散の値（自由推定時は初期値） |
+| `free_mean`, `free_var` | `mean`・`var` を推定するか（識別性の規則は `Normal` と同じ） |
+| `means`, `variances`, `weights` | 長さ $k$ の初期形状（成分の平均、正の分散、和が 1 の正の重み）。任意のアフィン尺度でよい。既定は `(0, 1.5, -1.5, 3, -3, ...)`、すべて `1`、`1/k` |
+
+**例外**: `n_components`・`mean`・`var`・フラグ・初期形状が不正、または `Model.with_groups()`・`Model.with_factors()` と
+組み合わせた場合に `SpecificationError`。`free_mean`・`free_var` に必要な固定切片・固定傾きがない場合は
+`IdentificationError`。
+
 ---
 
 ## 尺度リンキング
@@ -673,7 +702,7 @@ mirt の既定と同じく、1 因子で 61 点、2 因子で各軸 31 点（$31
 
 `Quadrature.gauss_hermite(n_points)` は `Normal` 潜在分布用に Gauss–Hermite 節点 $\sqrt2\,x_q$（次元あたり 3–200 点、
 2・3 次元では直積則）を使い、推定した平均・共分散に合わせて重みを付け直す（DESIGN §15.44）。`base_log_weights(n_factors)` は
-節点ごとの固定の対数重み（等間隔格子では 0）を返す。`EmpiricalHistogram`・`DavidianCurve` とは併用できない。
+節点ごとの固定の対数重み（等間隔格子では 0）を返す。`NormalMixture` でも使える（各成分はその平均・分散の `Normal` と同じ重みを受け取る）。`EmpiricalHistogram`・`DavidianCurve` とは併用できない。
 
 ---
 
@@ -715,4 +744,5 @@ flexpyirt が出すすべての警告の基底クラス（`UserWarning` を継�
 #### `HeywoodWarning`
 
 推定後、自由な項目パラメタが有限の境界から `1e-4` 以内に到達した（3PL / 4PL で `g` が 0 付近、`u` が 1 付近
-など）か、自由な傾きが $|a| > 20$ になった場合に出る。該当する項目名をすべて列挙する。
+など）か、自由な傾きが $|a| > 20$ になった場合に出る。該当する項目名をすべて列挙する。`NormalMixture` の解が退化した
+場合（重みが `1e-3` 未満、標準偏差が格子間隔の半分未満、平均が格子の外のいずれかの成分、または 2 つの成分の一致）にも出る。

@@ -42,7 +42,7 @@
 ## M5 以降（候補）
 - [x] 項目をまたぐ等値制約の M-step（`Model.equal_across_items()`、項目・項目モデルをまたぐ `free_id` の共有、連結成分ごとの同時 Newton。V16 で照合済み）。
 - [x] Davidian 曲線の潜在分布（`DavidianCurve`、単一群 1 次元、解析的標準化、Oakes/Hessian SE。V19 で照合済み）。
-- 混合正規の潜在分布。
+- [x] 混合正規の潜在分布（`NormalMixture`、単一群 1 次元、mirt の混合のパラメタ化を解析的に標準化、Oakes/Hessian SE。V22 で照合済み）。
 - [x] 微分可能なリンキング（`link()`, `LinkResult`: Haebara / Stocking–Lord の非対称・対称版、自動微分による Ogasawara デルタ法 SE。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目について V20 で照合済み）。
 - [x] 項目適合度: S-X2（`FitResult.item_fit()`、1 次元、多母集団は群ごと。V15 で照合済み）。
 - [x] DIF: 多群の尤度比検定（`FitResult.dif()`、`add` / `drop` の 2 方式、Holm / BH 補正。V17 で照合済み）。

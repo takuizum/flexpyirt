@@ -28,7 +28,13 @@ from flexpyirt._json import dump_fit_result, load_fit_result
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
 from flexpyirt.items import ItemKernel
-from flexpyirt.latent import davidian_param_names, eh_moments, latent_param_names
+from flexpyirt.latent import (
+    davidian_param_names,
+    eh_moments,
+    latent_param_names,
+    mixture_components,
+    mixture_param_names,
+)
 from flexpyirt.method import BAEM
 from flexpyirt.quadrature import Quadrature
 
@@ -55,6 +61,43 @@ def _is_prng_key(key: Any) -> bool:
     if jnp.issubdtype(key.dtype, jax.dtypes.prng_key):
         return key.ndim == 0
     return bool(key.dtype == jnp.uint32 and key.shape == (2,))
+
+
+@jax.jit
+def _mixture_val_and_jac(params: Array) -> tuple[Array, Array]:
+    """Standardized mixture components ``(pi, means, variances)`` stacked, and their Jacobian."""
+
+    def fn(p: Array) -> Array:
+        return jnp.concatenate(mixture_components(p))
+
+    return fn(params), jax.jacfwd(fn)(params)
+
+
+def _mixture_derived(
+    names: Sequence[str], est: np.ndarray, fids: np.ndarray, vcov: np.ndarray | None
+) -> dict[str, float]:
+    r"""Standardized components of a fitted ``NormalMixture`` with delta-method SEs (§16.7).
+
+    Returns ``pi_c``, ``mean_c``, ``var_c`` (:math:`c=1,\dots,k`) and their ``*_se`` from
+    :math:`J\Sigma J^\top` restricted to the free latent parameters (Jacobian by JAX forward-mode
+    autodiff; Oehlert, 1992). SEs are NaN without ``vcov``.
+    """
+    k = (len(names) + 1) // 3
+    vals, jac = _mixture_val_and_jac(jnp.asarray(est, dtype=jnp.float64))
+    vals_np = np.asarray(vals, dtype=float)
+    jac_np = np.asarray(jac, dtype=float)
+    free = fids >= 0
+    ses = np.full(vals_np.shape, np.nan)
+    if vcov is not None and free.any():
+        j_free = jac_np[:, free]
+        v_free = vcov[np.ix_(fids[free], fids[free])]
+        ses = np.sqrt(np.clip(np.diag(j_free @ v_free @ j_free.T), 0.0, None))
+    out: dict[str, float] = {}
+    for block, label in enumerate(("pi", "mean", "var")):
+        for c in range(k):
+            out[f"{label}_{c + 1}"] = float(vals_np[block * k + c])
+            out[f"{label}_{c + 1}_se"] = float(ses[block * k + c])
+    return out
 
 
 @cache
@@ -371,6 +414,10 @@ class FitResult:
         r"""Latent distribution summary per group.
 
         For ``Normal`` models: latent means, variances, correlations (for D > 1) and their SEs.
+        For ``NormalMixture`` models: ``mean``, ``var`` and the raw shape ``rmean_c``, ``rvar_c``,
+        ``logit_c`` with SEs, followed by the standardized components ``pi_c``, ``mean_c``,
+        ``var_c`` (:math:`c=1,\dots,k`, on the :math:`\theta` scale) with delta-method SEs
+        (DESIGN.md §16.7).
         For ``EmpiricalHistogram`` models: columns ``group``, ``mean``, ``var``, ``sd``,
         ``skewness``, ``kurtosis`` (Fisher's excess kurtosis :math:`\mu_4/\sigma^4 - 3`, 0 for
         a normal distribution; DESIGN.md §15.38). See :attr:`latent_weights` for the full
@@ -396,16 +443,30 @@ class FitResult:
             return pd.DataFrame(rows)
         p = self.parameters[self.parameters["item"] == LATENT_ITEM]
         groups = list(dict.fromkeys(p["group"]))
-        lat_cols = (
-            list(davidian_param_names(self._model.davidian_degree))
-            if self._model.is_davidian
-            else list(latent_param_names(self._model.n_factors))
-        )
+        if self._model.is_davidian:
+            lat_cols = list(davidian_param_names(self._model.davidian_degree))
+        elif self._model.is_mixture:
+            lat_cols = list(mixture_param_names(self._model.mixture_components))
+        else:
+            lat_cols = list(latent_param_names(self._model.n_factors))
         est = p.pivot(index="group", columns="param", values="estimate")[lat_cols]
         se = p.pivot(index="group", columns="param", values="se")[lat_cols].add_suffix("_se")
         out = pd.concat([est, se], axis=1).loc[groups]
         out.columns.name = None
-        return out.reset_index()
+        out = out.reset_index()
+        if self._model.is_mixture:
+            fid = p.pivot(index="group", columns="param", values="free_id")[lat_cols]
+            derived = [
+                _mixture_derived(
+                    lat_cols,
+                    est.loc[g].to_numpy(dtype=float),
+                    fid.loc[g].to_numpy(dtype=int),
+                    self.vcov,
+                )
+                for g in groups
+            ]
+            out = pd.concat([out, pd.DataFrame(derived)], axis=1)
+        return out
 
     @property
     def latent_weights(self) -> pd.DataFrame | None:
@@ -516,6 +577,12 @@ class FitResult:
             raise SpecificationError(
                 "method='MAP' is not supported with DavidianCurve (the density can be multimodal "
                 "and vanish at polynomial roots); use method='EAP', 'ML', 'WLE', or 'PV'."
+            )
+        if method == "MAP" and self._model.is_mixture:
+            raise SpecificationError(
+                "method='MAP' is not supported with NormalMixture (the mixture prior can be "
+                "multimodal, so the posterior mode need not be unique); use method='EAP', 'ML', "
+                "'WLE', or 'PV'."
             )
         if method == "PV":
             if key is None:
@@ -628,13 +695,18 @@ class FitResult:
         PrecisionError
             If JAX is not configured for 64-bit floating point.
         SpecificationError
-            For multidimensional, ``EmpiricalHistogram`` or ``DavidianCurve`` models (not yet
-            supported), data with missing responses, or an item with an unobserved category
-            (within a group).
+            For multidimensional, ``EmpiricalHistogram``, ``DavidianCurve`` or ``NormalMixture``
+            models (not yet supported), data with missing responses, or an item with an unobserved
+            category (within a group).
         """
         check_x64()
         model = self._model
-        if model.is_multidimensional or model.is_empirical_histogram or model.is_davidian:
+        if (
+            model.is_multidimensional
+            or model.is_empirical_histogram
+            or model.is_davidian
+            or model.is_mixture
+        ):
             raise SpecificationError(
                 "item_fit() supports unidimensional models with Normal latent distributions only."
             )
@@ -738,12 +810,18 @@ class FitResult:
         PrecisionError
             If JAX is not configured for 64-bit floating point.
         SpecificationError
-            For multidimensional, multiple-group, ``EmpiricalHistogram``, or MAP (with priors)
-            models, missing responses, invalid ``ci``, or fewer than 2 items or respondents.
+            For multidimensional, multiple-group, ``EmpiricalHistogram``, ``NormalMixture``, or MAP
+            (with priors) models, missing responses, invalid ``ci``, or fewer than 2 items or
+            respondents.
         """
         check_x64()
         model = self._model
-        if model.is_multidimensional or model.is_multigroup or model.is_empirical_histogram:
+        if (
+            model.is_multidimensional
+            or model.is_multigroup
+            or model.is_empirical_histogram
+            or model.is_mixture
+        ):
             raise SpecificationError(
                 "m2() supports single-group unidimensional models with a Normal latent "
                 "distribution only."
@@ -970,6 +1048,11 @@ class FitResult:
             latent_title = (
                 f"Latent distribution (DavidianCurve, degree={self._model.davidian_degree})"
             )
+        elif self._model.is_mixture:
+            latent_title = (
+                "Latent distribution "
+                f"(NormalMixture, n_components={self._model.mixture_components})"
+            )
         else:
             latent_title = "Latent distribution"
         lines.extend(
@@ -1039,6 +1122,11 @@ class FitResult:
         elif self._model.is_davidian:
             latent_heading = (
                 f"Latent distribution (DavidianCurve, degree={self._model.davidian_degree})"
+            )
+        elif self._model.is_mixture:
+            latent_heading = (
+                "Latent distribution "
+                f"(NormalMixture, n_components={self._model.mixture_components})"
             )
         else:
             latent_heading = "Latent distribution"

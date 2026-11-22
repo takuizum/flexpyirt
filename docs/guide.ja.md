@@ -446,6 +446,45 @@ print(dc.score(skew_df.iloc[:3], method="EAP").round(3))  # 推定した Davidia
   高い解に達した）。重要な分析では複数の初期角度から推定し直し（`Model.parameter_table()` の `phi_*` 行の `value` を
   変えて `table=` に渡す）、`loglik` が最も高い結果を採る。
 
+### 混合正規
+
+`NormalMixture(n_components)` は、潜在密度を $k \in \{2,\dots,10\}$ 個の正規成分の有限混合で表し、項目パラメタは
+共通の 1 組とする（Mislevy, 1984）。例えば 2 つの下位集団からなる母集団に使う。形状は mirt の `dentype = "mixture-k"`
+に従い（素の成分 1 が $N(0,1)$、成分 $c\ge 2$ は `rmean_c`・`rvar_c`・`logit_c` $=\log(\pi_c/\pi_1)$）、混合全体を
+解析的に標準化して連続平均・分散が `mean`（既定 `0`）・`var`（既定 `1`）に一致するようにする（`DavidianCurve` と
+同様）。`latent` には標準化した成分（混合比率 `pi_c`、平均 `mean_c`、分散 `var_c`）とデルタ法の SE が加わる。
+
+```python
+from flexpyirt import NormalMixture
+
+group_b = rng.random(1500) < 0.35
+theta_bi = np.where(group_b, rng.normal(2.2, 0.6, 1500), rng.normal(0.0, 1.0, 1500))
+bi_df = pd.DataFrame(simulate_2pl(a_true, d_true, theta_bi, rng), columns=items)
+
+mix = fit(
+    Model.uniform(TwoPL(), items=items).with_latent(NormalMixture(2)),
+    bi_df,
+    method=BAEM(squarem=True),
+)
+print(mix.latent[["pi_1", "pi_2", "mean_1", "mean_2", "var_1", "var_2"]].round(3))
+print(mix.score(bi_df.iloc[:3], method="EAP").round(3))  # 推定した混合事前分布を使う
+```
+
+- **識別性と対象範囲**: `DavidianCurve` と同じ（Rasch / PCM では `free_var=True`、FIPC では `NormalMixture.free(k)`。
+  単一群の 1 次元モデルのみ）。等間隔格子と Gauss–Hermite 格子に対応する。
+- **採点**: `"EAP"` と `"PV"` は推定した混合を使い、`"ML"` と `"WLE"` は尤度のみ。混合の事前分布は多峰になりうるため
+  `"MAP"` は `SpecificationError`。`item_fit()` と `m2()` はまだ使えない。
+- **初期値・ラベルスイッチング・退化した推定**: 成分は交換可能なので番号に意味はなく、尤度に局所最大が複数ありうる。
+  いくつかの初期形状（`NormalMixture(2, means=[0, 2], variances=[1, 0.3], weights=[0.7, 0.3])`）から推定し直し、
+  `loglik` が最も高いものを採る。重みがほぼ 0、格子より細い、格子の外に中心がある成分や、一致する 2 つの成分は
+  `HeywoodWarning` で知らせる。データが支持する成分数はそれより少ない。
+- **格子の解像度**: 細い成分と情報量の多い項目が多いと、事後分布の幅が格子の間隔と同程度になる。その場合は格子を
+  細かくし（例: `Quadrature.equispaced(121)`、間隔 0.1）、`loglik` がもう変わらないことを確かめる（V22c では 121 点が必要
+  だった）。
+- **mirt**: mirt の `dentype = "mixture-k"` は既定でクラスごとの項目パラメタを推定する（混合 IRT モデル）。flexpyirt の
+  モデルは、全項目をクラス間で等値にした mirt のモデル（`invariance = c(<項目>, "free_means", "free_var")`）に
+  $\theta$ の尺度を除いて一致する（[VALIDATION.ja.md](VALIDATION.ja.md) V22）。
+
 ## 9. 多母集団
 
 複数の集団（学年、受験年度、言語版など）の回答を同時に推定する。アンカー項目のパラメタを群間で等しくして
@@ -644,7 +683,8 @@ mirt は分散を閉形式のモーメントで更新するため、格子の端
 
 **Gauss–Hermite.** `Normal` 潜在分布では、`Quadrature.gauss_hermite(n)` が次元あたり `n` 個の Gauss–Hermite 節点を置き、
 推定した平均・分散に合わせて重みを付け直す。$N(0,1)$ 付近では同じ点数の等間隔格子より精度が高いことが多いが、分散が
-1 より十分大きいと精度が落ちる。`EmpiricalHistogram` と `DavidianCurve` には等間隔格子が必要。
+1 より十分大きいと精度が落ちる。`NormalMixture` でも使える（各成分を `Normal` と同様に重み付けし直す）。
+`EmpiricalHistogram` と `DavidianCurve` には等間隔格子が必要。
 
 ```python
 gh = Quadrature.gauss_hermite(41)
@@ -773,7 +813,7 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 | `SpecificationError` | 仕様とデータの矛盾（列の過不足、範囲外の値、観測されないカテゴリ、存在しない項目の固定、表や事前分布の不正な編集、群ラベルの不一致） |
 | `IdentificationError` | 尺度が識別できない（[8 節](#8-潜在分布と識別性)） |
 | `ConvergenceWarning` | `max_iter` までに収束しなかった、または SQUAREM が反復の 50% 超（5 回以上）で通常の EM に戻った |
-| `HeywoodWarning` | 自由な項目パラメタが有限の境界から `1e-4` 以内（3PL / 4PL で `g` が 0 付近、`u` が 1 付近など）、または自由な傾きが $|a| > 20$ |
+| `HeywoodWarning` | 自由な項目パラメタが有限の境界から `1e-4` 以内（3PL / 4PL で `g` が 0 付近、`u` が 1 付近など）、または自由な傾きが $|a| > 20$。`NormalMixture` の成分の退化 |
 | `FlexpyirtWarning` | 情報行列が正定値でない（SE が NaN）、アンカーが 1 パラメタだけ、または MAP 推定で `aic` / `bic` を参照した |
 
 すべての例外は `flexpyirt.errors.FlexpyirtError`、警告は `flexpyirt.errors.FlexpyirtWarning` を継承する。
@@ -800,6 +840,7 @@ except SpecificationError as e:
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Mislevy, R. J. (1984). Estimating latent distributions. *Psychometrika*, 49(3), 359–381.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
