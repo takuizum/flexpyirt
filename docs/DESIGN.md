@@ -957,8 +957,8 @@ data-independent shapes (§15.21).
     free latent parameters, as in mirt (which subtracts the latent parameters from every item).
     RMSEA and the $\chi^2$ p-value follow mirt. Tables are post-fit NumPy bookkeeping (data
     dependent shapes, outside `jit`); category probabilities come from the JAX item kernels.
-    Multidimensional, multiple-group, EH and missing-data cases raise `SpecificationError` until
-    they are validated (mirt imputes missing data and ignores EH weights for S-X2).
+    Multidimensional, EH and missing-data cases raise `SpecificationError` until they are
+    validated (mirt imputes missing data and ignores EH weights for S-X2); multiple groups: §15.45.
 41. **ML and WLE scoring for multidimensional models (M4, §8)**: for $D \in \{2, 3\}$, `"ML"`
     maximizes $\log L(\boldsymbol\theta\mid y)$ and `"WLE"` maximizes the Jeffreys/Firth penalized
     $\log L(\boldsymbol\theta\mid y)+\tfrac12\log\det\mathbf I(\boldsymbol\theta)$ (`mirt:::WLE.mirt`;
@@ -1014,6 +1014,17 @@ data-independent shapes (§15.21).
     relative error $1.2\times10^{-10}$) and against fits on very fine equispaced grids (Rasch with
     free variance, 41 nodes vs 401 points on $[-12,12]$: estimates within $2\times10^{-10}$; 2D 2PL,
     $31^2$ vs $121^2$: within $5\times10^{-7}$); mirt does not use Gauss–Hermite in EM.
+45. **S-X2 for multiple-group models (M5, §15.40)**: `item_fit(data, group=...)` computes S-X2
+    within each group, as mirt's `itemfit()` does for a `multipleGroup` fit (`MGC2SC`): group
+    $g$'s respondents give the observed table and $N_s$, the expected proportions use group $g$'s
+    item parameters and latent weights $w_{gq}$, and
+    $df_{gj}$ = kept cells − rows − free parameters of item $j$ in group $g$ − free latent
+    parameters of group $g$ (an anchor shared across groups counts in every group; the reference
+    group with mean 0 and variance 1 fixed subtracts none). RMSEA uses the group's $N_g$. Every
+    category must be observed within each group. The result has a leading `group` column. Validated
+    against mirt 1.48 (V15): V4's two-group 2PL at mirt's estimates, and Science (GRM) split into
+    two groups with all items invariant, at mirt's estimates (mirt stops ~2e-4 short in the item
+    parameters there): df identical, S-X2 within 1e-6 relative.
 
 ## 16. Implementation decisions (M5)
 1. **Equality constraints across items (`Model.equal_across_items`, shared `free_id`s)**:

@@ -38,7 +38,7 @@
 | V11 | 3PL・4PL 単一群（シミュレーション） | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 | V12 | 表示用 IRT 閾値とデルタ法 SE（2PL・Rasch・GRM・GPCM・PCM・2 群 2PL） | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | 能力値スコアリング: MAP・ML・WLE（2PL・GRM・GPCM・3PL・2 群・欠測） | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
-| V15 | S-X2 項目適合度（GRM・GPCM・分散自由の PCM・3PL・FIPC の 2PL、`mincell` 1 と 3） | `itemfit(m, fit_stats = "S_X2")` | M5 |
+| V15 | S-X2 項目適合度（GRM・GPCM・分散自由の PCM・3PL・FIPC の 2PL、`mincell` 1 と 3、2 群の 2PL と GRM を群ごと） | `itemfit(m, fit_stats = "S_X2")` | M5 |
 | V16 | 項目をまたぐ等値制約（LSAT7 の共通傾き、2PL + graded のモデル間制約、アンカーつき 2 群 + 共通傾き） | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V17 | V4 のデータでの尤度比検定による DIF（`a`+`d` と `d` の `add`、完全不変モデルからの `a`+`d` の `drop`） | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
 | V18 | M2 / M2* 限定情報の適合度（LSAT7 2PL、シミュレーション 2PL、3PL、分散自由の Rasch、GRM $K=3$、GPCM $K=4$） | `M2(m, quadpts = 61, theta_lim = c(-6, 6))` | M5 |
@@ -268,7 +268,13 @@
   `itemfit(m, fit_stats = "S_X2")` を計算する（mirt 1.48、`validation/r/m5_itemfit_reference.R` →
   `tests/reference/v15_sx2.json`）。flexpyirt はデータを推定し直す: 自由度はすべてのケースで一致し、S-X2 は相対 `2.2e-8`、
   p 値は `1.3e-8` で一致（推定値自体の一致の水準）。単体テストで Lord–Wingersky 漸化式を全パターン列挙と比べ、期待度数の行が
-  条件付き確率であることを確認する。テスト: `tests/test_mirt_m5_itemfit.py`。
+  条件付き確率であることを確認する。テスト: `tests/test_mirt_m5_itemfit.py`。多母集団（DESIGN §15.45）: mirt の群ごとの
+  `itemfit()` を、V4 の 2 群 2PL では mirt の推定値で（`multipleGroup(TOL = NaN)` でも EM が 1 ステップ進むので、すべての
+  パラメタを固定して推定してから各 `est` フラグを戻す）、Science（GRM）を行の偶奇で 2 群に分けすべての項目を等値・焦点群の
+  平均と分散を自由にしたものでも計算する（`validation/r/m5_itemfit_multigroup_reference.R` →
+  `tests/reference/v15_sx2_multigroup.json`）。Science では mirt の項目パラメタが約 2e-4 収束しきらない（flexpyirt の
+  対数尤度のほうが高い）ので、flexpyirt を mirt の推定値で評価する。両ケースの両群で自由度は一致し、S-X2 は相対 `1e-6`
+  以内。テスト: `tests/test_mirt_m5_itemfit_multigroup.py`。
 - **確認的 2–3 次元 MIRT（V14, M4）**: 4 つのシミュレーションケースを `tests/test_mirt_m4_mirt.py` で照合した
   （通常 EM・SQUAREM の双方で通過。参照値生成: `validation/r/m4_mirt_reference.R` →
   `tests/reference/v14_mirt2d.json`、`accelerate = "none"`, `TOL = 1e-10`, `SE.type = "Oakes"`、

@@ -56,7 +56,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - [x] Differentiable linking (`link()`, `LinkResult`: Haebara / Stocking–Lord, non-symmetric and
   symmetric, Ogasawara delta-method SEs via autodiff; validated in V20 for 2PL, 3PL, GRM, GPCM and
   mixed 2PL + GPCM common items).
-- [x] Item fit: S-X2 (`FitResult.item_fit()`, single-group unidimensional; validated in V15).
+- [x] Item fit: S-X2 (`FitResult.item_fit()`, unidimensional, per group for multiple groups; validated in V15).
 - [x] DIF: multiple-group likelihood-ratio tests (`FitResult.dif()`, schemes `add` / `drop`,
   Holm / BH adjustment; validated in V17).
 - [x] M2 limited-information goodness of fit (`FitResult.m2()`, single-group unidimensional
