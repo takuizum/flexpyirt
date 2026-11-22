@@ -143,8 +143,8 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 |---|---|---|
 | `Model` | frozen dataclass | 仕様全体。`uniform`, `from_items` で生成、`.fix`, `.fix_from`, `.prior`, `.equal_across_groups`, `.equal_across_items`, `.with_groups`, `.with_latent`, `.parameter_table` |
 | `Rasch`, `TwoPL`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`, `Nominal` | frozen dataclass（`ItemModel` を満たす） | 項目モデル |
-| `Normal`, `EmpiricalHistogram`, `DavidianCurve` | frozen dataclass（`LatentDist` を満たす） | 潜在分布。`Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)` |
-| `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
+| `Normal`, `EmpiricalHistogram`, `DavidianCurve`, `NormalMixture` | frozen dataclass（`LatentDist` を満たす） | 潜在分布。`Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)`, `NormalMixture(n_components)` |
+| `LogNormal`, `NormalPrior`, `Beta`, `TruncNormal` | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
 | `BAEM`, `Quadrature` | frozen dataclass | 推定設定 |
 | `fit` | 関数 | 推定。`FitResult` を返す |
 | `FitResult` | クラス | 結果（`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `dif`, `m2`, `to_json` / `from_json`） |

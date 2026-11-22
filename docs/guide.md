@@ -478,6 +478,53 @@ print(dc.score(skew_df.iloc[:3], method="EAP").round(3))  # uses the fitted Davi
   (edit `value` of the `phi_*` rows of `Model.parameter_table()` and pass `table=`) and keep the
   fit with the highest `loglik`.
 
+### Normal mixtures
+
+`NormalMixture(n_components)` models the latent density as a finite mixture of $k \in
+\{2,\dots,10\}$ normal components with one common set of item parameters (Mislevy, 1984), for
+example a population made of two subpopulations. The shape follows mirt's `dentype = "mixture-k"`
+(raw component 1 is $N(0,1)$; components $c\ge 2$ have `rmean_c`, `rvar_c` and
+`logit_c` $=\log(\pi_c/\pi_1)$), and the whole mixture is analytically standardized so its
+continuous mean and variance equal `mean` (default `0`) and `var` (default `1`), like
+`DavidianCurve`. `latent` adds the standardized components: mixing proportions `pi_c`, means
+`mean_c` and variances `var_c`, with delta-method SEs.
+
+```python
+from flexpyirt import NormalMixture
+
+group_b = rng.random(1500) < 0.35
+theta_bi = np.where(group_b, rng.normal(2.2, 0.6, 1500), rng.normal(0.0, 1.0, 1500))
+bi_df = pd.DataFrame(simulate_2pl(a_true, d_true, theta_bi, rng), columns=items)
+
+mix = fit(
+    Model.uniform(TwoPL(), items=items).with_latent(NormalMixture(2)),
+    bi_df,
+    method=BAEM(squarem=True),
+)
+print(mix.latent[["pi_1", "pi_2", "mean_1", "mean_2", "var_1", "var_2"]].round(3))
+print(mix.score(bi_df.iloc[:3], method="EAP").round(3))  # uses the fitted mixture prior
+```
+
+- **Identification and scope**: as for `DavidianCurve` (`free_var=True` for Rasch/PCM,
+  `NormalMixture.free(k)` under FIPC; single-group unidimensional models only). Equispaced and
+  Gauss–Hermite grids are supported.
+- **Scoring**: `"EAP"` and `"PV"` use the fitted mixture, `"ML"` and `"WLE"` are likelihood-only,
+  and `"MAP"` raises `SpecificationError` (a mixture prior can be multimodal). `item_fit()` and
+  `m2()` are not available yet.
+- **Starting values, label switching, degenerate fits**: the components are exchangeable, so their
+  numbering is arbitrary, and the likelihood can have several local maxima. Refit from a few
+  starting shapes (`NormalMixture(2, means=[0, 2], variances=[1, 0.3], weights=[0.7, 0.3])`) and
+  keep the highest `loglik`. A `HeywoodWarning` flags a component with almost no weight, one
+  narrower than the grid, one centred outside the grid, or two coinciding components: the data
+  then support fewer components.
+- **Grid resolution**: narrow components with many informative items make the posteriors about as
+  narrow as the grid spacing; then refine the grid (e.g. `Quadrature.equispaced(121)`, spacing
+  0.1) and check that `loglik` no longer changes (V22c needed 121 points).
+- **mirt**: mirt's `dentype = "mixture-k"` estimates class-specific item parameters by default (a
+  mixture IRT model). The flexpyirt model equals mirt's with every item constrained equal across
+  classes (`invariance = c(<items>, "free_means", "free_var")`), up to the scale of $\theta$
+  ([VALIDATION.md](VALIDATION.md) V22).
+
 ## 9. Multiple groups
 
 Calibrate responses from several populations (grades, test years, language versions) together.
@@ -691,7 +738,8 @@ the grid makes them agree ([VALIDATION.md](VALIDATION.md)).
 **Gauss–Hermite.** For `Normal` latent distributions, `Quadrature.gauss_hermite(n)` places `n`
 Gauss–Hermite nodes per dimension and reweights them for the estimated mean and variance; it is
 usually more accurate than an equispaced grid with the same number of points near $N(0,1)$, but
-loses accuracy for variances well above 1. `EmpiricalHistogram` and `DavidianCurve` need an equispaced grid.
+loses accuracy for variances well above 1. `NormalMixture` can use it too (each component is
+reweighted like a `Normal`). `EmpiricalHistogram` and `DavidianCurve` need an equispaced grid.
 
 ```python
 gh = Quadrature.gauss_hermite(41)
@@ -831,7 +879,7 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 | `SpecificationError` | The specification and data disagree (missing or extra columns, out-of-range values, unobserved categories, fixing an unknown item, invalid table or prior edits, unknown group labels) |
 | `IdentificationError` | The scale is not identified ([section 8](#8-latent-distributions-and-identification)) |
 | `ConvergenceWarning` | EM did not converge within `max_iter`, or SQUAREM fell back to plain EM on > 50% of iterations (at least 5 times) |
-| `HeywoodWarning` | A free item parameter ended within `1e-4` of a finite bound (e.g. `g` near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$ |
+| `HeywoodWarning` | A free item parameter ended within `1e-4` of a finite bound (e.g. `g` near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$; or a `NormalMixture` component is degenerate |
 | `FlexpyirtWarning` | The information matrix is not positive definite (SEs are NaN), an anchor is a single parameter, or `aic` / `bic` is accessed under MAP |
 
 Every exception derives from `flexpyirt.errors.FlexpyirtError` and every warning from
@@ -859,6 +907,7 @@ except SpecificationError as e:
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Mislevy, R. J. (1984). Estimating latent distributions. *Psychometrika*, 49(3), 359–381.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
