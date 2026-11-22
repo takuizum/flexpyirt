@@ -49,7 +49,8 @@ Bock–Aitkin EM algorithm (Bock & Aitkin, 1981).
 or data), `IdentificationError` (not identified). All are raised before estimation starts.
 
 **Warns**: `ConvergenceWarning` (`max_iter` reached, or SQUAREM fell back to plain EM frequently),
-`HeywoodWarning` (free asymptote within `1e-4` of its bound or free slope $|a| > 20$),
+`HeywoodWarning` (free asymptote within `1e-4` of its bound or free slope $|a| > 20$, or a
+degenerate `NormalMixture` component),
 `FlexpyirtWarning` (information matrix not positive definite, or an anchor that is a single
 parameter).
 
@@ -60,7 +61,7 @@ Returned by `fit()`. Immutable.
 | Attribute | Type | Description |
 |---|---|---|
 | `items` | DataFrame | One row per item (per group × item, with a `group` column, for multiple groups): `model`, internal parameters (`a` or `a1`…`aD`, `d` / `d1`…, `g`, `u`), `<param>_se`, and for unidimensional models display `b` / `bk` ($-d/a$, GRM $-d_k/a$, GPCM/PCM $-(d_k-d_{k-1})/a$ with $d_0=0$) and delta-method `b_se` / `bk_se` (from `vcov` via JAX autodiff; NaN when `se=None` or all parameters entering a threshold are fixed) |
-| `latent` | DataFrame | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` for 1 factor, or `group`, `mean_1`…`mean_D`, `var_1`…`var_D`, `cor_12`… and their `_se` columns for 2–3 factors (SEs of fixed values are NaN); for `EmpiricalHistogram`, `group`, `mean`, `var`, `sd`, `skewness`, `kurtosis` (excess) of each histogram |
+| `latent` | DataFrame | One row per group: `group`, `mean`, `var`, `mean_se`, `var_se` for 1 factor, or `group`, `mean_1`…`mean_D`, `var_1`…`var_D`, `cor_12`… and their `_se` columns for 2–3 factors (SEs of fixed values are NaN); for `EmpiricalHistogram`, `group`, `mean`, `var`, `sd`, `skewness`, `kurtosis` (excess) of each histogram; for `NormalMixture`, `mean`, `var`, the raw shape `rmean_c`, `rvar_c`, `logit_c` and their SEs, then the standardized components `pi_c`, `mean_c`, `var_c` ($c = 1..k$) with delta-method `_se` columns |
 | `latent_weights` | DataFrame / None | `EmpiricalHistogram` only: `group`, `node`, `weight` (one row per group × quadrature node); None for `Normal` |
 | `parameters` | DataFrame | The validated ParameterTable plus `estimate` (the estimate, or the fixed value) and `se` |
 | `loglik` | float | Marginal log-likelihood at the estimates (likelihood only, excluding priors) |
@@ -127,8 +128,8 @@ DataFrame): for unidimensional models, columns `theta`, `se` for `"EAP"`, `"MAP"
 and `pv1`…`pv{n_draws}` for `"PV"`; for multidimensional models, columns `theta_<factor>` and `se_<factor>` in declared factor
 order (`"PV"`: `pv<m>_<factor>`).
 
-**Raises**: `SpecificationError` if `method` is unknown, `method="MAP"` with an `EmpiricalHistogram`
-or `DavidianCurve` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for
+**Raises**: `SpecificationError` if `method` is unknown, `method="MAP"` with an `EmpiricalHistogram`,
+`DavidianCurve` or `NormalMixture` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for
 a deterministic method, or `n_draws` is not a positive integer.
 
 #### `FitResult.item_fit`
@@ -156,8 +157,9 @@ free latent parameters (mirt's convention).
 `df = 0` and NaN statistics. A multiple-group model adds a leading `group` column (one row per
 group and item).
 
-**Raises**: `SpecificationError` for multidimensional, `EmpiricalHistogram`, or `DavidianCurve` models, missing
-responses, an item with an unobserved category (within a group), or a non-positive `min_cell`.
+**Raises**: `SpecificationError` for multidimensional, `EmpiricalHistogram`, `DavidianCurve`, or
+`NormalMixture` models, missing responses, an item with an unobserved category (within a group),
+or a non-positive `min_cell`.
 
 #### `FitResult.m2`
 
@@ -186,7 +188,7 @@ CI, `tli` and `cfi` are `NaN` (`df` and `srmsr` remain finite). Polytomous model
 a `FlexpyirtWarning` is emitted and `tli`/`cfi` are `NaN`.
 
 **Raises**: `PrecisionError` if JAX 64-bit is disabled; `SpecificationError` for multidimensional,
-multiple-group, `EmpiricalHistogram`, or MAP (with priors) models, missing responses, invalid
+multiple-group, `EmpiricalHistogram`, `NormalMixture`, or MAP (with priors) models, missing responses, invalid
 `ci`, or fewer than 2 items or respondents.
 
 #### `FitResult.dif`
@@ -342,8 +344,8 @@ group's `Normal` applies to every factor ([guide section 14](guide.md#14-confirm
 model.with_latent(dist) -> Model
 ```
 
-Set the latent distribution of a single-group model to a `Normal` or an `EmpiricalHistogram`
-(unidimensional models only). Not available with groups
+Set the latent distribution of a single-group model to a `Normal`, `EmpiricalHistogram`,
+`DavidianCurve`, or `NormalMixture` (unidimensional models only). Not available with groups
 (set them with `with_groups()`).
 
 #### `Model.with_groups`
@@ -388,7 +390,8 @@ Attach a prior distribution `dist` (`NormalPrior`, `LogNormalPrior`, or `BetaPri
 `param` of the selected items across all groups (MAP estimation; [guide section 11](guide.md#11-priors-and-map-estimation)).
 Priors are evaluated on the natural parameter scale without a Jacobian term. Fixed parameters
 ignore their prior, and a parameter shared across groups (`free_id`) is counted once. Priors on
-latent-distribution parameters (`"mean"`, `"var"`) raise `SpecificationError`.
+latent-distribution parameters (`"mean"`, `"var"`, `"phi_*"`, `"rmean_*"`, `"rvar_*"`,
+`"logit_*"`, ...) raise `SpecificationError`.
 
 | Argument | Description |
 |---|---|
@@ -636,6 +639,38 @@ against `Normal` (use AIC / BIC), and possibly several local maxima
 with `Model.with_groups()` or `Model.with_factors()`; `IdentificationError` when `free_mean` or
 `free_var` lacks fixed intercepts or slopes.
 
+### `NormalMixture`
+
+```text
+NormalMixture(n_components, *, mean=0.0, var=1.0, free_mean=False, free_var=False,
+              means=None, variances=None, weights=None)
+NormalMixture.free(n_components, *, mean=0.0, var=1.0, means=None, variances=None, weights=None)
+```
+
+Finite normal-mixture latent density with $k$ = `n_components` in `2..10` components and one
+common set of item parameters (Mislevy, 1984; [guide section 8](guide.md#normal-mixtures)). The
+shape uses mirt's `dentype = "mixture-k"` class parameterization: raw component 1 is $N(0,1)$ and
+components $c \ge 2$ have raw means `rmean_c`, raw variances `rvar_c` and logits
+`logit_c` $=\log(\pi_c/\pi_1)$. The mixture is analytically standardized by its exact moments so
+its continuous mean and variance equal `mean` and `var` for every shape; each component is
+normalized on the grid and then mixed. `FitResult.latent` reports the standardized components
+`pi_c`, `mean_c`, `var_c` with delta-method SEs. Oakes / Hessian standard errors cover item and
+latent parameters. Single-group unidimensional models only; equispaced or Gauss–Hermite grids.
+Components are exchangeable (label switching) and the likelihood can have several local maxima:
+refit from a few starting shapes and keep the highest `loglik`. `score(method="MAP")`,
+`item_fit()` and `m2()` raise `SpecificationError`.
+
+| Argument | Description |
+|---|---|
+| `n_components` | Integer number of components $k \in \{2,\dots,10\}$ |
+| `mean`, `var` | Value (or starting value when free) of the continuous mixture mean and positive variance |
+| `free_mean`, `free_var` | Whether `mean` / `var` is estimated (same identification rules as `Normal`) |
+| `means`, `variances`, `weights` | Optional length-$k$ starting shape (component means, positive variances, positive weights summing to 1) in any affine scale; defaults `(0, 1.5, -1.5, 3, -3, ...)`, all `1`, and `1/k` |
+
+**Raises**: `SpecificationError` for an invalid `n_components`, `mean`, `var`, flags or starting
+shape, or when used with `Model.with_groups()` or `Model.with_factors()`; `IdentificationError`
+when `free_mean` or `free_var` lacks fixed intercepts or slopes.
+
 ---
 
 ## Scale linking
@@ -733,7 +768,9 @@ dimension; limits must be finite with `lower < upper`.
 `Quadrature.gauss_hermite(n_points)` uses the Gauss–Hermite nodes $\sqrt2\,x_q$ (3–200 per
 dimension, product rule in 2–3 dimensions) for `Normal` latent distributions, reweighted for the
 estimated mean and covariance (DESIGN §15.44); `base_log_weights(n_factors)` returns the fixed
-per-node log weights (0 for equispaced grids). Not available with `EmpiricalHistogram` or `DavidianCurve`.
+per-node log weights (0 for equispaced grids). Also used by `NormalMixture` (each component gets
+the weights of a `Normal` with its mean and variance). Not available with `EmpiricalHistogram` or
+`DavidianCurve`.
 
 ---
 
@@ -778,4 +815,6 @@ full fallbacks to $\theta_2$ and more than 50% of iterations).
 #### `HeywoodWarning`
 
 Emitted after fitting when a free item parameter ends within `1e-4` of a finite bound (e.g. `g`
-near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$, naming every affected item.
+near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$, naming every affected item; also
+for a degenerate `NormalMixture` solution (a component with weight below `1e-3`, standard
+deviation below half the grid spacing, or mean outside the grid, or two coinciding components).

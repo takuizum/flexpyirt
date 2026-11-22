@@ -15,10 +15,12 @@ from flexpyirt.errors import SpecificationError
 
 __all__ = [
     "MAX_DAVIDIAN_DEGREE",
+    "MAX_MIXTURE_COMPONENTS",
     "DavidianCurve",
     "EmpiricalHistogram",
     "LatentSpec",
     "Normal",
+    "NormalMixture",
     "correlation_matrix_is_positive_definite",
     "davidian_hermite_coeffs",
     "davidian_log_weights",
@@ -28,12 +30,18 @@ __all__ = [
     "eh_moments",
     "eh_project_floor",
     "latent_param_names",
+    "mixture_components",
+    "mixture_log_weights",
+    "mixture_param_names",
     "mvn_log_weights",
     "normal_log_weights",
 ]
 
 MAX_DAVIDIAN_DEGREE = 10
 """Maximum supported polynomial degree :math:`k` for :class:`DavidianCurve`."""
+
+MAX_MIXTURE_COMPONENTS = 10
+"""Maximum supported number of components :math:`k` for :class:`NormalMixture`."""
 
 
 @dataclass(frozen=True)
@@ -236,8 +244,298 @@ class DavidianCurve:
         return cls(degree=degree, mean=mean, var=var, free_mean=True, free_var=True)
 
 
-LatentSpec = Normal | EmpiricalHistogram | DavidianCurve
+def _float_tuple(values: Sequence[float] | None, n: int, what: str) -> tuple[float, ...] | None:
+    """Validate an optional length-``n`` sequence of finite floats for :class:`NormalMixture`."""
+    if values is None:
+        return None
+    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+        raise SpecificationError(f"NormalMixture {what} must be a sequence of floats.")
+    out: list[float] = []
+    for v in values:
+        if isinstance(v, bool) or not isinstance(v, (int, float, np.floating, np.integer)):
+            raise SpecificationError(f"NormalMixture {what} must contain floats, got {v!r}.")
+        if not math.isfinite(float(v)):
+            raise SpecificationError(f"NormalMixture {what} must be finite, got {v}.")
+        out.append(float(v))
+    if len(out) != n:
+        raise SpecificationError(
+            f"NormalMixture {what} must have n_components={n} entries, got {len(out)}."
+        )
+    return tuple(out)
+
+
+def _check_real(value: object, what: str, *, positive: bool = False) -> None:
+    """Raise ``SpecificationError`` unless ``value`` is a finite (positive) real number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SpecificationError(f"NormalMixture {what} must be a float, got {value!r}.")
+    if not math.isfinite(float(value)) or (positive and not float(value) > 0.0):
+        kind = "positive and finite" if positive else "finite"
+        raise SpecificationError(f"NormalMixture {what} must be {kind}, got {value}.")
+
+
+MIXTURE_START_OFFSET = 1.5
+"""Spacing of the default starting means of :class:`NormalMixture` components 2..k."""
+
+
+@dataclass(frozen=True)
+class NormalMixture:
+    r"""Analytically standardized normal-mixture latent distribution (Mislevy, 1984).
+
+    Models a unidimensional latent trait whose density is a finite mixture of :math:`k` normal
+    components, with one common set of item parameters (a single population with a non-normal
+    latent density, not a mixture IRT model with class-specific items). In the raw (gauge)
+    parameterization, component 1 is :math:`N(0,1)` and components :math:`c=2,\dots,k` have free
+    raw means ``rmean_c`` :math:`=\tilde\mu_c`, raw variances ``rvar_c`` :math:`=\tilde\sigma_c^2`
+    and baseline-category logits ``logit_c`` :math:`=\lambda_c=\log(\pi_c/\pi_1)` (R mirt's
+    ``MEAN_1``, ``COV_11`` and ``PI`` of class ``MIXTURE_c`` under ``dentype = "mixture-k"``
+    with items equal across classes, on mirt's class-1 scale; Chalmers, 2012):
+
+    .. math::
+        h(z) = \sum_{c=1}^{k}\pi_c\,\phi(z;\tilde\mu_c,\tilde\sigma_c^2),\qquad
+        \pi = \operatorname{softmax}(0,\lambda_2,\dots,\lambda_k),\quad
+        \tilde\mu_1 = 0,\ \tilde\sigma_1^2 = 1.
+
+    The raw mixture is standardized analytically by its exact continuous moments
+    :math:`M=\sum_c\pi_c\tilde\mu_c` and :math:`V=\sum_c\pi_c(\tilde\sigma_c^2+\tilde\mu_c^2)-M^2`,
+    :math:`\theta=\mu+\sigma(Z-M)/\sqrt V`, so :math:`\theta` has exact continuous mean
+    :math:`\mu` (``mean``) and variance :math:`\sigma^2` (``var``) for every shape, as for
+    :class:`DavidianCurve`. On the :math:`\theta` scale component :math:`c` is
+    :math:`N(\mu_c,\sigma_c^2)` with :math:`\mu_c=\mu+\sigma(\tilde\mu_c-M)/\sqrt V` and
+    :math:`\sigma_c^2=\sigma^2\tilde\sigma_c^2/V`. Quadrature weights normalize each component on
+    the grid and then mix them, :math:`w_q=\sum_c\pi_c\tilde w_{cq}` (DESIGN.md §4.4, §16.7).
+
+    Supported for single-group unidimensional models only. The likelihood is invariant to
+    relabelling the components (label switching) and can have several local maxima; compare
+    fits from different starting values (``means``, ``variances``, ``weights``).
+
+    Parameters
+    ----------
+    n_components : int
+        Number of components :math:`k\in\{2,\dots,10\}`.
+    mean, var : float, keyword-only
+        Value (or starting value when free) of the continuous mixture mean and variance.
+    free_mean, free_var : bool, keyword-only
+        Whether the mean / variance is estimated (requires identification via fixed item
+        intercepts / slopes as for :class:`Normal`, DESIGN.md §4.5).
+    means, variances, weights : sequence of float, optional, keyword-only
+        Length-:math:`k` starting component means, variances and mixing proportions
+        (:math:`\pi_c>0`, summing to 1). Only the shape matters: they are mapped to the raw
+        parameterization (component 1 to :math:`N(0,1)`) and standardized. Defaults:
+        ``means = (0, 1.5, -1.5, 3, -3, ...)``, ``variances = (1, ..., 1)``, ``weights = 1/k``.
+
+    Examples
+    --------
+    >>> NormalMixture(2)                              # mean 0, var 1; shape estimated
+    >>> NormalMixture(3, means=[0.0, 2.0, -2.0])      # explicit starting shape
+    >>> NormalMixture(2, free_var=True)               # Rasch / PCM
+    >>> NormalMixture.free(2)                         # FIPC: mean and variance also estimated
+    """
+
+    n_components: int
+    mean: float = field(default=0.0, kw_only=True)
+    var: float = field(default=1.0, kw_only=True)
+    free_mean: bool = field(default=False, kw_only=True)
+    free_var: bool = field(default=False, kw_only=True)
+    means: Sequence[float] | None = field(default=None, kw_only=True)
+    variances: Sequence[float] | None = field(default=None, kw_only=True)
+    weights: Sequence[float] | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        """Validate the number of components, values, starting shape and flags."""
+        k = self.n_components
+        if isinstance(k, bool) or not isinstance(k, int):
+            raise SpecificationError(f"NormalMixture n_components must be an integer, got {k!r}.")
+        if not (2 <= k <= MAX_MIXTURE_COMPONENTS):
+            raise SpecificationError(
+                f"NormalMixture n_components must be between 2 and {MAX_MIXTURE_COMPONENTS}, "
+                f"got {k} (use Normal for a single normal component)."
+            )
+        _check_real(self.mean, "mean")
+        _check_real(self.var, "var", positive=True)
+        for flag in ("free_mean", "free_var"):
+            if not isinstance(getattr(self, flag), bool):
+                raise SpecificationError(
+                    f"NormalMixture {flag} must be a bool, got {getattr(self, flag)!r}."
+                )
+        means = _float_tuple(self.means, k, "means")
+        variances = _float_tuple(self.variances, k, "variances")
+        weights = _float_tuple(self.weights, k, "weights")
+        if variances is not None and not all(v > 0.0 for v in variances):
+            raise SpecificationError(
+                f"NormalMixture variances must be positive, got {list(variances)}."
+            )
+        if weights is not None:
+            if not all(w > 0.0 for w in weights):
+                raise SpecificationError(
+                    f"NormalMixture weights must be positive, got {list(weights)}."
+                )
+            if abs(sum(weights) - 1.0) > 1e-8:
+                raise SpecificationError(
+                    f"NormalMixture weights must sum to 1, got sum {sum(weights)}."
+                )
+        object.__setattr__(self, "means", means)
+        object.__setattr__(self, "variances", variances)
+        object.__setattr__(self, "weights", weights)
+
+    @classmethod
+    def free(
+        cls,
+        n_components: int,
+        *,
+        mean: float = 0.0,
+        var: float = 1.0,
+        means: Sequence[float] | None = None,
+        variances: Sequence[float] | None = None,
+        weights: Sequence[float] | None = None,
+    ) -> NormalMixture:
+        """Return a mixture with mean, variance and shape all estimated."""
+        return cls(
+            n_components,
+            mean=mean,
+            var=var,
+            free_mean=True,
+            free_var=True,
+            means=None if means is None else tuple(means),
+            variances=None if variances is None else tuple(variances),
+            weights=None if weights is None else tuple(weights),
+        )
+
+    def raw_starts(self) -> tuple[float, ...]:
+        r"""Return the raw starting shape ``(rmean_2, rvar_2, logit_2, ..., logit_k)``.
+
+        The starting components (``means``, ``variances``, ``weights`` or their defaults) are
+        mapped affinely so that component 1 is :math:`N(0,1)`:
+        :math:`\tilde\mu_c=(m_c-m_1)/\sqrt{v_1}`, :math:`\tilde\sigma_c^2=v_c/v_1`,
+        :math:`\lambda_c=\log(\pi_c/\pi_1)` (DESIGN.md §16.7).
+        """
+        k = self.n_components
+        if self.means is not None:
+            means = list(self.means)
+        else:
+            means = [0.0]
+            for c in range(2, k + 1):
+                half = c // 2
+                means.append(MIXTURE_START_OFFSET * (half if c % 2 == 0 else -half))
+        variances = list(self.variances) if self.variances is not None else [1.0] * k
+        weights = list(self.weights) if self.weights is not None else [1.0 / k] * k
+        sd1 = math.sqrt(variances[0])
+        out: list[float] = []
+        for c in range(1, k):
+            out.extend(
+                [
+                    (means[c] - means[0]) / sd1,
+                    variances[c] / variances[0],
+                    math.log(weights[c] / weights[0]),
+                ]
+            )
+        return tuple(out)
+
+
+LatentSpec = Normal | EmpiricalHistogram | DavidianCurve | NormalMixture
 """Union of supported latent distribution specifications."""
+
+
+def mixture_param_names(n_components: int) -> tuple[str, ...]:
+    """Return ``("mean", "var", "rmean_2", "rvar_2", "logit_2", ..., "logit_k")``."""
+    if (
+        isinstance(n_components, bool)
+        or not isinstance(n_components, int)
+        or not (2 <= n_components <= MAX_MIXTURE_COMPONENTS)
+    ):
+        raise SpecificationError(
+            f"NormalMixture n_components must be an integer in 2..{MAX_MIXTURE_COMPONENTS}, "
+            f"got {n_components!r}."
+        )
+    names = ["mean", "var"]
+    for c in range(2, n_components + 1):
+        names.extend([f"rmean_{c}", f"rvar_{c}", f"logit_{c}"])
+    return tuple(names)
+
+
+def mixture_components(params: Array) -> tuple[Array, Array, Array]:
+    r"""Standardized components :math:`(\pi_c,\mu_c,\sigma_c^2)_{c=1}^k` of a normal mixture.
+
+    ``params`` follows :func:`mixture_param_names`. With raw component 1 fixed at
+    :math:`N(0,1)`, :math:`\pi=\operatorname{softmax}(0,\lambda_2,\dots,\lambda_k)`, the raw
+    continuous moments :math:`M=\sum_c\pi_c\tilde\mu_c` and
+    :math:`V=\sum_c\pi_c(\tilde\sigma_c^2+\tilde\mu_c^2)-M^2`, and
+    :math:`\theta=\mu+\sigma(Z-M)/\sqrt V` (Mislevy, 1984; DESIGN.md §16.7):
+
+    .. math::
+        \mu_c=\mu+\sigma\frac{\tilde\mu_c-M}{\sqrt V},\qquad
+        \sigma_c^2=\sigma^2\frac{\tilde\sigma_c^2}{V},
+
+    so :math:`\sum_c\pi_c\mu_c=\mu` and :math:`\sum_c\pi_c(\sigma_c^2+\mu_c^2)-\mu^2=\sigma^2`
+    exactly. Non-positive variances give NaN means and variances.
+
+    Returns
+    -------
+    pi, means, variances : tuple of Array, each of shape (k,)
+    """
+    k = (int(params.shape[0]) + 1) // 3
+    mean, var = params[0], params[1]
+    rest = params[2:].reshape(k - 1, 3)
+    dtype = params.dtype
+    rmeans = jnp.concatenate([jnp.zeros((1,), dtype=dtype), rest[:, 0]])
+    rvars = jnp.concatenate([jnp.ones((1,), dtype=dtype), rest[:, 1]])
+    logits = jnp.concatenate([jnp.zeros((1,), dtype=dtype), rest[:, 2]])
+    ok = jnp.all(rvars > 0.0) & (var > 0.0)
+    safe_rvars = jnp.where(rvars > 0.0, rvars, 1.0)
+    safe_var = jnp.where(var > 0.0, var, 1.0)
+    pi = jax.nn.softmax(logits)
+    m_raw = jnp.sum(pi * rmeans)
+    v_raw = jnp.sum(pi * (safe_rvars + rmeans**2)) - m_raw**2
+    means = mean + jnp.sqrt(safe_var) * (rmeans - m_raw) / jnp.sqrt(v_raw)
+    variances = safe_var * safe_rvars / v_raw
+    nan = jnp.full_like(means, jnp.nan)
+    return pi, jnp.where(ok, means, nan), jnp.where(ok, variances, nan)
+
+
+def mixture_log_weights(nodes: Array, params: Array, base: Array | None = None) -> Array:
+    r"""Log quadrature weights of a standardized normal mixture, components normalized on the grid.
+
+    With the standardized components :math:`(\pi_c,\mu_c,\sigma_c^2)` of
+    :func:`mixture_components` and the fixed node log base weights :math:`b_q` (0 on equispaced
+    grids; Gauss–Hermite, DESIGN.md §15.44),
+
+    .. math::
+        \log w_q = \log\sum_{c=1}^{k}\pi_c\,\tilde w_{cq},\qquad
+        \log\tilde w_{cq} = \operatorname{log\_softmax}_q\!\Big(b_q
+            - \frac{(\theta_q-\mu_c)^2}{2\sigma_c^2}\Big).
+
+    Each component is the :class:`Normal` grid density, so :math:`\sum_q\tilde w_{cq}=1` and
+    :math:`\pi_c` is exactly the grid mass of component :math:`c`, as R mirt's
+    ``dentype = "mixture-k"`` stacks per-class normalized densities (Mislevy, 1984; Chalmers,
+    2012; DESIGN.md §16.7). Non-positive variances return NaN so the Newton line search and
+    SQUAREM reject infeasible candidates.
+
+    Parameters
+    ----------
+    nodes : Array, shape (Q,) or (Q, 1)
+        Unidimensional quadrature nodes.
+    params : Array, shape (3k - 1,)
+        Parameters in :func:`mixture_param_names` order.
+    base : Array, shape (Q,), optional
+        Fixed node log base weights (default 0).
+
+    Returns
+    -------
+    Array, shape (Q,)
+    """
+    t = nodes[:, 0] if nodes.ndim == 2 else nodes
+    _, means, variances = mixture_components(params)
+    ok = jnp.all(jnp.isfinite(variances))
+    safe_v = jnp.where(ok, variances, 1.0)
+    safe_m = jnp.where(ok, means, 0.0)
+    kernel = -0.5 * (t[None, :] - safe_m[:, None]) ** 2 / safe_v[:, None]  # (k, Q)
+    if base is not None:
+        kernel = kernel + base[None, :]
+    log_comp = jax.nn.log_softmax(kernel, axis=1)
+    log_pi = jax.nn.log_softmax(
+        jnp.concatenate([jnp.zeros((1,), dtype=params.dtype), params[4::3]])
+    )
+    logw = jax.scipy.special.logsumexp(log_pi[:, None] + log_comp, axis=0)
+    return jnp.where(ok, logw, jnp.nan)
 
 
 def davidian_param_names(degree: int) -> tuple[str, ...]:

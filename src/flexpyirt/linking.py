@@ -34,7 +34,7 @@ from flexpyirt._linking import (
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import ConvergenceWarning, SpecificationError
 from flexpyirt.items import ItemKernel
-from flexpyirt.latent import davidian_param_names, latent_param_names
+from flexpyirt.latent import davidian_param_names, latent_param_names, mixture_param_names
 from flexpyirt.result import _HTML_STYLE, FitResult, _frame_to_html_table
 
 __all__ = ["LinkMethod", "LinkResult", "link"]
@@ -123,26 +123,33 @@ def _resolve_common_items(
 def _fitted_grid(res: FitResult, group_name: str, group_idx: int) -> tuple[np.ndarray, np.ndarray]:
     r"""Return ``(nodes, weights)`` of ``res``'s fitted unidimensional latent distribution.
 
-    The weights are those the EM integrates with (DESIGN.md §4.4, §15.44, §16.4): the fitted
-    histogram for ``EmpiricalHistogram``; otherwise
+    The weights are those the EM integrates with (DESIGN.md §4.4, §15.44, §16.4, §16.7): the
+    fitted histogram for ``EmpiricalHistogram``; otherwise
     :math:`w_q=\operatorname{softmax}_q(b_q+\log g(\theta_q;\hat{\boldsymbol\xi}))` with the
     fixed node base weights :math:`b_q` (0 on equispaced grids, nonzero for Gauss–Hermite) and
-    the fitted latent density :math:`g` (``Normal`` or the standardized ``DavidianCurve``).
+    the fitted latent density :math:`g` (``Normal``, the standardized ``DavidianCurve`` or
+    ``NormalMixture``, whose components are each normalized on the grid).
     """
     nodes = res._quadrature.nodes().astype(np.float64)
-    if res._model.is_empirical_histogram:
+    model = res._model
+    if model.is_empirical_histogram:
         assert res._eh_weights is not None
         w = np.asarray(res._eh_weights[group_idx], dtype=np.float64)
     else:
         lat = res.parameters[
             (res.parameters["group"] == group_name) & (res.parameters["item"] == LATENT_ITEM)
         ].set_index("param")["estimate"]
-        degree = res._model.davidian_degree
-        names = davidian_param_names(degree) if degree > 0 else latent_param_names(1)
+        kind = (model.davidian_degree, model.mixture_components)
+        if kind[0] > 0:
+            names = davidian_param_names(kind[0])
+        elif kind[1] > 0:
+            names = mixture_param_names(kind[1])
+        else:
+            names = latent_param_names(1)
         params = jnp.asarray(lat.loc[list(names)].to_numpy(dtype=np.float64))
         base = jnp.asarray(res._quadrature.base_log_weights(1), dtype=jnp.float64)
         logw = _latent_log_weights_group(
-            jnp.asarray(nodes, dtype=jnp.float64)[:, None], base, params, degree
+            jnp.asarray(nodes, dtype=jnp.float64)[:, None], base, params, kind
         )
         w = np.exp(np.asarray(logw, dtype=np.float64))
     return nodes, w / float(np.sum(w))

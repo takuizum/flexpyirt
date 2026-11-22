@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -36,10 +36,12 @@ from flexpyirt.errors import SpecificationError
 from flexpyirt.items import GPCM, GRM, PCM, FourPL, ItemModel, Nominal, Rasch, ThreePL, TwoPL
 from flexpyirt.latent import (
     MAX_DAVIDIAN_DEGREE,
+    MAX_MIXTURE_COMPONENTS,
     DavidianCurve,
     EmpiricalHistogram,
     LatentSpec,
     Normal,
+    NormalMixture,
 )
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
@@ -408,15 +410,78 @@ def _deserialize_davidian_latent(obj: dict[str, Any], field_name: str) -> Davidi
     )
 
 
+def _encode_float_tuple(values: Sequence[float] | None) -> list[Any] | None:
+    return None if values is None else [_encode_float(v) for v in values]
+
+
+def _decode_float_tuple(obj: Any, *, field_name: str) -> tuple[float, ...] | None:
+    if obj is None:
+        return None
+    if not isinstance(obj, list):
+        raise SpecificationError(f"Expected a list or null for {field_name}, got {obj!r}.")
+    return tuple(
+        _decode_float(v, field_name=f"{field_name}[{i}]", finite=True) for i, v in enumerate(obj)
+    )
+
+
+def _serialize_mixture_latent(dist: NormalMixture) -> dict[str, Any]:
+    return {
+        "type": "NormalMixture",
+        "n_components": int(dist.n_components),
+        "mean": _encode_float(dist.mean),
+        "var": _encode_float(dist.var),
+        "free_mean": bool(dist.free_mean),
+        "free_var": bool(dist.free_var),
+        "means": _encode_float_tuple(dist.means),
+        "variances": _encode_float_tuple(dist.variances),
+        "weights": _encode_float_tuple(dist.weights),
+    }
+
+
+def _deserialize_mixture_latent(obj: dict[str, Any], field_name: str) -> NormalMixture:
+    _check_keys(
+        obj,
+        required={
+            "type",
+            "n_components",
+            "mean",
+            "var",
+            "free_mean",
+            "free_var",
+            "means",
+            "variances",
+            "weights",
+        },
+        field_name=field_name,
+    )
+    return NormalMixture(
+        _require_int(
+            obj["n_components"],
+            field_name=f"{field_name}.n_components",
+            min_value=2,
+            max_value=MAX_MIXTURE_COMPONENTS,
+        ),
+        mean=_decode_float(obj["mean"], field_name=f"{field_name}.mean", finite=True),
+        var=_decode_float(obj["var"], field_name=f"{field_name}.var", finite=True),
+        free_mean=_require_bool(obj["free_mean"], field_name=f"{field_name}.free_mean"),
+        free_var=_require_bool(obj["free_var"], field_name=f"{field_name}.free_var"),
+        means=_decode_float_tuple(obj["means"], field_name=f"{field_name}.means"),
+        variances=_decode_float_tuple(obj["variances"], field_name=f"{field_name}.variances"),
+        weights=_decode_float_tuple(obj["weights"], field_name=f"{field_name}.weights"),
+    )
+
+
 _LATENT_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
     Normal: _serialize_normal_latent,
     EmpiricalHistogram: _serialize_eh_latent,
     DavidianCurve: _serialize_davidian_latent,
+    NormalMixture: _serialize_mixture_latent,
 }
 _LATENT_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], LatentSpec]] = {
     "Normal": _deserialize_normal_latent,
     "EmpiricalHistogram": _deserialize_eh_latent,
     "DavidianCurve": _deserialize_davidian_latent,
+    "NormalMixture": _deserialize_mixture_latent,
 }
 
 

@@ -153,7 +153,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 |---|---|---|
 | `Model` | frozen dataclass | The whole specification. Built with `uniform`, `from_items`; `.fix`, `.fix_from`, `.prior`, `.equal_across_groups`, `.equal_across_items`, `.with_groups`, `.with_latent`, `.parameter_table` |
 | `Rasch`, `TwoPL`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`, `Nominal` | frozen dataclass (satisfies `ItemModel`) | Item models |
-| `Normal`, `EmpiricalHistogram`, `DavidianCurve` | frozen dataclass (satisfies `LatentDist`) | Latent distributions. `Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)` |
+| `Normal`, `EmpiricalHistogram`, `DavidianCurve`, `NormalMixture` | frozen dataclass (satisfies `LatentDist`) | Latent distributions. `Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)`, `NormalMixture(n_components)` |
 | `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
 | `fit` | function | Estimation; returns a `FitResult` |

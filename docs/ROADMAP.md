@@ -52,7 +52,8 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   `free_id`s across items and item models; joint Newton per connected component; validated
   in V16).
 - [x] Davidian-curve latent distributions (`DavidianCurve`, single-group unidimensional, analytically standardized, Oakes/Hessian SEs; validated in V19).
-- Normal-mixture latent distributions.
+- [x] Normal-mixture latent distributions (`NormalMixture`, single-group unidimensional, mirt's
+  mixture parameterization analytically standardized, Oakes/Hessian SEs; validated in V22).
 - [x] Differentiable linking (`link()`, `LinkResult`: Haebara / Stocking–Lord, non-symmetric and
   symmetric, Ogasawara delta-method SEs via autodiff; validated in V20 for 2PL, 3PL, GRM, GPCM and
   mixed 2PL + GPCM common items).

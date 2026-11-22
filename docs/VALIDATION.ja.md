@@ -46,6 +46,7 @@
 | V19 | Davidian 曲線潜在分布（2PL $k=3$・GRM $k=2$・平均分散自由の FIPC 2PL $k=3$） | `mirt(..., dentype = "Davidian-k")` および `mirt(..., customGroup = ..., SE.type = "Oakes")` | M5 |
 | V20 | 尺度リンキング: Haebara・Stocking–Lord（非対称・対称）と Ogasawara SE（2PL・GRM・GPCM・3PL・非標準の新フォーム格子・2PL + GPCM 混在） | 個別 `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R 実装 | M5 |
 | V21 | 多母集団の確認的 2 次元 MIRT（単純構造・交差負荷。両因子にアンカー、焦点群の平均・分散を自由） | `COV = F1*F2` での `multipleGroup(..., invariance = c(anchors, "free_means", "free_var"))` | M4 |
+| V22 | 混合正規潜在分布（2PL $k=2$ の二峰、小さい成分を持つ GRM $k=2$、GPCM $k=3$） | 像の格子での `multipleGroup(..., dentype = "mixture-k", invariance = c(<全項目>, "free_means", "free_var"))` と、標準化した尤度の R による独立な実装（Newton による仕上げ、Richardson ヘッセ行列 SE、EAP） | M5 |
 | V23 | 名義反応モデル（Science、順序のない・負の採点係数を含むシミュレーション、名義 + 2PL の混在、大半が非単調な項目、2 因子の確認的モデル） | GPCM の点（またはより良い別の初期値）から開始する `pars` を与えた `mirt(..., "nominal")`、`itemfit(fit_stats = "S_X2")` | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -459,6 +460,63 @@
   中心有限差分検証、および $N(\hat\eta, \Sigma)$ からのパラメタ抽出ごとに重み固定でリンキングを解き直すモンテカルロ
   線形化検証（推定のブートストラップではない））: `tests/test_m5_linking.py`。
 
+- **混合正規潜在分布（V22、M5）**: flexpyirt の `NormalMixture`（DESIGN §16.7）は形状に mirt のクラスのパラメタ化を
+  使い、混合を解析的に標準化する。したがって格子 $\theta_q$ 上では、像の格子 $z_q=M+\sqrt V\theta_q$ 上の mirt の
+  `multipleGroup(dat, 1, itemtype = ..., dentype = "mixture-k", invariance = c(<全項目>, "free_means", "free_var"))`
+  （項目は 1 組、クラス 1 は $N(0,1)$ に固定、クラス $2..k$ の `MEAN_1`・`COV_11`・`PI` が自由）に厳密に一致し、
+  $a=a^{\text{mirt}}\sqrt V$、$d_k=d_k^{\text{mirt}}+s_k a^{\text{mirt}}M$（2PL/GRM では $s_k=1$、GPCM では $k$）である。
+  そこで `validation/r/m5_mixture_reference.R`（→ `tests/reference/v22_mixture_*.json`）はケースごとに次を記録する:
+  1. `exact`: flexpyirt の離散化尤度を R で独立に書き直したもの（2PL・GRM・GPCM のカテゴリ確率、成分ごとに正規化した
+     重み、標準化）を、$[-6,6]$ 上の mirt の解から Newton 法（中心差分の勾配、Richardson ヘッセ行列）で
+     max|grad| < 2e-5（最終 1.8e-6–3.6e-6）まで最大化した点と、Richardson ヘッセ行列 SE、EAP。
+  2. `mirt`: 厳密な最大点の像の格子（非対称な `theta_lim`。V22a では `c(-7.76, 9.50)`、`optimizer = "NR"`、
+     `TOL = 1e-10`）で組み込みの mirt を推定し直し、推定値と `fscores()` の EAP を flexpyirt の尺度へ写したもの。R での
+     mirt 尺度の尤度は mirt の `logLik` を 1e-12 で（mirt の推定値はその停留点で max|grad| <= 3.6e-6）、
+     `fscores()` の EAP を 1e-8 で再現する。
+  mirt 1.46.1 について分かったこと:
+  - `dentype = "mixture-k"` は既定でクラスごとの項目パラメタを推定する（混合 IRT モデル）。項目共通のモデルには
+    `invariance = <全項目>` が要る（`ESTIMATION` から無害な再利用の警告が出る）。`multipleGroup` の第 3 位置引数は
+    `group` なので `itemtype` は名前付きで渡す必要がある。
+  - **mirt の混合モデルの Oakes SE は観測情報の SE ではない。** mirt 自身の尺度と格子で、mirt の離散化尤度の R
+    Richardson ヘッセ行列による潜在分布パラメタ（`MEAN_1`・`COV_11`・`PI`）の SE は V22a で (0.159, 0.139, 0.135) だが、
+    `SE.type = "Oakes"` は (0.0315, 0.0048, 0.0401) で、3 ケースを通じた比は 0.014–0.34。`SE.type = "complete"` は
+    (0.0262, 0.0042, 0.0380) で、1/sqrt(N pi_1 pi_2) = 0.0380 はクラス既知のときの `PI` の完全データ SE である。項目の SE
+    も小さすぎる（V22a の q01 `a1`: 0.0539 対 0.0898）。混合モデルでは他の観測情報 SE の種類は拒否される。そこで SE の
+    基準は R の Richardson ヘッセ行列とし、mirt の尺度での Oakes・complete・R ヘッセ行列の SE を証拠として保存
+    （`mirt.se_*_mirt_scale`）、flexpyirt の潜在分布パラメタの SE が mirt の尺度での R ヘッセ行列の SE と一致し
+    （素の形状の座標は共通）、mirt の Oakes SE がその 0.6 倍未満であることをテストで確認する。
+  - 混合モデルでは `fscores(method = "MAP")` は拒否される（flexpyirt も MAP を拒否する）。EAP の列名は
+    `Class_1`, `SE_F1`。
+  - クラスで拡大した mirt の EM は遅い（生成値から `TOL = 1e-10` で 3,092–4,555 (61 points, V22a/b) and 24,961 (121 points, V22c) 回の EM サイクル）。mirt のパラメタ化では
+    flexpyirt の（節点レベルの）EM も、V22a で 4 通り中 2 通り、V22b で 4 通り中 3 通りの初期形状から劣った点
+    （対数尤度で 0.73–53.2 低い）に止まった。標準化すると、すべての初期値から通常の EM で 168–661 反復（SQUAREM で
+    27–93 反復）で最大値に達した（DESIGN §16.7）。
+  - **格子の解像度（V22c）**: 成分が細く（標準化後 $\sigma_c\approx0.26$）3 カテゴリの項目が 20 あると、事後分布の幅が
+    $[-6,6]$ 上 61 点の間隔 0.2 と同程度になる。61 点での最大値は 121 点・241 点（互いに 1e-9 で一致）と対数尤度で
+    5.7e-3 異なり、mirt の固定格子と flexpyirt の動く標準化格子の最大値は対数尤度で 2.6e-4、パラメタで最大 6e-3 離れた。
+    そこで V22c は $[-6,6]$ 上 121 点を使う（mirt は不動点が同じ `accelerate = "squarem"` を使ったが、それでも 24,961 回の EM
+    サイクルを要した）。
+  結果（通常の EM と SQUAREM の最大値。flexpyirt は既定の初期形状から `BAEM(tol=1e-9)` で推定。成分のラベルに
+  意味はないため標準化した成分は平均で並べて比較。SE の検査は mirt のラベル付けの初期値から推定（尤度が同じゲージの
+  選択））:
+  - **V22a（`v22_mixture_2pl_k2`、2PL、$J=20$、$N=3000$、$0.65N(0,1)+0.35N(2.5,0.5^2)$、61 点）**: `loglik` 相対
+    `4.5e-16`（exact・mirt とも）、項目パラメタ `3.5e-8` / `4.3e-8`、標準化した成分 `5.4e-8` / `5.5e-8`、mirt の
+    `MEAN_1, COV_11, PI` に対する素の形状 `1.2e-8`。R ヘッセ行列に対する項目 SE 相対 `1.0e-5`（潜在分布 `3.9e-6`）、
+    Oakes 対 Hessian `3.6e-14`。exact のパラメタでの EAP `4.7e-15`、mirt に対し `4.5e-9`（SE `3.1e-9`）。通常の EM 734 反復、
+    SQUAREM 54 反復。
+  - **V22b（`v22_mixture_grm_k2`、GRM $K=4$、$J=12$、$N=2500$、$0.8N(0,1)+0.2N(-2.2,0.4^2)$、61 点）**: `loglik` 相対
+    `8.8e-16`、項目パラメタ `3.3e-8` / `1.7e-9`、成分 `9.7e-9` / `7.8e-9`、mirt に対する素の形状 `9.3e-9`。R ヘッセ行列に
+    対する項目 SE 相対 `1.1e-5`（潜在分布 `3.2e-5`）、Oakes 対 Hessian `5.0e-15`。EAP `4.9e-15`、mirt に対し `2.6e-9`。
+    通常の EM 227 反復、SQUAREM 34 反復（flexpyirt の既定の初期値は、素の成分 1 が小さい成分になるラベルの付け替えた解に
+    収束する。尤度と標準化した成分は同じ）。
+  - **V22c（`v22_mixture_gpcm_k3`、GPCM $K=3$、$J=20$、$N=4000$、$0.5N(0,1)+0.3N(2.3,0.45^2)+0.2N(-2.3,0.5^2)$、
+    121 点）**: `loglik` 相対 `2.7e-16`、項目パラメタ `2.6e-8 / 2.6e-8`、成分 `9.6e-8 / 9.4e-8`、mirt に対する素の形状 `2.9e-7`。
+    R ヘッセ行列に対する項目 SE 相対 `3.2e-5`（潜在分布 `1.9e-4`）、Oakes 対 Hessian `1.8e-13`。EAP `4.9e-15`、
+    mirt に対し `1.9e-8 (SE 1.4e-8)`。通常の EM 416 反復、SQUAREM 55 反復。
+  許容誤差は上の表のとおり。単体テスト（仕様の検証、素の初期形状、厳密な標準化、等間隔・Gauss–Hermite 格子での重み、
+  NaN の防御、EM と SQUAREM の単調性、Oakes == Hessian、ラベルを付け替えた初期値、デルタ法の成分、Rasch/FIPC の
+  識別性、入れ子の Normal、退化解の警告、3 成分、採点、拒否するメソッド、リンキングの重み、JSON）:
+  `tests/test_m5_mixture.py`。mirt との照合: `tests/test_mirt_m5_mixture.py`。
 - **名義反応モデル（V23、M5）**: mirt の `itemtype = "nominal"`（`optimizer = "NR"`、`TOL = 1e-10`、$[-6,6]$ の
   61 点。V23f は次元あたり 31 点）。V23a: `0..3` に符号化し直した `Science`。V23b: シミュレーション
   $J=10, K=4, N=3000$ で、内部の採点係数が入れ替わった項目（`q09`: $\mathrm{ak}_1=2.2 > \mathrm{ak}_2=0.7$）と

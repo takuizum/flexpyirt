@@ -51,6 +51,7 @@ English | [日本語](VALIDATION.ja.md)
 | V19 | Davidian-curve latent distributions (2PL $k=3$, GRM $k=2$, FIPC 2PL $k=3$ with free mean/var) | `mirt(..., dentype = "Davidian-k")` & `mirt(..., customGroup = ..., SE.type = "Oakes")` | M5 |
 | V20 | Scale linking: Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara SEs (2PL, GRM, GPCM, 3PL, non-standard source grid, mixed 2PL + GPCM) | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` | M5 |
 | V21 | Multiple-group confirmatory 2D MIRT (simple structure, cross-loading; anchors on both factors, focal means/variances free) | `multipleGroup(..., invariance = c(anchors, "free_means", "free_var"))` with `COV = F1*F2` | M4 |
+| V22 | Normal-mixture latent distributions (2PL $k=2$ bimodal, GRM $k=2$ with a small component, GPCM $k=3$) | `multipleGroup(..., dentype = "mixture-k", invariance = c(<all items>, "free_means", "free_var"))` on the image grid, plus an independent R implementation of the standardized likelihood (Newton polish, Richardson-Hessian SEs, EAP) | M5 |
 | V23 | Nominal response model (Science; simulated with unordered/negative scoring coefficients; nominal + 2PL mixed; mostly non-monotone items; two-factor confirmatory) | `mirt(..., "nominal")` with `pars` starting at the GPCM point (or the best alternative start); `itemfit(fit_stats = "S_X2")` | M5 |
 
 ## mirt settings and known differences (found in M1)
@@ -563,6 +564,79 @@ English | [日本語](VALIDATION.ja.md)
   calibrations): `tests/test_m5_linking.py`.
 
 ## Validation beyond agreement
+- **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)
+  uses mirt's class parameterization for the shape and standardizes the mixture analytically, so
+  on the grid $\theta_q$ it is exactly mirt's `multipleGroup(dat, 1, itemtype = ..., dentype =
+  "mixture-k", invariance = c(<all items>, "free_means", "free_var"))` (one set of items, class 1
+  fixed at $N(0,1)$, `MEAN_1`, `COV_11`, `PI` free for classes $2..k$) on the image grid
+  $z_q=M+\sqrt V\theta_q$, with $a=a^{\text{mirt}}\sqrt V$ and $d_k=d_k^{\text{mirt}}+s_k a^{\text{mirt}}M$
+  ($s_k=1$ for 2PL/GRM, $k$ for GPCM). `validation/r/m5_mixture_reference.R`
+  (→ `tests/reference/v22_mixture_*.json`) therefore records, per case:
+  1. `exact`: flexpyirt's discretized likelihood re-coded independently in R (2PL, GRM and GPCM
+     category probabilities, per-component normalized weights, standardization), maximized by
+     Newton steps (central-difference gradient, Richardson Hessian) from mirt's solution on
+     $[-6,6]$ until max|grad| < 2e-5 (final 1.8e-6–3.6e-6), with Richardson-Hessian SEs and EAPs.
+  2. `mirt`: built-in mirt refitted on the image grid at the exact maximum (asymmetric
+     `theta_lim`, e.g. `c(-7.76, 9.50)` for V22a; `optimizer = "NR"`, `TOL = 1e-10`), its
+     estimates and `fscores()` EAPs mapped to flexpyirt's scale. R's own mirt-scale likelihood
+     reproduces mirt's `logLik` to 1e-12 (mirt's estimates are stationary for it, max|grad| <=
+     3.6e-6) and mirt's `fscores()` EAP to 1e-8.
+  Findings on mirt 1.46.1:
+  - `dentype = "mixture-k"` estimates class-specific item parameters by default (a mixture IRT
+    model); the common-items model needs `invariance = <all items>` (which emits a harmless
+    recycling warning from `ESTIMATION`). `multipleGroup`'s third positional argument is
+    `group`, so `itemtype` must be named.
+  - **mirt's mixture Oakes SEs are not the observed-information SEs.** On mirt's own scale and
+    grid, the R Richardson Hessian of mirt's discretized likelihood gives latent SEs (`MEAN_1`,
+    `COV_11`, `PI`) of (0.159, 0.139, 0.135) on V22a, while `SE.type = "Oakes"` gives
+    (0.0315, 0.0048, 0.0401), ratios 0.014–0.34 over the three cases; `SE.type = "complete"`
+    gives (0.0262, 0.0042, 0.0380), and 1/sqrt(N pi_1 pi_2) = 0.0380 is the complete-data SE of
+    `PI` with known classes. Item SEs are also too small (V22a q01 `a1`: 0.0539 vs 0.0898). Other
+    observed-information SE types are refused for mixtures. The SE reference is therefore the R
+    Richardson Hessian; mirt's Oakes, complete and R-Hessian SEs on mirt's scale are stored as
+    evidence (`mirt.se_*_mirt_scale`), and a test checks that flexpyirt's latent SEs equal the R
+    Hessian ones on mirt's scale (the raw shape coordinates are shared) while mirt's Oakes SEs are
+    below 0.6 times them.
+  - `fscores(method = "MAP")` is refused for mixtures (flexpyirt rejects MAP too); EAP columns are
+    named `Class_1`, `SE_F1`.
+  - mirt's class-augmented EM is slow: 3,092–4,555 (61 points, V22a/b) and 24,961 (121 points, V22c) EM cycles at `TOL = 1e-10` from the generating
+    values. In mirt's parameterization flexpyirt's (node-level) EM also stalled at inferior points
+    from 2 of 4 starting shapes on V22a and 3 of 4 on V22b (0.73–53.2 log-likelihood points
+    lower); standardized, every start reached the maximum in 168–661 plain EM iterations (27–93
+    with SQUAREM; DESIGN §16.7).
+  - **Grid resolution (V22c)**: with narrow components (standardized $\sigma_c\approx0.26$) and
+    20 three-category items, posteriors are about as narrow as the 0.2 spacing of 61 points on
+    $[-6,6]$: the 61-point maximum is 5.7e-3 log-likelihood points from the 121- and 241-point
+    ones (which agree to 1e-9), and mirt's fixed grid and flexpyirt's moving standardized grid
+    gave maxima 2.6e-4 points and up to 6e-3 in the parameters apart. V22c therefore uses 121
+    points on $[-6,6]$ (mirt with `accelerate = "squarem"`, the same fixed point; it still needed
+    24,961 EM cycles).
+  Results (maxima over plain EM and SQUAREM; flexpyirt fitted from its default starting shape,
+  `BAEM(tol=1e-9)`; standardized components compared sorted by mean, since component labels are
+  arbitrary; SE checks fit from a start with mirt's labelling, a gauge choice with the same
+  likelihood):
+  - **V22a (`v22_mixture_2pl_k2`, 2PL, $J=20$, $N=3000$, $0.65N(0,1)+0.35N(2.5,0.5^2)$, 61 pts)**:
+    `loglik` rel `4.5e-16` (exact and mirt), item params `3.5e-8` / `4.3e-8`, standardized
+    components `5.4e-8` / `5.5e-8`, raw shape vs mirt's `MEAN_1, COV_11, PI` `1.2e-8`; item SEs vs
+    R Hessian `1.0e-5` rel (latent `3.9e-6`), Oakes vs Hessian `3.6e-14`; EAP at the exact
+    parameters `4.7e-15`, vs mirt `4.5e-9` (SE `3.1e-9`). Plain EM 734 iterations, SQUAREM 54.
+  - **V22b (`v22_mixture_grm_k2`, GRM $K=4$, $J=12$, $N=2500$, $0.8N(0,1)+0.2N(-2.2,0.4^2)$, 61
+    pts)**: `loglik` rel `8.8e-16`, item params `3.3e-8` / `1.7e-9`, components `9.7e-9` / `7.8e-9`,
+    raw shape vs mirt `9.3e-9`; item SEs vs R Hessian `1.1e-5` rel (latent `3.2e-5`), Oakes vs
+    Hessian `5.0e-15`; EAP `4.9e-15`, vs mirt `2.6e-9`. Plain EM 227, SQUAREM 34. (flexpyirt's
+    default start converges to the relabelled solution whose raw component 1 is the small
+    component: same likelihood and standardized components.)
+  - **V22c (`v22_mixture_gpcm_k3`, GPCM $K=3$, $J=20$, $N=4000$, $0.5N(0,1)+0.3N(2.3,0.45^2)+
+    0.2N(-2.3,0.5^2)$, 121 pts)**: `loglik` rel `2.7e-16`, item params `2.6e-8 / 2.6e-8`, components
+    `9.6e-8 / 9.4e-8`, raw shape vs mirt `2.9e-7`; item SEs vs R Hessian `3.2e-5` rel (latent
+    `1.9e-4`), Oakes vs Hessian `1.8e-13`; EAP `4.9e-15`, vs mirt `1.9e-8 (SE 1.4e-8)`. Plain EM
+    416, SQUAREM 55.
+  Tolerances are those of the table above. Unit tests (spec validation, raw starting shape, exact
+  standardization, grid weights on equispaced and Gauss–Hermite grids, NaN guards, monotone EM
+  and SQUAREM, Oakes == Hessian, relabelled starts, delta-method components, Rasch/FIPC
+  identification, nested Normal fit, degenerate-solution warnings, three components, scoring,
+  rejected methods, link weights, JSON): `tests/test_m5_mixture.py`; mirt agreement:
+  `tests/test_mirt_m5_mixture.py`.
 - **Nominal response model (V23, M5)**: mirt's `itemtype = "nominal"` (`optimizer = "NR"`,
   `TOL = 1e-10`, 61 points on $[-6,6]$; 31 per dimension for V23f). V23a: `Science` recoded to
   `0..3`. V23b: simulated $J=10, K=4, N=3000$ with swapped interior scoring coefficients (`q09`:
