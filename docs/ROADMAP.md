@@ -56,4 +56,5 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - [x] Item fit: S-X2 (`FitResult.item_fit()`, single-group unidimensional; validated in V15).
 - [x] DIF: multiple-group likelihood-ratio tests (`FitResult.dif()`, schemes `add` / `drop`,
   Holm / BH adjustment; validated in V17).
-- M2 (limited-information goodness of fit).
+- [x] M2 limited-information goodness of fit (`FitResult.m2()`, single-group unidimensional
+  $M_2$ / $M_2^*$, RMSEA + CI, SRMSR, dichotomous TLI / CFI; validated in V18).

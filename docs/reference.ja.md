@@ -143,6 +143,34 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 **例外**: 多次元・多母集団・`EmpiricalHistogram` のモデル、欠測を含むデータ、観測されないカテゴリがある項目、
 正でない `mincell` の場合に `SpecificationError`。
 
+#### `FitResult.m2`
+
+```text
+m2(data, *, item_names=None, ci=0.90) -> DataFrame
+```
+
+Maydeu-Olivares & Joe (2005, 2006) による限定情報の適合度統計量 $M_2$ / $M_2^*$
+（[ガイド 5 節](guide.ja.md#限定情報の適合度m2)）。$J$ 個の項目得点平均と $\binom{J}{2}$ 個の交差積から計算する
+（mirt の既定 `M2(type = "M2*")` に対応。2 値項目では厳密に $M_2$）。ヤコビ行列
+$\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、すべての自由な項目・潜在分布パラメタを含む
+（共有パラメタは 1 回）。
+
+| 引数 | 説明 |
+|---|---|
+| `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
+| `item_names` | `data` が配列のときの列名 |
+| `ci` | RMSEA 信頼区間の信頼水準（`(0, 1)` の開区間、既定 `0.90`） |
+
+**戻り値**: 1 行の `DataFrame`。列は `m2`, `df`（$J + \binom{J}{2} - k$）, `p`, `rmsea`,
+`rmsea_<lo>`, `rmsea_<hi>`（`ci` に従う。例: `0.90` で `rmsea_5`, `rmsea_95`）, `srmsr`,
+`tli`, `cfi`。`df <= 0` または $\Delta_2$ がランク落ちしているとき（1 次・2 次モーメントから局所識別できないとき）は
+`FlexpyirtWarning` を出し、`m2`・`p`・RMSEA・信頼区間・`tli`・`cfi` を `NaN` とする（`df` と `srmsr` は有限のまま）。
+多値モデルでは `tli` と `cfi` を `NaN` とする（DESIGN §16.3）。2 値モデルで帰無モデルの $M_2$ が当てはめモデルの $M_2$
+以下のときは `FlexpyirtWarning` を出し `tli`・`cfi` を `NaN` とする。
+
+**例外**: JAX 64 ビットが無効なとき `PrecisionError`。多次元・多母集団・`EmpiricalHistogram`・事前分布つきの
+MAP モデル、欠測を含むデータ、不正な `ci`、項目数または回答者数が 2 未満のとき `SpecificationError`。
+
 #### `FitResult.dif`
 
 ```text

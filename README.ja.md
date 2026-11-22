@@ -30,6 +30,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 結果の保存 | `FitResult.to_json()` / `FitResult.from_json()`（厳密なスキーマ、pickle 不使用） | — |
 | EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | V1–V5, V7–V9, V11, V14 |
 | 項目適合度 | Orlando–Thissen の S-X2（`FitResult.item_fit()`）。mirt と同じセルのまとめ方・自由度・RMSEA・p 値 | V15 |
+| 限定情報の適合度 | Maydeu-Olivares & Joe の M2 / M2*（`FitResult.m2()`）。自由度・p 値・RMSEA と信頼区間・SRMSR・2 値の TLI / CFI | V18 |
 | DIF | 多母集団の尤度比検定による DIF（`FitResult.dif()`。mirt の `DIF()` の `add` / `drop` 方式、AIC・SABIC・HQ・BIC の差、Holm または BH で補正した p 値） | V17 |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
 

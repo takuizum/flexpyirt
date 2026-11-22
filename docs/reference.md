@@ -155,6 +155,36 @@ free latent parameters (mirt's convention).
 **Raises**: `SpecificationError` for multidimensional, multiple-group or `EmpiricalHistogram`
 models, missing responses, an item with an unobserved category, or a non-positive `mincell`.
 
+#### `FitResult.m2`
+
+```text
+m2(data, *, item_names=None, ci=0.90) -> DataFrame
+```
+
+Limited-information goodness-of-fit statistic $M_2$ / $M_2^*$ of Maydeu-Olivares & Joe (2005, 2006)
+([guide section 5](guide.md#limited-information-fit-m2)), computed on the $J$ item-score means and
+$\binom{J}{2}$ pairwise cross-products (matching mirt's default `M2(type = "M2*")`; identically
+$M_2$ for dichotomous items). The Jacobian $\Delta_2 = \partial\pi_2/\partial\eta^\top$ includes
+every free item and latent parameter (shared parameters once) via JAX autodiff.
+
+| Argument | Description |
+|---|---|
+| `data` | Complete responses on the fitted items (typically the fitting data) |
+| `item_names` | Column names when `data` is an array |
+| `ci` | Confidence level strictly in `(0, 1)` for the RMSEA confidence interval (default `0.90`) |
+
+**Returns**: One-row `DataFrame` with columns `m2`, `df` ($J + \binom{J}{2} - k$), `p`, `rmsea`,
+`rmsea_<lo>`, `rmsea_<hi>` (named from `ci`, e.g. `rmsea_5`, `rmsea_95` for `0.90`), `srmsr`,
+`tli`, `cfi`. When `df <= 0` or $\Delta_2$ is rank-deficient (the model is not locally identified
+from first- and second-order moments), a `FlexpyirtWarning` is emitted and `m2`, `p`, RMSEA, its
+CI, `tli` and `cfi` are `NaN` (`df` and `srmsr` remain finite). Polytomous models return `NaN` for
+`tli` and `cfi` (DESIGN §16.3); if the dichotomous null $M_2$ is not greater than the fitted $M_2$,
+a `FlexpyirtWarning` is emitted and `tli`/`cfi` are `NaN`.
+
+**Raises**: `PrecisionError` if JAX 64-bit is disabled; `SpecificationError` for multidimensional,
+multiple-group, `EmpiricalHistogram`, or MAP (with priors) models, missing responses, invalid
+`ci`, or fewer than 2 items or respondents.
+
 #### `FitResult.dif`
 
 ```text

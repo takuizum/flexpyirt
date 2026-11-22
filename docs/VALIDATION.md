@@ -43,6 +43,7 @@ English | [日本語](VALIDATION.ja.md)
 | V15 | S-X2 item fit (GRM, GPCM, PCM with free variance, 3PL, FIPC 2PL; `mincell` 1 and 3) | `itemfit(m, fit_stats = "S_X2")` | M5 |
 | V16 | Equality constraints across items (LSAT7 common slope; 2PL + graded with cross-model constraints; two groups with anchors and a common slope) | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V17 | DIF likelihood-ratio tests on the V4 data (`add` for `a`+`d` and for `d`; `drop` for `a`+`d` from the fully invariant model) | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
+| V18 | M2 / M2* limited-information goodness of fit (LSAT7 2PL, simulated 2PL, 3PL, Rasch with free variance, GRM $K=3$, GPCM $K=4$) | `M2(m, quadpts = 61, theta_lim = c(-6, 6))` | M5 |
 | V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 
 ## mirt settings and known differences (found in M1)
@@ -362,6 +363,42 @@ English | [日本語](VALIDATION.ja.md)
   Agreement (plain EM and SQUAREM): $X^2$ and the AIC/SABIC/HQ/BIC differences to $2.2\times10^{-11}$,
   `p` and `adj_p` to $3\times10^{-11}$. Tests: `tests/test_mirt_m5_dif.py`. Reference generator:
   `validation/r/m5_dif_reference.R`.
+- **M2 / M2* limited-information goodness of fit (V18, M5)**: six cases on 61 points over $[-6,6]$
+  (`validation/r/m5_m2_reference.R` → `tests/reference/v18_m2.json`, mirt 1.46.1): `lsat7_2pl` (V1),
+  `sim_2pl` (V1), `threepl` (V11 3PL), `rasch_free_var` (V2 Rasch with free latent variance),
+  `grm_sim` (GRM $K=3, J=10, N=2000$), and `gpcm_sim` (GPCM $K=4, J=8, N=2000$). Comparing against
+  mirt 1.46.1's `M2()` uncovered four discrepancies in mirt 1.46.1 (all verified in R):
+  1. **Free latent parameters omitted from $\Delta_2$**: mirt forces `GroupPars` entries to
+     `est = FALSE` inside `M2()` while still subtracting them from `df`. flexpyirt includes all
+     free parameters (item and latent) in $\Delta_2$ by default (Maydeu-Olivares & Joe, 2005,
+     2006); internal `_m2.m2_statistic(..., _latent_in_delta=False)` reproduces mirt's
+     `rasch_free_var` value (`M2` rel `9.7e-16`, `SRMSR` `4.9e-17`, `TLI` `1.6e-9` at mirt's
+     estimates), while the default (`True`) matches R's exact-with-latent reference (`M2` rel
+     `1.0e-12` at mirt's estimates, `9.5e-6` on refit due to the documented $7.9\times10^{-5}$
+     latent variance difference on $[-6,6]$) and differs from mirt's `M2` by `0.035`.
+  2. **`dP("dich")` bug for 3PL/4PL**: `mirt:::dP` for `dich` uses the 2PL derivative
+     $P_0 P_1$ for `(a1, d)` instead of $(u-g)\sigma(1-\sigma)$ and places raw category
+     probabilities $(P_0, P_1)$ in columns 3–4 (`cbind(Theta * PQ, PQ, P)`) instead of
+     $((1-\sigma)g(1-g),\, \sigma u(1-u))$, shifting `threepl`'s `M2` by 4.8% (`64.82` vs exact
+     `68.11`).
+  3. **`dP("gpcm")` slope-derivative bug**: `mirt:::dP` for `gpcm` omits division by
+     `den = rowSums(num)` in the `a1` derivative (`rowSums(Theta[, i] * aknum[[i]])`), shifting
+     `gpcm_sim`'s `M2` by 10.8% (`5.27` vs exact `5.90`).
+  4. **Polytomous null model rank deficiency**: for $K_j > 2$, item $j$'s $K_j - 1$ intercept
+     columns in the null $\Delta_2$ are strictly collinear ($\operatorname{rank}=J < \sum(K_j-1)$);
+     mirt slices `qr.Q(qr(delta), complete = TRUE)` after `ncol(delta)` without checking rank,
+     making its polytomous null $M_2^*$ depend on item ordering. flexpyirt returns `NaN` for
+     `tli` and `cfi` when any item is polytomous (DESIGN §16.3).
+
+  Agreement (both plain EM and SQUAREM, exact `df` in every case):
+  - **Direct vs mirt (`lsat7_2pl`, `sim_2pl`, `grm_sim`)**: `M2` rel $\le 3.8\times10^{-11}$,
+    `p` $\le 7.8\times10^{-11}$, `RMSEA` $\le 4.4\times10^{-13}$, CI bounds $\le 1.4\times10^{-8}$,
+    `SRMSR` $\le 1.4\times10^{-12}$; dichotomous `TLI` $\le 4.8\times10^{-10}$, `CFI` $\le 2.4\times10^{-10}$.
+  - **Exact R $M_2^*$ (`threepl`, `gpcm_sim`, using central-difference derivatives of
+    `expected.item()` + mirt's `buildXi2els`)**: `M2` rel $\le 1.6\times10^{-9}$, `p` $\le 7.1\times10^{-10}$,
+    `RMSEA` $\le 3.7\times10^{-11}$, CI bounds $\le 6.0\times10^{-9}$, `threepl` `TLI` `1.8e-10` /
+    `CFI` `0`, and `SRMSR` directly vs mirt $\le 8.5\times10^{-13}$.
+  Tests: `tests/test_mirt_m5_m2.py` (mirt agreement), `tests/test_m5_m2.py` (unit tests).
 
 ## Validation beyond agreement
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number

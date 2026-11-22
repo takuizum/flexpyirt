@@ -38,6 +38,7 @@
 | V15 | S-X2 項目適合度（GRM・GPCM・分散自由の PCM・3PL・FIPC の 2PL、`mincell` 1 と 3） | `itemfit(m, fit_stats = "S_X2")` | M5 |
 | V16 | 項目をまたぐ等値制約（LSAT7 の共通傾き、2PL + graded のモデル間制約、アンカーつき 2 群 + 共通傾き） | `mirt(..., mirt.model("... CONSTRAIN = (1-5, a1)"))` / `multipleGroup(...)` | M5 |
 | V17 | V4 のデータでの尤度比検定による DIF（`a`+`d` と `d` の `add`、完全不変モデルからの `a`+`d` の `drop`） | `DIF(mg, which.par = ..., scheme = ...)` | M5 |
+| V18 | M2 / M2* 限定情報の適合度（LSAT7 2PL、シミュレーション 2PL、3PL、分散自由の Rasch、GRM $K=3$、GPCM $K=4$） | `M2(m, quadpts = 61, theta_lim = c(-6, 6))` | M5 |
 | V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -300,6 +301,36 @@
   （`p.adjust = "holm"`）。mirt の `p` は `1 - pchisq(...)` なので非常に大きな $X^2$ では厳密に 0（flexpyirt は生存関数）。
   一致（通常の EM・SQUAREM とも）: $X^2$ と AIC/SABIC/HQ/BIC の差 $2.2\times10^{-11}$、`p`・`adj_p` $3\times10^{-11}$。
   テスト: `tests/test_mirt_m5_dif.py`。参照値生成: `validation/r/m5_dif_reference.R`。
+- **M2 / M2* 限定情報の適合度（V18、M5）**: $[-6,6]$ の 61 点上の 6 ケース（`validation/r/m5_m2_reference.R` →
+  `tests/reference/v18_m2.json`、mirt 1.46.1）: `lsat7_2pl`（V1）、`sim_2pl`（V1）、`threepl`（V11 3PL）、
+  `rasch_free_var`（V2 潜在分散自由の Rasch）、`grm_sim`（GRM $K=3, J=10, N=2000$）、`gpcm_sim`
+  （GPCM $K=4, J=8, N=2000$）。mirt 1.46.1 の `M2()` との照合で、mirt 側の 4 つの相違・不具合を確認した（すべて R で検証済み）:
+  1. **$\Delta_2$ から自由な潜在分布パラメタを除外**: mirt は `M2()` 内で `GroupPars` の `est` を `FALSE` に強制する一方、
+     `df` からは引いている。flexpyirt は Maydeu-Olivares & Joe (2005, 2006) に従い既定ですべての自由パラメタを
+     $\Delta_2$ に含める。内部の `_m2.m2_statistic(..., _latent_in_delta=False)` は mirt の `rasch_free_var` の値を再現する
+     （mirt の推定値で `M2` 相対 `9.7e-16`、`SRMSR` `4.9e-17`、`TLI` `1.6e-9`）。既定（`True`）は潜在分布を含めた厳密な R 参照値と
+     一致し（mirt の推定値で `M2` 相対 `1.0e-12`、再推定では $[-6,6]$ での $7.9\times10^{-5}$ の分散差により `9.5e-6`）、
+     mirt の `M2` とは `0.035` 異なる。
+  2. **3PL/4PL での `dP("dich")` の不具合**: `dich` の `mirt:::dP` は `(a1, d)` に $(u-g)\sigma(1-\sigma)$
+     ではなく 2PL の微分 $P_0 P_1$ を使い、第 3・4 列にも $((1-\sigma)g(1-g),\, \sigma u(1-u))$ ではなく
+     カテゴリ確率 $(P_0, P_1)$ をそのまま入れている（`cbind(Theta * PQ, PQ, P)`）。このため `threepl` の `M2` が
+     4.8% ずれる（`64.82` 対 厳密値 `68.11`）。
+  3. **GPCM の `dP("gpcm")` 傾き微分の不具合**: `gpcm` の `mirt:::dP` は `a1` の微分で `den = rowSums(num)` で割るのを
+     忘れており（`rowSums(Theta[, i] * aknum[[i]])`）、`gpcm_sim` の `M2` が 10.8% ずれる（`5.27` 対 厳密値 `5.90`）。
+  4. **多値帰無モデルのランク落ち**: $K_j > 2$ では帰無 $\Delta_2$ の項目 $j$ の $K_j - 1$ 本の切片列が厳密に線形従属
+     （$\operatorname{rank}=J < \sum(K_j-1)$）になるが、mirt はランクを確認せず `qr.Q(qr(delta), complete = TRUE)` の
+     `ncol(delta)` 列目以降を取り出すため、多値帰無 $M_2^*$ が項目順に依存する。flexpyirt は多値項目を含むとき `tli` と
+     `cfi` を `NaN` とする（DESIGN §16.3）。
+
+  一致（通常の EM・SQUAREM とも、全ケースで `df` は完全一致）:
+  - **mirt と直接比較（`lsat7_2pl`, `sim_2pl`, `grm_sim`）**: `M2` 相対 $\le 3.8\times10^{-11}$、
+    `p` $\le 7.8\times10^{-11}$、`RMSEA` $\le 4.4\times10^{-13}$、信頼区間端点 $\le 1.4\times10^{-8}$、
+    `SRMSR` $\le 1.4\times10^{-12}$、2 値の `TLI` $\le 4.8\times10^{-10}$、`CFI` $\le 2.4\times10^{-10}$。
+  - **厳密な R の $M_2^*$（`threepl`, `gpcm_sim`、`expected.item()` の中心差分微分 + mirt の `buildXi2els`）**:
+    `M2` 相対 $\le 1.6\times10^{-9}$、`p` $\le 7.1\times10^{-10}$、`RMSEA` $\le 3.7\times10^{-11}$、
+    信頼区間端点 $\le 6.0\times10^{-9}$、`threepl` の `TLI` `1.8e-10` / `CFI` `0`、`SRMSR` は mirt と直接比較で
+    $\le 8.5\times10^{-13}$。
+  テスト: `tests/test_mirt_m5_m2.py`（mirt 照合）、`tests/test_m5_m2.py`（単体テスト）。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

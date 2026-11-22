@@ -147,7 +147,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | `LogNormal`, `NormalPrior`, `Beta`, `TruncNormal` | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
 | `BAEM`, `Quadrature` | frozen dataclass | 推定設定 |
 | `fit` | 関数 | 推定。`FitResult` を返す |
-| `FitResult` | クラス | 結果（`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `to_json` / `from_json`） |
+| `FitResult` | クラス | 結果（`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `dif`, `m2`, `to_json` / `from_json`） |
 
 ## 8. 設計上の約束
 - 公開関数は keyword-only を基本にする（`fit(spec, data, *, group=None, ...)`）。

@@ -45,4 +45,4 @@
 - 微分可能なリンキング（Haebara / Stocking–Lord とその一般化）をライブラリの上に実装。
 - [x] 項目適合度: S-X2（`FitResult.item_fit()`、単一群 1 次元。V15 で照合済み）。
 - [x] DIF: 多群の尤度比検定（`FitResult.dif()`、`add` / `drop` の 2 方式、Holm / BH 補正。V17 で照合済み）。
-- M2（限定情報の適合度）。
+- [x] M2 限定情報の適合度（`FitResult.m2()`、単一群 1 次元の $M_2$ / $M_2^*$、RMSEA と信頼区間、SRMSR、2 値の TLI / CFI。V18 で照合済み）。
