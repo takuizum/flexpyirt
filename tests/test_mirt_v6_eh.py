@@ -193,6 +193,7 @@ def test_two_group_oakes_equals_hessian_at_mirt_solution() -> None:
     np.testing.assert_allclose(oakes, hessian, rtol=1e-8, atol=1e-8 * np.abs(hessian).max())
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", CASES)
 def test_fit_reaches_mirt_loglik(name: str) -> None:
     """A full flexpyirt fit ends at least as high as mirt's (both creep along a flat ridge)."""

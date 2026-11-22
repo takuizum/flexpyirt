@@ -96,6 +96,7 @@ def _on_ridge(name: str, item: str, param: str) -> bool:
     return item in ridge_items and param in (f"a{m}", "d")
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("squarem", [False, True])
 @pytest.mark.parametrize("name", CASES)
 def test_loglik_and_estimates(name: str, squarem: bool) -> None:
@@ -121,6 +122,7 @@ def test_loglik_and_estimates(name: str, squarem: bool) -> None:
             )
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", CASES)
 def test_standard_errors(name: str) -> None:
     raw, res = _case(name), _fit(name)
@@ -199,6 +201,7 @@ def test_mirt_stops_short_on_one_ridge(name: str) -> None:
     assert np.abs(g_mirt[~on_ridge]).max() < 1e-3
 
 
+@pytest.mark.slow
 def test_monotone_and_oakes_equals_hessian() -> None:
     raw = _case("mg2d_simple")
     res = _fit("mg2d_simple")

@@ -302,6 +302,7 @@ def test_identification_errors_and_rasch_fipc() -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_plain_em_vs_squarem_monotonicity_and_oakes_equals_hessian() -> None:
     df, res_sq = _fitted_dc3()
     spec = res_sq._model

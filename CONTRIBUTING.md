@@ -71,6 +71,11 @@ uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
 
+Tests run in parallel (pytest-xdist, `-n auto`); pass `-n 0` to run serially. Tests that take
+more than about 10 s are marked `@pytest.mark.slow`. PR CI skips them (`-m "not slow"`); pushes
+to `develop`/`main` run the full suite. Run `uv run pytest -m "not slow"` locally for a quick
+check, and mark any new test that takes more than ~10 s as `slow`.
+
 To regenerate the mirt reference values (needs R 4.4+ and mirt):
 
 ```bash
