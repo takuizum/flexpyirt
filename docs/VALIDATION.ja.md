@@ -41,6 +41,7 @@
 | V18 | M2 / M2* 限定情報の適合度（LSAT7 2PL、シミュレーション 2PL、3PL、分散自由の Rasch、GRM $K=3$、GPCM $K=4$） | `M2(m, quadpts = 61, theta_lim = c(-6, 6))` | M5 |
 | V14 | 確認的 2–3 次元 MIRT（2PL 単純構造・交差負荷・GRM・3 次元 2PL） | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 | V19 | Davidian 曲線潜在分布（2PL $k=3$・GRM $k=2$・平均分散自由の FIPC 2PL $k=3$） | `mirt(..., dentype = "Davidian-k")` および `mirt(..., customGroup = ..., SE.type = "Oakes")` | M5 |
+| V23 | 名義反応モデル（Science、順序のない・負の採点係数を含むシミュレーション、名義 + 2PL の混在、大半が非単調な項目、2 因子の確認的モデル） | GPCM の点（またはより良い別の初期値）から開始する `pars` を与えた `mirt(..., "nominal")`、`itemfit(fit_stats = "S_X2")` | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -395,6 +396,34 @@
   単体テスト（単位球面・モーメント・ゼロ角での $N(0,1)$ 一致・多項式零点の自動微分ガードと求積点上に零点を持つ推定・
   初期角の符号・`degree` 1 と 10 の推定・Rasch/FIPC・識別性と仕様エラー・スコアリング・JSON 往復と不正な
   `DavidianCurve` JSON）: `tests/test_m5_davidian.py`。
+- **名義反応モデル（V23、M5）**: mirt の `itemtype = "nominal"`（`optimizer = "NR"`、`TOL = 1e-10`、$[-6,6]$ の
+  61 点。V23f は次元あたり 31 点）。V23a: `0..3` に符号化し直した `Science`。V23b: シミュレーション
+  $J=10, K=4, N=3000$ で、内部の採点係数が入れ替わった項目（`q09`: $\mathrm{ak}_1=2.2 > \mathrm{ak}_2=0.7$）と
+  負の採点係数をもつ項目（`q10`: $\mathrm{ak}_1=-0.4$）を含む。V23c: 名義 5 項目（$K=4$）と 2PL 5 項目、$N=2500$。
+  V23e: シミュレーション $J=8, K=4, N=3000$ で、$\mathrm{ak}_k<0$ や $\mathrm{ak}_k>K-1$ を含む非単調な項目が 6 つ。
+  V23f: 2 因子の確認的名義モデル（$J=8$、因子あたり 4 項目、$K=4$、$N=3000$、相関は自由推定）。
+  **初期値**: mirt の名義モデルの既定初期値（`ak1 = ... = 0.5`、`d = 0`）では減衰なしの NR が `Science` で鞍点に止まる
+  （対数尤度 $-1631.79$、Comfort の `a1` $\approx 0$。最尤解は $-1608.452$）ため、スクリプトは mirt の NR を GPCM の点
+  （$\mathrm{ak}_k=k$、$d_k=\log(p_k/p_0)$）から開始する。さらに 1 次元の各ケースで mirt の別の初期値 5 通り（既定初期値の
+  NR と BFGS、`GenRandomPars` による NR 3 通り）で推定して `alt_starts` に保存し、いずれかの方が高ければそこから NR を
+  やり直す（`meta.reference_start`）。これは V23e で起こり、GPCM の点からの NR は局所最大（$-29561.14$）に止まり、
+  既定初期値の BFGS は $-26107.48$ に達する。保存したどの初期値も参照値を上回らず、flexpyirt は常に自身の既定初期値から
+  推定してすべての参照値（V23e を含む）に到達する。**一致**（通常の EM・SQUAREM とも。V23a–c, e の最大）: 対数尤度
+  $3.6\times10^{-11}$（絶対。相対 $1.6\times10^{-15}$）、パラメタ $7.1\times10^{-8}$、Oakes SE（相対）$3.8\times10^{-8}$、
+  Hessian と mirt Richardson SE $5.6\times10^{-7}$、flexpyirt の Oakes と Hessian $1.7\times10^{-13}$、EAP
+  $8\times10^{-15}$、各ケース 40–44 パタンの MAP / ML / WLE で $\theta$ $3.7\times10^{-6}$・SE（相対）$1.9\times10^{-4}$、
+  S-X2（`itemfit(fit_stats = "S_X2")`）は相対 $5.8\times10^{-9}$ で自由度も一致（Science: $8.235, 10.223, 6.246,
+  12.483$、自由度 6, 9, 6, 9）。V23f: 対数尤度 $4.0\times10^{-11}$、パラメタ $7.0\times10^{-9}$、Oakes SE
+  $2.5\times10^{-9}$、相関 $5.4\times10^{-12}$（SE は相対 $9.3\times10^{-11}$）、EAP は $10^{-5}$ 以内。**ML の既知の差**:
+  mirt の `fscores(method = "ML")` は採点係数にかかわらず全項目カテゴリ 0 / 全項目最上位カテゴリのパタンに
+  $-\infty$ / $+\infty$ を返し、V23e の真に $+\infty$ のパタン 1 つ（全項目最上位カテゴリではない）を `max_theta = 20` の
+  境界に残す（$19.99989$、SE は NA）。flexpyirt は極端パタンをカテゴリ傾き $a\,\mathrm{ak}_c$ で判定し、テストではその
+  判定を R でのパタン対数尤度の独立な走査（`fscores.ml_scan`: $[-20,20]$ 上 0.01 刻みの格子を `optimize()` で精密化）と
+  照合し、内点の ML 推定値（V23b・V23c で 1 つ、V23e で 2 つ）をそれと比較する。多次元の名義モデルは 2 因子（V23f）で
+  照合済み、3 因子は単体テストのみ。単体テスト（確率・勾配・GPCM / 2PL への帰着・初期値・識別性・`fix_from`・JSON・
+  S-X2・スコアリング・事前分布・等値制約・多群と DIF・EH・2 次元・退化項目の `HeywoodWarning`）:
+  `tests/test_m5_nominal.py`。テスト: `tests/test_mirt_m5_nominal.py`。参照値生成:
+  `validation/r/m5_nominal_reference.R`。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

@@ -11,7 +11,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Model: [`Model`](#model)
-- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm)
+- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormal`](#lognormal), [`Beta`](#beta)
 - Latent distribution: [`Normal`](#normal)
 - Settings: [`BAEM`](#baem), [`Quadrature`](#quadrature)
@@ -496,6 +496,21 @@ Display step difficulties $b_k=-(d_k-d_{k-1})$. In a single-group model whose it
 or `PCM`, the latent variance is estimated by default (same as mirt's `itemtype = "Rasch"` on
 polytomous data). With `n_cat = 2` this equals `Rasch`. Shares `GPCMKernel` with `GPCM` of the same
 `n_cat`.
+
+### `Nominal`
+
+```text
+Nominal(n_cat)
+```
+
+Nominal response model (Bock, 1972) in Thissen, Cai & Bock's (2010) overall-slope ×
+scoring-function parameterization with categories `0..n_cat-1` (`n_cat >= 2`):
+$P(y=k\mid\theta)=\exp(a\,\mathrm{ak}_k\,\theta+d_k)/\sum_{c=0}^{K-1}\exp(a\,\mathrm{ak}_c\,\theta+d_c)$
+with $\mathrm{ak}_0=0$, $\mathrm{ak}_{K-1}=K-1$, and $d_0=0$ fixed. Internal parameters `a` (or
+`a1`…`aD` for multidimensional models), `ak1`…`ak{K-2}`, and `d1`…`d{K-1}` (all free, no ordering
+constraint; no display `b` / `bk` columns). Same as mirt's `itemtype = "nominal"`. Fixing
+$\mathrm{ak}_k=k$ reproduces `GPCM(n_cat)` identically (and with `n_cat = 2` there are no free `ak`
+parameters, so `Nominal(2)` equals `GPCM(2)` / `TwoPL`). Uses `NominalKernel(n_cat)`.
 
 ---
 

@@ -59,3 +59,6 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   Holm / BH adjustment; validated in V17).
 - [x] M2 limited-information goodness of fit (`FitResult.m2()`, single-group unidimensional
   $M_2$ / $M_2^*$, RMSEA + CI, SRMSR, dichotomous TLI / CFI; validated in V18).
+- [x] Nominal response model (`Nominal(n_cat)`, Thissen, Cai & Bock (2010) parameterization as in
+  mirt's `itemtype = "nominal"`; validated in V23 for one and two factors, three factors
+  unit-tested only).

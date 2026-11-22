@@ -10,7 +10,7 @@ from typing import Any, Literal
 import pandas as pd
 
 from flexpyirt.errors import SpecificationError
-from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, Rasch
+from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, NominalKernel, Rasch
 from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, LatentSpec, Normal
 from flexpyirt.priors import PRIOR_TYPES, Prior
 from flexpyirt.quadrature import MAX_FACTORS
@@ -228,11 +228,19 @@ class Model:
             fixed on the model via :meth:`fix` (whose fixed slope is used to convert ``b`` to
             ``d``). Asymptotes ``g`` (3PL/4PL) and ``u`` (4PL) are given as they are in both
             parameterizations; ``u`` may be omitted (or NaN) for 3PL items (it stays 1), and any
-            asymptote already fixed via :meth:`fix` may also be omitted (or NaN). NaN cells are
-            treated as not given.
+            asymptote already fixed via :meth:`fix` may also be omitted (or NaN). ``Nominal``
+            items take ``a``, ``ak1..ak{K-2}``, and ``d1..d{K-1}`` and support only
+            ``"slope-intercept"`` (DESIGN.md §16.8). NaN cells are treated as not given.
         items : list of str or callable, optional
             Items to fix (default: every bank item that is in the model).
         parameterization : {"slope-intercept", "irt"}
+
+        Raises
+        ------
+        SpecificationError
+            If the bank lacks a needed column or item, if ``parameterization="irt"`` is used
+            with a multidimensional model, or if ``parameterization="irt"`` is used for a
+            ``Nominal`` item (the nominal model has no IRT thresholds).
         """
         if self.is_multidimensional and parameterization == "irt":
             raise SpecificationError(
@@ -264,6 +272,11 @@ class Model:
             row = rows[item]
             item_model = lookup[item]
             kernel = self.item_kernel(item_model)
+            if parameterization == "irt" and isinstance(kernel, NominalKernel):
+                raise SpecificationError(
+                    f"parameterization='irt' is not supported for Nominal item {item!r}; "
+                    "use parameterization='slope-intercept'."
+                )
             slope = float(row["a"]) if _has_value(row, "a") else prior_fixed.get((item, "a"), 1.0)
             is_gpcm = isinstance(kernel, GPCMKernel)
             cum_b = 0.0

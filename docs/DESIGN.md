@@ -337,7 +337,7 @@ E-step, M-step (autodiff Newton), Oakes/Hessian SEs, and EAP scoring for $D \in 
 | 3PL / 4PL | $a, d, g, u$ (natural scale, $0<g<u\le 1$; §15.2) | M3 |
 | GRM | $a, d_1>\dots>d_{K-1}$ | M2 |
 | GPCM / PCM | $a, d_1..d_{K-1}$ | M3 |
-| Nominal | M5 or later (undecided) | — |
+| Nominal | $a, \mathrm{ak}_1..\mathrm{ak}_{K-2}, d_1..d_{K-1}$ ($\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$; §16.8) | M5 |
 
 The display IRT parameterization ($b=-d/a$ for 2PL/Rasch/3PL/4PL, $b_k=-d_k/a$ for GRM, and
 step difficulties $b_k=-(d_k-d_{k-1})/a$ with $d_0=0$ for GPCM/PCM) is computed in the Result layer
@@ -1197,12 +1197,75 @@ data-independent shapes (§15.21).
    can be multimodal and vanish at real roots of $P_k$ (matching mirt's `use_dentype_estimate`).
    `item_fit()` rejects `DavidianCurve` until validated. `"DavidianCurve"` is registered in
    `_json.py` without changing the JSON payload shape (`schema_version` remains 3).
+8. **Nominal response model (`Nominal(n_cat)`, `NominalKernel(n_cat, n_factors=1)`, V23)**:
+   Bock's (1972) nominal response model in Thissen, Cai & Bock's (2010) overall-slope ×
+   scoring-function parameterization, matching R mirt's `itemtype = "nominal"` (Chalmers, 2012):
+   $$P(y=k\mid\boldsymbol\theta)=\frac{\exp\big(\mathrm{ak}_k\,\mathbf a^\top\boldsymbol\theta+d_k\big)}{\sum_{c=0}^{K-1}\exp\big(\mathrm{ak}_c\,\mathbf a^\top\boldsymbol\theta+d_c\big)},\qquad k=0,\dots,K-1,\quad \mathrm{ak}_0=0,\ \mathrm{ak}_{K-1}=K-1,\ d_0=0,$$
+   for categories `0..K-1` (`n_cat >= 2` validated) and $D\in\{1,2,3\}$ (evaluated with
+   `_linear_predictor(theta, params[:D], D)` multiplying the scoring vector $\mathrm{ak}$ and
+   `jax.nn.log_softmax`).
+   - **Parameters and bounds**: mirt's `coef(m)` / `pars = "values"` reports `a1` (`a1..aD`),
+     `ak0..ak{K-1}`, and `d0..d{K-1}` with `ak0 = 0`, `ak{K-1} = K - 1`, and `d0 = 0` fixed
+     (`est = FALSE`) and all bounds `(-Inf, Inf)`. As in `GPCMKernel` (§15.8), the three fixed
+     identification constants are part of the kernel rather than `ParameterTable` rows (so
+     `_check_identification` does not treat them as user-fixed slopes or intercepts):
+     `param_names` is `("a", "ak1", ..., "ak{K-2}", "d1", ..., "d{K-1}")` for $D=1$ and
+     `("a1", ..., "aD", "ak1", ..., "ak{K-2}", "d1", ..., "d{K-1}")` for $D\in\{2,3\}$, all free
+     by default and unbounded `(-inf, inf)`. Fixing $\mathrm{ak}_k=k$ ($k=1,\dots,K-2$) reduces
+     `Nominal(K)` to `GPCM(K)` identically (`Nominal(2)` has no free `ak` parameters and equals
+     `GPCM(2)` / `TwoPL`).
+   - **Starting values, identification, and estimability**: mirt's default starting values
+     (`a1 = 0.851`, `ak1 = ... = ak{K-2} = 0.5`, `d1 = ... = d{K-1} = 0`) give interior
+     categories $1,\dots,K-2$ identical predictors at iteration 0 and can cause mirt's undamped
+     `optimizer = "NR"` to hit an indefinite joint Hessian and trap `a1 = 0` (e.g. on `Science`).
+     flexpyirt starts `Nominal(n_cat)` at the GPCM starting point: $a_j^{(0)}$ from the item–rest
+     correlation (§4.10; factor-specific item–rest correlations for $D>1$, §15.31), distinct
+     scoring coefficients $\mathrm{ak}_{jk}^{(0)}=k$ ($k=1,\dots,K-2$), and GPCM starting
+     intercepts $d_{jk}^{(0)}$ (`_gpcm_intercept_starts`, §15.9). This breaks category symmetry at
+     iteration 0 while allowing items with non-monotone or negative true $\mathrm{ak}_k$ to
+     converge to the unordered MLE. For §4.5 / §15.31 identification checks, `slope_params` is
+     `("a",)` (`("a1", ..., "aD")`) and `intercept_params` is `("d1", ..., "d{K-1}")`;
+     `ak1..ak{K-2}` carry relative category shape (fixing $\mathrm{ak}_k=k$ yields GPCM and does
+     not identify a free latent variance or mean). Every category `0..K-1` must be observed for
+     items with free parameters (`_check_estimable`).
+   - **Display thresholds, FIPC, JSON, and ML scoring**: mirt's `coef(m, IRTpars = TRUE)` converts
+     nominal items to Bock's (1972) zero-sum slopes and intercepts
+     $a_k^*=a\,\mathrm{ak}_{k-1}-\overline{a\,\mathrm{ak}}$ (`a1..aK`) and $c_k^*=d_{k-1}-\bar d$
+     (`c1..cK`) rather than $\theta$-scale difficulty thresholds $b_k$, and adjacent category
+     intersections $-(d_k-d_{k-1})/[a(\mathrm{ak}_k-\mathrm{ak}_{k-1})]$ are singular whenever
+     $\mathrm{ak}_k=\mathrm{ak}_{k-1}$. `NominalKernel` therefore sets `irt_names = ()` and
+     `irt_dep_indices = ()` (no `b` / `bk` columns in `FitResult.items`), and `Model.fix_from()`
+     supports `Nominal` items with `parameterization="slope-intercept"` while raising
+     `SpecificationError` for `parameterization="irt"` on `Nominal` items. `"Nominal"` is added to
+     the polytomous item registry in `_json.py` (keeping schema version 3 and older versions 1–2
+     readable). In 1-D ML scoring (`_scoring._pattern_flags`), an item's lowest- and
+     highest-$\theta$ categories are determined from the effective category slopes
+     $s_c=a\,\mathrm{ak}_c$ ($s_{y_j}=\min_c s_c$ and $s_{y_j}=\max_c s_c$ with $a\neq 0$), which
+     handles non-monotone categories ($\mathrm{ak}_k<0$ or $\mathrm{ak}_k>K-1$) and reduces to
+     $0$ and $K-1$ when $0\le\mathrm{ak}_k\le K-1$. This deliberately differs from mirt 1.46.1,
+     whose `fscores(method = "ML")` returns $\mp\infty$ for every all-category-0 /
+     all-top-category pattern regardless of $\mathrm{ak}$: with $\mathrm{ak}_1<0$ the all-0 pattern
+     has an interior ML estimate, which flexpyirt returns (VALIDATION.md V23).
+   - **Degenerate items**: `fit()` emits a `HeywoodWarning` for a `Nominal` item ($K\ge 3$) with a
+     free slope whose slope norm is below $10^{-3}$ (the item carries no information and
+     $\mathrm{ak}_1..\mathrm{ak}_{K-2}$ are unidentified: the saddle that traps mirt's NR from its
+     default starts) or whose $|\mathrm{ak}_k|$ or $|d_k|$ exceeds 50 (diverging categories).
+   - **Validation (V23)**: `validation/r/m5_nominal_reference.R` starts mirt's NR at the GPCM point
+     (mirt's default nominal starting values stop NR at a saddle on `Science`) and restarts it from
+     the best of five alternative mirt starts when that is higher (on the mostly non-monotone V23e
+     data the GPCM-point NR stops at a local maximum). flexpyirt fits from its own defaults and
+     reaches mirt's solution in all cases within the VALIDATION.md tolerances: unidimensional
+     (`Science`, simulated with unordered / negative $\mathrm{ak}$, nominal + 2PL, mostly
+     non-monotone items) and a two-factor confirmatory model (V23f). Three-factor nominal models
+     are unit-tested only. mirt also leaves one true $+\infty$ V23e pattern at its `max_theta = 20`
+     bound; ML extremes are checked against an independent R log-likelihood scan.
 
 ## References
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
+- Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
@@ -1229,6 +1292,7 @@ data-independent shapes (§15.21).
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
+- Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.

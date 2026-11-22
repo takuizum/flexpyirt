@@ -270,7 +270,7 @@ class ItemKernel(Protocol):
 | 3PL / 4PL | $a, d, g, u$（自然尺度、$0<g<u\le 1$、§15.2） | M3 |
 | GRM | $a, d_1>\dots>d_{K-1}$ | M2 |
 | GPCM / PCM | $a, d_1..d_{K-1}$ | M3 |
-| Nominal | M5 以降（未定） | — |
+| Nominal | $a, \mathrm{ak}_1..\mathrm{ak}_{K-2}, d_1..d_{K-1}$（$\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$、§16.8） | M5 |
 
 表示用の IRT パラメタ化（2PL / Rasch / 3PL / 4PL は $b=-d/a$、GRM は $b_k=-d_k/a$、GPCM / PCM は
 ステップ困難度 $b_k=-(d_k-d_{k-1})/a$、$d_0=0$）は Result 層（`FitResult.items`）で計算し、SE
@@ -807,12 +807,62 @@ class ItemKernel(Protocol):
    `"MAP"` は $P_k(z)^2\varphi(z)$ が多峰になったり実根で密度 0 になったりするため `SpecificationError`（mirt の
    `use_dentype_estimate` の制限と同じ）。`item_fit()` は検証されるまで `DavidianCurve` を拒否する。`_json.py` に
    `"DavidianCurve"` を登録し、JSON ペイロードの形は変わらないため `schema_version` は 3 のままとする。
+8. **名義反応モデル（`Nominal(n_cat)`、`NominalKernel(n_cat, n_factors=1)`、V23）**:
+   Thissen, Cai & Bock (2010) の全体傾き × 採点関数パラメタ化による Bock (1972) の名義反応モデルで、R mirt の
+   `itemtype = "nominal"`（Chalmers, 2012）に対応する:
+   $$P(y=k\mid\boldsymbol\theta)=\frac{\exp\big(\mathrm{ak}_k\,\mathbf a^\top\boldsymbol\theta+d_k\big)}{\sum_{c=0}^{K-1}\exp\big(\mathrm{ak}_c\,\mathbf a^\top\boldsymbol\theta+d_c\big)},\qquad k=0,\dots,K-1,\quad \mathrm{ak}_0=0,\ \mathrm{ak}_{K-1}=K-1,\ d_0=0.$$
+   カテゴリは `0..K-1`（`n_cat >= 2` を検証）で、$D\in\{1,2,3\}$ に対応する（`_linear_predictor(theta, params[:D], D)`
+   に採点ベクトル $\mathrm{ak}$ を掛け、`jax.nn.log_softmax` で数値安定に評価する）。
+   - **内部パラメタと範囲**: mirt の `coef(m)` / `pars = "values"` は `a1`（`a1..aD`）、`ak0..ak{K-1}`、
+     `d0..d{K-1}` を返し、`ak0 = 0`・`ak{K-1} = K - 1`・`d0 = 0` を固定（`est = FALSE`）、範囲はすべて
+     `(-Inf, Inf)` とする。`GPCMKernel`（§15.8）と同様、これら 3 つの固定識別定数は `ParameterTable` の行ではなく
+     カーネル内部の定数として持つ（`_check_identification` が固定傾きや固定切片と誤認しないようにするため）。したがって
+     `param_names` は $D=1$ で `("a", "ak1", ..., "ak{K-2}", "d1", ..., "d{K-1}")`、$D\in\{2,3\}$ で
+     `("a1", ..., "aD", "ak1", ..., "ak{K-2}", "d1", ..., "d{K-1}")` となり、既定ですべて自由推定・非有界
+     `(-inf, inf)` とする。$\mathrm{ak}_k=k$（$k=1,\dots,K-2$）に固定すると `Nominal(K)` は `GPCM(K)` に厳密に
+     一致する（`Nominal(2)` は自由な `ak` を持たず、`GPCM(2)` / `TwoPL` と一致する）。
+   - **初期値・識別性・推定可能性**: mirt の既定初期値（`a1 = 0.851`、`ak1 = ... = ak{K-2} = 0.5`、
+     `d1 = ... = d{K-1} = 0`）は反復 0 で中間カテゴリ $1,\dots,K-2$ の予測子が同一になり、減衰なしの
+     `optimizer = "NR"` では同時 Hessian が不定になって `a1 = 0` に捕捉されることがある（`Science` など）。
+     flexpyirt では `Nominal(n_cat)` を GPCM の初期値から開始する: $a_j^{(0)}$ は項目−残余相関（§4.10。$D>1$ では
+     因子別項目−残余相関、§15.31）、採点係数は互いに異なる $\mathrm{ak}_{jk}^{(0)}=k$（$k=1,\dots,K-2$）、切片は GPCM の
+     初期切片 $d_{jk}^{(0)}$（`_gpcm_intercept_starts`、§15.9）。これにより反復 0 でのカテゴリ対称性を破りつつ、真の
+     $\mathrm{ak}_k$ が非単調や負の項目も順序制約なしの最尤解へ収束する。§4.5 / §15.31 の識別性検査では
+     `slope_params` を `("a",)`（`("a1", ..., "aD")`）、`intercept_params` を `("d1", ..., "d{K-1}")` とする
+     （`ak1..ak{K-2}` はカテゴリ間の相対形状を担い、$\mathrm{ak}_k=k$ を固定しても GPCM になるだけで自由な潜在分散や
+     潜在平均を識別しない）。自由パラメタを持つ項目では `0..K-1` の全カテゴリが観測されている必要がある
+     （`_check_estimable`）。
+   - **表示用閾値・FIPC・JSON・ML スコアリング**: mirt の `coef(m, IRTpars = TRUE)` は名義反応項目について $\theta$
+     尺度の閾値 $b_k$ ではなく Bock (1972) のゼロ和パラメタ $a_k^*=a\,\mathrm{ak}_{k-1}-\overline{a\,\mathrm{ak}}$
+     （`a1..aK`）と $c_k^*=d_{k-1}-\bar d$（`c1..cK`）を返し、隣接カテゴリの交点
+     $-(d_k-d_{k-1})/[a(\mathrm{ak}_k-\mathrm{ak}_{k-1})]$ も $\mathrm{ak}_k=\mathrm{ak}_{k-1}$ で特異になる。そのため
+     `NominalKernel` は `irt_names = ()`・`irt_dep_indices = ()`（`FitResult.items` に `b` / `bk` 列を追加しない）
+     とし、`Model.fix_from()` は `Nominal` 項目に対して `parameterization="slope-intercept"` を受け付け、
+     `parameterization="irt"` は `SpecificationError` とする。`_json.py` の多値項目レジストリに `"Nominal"` を追加する
+     （スキーマバージョン 3 および旧バージョン 1–2 の読み込み互換を維持）。1 次元 ML スコアリング
+     （`_scoring._pattern_flags`）では、各カテゴリの有効傾き $s_c=a\,\mathrm{ak}_c$ から最低・最高 $\theta$ カテゴリ
+     （$a\neq 0$ のもとで $s_{y_j}=\min_c s_c$ および $s_{y_j}=\max_c s_c$）を判定し、非単調なカテゴリ
+     （$\mathrm{ak}_k<0$ や $\mathrm{ak}_k>K-1$）を正しく扱いつつ $0\le\mathrm{ak}_k\le K-1$ では $0$ と $K-1$ に
+     帰着させる。これは mirt 1.46.1 と意図的に異なる。mirt の `fscores(method = "ML")` は $\mathrm{ak}$ にかかわらず
+     全項目カテゴリ 0 / 全項目最上位カテゴリのパタンに $\mp\infty$ を返すが、$\mathrm{ak}_1<0$ では全 0 パタンの
+     ML 推定値は内点にあり、flexpyirt はその値を返す（VALIDATION.md V23）。
+   - **退化項目**: `fit()` は、傾きが自由な `Nominal` 項目（$K\ge 3$）について、傾きのノルムが $10^{-3}$ 未満
+     （項目が情報を持たず $\mathrm{ak}_1..\mathrm{ak}_{K-2}$ が識別されない。mirt の NR が既定初期値から陥る鞍点）か、
+     $|\mathrm{ak}_k|$ または $|d_k|$ が 50 を超える（カテゴリの発散）ときに `HeywoodWarning` を出す。
+   - **照合（V23）**: mirt の名義モデルの既定初期値では NR が `Science` で鞍点に止まるため、
+     `validation/r/m5_nominal_reference.R` は mirt の NR を GPCM の点から開始し、mirt の別の初期値 5 通りのうち最良のものが
+     より高ければそこから NR をやり直す（大半が非単調な V23e では GPCM の点からの NR は局所最大に止まる）。flexpyirt は
+     自身の既定初期値から推定し、1 次元（`Science`、順序のない・負の $\mathrm{ak}$ を含むシミュレーション、名義 + 2PL、
+     大半が非単調な項目）と 2 因子の確認的モデル（V23f）のすべてで VALIDATION.md の許容誤差内で mirt の解に到達する。
+     3 因子の名義モデルは単体テストのみ。mirt は V23e の真に $+\infty$ のパタン 1 つを `max_theta = 20` の境界に残す。
+     ML の極端パタンは R での独立な対数尤度走査と照合する。
 
 ## 参考文献
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
+- Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
@@ -839,6 +889,7 @@ class ItemKernel(Protocol):
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
+- Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.

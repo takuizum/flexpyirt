@@ -17,7 +17,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 
 | 機能 | 内容 | mirt 照合 |
 |---|---|---|
-| 項目モデル | 2PL、Rasch（潜在分散を自由推定）、3PL、4PL、GRM（段階反応モデル）、GPCM、PCM（潜在分散を自由推定） | V1, V2, V3, V8, V11 |
+| 項目モデル | 2PL、Rasch（潜在分散を自由推定）、3PL、4PL、GRM（段階反応モデル）、GPCM、PCM（潜在分散を自由推定）、Nominal（名義反応モデル。1 因子・2 因子で照合済み、3 因子は単体テストのみ） | V1, V2, V3, V8, V11, V23 |
 | 事前分布と MAP | 項目パラメタの事前分布 `NormalPrior`・`LogNormal`・`Beta`（`Model.prior()`）、自然尺度、`FitResult.log_posterior` | V7 |
 | 多母集団 | 群ごとの項目パラメタ、アンカー項目の群間等値、焦点群の平均・分散の推定 | V4 |
 | 項目間の等値制約 | 項目・項目モデルをまたぐ共通パラメタ（`Model.equal_across_items()`、例: 全項目共通の傾き）。群間等値と組み合わせ可 | V16 |

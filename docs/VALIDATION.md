@@ -46,6 +46,7 @@ English | [日本語](VALIDATION.ja.md)
 | V18 | M2 / M2* limited-information goodness of fit (LSAT7 2PL, simulated 2PL, 3PL, Rasch with free variance, GRM $K=3$, GPCM $K=4$) | `M2(m, quadpts = 61, theta_lim = c(-6, 6))` | M5 |
 | V14 | Confirmatory 2–3D MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL) | `mirt(..., mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes")` | M4 |
 | V19 | Davidian-curve latent distributions (2PL $k=3$, GRM $k=2$, FIPC 2PL $k=3$ with free mean/var) | `mirt(..., dentype = "Davidian-k")` & `mirt(..., customGroup = ..., SE.type = "Oakes")` | M5 |
+| V23 | Nominal response model (Science; simulated with unordered/negative scoring coefficients; nominal + 2PL mixed; mostly non-monotone items; two-factor confirmatory) | `mirt(..., "nominal")` with `pars` starting at the GPCM point (or the best alternative start); `itemfit(fit_stats = "S_X2")` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -484,6 +485,44 @@ English | [日本語](VALIDATION.ja.md)
   guard and fits with a root on a quadrature node, start-angle signs, fits with `degree` 1 and
   10, Rasch/FIPC, identification/spec errors, scoring, JSON round trip and malformed
   `DavidianCurve` JSON): `tests/test_m5_davidian.py`.
+- **Nominal response model (V23, M5)**: mirt's `itemtype = "nominal"` (`optimizer = "NR"`,
+  `TOL = 1e-10`, 61 points on $[-6,6]$; 31 per dimension for V23f). V23a: `Science` recoded to
+  `0..3`. V23b: simulated $J=10, K=4, N=3000$ with swapped interior scoring coefficients (`q09`:
+  $\mathrm{ak}_1=2.2 > \mathrm{ak}_2=0.7$) and a negative one (`q10`: $\mathrm{ak}_1=-0.4$). V23c:
+  five nominal items ($K=4$) and five 2PL items, $N=2500$. V23e: simulated $J=8, K=4, N=3000$ with
+  six non-monotone items, including $\mathrm{ak}_k<0$ and $\mathrm{ak}_k>K-1$. V23f: two-factor
+  confirmatory nominal model ($J=8$, four items per factor, $K=4$, $N=3000$, correlation free).
+  **Starting values**: mirt's default nominal starting values (`ak1 = ... = 0.5`, `d = 0`) make
+  undamped NR stop at a saddle on `Science` (log-likelihood $-1631.79$ with Comfort's `a1`
+  $\approx 0$, versus $-1608.452$), so the script starts mirt's NR at the GPCM point
+  ($\mathrm{ak}_k=k$, $d_k=\log(p_k/p_0)$). It also fits five alternative mirt starts per
+  unidimensional case (default-start NR and BFGS, three `GenRandomPars` NR starts) and stores them
+  in `alt_starts`; when one of them is higher, NR is restarted from it (`meta.reference_start`).
+  This happens on V23e, where the GPCM-point NR stops at a local maximum ($-29561.14$) and the
+  default-start BFGS reaches $-26107.48$. No stored start exceeds any reference, and flexpyirt,
+  always fitting from its own default starting values, reaches every reference (including V23e).
+  **Agreement** (plain EM and SQUAREM; maxima over V23a–c, e): log-likelihood to
+  $3.6\times10^{-11}$ absolute ($1.6\times10^{-15}$ relative), parameters to $7.1\times10^{-8}$,
+  Oakes SEs to $3.8\times10^{-8}$ (relative), Hessian vs mirt Richardson SEs to
+  $5.6\times10^{-7}$, flexpyirt Oakes vs Hessian to $1.7\times10^{-13}$, EAP to $8\times10^{-15}$,
+  MAP / ML / WLE on 40–44 patterns per case to $3.7\times10^{-6}$ in $\theta$ and
+  $1.9\times10^{-4}$ (relative) in SE, and S-X2 (`itemfit(fit_stats = "S_X2")`) to
+  $5.8\times10^{-9}$ (relative) with identical degrees of freedom (Science: $8.235, 10.223, 6.246,
+  12.483$ on 6, 9, 6, 9 df). V23f: log-likelihood to $4.0\times10^{-11}$, parameters to
+  $7.0\times10^{-9}$, Oakes SEs to $2.5\times10^{-9}$, correlation to $5.4\times10^{-12}$ (SE
+  $9.3\times10^{-11}$ relative), EAP within $10^{-5}$. **Known ML difference**: mirt's
+  `fscores(method = "ML")` returns $-\infty$ / $+\infty$ for every all-category-0 /
+  all-top-category pattern regardless of the scoring coefficients, and leaves one true $+\infty$
+  V23e pattern (not all-top-category) at its `max_theta = 20` bound ($19.99989$, SE NA).
+  flexpyirt classifies extreme patterns by the category slopes $a\,\mathrm{ak}_c$; the tests
+  check that classification against an independent R scan of the pattern log-likelihood
+  (`fscores.ml_scan`: 0.01 grid on $[-20,20]$ refined with `optimize()`) and compare the interior
+  ML estimates (one in V23b and V23c, two in V23e) with it. Multidimensional nominal models are
+  validated for two factors (V23f); three factors are unit-tested only. Unit tests (probabilities,
+  gradients, reduction to GPCM / 2PL, starting values, identification, `fix_from`, JSON, S-X2,
+  scoring, priors, equality constraints, multiple groups and DIF, EH, 2D, the degenerate-item
+  `HeywoodWarning`): `tests/test_m5_nominal.py`. Tests: `tests/test_mirt_m5_nominal.py`.
+  Reference generator: `validation/r/m5_nominal_reference.R`.
 
 ## Validation beyond agreement
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
