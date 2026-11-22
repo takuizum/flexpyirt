@@ -264,6 +264,7 @@ def test_infeasible_parameters_give_nan_and_gradients_are_finite() -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_em_squarem_monotone_same_optimum_and_oakes_equals_hessian() -> None:
     df, res_sq = _fitted_mix2()
     _, res_em = _fitted_mix2(squarem=False, se="hessian")
