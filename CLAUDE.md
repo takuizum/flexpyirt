@@ -42,3 +42,12 @@
 
 1. `docs/ROADMAP.md` の M0（足場）から着手する。
 2. 迷ったら DESIGN.md の「未決事項」節を確認し、決めた内容は DESIGN.md に追記してからコードを書く。
+
+## ドキュメントとリリース
+
+- 利用者向けドキュメントは MkDocs（`mkdocs.yml`, `docs/index.md`, `docs/getting-started.md`, `docs/guide/`,
+  `docs/reference/`）。`main` への push で GitHub Pages に公開される。
+- 機能が mirt 照合済みになったら、`docs/guide/` と `docs/index.md` の対応状況、`CHANGELOG.md` の
+  `[Unreleased]` を同じ PR で更新する。未検証の機能はここにも載せない。
+- ローカル確認: `uv run --group docs mkdocs build --strict`（CI と同じ）。
+- リリース手順は `docs/dev/releasing.md`（タグ push → Trusted Publishing で PyPI）。

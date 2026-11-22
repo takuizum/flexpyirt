@@ -1,0 +1,3 @@
+# FitResult
+
+::: flexpyirt.FitResult
