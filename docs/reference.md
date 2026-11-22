@@ -13,7 +13,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
-- Priors: [`NormalPrior`](#normalprior), [`LogNormal`](#lognormal), [`Beta`](#beta)
+- Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormal), [`BetaPrior`](#beta)
 - Latent distribution: [`Normal`](#normal)
 - Settings: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - Exceptions and warnings: [`flexpyirt.errors`](#flexpyirterrors)
@@ -134,20 +134,20 @@ a deterministic method, or `n_draws` is not a positive integer.
 #### `FitResult.item_fit`
 
 ```text
-item_fit(data, *, mincell=1.0, item_names=None) -> DataFrame
+item_fit(data, *, min_cell=1.0, item_names=None) -> DataFrame
 ```
 
 Orlando–Thissen S-X2 item fit ([guide section 5](guide.md#item-fit-s-x2)). For each item,
 observed and model-implied counts of each category at summed scores $1,\dots,S-1$ are compared;
 the expected counts use the Lord–Wingersky recursion with the item left out and the fitted latent
 weights on the fitted quadrature grid. Sparse cells are collapsed exactly as mirt's `itemfit()`
-(`mincell` is mirt's argument), and $df_j$ = kept cells − rows − free parameters of the item −
+(`min_cell` is mirt's `mincell`), and $df_j$ = kept cells − rows − free parameters of the item −
 free latent parameters (mirt's convention).
 
 | Argument | Description |
 |---|---|
 | `data` | Complete responses on the fitted items (typically the fitting data) |
-| `mincell` | Minimum expected count per cell before collapsing (default `1.0`) |
+| `min_cell` | Minimum expected count per cell before collapsing (default `1.0`) |
 | `item_names` | Column names when `data` is an array |
 
 **Returns**: `DataFrame` with columns `item`, `s_x2`, `df`, `rmsea`
@@ -156,7 +156,7 @@ free latent parameters (mirt's convention).
 
 **Raises**: `SpecificationError` for multidimensional, multiple-group, `EmpiricalHistogram`, or
 `DavidianCurve` models, missing responses, an item with an unobserved category, or a non-positive
-`mincell`.
+`min_cell`.
 
 #### `FitResult.m2`
 
@@ -227,7 +227,7 @@ to_json(path=None, *, indent=2) -> str
 
 Serialize the fitted result to a strict RFC 8259 JSON string, and also write it (UTF-8) to `path`
 (`str` or `os.PathLike`) when `path` is given. Uses plain, versioned JSON (no `pickle`) with
-top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 3` (files with versions 1 and 2 are
+top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 4` (files with versions 1–3 are
 still read), and `"flexpyirt_version"`. Multidimensional results store their factor structure.
 Finite float64 values are written as `repr`-exact JSON numbers and non-finite values (`NaN`,
 `+inf`, `-inf`) are encoded explicitly as `"NaN"`, `"Infinity"`, and `"-Infinity"` in float-typed
@@ -305,7 +305,7 @@ raise `SpecificationError`.
 #### `Model.fix_from`
 
 ```text
-model.fix_from(bank, *, items=None, parameterization="slope-intercept") -> Model
+model.fix_from(bank, *, items=None, parameterization="slope_intercept") -> Model
 ```
 
 Fix item parameters at item-bank values (FIPC). Combine with `.with_latent(Normal.free())` to
@@ -313,9 +313,9 @@ estimate the latent distribution.
 
 | Argument | Description |
 |---|---|
-| `bank` | A DataFrame with an `item` column and parameter columns: `a`, `d` (GRM/GPCM/PCM: `d1`, `d2`, …) for `"slope-intercept"`; `a`, `b` (GRM/GPCM/PCM: `b1`, …) for `"irt"`. Rasch and PCM items may omit `a`. Asymptotes `g` (3PL/4PL) and `u` (4PL) are passed unchanged in both parameterizations; `u` may be omitted for 3PL items |
+| `bank` | A DataFrame with an `item` column and parameter columns: `a`, `d` (GRM/GPCM/PCM: `d1`, `d2`, …) for `"slope_intercept"`; `a`, `b` (GRM/GPCM/PCM: `b1`, …) for `"irt"`. Rasch and PCM items may omit `a`. Asymptotes `g` (3PL/4PL) and `u` (4PL) are passed unchanged in both parameterizations; `u` may be omitted for 3PL items |
 | `items` | Items to fix (a list of names or a `str -> bool` function). Default: every bank item that is also in the model |
-| `parameterization` | `"slope-intercept"` or `"irt"` (converted with $d = -ab$, or $d_k = -a\sum_{c=1}^{k} b_c$ for GPCM/PCM) |
+| `parameterization` | `"slope_intercept"` or `"irt"` (converted with $d = -ab$, or $d_k = -a\sum_{c=1}^{k} b_c$ for GPCM/PCM) |
 
 #### `Model.with_factors`
 
@@ -381,7 +381,7 @@ the items' starting values. Equivalent to giving the rows one `free_id` in an ed
 model.prior(*, param, dist, items=None) -> Model
 ```
 
-Attach a prior distribution `dist` (`NormalPrior`, `LogNormal`, or `Beta`) to internal parameter
+Attach a prior distribution `dist` (`NormalPrior`, `LogNormalPrior`, or `BetaPrior`) to internal parameter
 `param` of the selected items across all groups (MAP estimation; [guide section 11](guide.md#11-priors-and-map-estimation)).
 Priors are evaluated on the natural parameter scale without a Jacobian term. Fixed parameters
 ignore their prior, and a parameter shared across groups (`free_id`) is counted once. Priors on
@@ -390,7 +390,7 @@ latent-distribution parameters (`"mean"`, `"var"`) raise `SpecificationError`.
 | Argument | Description |
 |---|---|
 | `param` | Internal item parameter name (`"a"`, `"d"`, `"g"`, `"u"`, `"d1"`, …) |
-| `dist` | `NormalPrior`, `LogNormal`, or `Beta` |
+| `dist` | `NormalPrior`, `LogNormalPrior`, or `BetaPrior` |
 | `items` | List of item names, a `str -> bool` function, or `None` for every item |
 
 #### `Model.parameter_table`
@@ -465,53 +465,53 @@ with `ThreePL`.
 ### `GRM`
 
 ```text
-GRM(n_cat)
+GRM(n_categories)
 ```
 
-Graded response model (Samejima, 1969) with categories `0..n_cat-1`:
+Graded response model (Samejima, 1969) with categories `0..n_categories-1`:
 $P(y\ge k\mid\theta)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$. Internal parameters `a`,
 `d1`…`d{K-1}`; display $b_k=-d_k/a$. Same as mirt's `itemtype = "graded"`. GRM items with the same
-`n_cat` are estimated together.
+`n_categories` are estimated together.
 
 ### `GPCM`
 
 ```text
-GPCM(n_cat)
+GPCM(n_categories)
 ```
 
-Generalized partial credit model (Muraki, 1992) with categories `0..n_cat-1` (`n_cat >= 2`):
+Generalized partial credit model (Muraki, 1992) with categories `0..n_categories-1` (`n_categories >= 2`):
 $P(y=k\mid\theta)=\exp(k\,a\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\,a\theta+d_c)$ with $d_0=0$ fixed.
 Internal parameters `a`, `d1`…`d{K-1}` (no ordering constraint); display step difficulties
-$b_k=-(d_k-d_{k-1})/a$ with $d_0=0$. Same as mirt's `itemtype = "gpcm"`. With `n_cat = 2` this
-equals `TwoPL`. Shares `GPCMKernel` with `PCM` of the same `n_cat`.
+$b_k=-(d_k-d_{k-1})/a$ with $d_0=0$. Same as mirt's `itemtype = "gpcm"`. With `n_categories = 2` this
+equals `TwoPL`. Shares `GPCMKernel` with `PCM` of the same `n_categories`.
 
 ### `PCM`
 
 ```text
-PCM(n_cat)
+PCM(n_categories)
 ```
 
-Partial credit model (Masters, 1982) with categories `0..n_cat-1` (`n_cat >= 2`): GPCM with `a = 1`
+Partial credit model (Masters, 1982) with categories `0..n_categories-1` (`n_categories >= 2`): GPCM with `a = 1`
 fixed, $P(y=k\mid\theta)=\exp(k\theta+d_k)/\sum_{c=0}^{K-1}\exp(c\theta+d_c)$ with $d_0=0$ fixed.
 Display step difficulties $b_k=-(d_k-d_{k-1})$. In a single-group model whose items are all `Rasch`
 or `PCM`, the latent variance is estimated by default (same as mirt's `itemtype = "Rasch"` on
-polytomous data). With `n_cat = 2` this equals `Rasch`. Shares `GPCMKernel` with `GPCM` of the same
-`n_cat`.
+polytomous data). With `n_categories = 2` this equals `Rasch`. Shares `GPCMKernel` with `GPCM` of the same
+`n_categories`.
 
 ### `Nominal`
 
 ```text
-Nominal(n_cat)
+Nominal(n_categories)
 ```
 
 Nominal response model (Bock, 1972) in Thissen, Cai & Bock's (2010) overall-slope ×
-scoring-function parameterization with categories `0..n_cat-1` (`n_cat >= 2`):
+scoring-function parameterization with categories `0..n_categories-1` (`n_categories >= 2`):
 $P(y=k\mid\theta)=\exp(a\,\mathrm{ak}_k\,\theta+d_k)/\sum_{c=0}^{K-1}\exp(a\,\mathrm{ak}_c\,\theta+d_c)$
 with $\mathrm{ak}_0=0$, $\mathrm{ak}_{K-1}=K-1$, and $d_0=0$ fixed. Internal parameters `a` (or
 `a1`…`aD` for multidimensional models), `ak1`…`ak{K-2}`, and `d1`…`d{K-1}` (all free, no ordering
 constraint; no display `b` / `bk` columns). Same as mirt's `itemtype = "nominal"`. Fixing
-$\mathrm{ak}_k=k$ reproduces `GPCM(n_cat)` identically (and with `n_cat = 2` there are no free `ak`
-parameters, so `Nominal(2)` equals `GPCM(2)` / `TwoPL`). Uses `NominalKernel(n_cat)`.
+$\mathrm{ak}_k=k$ reproduces `GPCM(n_categories)` identically (and with `n_categories = 2` there are no free `ak`
+parameters, so `Nominal(2)` equals `GPCM(2)` / `TwoPL`). Uses `NominalKernel(n_categories)`.
 
 ---
 
@@ -532,21 +532,21 @@ $\log\pi(x) = -\tfrac{1}{2}\log(2\pi) - \log\sigma - \frac{(x-\mu)^2}{2\sigma^2}
 (Mislevy, 1986; mirt `norm`). Requires finite `mean` and positive finite `sd`. Named `NormalPrior`
 to avoid clashing with the latent distribution `Normal`.
 
-### `LogNormal`
+### `LogNormalPrior`
 
 ```text
-LogNormal(meanlog, sdlog)
+LogNormalPrior(mean_log, sd_log)
 ```
 
 Log-normal prior on $(0, \infty)$ ($\log X \sim N(\mu, s^2)$):
 $\log\pi(x) = -\log x - \log s - \tfrac{1}{2}\log(2\pi) - \frac{(\log x - \mu)^2}{2s^2}$
-($-\infty$ for $x \le 0$; Mislevy, 1986; mirt `lnorm`). Requires finite `meanlog` and positive
-finite `sdlog`. Commonly used for item slopes `a`.
+($-\infty$ for $x \le 0$; Mislevy, 1986; mirt `lnorm`). Requires finite `mean_log` and positive
+finite `sd_log`. Commonly used for item slopes `a`.
 
-### `Beta`
+### `BetaPrior`
 
 ```text
-Beta(a, b)
+BetaPrior(a, b)
 ```
 
 Beta prior on $(0, 1)$:
@@ -640,7 +640,7 @@ with `Model.with_groups()` or `Model.with_factors()`; `IdentificationError` when
 ### `link`
 
 ```text
-link(source, target, *, items=None, method="stocking-lord", symmetric=False,
+link(source, target, *, items=None, method="stocking_lord", symmetric=False,
      nodes=None, weights=None, source_group=None, target_group=None,
      tol=1e-10, max_iter=200) -> LinkResult
 ```
@@ -659,7 +659,7 @@ calibrations (the joint covariance is used when one multiple-group fit is both `
 | `source` | `FitResult` | Fitted unidimensional model on the source (new) scale |
 | `target` | `FitResult` | Fitted unidimensional model on the target (base) scale |
 | `items` | iterable[str] / Mapping[str, str], optional | Common items (default `None`: all items sharing the same name). Pass `{source_item: target_item}` when names differ. Common pairs must share the same kernel and category count |
-| `method` | `"stocking-lord"` / `"haebara"` | Criterion: Stocking & Lord (1983) squared TCC difference (default) or Haebara (1980) squared category-curve differences (polytomous forms: Kim & Lee, 2006) |
+| `method` | `"stocking_lord"` / `"haebara"` | Criterion: Stocking & Lord (1983) squared TCC difference (default) or Haebara (1980) squared category-curve differences (polytomous forms: Kim & Lee, 2006) |
 | `symmetric` | bool | If `True`, add the reverse-direction squared difference (Kim & Lee, 2006); default `False` |
 | `nodes` | 1-D array-like, optional | Quadrature nodes $\theta_q$ (default: target group's fitted grid, and source group's grid for the reverse direction when `symmetric=True`) |
 | `weights` | 1-D array-like, optional | Non-negative weights normalized to sum to 1 (default: fitted latent distribution weights, or uniform when `nodes` is given without `weights`) |
@@ -685,7 +685,7 @@ Returned by `link()`. Immutable.
 | `A_se`, `B_se` | float | Delta-method standard errors from the implicit function theorem (Ogasawara, 2001), or NaN when unavailable |
 | `vcov` | ndarray (2, 2) / None | Asymptotic covariance matrix of `(A, B)`, or `None` when `se=None` on a side with free common-item parameters, all common parameters are fixed, or $H_{cc}$ is not positive definite |
 | `criterion` | float | Minimized criterion value at `(A, B)` |
-| `method` | `"stocking-lord"` / `"haebara"` | Criterion used |
+| `method` | `"stocking_lord"` / `"haebara"` | Criterion used |
 | `symmetric` | bool | Whether the symmetric criterion was minimized |
 | `converged` | bool | Whether `grad_norm <= tol` was met |
 | `n_iter` | int | Number of Newton iterations taken |
@@ -715,8 +715,8 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 ### `Quadrature`
 
 ```text
-Quadrature.equispaced(n_points=61, *, lim=(-6.0, 6.0))
-Quadrature.default(n_factors=1, *, lim=(-6.0, 6.0))
+Quadrature.equispaced(n_points=61, *, bounds=(-6.0, 6.0))
+Quadrature.default(n_factors=1, *, bounds=(-6.0, 6.0))
 Quadrature.gauss_hermite(n_points=21)
 ```
 

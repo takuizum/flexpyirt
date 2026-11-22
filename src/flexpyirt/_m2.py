@@ -78,7 +78,7 @@ def conditional_moments(prob: CompiledProblem, eta: Array) -> tuple[Array, Array
     m2 = jnp.zeros_like(m1)
     for fam, logp in zip(prob.families, _core._item_log_probs(prob, eta), strict=True):
         p = jnp.exp(logp[0])  # (J_f, Q, K_f)
-        k = jnp.arange(fam.kernel.n_cat, dtype=p.dtype)
+        k = jnp.arange(fam.kernel.n_categories, dtype=p.dtype)
         m1 = m1.at[fam.columns, :].set(jnp.sum(p * k, axis=-1))
         m2 = m2.at[fam.columns, :].set(jnp.sum(p * k**2, axis=-1))
     return m1, m2
@@ -261,7 +261,7 @@ def m2_statistic(
     y: np.ndarray,
     *,
     n_params: int,
-    n_cat: Sequence[int],
+    n_categories: Sequence[int],
     level: float = 0.90,
     _latent_in_delta: bool = True,
 ) -> M2Result:
@@ -346,7 +346,7 @@ def m2_statistic(
 
     tli_val = float("nan")
     cfi_val = float("nan")
-    if df > 0 and np.isfinite(stat) and all(k == 2 for k in n_cat):
+    if df > 0 and np.isfinite(stat) and all(k == 2 for k in n_categories):
         x2_null, df_null = null_m2(y)
         if np.isfinite(x2_null) and df_null > 0:
             if x2_null > stat:

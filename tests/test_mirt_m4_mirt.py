@@ -95,7 +95,7 @@ def load(name: str) -> Case:
     item_model = GRM(int(meta["n_cat"])) if meta["itemtype"] == "graded" else TwoPL()
     spec = Model.uniform(item_model, items=items).with_factors(factors)
     lo, hi = meta["theta_lim"]
-    quad = Quadrature.equispaced(int(meta["quadpts"]), lim=(float(lo), float(hi)))
+    quad = Quadrature.equispaced(int(meta["quadpts"]), bounds=(float(lo), float(hi)))
     assert quad.n_points**spec.n_factors == int(meta["n_nodes"])
     return Case(name=name, raw=raw, spec=spec, quadrature=quad)
 

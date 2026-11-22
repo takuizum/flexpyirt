@@ -67,10 +67,14 @@ def load(name: str) -> Case:
     meta = raw["meta"]
     check_reference_meta(meta, require_richardson=True, require_grid_check=True)
     items = raw["items"]
-    n_cat = int(meta["n_cat"])
-    item_model = PCM(n_cat=n_cat) if meta["itemtype"] == "Rasch" else GPCM(n_cat=n_cat)
+    n_categories = int(meta["n_cat"])
+    item_model = (
+        PCM(n_categories=n_categories)
+        if meta["itemtype"] == "Rasch"
+        else GPCM(n_categories=n_categories)
+    )
     lim = (float(meta["theta_lim"][0]), float(meta["theta_lim"][1]))
-    quad = Quadrature.equispaced(int(meta["quadpts"]), lim=lim)
+    quad = Quadrature.equispaced(int(meta["quadpts"]), bounds=lim)
     return Case(name, raw, Model.uniform(item_model, items=items), quad)
 
 

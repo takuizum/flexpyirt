@@ -52,8 +52,8 @@ def _simulate_grm(a: np.ndarray, d: np.ndarray, n: int, seed: int) -> pd.DataFra
 def _simulate_gpcm(a: np.ndarray, d: np.ndarray, n: int, seed: int) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     theta = rng.normal(0.0, 1.0, size=n)
-    n_cat = d.shape[1] + 1
-    cats = np.arange(n_cat, dtype=float)
+    n_categories = d.shape[1] + 1
+    cats = np.arange(n_categories, dtype=float)
     y = np.zeros((n, len(a)), dtype=int)
     for j in range(len(a)):
         intercepts = np.concatenate([[0.0], d[j]])
@@ -178,14 +178,14 @@ def test_squarem_is_monotone(seed: int, kind: str) -> None:
         df = _simulate_grm(a, d, 500, seed)
         if any(df[c].nunique() < 4 for c in df.columns):
             return
-        spec = Model.uniform(GRM(n_cat=4), items=df.columns)
+        spec = Model.uniform(GRM(n_categories=4), items=df.columns)
     else:
         a = rng.lognormal(0.1, 0.3, 5)
         d = rng.normal(0.0, 0.8, (5, 3))
         df = _simulate_gpcm(a, d, 500, seed)
         if any(df[c].nunique() < 4 for c in df.columns):
             return
-        spec = Model.uniform(GPCM(n_cat=4), items=df.columns)
+        spec = Model.uniform(GPCM(n_categories=4), items=df.columns)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", HeywoodWarning)

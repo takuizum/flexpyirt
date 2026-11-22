@@ -44,10 +44,12 @@ def _sim_2pl(n_obs: int = 400, n_items: int = 6, seed: int = 42) -> pd.DataFrame
     )
 
 
-def _sim_grm(n_obs: int = 400, n_items: int = 6, n_cat: int = 3, seed: int = 43) -> pd.DataFrame:
+def _sim_grm(
+    n_obs: int = 400, n_items: int = 6, n_categories: int = 3, seed: int = 43
+) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     a = rng.lognormal(0.1, 0.25, n_items)
-    d = np.sort(rng.normal(0.0, 1.0, (n_items, n_cat - 1)), axis=1)[:, ::-1]
+    d = np.sort(rng.normal(0.0, 1.0, (n_items, n_categories - 1)), axis=1)[:, ::-1]
     theta = rng.normal(0.0, 1.0, n_obs)
     u = rng.random((n_obs, n_items))
     y = np.zeros((n_obs, n_items), dtype=int)
@@ -101,7 +103,7 @@ def test_m2_rejects_unsupported_models_and_inputs() -> None:
         spec_2d,
         df,
         method=BAEM(tol=1e-4, squarem=True),
-        quadrature=Quadrature.equispaced(11, lim=(-4, 4)),
+        quadrature=Quadrature.equispaced(11, bounds=(-4, 4)),
         se=None,
     )
     with pytest.raises(SpecificationError, match="single-group unidimensional"):
@@ -166,8 +168,8 @@ def test_m2_nonpositive_df_with_low_rank_and_rank_deficient_positive_df() -> Non
     """Both df <= 0 with rank < s and df > 0 with rank < n_cols warn and return NaN M2."""
     # Case 1: df <= 0 with rank(Delta_2) < s (3 GPCM(4) items with slopes fixed at 0:
     # s = 6, q = 9, df = -3, rank = 3 < 6).
-    df3 = _sim_grm(n_obs=400, n_items=3, n_cat=4, seed=11)
-    spec_low = Model.uniform(GPCM(n_cat=4), items=list(df3.columns))
+    df3 = _sim_grm(n_obs=400, n_items=3, n_categories=4, seed=11)
+    spec_low = Model.uniform(GPCM(n_categories=4), items=list(df3.columns))
     for item in df3.columns:
         spec_low = spec_low.fix(item=item, a=0.0)
     res_low = fit(spec_low, df3, method=BAEM(tol=1e-6, squarem=True), se=None)
@@ -189,7 +191,7 @@ def test_m2_nonpositive_df_with_low_rank_and_rank_deficient_positive_df() -> Non
     y_p = rng.integers(0, 7, size=(n_obs, 1))
     df5 = pd.DataFrame(np.hstack([y_r, y_p]), columns=["r1", "r2", "r3", "r4", "p5"])
     spec_rd = Model.from_items(
-        {"r1": Rasch(), "r2": Rasch(), "r3": Rasch(), "r4": Rasch(), "p5": GPCM(n_cat=7)}
+        {"r1": Rasch(), "r2": Rasch(), "r3": Rasch(), "r4": Rasch(), "p5": GPCM(n_categories=7)}
     ).with_latent(Normal.standard())
     res_rd = fit(spec_rd, df5, method=BAEM(tol=1e-4, max_iter=200, squarem=True), se=None)
     assert res_rd.n_params == 11
@@ -222,16 +224,16 @@ def test_m2_invariant_to_item_order() -> None:
         np.testing.assert_allclose(r1[col].iloc[0], r2[col].iloc[0], rtol=1e-7, atol=1e-9)
 
     # Also check polytomous (GRM) invariance.
-    dfg = _sim_grm(n_obs=500, n_items=6, n_cat=3, seed=4)
+    dfg = _sim_grm(n_obs=500, n_items=6, n_categories=3, seed=4)
     gperm = ["g04", "g01", "g06", "g02", "g05", "g03"]
     rg1 = fit(
-        Model.uniform(GRM(n_cat=3), items=list(dfg.columns)),
+        Model.uniform(GRM(n_categories=3), items=list(dfg.columns)),
         dfg,
         method=BAEM(tol=1e-9, squarem=True),
         se=None,
     ).m2(dfg)
     rg2 = fit(
-        Model.uniform(GRM(n_cat=3), items=gperm),
+        Model.uniform(GRM(n_categories=3), items=gperm),
         dfg[gperm],
         method=BAEM(tol=1e-9, squarem=True),
         se=None,
@@ -297,12 +299,12 @@ def test_rmsea_and_rmsea_ci_against_hand_values() -> None:
 
 def test_xi_is_symmetric_psd_and_matches_brute_force() -> None:
     df_bin = _sim_2pl(n_obs=300, n_items=7, seed=5)
-    df_poly = _sim_grm(n_obs=300, n_items=6, n_cat=4, seed=6)
+    df_poly = _sim_grm(n_obs=300, n_items=6, n_categories=4, seed=6)
     configs = [
         (Model.uniform(TwoPL(), items=list(df_bin.columns)), df_bin),
         (Model.uniform(ThreePL(), items=list(df_bin.columns)), df_bin),
-        (Model.uniform(GRM(n_cat=4), items=list(df_poly.columns)), df_poly),
-        (Model.uniform(GPCM(n_cat=4), items=list(df_poly.columns)), df_poly),
+        (Model.uniform(GRM(n_categories=4), items=list(df_poly.columns)), df_poly),
+        (Model.uniform(GPCM(n_categories=4), items=list(df_poly.columns)), df_poly),
     ]
     for spec, df in configs:
         with warnings.catch_warnings():
@@ -401,7 +403,7 @@ def test_null_m2_matches_explicit_independence_model() -> None:
             jnp.asarray(res_null._eta),
             y,
             n_params=res_null.n_params,
-            n_cat=[2] * len(items),
+            n_categories=[2] * len(items),
         )
     closed_stat, closed_df = _m2.null_m2(y)
     assert closed_df == explicit.df
@@ -436,11 +438,11 @@ def test_m2_fourpl_and_pcm() -> None:
     for col in ("m2", "p", "rmsea", "rmsea_5", "rmsea_95", "srmsr", "tli", "cfi"):
         assert np.isfinite(out4[col])
 
-    # PCM(n_cat=3) with J=6: s = 21, q = 6*2 + 1 = 13 -> df = 8; latent variance in Delta differs
-    # from _latent_in_delta=False, and tli/cfi are NaN (polytomous).
-    df_pcm = _sim_grm(n_obs=500, n_items=6, n_cat=3, seed=14)
+    # PCM(n_categories=3) with J=6: s = 21, q = 6*2 + 1 = 13 -> df = 8; latent variance in
+    # Delta differs from _latent_in_delta=False, and tli/cfi are NaN (polytomous).
+    df_pcm = _sim_grm(n_obs=500, n_items=6, n_categories=3, seed=14)
     res_pcm = fit(
-        Model.uniform(PCM(n_cat=3), items=list(df_pcm.columns)),
+        Model.uniform(PCM(n_categories=3), items=list(df_pcm.columns)),
         df_pcm,
         method=BAEM(tol=1e-7, squarem=True),
         se=None,
@@ -459,7 +461,7 @@ def test_m2_fourpl_and_pcm() -> None:
         jnp.asarray(res_pcm._eta),
         y,
         n_params=res_pcm.n_params,
-        n_cat=[3] * 6,
+        n_categories=[3] * 6,
         _latent_in_delta=False,
     )
     assert abs(float(out_pcm["m2"]) - nolat.m2) > 1e-6

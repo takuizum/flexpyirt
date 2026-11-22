@@ -62,11 +62,11 @@ def _data(source: str) -> tuple[dict[str, Any], pd.DataFrame]:
 def _fit(source: str) -> FitResult:
     raw, df = _data(source)
     items = raw["items"]
-    quad = Quadrature.equispaced(raw["meta"]["quadpts"], lim=tuple(raw["meta"]["theta_lim"]))
+    quad = Quadrature.equispaced(raw["meta"]["quadpts"], bounds=tuple(raw["meta"]["theta_lim"]))
     spec = {
-        "v3_science_grm": lambda: Model.uniform(GRM(n_cat=4), items=items),
-        "v8_science_gpcm": lambda: Model.uniform(GPCM(n_cat=4), items=items),
-        "v8_sim_pcm": lambda: Model.uniform(PCM(n_cat=4), items=items),
+        "v3_science_grm": lambda: Model.uniform(GRM(n_categories=4), items=items),
+        "v8_science_gpcm": lambda: Model.uniform(GPCM(n_categories=4), items=items),
+        "v8_sim_pcm": lambda: Model.uniform(PCM(n_categories=4), items=items),
         "v11_3pl": lambda: Model.uniform(ThreePL(), items=items),
         "v5_fipc_2pl": lambda: (
             Model.uniform(TwoPL(), items=items)
@@ -81,7 +81,7 @@ def _fit(source: str) -> FitResult:
 def test_s_x2_matches_mirt(name: str) -> None:
     ref = _bundle()[name]
     _, df = _data(ref["source"])
-    res = _fit(ref["source"]).item_fit(df, mincell=ref["mincell"])
+    res = _fit(ref["source"]).item_fit(df, min_cell=ref["mincell"])
     assert list(res["item"]) == ref["item"]
     np.testing.assert_array_equal(res["df"].to_numpy(), np.asarray(ref["df"]))
     np.testing.assert_allclose(res["s_x2"], ref["S_X2"], rtol=TOL_SX2_REL)
@@ -92,11 +92,11 @@ def test_s_x2_matches_mirt(name: str) -> None:
 def test_lord_wingersky_matches_enumeration() -> None:
     """Summed-score likelihoods equal brute-force enumeration of response patterns."""
     rng = np.random.default_rng(0)
-    n_cat = [2, 3, 4]
-    traces = [rng.dirichlet(np.ones(k), size=5) for k in n_cat]
+    n_categories = [2, 3, 4]
+    traces = [rng.dirichlet(np.ones(k), size=5) for k in n_categories]
     lik = _itemfit.lord_wingersky(traces)
     brute = np.zeros_like(lik)
-    for y in np.ndindex(*n_cat):
+    for y in np.ndindex(*n_categories):
         brute[sum(y)] += np.prod([traces[j][:, y[j]] for j in range(3)], axis=0)
     np.testing.assert_allclose(lik, brute, rtol=1e-14)
     np.testing.assert_allclose(lik.sum(axis=0), 1.0, rtol=1e-14)
@@ -118,5 +118,5 @@ def test_item_fit_rejects_unsupported_inputs() -> None:
         res.item_fit(df.assign(**{df.columns[0]: df.iloc[:, 0].where(df.index > 0)}))
     with pytest.raises(SpecificationError, match="every response category"):
         res.item_fit(df.assign(**{df.columns[0]: np.minimum(df.iloc[:, 0], 2)}))
-    with pytest.raises(SpecificationError, match="mincell"):
-        res.item_fit(df, mincell=0)
+    with pytest.raises(SpecificationError, match="min_cell"):
+        res.item_fit(df, min_cell=0)

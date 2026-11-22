@@ -2,9 +2,10 @@
 
 Implements the versioned plain-JSON format specified in DESIGN.md §15.26–§15.28:
 
-- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 3`` (versions 1
-  and 2, written before multidimensional models and across-item equalities were stored, are still
-  read), and ``"flexpyirt_version"``.
+- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 4`` (versions 1
+  and 2, written before multidimensional models and across-item equalities were stored, and
+  version 3, written before the naming refactor of §15.46, are still read), and
+  ``"flexpyirt_version"``.
 - Strict RFC 8259 JSON (``allow_nan=False`` on write; rejecting ``parse_constant`` on read).
   Finite IEEE-754 float64 values use standard ``repr``-exact JSON numbers; non-finite values in
   float-typed fields are encoded explicitly as ``"NaN"``, ``"Infinity"``, or ``"-Infinity"``.
@@ -42,7 +43,7 @@ from flexpyirt.latent import (
 )
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
-from flexpyirt.priors import Beta, LogNormal, NormalPrior, Prior
+from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior, Prior
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -56,10 +57,18 @@ __all__ = [
 ]
 
 FORMAT_TAG = "flexpyirt.FitResult"
-SCHEMA_VERSION = 3
-"""Schema version written by :func:`dump_fit_result` (2 adds the confirmatory factor structure)."""
-SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3})
+SCHEMA_VERSION = 4
+"""Schema version written by :func:`dump_fit_result`.
+
+2 adds the confirmatory factor structure, 3 across-item equalities, and 4 renames the item-model
+key ``n_cat`` to ``n_categories`` and the priors ``LogNormal(meanlog, sdlog)`` / ``Beta`` to
+``LogNormalPrior(mean_log, sd_log)`` / ``BetaPrior`` (DESIGN.md §15.46).
+"""
+SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4})
 """Schema versions accepted by :func:`load_fit_result`; version 1 has no factor keys."""
+
+_LEGACY_PRIOR_TYPES = {"LogNormal": "LogNormalPrior", "Beta": "BetaPrior"}
+_LEGACY_PRIOR_KEYS = {"meanlog": "mean_log", "sdlog": "sd_log"}
 
 _INT32_MAX = (1 << 31) - 1
 _INT64_MIN = -(1 << 63)
@@ -254,7 +263,7 @@ def _serialize_simple_item(model: Any) -> dict[str, Any]:
 
 
 def _serialize_polytomous_item(model: Any) -> dict[str, Any]:
-    return {"type": str(model.name), "n_cat": int(model.n_cat)}
+    return {"type": str(model.name), "n_categories": int(model.n_categories)}
 
 
 def _make_simple_item_loader(cls: type[Any]) -> Callable[[dict[str, Any], str], ItemModel]:
@@ -268,13 +277,13 @@ def _make_simple_item_loader(cls: type[Any]) -> Callable[[dict[str, Any], str], 
 
 def _make_polytomous_item_loader(cls: type[Any]) -> Callable[[dict[str, Any], str], ItemModel]:
     def _load(obj: dict[str, Any], field_name: str) -> ItemModel:
-        _check_keys(obj, required={"type", "n_cat"}, field_name=field_name)
-        n_cat = _require_int(
-            obj["n_cat"],
-            field_name=f"{field_name}.n_cat",
+        _check_keys(obj, required={"type", "n_categories"}, field_name=field_name)
+        n_categories = _require_int(
+            obj["n_categories"],
+            field_name=f"{field_name}.n_categories",
             max_value=_MAX_ITEM_CATEGORIES,
         )
-        item_model: ItemModel = cls(n_cat=n_cat)
+        item_model: ItemModel = cls(n_categories=n_categories)
         return item_model
 
     return _load
@@ -444,17 +453,17 @@ def _serialize_normal_prior(prior: NormalPrior) -> dict[str, Any]:
     }
 
 
-def _serialize_lognormal_prior(prior: LogNormal) -> dict[str, Any]:
+def _serialize_lognormal_prior(prior: LogNormalPrior) -> dict[str, Any]:
     return {
-        "type": "LogNormal",
-        "meanlog": _encode_float(prior.meanlog),
-        "sdlog": _encode_float(prior.sdlog),
+        "type": "LogNormalPrior",
+        "mean_log": _encode_float(prior.mean_log),
+        "sd_log": _encode_float(prior.sd_log),
     }
 
 
-def _serialize_beta_prior(prior: Beta) -> dict[str, Any]:
+def _serialize_beta_prior(prior: BetaPrior) -> dict[str, Any]:
     return {
-        "type": "Beta",
+        "type": "BetaPrior",
         "a": _encode_float(prior.a),
         "b": _encode_float(prior.b),
     }
@@ -468,17 +477,17 @@ def _deserialize_normal_prior(obj: dict[str, Any], field_name: str) -> NormalPri
     )
 
 
-def _deserialize_lognormal_prior(obj: dict[str, Any], field_name: str) -> LogNormal:
-    _check_keys(obj, required={"type", "meanlog", "sdlog"}, field_name=field_name)
-    return LogNormal(
-        meanlog=_decode_float(obj["meanlog"], field_name=f"{field_name}.meanlog", finite=True),
-        sdlog=_decode_float(obj["sdlog"], field_name=f"{field_name}.sdlog", finite=True),
+def _deserialize_lognormal_prior(obj: dict[str, Any], field_name: str) -> LogNormalPrior:
+    _check_keys(obj, required={"type", "mean_log", "sd_log"}, field_name=field_name)
+    return LogNormalPrior(
+        mean_log=_decode_float(obj["mean_log"], field_name=f"{field_name}.mean_log", finite=True),
+        sd_log=_decode_float(obj["sd_log"], field_name=f"{field_name}.sd_log", finite=True),
     )
 
 
-def _deserialize_beta_prior(obj: dict[str, Any], field_name: str) -> Beta:
+def _deserialize_beta_prior(obj: dict[str, Any], field_name: str) -> BetaPrior:
     _check_keys(obj, required={"type", "a", "b"}, field_name=field_name)
-    return Beta(
+    return BetaPrior(
         a=_decode_float(obj["a"], field_name=f"{field_name}.a", finite=True),
         b=_decode_float(obj["b"], field_name=f"{field_name}.b", finite=True),
     )
@@ -486,13 +495,13 @@ def _deserialize_beta_prior(obj: dict[str, Any], field_name: str) -> Beta:
 
 _PRIOR_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
     NormalPrior: _serialize_normal_prior,
-    LogNormal: _serialize_lognormal_prior,
-    Beta: _serialize_beta_prior,
+    LogNormalPrior: _serialize_lognormal_prior,
+    BetaPrior: _serialize_beta_prior,
 }
 _PRIOR_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], Prior]] = {
     "NormalPrior": _deserialize_normal_prior,
-    "LogNormal": _deserialize_lognormal_prior,
-    "Beta": _deserialize_beta_prior,
+    "LogNormalPrior": _deserialize_lognormal_prior,
+    "BetaPrior": _deserialize_beta_prior,
 }
 
 
@@ -523,6 +532,27 @@ def _deserialize_prior(raw: Any, *, field_name: str) -> Prior | None:
             f"supported: {sorted(_PRIOR_DESERIALIZERS)}."
         )
     return loader(obj, field_name)
+
+
+def _upgrade_legacy_names(raw: Any) -> Any:
+    """Rename schema 1–3 keys to their schema 4 names (DESIGN.md §15.46); returns a new object.
+
+    Item models: ``n_cat`` -> ``n_categories``. Priors: ``LogNormal`` -> ``LogNormalPrior`` (with
+    ``meanlog``/``sdlog`` -> ``mean_log``/``sd_log``) and ``Beta`` -> ``BetaPrior``. Only
+    dictionaries carrying an item-model or prior ``type`` are touched.
+    """
+    if isinstance(raw, list):
+        return [_upgrade_legacy_names(v) for v in raw]
+    if not isinstance(raw, dict):
+        return raw
+    out = {k: _upgrade_legacy_names(v) for k, v in raw.items()}
+    kind = out.get("type")
+    if kind in _LEGACY_PRIOR_TYPES:
+        out["type"] = _LEGACY_PRIOR_TYPES[kind]
+        out = {_LEGACY_PRIOR_KEYS.get(k, k): v for k, v in out.items()}
+    elif isinstance(kind, str) and kind in _ITEM_MODEL_DESERIALIZERS and "n_cat" in out:
+        out = {("n_categories" if k == "n_cat" else k): v for k, v in out.items()}
+    return out
 
 
 def _serialize_equispaced_quadrature(quad: Quadrature) -> dict[str, Any]:
@@ -1355,11 +1385,13 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
     if extra_top:
         raise SpecificationError(f"Unexpected keys in FitResult: {extra_top}.")
     _require_str(obj["flexpyirt_version"], field_name="flexpyirt_version")
+    if schema_version < 4:
+        obj = _upgrade_legacy_names(obj)
 
     model = _deserialize_model(obj["model"], schema_version=schema_version)
     quadrature = _deserialize_quadrature(obj["quadrature"], field_name="quadrature")
     eh_weights: np.ndarray | None = None
-    if model.is_eh:
+    if model.is_empirical_histogram:
         if "latent_weights" not in obj:
             raise SpecificationError(
                 "Missing required key 'latent_weights' for an EmpiricalHistogram FitResult."

@@ -30,7 +30,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 
 ## M3 EH, MAP, 3PL/4PL, GPCM, SQUAREM
 - [x] EmpiricalHistogram (`EmpiricalHistogram`, reference group standardized by a moment-constrained M-step, square-root-scale SQUAREM; validated in V6).
-- [x] Priors and MAP (`NormalPrior`, `LogNormal`, `Beta`, `Model.prior()`, `FitResult.log_posterior`, validated in V7).
+- [x] Priors and MAP (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, `Model.prior()`, `FitResult.log_posterior`, validated in V7).
 - [x] 3PL / 4PL (`ThreePL`, `FourPL`, `HeywoodWarning`, validated in V11).
 - [x] GPCM / PCM (`GPCM`, `PCM`, validated in V8).
 - [x] SQUAREM (`BAEM(squarem=True)`, scheme S3 with monotonicity/feasibility safeguard; all mirt agreement suites pass with and without SQUAREM).
@@ -61,6 +61,6 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   Holm / BH adjustment; validated in V17).
 - [x] M2 limited-information goodness of fit (`FitResult.m2()`, single-group unidimensional
   $M_2$ / $M_2^*$, RMSEA + CI, SRMSR, dichotomous TLI / CFI; validated in V18).
-- [x] Nominal response model (`Nominal(n_cat)`, Thissen, Cai & Bock (2010) parameterization as in
+- [x] Nominal response model (`Nominal(n_categories)`, Thissen, Cai & Bock (2010) parameterization as in
   mirt's `itemtype = "nominal"`; validated in V23 for one and two factors, three factors
   unit-tested only).

@@ -41,7 +41,7 @@ from flexpyirt._linking import (
 from flexpyirt.errors import ConvergenceWarning, SpecificationError
 from flexpyirt.items import DichotomousKernel, FourPLKernel, GPCMKernel, GradedKernel, ItemModel
 
-METHODS: tuple[LinkMethod, ...] = ("stocking-lord", "haebara")
+METHODS: tuple[LinkMethod, ...] = ("stocking_lord", "haebara")
 
 
 def _simulate(
@@ -62,7 +62,7 @@ def _simulate(
         probs = np.asarray(jnp.exp(kernel.log_prob(th_j, jnp.asarray(params[name]))))
         cdf = np.cumsum(probs, axis=1)
         u = rng.random(n_obs)[:, None]
-        cols[name] = np.clip((u > cdf).sum(axis=1), 0, kernel.n_cat - 1).astype(int)
+        cols[name] = np.clip((u > cdf).sum(axis=1), 0, kernel.n_categories - 1).astype(int)
     return pd.DataFrame(cols)
 
 
@@ -79,7 +79,7 @@ def _make_fixed_fit(
     df = _simulate(model, params, n_obs=120, seed=seed, mean=latent_mean, sd=math.sqrt(latent_var))
     # Ensure every category appears at least once so parameter_table succeeds cleanly.
     for name, item_model in model.items:
-        k = item_model.kernel.n_cat
+        k = item_model.kernel.n_categories
         for cat in range(k):
             if cat not in df[name].values:
                 df.loc[cat, name] = cat
@@ -106,9 +106,9 @@ def _make_fixed_fit(
         (Rasch(), np.array([1.0, 0.7])),
         (ThreePL(), np.array([1.6, -0.3, 0.2, 1.0])),
         (FourPL(), np.array([1.5, 0.4, 0.15, 0.88])),
-        (GRM(n_cat=4), np.array([1.3, 1.4, 0.1, -1.2])),
-        (GPCM(n_cat=4), np.array([1.2, 0.8, 0.2, -0.9])),
-        (PCM(n_cat=3), np.array([1.0, 0.5, -0.4])),
+        (GRM(n_categories=4), np.array([1.3, 1.4, 0.1, -1.2])),
+        (GPCM(n_categories=4), np.array([1.2, 0.8, 0.2, -0.9])),
+        (PCM(n_categories=3), np.array([1.0, 0.5, -0.4])),
     ],
 )
 @pytest.mark.parametrize(("a_const", "b_const"), [(1.35, 0.6), (0.75, -1.1), (2.2, 2.5)])
@@ -217,9 +217,9 @@ def test_identity_source_equals_target_mixed_format(method: LinkMethod, symmetri
             "irasch": Rasch(),
             "i3pl": ThreePL(),
             "i4pl": FourPL(),
-            "igrm": GRM(n_cat=4),
-            "igpcm": GPCM(n_cat=4),
-            "ipcm": PCM(n_cat=3),
+            "igrm": GRM(n_categories=4),
+            "igpcm": GPCM(n_categories=4),
+            "ipcm": PCM(n_categories=3),
         }
     )
     params = {
@@ -254,11 +254,11 @@ def test_exact_recovery_of_known_transformation_all_models(
         "c_2pl": TwoPL(),
         "c_3pl": ThreePL(),
         "c_4pl": FourPL(),
-        "c_grm": GRM(n_cat=4),
-        "c_gpcm": GPCM(n_cat=4),
+        "c_grm": GRM(n_categories=4),
+        "c_gpcm": GPCM(n_categories=4),
     }
     tgt_model = Model.from_items({**common_spec, "t_only": TwoPL()})
-    src_model = Model.from_items({**common_spec, "s_only": GRM(n_cat=3)})
+    src_model = Model.from_items({**common_spec, "s_only": GRM(n_categories=3)})
 
     tgt_params = {
         "c_2pl": np.array([1.2, -0.4]),
@@ -301,7 +301,7 @@ def test_exact_recovery_of_known_transformation_all_models(
 
     # Transformed item table works directly with Model.fix_from() in both parameterizations.
     fipc_si = Model.from_items(common_spec).fix_from(
-        linked.items, parameterization="slope-intercept"
+        linked.items, parameterization="slope_intercept"
     )
     fipc_irt = Model.from_items(common_spec).fix_from(linked.items, parameterization="irt")
     assert len(fipc_si.fixed) == len(fipc_irt.fixed)
@@ -465,8 +465,8 @@ def test_fixed_slope_items_transform_to_slope_one_over_a() -> None:
         "r1": Rasch(),
         "r2": Rasch(),
         "r3": Rasch(),
-        "p1": PCM(n_cat=3),
-        "p2": PCM(n_cat=3),
+        "p1": PCM(n_categories=3),
+        "p2": PCM(n_categories=3),
     }
     src_model = Model.from_items(src_spec)
     src_params = {
@@ -478,7 +478,7 @@ def test_fixed_slope_items_transform_to_slope_one_over_a() -> None:
     }
     # The target holds the same items on the target scale (slope 1/A), so it needs 2PL / GPCM.
     tgt_spec: dict[str, ItemModel] = {
-        n: (TwoPL() if isinstance(m, Rasch) else GPCM(n_cat=3)) for n, m in src_spec.items()
+        n: (TwoPL() if isinstance(m, Rasch) else GPCM(n_categories=3)) for n, m in src_spec.items()
     }
     tgt_model = Model.from_items(tgt_spec)
     tgt_params = {
@@ -622,7 +622,7 @@ def test_ogasawara_se_monte_carlo_linearization_check(
     of the calibrations (no data are resampled and no models are refitted).
     """
     res_src, res_tgt, _ = fitted_2pl_pair
-    linked = link(res_src, res_tgt, method="stocking-lord", symmetric=False)
+    linked = link(res_src, res_tgt, method="stocking_lord", symmetric=False)
     assert linked.vcov is not None and res_src.vcov is not None and res_tgt.vcov is not None
 
     common = list(linked.common_items)
@@ -681,7 +681,7 @@ def test_ogasawara_se_monte_carlo_linearization_check(
     batch_solve = jax.jit(
         jax.vmap(
             lambda es, et: solve_linking(
-                prob, es, et, ab0, method="stocking-lord", symmetric=False, tol=1e-10, max_iter=100
+                prob, es, et, ab0, method="stocking_lord", symmetric=False, tol=1e-10, max_iter=100
             )[0]
         )
     )
@@ -720,7 +720,7 @@ def test_se_none_and_multigroup_and_eh(
         eh_spec,
         df_src,
         method=BAEM(tol=1e-4, max_iter=300, squarem=True),
-        quadrature=Quadrature.equispaced(21, lim=(-4, 4)),
+        quadrature=Quadrature.equispaced(21, bounds=(-4, 4)),
         se=None,
     )
     linked_eh = link(res_src, res_eh, symmetric=True)
@@ -808,15 +808,15 @@ def test_errors_and_validation(
         link(m3pl, res_tgt)
 
     mgrm3 = _make_fixed_fit(
-        Model.uniform(GRM(n_cat=3), items=["p1", "p2"]),
+        Model.uniform(GRM(n_categories=3), items=["p1", "p2"]),
         {"p1": np.array([1.1, 0.8, -0.7]), "p2": np.array([1.3, 0.5, -0.9])},
     )
     mgrm4 = _make_fixed_fit(
-        Model.uniform(GRM(n_cat=4), items=["p1", "p2"]),
+        Model.uniform(GRM(n_categories=4), items=["p1", "p2"]),
         {"p1": np.array([1.1, 1.0, 0.0, -1.0]), "p2": np.array([1.3, 0.9, -0.1, -1.1])},
     )
     mgpcm3 = _make_fixed_fit(
-        Model.uniform(GPCM(n_cat=3), items=["p1", "p2"]),
+        Model.uniform(GPCM(n_categories=3), items=["p1", "p2"]),
         {"p1": np.array([1.1, 0.5, -0.4]), "p2": np.array([1.3, 0.2, -0.6])},
     )
     with pytest.raises(SpecificationError, match="same item kernel"):
@@ -833,7 +833,7 @@ def test_errors_and_validation(
             md_spec,
             df_src.iloc[:200, :6],
             method=BAEM(tol=1e-2, max_iter=5),
-            quadrature=Quadrature.equispaced(7, lim=(-3, 3)),
+            quadrature=Quadrature.equispaced(7, bounds=(-3, 3)),
             se=None,
         )
     with pytest.raises(SpecificationError, match="unidimensional"):
@@ -943,7 +943,7 @@ def test_same_multigroup_fit_uses_joint_vcov(multigroup_anchor_fit: FitResult) -
             es,
             et,
             jnp.array([linked.A, linked.B]),
-            method="stocking-lord",
+            method="stocking_lord",
             symmetric=False,
             tol=1e-13,
             max_iter=50,

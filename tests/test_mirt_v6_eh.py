@@ -33,7 +33,7 @@ from tests._reference import check_reference_meta
 REFERENCE_DIR = Path(__file__).parent / "reference"
 CASES = ["v6_fipc_eh", "v6_twogroup_fipc_eh"]
 TOL_SE_REL = 1e-3
-QUAD = Quadrature.equispaced(61, lim=(-6, 6))
+QUAD = Quadrature.equispaced(61, bounds=(-6, 6))
 
 
 @dataclass(frozen=True)

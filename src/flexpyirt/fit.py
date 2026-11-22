@@ -74,7 +74,7 @@ def fit(
     spec : Model
         Model specification.
     data : DataFrame or array-like
-        Responses (persons × items) coded ``0..n_cat-1``; NaN is missing (MAR). Columns must be
+        Responses (persons × items) coded ``0..K-1``; NaN is missing (MAR). Columns must be
         exactly the model's items.
     group : array-like, optional
         Group label of each row for a multiple-group model (see ``Model.with_groups``).
@@ -155,8 +155,12 @@ def fit(
 
     vcov = None
     se_values = np.full(eta.shape[0], np.nan)
-    eh_weights = np.asarray(out.eh_weights, dtype=np.float64) if spec.is_eh else None
-    problem_fin = _core._with_eh_weights(problem, out.eh_weights) if spec.is_eh else problem
+    eh_weights = (
+        np.asarray(out.eh_weights, dtype=np.float64) if spec.is_empirical_histogram else None
+    )
+    problem_fin = (
+        _core._with_eh_weights(problem, out.eh_weights) if spec.is_empirical_histogram else problem
+    )
     if eh_weights is not None:
         _check_eh_reference_moments(problem, eh_weights[0])
     if se is not None and eta.shape[0] > 0:
@@ -255,7 +259,7 @@ def _warn_nominal_degenerate(
 ) -> None:
     r"""Warn about degenerate nominal items (DESIGN.md §16.6).
 
-    A ``Nominal`` item with ``n_cat >= 3`` and a free slope is degenerate when its slope norm
+    A ``Nominal`` item with ``n_categories >= 3`` and a free slope is degenerate when its slope norm
     :math:`\lVert\mathbf a\rVert < 10^{-3}` (the item carries no information about
     :math:`\theta` and :math:`\mathrm{ak}_1..\mathrm{ak}_{K-2}` are not identified: the saddle
     that traps mirt's Newton–Raphson from its default starting values) or when some
@@ -267,7 +271,7 @@ def _warn_nominal_degenerate(
     items: set[str] = set()
     for (group, item), sub in rows.groupby(["group", "item"], sort=False):
         kernel = kernels[str(item)]
-        if not isinstance(kernel, NominalKernel) or kernel.n_cat < 3:
+        if not isinstance(kernel, NominalKernel) or kernel.n_categories < 3:
             continue
         if not bool(sub.loc[sub["param"].isin(kernel.slope_params), "free"].any()):
             continue

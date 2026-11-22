@@ -34,11 +34,11 @@ from flexpyirt._precision import check_x64
 from flexpyirt.errors import ConvergenceWarning, SpecificationError
 from flexpyirt.items import ItemKernel
 from flexpyirt.latent import normal_log_weights
-from flexpyirt.result import _HTML_STYLE, FitResult, _df_to_html_table
+from flexpyirt.result import _HTML_STYLE, FitResult, _frame_to_html_table
 
 __all__ = ["LinkMethod", "LinkResult", "link"]
 
-_LINK_METHODS: tuple[str, ...] = ("haebara", "stocking-lord")
+_LINK_METHODS: tuple[str, ...] = ("haebara", "stocking_lord")
 _PV_COL_RE = re.compile(r"^pv\d+$")
 
 _solve_linking = jax.jit(solve_linking, static_argnames=("method", "symmetric"))
@@ -122,7 +122,7 @@ def _resolve_common_items(
 def _fitted_grid(res: FitResult, group_name: str, group_idx: int) -> tuple[np.ndarray, np.ndarray]:
     """Return ``(nodes, weights)`` of ``res``'s fitted unidimensional latent distribution."""
     nodes = res._quadrature.nodes().astype(np.float64)
-    if res._model.is_eh:
+    if res._model.is_empirical_histogram:
         assert res._eh_weights is not None
         w = np.asarray(res._eh_weights[group_idx], dtype=np.float64)
     else:
@@ -326,7 +326,7 @@ class LinkResult:
         common parameters are fixed, or the criterion Hessian is not positive definite).
     criterion : float
         Minimized Haebara or Stocking–Lord criterion value at ``(A, B)``.
-    method : {"haebara", "stocking-lord"}
+    method : {"haebara", "stocking_lord"}
         Linking criterion used.
     symmetric : bool
         Whether the symmetric (two-direction) criterion was minimized.
@@ -495,8 +495,8 @@ class LinkResult:
         meta_rows = "".join(
             f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>" for k, v in meta
         )
-        const_html = _df_to_html_table(self._constants_table(), digits=4)
-        items_html = _df_to_html_table(self.items, digits=4)
+        const_html = _frame_to_html_table(self._constants_table(), digits=4)
+        items_html = _frame_to_html_table(self.items, digits=4)
         return (
             f"{_HTML_STYLE}"
             '<div class="flexpyirt-result">'
@@ -515,7 +515,7 @@ def link(
     target: FitResult,
     *,
     items: Iterable[str] | Mapping[str, str] | None = None,
-    method: LinkMethod = "stocking-lord",
+    method: LinkMethod = "stocking_lord",
     symmetric: bool = False,
     nodes: Any = None,
     weights: Any = None,
@@ -531,7 +531,7 @@ def link(
     scale by minimizing a characteristic-curve criterion over common items (Kolen & Brennan, 2014;
     DESIGN.md §16.5):
 
-    - ``method="stocking-lord"`` (Stocking & Lord, 1983; polytomous form Kim & Lee, 2006):
+    - ``method="stocking_lord"`` (Stocking & Lord, 1983; polytomous form Kim & Lee, 2006):
       weighted squared difference of common-item test characteristic curves
       :math:`\mathrm{TCC}(\theta) = \sum_{j\in\mathcal{C}}\sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)`.
     - ``method="haebara"`` (Haebara, 1980; polytomous form Kim & Lee, 2006):
@@ -570,7 +570,7 @@ def link(
         ``source`` and ``target``. Pass a ``{source_item: target_item}`` mapping when common items
         have different names in the two forms. Every common pair must share the same item kernel
         and number of categories.
-    method : {"stocking-lord", "haebara"}, default "stocking-lord"
+    method : {"stocking_lord", "haebara"}, default "stocking_lord"
         Characteristic-curve linking criterion.
     symmetric : bool, default False
         If ``True``, minimize the symmetric (two-direction) criterion (Kim & Lee, 2006).
@@ -641,8 +641,9 @@ def link(
         tk = target._model.item_kernel(tgt_lookup[t_name])
         if sk != tk:
             raise SpecificationError(
-                f"Common item {s_name!r} (source: {src_lookup[s_name].name}, n_cat={sk.n_cat}) "
-                f"and {t_name!r} (target: {tgt_lookup[t_name].name}, n_cat={tk.n_cat}) do not "
+                f"Common item {s_name!r} (source: {src_lookup[s_name].name}, "
+                f"n_categories={sk.n_categories}) and {t_name!r} (target: "
+                f"{tgt_lookup[t_name].name}, n_categories={tk.n_categories}) do not "
                 "share the same item kernel and category count."
             )
         common_kernels[s_name] = sk

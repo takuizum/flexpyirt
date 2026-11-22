@@ -43,7 +43,7 @@ from benchmarks.data import (  # noqa: E402
 DEFAULT_OUT_PATH = DEFAULT_DATA_DIR / "flexpyirt_raw.json"
 DEFAULT_TOL = 1e-4
 DEFAULT_MAX_ITER = 2000
-DEFAULT_QUADPTS = 61
+DEFAULT_N_POINTS = 61
 DEFAULT_THETA_LIM = (-6.0, 6.0)
 DEFAULT_WARM_REPEATS = 3
 
@@ -111,7 +111,7 @@ def _build_spec(case: BenchmarkCase) -> Any:
     if case.model == "2pl":
         return Model.uniform(TwoPL(), items=items)
     if case.model == "grm":
-        return Model.uniform(GRM(n_cat=case.n_cat), items=items)
+        return Model.uniform(GRM(n_categories=case.n_categories), items=items)
     if case.model == "3pl":
         return Model.uniform(ThreePL(), items=items)
     if case.model == "twogroup_2pl":
@@ -157,7 +157,7 @@ def _run_worker(
 
     spec = _build_spec(case)
     method = BAEM(tol=tol, max_iter=max_iter, squarem=squarem)
-    quad = Quadrature.equispaced(quadpts, lim=theta_lim)
+    quad = Quadrature.equispaced(quadpts, bounds=theta_lim)
     se_opt: Literal["oakes"] | None = None if se_arg == "none" else "oakes"
 
     def _one_call() -> tuple[float, Any, list[str]]:
@@ -261,7 +261,7 @@ def run_benchmark(
     warm_repeats: int = DEFAULT_WARM_REPEATS,
     tol: float = DEFAULT_TOL,
     max_iter: int = DEFAULT_MAX_ITER,
-    quadpts: int = DEFAULT_QUADPTS,
+    quadpts: int = DEFAULT_N_POINTS,
     theta_lim: tuple[float, float] = DEFAULT_THETA_LIM,
     quick: bool = False,
     verbose: bool = True,
@@ -371,7 +371,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--tol", type=float, default=DEFAULT_TOL)
     parser.add_argument("--max-iter", type=int, default=DEFAULT_MAX_ITER)
-    parser.add_argument("--quadpts", type=int, default=DEFAULT_QUADPTS)
+    parser.add_argument("--quadpts", type=int, default=DEFAULT_N_POINTS)
     parser.add_argument(
         "--theta-lim",
         type=float,

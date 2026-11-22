@@ -36,7 +36,7 @@ __all__ = [
     "transform_kernel_params",
 ]
 
-LinkMethod = Literal["haebara", "stocking-lord"]
+LinkMethod = Literal["haebara", "stocking_lord"]
 
 _N_HALVINGS = 40
 """Number of backtracking step sizes ``2^-k`` evaluated in parallel during 2-D Newton."""
@@ -143,7 +143,7 @@ def transform_kernel_params(
     if isinstance(kernel, GradedKernel):
         return jnp.concatenate([a_new[None], params[1:] - shift])
     if isinstance(kernel, GPCMKernel):
-        ks = jnp.arange(1, kernel.n_cat, dtype=params.dtype)
+        ks = jnp.arange(1, kernel.n_categories, dtype=params.dtype)
         return jnp.concatenate([a_new[None], params[1:] - ks * shift])
     raise SpecificationError(
         f"Scale parameter transformation is not implemented for kernel {type(kernel).__name__}."
@@ -198,7 +198,7 @@ def _stocking_lord_direction(
     tcc_fixed = jnp.zeros_like(nodes)
     tcc_moved = jnp.zeros_like(nodes)
     for fam, xi_fixed, xi_moved in zip(families, xi_fixed_list, xi_moved_list, strict=True):
-        cats = jnp.arange(fam.kernel.n_cat, dtype=nodes.dtype)
+        cats = jnp.arange(fam.kernel.n_categories, dtype=nodes.dtype)
         p_fixed = _family_probs(fam.kernel, xi_fixed, nodes)
         p_moved = _family_probs(fam.kernel, xi_moved, moved_nodes)
         tcc_fixed = tcc_fixed + jnp.sum(p_fixed * cats[None, None, :], axis=(0, 2))
@@ -257,7 +257,7 @@ def linking_criterion(
         Common-item free parameter vectors for source and target.
     prob : LinkingProblem
         Static-shape linking problem pytree.
-    method : {"haebara", "stocking-lord"}
+    method : {"haebara", "stocking_lord"}
         Static criterion selector.
     symmetric : bool
         Static flag for the symmetric criterion.
@@ -322,7 +322,7 @@ def solve_linking(
         Common-item free parameter vectors for source and target.
     ab0 : Array, shape (2,)
         Initial ``[A, B]`` with ``A > 0``.
-    method : {"haebara", "stocking-lord"}
+    method : {"haebara", "stocking_lord"}
         Static criterion selector.
     symmetric : bool
         Static flag for the symmetric criterion.
@@ -490,7 +490,7 @@ def linking_vcov(
         Covariance matrices of ``eta_s`` and ``eta_t``.
     prob : LinkingProblem
         Static-shape linking problem pytree.
-    method : {"haebara", "stocking-lord"}
+    method : {"haebara", "stocking_lord"}
         Static criterion selector.
     symmetric : bool
         Static flag for the symmetric criterion.

@@ -22,7 +22,7 @@ calibration and fixed item parameter calibration (FIPC).
 | Feature | Details | mirt check |
 |---|---|---|
 | Item models | 2PL, Rasch (latent variance estimated), 3PL, 4PL, GRM (graded response model), GPCM, PCM (latent variance estimated), Nominal (nominal response model; validated for one and two factors, three factors unit-tested only) | V1, V2, V3, V8, V11, V23 |
-| Priors and MAP | `NormalPrior`, `LogNormal`, `Beta` on item parameters (`Model.prior()`), natural scale, `FitResult.log_posterior` | V7 |
+| Priors and MAP | `NormalPrior`, `LogNormalPrior`, `BetaPrior` on item parameters (`Model.prior()`), natural scale, `FitResult.log_posterior` | V7 |
 | Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | V4 |
 | Equality across items | Common parameters across items and item models (`Model.equal_across_items()`, e.g. one common slope), combined with across-group equalities | V16 |
 | FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | V5 |

@@ -116,7 +116,7 @@ class Model:
         return self.groups is not None
 
     @property
-    def is_eh(self) -> bool:
+    def is_empirical_histogram(self) -> bool:
         """Whether this model uses an :class:`~flexpyirt.EmpiricalHistogram` latent distribution."""
         return isinstance(self.resolved_groups()[0][1], EmpiricalHistogram)
 
@@ -214,7 +214,7 @@ class Model:
         bank: pd.DataFrame,
         *,
         items: ItemSelector = None,
-        parameterization: Literal["slope-intercept", "irt"] = "slope-intercept",
+        parameterization: Literal["slope_intercept", "irt"] = "slope_intercept",
     ) -> Model:
         r"""Return a model with item parameters fixed from an item bank (FIPC, DESIGN.md §14.6).
 
@@ -222,7 +222,7 @@ class Model:
         ----------
         bank : DataFrame
             One row per item with an ``item`` column and parameter columns: ``a``, ``d`` (or
-            ``d1..``) for ``"slope-intercept"``; ``a``, ``b`` (or ``b1..``) for ``"irt"``,
+            ``d1..``) for ``"slope_intercept"``; ``a``, ``b`` (or ``b1..``) for ``"irt"``,
             converted with :math:`d=-ab` (or :math:`d_k=-a\sum_{c=1}^{k} b_c` for GPCM/PCM step
             difficulties). ``a`` may be omitted (or NaN) for Rasch and PCM items, or when already
             fixed on the model via :meth:`fix` (whose fixed slope is used to convert ``b`` to
@@ -230,10 +230,10 @@ class Model:
             parameterizations; ``u`` may be omitted (or NaN) for 3PL items (it stays 1), and any
             asymptote already fixed via :meth:`fix` may also be omitted (or NaN). ``Nominal``
             items take ``a``, ``ak1..ak{K-2}``, and ``d1..d{K-1}`` and support only
-            ``"slope-intercept"`` (DESIGN.md §16.6). NaN cells are treated as not given.
+            ``"slope_intercept"`` (DESIGN.md §16.6). NaN cells are treated as not given.
         items : list of str or callable, optional
             Items to fix (default: every bank item that is in the model).
-        parameterization : {"slope-intercept", "irt"}
+        parameterization : {"slope_intercept", "irt"}
 
         Raises
         ------
@@ -295,7 +295,7 @@ class Model:
                         raise SpecificationError(_missing_message(item, row, p))
                     continue
                 if p in kernel.intercept_params:
-                    if parameterization == "slope-intercept":
+                    if parameterization == "slope_intercept":
                         key = p
                     elif parameterization == "irt":
                         key = "b" + p[1:]
@@ -304,7 +304,7 @@ class Model:
                     if not _has_value(row, key):
                         raise SpecificationError(_missing_message(item, row, key))
                     value = float(row[key])
-                    if parameterization == "slope-intercept":
+                    if parameterization == "slope_intercept":
                         values[p] = value
                     elif is_gpcm:
                         cum_b += value
@@ -550,14 +550,15 @@ class Model:
         param : str
             Internal item parameter name (e.g. ``"a"``, ``"a1"``, ``"d"``, ``"g"``, ``"u"``,
             ``"d1"``).
-        dist : NormalPrior, LogNormal, or Beta
+        dist : NormalPrior, LogNormalPrior, or BetaPrior
             Prior distribution on the natural parameter scale.
         items : iterable of str or callable, optional
             Items to attach the prior to (default: every item in the model).
         """
         if not isinstance(dist, PRIOR_TYPES):
             raise SpecificationError(
-                f"Unsupported prior distribution {dist!r}; use NormalPrior, LogNormal or Beta."
+                f"Unsupported prior distribution {dist!r}; "
+                "use NormalPrior, LogNormalPrior or BetaPrior."
             )
         if param in ("mean", "var") or param.startswith(("mean_", "var_", "cor_", "phi_")):
             raise SpecificationError(

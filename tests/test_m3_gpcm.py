@@ -98,7 +98,7 @@ def test_gpcm_two_categories_equals_2pl_kernel() -> None:
 
 
 def test_gpcm_two_categories_equals_2pl_fit() -> None:
-    """With n_cat = 2, GPCM matches 2PL and PCM matches Rasch in estimates, SEs, and EAP."""
+    """With n_categories = 2, GPCM matches 2PL and PCM matches Rasch in estimates, SEs, and EAP."""
     a = np.array([1.1, 1.4, 0.9, 1.3, 1.0, 1.2])
     d = np.array([[-0.6], [0.3], [-0.2], [0.5], [0.0], [-0.4]])
     df = _sim_gpcm(a, d, n=800, seed=101)
@@ -183,7 +183,7 @@ def test_gpcm_unobserved_category_is_rejected() -> None:
 
 
 def test_mixed_gpcm_pcm_twopl_grm_model() -> None:
-    """Mix GPCM, PCM, 2PL, Rasch, and GRM items (and distinct n_cat) in one model."""
+    """Mix GPCM, PCM, 2PL, Rasch, and GRM items (and distinct n_categories) in one model."""
     rng = np.random.default_rng(303)
     n = 1200
     theta = rng.normal(0.0, 1.0, size=n)

@@ -68,15 +68,15 @@ def _case(name: str) -> dict[str, Any]:
     return raw
 
 
-def _item_model(itemtype: str, n_cat: int) -> ItemModel:
+def _item_model(itemtype: str, n_categories: int) -> ItemModel:
     if itemtype == "2PL":
         return TwoPL()
     if itemtype == "3PL":
         return ThreePL()
     if itemtype == "graded":
-        return GRM(n_cat=n_cat)
+        return GRM(n_categories=n_categories)
     if itemtype == "gpcm":
-        return GPCM(n_cat=n_cat)
+        return GPCM(n_categories=n_categories)
     raise ValueError(f"Unsupported reference itemtype {itemtype!r}")
 
 
@@ -107,7 +107,7 @@ def _fixed_at_mirt(name: str, side: str) -> FitResult:
     meta = case["meta"]
     spec = _form_model(form)
     data = _form_data(form)
-    quad = Quadrature.equispaced(int(meta["quadpts"]), lim=tuple(meta["theta_lim"]))
+    quad = Quadrature.equispaced(int(meta["quadpts"]), bounds=tuple(meta["theta_lim"]))
     table = spec.parameter_table(data)
     vals = []
     for item, param in zip(table["item"], table["param"], strict=True):
@@ -132,7 +132,7 @@ def _fit_form(name: str, side: str) -> FitResult:
     meta = case["meta"]
     spec = _form_model(form)
     data = _form_data(form)
-    quad = Quadrature.equispaced(int(meta["quadpts"]), lim=tuple(meta["theta_lim"]))
+    quad = Quadrature.equispaced(int(meta["quadpts"]), bounds=tuple(meta["theta_lim"]))
     table = spec.parameter_table(data)
     is_latent = table["item"] == "__latent__"
     table.loc[is_latent, "value"] = [
@@ -157,7 +157,7 @@ def _direct_problem(name: str) -> tuple[LinkingProblem, jax.Array, jax.Array, ja
     """
     case = _case(name)
     meta = case["meta"]
-    nodes = Quadrature.equispaced(int(meta["quadpts"]), lim=tuple(meta["theta_lim"])).nodes()
+    nodes = Quadrature.equispaced(int(meta["quadpts"]), bounds=tuple(meta["theta_lim"])).nodes()
     nodes_j = jnp.asarray(nodes, dtype=jnp.float64)
 
     def weights(form: dict[str, Any]) -> jax.Array:

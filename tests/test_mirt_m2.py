@@ -26,7 +26,7 @@ TOL_LOGLIK_REL = 1e-6
 TOL_PARAM = 1e-4
 TOL_SE_REL = 1e-3
 TOL_EAP = 1e-5
-WIDE = Quadrature.equispaced(81, lim=(-8, 8))
+WIDE = Quadrature.equispaced(81, bounds=(-8, 8))
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,9 @@ def load(name: str) -> Case:
     check_reference_meta(raw["meta"], require_grid_check=True)
     items = raw["items"]
     if name == "v3_science_grm":
-        return Case(name, raw, Model.uniform(GRM(n_cat=4), items=items), Quadrature.equispaced())
+        return Case(
+            name, raw, Model.uniform(GRM(n_categories=4), items=items), Quadrature.equispaced()
+        )
     if name == "v9_missing_2pl":
         return Case(name, raw, Model.uniform(TwoPL(), items=items), Quadrature.equispaced())
     if name == "v5_fipc_2pl":

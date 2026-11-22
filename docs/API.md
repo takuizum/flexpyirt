@@ -33,17 +33,17 @@ res.score(df, method="EAP")  # DataFrame: theta, se
 ## 2. Mixed formats + priors (MAP)
 
 ```python
-from flexpyirt import Model, ThreePL, GRM, LogNormal, Beta, fit
+from flexpyirt import Model, ThreePL, GRM, LogNormalPrior, BetaPrior, fit
 
 spec = (
     Model.from_items(
         {
             **{f"mc{i:02d}": ThreePL() for i in range(1, 31)},
-            **{f"cr{i}": GRM(n_cat=4) for i in range(1, 6)},
+            **{f"cr{i}": GRM(n_categories=4) for i in range(1, 6)},
         }
     )
-    .prior(param="a", dist=LogNormal(0.0, 0.5))
-    .prior(param="g", dist=Beta(5, 17), items=lambda name: name.startswith("mc"))
+    .prior(param="a", dist=LogNormalPrior(0.0, 0.5))
+    .prior(param="g", dist=BetaPrior(5, 17), items=lambda name: name.startswith("mc"))
 )
 res = fit(spec, df)
 res.log_posterior, res.loglik
@@ -103,7 +103,7 @@ res = fit(
     spec,
     df,
     method=BAEM(tol=1e-4, max_iter=2000, squarem=True, m_step_newton_steps=5),
-    quadrature=Quadrature.equispaced(61, lim=(-6, 6)),  # or Quadrature.gauss_hermite(41)
+    quadrature=Quadrature.equispaced(61, bounds=(-6, 6)),  # or Quadrature.gauss_hermite(41)
     se="oakes",  # "oakes" | "hessian" | "crossprod" | "sandwich" | None
     verbose=False,
 )
@@ -117,7 +117,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 - `fit(spec, data, *, group=None, table=None, item_names=None, method=None, quadrature=None, se="oakes")`.
   `se` is `"oakes" | "hessian" | None`. `group=` raised `NotImplementedError` until M2.
 - `BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3)` (`squarem` comes in M3).
-  `Quadrature.equispaced(n_points=61, lim=(-6, 6))`; Gauss–Hermite is `Quadrature.gauss_hermite(n)` (DESIGN §15.44).
+  `Quadrature.equispaced(n_points=61, bounds=(-6, 6))`; Gauss–Hermite is `Quadrature.gauss_hermite(n)` (DESIGN §15.44).
 - `Model.uniform`, `Model.from_items`, `.fix(item=..., a=..., d=...)`, `.with_latent(...)`,
   `.parameter_table(data)`.
 - `FitResult`: `items`, `latent`, `parameters` (table + `estimate`, `se`), `vcov`, `loglik`, `aic`,
@@ -126,21 +126,21 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
   `SpecificationError` until M2.
 
 ## 6.2 Added in M2
-- Item model `GRM(n_cat=K)` (categories $0..K-1$). Missing data (NaN, MAR) accepted.
+- Item model `GRM(n_categories=K)` (categories $0..K-1$). Missing data (NaN, MAR) accepted.
 - Multiple groups: `Model.with_groups(ref=Normal.standard(), focal=Normal.free())` (the first is the
   reference group), `.equal_across_groups(items=..., params=None)`, `fit(..., group=labels)`.
   `FitResult.items` has a `group` column; `score(data, group=labels)`.
-- FIPC: `Model.fix_from(bank, items=None, parameterization="slope-intercept" | "irt")` +
+- FIPC: `Model.fix_from(bank, items=None, parameterization="slope_intercept" | "irt")` +
   `.with_latent(Normal.free())`.
 - Unidentified specifications (focal group free without anchors, a free mean without fixed items,
   ...) raise `IdentificationError` before fitting.
 
 ## 6.3 Added in M3 (so far)
-- Item models: `ThreePL`, `FourPL`, `GPCM(n_cat=K)`, `PCM(n_cat=K)` (`HeywoodWarning` on boundary
+- Item models: `ThreePL`, `FourPL`, `GPCM(n_categories=K)`, `PCM(n_categories=K)` (`HeywoodWarning` on boundary
   solutions).
 - SQUAREM acceleration: `BAEM(squarem=True)` (scheme S3 with monotonicity/feasibility safeguard;
   `FitResult.n_em_evaluations`, `FitResult.n_safeguards`).
-- Priors and MAP estimation: `NormalPrior(mean, sd)`, `LogNormal(meanlog, sdlog)`, `Beta(a, b)`
+- Priors and MAP estimation: `NormalPrior(mean, sd)`, `LogNormalPrior(mean_log, sd_log)`, `BetaPrior(a, b)`
   with `log_pdf`, attached via `Model.prior(*, param, dist, items=None)` or the `prior` column of
   `ParameterTable`. `FitResult.log_posterior` (equal to `loglik` without priors),
   `history["log_posterior"]`, `FlexpyirtWarning` on `aic`/`bic` when priors are active, and
@@ -154,7 +154,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | `Model` | frozen dataclass | The whole specification. Built with `uniform`, `from_items`; `.fix`, `.fix_from`, `.prior`, `.equal_across_groups`, `.equal_across_items`, `.with_groups`, `.with_latent`, `.parameter_table` |
 | `Rasch`, `TwoPL`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`, `Nominal` | frozen dataclass (satisfies `ItemModel`) | Item models |
 | `Normal`, `EmpiricalHistogram`, `DavidianCurve` | frozen dataclass (satisfies `LatentDist`) | Latent distributions. `Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)` |
-| `LogNormal`, `NormalPrior`, `Beta`, `TruncNormal` | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
+| `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
 | `fit` | function | Estimation; returns a `FitResult` |
 | `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `dif`, `m2`, `to_json` / `from_json`) |

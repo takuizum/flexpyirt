@@ -45,13 +45,20 @@ from flexpyirt.items import (
 from flexpyirt.latent import (
     DavidianCurve,
     EmpiricalHistogram,
-    correlation_matrix_is_pd,
+    correlation_matrix_is_positive_definite,
     davidian_param_names,
     eh_project_floor,
     latent_param_names,
 )
 from flexpyirt.model import LATENT_ITEM
-from flexpyirt.priors import PRIOR_TYPES, Beta, LogNormal, NormalPrior, Prior, encode_prior
+from flexpyirt.priors import (
+    PRIOR_TYPES,
+    BetaPrior,
+    LogNormalPrior,
+    NormalPrior,
+    Prior,
+    encode_prior,
+)
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -102,7 +109,8 @@ def coerce_responses(
     """Return an ``(N, J)`` int array ordered like the model's items, missing coded ``-1``.
 
     Accepts a pandas DataFrame, a polars DataFrame (via ``to_pandas``), or a 2-D array-like with
-    ``item_names``. Responses are integers ``0..n_cat-1``; NaN is missing (MAR, DESIGN.md §14.8).
+    ``item_names``. Responses are integers ``0..K-1`` (``K = n_categories``); NaN is missing (MAR,
+    DESIGN.md §14.8).
 
     Raises
     ------
@@ -151,7 +159,7 @@ def coerce_responses(
     for j, (name, item_model) in enumerate(model.items):
         col = values[:, j]
         obs = ~np.isnan(col)
-        k = item_model.kernel.n_cat
+        k = item_model.kernel.n_categories
         ok = np.isin(col[obs], np.arange(k, dtype=float))
         if not ok.all():
             bad = sorted(set(col[obs][~ok].tolist()))[:5]
@@ -227,17 +235,17 @@ def _non_slope_starts(item_model: ItemModel, item: np.ndarray, a_eff: float) -> 
         g, u = _asymptote_starts(p, free_upper=isinstance(item_model, FourPL))
         return [_intercept_start((p - g) / (u - g), a_eff), g, u]
     if isinstance(item_model, GRM):
-        cum = [float((item >= k).mean()) for k in range(1, item_model.n_cat)]
+        cum = [float((item >= k).mean()) for k in range(1, item_model.n_categories)]
         d = [_intercept_start(prob, a_eff) for prob in cum]
         for k in range(1, len(d)):
             d[k] = min(d[k], d[k - 1] - 0.05)
         return d
     if isinstance(item_model, (GPCM, PCM)):
-        return _gpcm_intercept_starts(item, item_model.n_cat, a_eff)
+        return _gpcm_intercept_starts(item, item_model.n_categories, a_eff)
     if isinstance(item_model, Nominal):
         return [
-            *(float(k) for k in range(1, item_model.n_cat - 1)),
-            *_gpcm_intercept_starts(item, item_model.n_cat, a_eff),
+            *(float(k) for k in range(1, item_model.n_categories - 1)),
+            *_gpcm_intercept_starts(item, item_model.n_categories, a_eff),
         ]
     return [_intercept_start(p, a_eff)]
 
@@ -302,12 +310,12 @@ def _prior_center(pri: Prior) -> float | None:
     """Return a representative interior point for ``pri``, or ``None`` if it overflows."""
     if isinstance(pri, NormalPrior):
         return pri.mean
-    if isinstance(pri, LogNormal):
+    if isinstance(pri, LogNormalPrior):
         try:
-            return math.exp(pri.meanlog)
+            return math.exp(pri.mean_log)
         except OverflowError:
             return None
-    if isinstance(pri, Beta):
+    if isinstance(pri, BetaPrior):
         return pri.a / (pri.a + pri.b)
     return None
 
@@ -688,7 +696,7 @@ def _validate_value_column(
     grm_items = {
         name: m.kernel.intercept_params
         for name, m in model.items
-        if isinstance(m.kernel, GradedKernel) and m.kernel.n_cat > 2
+        if isinstance(m.kernel, GradedKernel) and m.kernel.n_categories > 2
     }
     if grm_items:
         sub = t[t["item"].isin(grm_items)]
@@ -776,7 +784,8 @@ def validate_table_constraints(
                 )
             if not isinstance(pri, PRIOR_TYPES):
                 raise SpecificationError(
-                    f"Invalid prior {pri!r} at {where}; use NormalPrior, LogNormal, Beta or None."
+                    f"Invalid prior {pri!r} at {where}; "
+                    "use NormalPrior, LogNormalPrior, BetaPrior or None."
                 )
             if free[i]:
                 p_lo, p_hi = pri.support
@@ -841,7 +850,7 @@ def validate_table(
         for grp_lat, rows_g in lat_sub.groupby("group", sort=False):
             vals_g = dict(zip(rows_g["param"], rows_g["value"], strict=True))
             cors = [float(vals_g[c]) for c in cor_names]
-            if not correlation_matrix_is_pd(cors, n_factors):
+            if not correlation_matrix_is_positive_definite(cors, n_factors):
                 raise SpecificationError(
                     f"Latent correlation matrix is not positive definite for group {grp_lat!r}: "
                     f"{dict(zip(cor_names, cors, strict=True))}."
@@ -877,13 +886,13 @@ def _check_estimable(t: pd.DataFrame, model: Model, y: np.ndarray, group: np.nda
     """Each free item parameter needs every category observed in the groups that use it."""
     names = [g for g, _ in model.resolved_groups()]
     col = {name: j for j, name in enumerate(model.item_names)}
-    n_cat = {name: m.kernel.n_cat for name, m in model.items}
+    n_categories = {name: m.kernel.n_categories for name, m in model.items}
     free_items = t[t["free"] & (t["item"] != LATENT_ITEM)]
     for (item, _fid), rows in free_items.groupby(["item", "free_id"]):
         codes = [names.index(g) for g in rows["group"].unique()]
         resp = y[np.isin(group, codes), col[str(item)]]
         seen = set(np.unique(resp[resp >= 0]).tolist())
-        absent = [k for k in range(n_cat[str(item)]) if k not in seen]
+        absent = [k for k in range(n_categories[str(item)]) if k not in seen]
         if absent:
             where = (
                 "" if not model.is_multigroup else f" in groups {sorted(rows['group'].unique())}"
@@ -901,7 +910,7 @@ def eh_standardization_flags(t: pd.DataFrame, model: Model) -> tuple[bool, bool]
     component; its variance is standardized iff no nonzero slope parameter is fixed in its
     connected component. Under FIPC (fixed nonzero slopes and fixed intercepts), both are False.
     """
-    if not model.is_eh:
+    if not model.is_empirical_histogram:
         return False, False
     lookup = dict(model.items)
     groups = [g for g, _ in model.resolved_groups()]
@@ -945,7 +954,7 @@ def eh_param_count(t: pd.DataFrame, model: Model, quad: Quadrature) -> int:
     mean and variance are standardized, ``Q - 2`` for Rasch/PCM, ``Q - 1`` under FIPC). Every
     focal group: ``Q - 1``. Returns ``0`` for ``Normal`` models.
     """
-    if not model.is_eh:
+    if not model.is_empirical_histogram:
         return 0
     std_mean, std_var = eh_standardization_flags(t, model)
     n_groups = len(model.resolved_groups())
@@ -971,7 +980,7 @@ def _check_identification(t: pd.DataFrame, model: Model) -> None:
             for i, p in zip(items["item"], items["param"], strict=True)
         ]
     )
-    if model.is_eh:
+    if model.is_empirical_histogram:
         std_mean, std_var = eh_standardization_flags(t, model)
         lat_free: dict[tuple[str, str], bool] = {}
         for idx, g in enumerate(groups):
@@ -1343,7 +1352,7 @@ def compile_problem(
 
     nodes = jnp.asarray(quad.grid(model.n_factors), dtype=jnp.float64)
     resolved = model.resolved_groups()
-    if model.is_eh and quad.kind != "equispaced":
+    if model.is_empirical_histogram and quad.kind != "equispaced":
         raise SpecificationError(
             "EmpiricalHistogram needs an equispaced quadrature grid (its weights are histogram "
             "bins); Gauss-Hermite quadrature is for Normal latent distributions."
@@ -1353,7 +1362,7 @@ def compile_problem(
             "DavidianCurve is validated on equispaced quadrature grids only; Gauss-Hermite "
             "quadrature is for Normal latent distributions."
         )
-    if model.is_eh:
+    if model.is_empirical_histogram:
         min_w_list: list[float] = []
         for g_name, dist in resolved:
             assert isinstance(dist, EmpiricalHistogram)

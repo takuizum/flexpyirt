@@ -42,10 +42,10 @@ from flexpyirt import (
     GPCM,
     GRM,
     PCM,
-    Beta,
+    BetaPrior,
     FitResult,
     FourPL,
-    LogNormal,
+    LogNormalPrior,
     Model,
     Nominal,
     Normal,
@@ -102,7 +102,8 @@ A model is an immutable `Model` object. Methods such as `.fix()` and `.with_grou
 
 ```python
 spec = Model.uniform(TwoPL(), items=items)  # same item model for every item
-mixed = Model.from_items({"x1": TwoPL(), "x2": Rasch(), "s1": GRM(n_cat=4)})  # per item
+# per item
+mixed = Model.from_items({"x1": TwoPL(), "x2": Rasch(), "s1": GRM(n_categories=4)})
 print(spec.item_names[:3], mixed.item_names)
 ```
 
@@ -114,10 +115,10 @@ print(spec.item_names[:3], mixed.item_names)
 | `Rasch()` | $P(y=1)=\sigma(\theta+d)$ ($a=1$ fixed) | `a` (fixed), `d` | `b = -d` |
 | `ThreePL()` | $P(y=1)=g+(1-g)\sigma(a\theta+d)$ ($u=1$ fixed) | `a`, `d`, `g`, `u` (fixed) | `b = -d/a` |
 | `FourPL()` | $P(y=1)=g+(u-g)\sigma(a\theta+d)$ | `a`, `d`, `g`, `u` | `b = -d/a` |
-| `GRM(n_cat=K)` | $P(y\ge k)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$ | `a`, `d1`…`d{K-1}` | `bk = -dk/a` |
-| `GPCM(n_cat=K)` | $P(y=k)\propto\exp(k\,a\theta+d_k)$, $d_0=0$ | `a`, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})/a` |
-| `PCM(n_cat=K)` | $P(y=k)\propto\exp(k\theta+d_k)$ ($a=1$ fixed, $d_0=0$) | `a` (fixed), `d1`…`d{K-1}` | `bk = -(dk - d{k-1})` |
-| `Nominal(n_cat=K)` | $P(y=k)\propto\exp(a\,\mathrm{ak}_k\,\theta+d_k)$, $\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$ | `a`, `ak1`…`ak{K-2}`, `d1`…`d{K-1}` | — |
+| `GRM(n_categories=K)` | $P(y\ge k)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$ | `a`, `d1`…`d{K-1}` | `bk = -dk/a` |
+| `GPCM(n_categories=K)` | $P(y=k)\propto\exp(k\,a\theta+d_k)$, $d_0=0$ | `a`, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})/a` |
+| `PCM(n_categories=K)` | $P(y=k)\propto\exp(k\theta+d_k)$ ($a=1$ fixed, $d_0=0$) | `a` (fixed), `d1`…`d{K-1}` | `bk = -(dk - d{k-1})` |
+| `Nominal(n_categories=K)` | $P(y=k)\propto\exp(a\,\mathrm{ak}_k\,\theta+d_k)$, $\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$ | `a`, `ak1`…`ak{K-2}`, `d1`…`d{K-1}` | — |
 
 The parameterization is mirt's slope–intercept form (`itemtype = "2PL"`, `"Rasch"`, `"3PL"`,
 `"4PL"`, `"graded"`, `"gpcm"`, `"nominal"` — mirt's `"Rasch"` on polytomous data is `PCM`). For 3PL and 4PL,
@@ -142,24 +143,24 @@ print(res_3pl.items[["item", "a", "d", "g", "b"]].round(3))
 ```
 
 ```python
-n_cat = 4
+n_categories = 4
 cuts = np.array([-1.0, 0.2, 1.3])
 theta = rng.normal(0, 1, 800)
 latent_cont = np.outer(theta, np.ones(5)) + rng.logistic(0, 1, (800, 5))
 grm_df = pd.DataFrame(
     np.searchsorted(cuts, latent_cont).astype(float), columns=[f"s{j}" for j in range(1, 6)]
 )
-grm = fit(Model.uniform(GRM(n_cat=n_cat), items=grm_df.columns), grm_df)
+grm = fit(Model.uniform(GRM(n_categories=n_categories), items=grm_df.columns), grm_df)
 print(grm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
 ```
 
 ```python
-gpcm = fit(Model.uniform(GPCM(n_cat=n_cat), items=grm_df.columns), grm_df)
+gpcm = fit(Model.uniform(GPCM(n_categories=n_categories), items=grm_df.columns), grm_df)
 print(gpcm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
 ```
 
 ```python
-nominal = fit(Model.uniform(Nominal(n_cat=n_cat), items=grm_df.columns), grm_df)
+nominal = fit(Model.uniform(Nominal(n_categories=n_categories), items=grm_df.columns), grm_df)
 print(nominal.items[["item", "a", "ak1", "ak2", "d1", "d2", "d3"]].round(3))
 ```
 
@@ -179,7 +180,7 @@ res = fit(
     spec,
     df,
     method=BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False),  # defaults
-    quadrature=Quadrature.equispaced(61, lim=(-6, 6)),  # default
+    quadrature=Quadrature.equispaced(61, bounds=(-6, 6)),  # default
     se="oakes",  # default
 )
 ```
@@ -272,7 +273,7 @@ np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_nump
 
 `item_fit(data)` computes Orlando and Thissen's S-X2 for every item: observed versus model-implied
 counts of each response category at each summed score, with sparse cells collapsed exactly as
-mirt's `itemfit()` does (`mincell=1` by default). It needs complete data, every response category
+mirt's `itemfit()` does (`min_cell=1` by default). It needs complete data, every response category
 observed, and a single-group unidimensional model with a `Normal` latent distribution.
 
 ```python
@@ -502,7 +503,7 @@ mg_spec = (
     .with_groups(ref=Normal.standard(), focal=Normal.free())
     .equal_across_groups(items=anchors)  # all parameters equal across groups
 )
-mg = fit(mg_spec, mg_df, group=group, quadrature=Quadrature.equispaced(81, lim=(-8, 8)))
+mg = fit(mg_spec, mg_df, group=group, quadrature=Quadrature.equispaced(81, bounds=(-8, 8)))
 print(mg.latent)
 print(mg.items[mg.items["item"] == "q01"])  # anchors have the same values in both groups
 ```
@@ -556,7 +557,7 @@ fipc_spec = (
     .fix_from(bank)  # fix the bank items in every group
     .with_latent(Normal.free())  # estimate the mean and variance
 )
-fipc = fit(fipc_spec, fipc_df, quadrature=Quadrature.equispaced(81, lim=(-8, 8)))
+fipc = fit(fipc_spec, fipc_df, quadrature=Quadrature.equispaced(81, bounds=(-8, 8)))
 print(fipc.latent[["mean", "var"]])  # generating values: mean 0.4, variance 1.3225
 ```
 
@@ -582,8 +583,8 @@ natural-scale priors are provided:
 | Class | Support | Typical use |
 |---|---|---|
 | `NormalPrior(mean, sd)` | $(-\infty, \infty)$ | Intercepts `d` / `dk`, or slopes `a` |
-| `LogNormal(meanlog, sdlog)` | $(0, \infty)$ | Slopes `a` ($\log a \sim N(\mu, s^2)$) |
-| `Beta(a, b)` | $(0, 1)$ | 3PL / 4PL asymptotes `g` and `u` |
+| `LogNormalPrior(mean_log, sd_log)` | $(0, \infty)$ | Slopes `a` ($\log a \sim N(\mu, s^2)$) |
+| `BetaPrior(a, b)` | $(0, 1)$ | 3PL / 4PL asymptotes `g` and `u` |
 
 Priors are evaluated directly on the **natural parameter scale** without a Jacobian term
 (matching R mirt's log-prior objective `LL.Priors`). In a multiple-group model, `.prior()`
@@ -594,9 +595,9 @@ are not supported (`SpecificationError`).
 ```python
 map_spec = (
     Model.uniform(ThreePL(), items=df_3pl.columns)
-    .prior(param="a", dist=LogNormal(0.2, 0.3))
+    .prior(param="a", dist=LogNormalPrior(0.2, 0.3))
     .prior(param="d", dist=NormalPrior(0.0, 2.0))
-    .prior(param="g", dist=Beta(5, 17))
+    .prior(param="g", dist=BetaPrior(5, 17))
 )
 map_res = fit(map_spec, df_3pl)
 print(map_res.loglik, map_res.log_posterior)
@@ -631,7 +632,7 @@ print(table.head(4))
 | `value` | Starting value (the fixed value if not free) |
 | `free` | Whether the parameter is estimated |
 | `lower`, `upper` | Bounds; starting values must lie strictly inside |
-| `prior` | Prior object (`NormalPrior`, `LogNormal`, `Beta`, or `None`; ignored if fixed) |
+| `prior` | Prior object (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, or `None`; ignored if fixed) |
 | `free_id` | Free-parameter number. **Rows with the same number are constrained to be equal.** Newly freed rows may keep `-1` (they get a number) |
 
 ```python
@@ -677,7 +678,7 @@ $N(0,1)$. When **an estimated group's variance is large (above 2) or its mean is
 widen the grid while keeping the spacing.
 
 ```python
-wide = Quadrature.equispaced(81, lim=(-8, 8))  # same 0.2 spacing, wider range
+wide = Quadrature.equispaced(81, bounds=(-8, 8))  # same 0.2 spacing, wider range
 ```
 
 The reported `var` is the parameter of the normal distribution before the grid cuts it off; the
@@ -737,7 +738,7 @@ res_mirt = fit(
     mirt_spec,
     mirt_df,
     method=BAEM(squarem=True),
-    quadrature=Quadrature.equispaced(21, lim=(-6, 6)),
+    quadrature=Quadrature.equispaced(21, bounds=(-6, 6)),
 )
 print(res_mirt.latent[["mean_1", "mean_2", "var_1", "var_2", "cor_12", "cor_12_se"]].round(3))
 print(res_mirt.items[["item", "a1", "a2", "d", "a1_se", "a2_se"]].round(3))
@@ -772,7 +773,7 @@ d_new = np.concatenate([d_true[:6], rng.normal(0.0, 1.0, 4)])
 src_df = pd.DataFrame(simulate_2pl(a_new, d_new, rng.normal(0.5, 1.2, 800), rng), columns=new_items)
 src_res = fit(Model.uniform(TwoPL(), items=new_items), src_df, method=BAEM(squarem=True))
 
-linked_sl = link(src_res, res, method="stocking-lord")
+linked_sl = link(src_res, res, method="stocking_lord")
 linked_hb = link(src_res, res, method="haebara", symmetric=True)
 print(linked_sl)
 print(

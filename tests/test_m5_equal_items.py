@@ -15,7 +15,7 @@ from flexpyirt import (
     GRM,
     EmpiricalHistogram,
     FitResult,
-    LogNormal,
+    LogNormalPrior,
     Model,
     Normal,
     Quadrature,
@@ -35,15 +35,15 @@ def _val(frame: pd.DataFrame, item: str, col: str) -> float:
     return float(value)
 
 
-def _sim(n: int = 1500, j: int = 6, seed: int = 3, n_cat: int = 2) -> pd.DataFrame:
+def _sim(n: int = 1500, j: int = 6, seed: int = 3, n_categories: int = 2) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     theta = rng.normal(size=(n, 1))
     a = rng.uniform(0.8, 1.6, size=j)
-    if n_cat == 2:
+    if n_categories == 2:
         d = rng.normal(0.0, 0.8, size=j)
         y = (rng.random((n, j)) < 1 / (1 + np.exp(-(theta * a + d)))).astype(float)
     else:
-        cuts = np.sort(rng.normal(0.0, 1.0, size=(j, n_cat - 1)), axis=1)[:, ::-1]
+        cuts = np.sort(rng.normal(0.0, 1.0, size=(j, n_categories - 1)), axis=1)[:, ::-1]
         z = theta[:, :, None] * a[None, :, None] + cuts[None]
         y = (rng.random((n, j))[:, :, None] < 1 / (1 + np.exp(-z))).sum(axis=2).astype(float)
     return pd.DataFrame(y, columns=[f"i{k}" for k in range(j)])
@@ -134,7 +134,7 @@ def test_common_slope_matches_shared_free_id_loglik_and_is_monotone() -> None:
 
 def test_shared_prior_is_counted_once() -> None:
     df = _sim()
-    prior = LogNormal(0.0, 0.5)
+    prior = LogNormalPrior(0.0, 0.5)
     spec = (
         Model.uniform(TwoPL(), items=df.columns)
         .prior(param="a", dist=prior)
@@ -151,10 +151,10 @@ def test_shared_prior_is_counted_once() -> None:
 
 def test_mixed_families_oakes_equals_hessian() -> None:
     df2 = _sim(n=1500, j=4, seed=5)
-    df3 = _sim(n=1500, j=3, seed=5, n_cat=3).rename(columns=lambda c: f"g{c}")
+    df3 = _sim(n=1500, j=3, seed=5, n_categories=3).rename(columns=lambda c: f"g{c}")
     df = pd.concat([df2, df3], axis=1)
     spec = Model.from_items(
-        {**{c: TwoPL() for c in df2.columns}, **{c: GRM(n_cat=3) for c in df3.columns}}
+        {**{c: TwoPL() for c in df2.columns}, **{c: GRM(n_categories=3) for c in df3.columns}}
     ).equal_across_items(items=["i0", "gi0", "gi1"], params=["a"])
     oakes = fit(spec, df, method=TIGHT, se="oakes")
     hess = fit(spec, df, method=TIGHT, se="hessian")

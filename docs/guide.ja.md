@@ -41,10 +41,10 @@ from flexpyirt import (
     GPCM,
     GRM,
     PCM,
-    Beta,
+    BetaPrior,
     FitResult,
     FourPL,
-    LogNormal,
+    LogNormalPrior,
     Model,
     Nominal,
     Normal,
@@ -99,7 +99,8 @@ res_np = fit(spec, arr, item_names=items, se=None)
 
 ```python
 spec = Model.uniform(TwoPL(), items=items)  # 全項目に同じ項目モデル
-mixed = Model.from_items({"x1": TwoPL(), "x2": Rasch(), "s1": GRM(n_cat=4)})  # 項目ごとに指定
+# 項目ごとに指定
+mixed = Model.from_items({"x1": TwoPL(), "x2": Rasch(), "s1": GRM(n_categories=4)})
 print(spec.item_names[:3], mixed.item_names)
 ```
 
@@ -111,10 +112,10 @@ print(spec.item_names[:3], mixed.item_names)
 | `Rasch()` | $P(y=1)=\sigma(\theta+d)$（$a=1$ 固定） | `a`（固定）, `d` | `b = -d` |
 | `ThreePL()` | $P(y=1)=g+(1-g)\sigma(a\theta+d)$（$u=1$ 固定） | `a`, `d`, `g`, `u`（固定） | `b = -d/a` |
 | `FourPL()` | $P(y=1)=g+(u-g)\sigma(a\theta+d)$ | `a`, `d`, `g`, `u` | `b = -d/a` |
-| `GRM(n_cat=K)` | $P(y\ge k)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$ | `a`, `d1`…`d{K-1}` | `bk = -dk/a` |
-| `GPCM(n_cat=K)` | $P(y=k)\propto\exp(k\,a\theta+d_k)$, $d_0=0$ | `a`, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})/a` |
-| `PCM(n_cat=K)` | $P(y=k)\propto\exp(k\theta+d_k)$（$a=1$ 固定、$d_0=0$） | `a`（固定）, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})` |
-| `Nominal(n_cat=K)` | $P(y=k)\propto\exp(a\,\mathrm{ak}_k\,\theta+d_k)$（$\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$） | `a`, `ak1`…`ak{K-2}`, `d1`…`d{K-1}` | — |
+| `GRM(n_categories=K)` | $P(y\ge k)=\sigma(a\theta+d_k)$, $d_1>\dots>d_{K-1}$ | `a`, `d1`…`d{K-1}` | `bk = -dk/a` |
+| `GPCM(n_categories=K)` | $P(y=k)\propto\exp(k\,a\theta+d_k)$, $d_0=0$ | `a`, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})/a` |
+| `PCM(n_categories=K)` | $P(y=k)\propto\exp(k\theta+d_k)$（$a=1$ 固定、$d_0=0$） | `a`（固定）, `d1`…`d{K-1}` | `bk = -(dk - d{k-1})` |
+| `Nominal(n_categories=K)` | $P(y=k)\propto\exp(a\,\mathrm{ak}_k\,\theta+d_k)$（$\mathrm{ak}_0=0, \mathrm{ak}_{K-1}=K-1, d_0=0$） | `a`, `ak1`…`ak{K-2}`, `d1`…`d{K-1}` | — |
 
 パラメタ化は mirt（`itemtype = "2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"graded"`, `"gpcm"`, `"nominal"`。多値に対する
 `"Rasch"` は `PCM`）と同じ傾き・切片形式。3PL / 4PL の `g`, `u` は自然尺度（$0 < g < u \le 1$）で推定する
@@ -137,24 +138,24 @@ print(res_3pl.items[["item", "a", "d", "g", "b"]].round(3))
 ```
 
 ```python
-n_cat = 4
+n_categories = 4
 cuts = np.array([-1.0, 0.2, 1.3])
 theta = rng.normal(0, 1, 800)
 latent_cont = np.outer(theta, np.ones(5)) + rng.logistic(0, 1, (800, 5))
 grm_df = pd.DataFrame(
     np.searchsorted(cuts, latent_cont).astype(float), columns=[f"s{j}" for j in range(1, 6)]
 )
-grm = fit(Model.uniform(GRM(n_cat=n_cat), items=grm_df.columns), grm_df)
+grm = fit(Model.uniform(GRM(n_categories=n_categories), items=grm_df.columns), grm_df)
 print(grm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
 ```
 
 ```python
-gpcm = fit(Model.uniform(GPCM(n_cat=n_cat), items=grm_df.columns), grm_df)
+gpcm = fit(Model.uniform(GPCM(n_categories=n_categories), items=grm_df.columns), grm_df)
 print(gpcm.items[["item", "a", "d1", "d2", "d3", "b1", "b2", "b3"]].round(3))
 ```
 
 ```python
-nominal = fit(Model.uniform(Nominal(n_cat=n_cat), items=grm_df.columns), grm_df)
+nominal = fit(Model.uniform(Nominal(n_categories=n_categories), items=grm_df.columns), grm_df)
 print(nominal.items[["item", "a", "ak1", "ak2", "d1", "d2", "d3"]].round(3))
 ```
 
@@ -174,7 +175,7 @@ res = fit(
     spec,
     df,
     method=BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False),  # 既定値
-    quadrature=Quadrature.equispaced(61, lim=(-6, 6)),  # 既定値
+    quadrature=Quadrature.equispaced(61, bounds=(-6, 6)),  # 既定値
     se="oakes",  # 既定値
 )
 ```
@@ -260,7 +261,7 @@ np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_nump
 ### 項目適合度（S-X2）
 
 `item_fit(data)` は各項目の Orlando と Thissen の S-X2 を計算する。合計得点ごとの各反応カテゴリの観測度数とモデルによる
-期待度数を比べ、度数の少ないセルは mirt の `itemfit()` と同じ方法でまとめる（既定 `mincell=1`）。欠測のないデータ、
+期待度数を比べ、度数の少ないセルは mirt の `itemfit()` と同じ方法でまとめる（既定 `min_cell=1`）。欠測のないデータ、
 すべての反応カテゴリが観測されていること、`Normal` 潜在分布の単一群 1 次元モデルが必要。
 
 ```python
@@ -470,7 +471,7 @@ mg_spec = (
     .with_groups(ref=Normal.standard(), focal=Normal.free())
     .equal_across_groups(items=anchors)  # 全パラメタを群間で等値
 )
-mg = fit(mg_spec, mg_df, group=group, quadrature=Quadrature.equispaced(81, lim=(-8, 8)))
+mg = fit(mg_spec, mg_df, group=group, quadrature=Quadrature.equispaced(81, bounds=(-8, 8)))
 print(mg.latent)
 print(mg.items[mg.items["item"] == "q01"])  # アンカーは両群で同じ値
 ```
@@ -519,7 +520,7 @@ fipc_spec = (
     .fix_from(bank)  # バンクにある項目を全群で固定
     .with_latent(Normal.free())  # 平均・分散を推定
 )
-fipc = fit(fipc_spec, fipc_df, quadrature=Quadrature.equispaced(81, lim=(-8, 8)))
+fipc = fit(fipc_spec, fipc_df, quadrature=Quadrature.equispaced(81, bounds=(-8, 8)))
 print(fipc.latent[["mean", "var"]])  # 生成値は平均 0.4、分散 1.3225
 ```
 
@@ -544,8 +545,8 @@ fipc_spec_irt = (
 | クラス | 台（サポート） | 主な用途 |
 |---|---|---|
 | `NormalPrior(mean, sd)` | $(-\infty, \infty)$ | 切片 `d` / `dk`、または傾き `a` |
-| `LogNormal(meanlog, sdlog)` | $(0, \infty)$ | 傾き `a`（$\log a \sim N(\mu, s^2)$） |
-| `Beta(a, b)` | $(0, 1)$ | 3PL / 4PL の漸近線 `g`・`u` |
+| `LogNormalPrior(mean_log, sd_log)` | $(0, \infty)$ | 傾き `a`（$\log a \sim N(\mu, s^2)$） |
+| `BetaPrior(a, b)` | $(0, 1)$ | 3PL / 4PL の漸近線 `g`・`u` |
 
 事前分布は**ヤコビアンなしの自然パラメタ尺度**で直接評価する（R mirt の対数事前目的関数 `LL.Priors` と一致）。
 多母集団モデルでは `.prior()` が全群に適用され、群間で共有されるパラメタ（同じ `free_id`）の事前分布は **1 回だけ**
@@ -555,9 +556,9 @@ fipc_spec_irt = (
 ```python
 map_spec = (
     Model.uniform(ThreePL(), items=df_3pl.columns)
-    .prior(param="a", dist=LogNormal(0.2, 0.3))
+    .prior(param="a", dist=LogNormalPrior(0.2, 0.3))
     .prior(param="d", dist=NormalPrior(0.0, 2.0))
-    .prior(param="g", dist=Beta(5, 17))
+    .prior(param="g", dist=BetaPrior(5, 17))
 )
 map_res = fit(map_spec, df_3pl)
 print(map_res.loglik, map_res.log_posterior)
@@ -589,7 +590,7 @@ print(table.head(4))
 | `value` | 初期値（固定なら固定値） |
 | `free` | 推定するか |
 | `lower`, `upper` | 範囲。初期値はこの範囲の内側でなければならない |
-| `prior` | 事前分布オブジェクト（`NormalPrior`, `LogNormal`, `Beta`, または `None`。固定なら無視） |
+| `prior` | 事前分布オブジェクト（`NormalPrior`, `LogNormalPrior`, `BetaPrior`, または `None`。固定なら無視） |
 | `free_id` | 自由パラメタの番号。**同じ番号の行は同じ値に制約される**（等値制約）。新しく自由にした行は `-1` のままでよい（番号が振られる） |
 
 ```python
@@ -633,7 +634,7 @@ print(res_common.n_params)  # 傾き 1 つ + 項目ごとの切片
 （2 を超える）か平均が 0 から離れる**ときは、格子を広げて刻みを保つ。
 
 ```python
-wide = Quadrature.equispaced(81, lim=(-8, 8))  # 刻み 0.2 のまま範囲を広げる
+wide = Quadrature.equispaced(81, bounds=(-8, 8))  # 刻み 0.2 のまま範囲を広げる
 ```
 
 報告される `var` は格子で切る前の正規分布のパラメタで、格子上の分布の分散はそれよりわずかに小さい。
@@ -689,7 +690,7 @@ res_mirt = fit(
     mirt_spec,
     mirt_df,
     method=BAEM(squarem=True),
-    quadrature=Quadrature.equispaced(21, lim=(-6, 6)),
+    quadrature=Quadrature.equispaced(21, bounds=(-6, 6)),
 )
 print(res_mirt.latent[["mean_1", "mean_2", "var_1", "var_2", "cor_12", "cor_12_se"]].round(3))
 print(res_mirt.items[["item", "a1", "a2", "d", "a1_se", "a2_se"]].round(3))
@@ -719,7 +720,7 @@ d_new = np.concatenate([d_true[:6], rng.normal(0.0, 1.0, 4)])
 src_df = pd.DataFrame(simulate_2pl(a_new, d_new, rng.normal(0.5, 1.2, 800), rng), columns=new_items)
 src_res = fit(Model.uniform(TwoPL(), items=new_items), src_df, method=BAEM(squarem=True))
 
-linked_sl = link(src_res, res, method="stocking-lord")
+linked_sl = link(src_res, res, method="stocking_lord")
 linked_hb = link(src_res, res, method="haebara", symmetric=True)
 print(linked_sl)
 print(

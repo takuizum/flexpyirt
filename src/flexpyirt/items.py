@@ -82,8 +82,8 @@ class ItemKernel(Protocol):
         ...
 
     @property
-    def n_cat(self) -> int:
-        """Number of response categories (coded ``0..n_cat-1``)."""
+    def n_categories(self) -> int:
+        """Number of response categories (coded ``0..n_categories-1``)."""
         ...
 
     @property
@@ -102,7 +102,7 @@ class ItemKernel(Protocol):
         ...
 
     @property
-    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+    def irt_dependency_indices(self) -> tuple[tuple[int, ...], ...]:
         """Indices into ``param_names`` that enter each display threshold in ``irt_names``."""
         ...
 
@@ -111,7 +111,7 @@ class ItemKernel(Protocol):
         ...
 
     def log_prob(self, theta: Array, params: Array) -> Array:
-        """Return ``(Q, n_cat)`` log-probabilities for nodes ``theta`` of shape ``(Q, D)``."""
+        """Return ``(Q, n_categories)`` log-probabilities at nodes ``theta`` of shape ``(Q, D)``."""
         ...
 
     def __hash__(self) -> int:
@@ -148,7 +148,7 @@ class DichotomousKernel:
         return (*_slope_names(self.n_factors), "d")
 
     @property
-    def n_cat(self) -> int:
+    def n_categories(self) -> int:
         """Two categories."""
         return 2
 
@@ -168,7 +168,7 @@ class DichotomousKernel:
         return ("b",) if self.n_factors == 1 else ()
 
     @property
-    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+    def irt_dependency_indices(self) -> tuple[tuple[int, ...], ...]:
         """``((0, 1),)`` for ``D == 1``; empty for ``D > 1``."""
         return ((0, 1),) if self.n_factors == 1 else ()
 
@@ -227,7 +227,7 @@ class FourPLKernel:
         return (*_slope_names(self.n_factors), "d", "g", "u")
 
     @property
-    def n_cat(self) -> int:
+    def n_categories(self) -> int:
         """Two categories."""
         return 2
 
@@ -247,7 +247,7 @@ class FourPLKernel:
         return ("b",) if self.n_factors == 1 else ()
 
     @property
-    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+    def irt_dependency_indices(self) -> tuple[tuple[int, ...], ...]:
         """``((0, 1),)`` for ``D == 1``; empty for ``D > 1``."""
         return ((0, 1),) if self.n_factors == 1 else ()
 
@@ -309,13 +309,13 @@ class GradedKernel:
     (DESIGN.md §14.7). Disordered intercepts give NaN.
     """
 
-    n_cat: int
+    n_categories: int
     n_factors: int = 1
 
     def __post_init__(self) -> None:
         """Validate the number of categories and factors."""
-        if self.n_cat < 2:
-            raise SpecificationError(f"GRM needs at least 2 categories, got {self.n_cat}.")
+        if self.n_categories < 2:
+            raise SpecificationError(f"GRM needs at least 2 categories, got {self.n_categories}.")
         _validate_n_factors(self.n_factors)
 
     def with_factors(self, n_factors: int) -> GradedKernel:
@@ -325,7 +325,7 @@ class GradedKernel:
     @property
     def param_names(self) -> tuple[str, ...]:
         """``("a", "d1", ..., "d{K-1}")`` or ``("a1", ..., "aD", "d1", ..., "d{K-1}")``."""
-        return (*_slope_names(self.n_factors), *(f"d{k}" for k in range(1, self.n_cat)))
+        return (*_slope_names(self.n_factors), *(f"d{k}" for k in range(1, self.n_categories)))
 
     @property
     def slope_params(self) -> tuple[str, ...]:
@@ -342,14 +342,14 @@ class GradedKernel:
         """``("b1", ..., "b{K-1}")`` for ``D == 1``; empty for ``D > 1``."""
         if self.n_factors > 1:
             return ()
-        return tuple(f"b{k}" for k in range(1, self.n_cat))
+        return tuple(f"b{k}" for k in range(1, self.n_categories))
 
     @property
-    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+    def irt_dependency_indices(self) -> tuple[tuple[int, ...], ...]:
         """Each ``bk`` depends on ``(a, dk)`` for ``D == 1``; empty for ``D > 1``."""
         if self.n_factors > 1:
             return ()
-        return tuple((0, k) for k in range(1, self.n_cat))
+        return tuple((0, k) for k in range(1, self.n_categories))
 
     def irt_thresholds(self, params: Array) -> Array:
         r"""Return IRT thresholds :math:`b_k = -d_k / a` for ``D == 1`` (Samejima, 1969)."""
@@ -358,7 +358,7 @@ class GradedKernel:
         return -params[1:] / params[0]
 
     def log_prob(self, theta: Array, params: Array) -> Array:
-        """Return ``(Q, n_cat)`` category log-probabilities."""
+        """Return ``(Q, n_categories)`` category log-probabilities."""
         d = self.n_factors
         lin = _linear_predictor(theta, params[:d], d)
         z = lin[:, None] + params[None, d:]  # (Q, K-1)
@@ -382,16 +382,16 @@ class GPCMKernel:
     with fixed scoring coefficients :math:`\mathrm{ak}_k=k` and :math:`d_0=0` (not a parameter),
     matching mirt's ``itemtype="gpcm"`` (Chalmers, 2012). Computed with ``jax.nn.log_softmax``;
     there is no ordering constraint on :math:`d_1,\dots,d_{K-1}`. Shared by :class:`GPCM` and
-    :class:`PCM` items with the same ``n_cat`` (DESIGN.md §15.8).
+    :class:`PCM` items with the same ``n_categories`` (DESIGN.md §15.8).
     """
 
-    n_cat: int
+    n_categories: int
     n_factors: int = 1
 
     def __post_init__(self) -> None:
         """Validate the number of categories and factors."""
-        if self.n_cat < 2:
-            raise SpecificationError(f"GPCM needs at least 2 categories, got {self.n_cat}.")
+        if self.n_categories < 2:
+            raise SpecificationError(f"GPCM needs at least 2 categories, got {self.n_categories}.")
         _validate_n_factors(self.n_factors)
 
     def with_factors(self, n_factors: int) -> GPCMKernel:
@@ -401,7 +401,7 @@ class GPCMKernel:
     @property
     def param_names(self) -> tuple[str, ...]:
         """``("a", "d1", ..., "d{K-1}")`` or ``("a1", ..., "aD", "d1", ..., "d{K-1}")``."""
-        return (*_slope_names(self.n_factors), *(f"d{k}" for k in range(1, self.n_cat)))
+        return (*_slope_names(self.n_factors), *(f"d{k}" for k in range(1, self.n_categories)))
 
     @property
     def slope_params(self) -> tuple[str, ...]:
@@ -418,14 +418,14 @@ class GPCMKernel:
         """``("b1", ..., "b{K-1}")`` for ``D == 1``; empty for ``D > 1``."""
         if self.n_factors > 1:
             return ()
-        return tuple(f"b{k}" for k in range(1, self.n_cat))
+        return tuple(f"b{k}" for k in range(1, self.n_categories))
 
     @property
-    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+    def irt_dependency_indices(self) -> tuple[tuple[int, ...], ...]:
         r"""``b1`` depends on ``(a, d1)``; ``bk`` (:math:`k\ge 2`) on ``(a, d{k-1}, dk)``."""
         if self.n_factors > 1:
             return ()
-        return ((0, 1), *((0, k - 1, k) for k in range(2, self.n_cat)))
+        return ((0, 1), *((0, k - 1, k) for k in range(2, self.n_categories)))
 
     def irt_thresholds(self, params: Array) -> Array:
         r"""Return step difficulties :math:`b_k = -(d_k - d_{k-1}) / a` for ``D == 1``.
@@ -438,9 +438,9 @@ class GPCMKernel:
         return -jnp.diff(intercepts) / params[0]
 
     def log_prob(self, theta: Array, params: Array) -> Array:
-        """Return ``(Q, n_cat)`` category log-probabilities."""
+        """Return ``(Q, n_categories)`` category log-probabilities."""
         d = self.n_factors
-        categories = jnp.arange(self.n_cat, dtype=theta.dtype)
+        categories = jnp.arange(self.n_categories, dtype=theta.dtype)
         intercepts = jnp.concatenate([jnp.zeros((1,), dtype=params.dtype), params[d:]])
         lin = _linear_predictor(theta, params[:d], d)
         eta = lin[:, None] * categories[None, :] + intercepts[None, :]
@@ -464,13 +464,15 @@ class NominalKernel:
     :math:`d_1,\dots,d_{K-1}` (DESIGN.md §16.6).
     """
 
-    n_cat: int
+    n_categories: int
     n_factors: int = 1
 
     def __post_init__(self) -> None:
         """Validate the number of categories and factors."""
-        if self.n_cat < 2:
-            raise SpecificationError(f"Nominal needs at least 2 categories, got {self.n_cat}.")
+        if self.n_categories < 2:
+            raise SpecificationError(
+                f"Nominal needs at least 2 categories, got {self.n_categories}."
+            )
         _validate_n_factors(self.n_factors)
 
     def with_factors(self, n_factors: int) -> NominalKernel:
@@ -482,8 +484,8 @@ class NominalKernel:
         """``("a", "ak1", ..., "ak{K-2}", "d1", ..., "d{K-1}")`` (or ``a1..aD`` for ``D > 1``)."""
         return (
             *_slope_names(self.n_factors),
-            *(f"ak{k}" for k in range(1, self.n_cat - 1)),
-            *(f"d{k}" for k in range(1, self.n_cat)),
+            *(f"ak{k}" for k in range(1, self.n_categories - 1)),
+            *(f"d{k}" for k in range(1, self.n_categories)),
         )
 
     @property
@@ -494,7 +496,7 @@ class NominalKernel:
     @property
     def intercept_params(self) -> tuple[str, ...]:
         """``("d1", ..., "d{K-1}")``; ``ak1..ak{K-2}`` carry relative category shape."""
-        return tuple(f"d{k}" for k in range(1, self.n_cat))
+        return tuple(f"d{k}" for k in range(1, self.n_categories))
 
     @property
     def irt_names(self) -> tuple[str, ...]:
@@ -502,7 +504,7 @@ class NominalKernel:
         return ()
 
     @property
-    def irt_dep_indices(self) -> tuple[tuple[int, ...], ...]:
+    def irt_dependency_indices(self) -> tuple[tuple[int, ...], ...]:
         """Empty tuple."""
         return ()
 
@@ -511,14 +513,14 @@ class NominalKernel:
         return jnp.empty((0,), dtype=params.dtype)
 
     def log_prob(self, theta: Array, params: Array) -> Array:
-        """Return ``(Q, n_cat)`` category log-probabilities."""
+        """Return ``(Q, n_categories)`` category log-probabilities."""
         d = self.n_factors
-        n_ak = self.n_cat - 2
+        n_ak = self.n_categories - 2
         ak = jnp.concatenate(
             [
                 jnp.zeros((1,), dtype=params.dtype),
                 params[d : d + n_ak],
-                jnp.array([float(self.n_cat - 1)], dtype=params.dtype),
+                jnp.array([float(self.n_categories - 1)], dtype=params.dtype),
             ]
         )
         intercepts = jnp.concatenate([jnp.zeros((1,), dtype=params.dtype), params[d + n_ak :]])
@@ -720,28 +722,28 @@ class FourPL:
 
 @dataclass(frozen=True)
 class GRM:
-    r"""Graded response model (Samejima, 1969) with ``n_cat`` ordered categories ``0..n_cat-1``.
+    r"""Graded response model (Samejima, 1969) with ``n_categories`` ordered categories ``0..K-1``.
 
     :math:`P(y\ge k\mid\theta)=\sigma(a\theta+d_k)` with :math:`d_1>\dots>d_{K-1}`; the IRT
     thresholds are :math:`b_k=-d_k/a`. Same parameterization as mirt's ``itemtype="graded"``.
     """
 
-    n_cat: int
+    n_categories: int
     name: ClassVar[str] = "GRM"
 
     def __post_init__(self) -> None:
         """Validate the number of categories."""
-        if self.n_cat < 2:
-            raise SpecificationError(f"GRM needs at least 2 categories, got {self.n_cat}.")
+        if self.n_categories < 2:
+            raise SpecificationError(f"GRM needs at least 2 categories, got {self.n_categories}.")
 
     @property
     def kernel(self) -> GradedKernel:
         """Graded kernel with this number of categories."""
-        return GradedKernel(self.n_cat)
+        return GradedKernel(self.n_categories)
 
     def default_free(self) -> tuple[bool, ...]:
         """All parameters are free."""
-        return (True,) * self.n_cat
+        return (True,) * self.n_categories
 
     def start_values(self, item: np.ndarray, rest: np.ndarray) -> np.ndarray:
         r"""Return starting values (DESIGN.md §4.10).
@@ -750,7 +752,7 @@ class GRM:
         :math:`d_k^{(0)}=\mathrm{logit}(P(y\ge k))\sqrt{1+(a^{(0)}/1.7)^2}`.
         """
         a = _slope_start(item, rest)
-        cum = [float((item >= k).mean()) for k in range(1, self.n_cat)]
+        cum = [float((item >= k).mean()) for k in range(1, self.n_categories)]
         d = [_intercept_start(p, a) for p in cum]
         # keep strictly decreasing even after clipping
         for k in range(1, len(d)):
@@ -759,24 +761,24 @@ class GRM:
 
     def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
         """Unbounded (ordering is enforced by the line search)."""
-        return _unbounded(self.n_cat)
+        return _unbounded(self.n_categories)
 
 
-def _gpcm_intercept_starts(item: np.ndarray, n_cat: int, a: float) -> list[float]:
+def _gpcm_intercept_starts(item: np.ndarray, n_categories: int, a: float) -> list[float]:
     r"""Return starting :math:`d_1,\dots,d_{K-1}` for GPCM/PCM (DESIGN.md §4.10, §15.9).
 
     Each step :math:`\delta_c^{(0)}=\mathrm{logit}(p_c)\sqrt{1+(a/1.7)^2}` uses the cumulative
     proportion :math:`p_c=\hat P(y\ge c)` (clipped to :math:`[0.01, 0.99]`), and
     :math:`d_k^{(0)}=\sum_{c=1}^{k}\delta_c^{(0)}`. Reduces to :func:`_intercept_start` for
-    ``n_cat == 2``.
+    ``n_categories == 2``.
     """
-    steps = [_intercept_start(float((item >= c).mean()), a) for c in range(1, n_cat)]
+    steps = [_intercept_start(float((item >= c).mean()), a) for c in range(1, n_categories)]
     return [float(v) for v in np.cumsum(steps)]
 
 
 @dataclass(frozen=True)
 class GPCM:
-    r"""Generalized partial credit model (Muraki, 1992) with ``n_cat`` categories ``0..n_cat-1``.
+    r"""Generalized partial credit model (Muraki, 1992) with ``n_categories`` categories ``0..K-1``.
 
     .. math::
         P(y=k\mid\theta) = \frac{\exp(k\,a\theta + d_k)}{\sum_{c=0}^{K-1}\exp(c\,a\theta + d_c)},
@@ -785,40 +787,41 @@ class GPCM:
     Slope :math:`a` and intercepts :math:`d_1,\dots,d_{K-1}` are estimated with no ordering
     constraint; step difficulties displayed in :attr:`FitResult.items` are
     :math:`b_k=-(d_k-d_{k-1})/a` with :math:`d_0=0`. Same parameterization as mirt's
-    ``itemtype="gpcm"`` (Chalmers, 2012). With ``n_cat=2`` this is identical to :class:`TwoPL`.
-    Shares :class:`GPCMKernel` with :class:`PCM` of the same ``n_cat``.
+    ``itemtype="gpcm"`` (Chalmers, 2012). With ``n_categories=2`` this is identical to
+    :class:`TwoPL`.
+    Shares :class:`GPCMKernel` with :class:`PCM` of the same ``n_categories``.
     """
 
-    n_cat: int
+    n_categories: int
     name: ClassVar[str] = "GPCM"
 
     def __post_init__(self) -> None:
         """Validate the number of categories."""
-        if self.n_cat < 2:
-            raise SpecificationError(f"GPCM needs at least 2 categories, got {self.n_cat}.")
+        if self.n_categories < 2:
+            raise SpecificationError(f"GPCM needs at least 2 categories, got {self.n_categories}.")
 
     @property
     def kernel(self) -> GPCMKernel:
         """GPCM kernel with this number of categories."""
-        return GPCMKernel(self.n_cat)
+        return GPCMKernel(self.n_categories)
 
     def default_free(self) -> tuple[bool, ...]:
         """All parameters are free."""
-        return (True,) * self.n_cat
+        return (True,) * self.n_categories
 
     def start_values(self, item: np.ndarray, rest: np.ndarray) -> np.ndarray:
         """Return starting values (DESIGN.md §4.10, §15.9)."""
         a = _slope_start(item, rest)
-        return np.array([a, *_gpcm_intercept_starts(item, self.n_cat, a)])
+        return np.array([a, *_gpcm_intercept_starts(item, self.n_categories, a)])
 
     def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
         """Unbounded."""
-        return _unbounded(self.n_cat)
+        return _unbounded(self.n_categories)
 
 
 @dataclass(frozen=True)
 class PCM:
-    r"""Partial credit model (Masters, 1982) with ``n_cat`` categories ``0..n_cat-1``.
+    r"""Partial credit model (Masters, 1982) with ``n_categories`` categories ``0..K-1``.
 
     .. math::
         P(y=k\mid\theta) = \frac{\exp(k\theta + d_k)}{\sum_{c=0}^{K-1}\exp(c\theta + d_c)},
@@ -827,39 +830,40 @@ class PCM:
     GPCM with slope fixed at :math:`a=1`; step difficulties are :math:`b_k=-(d_k-d_{k-1})` with
     :math:`d_0=0`. In a single-group model whose items are all :class:`Rasch` or :class:`PCM`, the
     latent variance is estimated by default (DESIGN.md §4.5, §15.8), matching mirt's
-    ``itemtype="Rasch"`` on polytomous data. With ``n_cat=2`` this is identical to :class:`Rasch`.
-    Shares :class:`GPCMKernel` with :class:`GPCM` of the same ``n_cat``.
+    ``itemtype="Rasch"`` on polytomous data. With ``n_categories=2`` this is identical to
+    :class:`Rasch`.
+    Shares :class:`GPCMKernel` with :class:`GPCM` of the same ``n_categories``.
     """
 
-    n_cat: int
+    n_categories: int
     name: ClassVar[str] = "PCM"
 
     def __post_init__(self) -> None:
         """Validate the number of categories."""
-        if self.n_cat < 2:
-            raise SpecificationError(f"PCM needs at least 2 categories, got {self.n_cat}.")
+        if self.n_categories < 2:
+            raise SpecificationError(f"PCM needs at least 2 categories, got {self.n_categories}.")
 
     @property
     def kernel(self) -> GPCMKernel:
         """Shared GPCM kernel with this number of categories."""
-        return GPCMKernel(self.n_cat)
+        return GPCMKernel(self.n_categories)
 
     def default_free(self) -> tuple[bool, ...]:
         """Slope fixed (at 1), intercepts free."""
-        return (False, *(True,) * (self.n_cat - 1))
+        return (False, *(True,) * (self.n_categories - 1))
 
     def start_values(self, item: np.ndarray, rest: np.ndarray) -> np.ndarray:
         """Return starting values (DESIGN.md §4.10, §15.9); the slope is 1."""
-        return np.array([1.0, *_gpcm_intercept_starts(item, self.n_cat, 1.0)])
+        return np.array([1.0, *_gpcm_intercept_starts(item, self.n_categories, 1.0)])
 
     def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
         """Unbounded."""
-        return _unbounded(self.n_cat)
+        return _unbounded(self.n_categories)
 
 
 @dataclass(frozen=True)
 class Nominal:
-    r"""Nominal response model (Bock, 1972) with ``n_cat`` categories ``0..n_cat-1``.
+    r"""Nominal response model (Bock, 1972) with ``n_categories`` categories ``0..K-1``.
 
     .. math::
         P(y=k\mid\theta)
@@ -872,33 +876,35 @@ class Nominal:
     (or :math:`a_1,\dots,a_D` for multidimensional models), interior scoring coefficients
     :math:`\mathrm{ak}_1,\dots,\mathrm{ak}_{K-2}`, and intercepts :math:`d_1,\dots,d_{K-1}` are
     estimated with no ordering constraint. Fixing :math:`\mathrm{ak}_k=k` reproduces
-    :class:`GPCM` identically (and with ``n_cat=2`` there are no free ``ak`` parameters, so
+    :class:`GPCM` identically (and with ``n_categories=2`` there are no free ``ak`` parameters, so
     ``Nominal(2)`` equals :class:`GPCM`\(2\) / :class:`TwoPL`).
     """
 
-    n_cat: int
+    n_categories: int
     name: ClassVar[str] = "Nominal"
 
     def __post_init__(self) -> None:
         """Validate the number of categories."""
-        if self.n_cat < 2:
-            raise SpecificationError(f"Nominal needs at least 2 categories, got {self.n_cat}.")
+        if self.n_categories < 2:
+            raise SpecificationError(
+                f"Nominal needs at least 2 categories, got {self.n_categories}."
+            )
 
     @property
     def kernel(self) -> NominalKernel:
         """Nominal kernel with this number of categories."""
-        return NominalKernel(self.n_cat)
+        return NominalKernel(self.n_categories)
 
     def default_free(self) -> tuple[bool, ...]:
         """All parameters are free."""
-        return (True,) * (2 * self.n_cat - 2)
+        return (True,) * (2 * self.n_categories - 2)
 
     def start_values(self, item: np.ndarray, rest: np.ndarray) -> np.ndarray:
         """Return starting values at the GPCM point ``ak_k = k`` (DESIGN.md §4.10, §16.6)."""
         a = _slope_start(item, rest)
-        ak = [float(k) for k in range(1, self.n_cat - 1)]
-        return np.array([a, *ak, *_gpcm_intercept_starts(item, self.n_cat, a)])
+        ak = [float(k) for k in range(1, self.n_categories - 1)]
+        return np.array([a, *ak, *_gpcm_intercept_starts(item, self.n_categories, a)])
 
     def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
         """Unbounded."""
-        return _unbounded(2 * self.n_cat - 2)
+        return _unbounded(2 * self.n_categories - 2)

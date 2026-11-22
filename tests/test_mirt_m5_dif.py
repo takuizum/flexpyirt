@@ -21,7 +21,7 @@ from flexpyirt import BAEM, FitResult, Model, Normal, Quadrature, TwoPL, fit
 from tests._reference import check_reference_meta
 
 REFERENCE_DIR = Path(__file__).parent / "reference"
-WIDE = Quadrature.equispaced(81, lim=(-8, 8))
+WIDE = Quadrature.equispaced(81, bounds=(-8, 8))
 TOL_X2 = 1e-5
 TOL_CRIT = 1e-5
 TOL_P = 1e-6

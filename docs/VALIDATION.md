@@ -182,11 +182,11 @@ English | [日本語](VALIDATION.ja.md)
     `log_posterior` rel `5.1e-15`, parameters `8.0e-9`, Oakes SE vs mirt Oakes `3.4e-9`, Oakes vs
     Hessian `1.2e-12`, EAP `6.4e-15` (and mirt Richardson matches flexpyirt's likelihood-only
     Hessian at $\hat\eta_{\text{MAP}}$).
-  - **V7b (`v7_2pl_lnorm_map`)**: 2PL with $a\sim\mathrm{LogNormal}(0.2, 0.3)$, $d\sim\mathrm{NormalPrior}(0, 2)$,
+  - **V7b (`v7_2pl_lnorm_map`)**: 2PL with $a\sim\mathrm{LogNormalPrior}(0.2, 0.3)$, $d\sim\mathrm{NormalPrior}(0, 2)$,
     compared directly against mirt (`NR`) for `loglik` (`4.0e-13`), `log_posterior` (`1.4e-14`),
     parameters (`2.6e-9`), and EAP (`7.1e-15`), and against the exact R posterior Hessian for Oakes
     and Hessian SEs (`1.8e-9`; Oakes vs Hessian `2.3e-12`).
-  - **V7c (`v7_3pl_map`)**: 3PL with $a\sim\mathrm{LogNormal}(0.2, 0.3)$, $d\sim\mathrm{NormalPrior}(0, 2)$,
+  - **V7c (`v7_3pl_map`)**: 3PL with $a\sim\mathrm{LogNormalPrior}(0.2, 0.3)$, $d\sim\mathrm{NormalPrior}(0, 2)$,
     $g\sim\mathrm{Beta}(5, 17)$ (`expbeta` in mirt), maximizing mirt's exact `logLik + logPrior`
     objective in R (`max |grad| = 5.1e-13`, cross-checked against `mirt(..., pars = sv_fixed)` to
     `8.9e-15` with EAP from mirt `fscores`): `loglik` rel `2.5e-13`, `log_posterior` rel `8.1e-16`,

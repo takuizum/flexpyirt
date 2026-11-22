@@ -18,7 +18,7 @@ from flexpyirt import (
     GPCM,
     EmpiricalHistogram,
     FitResult,
-    LogNormal,
+    LogNormalPrior,
     Model,
     Nominal,
     Normal,
@@ -105,7 +105,7 @@ def test_nominal_multidimensional_kernel_and_finite_diff_gradients() -> None:
         kernel = NominalKernel(4).with_factors(n_factors)
         assert kernel.n_factors == n_factors
         assert kernel.irt_names == ()
-        assert kernel.irt_dep_indices == ()
+        assert kernel.irt_dependency_indices == ()
         assert kernel.irt_thresholds(jnp.zeros(len(kernel.param_names))).shape == (0,)
         theta = jnp.asarray(rng.normal(0.0, 1.0, size=(15, n_factors)))
         weights = jnp.asarray(rng.uniform(0.5, 2.0, size=(15, 4)))
@@ -403,7 +403,7 @@ def test_nominal_priors_equal_items_multigroup_and_2d() -> None:
     spec_eq = (
         Model.uniform(Nominal(3), items=df1.columns)
         .equal_across_items(items=["q01", "q02"], params=["a", "ak1"])
-        .prior(param="a", dist=LogNormal(0.0, 0.5))
+        .prior(param="a", dist=LogNormalPrior(0.0, 0.5))
         .prior(param="ak1", dist=NormalPrior(1.0, 1.0))
     )
     res_eq = fit(spec_eq, df1, method=BAEM(tol=1e-6), se="oakes")
@@ -426,7 +426,7 @@ def test_nominal_priors_equal_items_multigroup_and_2d() -> None:
         df_mg,
         group=grp,
         method=BAEM(tol=1e-5, squarem=True),
-        quadrature=Quadrature.equispaced(41, lim=(-6, 6)),
+        quadrature=Quadrature.equispaced(41, bounds=(-6, 6)),
         se="oakes",
     )
     assert res_mg.converged
@@ -439,7 +439,7 @@ def test_nominal_priors_equal_items_multigroup_and_2d() -> None:
         Model.uniform(Nominal(3), items=df1.columns).with_latent(EmpiricalHistogram()),
         df1,
         method=BAEM(tol=1e-4, squarem=True),
-        quadrature=Quadrature.equispaced(21, lim=(-5, 5)),
+        quadrature=Quadrature.equispaced(21, bounds=(-5, 5)),
         se="oakes",
     )
     assert res_eh.converged and res_eh.vcov is not None and np.isfinite(res_eh.vcov).all()
@@ -464,7 +464,7 @@ def test_nominal_priors_equal_items_multigroup_and_2d() -> None:
         spec_2d,
         df_2d,
         method=BAEM(tol=1e-5, squarem=True),
-        quadrature=Quadrature.equispaced(15, lim=(-5, 5)),
+        quadrature=Quadrature.equispaced(15, bounds=(-5, 5)),
         se="oakes",
     )
     assert res_2d.converged

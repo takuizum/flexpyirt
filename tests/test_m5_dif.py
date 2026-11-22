@@ -14,7 +14,7 @@ from flexpyirt import (
     GRM,
     EmpiricalHistogram,
     FitResult,
-    LogNormal,
+    LogNormalPrior,
     Model,
     Normal,
     Quadrature,
@@ -29,7 +29,7 @@ from flexpyirt.errors import (
     SpecificationError,
 )
 
-WIDE = Quadrature.equispaced(81, lim=(-8, 8))
+WIDE = Quadrature.equispaced(81, bounds=(-8, 8))
 METHOD = BAEM(tol=1e-8, max_iter=5000)
 
 
@@ -44,22 +44,22 @@ def test_adjust_p_matches_r() -> None:
     assert np.isnan(adjust_p(np.array([np.nan]), "holm")).all()
 
 
-def _sim(n_per: int = 700, seed: int = 4, n_cat: int = 2) -> tuple[pd.DataFrame, np.ndarray]:
+def _sim(n_per: int = 700, seed: int = 4, n_categories: int = 2) -> tuple[pd.DataFrame, np.ndarray]:
     rng = np.random.default_rng(seed)
     j = 6
     a = rng.uniform(0.8, 1.6, size=j)
-    if n_cat == 2:
+    if n_categories == 2:
         d = rng.normal(0.0, 0.8, size=j)
         d_f = d.copy()
         d_f[5] += 0.9  # DIF on the last item
     else:
-        d = np.sort(rng.normal(0.0, 1.0, size=(j, n_cat - 1)), axis=1)[:, ::-1]
+        d = np.sort(rng.normal(0.0, 1.0, size=(j, n_categories - 1)), axis=1)[:, ::-1]
         d_f = d.copy()
         d_f[5] += 0.9
     out = []
     for dd, mu in ((d, 0.0), (d_f, 0.4)):
         theta = rng.normal(mu, 1.0, size=(n_per, 1))
-        if n_cat == 2:
+        if n_categories == 2:
             y = (rng.random((n_per, j)) < 1 / (1 + np.exp(-(theta * a + dd)))).astype(float)
         else:
             z = theta[:, :, None] * a[None, :, None] + dd[None]
@@ -71,9 +71,9 @@ def _sim(n_per: int = 700, seed: int = 4, n_cat: int = 2) -> tuple[pd.DataFrame,
 
 
 @cache
-def _base(n_cat: int = 2) -> tuple[FitResult, pd.DataFrame, np.ndarray]:
-    df, grp = _sim(n_cat=n_cat)
-    item = TwoPL() if n_cat == 2 else GRM(n_cat=n_cat)
+def _base(n_categories: int = 2) -> tuple[FitResult, pd.DataFrame, np.ndarray]:
+    df, grp = _sim(n_categories=n_categories)
+    item = TwoPL() if n_categories == 2 else GRM(n_categories=n_categories)
     spec = (
         Model.uniform(item, items=df.columns)
         .with_groups(r=Normal.standard(), f=Normal.free())
@@ -124,7 +124,7 @@ def test_drop_scheme_and_params_subset() -> None:
 
 
 def test_grm_dif_runs() -> None:
-    res, df, grp = _base(n_cat=3)
+    res, df, grp = _base(n_categories=3)
     out = res.dif(df, group=grp, items=["i5"], params=["d1", "d2"])
     assert int(out["df"].iloc[0]) == 2
     assert out["p"].iloc[0] < 1e-3
@@ -172,7 +172,7 @@ def test_map_fits_are_rejected() -> None:
         Model.uniform(TwoPL(), items=df.columns)
         .with_groups(r=Normal.standard(), f=Normal.free())
         .equal_across_groups(items=["i0", "i1", "i2"])
-        .prior(param="a", dist=LogNormal(0.0, 0.5))
+        .prior(param="a", dist=LogNormalPrior(0.0, 0.5))
     )
     res = fit(spec, df, group=grp, method=METHOD, quadrature=WIDE, se=None)
     with pytest.raises(SpecificationError, match="priors"):

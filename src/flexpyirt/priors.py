@@ -26,8 +26,8 @@ __all__ = [
     "PRIOR_LOGNORMAL",
     "PRIOR_NONE",
     "PRIOR_NORMAL",
-    "Beta",
-    "LogNormal",
+    "BetaPrior",
+    "LogNormalPrior",
     "NormalPrior",
     "Prior",
     "encode_prior",
@@ -122,7 +122,7 @@ class NormalPrior:
 
 
 @dataclass(frozen=True)
-class LogNormal:
+class LogNormalPrior:
     r"""Log-normal prior distribution on the natural parameter scale.
 
     .. math::
@@ -136,19 +136,19 @@ class LogNormal:
 
     Parameters
     ----------
-    meanlog : float
+    mean_log : float
         Mean :math:`\mu` of :math:`\log X` (finite).
-    sdlog : float
+    sd_log : float
         Standard deviation :math:`s` of :math:`\log X` (positive and finite).
     """
 
-    meanlog: float
-    sdlog: float
+    mean_log: float
+    sd_log: float
 
-    def __init__(self, meanlog: RealScalar, sdlog: RealScalar) -> None:
+    def __init__(self, mean_log: RealScalar, sd_log: RealScalar) -> None:
         """Validate prior hyperparameters and store them as Python floats."""
-        object.__setattr__(self, "meanlog", _validate_finite(meanlog, "LogNormal meanlog"))
-        object.__setattr__(self, "sdlog", _validate_positive(sdlog, "LogNormal sdlog"))
+        object.__setattr__(self, "mean_log", _validate_finite(mean_log, "LogNormal mean_log"))
+        object.__setattr__(self, "sd_log", _validate_positive(sd_log, "LogNormal sd_log"))
 
     @property
     def support(self) -> tuple[float, float]:
@@ -161,14 +161,14 @@ class LogNormal:
         valid = arr > 0.0
         safe_x = jnp.where(valid, arr, 1.0)
         log_x = jnp.log(safe_x)
-        z = (log_x - self.meanlog) / self.sdlog
-        log_sd = jnp.log(jnp.asarray(self.sdlog, dtype=arr.dtype))
+        z = (log_x - self.mean_log) / self.sd_log
+        log_sd = jnp.log(jnp.asarray(self.sd_log, dtype=arr.dtype))
         val = -log_x - log_sd - _HALF_LOG_2PI - 0.5 * z * z
         return jnp.where(valid, val, -jnp.inf)
 
 
 @dataclass(frozen=True)
-class Beta:
+class BetaPrior:
     r"""Beta prior distribution on the natural parameter scale.
 
     .. math::
@@ -215,11 +215,11 @@ class Beta:
         return jnp.where(valid, val, -jnp.inf)
 
 
-Prior = NormalPrior | LogNormal | Beta
-PRIOR_TYPES: tuple[type[NormalPrior], type[LogNormal], type[Beta]] = (
+Prior = NormalPrior | LogNormalPrior | BetaPrior
+PRIOR_TYPES: tuple[type[NormalPrior], type[LogNormalPrior], type[BetaPrior]] = (
     NormalPrior,
-    LogNormal,
-    Beta,
+    LogNormalPrior,
+    BetaPrior,
 )
 
 
@@ -229,12 +229,13 @@ def encode_prior(prior: Prior | None) -> tuple[int, float, float]:
         return (PRIOR_NONE, 0.0, 1.0)
     if isinstance(prior, NormalPrior):
         return (PRIOR_NORMAL, float(prior.mean), float(prior.sd))
-    if isinstance(prior, LogNormal):
-        return (PRIOR_LOGNORMAL, float(prior.meanlog), float(prior.sdlog))
-    if isinstance(prior, Beta):
+    if isinstance(prior, LogNormalPrior):
+        return (PRIOR_LOGNORMAL, float(prior.mean_log), float(prior.sd_log))
+    if isinstance(prior, BetaPrior):
         return (PRIOR_BETA, float(prior.a), float(prior.b))
     raise SpecificationError(
-        f"Unsupported prior distribution {prior!r}; use NormalPrior, LogNormal, Beta or None."
+        f"Unsupported prior distribution {prior!r}; "
+        "use NormalPrior, LogNormalPrior, BetaPrior or None."
     )
 
 
@@ -244,8 +245,8 @@ def eval_log_prior(x: Array, kind: Array, param1: Array, param2: Array) -> Array
     Uses the double-``where`` pattern on every branch so that unselected branches and unused
     padding slots (``kind == PRIOR_NONE``) never evaluate :math:`\log 0` or negative logs and
     contribute zero value, gradient and Hessian. Out-of-support values for an active
-    :class:`LogNormal` or :class:`Beta` prior return :math:`-\infty` (rejected by the M-step
-    line search and SQUAREM safeguard).
+    :class:`LogNormalPrior` or :class:`BetaPrior` prior return :math:`-\infty` (rejected by the
+    M-step line search and SQUAREM safeguard).
     """
     is_norm = kind == PRIOR_NORMAL
     sd_n = jnp.where(is_norm, param2, 1.0)

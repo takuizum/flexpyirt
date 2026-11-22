@@ -19,7 +19,7 @@ from flexpyirt import (
     GRM,
     PCM,
     FourPL,
-    LogNormal,
+    LogNormalPrior,
     Model,
     Normal,
     NormalPrior,
@@ -38,7 +38,11 @@ from flexpyirt.errors import (
     SpecificationError,
 )
 from flexpyirt.items import DichotomousKernel, FourPLKernel, GPCMKernel, GradedKernel
-from flexpyirt.latent import correlation_matrix_is_pd, latent_param_names, mvn_log_weights
+from flexpyirt.latent import (
+    correlation_matrix_is_positive_definite,
+    latent_param_names,
+    mvn_log_weights,
+)
 from tests._reference import load as load_m1
 
 
@@ -92,15 +96,15 @@ def _reference_oakes(prob: _core.CompiledProblem, eta: jax.Array) -> jax.Array:
 
 
 def test_quadrature_defaults_and_product_grid_shapes() -> None:
-    assert Quadrature.default(1) == Quadrature.equispaced(61, lim=(-6.0, 6.0))
-    assert Quadrature.default(2) == Quadrature.equispaced(31, lim=(-6.0, 6.0))
-    assert Quadrature.default(3) == Quadrature.equispaced(15, lim=(-6.0, 6.0))
+    assert Quadrature.default(1) == Quadrature.equispaced(61, bounds=(-6.0, 6.0))
+    assert Quadrature.default(2) == Quadrature.equispaced(31, bounds=(-6.0, 6.0))
+    assert Quadrature.default(3) == Quadrature.equispaced(15, bounds=(-6.0, 6.0))
     with pytest.raises(SpecificationError, match="1 to 3"):
         Quadrature.default(4)
     with pytest.raises(SpecificationError, match="1 to 3"):
         Quadrature.default(0)
 
-    q = Quadrature.equispaced(5, lim=(-2.0, 2.0))
+    q = Quadrature.equispaced(5, bounds=(-2.0, 2.0))
     assert q.nodes().shape == (5,)
     g1 = q.grid(1)
     g2 = q.grid(2)
@@ -151,7 +155,7 @@ def test_multidimensional_kernels_sum_to_one_and_differentiate(n_factors: int) -
     assert np.isfinite(jax.grad(lambda p: k_4pl.log_prob(theta, p).sum())(p_4pl)).all()
 
     # Graded (GRM)
-    k_grm = GradedKernel(n_cat=4, n_factors=n_factors)
+    k_grm = GradedKernel(n_categories=4, n_factors=n_factors)
     assert k_grm.param_names == (*[f"a{m}" for m in range(1, n_factors + 1)], "d1", "d2", "d3")
     p_grm = jnp.asarray([*slopes, 1.2, 0.1, -1.1])
     lp_grm = k_grm.log_prob(theta, p_grm)
@@ -161,7 +165,7 @@ def test_multidimensional_kernels_sum_to_one_and_differentiate(n_factors: int) -
     assert np.isnan(k_grm.log_prob(theta, jnp.asarray([*slopes, -1.0, 0.5, -2.0]))).any()
 
     # GPCM / PCM
-    k_gpcm = GPCMKernel(n_cat=4, n_factors=n_factors)
+    k_gpcm = GPCMKernel(n_categories=4, n_factors=n_factors)
     assert k_gpcm.param_names == (*[f"a{m}" for m in range(1, n_factors + 1)], "d1", "d2", "d3")
     p_gpcm = jnp.asarray([*slopes, 0.8, -0.2, -0.9])
     lp_gpcm = k_gpcm.log_prob(theta, p_gpcm)
@@ -176,7 +180,7 @@ def test_multidimensional_kernels_sum_to_one_and_differentiate(n_factors: int) -
 
 
 def test_mvn_log_weights_match_scipy_2d_and_3d() -> None:
-    q2 = Quadrature.equispaced(11, lim=(-4.0, 4.0)).grid(2)
+    q2 = Quadrature.equispaced(11, bounds=(-4.0, 4.0)).grid(2)
     params2 = jnp.array([0.3, -0.2, 1.4, 0.8, 0.55])
     cov2 = np.array([[1.4, 0.55 * np.sqrt(1.4 * 0.8)], [0.55 * np.sqrt(1.4 * 0.8), 0.8]])
     ref2 = np.asarray(multivariate_normal.logpdf(q2, mean=[0.3, -0.2], cov=cov2), dtype=float)
@@ -186,7 +190,7 @@ def test_mvn_log_weights_match_scipy_2d_and_3d() -> None:
     assert float(np.exp(got2).sum()) == pytest.approx(1.0, rel=1e-13)
     assert np.isfinite(jax.jacfwd(lambda p: mvn_log_weights(jnp.asarray(q2), p))(params2)).all()
 
-    q3 = Quadrature.equispaced(7, lim=(-3.0, 3.0)).grid(3)
+    q3 = Quadrature.equispaced(7, bounds=(-3.0, 3.0)).grid(3)
     params3 = jnp.array([0.1, -0.2, 0.3, 1.2, 0.9, 1.5, 0.4, -0.2, 0.5])
     sds3 = np.sqrt([1.2, 0.9, 1.5])
     r3 = np.array([[1.0, 0.4, -0.2], [0.4, 1.0, 0.5], [-0.2, 0.5, 1.0]])
@@ -200,15 +204,15 @@ def test_mvn_log_weights_match_scipy_2d_and_3d() -> None:
 
 
 def test_mvn_log_weights_rejects_non_pd_inputs() -> None:
-    q2 = jnp.asarray(Quadrature.equispaced(5, lim=(-2.0, 2.0)).grid(2))
+    q2 = jnp.asarray(Quadrature.equispaced(5, bounds=(-2.0, 2.0)).grid(2))
     assert np.isnan(mvn_log_weights(q2, jnp.array([0.0, 0.0, 1.0, 1.0, 1.0]))).all()
     assert np.isnan(mvn_log_weights(q2, jnp.array([0.0, 0.0, 1.0, 1.0, -1.2]))).all()
     assert np.isnan(mvn_log_weights(q2, jnp.array([0.0, 0.0, -0.1, 1.0, 0.2]))).all()
 
-    q3 = jnp.asarray(Quadrature.equispaced(5, lim=(-2.0, 2.0)).grid(3))
+    q3 = jnp.asarray(Quadrature.equispaced(5, bounds=(-2.0, 2.0)).grid(3))
     # r12=0.8, r13=0.8, r23=-0.5 has det < 0
     bad3 = jnp.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.8, 0.8, -0.5])
-    assert not correlation_matrix_is_pd([0.8, 0.8, -0.5], 3)
+    assert not correlation_matrix_is_positive_definite([0.8, 0.8, -0.5], 3)
     assert np.isnan(mvn_log_weights(q3, bad3)).all()
     assert latent_param_names(1) == ("mean", "var")
     assert latent_param_names(2) == ("mean_1", "mean_2", "var_1", "var_2", "cor_12")
@@ -270,7 +274,7 @@ def test_2d_2pl_monotone_oakes_equals_hessian_and_eap() -> None:
     spec = Model.uniform(TwoPL(), items=items).with_factors(
         {"math": items[:5], "verbal": items[4:]}
     )
-    quad = Quadrature.equispaced(15, lim=(-5.0, 5.0))
+    quad = Quadrature.equispaced(15, bounds=(-5.0, 5.0))
 
     res_em = fit(spec, df, method=BAEM(tol=1e-9), quadrature=quad, se="oakes")
     res_hess = fit(spec, df, method=BAEM(tol=1e-9), quadrature=quad, se="hessian")
@@ -375,7 +379,7 @@ def test_2d_orthogonal_rasch_grm_mixed_priors_and_fix() -> None:
         spec_r,
         df_r,
         method=BAEM(tol=1e-7, squarem=True),
-        quadrature=Quadrature.equispaced(15, lim=(-6.0, 6.0)),
+        quadrature=Quadrature.equispaced(15, bounds=(-6.0, 6.0)),
         se="oakes",
     )
     assert res_r.converged
@@ -393,7 +397,7 @@ def test_2d_orthogonal_rasch_grm_mixed_priors_and_fix() -> None:
     spec_g = (
         Model.uniform(GRM(4), items=items_g)
         .with_factors({"F1": items_g[:3], "F2": items_g[3:]})
-        .prior(param="a1", dist=LogNormal(0.1, 0.4))
+        .prior(param="a1", dist=LogNormalPrior(0.1, 0.4))
         .prior(param="d1", dist=NormalPrior(0.0, 2.0))
         .fix(item="g01", a1=1.2)
     )
@@ -401,7 +405,7 @@ def test_2d_orthogonal_rasch_grm_mixed_priors_and_fix() -> None:
         spec_g,
         df_g,
         method=BAEM(tol=1e-6, squarem=True),
-        quadrature=Quadrature.equispaced(11, lim=(-5.0, 5.0)),
+        quadrature=Quadrature.equispaced(11, bounds=(-5.0, 5.0)),
         se="oakes",
     )
     assert res_g.converged
@@ -451,7 +455,7 @@ def test_2d_mixed_item_families() -> None:
     ).with_factors(
         {"F1": ["m_2pl", "m_rasch", "m_3pl", "m_grm"], "F2": ["m_4pl", "m_gpcm", "m_pcm"]}
     )
-    quad = Quadrature.equispaced(9, lim=(-4.0, 4.0))
+    quad = Quadrature.equispaced(9, bounds=(-4.0, 4.0))
     prep = prepare(spec, df, group=None, item_names=None, table=None)
     comp = compile_problem(spec, prep.y, prep.group, prep.table, quad)
     eta = jnp.asarray(comp.eta0)
@@ -488,7 +492,7 @@ def test_3d_2pl_oakes_equals_hessian_and_monotone() -> None:
     spec = Model.uniform(TwoPL(), items=items).with_factors(
         {"F1": items[:3], "F2": items[3:6], "F3": items[6:]}
     )
-    quad = Quadrature.equispaced(7, lim=(-4.0, 4.0))
+    quad = Quadrature.equispaced(7, bounds=(-4.0, 4.0))
     res = fit(spec, df, method=BAEM(tol=1e-7, squarem=True), quadrature=quad, se="oakes")
     assert res.converged
     ll = res.history["loglik"].to_numpy()
@@ -567,7 +571,7 @@ def test_mirt_specification_errors() -> None:
     with pytest.raises(SpecificationError, match="with_factors\\(\\) before fix"):
         base.fix(item="q1", a=1.0).with_factors({"F1": items[:3], "F2": items[3:]})
     with pytest.raises(SpecificationError, match="with_factors\\(\\) before prior"):
-        base.prior(param="a", dist=LogNormal(0.0, 0.5)).with_factors(
+        base.prior(param="a", dist=LogNormalPrior(0.0, 0.5)).with_factors(
             {"F1": items[:3], "F2": items[3:]}
         )
     with pytest.raises(SpecificationError, match="latent-distribution"):

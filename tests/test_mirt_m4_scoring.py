@@ -110,16 +110,16 @@ def load(name: str) -> Case:
     raw = dict(_bundle()["cases"][name])
     check_reference_meta(raw["meta"], require_grid_check=True)
     items = list(raw["items"])
-    n_cat = int(raw["meta"]["n_cat"])
+    n_categories = int(raw["meta"]["n_cat"])
     lo, hi = (float(v) for v in raw["meta"]["theta_lim"])
-    quad = Quadrature.equispaced(int(raw["meta"]["quadpts"]), lim=(lo, hi))
+    quad = Quadrature.equispaced(int(raw["meta"]["quadpts"]), bounds=(lo, hi))
 
     if name == "lsat7_2pl":
         spec = Model.uniform(TwoPL(), items=items)
     elif name == "science_grm":
-        spec = Model.uniform(GRM(n_cat=n_cat), items=items)
+        spec = Model.uniform(GRM(n_categories=n_categories), items=items)
     elif name == "science_gpcm":
-        spec = Model.uniform(GPCM(n_cat=n_cat), items=items)
+        spec = Model.uniform(GPCM(n_categories=n_categories), items=items)
     elif name == "v11_3pl":
         spec = Model.uniform(ThreePL(), items=items)
     elif name == "twogroup_2pl":

@@ -11,7 +11,7 @@ from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, Normal
 from flexpyirt.linking import LinkResult, link
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
-from flexpyirt.priors import Beta, LogNormal, NormalPrior
+from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
 
@@ -25,13 +25,13 @@ __all__ = [
     "GPCM",
     "GRM",
     "PCM",
-    "Beta",
+    "BetaPrior",
     "DavidianCurve",
     "EmpiricalHistogram",
     "FitResult",
     "FourPL",
     "LinkResult",
-    "LogNormal",
+    "LogNormalPrior",
     "Model",
     "Nominal",
     "Normal",
