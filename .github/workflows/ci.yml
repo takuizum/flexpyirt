@@ -39,10 +39,13 @@ jobs:
         run: uv run mypy
       # PRs skip @pytest.mark.slow tests; pushes to develop/main and manual runs run everything.
       # Parallelism (pytest-xdist, -n auto) is set in pyproject.toml.
+      # Interim (#43): Python 3.11 runs serially. With 4 workers its runner is shut down near the end
+      # of the full suite (3.11 resolves an older, slower JAX). Remove when 3.11 is dropped (#44).
       - name: Pytest
         env:
           MARKEXPR: ${{ github.event_name == 'pull_request' && 'not slow' || '' }}
-        run: uv run pytest --durations=15 -m "$MARKEXPR"
+          WORKERS: ${{ matrix.python-version == '3.11' && '0' || 'auto' }}
+        run: uv run pytest --durations=15 -m "$MARKEXPR" -n "$WORKERS"
       - name: Editable install smoke test (isolated env)
         run: uv run --isolated --no-project --with-editable . python -c "import flexpyirt; print(flexpyirt.__version__)"
 
