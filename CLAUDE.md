@@ -1,7 +1,7 @@
 # CLAUDE.md — flexpyirt 実装の引き継ぎ
 
 このリポジトリは、JAX ベースの Bock–Aitkin EM (BA-EM) による IRT 推定ライブラリ **flexpyirt**の
-設計段階のリポジトリです。まだ実装コードはありません。以下のドキュメントを読んでから作業を始めてください。
+リポジトリです（M2 まで実装済み）。以下のドキュメントを読んでから作業を始めてください（各文書は英語版 `*.md` と日本語版 `*.ja.md` があり、内容は同じ。更新するときは両方を直す）。
 
 | ファイル | 内容 |
 |---|---|
@@ -37,6 +37,22 @@
 - 数式を実装した関数には、docstring に対応する式（LaTeX）と出典（著者・年）を書く。
 - jit 関数内で Python の分岐が shape に依存しないこと。可変長はパディング + マスク（DESIGN.md §5）。
 - 例外は `flexpyirt.errors` に定義した具体的なクラスで投げる（`SpecificationError`, `IdentificationError` など）。
+- 命名は PEP 8 に従い、R/mirt の引数名を持ち込まない（詳細は CONTRIBUTING.md「命名」、DESIGN.md §15.46）。
+  - 公開名は略さず、同じ概念は API 全体で同じ名前（`n_categories`, `n_points`, `n_factors`）。
+    mirt の対応名は docstring に書く（`min_cell` ← mirt `mincell`）。
+  - `Literal` の選択肢は小文字 `snake_case`（`"slope_intercept"`）。定着した頭字語（`"EAP"`）は大文字のまま。
+  - 大文字の数式記号は DESIGN.md の式に対応する jit カーネル内だけ。ローカルのクロージャは役割で名付ける（`obj`・`tmp` 禁止。
+    mirt を行ごとに移植した箇所は例外）。
+  - JSON に保存される名前を変えたら `schema_version` を上げ、旧ファイルも読めるようにする。
+
+## 開発フロー（CONTRIBUTING.md）
+
+- `feature/<slug>` と `fix/<issue番号>-<slug>` を `develop` から切り、`develop` へ PR。fix は issue 必須（`Closes #N`）。
+- リリースは `develop` → `main` の PR。タイトル `release(major|minor|patch): ...` で上げ方を決め、マージ後にオーナーが `release` 環境を承認するとタグ `vX.Y.Z` と GitHub Release ができる。バージョンは git タグから（hatch-vcs、`pyproject.toml` に書かない）。
+  同じワークフローの `pypi` ジョブが PyPI に公開し（Trusted Publishing）、`docs.yml` がドキュメントサイト（`docs/` から MkDocs、英日）を GitHub Pages に公開する。
+- `README*.md` は PyPI にも表示されるのでリンクは絶対 URL。`docs/` 内は相対リンク。`uv run --group docs mkdocs build --strict` が CI と同じ検査。
+- **PR はオーナーがレビューしてマージする。Claude は PR を作るまでで、マージしない。**
+- Python 環境は `uv` のみ（pip は使わない）。
 
 ## 作業開始時にやること
 

@@ -1,0 +1,94 @@
+site_name: flexpyirt
+site_description: Bock–Aitkin EM estimation for item response theory models, built on JAX.
+site_url: https://takuizum.github.io/flexpyirt/
+repo_url: https://github.com/takuizum/flexpyirt
+repo_name: takuizum/flexpyirt
+edit_uri: edit/develop/docs/
+copyright: Copyright &copy; 2026 takuizum
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+# The site is built from the same Markdown files that GitHub renders (X.md / X.ja.md).
+# scripts/mkdocs_hooks.py drops the in-page language links and points links outside docs/ to GitHub.
+hooks:
+  - scripts/mkdocs_hooks.py
+
+nav:
+  - Home: index.md
+  - User guide: guide.md
+  - API reference: reference.md
+  - Validation: VALIDATION.md
+  - Design: DESIGN.md
+  - API overview: API.md
+  - Roadmap: ROADMAP.md
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: false
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: ja
+          name: 日本語
+          build: true
+          site_description: JAX による Bock–Aitkin EM の項目反応理論（IRT）推定ライブラリ。
+          nav_translations:
+            Home: ホーム
+            User guide: ユーザーガイド
+            API reference: API リファレンス
+            Validation: 検証（R mirt との照合）
+            Design: 設計
+            API overview: API 概要
+            Roadmap: ロードマップ
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      # GitHub-compatible anchors (keeps Japanese headings), so links work in both places.
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
+
+validation:
+  omitted_files: warn
+  absolute_links: info
+  unrecognized_links: warn
+  anchors: warn

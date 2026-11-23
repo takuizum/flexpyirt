@@ -1,0 +1,29 @@
+name: Bug report / バグ報告
+description: Wrong estimates, errors, crashes (fix branches are tied to this issue) / 推定結果の誤り、エラー、クラッシュなど（fix ブランチはこの issue に対応させます）
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened / 何が起きたか
+      description: The actual result (error message or estimates) / 実際の結果（エラーメッセージや推定値）
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result / 期待した結果
+      description: Include values from a reference implementation such as mirt if you have them / mirt など参照実装の値があれば添えてください
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce / 再現手順
+      description: Minimal code and data (e.g. a simulation seed) / 最小のコードとデータ（シミュレーションのシードなど）
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions / バージョン
+      description: flexpyirt / jax / Python / OS

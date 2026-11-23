@@ -1,0 +1,14 @@
+name: Feature request / 機能の提案
+description: Propose a new model, option or API / 新しいモデル・オプション・API の提案
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do / やりたいこと
+    validations:
+      required: true
+  - type: textarea
+    id: reference
+    attributes:
+      label: References (papers, the corresponding mirt feature, ...) / 参照（論文・mirt の対応機能など）

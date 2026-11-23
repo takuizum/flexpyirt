@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -13,7 +15,7 @@ from hypothesis import strategies as st
 from flexpyirt import BAEM, Model, Normal, Quadrature, Rasch, TwoPL, _core, fit
 from flexpyirt._compile import compile_problem, prepare
 from flexpyirt._newton import newton_ascent
-from flexpyirt.errors import IdentificationError, SpecificationError
+from flexpyirt.errors import HeywoodWarning, IdentificationError, SpecificationError
 from flexpyirt.items import DichotomousKernel
 from tests._reference import load
 
@@ -89,7 +91,7 @@ def test_newton_reaches_interior_optimum_and_keeps_fixed_coordinates() -> None:
 
 
 def test_newton_stays_inside_bounds() -> None:
-    """Bounds are kept by the line search (not projection): iterates stay strictly inside."""
+    """Iterates stay strictly inside the bounds and approach a bound that holds the optimum."""
 
     def f(x: jax.Array) -> jax.Array:
         return -((x[0] - 5.0) ** 2)
@@ -97,7 +99,26 @@ def test_newton_stays_inside_bounds() -> None:
     x = newton_ascent(
         f, jnp.array([0.0]), jnp.array([True]), jnp.array([-1.0]), jnp.array([2.0]), 20
     )
-    assert 0.0 < float(x[0]) < 2.0
+    assert 2.0 - 1e-5 < float(x[0]) < 2.0
+
+
+def test_newton_bound_does_not_block_other_coordinates() -> None:
+    """A coordinate pressed against its bound is held while the others still converge."""
+
+    def f(x: jax.Array) -> jax.Array:
+        return -((x[0] + 1.0) ** 2) - (x[1] - 3.0) ** 2 - 0.5 * x[0] * x[1]
+
+    x = newton_ascent(
+        f,
+        jnp.array([0.5, 0.0]),
+        jnp.array([True, True]),
+        jnp.array([0.0, -jnp.inf]),
+        jnp.array([jnp.inf, jnp.inf]),
+        60,
+    )
+    assert 0.0 < float(x[0]) < 1e-7
+    # with x0 at its bound 0, the optimum in x1 is 3
+    assert float(x[1]) == pytest.approx(3.0, abs=1e-6)
 
 
 def test_newton_never_decreases_nonconcave_objective() -> None:
@@ -160,7 +181,11 @@ def test_em_is_monotone(seed: int, rasch: bool) -> None:
     if (df.nunique() < 2).any():
         return
     spec = Model.uniform(Rasch() if rasch else TwoPL(), items=df.columns)
-    res = fit(spec, df, method=BAEM(tol=1e-7, max_iter=300), se=None)
+    with warnings.catch_warnings():
+        # Random small-N 2PL draws can legitimately hit a finite-sample Heywood slope; EM
+        # monotonicity must still hold.
+        warnings.simplefilter("ignore", HeywoodWarning)
+        res = fit(spec, df, method=BAEM(tol=1e-7, max_iter=300), se=None)
     ll = res.history["loglik"].to_numpy()
     assert np.all(np.diff(ll) >= -1e-9 * np.abs(ll[1:]))
     assert res.loglik >= ll[-1] - 1e-9 * abs(ll[-1])
@@ -220,14 +245,32 @@ def test_specification_errors(small: pd.DataFrame) -> None:
         fit(spec, small.assign(**{"Item.1": 1}))
     with pytest.raises(SpecificationError, match="Duplicated"):
         Model.uniform(TwoPL(), items=["x", "x"])
+    with pytest.raises(SpecificationError, match="reserved"):
+        Model.uniform(TwoPL(), items=["x", "__latent__"])
+    with pytest.raises(SpecificationError, match="reserved"):
+        Model.from_items({"__latent__": TwoPL()})
 
 
-def test_free_id_shared_across_items_is_rejected(small: pd.DataFrame) -> None:
+def test_free_id_shared_across_items_in_table(small: pd.DataFrame) -> None:
+    """Sharing a free_id across items in an edited table equals equal_across_items (§16.1)."""
     spec = Model.uniform(TwoPL(), items=small.columns)
     table = spec.parameter_table(small)
     slopes = (table["param"] == "a") & (table["item"] != "__latent__")
     table.loc[slopes, "free_id"] = 0
-    with pytest.raises(SpecificationError, match="M5"):
+    tight = BAEM(tol=1e-9, max_iter=5000)
+    by_table = fit(spec, small, table=table, method=tight, se=None)
+    by_spec = fit(spec.equal_across_items(items=None, params=["a"]), small, method=tight, se=None)
+    assert by_table.n_params == by_spec.n_params == small.shape[1] + 1
+    assert by_table.loglik == pytest.approx(by_spec.loglik, rel=1e-12)
+    np.testing.assert_allclose(by_table.items["a"], by_spec.items["a"], atol=1e-7)
+
+
+def test_free_id_shared_by_two_params_of_one_item_is_rejected(small: pd.DataFrame) -> None:
+    spec = Model.uniform(TwoPL(), items=small.columns)
+    table = spec.parameter_table(small)
+    first = table["item"] == "Item.1"
+    table.loc[first, "free_id"] = 0
+    with pytest.raises(SpecificationError, match="different parameters of item"):
         fit(spec, small, table=table)
 
 

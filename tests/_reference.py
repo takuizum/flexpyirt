@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,29 @@ import numpy as np
 import pandas as pd
 
 REFERENCE_DIR = Path(__file__).parent / "reference"
+
+
+def check_reference_meta(
+    meta: Mapping[str, Any],
+    *,
+    require_richardson: bool = False,
+    require_grid_check: bool = False,
+) -> None:
+    """Assert that mirt reference metadata records converged fits and the requested grid."""
+    case = meta.get("case", "<unknown>")
+    assert meta.get("converged") is True, f"Reference {case!r}: Oakes fit did not converge."
+    if require_richardson or "converged_richardson" in meta:
+        assert meta.get("converged_richardson") is True, (
+            f"Reference {case!r}: Richardson fit did not converge."
+        )
+    if require_grid_check or "grid_check" in meta:
+        assert "grid_check" in meta and "theta_lim" in meta, (
+            f"Reference {case!r}: missing grid_check or theta_lim in meta."
+        )
+        assert meta["grid_check"] == meta["theta_lim"], (
+            f"Reference {case!r}: grid_check {meta['grid_check']!r} "
+            f"!= theta_lim {meta['theta_lim']!r}."
+        )
 
 
 @dataclass(frozen=True)
@@ -48,4 +72,6 @@ class Case:
 
 
 def load(name: str) -> Case:
-    return Case(name, json.loads((REFERENCE_DIR / f"{name}.json").read_text()))
+    raw = dict(json.loads((REFERENCE_DIR / f"{name}.json").read_text()))
+    check_reference_meta(raw["meta"])
+    return Case(name, raw)

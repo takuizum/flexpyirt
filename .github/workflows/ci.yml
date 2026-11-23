@@ -2,8 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same PR cancels the run in progress (pushes to develop/main always finish).
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -14,6 +23,8 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs derives the version from tags
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python-version }}
@@ -26,7 +37,33 @@ jobs:
         run: uv run ruff format --check .
       - name: Mypy
         run: uv run mypy
+      # PRs skip @pytest.mark.slow tests; pushes to develop/main and manual runs run everything.
+      # Parallelism (pytest-xdist, -n auto) is set in pyproject.toml.
+      # Interim (#43): Python 3.11 runs serially. With 4 workers its runner is shut down near the end
+      # of the full suite (3.11 resolves an older, slower JAX). Remove when 3.11 is dropped (#44).
       - name: Pytest
-        run: uv run pytest
+        env:
+          MARKEXPR: ${{ github.event_name == 'pull_request' && 'not slow' || '' }}
+          WORKERS: ${{ matrix.python-version == '3.11' && '0' || 'auto' }}
+        run: uv run pytest --durations=15 -m "$MARKEXPR" -n "$WORKERS"
       - name: Editable install smoke test (isolated env)
         run: uv run --isolated --no-project --with-editable . python -c "import flexpyirt; print(flexpyirt.__version__)"
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs derives the version from tags
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Build sdist and wheel
+        run: uv build
+      - name: Check metadata (PyPI rendering of README.md)
+        run: uvx twine check --strict dist/*
+      - name: Smoke test the wheel (isolated env)
+        run: |
+          uv run --isolated --no-project --with dist/*.whl python -c \
+            "import flexpyirt; print(flexpyirt.__version__)"

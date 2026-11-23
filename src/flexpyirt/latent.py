@@ -3,14 +3,45 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 
 import jax
+import jax.numpy as jnp
+import numpy as np
 from jax import Array
 
 from flexpyirt.errors import SpecificationError
 
-__all__ = ["Normal", "normal_log_weights"]
+__all__ = [
+    "MAX_DAVIDIAN_DEGREE",
+    "MAX_MIXTURE_COMPONENTS",
+    "DavidianCurve",
+    "EmpiricalHistogram",
+    "LatentSpec",
+    "Normal",
+    "NormalMixture",
+    "correlation_matrix_is_positive_definite",
+    "davidian_hermite_coeffs",
+    "davidian_log_weights",
+    "davidian_moments",
+    "davidian_param_names",
+    "eh_constrained_weights",
+    "eh_moments",
+    "eh_project_floor",
+    "latent_param_names",
+    "mixture_components",
+    "mixture_log_weights",
+    "mixture_param_names",
+    "mvn_log_weights",
+    "normal_log_weights",
+]
+
+MAX_DAVIDIAN_DEGREE = 10
+"""Maximum supported polynomial degree :math:`k` for :class:`DavidianCurve`."""
+
+MAX_MIXTURE_COMPONENTS = 10
+"""Maximum supported number of components :math:`k` for :class:`NormalMixture`."""
 
 
 @dataclass(frozen=True)
@@ -76,3 +107,857 @@ def normal_log_weights(nodes: Array, mean: Array, var: Array) -> Array:
     """
     kernel = -0.5 * (nodes - mean) ** 2 / var
     return jax.nn.log_softmax(kernel)
+
+
+@dataclass(frozen=True, kw_only=True)
+class EmpiricalHistogram:
+    r"""Empirical histogram (EH) nonparametric latent distribution (Woods, 2007).
+
+    Represents each group's latent distribution by discrete weights
+    :math:`w_{g1},\dots,w_{gQ}` on the fixed quadrature grid :math:`\theta_1,\dots,\theta_Q`
+    satisfying :math:`w_{gq}\ge\tau>0` and :math:`\sum_q w_{gq}=1` (DESIGN.md §4.4, §15.34).
+    During EM, each group's EH M-step solves
+    :math:`\max_{w\in\Delta^{Q-1},\,w_q\ge\tau}\sum_q \bar n_{gq}\log w_q` via exact KKT
+    water-filling (reducing identically to :math:`\bar n_{gq}/N_g` when no node hits the floor).
+    Unless the scale is pinned by fixed item parameters (FIPC), the reference group's M-step adds
+    the constraints :math:`\sum_q w_q\theta_q=0` and :math:`\sum_q w_q\theta_q^2=1` (mean only
+    for Rasch/PCM), so its histogram has mean 0 and variance 1 after every iteration and EM stays
+    monotone (:func:`eh_constrained_weights`).
+
+    Parameters
+    ----------
+    min_weight : float, default 1e-10
+        Strict positive floor :math:`\tau` on every quadrature node's weight so empty nodes keep
+        finite log-weights. Must satisfy :math:`0 < \tau < 1/Q` for the quadrature grid used.
+    """
+
+    min_weight: float = 1e-10
+
+    def __post_init__(self) -> None:
+        """Validate ``min_weight``."""
+        if isinstance(self.min_weight, bool) or not isinstance(self.min_weight, (int, float)):
+            raise SpecificationError(
+                f"EmpiricalHistogram min_weight must be a float, got {self.min_weight!r}."
+            )
+        val = float(self.min_weight)
+        if not (math.isfinite(val) and 0.0 < val < 1.0):
+            raise SpecificationError(
+                "EmpiricalHistogram min_weight must be finite and in (0, 1), "
+                f"got {self.min_weight}."
+            )
+
+
+@dataclass(frozen=True)
+class DavidianCurve:
+    r"""Davidian-curve seminonparametric latent distribution (Woods & Lin, 2009).
+
+    Zhang & Davidian (2001); Woods & Lin (2009). Models a unidimensional latent trait with density
+
+    .. math::
+        f_k(\theta;\mu,\sigma^2,\boldsymbol\phi)
+        = \frac{\sigma_Z(\boldsymbol\phi)}{\sigma}\,
+          P_k\!\big(z(\theta);\boldsymbol\phi\big)^2\,\varphi\!\big(z(\theta)\big),
+        \qquad
+        z(\theta) = \mu_Z(\boldsymbol\phi) + \sigma_Z(\boldsymbol\phi)\frac{\theta-\mu}{\sigma},
+
+    where :math:`P_k(z;\boldsymbol\phi)=\sum_{j=0}^k c_j(\boldsymbol\phi)\,He_j(z)/\sqrt{j!}` is
+    expanded in normalized probabilists' Hermite polynomials with unit-sphere coefficients
+    :math:`\mathbf c(\boldsymbol\phi)\in S^k` parameterized by :math:`k=\texttt{degree}` angles
+    :math:`\boldsymbol\phi=(\phi_1,\dots,\phi_k)`, and :math:`(\mu_Z(\boldsymbol\phi),
+    \sigma_Z^2(\boldsymbol\phi))` are the exact continuous mean and variance of
+    :math:`h_k(z;\boldsymbol\phi)=P_k(z;\boldsymbol\phi)^2\varphi(z)` (DESIGN.md §4.4, §16.4).
+    Analytical standardization ensures :math:`\theta` has exact continuous mean :math:`\mu` and
+    variance :math:`\sigma^2` for every :math:`\boldsymbol\phi\in\mathbb R^k`, while
+    :math:`\boldsymbol\phi=\mathbf 0` reproduces :math:`N(\mu,\sigma^2)` non-singularly.
+
+    Supported for single-group unidimensional models only.
+
+    Notes
+    -----
+    The Fisher information is singular at :math:`\boldsymbol\phi=\mathbf 0` in the
+    :math:`(\phi_1,\phi_2)` directions (in :math:`\phi_1` for ``degree=1``): their first-order
+    perturbations of :math:`\varphi` are pure location / scale changes, which the
+    standardization removes, so the score in :math:`\phi_1,\phi_2` is zero there for every data
+    set. When the latent density is close to normal, the angles are poorly determined, the
+    likelihood can have several local maxima, the angle standard errors are unreliable, and a
+    likelihood-ratio test of ``DavidianCurve`` against :class:`Normal` has no standard
+    :math:`\chi^2` reference distribution. Compare degrees with AIC/BIC instead (Woods & Lin,
+    2009; DESIGN.md §16.4).
+
+    Parameters
+    ----------
+    degree : int
+        Polynomial degree :math:`k \in \{1, \dots, 10\}` (number of angle parameters
+        ``phi_1..phi_k``).
+    mean, var : float, keyword-only
+        Value (or starting value when free) of the continuous mean and variance.
+    free_mean, free_var : bool, keyword-only
+        Whether the mean / variance is estimated (requires identification via fixed item
+        intercepts / slopes as for :class:`Normal`, DESIGN.md §4.5).
+
+    Examples
+    --------
+    >>> DavidianCurve(3)                      # mean 0, var 1 fixed; phi_1..phi_3 free
+    >>> DavidianCurve(3, free_var=True)       # Rasch / PCM with Davidian shape
+    >>> DavidianCurve.free(3)                 # FIPC: mean, var, and phi_1..phi_3 free
+    """
+
+    degree: int
+    mean: float = field(default=0.0, kw_only=True)
+    var: float = field(default=1.0, kw_only=True)
+    free_mean: bool = field(default=False, kw_only=True)
+    free_var: bool = field(default=False, kw_only=True)
+
+    def __post_init__(self) -> None:
+        """Validate degree, mean, variance, and flags."""
+        if isinstance(self.degree, bool) or not isinstance(self.degree, int):
+            raise SpecificationError(
+                f"DavidianCurve degree must be an integer, got {self.degree!r}."
+            )
+        if not (1 <= self.degree <= MAX_DAVIDIAN_DEGREE):
+            raise SpecificationError(
+                f"DavidianCurve degree must be between 1 and {MAX_DAVIDIAN_DEGREE}, "
+                f"got {self.degree}."
+            )
+        if isinstance(self.mean, bool) or not isinstance(self.mean, (int, float)):
+            raise SpecificationError(f"DavidianCurve mean must be a float, got {self.mean!r}.")
+        if not math.isfinite(float(self.mean)):
+            raise SpecificationError(f"DavidianCurve mean must be finite, got {self.mean}.")
+        if isinstance(self.var, bool) or not isinstance(self.var, (int, float)):
+            raise SpecificationError(f"DavidianCurve var must be a float, got {self.var!r}.")
+        if not (math.isfinite(float(self.var)) and float(self.var) > 0.0):
+            raise SpecificationError(
+                f"DavidianCurve variance must be positive and finite, got {self.var}."
+            )
+        if not isinstance(self.free_mean, bool):
+            raise SpecificationError(
+                f"DavidianCurve free_mean must be a bool, got {self.free_mean!r}."
+            )
+        if not isinstance(self.free_var, bool):
+            raise SpecificationError(
+                f"DavidianCurve free_var must be a bool, got {self.free_var!r}."
+            )
+
+    @classmethod
+    def free(cls, degree: int, *, mean: float = 0.0, var: float = 1.0) -> DavidianCurve:
+        """Return a Davidian curve with mean, variance, and shape angles all estimated."""
+        return cls(degree=degree, mean=mean, var=var, free_mean=True, free_var=True)
+
+
+def _float_tuple(values: Sequence[float] | None, n: int, what: str) -> tuple[float, ...] | None:
+    """Validate an optional length-``n`` sequence of finite floats for :class:`NormalMixture`."""
+    if values is None:
+        return None
+    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+        raise SpecificationError(f"NormalMixture {what} must be a sequence of floats.")
+    out: list[float] = []
+    for v in values:
+        if isinstance(v, bool) or not isinstance(v, (int, float, np.floating, np.integer)):
+            raise SpecificationError(f"NormalMixture {what} must contain floats, got {v!r}.")
+        if not math.isfinite(float(v)):
+            raise SpecificationError(f"NormalMixture {what} must be finite, got {v}.")
+        out.append(float(v))
+    if len(out) != n:
+        raise SpecificationError(
+            f"NormalMixture {what} must have n_components={n} entries, got {len(out)}."
+        )
+    return tuple(out)
+
+
+def _check_real(value: object, what: str, *, positive: bool = False) -> None:
+    """Raise ``SpecificationError`` unless ``value`` is a finite (positive) real number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SpecificationError(f"NormalMixture {what} must be a float, got {value!r}.")
+    if not math.isfinite(float(value)) or (positive and not float(value) > 0.0):
+        kind = "positive and finite" if positive else "finite"
+        raise SpecificationError(f"NormalMixture {what} must be {kind}, got {value}.")
+
+
+MIXTURE_START_OFFSET = 1.5
+"""Spacing of the default starting means of :class:`NormalMixture` components 2..k."""
+
+
+@dataclass(frozen=True)
+class NormalMixture:
+    r"""Analytically standardized normal-mixture latent distribution (Mislevy, 1984).
+
+    Models a unidimensional latent trait whose density is a finite mixture of :math:`k` normal
+    components, with one common set of item parameters (a single population with a non-normal
+    latent density, not a mixture IRT model with class-specific items). In the raw (gauge)
+    parameterization, component 1 is :math:`N(0,1)` and components :math:`c=2,\dots,k` have free
+    raw means ``rmean_c`` :math:`=\tilde\mu_c`, raw variances ``rvar_c`` :math:`=\tilde\sigma_c^2`
+    and baseline-category logits ``logit_c`` :math:`=\lambda_c=\log(\pi_c/\pi_1)` (R mirt's
+    ``MEAN_1``, ``COV_11`` and ``PI`` of class ``MIXTURE_c`` under ``dentype = "mixture-k"``
+    with items equal across classes, on mirt's class-1 scale; Chalmers, 2012):
+
+    .. math::
+        h(z) = \sum_{c=1}^{k}\pi_c\,\phi(z;\tilde\mu_c,\tilde\sigma_c^2),\qquad
+        \pi = \operatorname{softmax}(0,\lambda_2,\dots,\lambda_k),\quad
+        \tilde\mu_1 = 0,\ \tilde\sigma_1^2 = 1.
+
+    The raw mixture is standardized analytically by its exact continuous moments
+    :math:`M=\sum_c\pi_c\tilde\mu_c` and :math:`V=\sum_c\pi_c(\tilde\sigma_c^2+\tilde\mu_c^2)-M^2`,
+    :math:`\theta=\mu+\sigma(Z-M)/\sqrt V`, so :math:`\theta` has exact continuous mean
+    :math:`\mu` (``mean``) and variance :math:`\sigma^2` (``var``) for every shape, as for
+    :class:`DavidianCurve`. On the :math:`\theta` scale component :math:`c` is
+    :math:`N(\mu_c,\sigma_c^2)` with :math:`\mu_c=\mu+\sigma(\tilde\mu_c-M)/\sqrt V` and
+    :math:`\sigma_c^2=\sigma^2\tilde\sigma_c^2/V`. Quadrature weights normalize each component on
+    the grid and then mix them, :math:`w_q=\sum_c\pi_c\tilde w_{cq}` (DESIGN.md §4.4, §16.7).
+
+    Supported for single-group unidimensional models only. The likelihood is invariant to
+    relabelling the components (label switching) and can have several local maxima; compare
+    fits from different starting values (``means``, ``variances``, ``weights``).
+
+    Parameters
+    ----------
+    n_components : int
+        Number of components :math:`k\in\{2,\dots,10\}`.
+    mean, var : float, keyword-only
+        Value (or starting value when free) of the continuous mixture mean and variance.
+    free_mean, free_var : bool, keyword-only
+        Whether the mean / variance is estimated (requires identification via fixed item
+        intercepts / slopes as for :class:`Normal`, DESIGN.md §4.5).
+    means, variances, weights : sequence of float, optional, keyword-only
+        Length-:math:`k` starting component means, variances and mixing proportions
+        (:math:`\pi_c>0`, summing to 1). Only the shape matters: they are mapped to the raw
+        parameterization (component 1 to :math:`N(0,1)`) and standardized. Defaults:
+        ``means = (0, 1.5, -1.5, 3, -3, ...)``, ``variances = (1, ..., 1)``, ``weights = 1/k``.
+
+    Examples
+    --------
+    >>> NormalMixture(2)                              # mean 0, var 1; shape estimated
+    >>> NormalMixture(3, means=[0.0, 2.0, -2.0])      # explicit starting shape
+    >>> NormalMixture(2, free_var=True)               # Rasch / PCM
+    >>> NormalMixture.free(2)                         # FIPC: mean and variance also estimated
+    """
+
+    n_components: int
+    mean: float = field(default=0.0, kw_only=True)
+    var: float = field(default=1.0, kw_only=True)
+    free_mean: bool = field(default=False, kw_only=True)
+    free_var: bool = field(default=False, kw_only=True)
+    means: Sequence[float] | None = field(default=None, kw_only=True)
+    variances: Sequence[float] | None = field(default=None, kw_only=True)
+    weights: Sequence[float] | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        """Validate the number of components, values, starting shape and flags."""
+        k = self.n_components
+        if isinstance(k, bool) or not isinstance(k, int):
+            raise SpecificationError(f"NormalMixture n_components must be an integer, got {k!r}.")
+        if not (2 <= k <= MAX_MIXTURE_COMPONENTS):
+            raise SpecificationError(
+                f"NormalMixture n_components must be between 2 and {MAX_MIXTURE_COMPONENTS}, "
+                f"got {k} (use Normal for a single normal component)."
+            )
+        _check_real(self.mean, "mean")
+        _check_real(self.var, "var", positive=True)
+        for flag in ("free_mean", "free_var"):
+            if not isinstance(getattr(self, flag), bool):
+                raise SpecificationError(
+                    f"NormalMixture {flag} must be a bool, got {getattr(self, flag)!r}."
+                )
+        means = _float_tuple(self.means, k, "means")
+        variances = _float_tuple(self.variances, k, "variances")
+        weights = _float_tuple(self.weights, k, "weights")
+        if variances is not None and not all(v > 0.0 for v in variances):
+            raise SpecificationError(
+                f"NormalMixture variances must be positive, got {list(variances)}."
+            )
+        if weights is not None:
+            if not all(w > 0.0 for w in weights):
+                raise SpecificationError(
+                    f"NormalMixture weights must be positive, got {list(weights)}."
+                )
+            if abs(sum(weights) - 1.0) > 1e-8:
+                raise SpecificationError(
+                    f"NormalMixture weights must sum to 1, got sum {sum(weights)}."
+                )
+        object.__setattr__(self, "means", means)
+        object.__setattr__(self, "variances", variances)
+        object.__setattr__(self, "weights", weights)
+
+    @classmethod
+    def free(
+        cls,
+        n_components: int,
+        *,
+        mean: float = 0.0,
+        var: float = 1.0,
+        means: Sequence[float] | None = None,
+        variances: Sequence[float] | None = None,
+        weights: Sequence[float] | None = None,
+    ) -> NormalMixture:
+        """Return a mixture with mean, variance and shape all estimated."""
+        return cls(
+            n_components,
+            mean=mean,
+            var=var,
+            free_mean=True,
+            free_var=True,
+            means=None if means is None else tuple(means),
+            variances=None if variances is None else tuple(variances),
+            weights=None if weights is None else tuple(weights),
+        )
+
+    def raw_starts(self) -> tuple[float, ...]:
+        r"""Return the raw starting shape ``(rmean_2, rvar_2, logit_2, ..., logit_k)``.
+
+        The starting components (``means``, ``variances``, ``weights`` or their defaults) are
+        mapped affinely so that component 1 is :math:`N(0,1)`:
+        :math:`\tilde\mu_c=(m_c-m_1)/\sqrt{v_1}`, :math:`\tilde\sigma_c^2=v_c/v_1`,
+        :math:`\lambda_c=\log(\pi_c/\pi_1)` (DESIGN.md §16.7).
+        """
+        k = self.n_components
+        if self.means is not None:
+            means = list(self.means)
+        else:
+            means = [0.0]
+            for c in range(2, k + 1):
+                half = c // 2
+                means.append(MIXTURE_START_OFFSET * (half if c % 2 == 0 else -half))
+        variances = list(self.variances) if self.variances is not None else [1.0] * k
+        weights = list(self.weights) if self.weights is not None else [1.0 / k] * k
+        sd1 = math.sqrt(variances[0])
+        out: list[float] = []
+        for c in range(1, k):
+            out.extend(
+                [
+                    (means[c] - means[0]) / sd1,
+                    variances[c] / variances[0],
+                    math.log(weights[c] / weights[0]),
+                ]
+            )
+        return tuple(out)
+
+
+LatentSpec = Normal | EmpiricalHistogram | DavidianCurve | NormalMixture
+"""Union of supported latent distribution specifications."""
+
+
+def mixture_param_names(n_components: int) -> tuple[str, ...]:
+    """Return ``("mean", "var", "rmean_2", "rvar_2", "logit_2", ..., "logit_k")``."""
+    if (
+        isinstance(n_components, bool)
+        or not isinstance(n_components, int)
+        or not (2 <= n_components <= MAX_MIXTURE_COMPONENTS)
+    ):
+        raise SpecificationError(
+            f"NormalMixture n_components must be an integer in 2..{MAX_MIXTURE_COMPONENTS}, "
+            f"got {n_components!r}."
+        )
+    names = ["mean", "var"]
+    for c in range(2, n_components + 1):
+        names.extend([f"rmean_{c}", f"rvar_{c}", f"logit_{c}"])
+    return tuple(names)
+
+
+def mixture_components(params: Array) -> tuple[Array, Array, Array]:
+    r"""Standardized components :math:`(\pi_c,\mu_c,\sigma_c^2)_{c=1}^k` of a normal mixture.
+
+    ``params`` follows :func:`mixture_param_names`. With raw component 1 fixed at
+    :math:`N(0,1)`, :math:`\pi=\operatorname{softmax}(0,\lambda_2,\dots,\lambda_k)`, the raw
+    continuous moments :math:`M=\sum_c\pi_c\tilde\mu_c` and
+    :math:`V=\sum_c\pi_c(\tilde\sigma_c^2+\tilde\mu_c^2)-M^2`, and
+    :math:`\theta=\mu+\sigma(Z-M)/\sqrt V` (Mislevy, 1984; DESIGN.md §16.7):
+
+    .. math::
+        \mu_c=\mu+\sigma\frac{\tilde\mu_c-M}{\sqrt V},\qquad
+        \sigma_c^2=\sigma^2\frac{\tilde\sigma_c^2}{V},
+
+    so :math:`\sum_c\pi_c\mu_c=\mu` and :math:`\sum_c\pi_c(\sigma_c^2+\mu_c^2)-\mu^2=\sigma^2`
+    exactly. Non-positive variances give NaN means and variances.
+
+    Returns
+    -------
+    pi, means, variances : tuple of Array, each of shape (k,)
+    """
+    k = (int(params.shape[0]) + 1) // 3
+    mean, var = params[0], params[1]
+    rest = params[2:].reshape(k - 1, 3)
+    dtype = params.dtype
+    rmeans = jnp.concatenate([jnp.zeros((1,), dtype=dtype), rest[:, 0]])
+    rvars = jnp.concatenate([jnp.ones((1,), dtype=dtype), rest[:, 1]])
+    logits = jnp.concatenate([jnp.zeros((1,), dtype=dtype), rest[:, 2]])
+    ok = jnp.all(rvars > 0.0) & (var > 0.0)
+    safe_rvars = jnp.where(rvars > 0.0, rvars, 1.0)
+    safe_var = jnp.where(var > 0.0, var, 1.0)
+    pi = jax.nn.softmax(logits)
+    m_raw = jnp.sum(pi * rmeans)
+    v_raw = jnp.sum(pi * (safe_rvars + rmeans**2)) - m_raw**2
+    means = mean + jnp.sqrt(safe_var) * (rmeans - m_raw) / jnp.sqrt(v_raw)
+    variances = safe_var * safe_rvars / v_raw
+    nan = jnp.full_like(means, jnp.nan)
+    return pi, jnp.where(ok, means, nan), jnp.where(ok, variances, nan)
+
+
+def mixture_log_weights(nodes: Array, params: Array, base: Array | None = None) -> Array:
+    r"""Log quadrature weights of a standardized normal mixture, components normalized on the grid.
+
+    With the standardized components :math:`(\pi_c,\mu_c,\sigma_c^2)` of
+    :func:`mixture_components` and the fixed node log base weights :math:`b_q` (0 on equispaced
+    grids; Gauss–Hermite, DESIGN.md §15.44),
+
+    .. math::
+        \log w_q = \log\sum_{c=1}^{k}\pi_c\,\tilde w_{cq},\qquad
+        \log\tilde w_{cq} = \operatorname{log\_softmax}_q\!\Big(b_q
+            - \frac{(\theta_q-\mu_c)^2}{2\sigma_c^2}\Big).
+
+    Each component is the :class:`Normal` grid density, so :math:`\sum_q\tilde w_{cq}=1` and
+    :math:`\pi_c` is exactly the grid mass of component :math:`c`, as R mirt's
+    ``dentype = "mixture-k"`` stacks per-class normalized densities (Mislevy, 1984; Chalmers,
+    2012; DESIGN.md §16.7). Non-positive variances return NaN so the Newton line search and
+    SQUAREM reject infeasible candidates.
+
+    Parameters
+    ----------
+    nodes : Array, shape (Q,) or (Q, 1)
+        Unidimensional quadrature nodes.
+    params : Array, shape (3k - 1,)
+        Parameters in :func:`mixture_param_names` order.
+    base : Array, shape (Q,), optional
+        Fixed node log base weights (default 0).
+
+    Returns
+    -------
+    Array, shape (Q,)
+    """
+    t = nodes[:, 0] if nodes.ndim == 2 else nodes
+    _, means, variances = mixture_components(params)
+    ok = jnp.all(jnp.isfinite(variances))
+    safe_v = jnp.where(ok, variances, 1.0)
+    safe_m = jnp.where(ok, means, 0.0)
+    kernel = -0.5 * (t[None, :] - safe_m[:, None]) ** 2 / safe_v[:, None]  # (k, Q)
+    if base is not None:
+        kernel = kernel + base[None, :]
+    log_comp = jax.nn.log_softmax(kernel, axis=1)
+    log_pi = jax.nn.log_softmax(
+        jnp.concatenate([jnp.zeros((1,), dtype=params.dtype), params[4::3]])
+    )
+    logw = jax.scipy.special.logsumexp(log_pi[:, None] + log_comp, axis=0)
+    return jnp.where(ok, logw, jnp.nan)
+
+
+def davidian_param_names(degree: int) -> tuple[str, ...]:
+    """Return latent parameter names ``("mean", "var", "phi_1", ..., "phi_k")``."""
+    if (
+        isinstance(degree, bool)
+        or not isinstance(degree, int)
+        or not (1 <= degree <= MAX_DAVIDIAN_DEGREE)
+    ):
+        raise SpecificationError(
+            f"DavidianCurve degree must be an integer in 1..{MAX_DAVIDIAN_DEGREE}, got {degree!r}."
+        )
+    return ("mean", "var", *(f"phi_{j}" for j in range(1, degree + 1)))
+
+
+def davidian_hermite_coeffs(phi: Array) -> Array:
+    r"""Map spherical angles :math:`\boldsymbol\phi\in\mathbb R^k` to unit Hermite coefficients.
+
+    Uses the cosine-first spherical chart on :math:`S^k` (DESIGN.md §16.4):
+
+    .. math::
+        c_0 = \prod_{m=1}^{k}\cos\phi_m, \qquad
+        c_j = \sin\phi_j \prod_{m=j+1}^{k}\cos\phi_m \quad (j=1,\dots,k).
+
+    Satisfies :math:`\lVert\mathbf c(\boldsymbol\phi)\rVert_2 = 1` identically, maps
+    :math:`\boldsymbol\phi = \mathbf 0` to :math:`\mathbf c = (1, 0, \dots, 0)` with identity
+    Jacobian :math:`\partial c_j / \partial\phi_m|_{\mathbf 0} = \delta_{jm}`, and nests degree
+    :math:`k-1` at :math:`\phi_k = 0`. Zhang & Davidian (2001); Woods & Lin (2009).
+
+    Parameters
+    ----------
+    phi : Array, shape (k,)
+        Spherical angles.
+
+    Returns
+    -------
+    Array, shape (k + 1,)
+        Unit-norm coefficients of the normalized probabilists' Hermite basis.
+    """
+    s = jnp.sin(phi)
+    c = jnp.cos(phi)
+    one = jnp.ones((1,), dtype=phi.dtype)
+    suffix = jnp.concatenate([jnp.cumprod(c[::-1])[::-1], one])
+    head = jnp.concatenate([one, s])
+    return head * suffix
+
+
+def davidian_moments(coeffs: Array) -> tuple[Array, Array]:
+    r"""Exact continuous mean and variance of :math:`h_k(z) = P_k(z)^2\varphi(z)`.
+
+    For :math:`P_k(z) = \sum_{j=0}^k c_j\,He_j(z)/\sqrt{j!}` with :math:`\sum_{j=0}^k c_j^2 = 1`,
+    the three-term recurrence :math:`z\,\psi_j(z) = \sqrt{j+1}\,\psi_{j+1}(z) +
+    \sqrt{j}\,\psi_{j-1}(z)` yields closed-form continuous moments (Zhang & Davidian, 2001;
+    DESIGN.md §16.4):
+
+    .. math::
+        \mu_Z = 2\sum_{j=0}^{k-1}\sqrt{j+1}\,c_j c_{j+1}, \qquad
+        \sigma_Z^2 = \sum_{j=0}^{k}(2j+1)c_j^2
+                   + 2\sum_{j=0}^{k-2}\sqrt{(j+1)(j+2)}\,c_j c_{j+2}
+                   - \mu_Z^2.
+
+    Parameters
+    ----------
+    coeffs : Array, shape (k + 1,)
+        Unit-norm Hermite coefficients from :func:`davidian_hermite_coeffs`.
+
+    Returns
+    -------
+    mean, var : tuple of scalar Array
+        Exact continuous mean and strictly positive variance of :math:`h_k`.
+    """
+    k = int(coeffs.shape[0]) - 1
+    dtype = coeffs.dtype
+    idx1 = jnp.arange(1, k + 1, dtype=dtype)
+    mu = 2.0 * jnp.sum(jnp.sqrt(idx1) * coeffs[:-1] * coeffs[1:])
+    e2 = jnp.sum((2.0 * jnp.arange(k + 1, dtype=dtype) + 1.0) * (coeffs * coeffs))
+    if k >= 2:
+        idx2 = jnp.arange(1, k, dtype=dtype)
+        e2 = e2 + 2.0 * jnp.sum(jnp.sqrt(idx2 * (idx2 + 1.0)) * coeffs[:-2] * coeffs[2:])
+    var = e2 - mu * mu
+    return mu, var
+
+
+def _normalized_hermite_basis(z: Array, degree: int) -> Array:
+    r"""Evaluate normalized probabilists' Hermite polynomials :math:`He_j(z)/\sqrt{j!}`."""
+    cols = [jnp.ones_like(z)]
+    if degree >= 1:
+        cols.append(z)
+    for j in range(2, degree + 1):
+        cols.append((z * cols[-1] - math.sqrt(j - 1) * cols[-2]) / math.sqrt(j))
+    return jnp.stack(cols, axis=-1)  # (Q, degree + 1)
+
+
+def davidian_log_weights(nodes: Array, params: Array) -> Array:
+    r"""Log quadrature weights of an analytically standardized Davidian curve on ``nodes``.
+
+    Given ``params = (mean, var, phi_1, ..., phi_k)``, maps :math:`\boldsymbol\phi` to unit
+    Hermite coefficients :math:`\mathbf c(\boldsymbol\phi)` via :func:`davidian_hermite_coeffs`,
+    computes the exact continuous moments :math:`(\mu_Z,\sigma_Z^2)` via :func:`davidian_moments`,
+    evaluates the standardized density at
+    :math:`z_q = \mu_Z + \sigma_Z (\theta_q - \mu) / \sqrt{\sigma^2}`, and normalizes on the
+    grid (Zhang & Davidian, 2001; Woods & Lin, 2009; DESIGN.md §4.4, §16.4):
+
+    .. math::
+        \log w_q(\mu,\sigma^2,\boldsymbol\phi)
+        = \operatorname{log\_softmax}_q\!\Big(
+            \log\!\big(P_k(z_q;\boldsymbol\phi)^2\big) - \tfrac{1}{2}z_q^2
+          \Big).
+
+    Constant factors :math:`(2\pi)^{-1/2}\sigma_Z/\sigma` cancel inside ``log_softmax``. Exact
+    zeros of :math:`P_k(z_q)` receive :math:`\log w_q = -\infty` with double-``where`` guards so
+    gradients remain finite at non-zero nodes; non-positive ``var`` returns NaN so line search
+    and SQUAREM reject infeasible candidates.
+
+    Parameters
+    ----------
+    nodes : Array, shape (Q,) or (Q, 1)
+        Unidimensional quadrature nodes.
+    params : Array, shape (2 + degree,)
+        Latent parameters ``(mean, var, phi_1, ..., phi_k)``.
+
+    Returns
+    -------
+    Array, shape (Q,)
+        Log quadrature weights summing to 1 in probability space.
+    """
+    t = nodes[:, 0] if nodes.ndim == 2 else nodes
+    mean = params[0]
+    var = params[1]
+    phi = params[2:]
+    degree = int(phi.shape[0])
+
+    ok_var = var > 0.0
+    safe_var = jnp.where(ok_var, var, 1.0)
+    coeffs = davidian_hermite_coeffs(phi)
+    mu_z, var_z = davidian_moments(coeffs)
+    ok_z = var_z > 0.0
+    safe_var_z = jnp.where(ok_z, var_z, 1.0)
+    z = mu_z + jnp.sqrt(safe_var_z) * (t - mean) / jnp.sqrt(safe_var)
+
+    basis = _normalized_hermite_basis(z, degree)
+    poly = basis @ coeffs
+    p2 = poly * poly
+    pos = p2 > 0.0
+    log_p2 = jnp.where(pos, jnp.log(jnp.where(pos, p2, 1.0)), -jnp.inf)
+    log_h = log_p2 - 0.5 * z * z
+    any_pos = jnp.any(pos)
+    safe_log_h = jnp.where(any_pos, log_h, jnp.zeros_like(log_h))
+    logw = jax.nn.log_softmax(safe_log_h)
+    return jnp.where(ok_var & ok_z & any_pos, logw, jnp.nan)
+
+
+def eh_project_floor(counts: Array, min_weight: Array | float) -> Array:
+    r"""Exact KKT maximizer of :math:`\sum_q \bar n_q\log w_q` on the floored simplex.
+
+    Solves
+
+    .. math::
+        \max_{w\in\Delta^{Q-1},\;w_q\ge\tau}\sum_{q=1}^Q \bar n_q \log w_q,
+
+    whose unique KKT solution is :math:`w_q=\max(\tau,\,c^*\bar n_q)` with :math:`c^*>0` chosen
+    so :math:`\sum_q w_q=1` (DESIGN.md §4.4, §15.34). Reduces identically to
+    :math:`\bar n_q / \sum_{q'}\bar n_{q'}` whenever no node hits the floor :math:`\tau`.
+    """
+    n_nodes = counts.shape[0]
+    total = jnp.sum(counts)
+    r = jnp.where(total > 0.0, counts / jnp.where(total > 0.0, total, 1.0), 1.0 / n_nodes)
+    order = jnp.argsort(r)
+    r_sorted = r[order]
+    suf = jnp.cumsum(r_sorted[::-1])[::-1]
+    ks = jnp.arange(n_nodes, dtype=r.dtype)
+    rem = 1.0 - ks * min_weight
+    c_k = jnp.where(suf > 0.0, rem / jnp.where(suf > 0.0, suf, 1.0), 0.0)
+    above = (c_k * r_sorted) > min_weight
+    has_above = jnp.any(above)
+    k_opt = jnp.argmax(above)
+    c_opt = c_k[k_opt]
+    w = jnp.where(has_above, jnp.maximum(min_weight, c_opt * r), jnp.full_like(r, 1.0 / n_nodes))
+    return w / jnp.sum(w)
+
+
+_EH_DUAL_MAX_ITER = 200
+"""Maximum dual Newton iterations in :func:`eh_constrained_weights`."""
+_EH_DUAL_GRAD_TOL = 1e-13
+"""Convergence tolerance on the moment residuals in :func:`eh_constrained_weights`."""
+
+
+def eh_constrained_weights(
+    counts: Array, nodes: Array, min_weight: Array | float, n_moments: int
+) -> Array:
+    r"""Maximize :math:`\sum_q \bar n_q\log w_q` on the floored simplex with moment constraints.
+
+    Solves the reference-group EH M-step under the identification of DESIGN.md §4.4 / §15.34:
+
+    .. math::
+        \max_{w}\ \sum_{q=1}^Q p_q\log w_q
+        \quad\text{s.t.}\quad w_q\ge\tau,\quad \sum_q w_q=1,\quad
+        \sum_q w_q\theta_q=0\ (n_{\text{moments}}\ge 1),\quad
+        \sum_q w_q\theta_q^2=1\ (n_{\text{moments}}=2),
+
+    with :math:`p_q=\bar n_q/\sum_r\bar n_r`. With :math:`\phi_q=(1,\theta_q,\theta_q^2)` (first
+    :math:`K=n_{\text{moments}}+1` entries) and multipliers :math:`\lambda\in\mathbb R^K`, the
+    KKT solution is :math:`w_q(\lambda)=\max\{\tau,\ p_q/(\lambda^\top\phi_q)\}`, where
+    :math:`\lambda` minimizes the smooth convex dual
+
+    .. math::
+        G(\lambda)=\sum_q\big[p_q\log w_q(\lambda)-(\lambda^\top\phi_q)\,w_q(\lambda)\big]
+        +\lambda^\top c,\qquad c=(1,0,1)_{1:K},
+
+    over :math:`\{\lambda:\lambda^\top\phi_q>0\ \forall q\}` (Boyd & Vandenberghe, 2004,
+    §5.2). :math:`G` is minimized by damped Newton with backtracking from
+    :math:`\lambda=(1,0,\dots)`; :math:`\nabla G=c-\sum_q w_q\phi_q` is the constraint residual,
+    so the returned weights satisfy the moment constraints to about ``1e-13``. The objective is
+    the EM latent Q-function, so the M-step is exact and EM stays monotone. ``n_moments=0``
+    reduces to :func:`eh_project_floor`. Used as an I-projection (``counts`` = candidate weights)
+    for SQUAREM candidates (§15.36).
+
+    The minimizer is interior whenever every :math:`p_q>0` (E-step counts and softmax candidates
+    always are): :math:`G\to\infty` as any :math:`\lambda^\top\phi_q\downarrow 0`. If some
+    :math:`p_q=0` and the optimum needs extra mass on those nodes, the dual infimum lies on the
+    boundary; Newton then stops early and the constraints are not met, which ``fit()`` reports
+    (DESIGN.md §15.34).
+
+    Parameters
+    ----------
+    counts : (Q,) float
+        Expected counts :math:`\bar n_q \ge 0` (or candidate weights).
+    nodes : (Q,) float
+        Quadrature nodes :math:`\theta_q`.
+    min_weight : float
+        Floor :math:`\tau`.
+    n_moments : {0, 1, 2}
+        Static number of moment constraints (mean 0; mean 0 and variance 1).
+    """
+    if n_moments == 0:
+        return eh_project_floor(counts, min_weight)
+    dtype = counts.dtype
+    total = jnp.sum(counts)
+    p = counts / total
+    k = n_moments + 1
+    phi = jnp.stack([jnp.ones_like(nodes), nodes, nodes**2], axis=1)[:, :k]  # (Q, K)
+    c = jnp.asarray([1.0, 0.0, 1.0], dtype=dtype)[:k]
+
+    def weights(lam: Array) -> tuple[Array, Array, Array]:
+        sq = phi @ lam
+        safe = jnp.where(sq > 0.0, sq, 1.0)
+        free = p > min_weight * safe
+        w = jnp.where(free, p / safe, min_weight)
+        return w, sq, free
+
+    def dual(lam: Array) -> Array:
+        w, sq, _ = weights(lam)
+        logw = jnp.log(w)
+        val = jnp.sum(jnp.where(p > 0.0, p * logw, 0.0) - sq * w) + lam @ c
+        return jnp.where(jnp.all(sq > 0.0), val, jnp.inf)
+
+    def grad_hess(lam: Array) -> tuple[Array, Array]:
+        w, sq, free = weights(lam)
+        g = c - phi.T @ w
+        curv = jnp.where(free, p / jnp.where(sq > 0.0, sq, 1.0) ** 2, 0.0)
+        h = (phi * curv[:, None]).T @ phi
+        return g, h
+
+    def cond(state: tuple[Array, Array, Array, Array]) -> Array:
+        _, g, it, stalled = state
+        return (jnp.max(jnp.abs(g)) > _EH_DUAL_GRAD_TOL) & (it < _EH_DUAL_MAX_ITER) & ~stalled
+
+    def body(state: tuple[Array, Array, Array, Array]) -> tuple[Array, Array, Array, Array]:
+        lam, g, it, _ = state
+        _, h = grad_hess(lam)
+        step = -jnp.linalg.solve(h, g)
+        f0 = dual(lam)
+        slope = g @ step
+
+        g_inf = jnp.max(jnp.abs(g))
+
+        def armijo_fails(t: Array) -> Array:
+            # Near the optimum the dual decrease falls below rounding; a feasible step that
+            # shrinks the constraint residual is then accepted instead.
+            cand = lam + t * step
+            f1 = dual(cand)
+            g1, _ = grad_hess(cand)
+            shrinks = jnp.isfinite(f1) & (jnp.max(jnp.abs(g1)) < 0.5 * g_inf)
+            accept: Array = (f1 <= f0 + 1e-4 * t * slope) | shrinks
+            return ~accept
+
+        t = jax.lax.while_loop(
+            lambda t: armijo_fails(t) & (t > 1e-12), lambda t: 0.5 * t, jnp.ones((), dtype=dtype)
+        )
+        ok = ~armijo_fails(t)
+        lam_new = jnp.where(ok, lam + t * step, lam)
+        g_new, _ = grad_hess(lam_new)
+        return lam_new, g_new, it + 1, ~ok
+
+    lam0 = jnp.zeros((k,), dtype=dtype).at[0].set(1.0)
+    g0, _ = grad_hess(lam0)
+    init = (lam0, g0, jnp.zeros((), dtype=jnp.int32), jnp.zeros((), dtype=jnp.bool_))
+    lam, _, _, _ = jax.lax.while_loop(cond, body, init)
+    w, _, _ = weights(lam)
+    return w
+
+
+def eh_moments(nodes: np.ndarray, weights: np.ndarray) -> tuple[float, float, float, float, float]:
+    r"""Return ``(mean, var, sd, skewness, kurtosis)`` of discrete EH weights on ``nodes``.
+
+    .. math::
+        \mu = \sum_q w_q\theta_q,\quad
+        \sigma^2 = \sum_q w_q(\theta_q-\mu)^2,\quad
+        \gamma_1 = \frac{\sum_q w_q(\theta_q-\mu)^3}{\sigma^3},\quad
+        \gamma_2 = \frac{\sum_q w_q(\theta_q-\mu)^4}{\sigma^4} - 3
+
+    where :math:`\gamma_2` is Fisher's excess kurtosis (0 for a normal distribution).
+    """
+    th = np.asarray(nodes, dtype=float)
+    w = np.asarray(weights, dtype=float)
+    mean = float(np.sum(w * th))
+    centered = th - mean
+    var = float(np.sum(w * centered**2))
+    if var <= 0.0:
+        return mean, max(var, 0.0), 0.0, math.nan, math.nan
+    sd = math.sqrt(var)
+    skewness = float(np.sum(w * centered**3)) / (sd**3)
+    kurtosis = float(np.sum(w * centered**4)) / (var**2) - 3.0
+    return mean, var, sd, skewness, kurtosis
+
+
+def latent_param_names(n_factors: int) -> tuple[str, ...]:
+    """Return the latent parameter names for ``n_factors`` in ``{1, 2, 3}``.
+
+    For ``n_factors == 1``, returns ``("mean", "var")``. For ``n_factors > 1``, returns
+    ``("mean_1", ..., "mean_D", "var_1", ..., "var_D", "cor_12", ...)`` with correlation pairs in
+    lexicographic order ``i < j``.
+    """
+    if n_factors == 1:
+        return ("mean", "var")
+    if n_factors not in (2, 3):
+        raise SpecificationError(f"Multivariate normal supports 1 to 3 factors, got {n_factors}.")
+    means = tuple(f"mean_{i}" for i in range(1, n_factors + 1))
+    vars_ = tuple(f"var_{i}" for i in range(1, n_factors + 1))
+    cors = tuple(
+        f"cor_{i}{j}" for i in range(1, n_factors + 1) for j in range(i + 1, n_factors + 1)
+    )
+    return (*means, *vars_, *cors)
+
+
+def correlation_matrix_is_positive_definite(cors: Sequence[float], n_factors: int) -> bool:
+    """Return True iff the ``n_factors`` × ``n_factors`` correlation matrix is positive definite."""
+    if n_factors == 1:
+        return True
+    if n_factors == 2:
+        r12 = float(cors[0])
+        return math.isfinite(r12) and abs(r12) < 1.0
+    if n_factors == 3:
+        r12, r13, r23 = float(cors[0]), float(cors[1]), float(cors[2])
+        if not (math.isfinite(r12) and math.isfinite(r13) and math.isfinite(r23)):
+            return False
+        m2 = 1.0 - r12 * r12
+        det = 1.0 - r12 * r12 - r13 * r13 - r23 * r23 + 2.0 * r12 * r13 * r23
+        return m2 > 0.0 and det > 0.0
+    raise SpecificationError(f"Multivariate normal supports 1 to 3 factors, got {n_factors}.")
+
+
+def mvn_log_weights(nodes: Array, params: Array) -> Array:
+    r"""Log quadrature weights of a :math:`D`-dimensional normal density normalized on the grid.
+
+    .. math::
+        \log w_q = \log\phi_D(\boldsymbol\theta_q; \boldsymbol\mu, \boldsymbol\Sigma)
+                 - \log\sum_{q'}\phi_D(\boldsymbol\theta_{q'}; \boldsymbol\mu, \boldsymbol\Sigma),
+        \qquad
+        \Sigma_{ii} = v_i > 0,\quad \Sigma_{ij} = \rho_{ij}\sqrt{v_i v_j}\ (i \neq j).
+
+    The normalizing constant :math:`(2\pi)^{-D/2}|\boldsymbol\Sigma|^{-1/2}` is independent of
+    :math:`q` and cancels inside ``log_softmax``. For :math:`D = 1` this dispatches to
+    :func:`normal_log_weights` unchanged. For :math:`D \in \{2, 3\}`, positive definiteness of the
+    correlation matrix is checked by Sylvester's criterion (leading principal minors :math:`> 0`)
+    with double-``where`` guards so derivatives at valid interior points never see NaN, while
+    non-positive-definite candidates return NaN and are rejected by the Newton line search and
+    SQUAREM safeguard (DESIGN.md §4.4, §15.30).
+
+    Parameters
+    ----------
+    nodes : Array, shape (Q, D) or (Q,)
+        Product quadrature nodes.
+    params : Array, shape (2*D + D*(D-1)//2,)
+        Latent parameters in :func:`latent_param_names` order.
+
+    Returns
+    -------
+    Array, shape (Q,)
+    """
+    n_factors = 1 if nodes.ndim == 1 else int(nodes.shape[1])
+    if n_factors == 1:
+        t = nodes if nodes.ndim == 1 else nodes[:, 0]
+        return normal_log_weights(t, params[0], params[1])
+
+    means = params[:n_factors]
+    vars_ = params[n_factors : 2 * n_factors]
+    ok_var = jnp.all(vars_ > 0.0)
+    safe_vars = jnp.where(vars_ > 0.0, vars_, 1.0)
+    z = (nodes - means[None, :]) / jnp.sqrt(safe_vars)[None, :]  # (Q, D)
+
+    if n_factors == 2:
+        r12 = params[4]
+        det = 1.0 - r12 * r12
+        is_pd = ok_var & (det > 0.0)
+        safe_det = jnp.where(is_pd, det, 1.0)
+        quad = (z[:, 0] ** 2 - 2.0 * r12 * z[:, 0] * z[:, 1] + z[:, 1] ** 2) / safe_det
+        logw = jax.nn.log_softmax(-0.5 * quad)
+        return jnp.where(is_pd, logw, jnp.nan)
+
+    if n_factors == 3:
+        r12, r13, r23 = params[6], params[7], params[8]
+        m2 = 1.0 - r12 * r12
+        det = 1.0 - r12 * r12 - r13 * r13 - r23 * r23 + 2.0 * r12 * r13 * r23
+        is_pd = ok_var & (m2 > 0.0) & (det > 0.0)
+        one = jnp.ones((), dtype=params.dtype)
+        corr = jnp.array([[one, r12, r13], [r12, one, r23], [r13, r23, one]])
+        safe_corr = jnp.where(is_pd, corr, jnp.eye(3, dtype=params.dtype))
+        chol = jnp.linalg.cholesky(safe_corr)
+        y = jax.scipy.linalg.solve_triangular(chol, z.T, lower=True)
+        quad = jnp.sum(y * y, axis=0)
+        logw = jax.nn.log_softmax(-0.5 * quad)
+        return jnp.where(is_pd, logw, jnp.nan)
+
+    raise SpecificationError(f"Multivariate normal supports 1 to 3 factors, got {n_factors}.")

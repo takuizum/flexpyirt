@@ -9,3 +9,5 @@ build/
 .ipynb_checkpoints/
 validation/r/.Rhistory
 .hypothesis/
+benchmarks/data/
+site/

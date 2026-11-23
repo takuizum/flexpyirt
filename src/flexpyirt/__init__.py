@@ -6,10 +6,12 @@ from importlib.metadata import PackageNotFoundError, version
 
 from flexpyirt import errors
 from flexpyirt.fit import fit
-from flexpyirt.items import GRM, Rasch, TwoPL
-from flexpyirt.latent import Normal
+from flexpyirt.items import GPCM, GRM, PCM, FourPL, Nominal, Rasch, ThreePL, TwoPL
+from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, Normal, NormalMixture
+from flexpyirt.linking import LinkResult, link
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
+from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
 
@@ -20,14 +22,27 @@ except PackageNotFoundError:  # pragma: no cover - only when running from an unb
 
 __all__ = [
     "BAEM",
+    "GPCM",
     "GRM",
+    "PCM",
+    "BetaPrior",
+    "DavidianCurve",
+    "EmpiricalHistogram",
     "FitResult",
+    "FourPL",
+    "LinkResult",
+    "LogNormalPrior",
     "Model",
+    "Nominal",
     "Normal",
+    "NormalMixture",
+    "NormalPrior",
     "Quadrature",
     "Rasch",
+    "ThreePL",
     "TwoPL",
     "__version__",
     "errors",
     "fit",
+    "link",
 ]

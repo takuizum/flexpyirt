@@ -1,17 +1,45 @@
 [project]
 name = "flexpyirt"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Bock–Aitkin EM estimation for item response theory models, built on JAX."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [{ name = "takuizum" }]
+keywords = [
+    "item response theory",
+    "IRT",
+    "psychometrics",
+    "EM algorithm",
+    "marginal maximum likelihood",
+    "JAX",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Typing :: Typed",
+]
 dependencies = [
     "jax>=0.4.30",
     "numpy>=1.26",
     "scipy>=1.11",
     "pandas>=2.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/takuizum/flexpyirt"
+Documentation = "https://takuizum.github.io/flexpyirt/"
+Repository = "https://github.com/takuizum/flexpyirt"
+Issues = "https://github.com/takuizum/flexpyirt/issues"
+Releases = "https://github.com/takuizum/flexpyirt/releases"
 
 [project.optional-dependencies]
 polars = ["polars>=1.0"]
@@ -23,14 +51,31 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "pandas-stubs>=2.1",
+    "pytest-xdist>=3.8.0",
+]
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocs-static-i18n>=1.2",
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+# The version comes from the latest vX.Y.Z git tag (CONTRIBUTING.md "リリース").
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+fallback_version = "0.0.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/flexpyirt"]
+
+# The sdist carries the sources, tests (with the mirt reference values), R validation scripts,
+# benchmarks and documentation; repository tooling stays out.
+[tool.hatch.build.targets.sdist]
+exclude = ["/.github", "/.python-version", "/CLAUDE.md", "/uv.lock", "/site"]
 
 [tool.ruff]
 line-length = 100
@@ -53,7 +98,7 @@ convention = "numpy"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src/flexpyirt", "tests"]
+files = ["src/flexpyirt", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
 module = ["scipy.*"]
@@ -62,5 +107,11 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = ["-ra", "--strict-markers", "--strict-config"]
+# Parallel by default (pytest-xdist). `loadfile` keeps each module on one worker so JAX
+# compilations are reused within a module (conftest clears the cache between modules).
+# Use `-n 0` to run serially, e.g. when debugging.
+addopts = ["-ra", "--strict-markers", "--strict-config", "-n", "auto", "--dist", "loadfile"]
+markers = [
+    "slow: long-running (>~10 s) test; skipped on PR CI, run on pushes to develop/main. Deselect locally with -m 'not slow'.",
+]
 xfail_strict = true

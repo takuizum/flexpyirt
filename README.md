@@ -1,55 +1,172 @@
 # flexpyirt
 
-JAX による Bock–Aitkin EM の項目反応理論（IRT）推定ライブラリ — **開発中**。
+English | [日本語](https://github.com/takuizum/flexpyirt/blob/main/README.ja.md)
 
-目標とする機能（未実装のものを含む）:
+Item response theory (IRT) estimation in Python, built on JAX. At its core is marginal maximum
+likelihood estimation (MMLE) with the Bock–Aitkin EM algorithm, including multiple-group
+calibration and fixed item parameter calibration (FIPC).
 
-- 多母集団の同時推定（部分アンカー）
-- 固定パラメタ推定（FIPC）
-- 潜在分布の指定（Normal / Empirical Histogram）
-- 事前分布つきの Bayes modal（MAP）推定
-- Oakes の恒等式による標準誤差（自動微分）
+- **Verified against R `mirt`**: every supported feature is checked numerically against mirt
+  (parameters, log-likelihood and standard errors agree to about 1e-8; see
+  [validation](https://takuizum.github.io/flexpyirt/VALIDATION/)).
+- **Automatic differentiation**: M-step gradients and Hessians and the standard errors (Oakes'
+  identity) all come from JAX autodiff. A new item model only needs its log-probability for
+  estimation, standard errors and scoring to work.
+- **ParameterTable**: a table like mirt's `pars = "values"` for editing fixed values, equality
+  constraints and starting values.
 
-すべての機能は R `mirt` との数値照合テストが通ってから「対応済み」とする。
+> Under development (0.x). The public API may change before 1.0.0.
 
-## ドキュメント
-- [設計書](docs/DESIGN.md)
-- [API スケッチ](docs/API.md)
-- [検証計画](docs/VALIDATION.md)
-- [ロードマップ](docs/ROADMAP.md)
-- [Claude Code への引き継ぎ](CLAUDE.md)
+**Documentation: <https://takuizum.github.io/flexpyirt/>**
 
-## ステータス
-| マイルストーン | 内容 | 状態 |
+## Features
+
+| Feature | Details | mirt check |
 |---|---|---|
-| M0 | 足場（パッケージ・CI） | 完了 |
-| M1 | 単一群 2PL / Rasch の BA-EM、Oakes / Hessian SE、EAP | R mirt 照合（V1, V2, V10）済み |
-| M2 | 多母集団（部分アンカー）、FIPC、GRM、欠測（MAR） | R mirt 照合（V3, V4, V5, V9）済み |
+| Item models | 2PL, Rasch (latent variance estimated), 3PL, 4PL, GRM (graded response model), GPCM, PCM (latent variance estimated), Nominal (nominal response model; validated for one and two factors, three factors unit-tested only) | V1, V2, V3, V8, V11, V23 |
+| Priors and MAP | `NormalPrior`, `LogNormalPrior`, `BetaPrior` on item parameters (`Model.prior()`), natural scale, `FitResult.log_posterior` | V7 |
+| Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | V4 |
+| Equality across items | Common parameters across items and item models (`Model.equal_across_items()`, e.g. one common slope), combined with across-group equalities | V16 |
+| FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | V5 |
+| Missing data | Responses missing at random (MAR) | V9 |
+| Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior, plus delta-method SEs for display IRT thresholds (`b_se` / `bk_se`) | V7, V10, V12, V14 |
+| Scoring | EAP, MAP, ML and WLE (1–3 factors, with standard errors) and plausible values (`PV`, 1–3 factors, explicit JAX PRNG `key`), using each group's latent distribution as the prior where applicable | V1–V5, V7–V9, V11, V13, V14 |
+| Multidimensional models | Confirmatory 2–3 factor MIRT (`Model.with_factors()`, also with multiple groups) with cross-loadings, correlated or orthogonal MVN factors, product quadrature grids, Oakes/Hessian SEs, and EAP / MAP / ML / WLE scoring | V14, V21 |
+| Empirical histogram | `EmpiricalHistogram()` latent distributions (Woods, 2007) for skewed or multimodal traits; reference group standardized to mean 0 / variance 1 by an exact constrained M-step, free under FIPC; weights reported with moments up to the 4th | V6 |
+| Davidian curves | `DavidianCurve(degree)` seminonparametric latent distributions (Zhang & Davidian, 2001; Woods & Lin, 2009) for single-group unidimensional models; analytically standardized to exact continuous `mean`/`var` (optional `free_mean`/`free_var` for Rasch, PCM, FIPC) with joint Oakes/Hessian SEs and EAP/PV scoring | V19 |
+| Normal mixtures | `NormalMixture(n_components)` latent densities (Mislevy, 1984) with one common set of items for single-group unidimensional models; mirt's `dentype = "mixture-k"` class parameterization analytically standardized to exact continuous `mean`/`var`, standardized components (`pi_c`, `mean_c`, `var_c`) with delta-method SEs, joint Oakes/Hessian SEs, EAP/PV scoring, degenerate-solution warnings | V22 |
+| Saving results | `FitResult.to_json()` / `FitResult.from_json()` (strict schema, no pickle) | — |
+| EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | V1–V5, V7–V9, V11, V14 |
+| Item fit | Orlando–Thissen S-X2 (`FitResult.item_fit()`, per group for multiple groups) with mirt's cell collapsing, df, RMSEA and p-values | V15 |
+| Limited-information fit | Maydeu-Olivares & Joe M2 / M2* (`FitResult.m2()`) with df, p-value, RMSEA + CI, SRMSR and dichotomous TLI / CFI | V18 |
+| DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | V17 |
+| Scale linking | Differentiable characteristic-curve linking (`link()`, `LinkResult`: Haebara and Stocking–Lord, non-symmetric and symmetric, Ogasawara delta-method SEs, transformed items and $\theta$ scores; validated for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items) | V20 |
+| Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
-M1（すべて `tests/test_mirt_m1.py` で mirt と照合）:
-- 2PL・Rasch（Rasch は潜在分散を自由推定）の周辺最尤推定
-- 標準誤差（Oakes の恒等式／周辺対数尤度の Hessian、いずれも自動微分）
-- EAP スコア
+See the [roadmap](https://takuizum.github.io/flexpyirt/ROADMAP/) for what comes next.
 
-M2 で追加（`tests/test_mirt_m2.py` で mirt と照合）:
-- 多母集団の同時推定（群間等値のアンカー項目、焦点群の平均・分散を自由推定）
-- 固定項目パラメタ推定（FIPC）
-- GRM（段階反応モデル）
-- 欠測（MAR）を含むデータ
+## Installation
+
+Python 3.11 or later.
+
+```bash
+pip install flexpyirt  # or: uv add flexpyirt
+```
+
+For polars input, install `flexpyirt[polars]`. For GPUs, install a CUDA build of `jax` first
+(see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)).
+
+flexpyirt computes in **64-bit floating point**. The JAX setting belongs to you, so the library
+does not change it; enable it before fitting (otherwise `fit()` raises `PrecisionError`).
 
 ```python
 import jax
 
 jax.config.update("jax_enable_x64", True)
-from flexpyirt import Model, Rasch, fit
-
-res = fit(Model.uniform(Rasch(), items=df.columns), df)
-res.items, res.latent, res.loglik
-res.score(df)
 ```
 
-## 開発
+## Quick start
+
+As an example, simulate 2PL data and fit it. With real data, pass a DataFrame with one column per
+item and one row per respondent (values 0/1, missing as NaN).
+
+```python
+import numpy as np
+import pandas as pd
+
+from flexpyirt import Model, TwoPL, fit
+
+rng = np.random.default_rng(1)
+n_persons, n_items = 1000, 10
+a = rng.lognormal(0.0, 0.3, n_items)  # slopes
+d = rng.normal(0.0, 1.0, n_items)  # intercepts
+theta = rng.normal(0.0, 1.0, n_persons)
+p = 1.0 / (1.0 + np.exp(-(np.outer(theta, a) + d)))
+df = pd.DataFrame(
+    (rng.random(p.shape) < p).astype(int),
+    columns=[f"q{j:02d}" for j in range(1, n_items + 1)],
+)
+
+spec = Model.uniform(TwoPL(), items=df.columns)
+res = fit(spec, df)
+
+print(res)  # log-likelihood, number of parameters, convergence
+print(res.items.head())  # item, model, a, d, a_se, d_se, b (= -d/a), b_se
+print(res.loglik, res.aic, res.bic)
+scores = res.score(df)  # EAP (theta) and posterior SD (se) per respondent
+```
+
+Parameters use mirt's slope–intercept form $P(y=1\mid\theta)=\sigma(a\theta+d)$; `items` also
+shows the difficulty $b=-d/a$ for display.
+
+## Examples
+
+See the [user guide](https://takuizum.github.io/flexpyirt/guide/) for details and the [API reference](https://takuizum.github.io/flexpyirt/reference/) for
+each function.
+
+**Rasch model** (slopes fixed at 1, latent variance estimated)
+
+```python
+from flexpyirt import Rasch
+
+rasch = fit(Model.uniform(Rasch(), items=df.columns), df)
+print(rasch.latent)  # group, mean (fixed at 0), var (estimated), mean_se, var_se
+```
+
+**Multiple groups (linked by anchor items)**
+
+```python
+from flexpyirt import Normal
+
+group = np.repeat(["ref", "focal"], n_persons // 2)
+spec2 = (
+    Model.uniform(TwoPL(), items=df.columns)
+    .with_groups(ref=Normal.standard(), focal=Normal.free())  # the first group is the reference
+    .equal_across_groups(items=["q01", "q02", "q03", "q04"])  # anchor items
+)
+res2 = fit(spec2, df, group=group)
+print(res2.latent)  # the focal group's mean and variance are estimated
+```
+
+**FIPC (fix items at bank values and calibrate new items)**
+
+```python
+bank = pd.DataFrame({"item": ["q01", "q02", "q03"], "a": a[:3], "d": d[:3]})
+spec3 = Model.uniform(TwoPL(), items=df.columns).fix_from(bank).with_latent(Normal.free())
+res3 = fit(spec3, df)
+```
+
+## Performance
+
+Wall-time benchmarks against R `mirt` (default settings, `TOL = 1e-4`, 61 quadrature points on CPU)
+are in [benchmarks/](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/README.md) with committed Apple M5 results in
+[benchmarks/results/2026-11-21-apple-m5.md](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/results/2026-11-21-apple-m5.md).
+After the first-call JAX/XLA compilation (a cold EM fit takes ~0.8–1.1 s), warm CPU fits are faster
+than `mirt` across all tested cases (`0.12×–0.60×` of `mirt` time), while `mirt` is faster for a
+single cold fit without standard errors.
+
+## Documentation
+
+- [User guide](https://takuizum.github.io/flexpyirt/guide/) — specifying models, multiple groups, FIPC, editing the
+  ParameterTable, estimation options
+- [API reference](https://takuizum.github.io/flexpyirt/reference/) — public classes and functions and their arguments
+- [Validation](https://takuizum.github.io/flexpyirt/VALIDATION/) — how results are checked against R mirt, tolerances, known
+  differences
+- [Design](https://takuizum.github.io/flexpyirt/DESIGN/) — formulas, algorithms and implementation decisions
+- [Roadmap](https://takuizum.github.io/flexpyirt/ROADMAP/)
+- [Contributing](https://github.com/takuizum/flexpyirt/blob/main/CONTRIBUTING.md) — branches, reviews, releases
+
+Every document is also available in Japanese ([日本語サイト](https://takuizum.github.io/flexpyirt/ja/)).
+
+## Development
+
 ```bash
 uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
+
+See [CONTRIBUTING.md](https://github.com/takuizum/flexpyirt/blob/main/CONTRIBUTING.md) for the branch flow and releases.
+
+## License
+
+MIT
