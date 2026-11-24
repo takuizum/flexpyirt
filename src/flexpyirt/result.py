@@ -1016,13 +1016,14 @@ class FitResult:
         if method == "one_step":
             assert self.vcov is not None
             grads = np.asarray(_jsi.gradients_without(prob, jnp.asarray(eta), jnp.arange(n_items)))
-            se_full = np.sqrt(np.clip(np.diag(self.vcov), 0.0, None))
+            vcov_full = np.asarray(self.vcov, dtype=np.float64)
+            se_full = np.sqrt(np.clip(np.diag(vcov_full), 0.0, None))
         for j, name in enumerate(names):
             keep = np.unique(fid[free & (item_col != name)])
             if method == "one_step":
                 grad = np.zeros_like(eta)
                 grad[keep] = grads[j, keep]
-                eta_j = eta + self.vcov @ grad  # type: ignore[operator]
+                eta_j = eta + vcov_full @ grad
                 se_j = se_full
             else:
                 outcome = _jsi.newton_without(
