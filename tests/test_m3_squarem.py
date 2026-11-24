@@ -103,6 +103,7 @@ def test_eta_bounds_matches_parameter_table() -> None:
     np.testing.assert_array_equal(np.asarray(hi), free_rows["upper"].to_numpy(dtype=float))
 
 
+@pytest.mark.slow
 def test_eta_bounds_and_squarem_with_zero_free_parameters() -> None:
     case = load_m1("v1_lsat7_2pl")
     spec = Model.uniform(TwoPL(), items=case.items)
@@ -124,6 +125,7 @@ def test_eta_bounds_and_squarem_with_zero_free_parameters() -> None:
 # ---- history and counters -------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_history_columns_and_counters_plain_vs_squarem() -> None:
     case = load_m1("v1_lsat7_2pl")
     spec = Model.uniform(TwoPL(), items=case.items)
@@ -155,6 +157,7 @@ def test_history_columns_and_counters_plain_vs_squarem() -> None:
 # ---- monotonicity property (Hypothesis) -----------------------------------------------------
 
 
+@pytest.mark.slow
 @settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(
     seed=st.integers(0, 2**31 - 1),
@@ -206,6 +209,7 @@ def test_squarem_is_monotone(seed: int, kind: str) -> None:
 # ---- safeguard path tests -------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_safeguard_fires_for_threepl_near_lower_bound() -> None:
     """2PL data fitted with 3PL pushes g -> 0 so extrapolation leaves bounds and fires safeguard."""
     a = np.array([1.5, 1.8, 1.3, 2.0, 1.4, 1.7, 1.6, 1.9])
@@ -226,6 +230,7 @@ def test_safeguard_fires_for_threepl_near_lower_bound() -> None:
     assert np.all((g_vals > 0.0) & (g_vals < 1.0))
 
 
+@pytest.mark.slow
 def test_safeguard_fires_for_latent_variance_near_zero() -> None:
     """Near-zero latent variance: SQUAREM keeps var > 0 and the log-likelihood monotone.
 
@@ -255,6 +260,7 @@ def test_safeguard_fires_for_latent_variance_near_zero() -> None:
     assert res.loglik >= ll[-1] - 1e-9 * abs(ll[-1])
 
 
+@pytest.mark.slow
 def test_non_convergence_warning_mentions_safeguard_when_triggered() -> None:
     case = test_mirt_m2.load("v3_science_grm")
     with pytest.warns(ConvergenceWarning, match="SQUAREM safeguard fired"):
@@ -272,6 +278,7 @@ def test_non_convergence_warning_mentions_safeguard_when_triggered() -> None:
 # ---- clear reduction in EM evaluations on slow cases ----------------------------------------
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "case_id",
     ["v2_lsat7_rasch", "v2_sim_rasch", "v4_twogroup_2pl", "v8_science_gpcm"],

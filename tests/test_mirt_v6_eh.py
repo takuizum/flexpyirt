@@ -30,6 +30,9 @@ from flexpyirt._compile import compile_problem, prepare
 from flexpyirt.errors import ConvergenceWarning
 from tests._reference import check_reference_meta
 
+# mirt reference comparison: nightly and release-PR CI only (CONTRIBUTING.md, "Tests").
+pytestmark = pytest.mark.slow
+
 REFERENCE_DIR = Path(__file__).parent / "reference"
 CASES = ["v6_fipc_eh", "v6_twogroup_fipc_eh"]
 TOL_SE_REL = 1e-3

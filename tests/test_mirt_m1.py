@@ -44,6 +44,7 @@ def test_reference_metadata(name: str) -> None:
     check_reference_meta(load(name).raw["meta"])
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
 def test_loglik(name: str, squarem: bool) -> None:
@@ -55,6 +56,7 @@ def test_loglik(name: str, squarem: bool) -> None:
     assert res.loglik >= ref - 1e-8
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("squarem", SQUAREM)
 @pytest.mark.parametrize("name", CASES)
 def test_item_parameters(name: str, squarem: bool) -> None:

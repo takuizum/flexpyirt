@@ -82,6 +82,7 @@ def _base(n_categories: int = 2) -> tuple[FitResult, pd.DataFrame, np.ndarray]:
     return fit(spec, df, group=grp, method=METHOD, quadrature=WIDE, se=None), df, grp
 
 
+@pytest.mark.slow
 def test_add_scheme_flags_the_dif_item_and_is_consistent() -> None:
     res, df, grp = _base()
     out = res.dif(df, group=grp, items=["i3", "i4", "i5"])
@@ -115,6 +116,7 @@ def test_add_scheme_flags_the_dif_item_and_is_consistent() -> None:
     assert float(out["x2"].iloc[2]) == pytest.approx(x2, abs=1e-6)
 
 
+@pytest.mark.slow
 def test_drop_scheme_and_params_subset() -> None:
     res, df, grp = _base()
     out = res.dif(df, group=grp, items=["i1", "i2"], params=["d"], scheme="drop")
@@ -123,6 +125,7 @@ def test_drop_scheme_and_params_subset() -> None:
     np.testing.assert_allclose(out["aic"], -out["x2"] + 2.0, atol=1e-9)
 
 
+@pytest.mark.slow
 def test_grm_dif_runs() -> None:
     res, df, grp = _base(n_categories=3)
     out = res.dif(df, group=grp, items=["i5"], params=["d1", "d2"])
@@ -153,6 +156,7 @@ def test_errors() -> None:
         single.dif(df, group=grp, items=["i5"])
 
 
+@pytest.mark.slow
 def test_freeing_all_anchors_is_unidentified() -> None:
     df, grp = _sim()
     spec = (
@@ -179,6 +183,7 @@ def test_map_fits_are_rejected() -> None:
         res.dif(df, group=grp, items=["i5"])
 
 
+@pytest.mark.slow
 def test_eh_dif_runs() -> None:
     df, grp = _sim()
     spec = (

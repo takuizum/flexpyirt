@@ -246,6 +246,7 @@ def test_identical_components_reduce_to_normal_on_both_grids() -> None:
     )
 
 
+@pytest.mark.slow
 def test_infeasible_parameters_give_nan_and_gradients_are_finite() -> None:
     nodes = jnp.linspace(-6.0, 6.0, 61)
     good = jnp.asarray([0.0, 1.0, 2.0, 0.4, -0.5])
@@ -289,6 +290,7 @@ def test_em_squarem_monotone_same_optimum_and_oakes_equals_hessian() -> None:
     assert res_sq.loglik > res_nm.loglik + 5.0
 
 
+@pytest.mark.slow
 def test_relabelled_starts_reach_the_same_mixture() -> None:
     df, res = _fitted_mix2()
     spec = Model.uniform(TwoPL(), items=df.columns)
@@ -323,6 +325,7 @@ def test_relabelled_starts_reach_the_same_mixture() -> None:
             np.testing.assert_allclose(np.array(ours)[:, 1], np.array(ref)[:, 1], atol=2e-5)
 
 
+@pytest.mark.slow
 def test_latent_table_derived_components_and_delta_ses() -> None:
     _, res = _fitted_mix2()
     lat = res.latent
@@ -350,6 +353,7 @@ def test_latent_table_derived_components_and_delta_ses() -> None:
     assert np.isnan(float(no_se.latent["pi_1_se"].iloc[0]))
 
 
+@pytest.mark.slow
 def test_identification_rasch_and_fipc() -> None:
     df, a_true, d_true = _bimodal_2pl_data(n_obs=800, n_items=8)
     with pytest.raises(IdentificationError, match="variance"):
@@ -391,6 +395,7 @@ def test_identification_rasch_and_fipc() -> None:
     assert lat["var"] == pytest.approx(true_var, rel=0.3)
 
 
+@pytest.mark.slow
 def test_fixed_identical_components_match_normal_fit() -> None:
     df, _, _ = _bimodal_2pl_data(n_obs=600, n_items=6)
     spec_mix = Model.uniform(TwoPL(), items=df.columns).with_latent(NormalMixture(2))
@@ -431,6 +436,7 @@ def test_well_separated_fit_does_not_warn() -> None:
         fit(res._model, df, method=BAEM(tol=1e-6, max_iter=3000, squarem=True), se=None)
 
 
+@pytest.mark.slow
 def test_three_components_and_gauss_hermite() -> None:
     df, res = _fitted_mix2()
     with warnings.catch_warnings():
@@ -465,6 +471,7 @@ def test_three_components_and_gauss_hermite() -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_scoring_and_rejected_methods() -> None:
     df, res = _fitted_mix2()
     sub = df.iloc[:25]
@@ -508,6 +515,7 @@ def test_link_uses_fitted_mixture_weights() -> None:
     assert abs(out.B) < 1e-8
 
 
+@pytest.mark.slow
 def test_json_roundtrip(tmp_path: Path) -> None:
     df, res = _fitted_mix2()
     path = tmp_path / "mix.json"
@@ -535,6 +543,7 @@ def test_json_roundtrip(tmp_path: Path) -> None:
     pd.testing.assert_frame_equal(back2.latent, one.latent)
 
 
+@pytest.mark.slow
 def test_malformed_mixture_json() -> None:
     _, res = _fitted_mix2()
     payload = json.loads(res.to_json())

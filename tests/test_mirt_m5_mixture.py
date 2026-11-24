@@ -33,6 +33,9 @@ from flexpyirt.items import ItemModel
 from flexpyirt.latent import mixture_components, mixture_param_names
 from tests._reference import check_reference_meta
 
+# mirt reference comparison: nightly and release-PR CI only (CONTRIBUTING.md, "Tests").
+pytestmark = pytest.mark.slow
+
 REFERENCE_DIR = Path(__file__).parent / "reference"
 CASES = ["v22_mixture_2pl_k2", "v22_mixture_grm_k2", "v22_mixture_gpcm_k3"]
 

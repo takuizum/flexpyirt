@@ -36,6 +36,9 @@ from flexpyirt.errors import HeywoodWarning
 from flexpyirt.items import ItemModel
 from tests._reference import check_reference_meta
 
+# mirt reference comparison: nightly and release-PR CI only (CONTRIBUTING.md, "Tests").
+pytestmark = pytest.mark.slow
+
 REFERENCE_DIR = Path(__file__).parent / "reference"
 SQUAREM = (False, True)
 TOL_LOGLIK_REL = 1e-6

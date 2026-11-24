@@ -108,10 +108,10 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 pythonpath = ["."]
 # Parallel by default (pytest-xdist). `loadfile` keeps each module on one worker so JAX
-# compilations are reused within a module (conftest clears the cache between modules).
-# Use `-n 0` to run serially, e.g. when debugging.
+# compilations and cached fits are reused within a module (conftest clears the cache between
+# modules). Use `-n 0` to run serially, e.g. when debugging.
 addopts = ["-ra", "--strict-markers", "--strict-config", "-n", "auto", "--dist", "loadfile"]
 markers = [
-    "slow: long-running (>~10 s) test; skipped on PR CI, run on pushes to develop/main. Deselect locally with -m 'not slow'.",
+    "slow: takes more than ~5 s (with its share of a cached fit), or a mirt reference comparison; skipped on PR/push CI, run nightly and on release PRs. Deselect locally with -m 'not slow'.",
 ]
 xfail_strict = true

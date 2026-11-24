@@ -83,6 +83,7 @@ def _at_mirt(res: FitResult, estimates: dict[str, Any]) -> FitResult:
     return dataclasses.replace(res, _eta=eta)
 
 
+@pytest.mark.slow
 def test_science_fit_matches_mirt() -> None:
     ref = _bundle()["science_grm_2g"]
     res, _, _ = _case("science_grm_2g")
@@ -93,6 +94,7 @@ def test_science_fit_matches_mirt() -> None:
     assert latent.loc["focal", "var"] == pytest.approx(ref["estimates"]["focal"]["var"], abs=1e-5)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", CASES)
 def test_s_x2_per_group_matches_mirt(name: str) -> None:
     ref = _bundle()[name]
@@ -111,6 +113,7 @@ def test_s_x2_per_group_matches_mirt(name: str) -> None:
         np.testing.assert_allclose(got["p"], expected["p"], rtol=1e-4, atol=1e-12)
 
 
+@pytest.mark.slow
 def test_requires_groups_and_all_categories_per_group() -> None:
     res, df, grp = _case("science_grm_2g")
     with pytest.raises(SpecificationError, match="group"):

@@ -208,6 +208,7 @@ def test_criterion_autodiff_gradient_matches_finite_differences(
 # ---- Identity and exact transformation recovery across all 7 models + mixed formats --------------
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("method", METHODS)
 @pytest.mark.parametrize("symmetric", [False, True])
 def test_identity_source_equals_target_mixed_format(method: LinkMethod, symmetric: bool) -> None:
@@ -243,6 +244,7 @@ def test_identity_source_equals_target_mixed_format(method: LinkMethod, symmetri
     assert math.isnan(linked.A_se) and math.isnan(linked.B_se)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("method", METHODS)
 @pytest.mark.parametrize("symmetric", [False, True])
 def test_exact_recovery_of_known_transformation_all_models(
@@ -307,6 +309,7 @@ def test_exact_recovery_of_known_transformation_all_models(
     assert len(fipc_si.fixed) == len(fipc_irt.fixed)
 
 
+@pytest.mark.slow
 def test_newton_converges_from_perturbed_starting_point() -> None:
     """Verify solve_linking converges from a far-off initial (A, B), not just Mean/Mean."""
     nodes = jnp.linspace(-5.0, 5.0, 41)
@@ -373,6 +376,7 @@ def fitted_2pl_pair() -> tuple[FitResult, FitResult, pd.DataFrame]:
     return res_src, res_tgt, df_src
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("method", METHODS)
 def test_symmetric_linking_is_exactly_reversible(
     fitted_2pl_pair: tuple[FitResult, FitResult, pd.DataFrame], method: LinkMethod
@@ -386,6 +390,7 @@ def test_symmetric_linking_is_exactly_reversible(
     assert rev.criterion == pytest.approx(fwd.criterion, rel=1e-10)
 
 
+@pytest.mark.slow
 def test_items_mapping_and_custom_nodes_weights(
     fitted_2pl_pair: tuple[FitResult, FitResult, pd.DataFrame],
 ) -> None:
@@ -524,6 +529,7 @@ def test_summary_str_and_html(
 # ---- Ogasawara (2001) delta-method SE validation (finite differences + Monte Carlo) -------------
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("method", METHODS)
 @pytest.mark.parametrize("symmetric", [False, True])
 def test_ogasawara_se_matches_central_finite_differences(
@@ -695,6 +701,7 @@ def test_ogasawara_se_monte_carlo_linearization_check(
     assert linked.B_se == pytest.approx(float(boot_se[1]), rel=0.06)
 
 
+@pytest.mark.slow
 def test_se_none_and_multigroup_and_eh(
     fitted_2pl_pair: tuple[FitResult, FitResult, pd.DataFrame],
 ) -> None:
@@ -747,6 +754,7 @@ def test_se_none_and_multigroup_and_eh(
 # ---- Validation and error handling ---------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_errors_and_validation(
     fitted_2pl_pair: tuple[FitResult, FitResult, pd.DataFrame],
 ) -> None:
@@ -882,6 +890,7 @@ def multigroup_anchor_fit() -> FitResult:
     return fit(spec, df, group=grp, method=BAEM(tol=1e-8, squarem=True), se="oakes")
 
 
+@pytest.mark.slow
 def test_same_multigroup_fit_uses_joint_vcov(multigroup_anchor_fit: FitResult) -> None:
     """One FitResult on both sides: cross-covariance from the joint vcov enters the SEs."""
     res = multigroup_anchor_fit
@@ -968,6 +977,7 @@ def test_same_multigroup_fit_uses_joint_vcov(multigroup_anchor_fit: FitResult) -
     assert not np.allclose(indep, expected, rtol=1e-3, atol=0.0)
 
 
+@pytest.mark.slow
 def test_link_requires_x64() -> None:
     code = (
         "import flexpyirt\n"
@@ -1009,6 +1019,7 @@ def test_fitted_grid_keeps_gauss_hermite_base_weights(mean: float, var: float) -
         assert float(w @ nodes**2) == pytest.approx(1.0, abs=1e-13)
 
 
+@pytest.mark.slow
 def test_fitted_grid_uses_the_fitted_davidian_density() -> None:
     from flexpyirt import DavidianCurve
     from flexpyirt.latent import davidian_log_weights, davidian_param_names

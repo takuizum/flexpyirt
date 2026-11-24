@@ -57,7 +57,11 @@ def _code_only(block: str) -> list[str]:
     return out
 
 
-@pytest.mark.parametrize("doc", RUNNABLE)
+@pytest.mark.parametrize(
+    "doc",
+    # The user guide fits many models (minutes on CI): slow. README and docs/index stay on PR CI.
+    [pytest.param(d, marks=pytest.mark.slow) if "guide" in d else d for d in RUNNABLE],
+)
 def test_code_blocks_run(doc: str, capsys: pytest.CaptureFixture[str]) -> None:
     blocks = _blocks(ROOT / doc)
     assert blocks, f"{doc} has no python blocks"

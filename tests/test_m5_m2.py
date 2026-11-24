@@ -76,6 +76,7 @@ def _brute_xi(m1: np.ndarray, m2: np.ndarray, w: np.ndarray, e: np.ndarray) -> n
     return out - np.outer(e, e)
 
 
+@pytest.mark.slow
 def test_m2_rejects_unsupported_models_and_inputs() -> None:
     df = _sim_2pl(n_obs=300, n_items=6, seed=1)
     items = list(df.columns)
@@ -140,6 +141,7 @@ def test_m2_rejects_unsupported_models_and_inputs() -> None:
         res_1item.m2(df[["q01"]])
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("n_items,expected_df", [(3, 0), (2, -1)])
 def test_m2_nonpositive_df_returns_nan_indices(n_items: int, expected_df: int) -> None:
     df = _sim_2pl(n_obs=400, n_items=n_items, seed=2)
@@ -164,6 +166,7 @@ def test_m2_nonpositive_df_returns_nan_indices(n_items: int, expected_df: int) -
     assert np.isfinite(row["srmsr"]) and row["srmsr"] >= 0.0
 
 
+@pytest.mark.slow
 def test_m2_nonpositive_df_with_low_rank_and_rank_deficient_positive_df() -> None:
     """Both df <= 0 with rank < s and df > 0 with rank < n_cols warn and return NaN M2."""
     # Case 1: df <= 0 with rank(Delta_2) < s (3 GPCM(4) items with slopes fixed at 0:
@@ -204,6 +207,7 @@ def test_m2_nonpositive_df_with_low_rank_and_rank_deficient_positive_df() -> Non
     assert np.isfinite(row_rd["srmsr"])
 
 
+@pytest.mark.slow
 def test_m2_invariant_to_item_order() -> None:
     df2 = _sim_2pl(n_obs=500, n_items=6, seed=3)
     perm = ["q05", "q02", "q06", "q01", "q04", "q03"]
@@ -297,6 +301,7 @@ def test_rmsea_and_rmsea_ci_against_hand_values() -> None:
     assert lo95 < lo < hi < hi95
 
 
+@pytest.mark.slow
 def test_xi_is_symmetric_psd_and_matches_brute_force() -> None:
     df_bin = _sim_2pl(n_obs=300, n_items=7, seed=5)
     df_poly = _sim_grm(n_obs=300, n_items=6, n_categories=4, seed=6)
@@ -328,6 +333,7 @@ def test_xi_is_symmetric_psd_and_matches_brute_force() -> None:
         assert float(eigvals.min()) >= -1e-13
 
 
+@pytest.mark.slow
 def test_m2_custom_ci_array_input_and_equality_constraints() -> None:
     df = _sim_2pl(n_obs=400, n_items=6, seed=7)
     items = list(df.columns)
@@ -356,6 +362,7 @@ def test_m2_custom_ci_array_input_and_equality_constraints() -> None:
     assert out95["rmsea_97.5"].iloc[0] >= out90["rmsea_95"].iloc[0]
 
 
+@pytest.mark.slow
 def test_m2_all_fixed_and_null_warning() -> None:
     """All-fixed model (n_params=0) works; a badly misspecified model triggers the null warning."""
     df = _sim_2pl(n_obs=400, n_items=5, seed=8)
@@ -379,6 +386,7 @@ def test_m2_all_fixed_and_null_warning() -> None:
     assert np.isnan(row["cfi"])
 
 
+@pytest.mark.slow
 def test_null_m2_matches_explicit_independence_model() -> None:
     """Closed-form null_m2 equals m2_statistic on an explicit a=0 dichotomous independence model."""
     df = _sim_2pl(n_obs=500, n_items=6, seed=9)
@@ -410,6 +418,7 @@ def test_null_m2_matches_explicit_independence_model() -> None:
     np.testing.assert_allclose(closed_stat, explicit.m2, rtol=1e-12)
 
 
+@pytest.mark.slow
 def test_m2_fourpl_and_pcm() -> None:
     """FourPL (dichotomous) and PCM (polytomous Rasch with free latent variance) work cleanly."""
     # FourPL with J=10: s = 55, q = 40 -> df = 15.
