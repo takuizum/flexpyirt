@@ -6,6 +6,14 @@ from importlib.metadata import PackageNotFoundError, version
 
 from flexpyirt import errors
 from flexpyirt.correlation import PolychoricResult, polychoric
+from flexpyirt.dimensionality import (
+    EmpiricalKaiserResult,
+    MAPResult,
+    ParallelAnalysisResult,
+    empirical_kaiser,
+    parallel_analysis,
+    velicer_map,
+)
 from flexpyirt.fit import fit
 from flexpyirt.items import GPCM, GRM, PCM, FourPL, Nominal, Rasch, ThreePL, TwoPL
 from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, Normal, NormalMixture
@@ -29,23 +37,29 @@ __all__ = [
     "BetaPrior",
     "DavidianCurve",
     "EmpiricalHistogram",
+    "EmpiricalKaiserResult",
     "FitResult",
     "FourPL",
     "LinkResult",
     "LogNormalPrior",
+    "MAPResult",
     "Model",
     "Nominal",
     "Normal",
     "NormalMixture",
     "NormalPrior",
+    "ParallelAnalysisResult",
     "PolychoricResult",
     "Quadrature",
     "Rasch",
     "ThreePL",
     "TwoPL",
     "__version__",
+    "empirical_kaiser",
     "errors",
     "fit",
     "link",
+    "parallel_analysis",
     "polychoric",
+    "velicer_map",
 ]
