@@ -48,3 +48,10 @@
 - [x] DIF: 多群の尤度比検定（`FitResult.dif()`、`add` / `drop` の 2 方式、Holm / BH 補正。V17 で照合済み）。
 - [x] M2 限定情報の適合度（`FitResult.m2()`、単一群 1 次元の $M_2$ / $M_2^*$、RMSEA と信頼区間、SRMSR、2 値の TLI / CFI。V18 で照合済み）。
 - [x] 名義反応モデル（`Nominal(n_categories)`、mirt の `itemtype = "nominal"` と同じ Thissen, Cai & Bock (2010) のパラメタ化。V23 で 1 因子・2 因子を照合済み、3 因子は単体テストのみ）。
+- [ ] 次元性診断（DESIGN.md §16.8。問い A「次元はいくつか」と問い B「本質的一次元性は認められるか」を分けて扱う。探索的 MIRT は行わない）:
+  - [ ] D1 ポリコリック・テトラコリック相関と平滑化（`psych::polychoric`、`lavaan::lavCor` と照合）。
+  - [ ] D2 固有値、平行分析、改訂 MAP、EKC（`psych::fa.parallel`、`psych::vss`、`EFAtools::EKC` と照合）。
+  - [ ] D3 局所依存 Q3 / Q3* / LD-X2 / JSI（`mirt::residuals` と照合）とモデルベース平行分析（`ltm::unidimTest` と照合）。続いてアンサンブル `dimensionality()`。
+  - [ ] D4 DETECT の確認的・探索的版（`sirt::conf.detect` / `expl.detect` と照合）。
+  - [ ] D5 任意依存 `factor_analyzer`（extra `flexpyirt[efa]`、`psych::fa` と照合）による EFA、Hull（`EFAtools::HULL` と照合）、比較データ法（`EFAtools::CD` と照合）。
+  - [ ] D6 ブートストラップでバイアス補正する DIMTEST（シミュレーション研究の第 1 種の誤りと検出力で受け入れる）。
