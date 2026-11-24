@@ -75,7 +75,9 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
     and model-based parallel analysis (`model_parallel_analysis()`, vs `ltm::unidimTest`); the ensemble
     `dimensionality()` (validated in V26; the ensemble by recomputation).
   - [ ] JSI (Edwards, Houts & Cai, 2018; vs `mirt::residuals(type = "JSI")`).
-  - [ ] D4 DETECT, confirmatory and exploratory (vs `sirt::conf.detect` / `expl.detect`).
+  - [x] D4 DETECT, confirmatory and exploratory (`detect()`, `exploratory_detect()`; validated in V27
+    against `sirt::conf.detect` / `expl.detect` with sum-score conditioning; kernel-smoothed
+    conditioning and the genetic partition search not implemented).
   - [ ] D5 EFA through the optional `factor_analyzer` (extra `flexpyirt[efa]`, vs `psych::fa`), Hull
     (vs `EFAtools::HULL`), comparison data (vs `EFAtools::CD`).
   - [ ] D6 DIMTEST with bootstrap bias correction (accepted on a simulation study: type I error and power).

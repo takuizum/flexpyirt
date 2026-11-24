@@ -1524,7 +1524,7 @@ data-independent shapes (§15.21).
    lists every method; the consensus for (A) is the mode and median of $k$ with the agreement count
    (ties reported, not broken), and for (B) the count of methods supporting essential
    unidimensionality. No weighted voting until a simulation study supports weights. Thresholds
-   (DETECT 0.1 / 0.5 / 1, Q3* 0.2, RMSEA) are arguments with their sources in docstrings. The
+   (DETECT 0.2 / 0.4 / 1, Q3* 0.2, RMSEA) are arguments with their sources in docstrings. The
    polychoric matrix is computed once and shared; simulations use a JAX PRNG key. The ensemble
    itself is checked by a simulation study (unidimensional, two-dimensional and bifactor data).
 9. **Polychoric / tetrachoric correlations (`polychoric()`, D1 of §16.8, V24)**:
@@ -1655,6 +1655,39 @@ data-independent shapes (§15.21).
     the name `dimensionality` (as `fit`), so `flexpyirt.dimensionality` is the function; tests
     reach the module with `importlib.import_module`. Checked in `tests/test_m5_ensemble.py` by
     recomputing each row with the individual functions and the same keys.
+13. **DETECT (`detect()`, `exploratory_detect()`, D4 of §16.8, V27)**: `_detect.py` (NumPy).
+    **Conditional covariances**: Zhang & Stout (1999): for each pair the ML covariance within
+    groups of equal total score $S$ and within groups of equal rest score $S-X_i-X_j$, each
+    averaged with the group proportions, then the two averaged (the total-score estimate is biased
+    negatively, the rest-score one positively). Groups are formed with `np.unique` and
+    `np.bincount`, one pass per pair. Raw item scores are used (polytomous items allowed);
+    complete data are required (the scores are undefined otherwise), so `dimensionality()`
+    reports DETECT as unavailable with missing data. **Indices** (sirt's `detect.index`):
+    DETECT $=100\,\overline{\delta\,\mathrm{ccov}}$, ASSI, RATIO, MADCOV100, MCOV100, unweighted
+    and weighted by $\sqrt{n_{ij}}$ (identical with complete data; kept for sirt's layout). The
+    smoothed (kernel) conditional covariances of sirt's default `conf.detect` are not
+    implemented. **Exploratory**: rows split into halves (`floor(N/2)` estimation rows from a JAX
+    key, or given), Ward clustering of the estimation-half matrix
+    $d=\max(\mathrm{ccov})-\mathrm{ccov}$ (the maximum includes the zero diagonal, as sirt's
+    `create.ccov`). R's `hclust(method = "ward.D")` applies the Lance–Williams Ward update to $d$;
+    SciPy's `"ward"` applies it to squared distances, so SciPy gets $\sqrt d$ (merge heights are
+    R's after squaring). `cutree` labels clusters by first appearance; flexpyirt relabels SciPy's
+    `fcluster` output the same way. Each partition $k=2..$`max_clusters` is scored on both halves;
+    `n_clusters` maximizes the estimation-half DETECT (sirt's choice). Zhang & Stout's genetic
+    partition search is not implemented. **Thresholds** (docstrings, guide): DETECT $<0.2$ / $0.4$
+    / $1$, ASSI $0.25$, RATIO $0.36$ (Jang & Roussos, 2007; Zhang, 2007; §16.8 had 0.1 / 0.5 / 1,
+    corrected here). **Ensemble**: `dimensionality()` adds the validation-half DETECT of the selected
+    partition as a question-(B) row (supports when $<$ `detect_threshold` $=0.2$), available
+    without `fit`; the key is split three ways (parallel analysis, model-based PA, DETECT).
+    **Validation (V27)**: `validation/r/m5_detect_reference.R` (sirt 4.2.133): simulated
+    two-dimensional (true and wrong partitions), unidimensional and Science (polytomous) data with
+    `conf.detect(use_sum_score = TRUE, bias_corr = TRUE, smooth = FALSE)`, and a three-cluster data
+    set with `expl.detect(use_sum_score = TRUE, estsample = )`: conditional covariances,
+    all five indices (both weightings), partitions and both halves' indices agree to
+    $10^{-12}$ (observed $10^{-14}$), and Ward merge heights to $10^{-12}$. With the default
+    `smooth = TRUE`, sirt's `conf.detect(use_sum_score = TRUE)` standardizes the total score and then
+    subtracts raw item scores for the rest score, so its rest-score groups are wrong (DETECT 6.73
+    instead of 1.60 for `sim_2d`); recorded on the accuracy page, not followed.
 
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1688,6 +1721,7 @@ data-independent shapes (§15.21).
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
+- Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
