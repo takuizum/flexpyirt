@@ -1117,6 +1117,45 @@ class ItemKernel(Protocol):
     参照固有値（3 つの大きさ x PCA・SMC、各 20000 データセット）は EFAtools の `PARALLEL` と Monte Carlo 誤差の範囲で
     一致する（固定のキーで平均は $|z|\le4.5$、95 パーセンタイルは $6\times10^{-3}$）。並べ替えの経路は性質（独立な
     置換、2 因子の回復、キーによる再現性）で確かめる。
+11. **局所依存とモデルに基づく平行分析（`FitResult.local_dependence()`、`model_parallel_analysis()`、§16.8 の D3、
+    V26）**: どちらも単一群・1 次元・`Normal` 潜在分布のモデルを要する（`FitResult._require_unidimensional_normal`）。
+    `FitResult._traces(prob, nodes)` は `CompiledProblem.nodes` を差し替えて（カーネルが読むのはノードだけ）任意の
+    点で全項目のカテゴリ確率を計算するので、推定した格子・EAP スコア・シミュレーションの $\theta$ に同じコードを使う。
+    **Q3**: `score()` の EAP $\hat\theta$ による残差 $x_{ij}-\sum_k kP_{jk}(\hat\theta_i)$（欠測可）の、ペアごとの完全な
+    ケースでの Pearson 相関（mirt のペアごとの `na.omit` と同じ）。**Q3\***: Q3 から非対角の Q3 の平均を引いたもの
+    （Christensen, Makransky & Horton, 2017）。したがって `max_q3_star` は彼らの $Q3_{\max}-\overline{Q3}$。
+    **LD**（Chen & Thissen, 1997、mirt の `residuals(type = "LD")` と同じ）: ペアごとに、両方に回答した回答者の
+    $K_i\times K_j$ の観測表、推定した格子の重みによる期待表 $n_{ij}\sum_q P_{ia}P_{jb}w_q$（mirt の 61 点格子での
+    正規化した正規密度と同じ）、$X^2$、$G^2$（$O>0$ のセル）、$\chi^2_{(K_i-1)(K_j-1)}$ による $p$、Goodman–Kruskal の
+    $\gamma$ による $V=\operatorname{sign}(\gamma_O-\gamma_E)\sqrt{X^2/(n\min(K_i-1,K_j-1))}$（同点なら符号 $+$、$\gamma$ が
+    定義できなければ $V$ は NaN）。**モデルに基づく平行分析**（Drasgow & Lissak, 1983）: 統計量は観測された平滑化済み
+    ポリコリック行列の第 2 固有値。`_simulate_responses` は $\theta\sim N(\hat\mu,\hat\sigma^2)$ を引き、累積カテゴリ
+    確率に対して一様乱数を逆変換して回答を作り、データの欠測をそのまま写す。$B$ 回の反復を `polychoric()` に通し
+    （警告は抑え、使えない反復は `FlexpyirtWarning` を出して飛ばす）、$p=(1+\#\{T_b\ge T\})/(B+1)$。
+    `eigen_type="max"`（既定）は ltm の `unidimTest` と同じく対角全体を非対角の最大の相関にする。`"smc"` と `"pca"` は
+    §16.10 を使う。ltm は推定済みオブジェクトを渡すと $\theta$ を $N(\mathrm{EAP}_i,\mathrm{SE}_i^2)$ から引く。
+    flexpyirt は推定した潜在分布（参照となる生成モデル）を使う。ltm もパラメタを渡したときはそうする。
+    パラメタは同じデータから推定するので、モデルが正しいとき $p$ 値は保守的になる（シミュレーションの 2PL の
+    データ 30 個、$B=50$ で $p$ の平均 0.66、0.05 未満は 30 個中 1 個）。docstring とガイドにそう書く。
+    **未実装**: 部分群ごとに項目パラメタを推定し直す JSI（Edwards, Houts & Cai, 2018）。ROADMAP の別項目とする。
+    **照合（V26）**: `validation/r/m5_local_dependence_reference.R`（mirt 1.46.1、ltm 1.2.0）。LSAT7 の 2PL、Science
+    の GRM、局所依存のペアを 1 つと 5% MCAR を含むシミュレーションの 2PL。flexpyirt はモデルを推定し直し
+    （対数尤度は相対 $10^{-9}$ で一致）、`residuals()` と $10^{-5}$（相対、$X^2$、$G^2$）、$10^{-6}$（$V$、Q3。実測
+    $4\times10^{-8}$ 以下）で一致する。LSAT7 に mirt の推定値（`thetas = cbind(d, a1)`、$B=4000$）で ltm の
+    `unidimTest` を実行し、観測固有値は $2\times10^{-4}$（polycor の `optimise()` の許容誤差。実測 $2.4\times10^{-5}$）、
+    シミュレーションの第 2 固有値の平均は $|z|\le4.5$（2 つのキーで 2000 反復なら実測 $|z|<1$）、その
+    95 パーセンタイルは 0.02 で一致する。
+12. **`dimensionality()` のアンサンブル（§16.8）**: 1 つのポリコリック行列（`fit` があれば、まずデータを推定した
+    項目にそろえる）から問い (A) の `parallel_analysis()`（既定値）、`velicer_map()`（4 乗）、`empirical_kaiser()` を
+    計算する。キーはシミュレーションを使う手法ごとに分割する。問い (B) は `fit` があるときだけで、
+    `model_parallel_analysis()`（$p\ge\alpha=0.05$）、最大の Q3\* $<0.2$、`m2()` の RMSEA $\le0.05$
+    （Maydeu-Olivares & Joe, 2014）。`m2()` の `SpecificationError`（欠測など）は隠さず、使えない行
+    （`supports_unidimensionality=None`）として示す。合意 (A) は最頻値（同数ならすべて）、中央値、一致数、(B) は使えた
+    手法のうち支持する数。重みは付けず、2 つの問いはまとめない（§16.8）。閾値は引数にし、出典を docstring に書く。
+    Q3\* の 0.2 は目安であると明記する。`DimensionalityResult.summary()` はすべての手法とその詳細、2 つの合意を
+    表示する。モジュールと関数が同じ名前 `dimensionality` を持つ（`fit` と同じ）ので、`flexpyirt.dimensionality` は
+    関数を指す。テストではモジュールを `importlib.import_module` で取得する。`tests/test_m5_ensemble.py` で、各行を
+    個々の関数と同じキーで計算し直して確かめる。
 
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1160,6 +1199,7 @@ class ItemKernel(Protocol):
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Maydeu-Olivares, A., & Joe, H. (2005). Limited- and full-information estimation and goodness-of-fit testing in $2^n$ contingency tables: A unified framework. *Journal of the American Statistical Association*, 100(471), 1009–1020.
 - Maydeu-Olivares, A., & Joe, H. (2006). Limited information goodness-of-fit testing in multidimensional contingency tables. *Psychometrika*, 71(4), 713–732.
+- Maydeu-Olivares, A., & Joe, H. (2014). Assessing approximate fit in categorical data analysis. *Multivariate Behavioral Research*, 49(4), 305–328.
 - McLachlan, G. J., & Peel, D. (2000). *Finite Mixture Models*. Wiley.
 - Mislevy, R. J. (1984). Estimating latent distributions. *Psychometrika*, 49(3), 359–381.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.

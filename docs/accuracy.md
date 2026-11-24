@@ -62,6 +62,8 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | SQUAREM | every comparison above is repeated with `BAEM(squarem=True)` |
 | Polychoric correlations | lavaan's `lavCor()` on ordered variables to $10^{-6}$, psych's `polychoric()` to $10^{-3}$ (its optimizer's tolerance) and psych's `cor.smooth()` for smoothing |
 | Parallel analysis, MAP, empirical Kaiser criterion | EFAtools' `EKC()` and `PARALLEL()`, psych's `vss()`, EFA.dimensions' `MAP()` and an independent R implementation of the fourth-power MAP, on the same correlation matrices to $10^{-11}$; reference eigenvalues of normal data within Monte Carlo error |
+| Q3 and LD $X^2$ / $G^2$ | `residuals(m, type = "Q3" / "LD" / "LDG2")` on the same models fitted by mirt |
+| Model-based parallel analysis | ltm's `unidimTest()` with the same item parameters: the observed statistic, and the simulated distribution within Monte Carlo error |
 | Scale linking (Haebara, Stocking–Lord) | independent R implementations of the criteria using mirt's response functions (mirt itself has no characteristic-curve linking) |
 
 ## Known differences from mirt

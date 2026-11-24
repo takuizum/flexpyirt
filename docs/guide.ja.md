@@ -23,7 +23,8 @@ flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめ�
 15. [尺度リンキング](#15-尺度リンキング)
 16. [ポリコリック相関](#16-ポリコリック相関)
 17. [次元数](#17-次元数)
-18. [エラーと警告](#18-エラーと警告)
+18. [局所依存と次元性のレポート](#18-局所依存と次元性のレポート)
+19. [エラーと警告](#19-エラーと警告)
 
 ## 1. 準備
 
@@ -852,9 +853,34 @@ print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
   （`power=2` で元の版）。
 - `empirical_kaiser()` は各固有値を標本サイズに応じた参照値と比べる（Braeken & van Assen, 2017）。
 - これらは次元の数を数えるもので、1 次元 IRT モデルが当てはまるかを検定するものではない。それには
-  `FitResult.m2()` と `FitResult.item_fit()` を使う。
+  18 節、`FitResult.m2()`、`FitResult.item_fit()` を使う。
 
-## 18. エラーと警告
+## 18. 局所依存と次元性のレポート
+
+17 節の数え方はデータだけを使う。1 次元モデルを推定していれば、項目間の依存をモデルが説明しきれているかも調べられる。
+
+```python
+from flexpyirt import dimensionality, model_parallel_analysis
+
+ld = res.local_dependence(df)
+cols = ["item_i", "item_j", "q3_star", "x2", "p_x2"]
+print(ld.pairs.sort_values("q3_star", ascending=False)[cols].head(3).round(3))
+mpa = model_parallel_analysis(res, df, key=jax.random.key(1), n_replications=20)
+print(round(mpa.statistic, 3), round(mpa.p_value, 3))
+report = dimensionality(df, key=jax.random.key(2), fit=res, n_replications=20)
+print(report)
+```
+
+- `FitResult.local_dependence()` は、すべてのペアについて Yen の Q3（EAP スコアによる残差の相関）、Q3\*（Q3 から
+  ペア全体の平均を引いたもの）、Chen & Thissen の LD $X^2$ / $G^2$ を mirt の `residuals()` と同じく求める。Q3\* や
+  $X^2$ が大きいペアは、$\theta$ 以外の何か（共通の問題文、テストレット、第 2 の次元）を共有している可能性がある。
+- `model_parallel_analysis()` は推定したモデルからデータをシミュレーションし、観測された第 2 固有値がモデルの生む
+  値より大きいかを調べる（Drasgow & Lissak, 1983）。モデルを同じデータに当てはめているので $p$ 値は保守的になる。
+  小さい値は第 2 の次元の証拠になるが、大きい値（この例では 1）は一次元性の証明ではない。
+- `dimensionality()` は 17 節の手法と、`fit=` を与えればこれらの確認と $M_2$ を実行し、すべての結果を 2 つの合意
+  （次元の数と、本質的一次元性を支持する確認の数）とともに表示する。1 つの判定にはまとめない。
+
+## 19. エラーと警告
 
 | 種類 | いつ出るか |
 |---|---|
@@ -864,7 +890,7 @@ print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
 | `ConvergenceWarning` | `max_iter` までに収束しなかった、または SQUAREM が反復の 50% 超（5 回以上）で通常の EM に戻った |
 | `HeywoodWarning` | 自由な項目パラメタが有限の境界から `1e-4` 以内（3PL / 4PL で `g` が 0 付近、`u` が 1 付近など）、または自由な傾きが $|a| > 20$。`NormalMixture` の成分の退化。ポリコリック相関のペアが $|\rho| \to 1$ |
 | `NotPositiveDefiniteWarning` | ポリコリック相関行列が正定値でなく、平滑化した |
-| `FlexpyirtWarning` | 情報行列が正定値でない（SE が NaN）、アンカーが 1 パラメタだけ、MAP 推定で `aic` / `bic` を参照した、または平行分析の反復を飛ばした |
+| `FlexpyirtWarning` | 情報行列が正定値でない（SE が NaN）、アンカーが 1 パラメタだけ、MAP 推定で `aic` / `bic` を参照した、または平行分析の反復（またはモデルに基づくシミュレーション）を飛ばした |
 
 すべての例外は `flexpyirt.errors.FlexpyirtError`、警告は `flexpyirt.errors.FlexpyirtWarning` を継承する。
 `SpecificationError` と `IdentificationError` は `ValueError` でもある。

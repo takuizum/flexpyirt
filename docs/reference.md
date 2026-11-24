@@ -12,7 +12,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Correlations: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser) and their results
+- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`model_parallel_analysis`](#model_parallel_analysis), [`dimensionality`](#dimensionality) and their results
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -192,6 +192,25 @@ a `FlexpyirtWarning` is emitted and `tli`/`cfi` are `NaN`.
 **Raises**: `PrecisionError` if JAX 64-bit is disabled; `SpecificationError` for multidimensional,
 multiple-group, `EmpiricalHistogram`, `NormalMixture`, or MAP (with priors) models, missing responses, invalid
 `ci`, or fewer than 2 items or respondents.
+
+#### `FitResult.local_dependence`
+
+```text
+local_dependence(data, *, item_names=None) -> LocalDependenceResult
+```
+
+Local-dependence statistics for every item pair of a single-group unidimensional model with a
+`Normal` latent distribution ([guide section 18](guide.md#18-local-dependence-and-the-dimensionality-report)):
+Yen's (1984) Q3 (correlation of residuals $x_{ij} - E(X_j \mid \hat\theta_i)$ with EAP
+$\hat\theta$), Q3\* $=$ Q3 $-$ mean Q3 (Christensen, Makransky & Horton, 2017), and Chen &
+Thissen's (1997) LD $X^2$ / $G^2$ against the model-implied table on the fitted grid, with
+$df = (K_i-1)(K_j-1)$, $p$-values and a signed Cramér's $V$, as mirt's
+`residuals(type = "Q3" / "LD" / "LDG2")`. Missing responses are allowed (pairwise).
+
+**Returns**: [`LocalDependenceResult`](#localdependenceresult)
+
+**Raises**: `PrecisionError`; `SpecificationError` for multiple-group, multidimensional or
+non-`Normal` latent models, or invalid data.
 
 #### `FitResult.dif`
 
@@ -870,6 +889,72 @@ $\max\{(1+\sqrt{p/n})^2 (p-\sum_{i<j}\lambda_i)/(p-j+1),\ 1\}$. `n_obs` is requi
 | `n_factors` | int | Number of leading eigenvalues above the reference |
 | `eigenvalues`, `reference` | ndarray | Eigenvalues and reference values |
 | `n_obs` | int | Sample size used |
+
+### `model_parallel_analysis`
+
+```text
+model_parallel_analysis(fit, data, *, key, n_replications=100, eigen_type="max",
+                        zero_cell_correction=0.5, item_names=None) -> ModelParallelAnalysisResult
+```
+
+Drasgow & Lissak's (1983) modified parallel analysis: the second eigenvalue of the observed
+polychoric (tetrachoric) matrix is compared with its distribution in data simulated from `fit`
+(same size and missingness, $\theta \sim N(\hat\mu, \hat\sigma^2)$);
+$p = (1 + \#\{T_b \ge T\})/(B + 1)$. `eigen_type="max"` puts the largest off-diagonal correlation
+on the diagonal, as ltm's `unidimTest`; `"smc"` and `"pca"` are also available. `fit` must be a
+single-group unidimensional model with a `Normal` latent distribution.
+
+### `ModelParallelAnalysisResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `statistic` | float | Observed second eigenvalue |
+| `p_value` | float | Monte Carlo $p$-value |
+| `observed` | ndarray | Observed eigenvalues |
+| `replications` | ndarray | `(B, p)` eigenvalues of the simulated data |
+| `eigen_type`, `n_skipped` | | Setting used and skipped simulations |
+
+### `LocalDependenceResult`
+
+Returned by `FitResult.local_dependence()`.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `pairs` | DataFrame | One row per pair: `item_i`, `item_j`, `n`, `q3`, `q3_star`, `x2`, `g2`, `df`, `p_x2`, `p_g2`, `cramer_v` |
+| `q3` | DataFrame | Item x item Q3 matrix |
+| `q3_mean` | float | Mean off-diagonal Q3 |
+| `max_q3_star` | float | Largest Q3\* |
+
+### `dimensionality`
+
+```text
+dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=0.5,
+               alpha=0.05, q3_star_threshold=0.2, rmsea_threshold=0.05,
+               item_names=None) -> DimensionalityResult
+```
+
+Runs several diagnostics and reports them side by side, with two separate consensus lines
+(no method is reliable alone; Auerswald & Moshagen, 2019).
+
+- **How many dimensions?** `parallel_analysis()` (polychoric, PCA, permutation, 95%),
+  `velicer_map()` (revised) and `empirical_kaiser()`; consensus = mode (all values on a tie) and
+  median, with the number of methods agreeing.
+- **Is essential unidimensionality tenable?** Only with `fit`: `model_parallel_analysis()`
+  ($p \ge$ `alpha`), the largest Q3\* $<$ `q3_star_threshold` (0.2 is a common rule; critical
+  values depend on the test and sample) and the RMSEA of `FitResult.m2()` $\le$ `rmsea_threshold`
+  (close fit; unavailable with missing data, then reported as such). Consensus = number of
+  available methods supporting it. Methods are not weighted.
+
+### `DimensionalityResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `number_of_dimensions` | DataFrame | `method`, `n_factors`, `detail`, `source` |
+| `unidimensionality` | DataFrame | `method`, `statistic`, `threshold`, `supports_unidimensionality` (`None` when unavailable), `detail`, `source` |
+| `n_factors_mode`, `n_factors_median`, `n_agreeing` | tuple[int, ...], float, int | Consensus on the number of dimensions |
+| `n_supporting`, `n_unidimensionality_methods` | int | Consensus on essential unidimensionality |
+| `results` | dict | The individual results |
+| `summary()` | str | Plain-text report (also `str(result)`) |
 
 ---
 

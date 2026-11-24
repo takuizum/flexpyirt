@@ -11,7 +11,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - 相関: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser) とその結果
+- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`model_parallel_analysis`](#model_parallel_analysis), [`dimensionality`](#dimensionality) とその結果
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -174,6 +174,23 @@ $\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、す
 
 **例外**: JAX 64 ビットが無効なとき `PrecisionError`。多次元・多母集団・`EmpiricalHistogram`・`NormalMixture`・事前分布つきの
 MAP モデル、欠測を含むデータ、不正な `ci`、項目数または回答者数が 2 未満のとき `SpecificationError`。
+
+#### `FitResult.local_dependence`
+
+```text
+local_dependence(data, *, item_names=None) -> LocalDependenceResult
+```
+
+単一群・1 次元・`Normal` 潜在分布のモデルについて、すべての項目ペアの局所依存の統計量を求める
+（[ガイド 18 節](guide.ja.md#18-局所依存と次元性のレポート)）。Yen (1984) の Q3（EAP の $\hat\theta$ による残差
+$x_{ij} - E(X_j \mid \hat\theta_i)$ の相関）、Q3\* $=$ Q3 $-$ Q3 の平均（Christensen, Makransky & Horton, 2017）、
+推定した格子でモデルが含意する分割表と比べる Chen & Thissen (1997) の LD $X^2$ / $G^2$（$df = (K_i-1)(K_j-1)$、
+$p$ 値、符号付きの Cramér の $V$）。mirt の `residuals(type = "Q3" / "LD" / "LDG2")` と同じ。欠測はペアごとに扱う。
+
+**戻り値**: [`LocalDependenceResult`](#localdependenceresult)
+
+**例外**: `PrecisionError`。多母集団・多次元・`Normal` 以外の潜在分布のモデル、不正なデータは
+`SpecificationError`。
 
 #### `FitResult.dif`
 
@@ -798,6 +815,67 @@ $\max\{(1+\sqrt{p/n})^2 (p-\sum_{i<j}\lambda_i)/(p-j+1),\ 1\}$ と比べる。`c
 | `n_factors` | int | 参照値を上回る固有値の数（先頭から） |
 | `eigenvalues`, `reference` | ndarray | 固有値と参照値 |
 | `n_obs` | int | 使った標本サイズ |
+
+### `model_parallel_analysis`
+
+```text
+model_parallel_analysis(fit, data, *, key, n_replications=100, eigen_type="max",
+                        zero_cell_correction=0.5, item_names=None) -> ModelParallelAnalysisResult
+```
+
+Drasgow & Lissak (1983) の修正平行分析。観測されたポリコリック（テトラコリック）相関行列の第 2 固有値を、`fit` から
+シミュレーションしたデータ（大きさと欠測は同じ、$\theta \sim N(\hat\mu, \hat\sigma^2)$）での分布と比べる。
+$p = (1 + \#\{T_b \ge T\})/(B + 1)$。`eigen_type="max"` は ltm の `unidimTest` と同じく対角に非対角の最大の相関を
+置く。`"smc"` と `"pca"` も使える。`fit` は単一群・1 次元・`Normal` 潜在分布のモデルであること。
+
+### `ModelParallelAnalysisResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `statistic` | float | 観測された第 2 固有値 |
+| `p_value` | float | Monte Carlo の $p$ 値 |
+| `observed` | ndarray | 観測固有値 |
+| `replications` | ndarray | シミュレーションしたデータの `(B, p)` の固有値 |
+| `eigen_type`, `n_skipped` | | 使った設定と飛ばしたシミュレーションの数 |
+
+### `LocalDependenceResult`
+
+`FitResult.local_dependence()` の戻り値。
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `pairs` | DataFrame | ペアごとに 1 行: `item_i`, `item_j`, `n`, `q3`, `q3_star`, `x2`, `g2`, `df`, `p_x2`, `p_g2`, `cramer_v` |
+| `q3` | DataFrame | 項目 x 項目の Q3 行列 |
+| `q3_mean` | float | 非対角の Q3 の平均 |
+| `max_q3_star` | float | 最大の Q3\* |
+
+### `dimensionality`
+
+```text
+dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=0.5,
+               alpha=0.05, q3_star_threshold=0.2, rmsea_threshold=0.05,
+               item_names=None) -> DimensionalityResult
+```
+
+いくつかの診断を実行して並べ、2 つの合意を別々に示す（単独で信頼できる手法はない。Auerswald & Moshagen, 2019）。
+
+- **次元はいくつか**: `parallel_analysis()`（ポリコリック、PCA、並べ替え、95%）、`velicer_map()`（改訂版）、
+  `empirical_kaiser()`。合意は最頻値（同数ならすべて）と中央値、および一致した手法の数。
+- **本質的一次元性は認められるか**: `fit` を与えたときだけ。`model_parallel_analysis()`（$p \ge$ `alpha`）、最大の
+  Q3\* $<$ `q3_star_threshold`（0.2 はよく使われる目安で、臨界値はテストと標本による）、`FitResult.m2()` の
+  RMSEA $\le$ `rmsea_threshold`（近似的な適合。欠測があると使えず、その旨を示す）。合意は支持する手法の数（使えた
+  手法のうち）。手法に重みは付けない。
+
+### `DimensionalityResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `number_of_dimensions` | DataFrame | `method`, `n_factors`, `detail`, `source` |
+| `unidimensionality` | DataFrame | `method`, `statistic`, `threshold`, `supports_unidimensionality`（使えないときは `None`）, `detail`, `source` |
+| `n_factors_mode`, `n_factors_median`, `n_agreeing` | tuple[int, ...], float, int | 次元数についての合意 |
+| `n_supporting`, `n_unidimensionality_methods` | int | 本質的一次元性についての合意 |
+| `results` | dict | 個々の結果 |
+| `summary()` | str | テキストのレポート（`str(result)` も同じ） |
 
 ---
 

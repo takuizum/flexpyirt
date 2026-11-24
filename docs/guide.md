@@ -23,7 +23,8 @@ for the models and algorithms behind them, see [Theory](theory.md).
 15. [Scale linking](#15-scale-linking)
 16. [Polychoric correlations](#16-polychoric-correlations)
 17. [Number of dimensions](#17-number-of-dimensions)
-18. [Errors and warnings](#18-errors-and-warnings)
+18. [Local dependence and the dimensionality report](#18-local-dependence-and-the-dimensionality-report)
+19. [Errors and warnings](#19-errors-and-warnings)
 
 ## 1. Setup
 
@@ -928,9 +929,38 @@ print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
 - `empirical_kaiser()` compares each eigenvalue with a sample-size-dependent reference
   (Braeken & van Assen, 2017).
 - These count dimensions; they do not test whether a unidimensional IRT model fits. For that,
-  see `FitResult.m2()` and `FitResult.item_fit()`.
+  see section 18, `FitResult.m2()` and `FitResult.item_fit()`.
 
-## 18. Errors and warnings
+## 18. Local dependence and the dimensionality report
+
+The counts of section 17 use the data only. With a fitted unidimensional model you can also ask
+whether the model leaves dependence between items unexplained.
+
+```python
+from flexpyirt import dimensionality, model_parallel_analysis
+
+ld = res.local_dependence(df)
+cols = ["item_i", "item_j", "q3_star", "x2", "p_x2"]
+print(ld.pairs.sort_values("q3_star", ascending=False)[cols].head(3).round(3))
+mpa = model_parallel_analysis(res, df, key=jax.random.key(1), n_replications=20)
+print(round(mpa.statistic, 3), round(mpa.p_value, 3))
+report = dimensionality(df, key=jax.random.key(2), fit=res, n_replications=20)
+print(report)
+```
+
+- `FitResult.local_dependence()` gives, for every pair, Yen's Q3 (the correlation of residuals
+  from EAP scores), Q3\* (Q3 minus its mean over pairs) and Chen & Thissen's LD $X^2$ / $G^2$,
+  as mirt's `residuals()`. Large Q3\* or $X^2$ point to pairs that share something beyond
+  $\theta$ (a common stem, a testlet, a second dimension).
+- `model_parallel_analysis()` simulates data from the fitted model and asks whether the observed
+  second eigenvalue is larger than the model produces (Drasgow & Lissak, 1983). Because the
+  model was fitted to the same data the $p$-value is conservative: a small value is evidence of a
+  second dimension, a large one (here even 1) is not proof of unidimensionality.
+- `dimensionality()` runs the methods of section 17 and, with `fit=`, these checks and $M_2$,
+  and prints every result with two separate consensus lines: how many dimensions, and how many
+  checks support essential unidimensionality. It does not merge them into one verdict.
+
+## 19. Errors and warnings
 
 | Type | When |
 |---|---|
@@ -940,7 +970,7 @@ print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
 | `ConvergenceWarning` | EM did not converge within `max_iter`, or SQUAREM fell back to plain EM on > 50% of iterations (at least 5 times) |
 | `HeywoodWarning` | A free item parameter ended within `1e-4` of a finite bound (e.g. `g` near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$; or a `NormalMixture` component is degenerate; or a polychoric pair is at $|\rho| \to 1$ |
 | `NotPositiveDefiniteWarning` | A polychoric matrix was not positive definite and was smoothed |
-| `FlexpyirtWarning` | The information matrix is not positive definite (SEs are NaN), an anchor is a single parameter, `aic` / `bic` is accessed under MAP, or parallel-analysis replications were skipped |
+| `FlexpyirtWarning` | The information matrix is not positive definite (SEs are NaN), an anchor is a single parameter, `aic` / `bic` is accessed under MAP, or parallel-analysis replications (or model-based simulations) were skipped |
 
 Every exception derives from `flexpyirt.errors.FlexpyirtError` and every warning from
 `flexpyirt.errors.FlexpyirtWarning`. `SpecificationError` and `IdentificationError` are also

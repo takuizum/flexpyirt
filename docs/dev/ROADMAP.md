@@ -71,8 +71,10 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
     validated in V24 against `lavaan::lavCor` and `psych::polychoric` / `cor.smooth`).
   - [x] D2 eigenvalues, parallel analysis, revised MAP, EKC (`parallel_analysis()`, `velicer_map()`,
     `empirical_kaiser()`; validated in V25 against EFAtools, psych and EFA.dimensions).
-  - [ ] D3 local dependence Q3 / Q3* / LD-X2 / JSI (vs `mirt::residuals`) and model-based parallel
-    analysis (vs `ltm::unidimTest`); then the ensemble `dimensionality()`.
+  - [x] D3 local dependence Q3 / Q3* / LD-X2 / G2 (`FitResult.local_dependence()`, vs `mirt::residuals`)
+    and model-based parallel analysis (`model_parallel_analysis()`, vs `ltm::unidimTest`); the ensemble
+    `dimensionality()` (validated in V26; the ensemble by recomputation).
+  - [ ] JSI (Edwards, Houts & Cai, 2018; vs `mirt::residuals(type = "JSI")`).
   - [ ] D4 DETECT, confirmatory and exploratory (vs `sirt::conf.detect` / `expl.detect`).
   - [ ] D5 EFA through the optional `factor_analyzer` (extra `flexpyirt[efa]`, vs `psych::fa`), Hull
     (vs `EFAtools::HULL`), comparison data (vs `EFAtools::CD`).
