@@ -44,7 +44,7 @@ PAIRED = [
 
 
 def _blocks(path: Path) -> list[str]:
-    return BLOCK_RE.findall(path.read_text())
+    return BLOCK_RE.findall(path.read_text(encoding="utf-8"))
 
 
 def _code_only(block: str) -> list[str]:
@@ -101,17 +101,25 @@ def test_translations_have_the_same_code(stem: str) -> None:
 
 @pytest.mark.parametrize("doc", ["docs/reference.md", "docs/reference.ja.md"])
 def test_reference_covers_public_api(doc: str) -> None:
-    text = (ROOT / doc).read_text()
+    text = (ROOT / doc).read_text(encoding="utf-8")
     names = [n for n in flexpyirt.__all__ if not n.startswith("_") and n != "errors"]
     names += list(errors.__all__)
     missing = [n for n in names if not re.search(rf"^#+ .*`{re.escape(n)}\b", text, re.M)]
     assert not missing, f"Not documented in {doc}: {missing}"
 
 
-@pytest.mark.parametrize("doc", sorted(str(p.relative_to(ROOT)) for p in ROOT.rglob("*.ja.md")))
+@pytest.mark.parametrize(
+    "doc",
+    sorted(
+        str(p.relative_to(ROOT))
+        for p in ROOT.rglob("*.ja.md")
+        # Skip hidden directories (.venv, local worktrees under .claude/, ...): not the repo's docs.
+        if not any(part.startswith(".") for part in p.relative_to(ROOT).parts)
+    ),
+)
 def test_japanese_docs_link_to_japanese_docs(doc: str) -> None:
     doc_path = ROOT / doc
-    lines = doc_path.read_text().splitlines()
+    lines = doc_path.read_text(encoding="utf-8").splitlines()
     body = [line for line in lines if not line.startswith("[English](")]
     text = "\n".join(body)
     links = re.findall(r"\]\(([^)#\s]+\.md)(?:#[^)]*)?\)", text)
