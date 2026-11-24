@@ -12,6 +12,7 @@ suppressMessages({
   library(mirt)
   library(jsonlite)
 })
+grDevices::pdf(NULL)  # expl.detect() draws a dendrogram; do not write Rplots.pdf
 
 quiet <- function(expr) {
   out <- NULL
