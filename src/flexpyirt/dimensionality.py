@@ -16,8 +16,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
-from flexpyirt import _comparison_data, _detect, _efa
+from flexpyirt import _comparison_data, _detect, _dimtest, _efa
 from flexpyirt._compile import coerce_responses
 from flexpyirt._precision import check_x64
 from flexpyirt.correlation import (
@@ -41,6 +42,7 @@ __all__ = [
     "ComparisonDataResult",
     "DetectResult",
     "DimensionalityResult",
+    "DimtestResult",
     "EFAResult",
     "EmpiricalKaiserResult",
     "ExploratoryDetectResult",
@@ -52,6 +54,7 @@ __all__ = [
     "comparison_data",
     "detect",
     "dimensionality",
+    "dimtest",
     "efa",
     "empirical_kaiser",
     "exploratory_detect",
@@ -739,8 +742,8 @@ class DimensionalityResult:
         Number of available question-(B) methods.
     results : dict of str to object
         The individual results (``polychoric``, ``parallel_analysis``, ``velicer_map``,
-        ``empirical_kaiser``, ``hull``, ``comparison_data``, ``exploratory_detect`` and, with
-        ``fit``,
+        ``empirical_kaiser``, ``hull``, ``comparison_data``, ``exploratory_detect``,
+        ``dimtest`` and, with ``fit``,
         ``model_parallel_analysis``, ``local_dependence``, ``m2``; ``None`` when unavailable).
     """
 
@@ -810,7 +813,9 @@ def dimensionality(
 
     * :func:`exploratory_detect` (complete data only): supports when the validation-half DETECT
       of the selected partition is below ``detect_threshold`` (0.2; Jang & Roussos, 2007;
-      Zhang, 2007).
+      Zhang, 2007);
+    * :func:`dimtest` (complete binary data only): supports when :math:`p\ge` ``alpha``
+      (conservative: its type I error is below nominal in DESIGN.md §16.16's study).
 
     Only with ``fit`` (a single-group unidimensional model with a ``Normal`` latent
     distribution):
@@ -832,8 +837,8 @@ def dimensionality(
         Respondents x items, ordered category codes; NaN is missing. With ``fit``, the fitting
         data (the fitted items, in any column order when a DataFrame).
     key : jax.Array
-        JAX PRNG key; split for the parallel analyses, the Hull bound, the DETECT split and the
-        comparison data.
+        JAX PRNG key; split for the parallel analyses, the Hull bound, the DETECT split, the
+        comparison data and DIMTEST.
     fit : FitResult, optional
         Fitted unidimensional model for question (B).
     n_replications : int, default 100
@@ -841,7 +846,7 @@ def dimensionality(
     zero_cell_correction : float, default 0.5
         Passed to :func:`~flexpyirt.polychoric`.
     alpha : float, default 0.05
-        Level for :func:`model_parallel_analysis`.
+        Level for :func:`model_parallel_analysis` and :func:`dimtest`.
     q3_star_threshold : float, default 0.2
         Largest acceptable Q3*.
     rmsea_threshold : float, default 0.05
@@ -873,7 +878,7 @@ def dimensionality(
     ):
         if not (lo < float(value) < hi):
             raise SpecificationError(f"{name} must be in ({lo:g}, {hi:g}), got {value!r}.")
-    key_a, key_b, key_c, key_d, key_e = jax.random.split(key, 5)
+    key_a, key_b, key_c, key_d, key_e, key_f = jax.random.split(key, 6)
     results: dict[str, object] = {}
 
     if fit is not None:
@@ -1003,6 +1008,34 @@ def dimensionality(
                     f"RATIO {float(best['RATIO_validation']):.3f}"
                 ),
                 "source": "Zhang & Stout (1999); Jang & Roussos (2007)",
+            }
+        )
+    binary = (not frame.isna().to_numpy().any()) and bool(
+        np.isin(frame.to_numpy(), (0.0, 1.0)).all()
+    )
+    if binary and n_items >= 4:
+        dt = dimtest(frame, key=key_f)
+        results["dimtest"] = dt
+        rows.append(
+            {
+                "method": "DIMTEST",
+                "statistic": dt.p_value,
+                "threshold": alpha,
+                "supports_unidimensionality": bool(dt.p_value >= alpha),
+                "detail": f"T = {dt.statistic:.3f}, p = {dt.p_value:.3g}, AT {dt.assessment_items}",
+                "source": "Stout (1987); Stout, Froelich & Gao (2001)",
+            }
+        )
+    else:
+        results["dimtest"] = None
+        rows.append(
+            {
+                "method": "DIMTEST",
+                "statistic": float("nan"),
+                "threshold": alpha,
+                "supports_unidimensionality": None,
+                "detail": "not available: DIMTEST needs complete binary data",
+                "source": "Stout (1987); Stout, Froelich & Gao (2001)",
             }
         )
     if fit is not None:
@@ -1770,4 +1803,202 @@ def comparison_data(
         p_values=pd.Series(p_values, name="p", dtype=np.float64),
         population_rmse=pd.Series(population_rmse, name="population_rmse"),
         max_factors=k_max,
+    )
+
+
+# ----------------------------------------------------------------------------- DIMTEST
+@dataclass(frozen=True)
+class DimtestResult:
+    r"""Result of :func:`dimtest`.
+
+    Attributes
+    ----------
+    statistic : float
+        Bias-corrected :math:`T=(T_L-\bar T_G)/\sqrt{1+1/B}`, standard normal under essential
+        unidimensionality.
+    p_value : float
+        One-sided :math:`1-\Phi(T)`.
+    t_l : float
+        :math:`T_L` on the test sample.
+    t_g : numpy.ndarray
+        :math:`T_L` of the ``B`` bootstrap data sets.
+    assessment_items, partitioning_items : list of str
+        The AT and PT items.
+    n_groups : int
+        Partitioning-score groups used on the test sample.
+    training_rows, test_rows : numpy.ndarray
+        Row positions used to select the AT (empty when ``assessment_items`` is given) and to test.
+    """
+
+    statistic: float
+    p_value: float
+    t_l: float
+    t_g: np.ndarray
+    assessment_items: list[str]
+    partitioning_items: list[str]
+    n_groups: int
+    training_rows: np.ndarray
+    test_rows: np.ndarray
+
+
+def _select_assessment_items(x: np.ndarray, max_size: int) -> np.ndarray:
+    """AT = the cluster (Ward on conditional covariances) with the largest DETECT vs the rest."""
+    n_items = x.shape[1]
+    ccov = _detect.conditional_covariances(x)
+    partitions = _detect.ward_clusters(ccov, list(range(2, min(6, n_items) + 1)))
+    best: tuple[float, tuple[int, ...]] | None = None
+    seen: set[tuple[int, ...]] = set()
+    for labels in partitions.values():
+        for label in np.unique(labels):
+            members = tuple(int(i) for i in np.flatnonzero(labels == label))
+            if not (2 <= len(members) <= max_size) or members in seen:
+                continue
+            seen.add(members)
+            split = np.where(np.isin(np.arange(n_items), members), 1, 2)
+            value = _detect.detect_indices(ccov, split)["DETECT"][0]
+            if best is None or value > best[0]:
+                best = (value, members)
+    if best is None:
+        raise SpecificationError("No assessment subtest of the allowed size could be formed.")
+    return np.asarray(best[1], dtype=np.int64)
+
+
+def dimtest(
+    data: pd.DataFrame | np.ndarray,
+    *,
+    key: jax.Array,
+    assessment_items: Sequence[str] | None = None,
+    training_fraction: float = 1 / 3,
+    n_bootstrap: int = 100,
+    min_group: int = 20,
+    max_assessment_size: int | None = None,
+) -> DimtestResult:
+    r"""DIMTEST: test essential unidimensionality (Stout, 1987; Stout, Froelich & Gao, 2001).
+
+    The items are split into an assessment subtest (AT) and a partitioning subtest (PT). Given
+    the PT score, the AT items' conditional covariances are near zero under essential
+    unidimensionality and positive when the AT measures a dimension the PT does not;
+    :math:`T_L` (Nandakumar & Stout, 1993; :func:`flexpyirt._dimtest.t_l_statistic`) sums their
+    standardized group-wise totals. Its bias is estimated by the mean :math:`\bar T_G` of
+    :math:`T_L` over ``n_bootstrap`` unidimensional data sets generated from kernel-smoothed item
+    response functions of the test sample (Ramsay, 1991, bandwidth :math:`1.1N^{-1/5}`;
+    :math:`\theta\sim N(0,1)`), and
+
+    .. math::
+        T=\frac{T_L-\bar T_G}{\sqrt{1+1/B}},\qquad p=1-\Phi(T)
+
+    (Stout, Froelich & Gao, 2001). Without ``assessment_items`` the AT is chosen on a random
+    ``training_fraction`` of the respondents (Froelich & Habing, 2008, use a separate subsample):
+    among the clusters of a Ward clustering of conditional covariances (:func:`exploratory_detect`)
+    with 2 to ``max_assessment_size`` items, the one whose split from the rest has the largest
+    DETECT; the test then uses the other respondents only. This AT search is in the spirit of
+    Froelich & Habing's conditional-covariance selection, not their exact procedure. The test is
+    accepted on a simulation study (no reference implementation outside DIMPACK; DESIGN.md
+    §16.16).
+
+    Parameters
+    ----------
+    data : pandas.DataFrame or numpy.ndarray
+        Respondents x items, complete binary (0/1) responses.
+    key : jax.Array
+        JAX PRNG key (split, AT search, bootstrap).
+    assessment_items : sequence of str, optional
+        The AT items (then all respondents are used for the test; choose them without looking at
+        these data, or the test is biased).
+    training_fraction : float, default 1/3
+        Share of respondents used to select the AT.
+    n_bootstrap : int, default 100
+        Bootstrap data sets :math:`B`.
+    min_group : int, default 20
+        Smallest PT-score group used.
+    max_assessment_size : int, optional
+        Largest AT (default half the items).
+
+    Returns
+    -------
+    DimtestResult
+
+    Raises
+    ------
+    SpecificationError
+        Non-binary or incomplete data, fewer than 4 items, invalid options, or no usable
+        PT-score group.
+    PrecisionError
+        If JAX is not running in 64-bit mode.
+    """
+    check_x64()
+    names, values = _coerce_ordinal(data)
+    if np.isnan(values).any() or not np.isin(values, (0.0, 1.0)).all():
+        raise SpecificationError("dimtest() needs complete binary (0/1) responses.")
+    n_obs, n_items = values.shape
+    if n_items < 4:
+        raise SpecificationError("dimtest() needs at least 4 items.")
+    max_size = n_items // 2 if max_assessment_size is None else int(max_assessment_size)
+    if not 2 <= max_size <= n_items - 2:
+        raise SpecificationError(
+            f"max_assessment_size must be in [2, {n_items - 2}], got {max_assessment_size!r}."
+        )
+    if not (isinstance(n_bootstrap, (int, np.integer)) and n_bootstrap >= 2):
+        raise SpecificationError(
+            f"n_bootstrap must be an integer of at least 2, got {n_bootstrap!r}."
+        )
+    if not (isinstance(min_group, (int, np.integer)) and min_group >= 2):
+        raise SpecificationError(f"min_group must be an integer of at least 2, got {min_group!r}.")
+    k_split, k_ties, k_boot = jax.random.split(key, 3)
+    if assessment_items is None:
+        if not (0.0 < float(training_fraction) < 1.0):
+            raise SpecificationError(
+                f"training_fraction must be in (0, 1), got {training_fraction!r}."
+            )
+        perm = np.asarray(jax.random.permutation(k_split, n_obs))
+        n_train = int(np.floor(n_obs * float(training_fraction)))
+        if n_train < 2 or n_obs - n_train < 2:
+            raise SpecificationError("Too few respondents for the training / test split.")
+        train = np.sort(perm[:n_train])
+        test = np.sort(perm[n_train:])
+        at_idx = _select_assessment_items(values[train], max_size)
+    else:
+        chosen = list(dict.fromkeys(str(i) for i in assessment_items))
+        unknown = [i for i in chosen if i not in names]
+        if unknown:
+            raise SpecificationError(f"Unknown assessment_items: {unknown}.")
+        if not 2 <= len(chosen) <= n_items - 2:
+            raise SpecificationError("The AT needs at least 2 items and the PT at least 2.")
+        at_idx = np.asarray([names.index(i) for i in chosen], dtype=np.int64)
+        train = np.zeros(0, dtype=np.int64)
+        test = np.arange(n_obs)
+    pt_idx = np.setdiff1d(np.arange(n_items), at_idx)
+    x = values[test]
+    t_l, n_groups = _dimtest.t_l_statistic(x[:, at_idx], x[:, pt_idx].sum(axis=1), int(min_group))
+    if n_groups == 0:
+        raise SpecificationError(
+            f"No partitioning-score group has at least min_group={min_group} respondents."
+        )
+    n_test = x.shape[0]
+    grid = np.linspace(-4.0, 4.0, 161)
+    tie_noise = np.asarray(jax.random.uniform(k_ties, (n_test,), dtype=jnp.float64))
+    irfs = _dimtest.kernel_irfs(x, tie_noise, grid, 1.1 * n_test ** (-0.2))
+    t_g = []
+    for kb in jax.random.split(k_boot, int(n_bootstrap)):
+        k_theta, k_unif = jax.random.split(kb)
+        theta = np.asarray(jax.random.normal(k_theta, (n_test,), dtype=jnp.float64))
+        unif = np.asarray(jax.random.uniform(k_unif, (n_test, n_items), dtype=jnp.float64))
+        sim = _dimtest.simulate_from_irfs(irfs, grid, theta, unif)
+        value, groups = _dimtest.t_l_statistic(
+            sim[:, at_idx], sim[:, pt_idx].sum(axis=1), int(min_group)
+        )
+        if groups > 0:
+            t_g.append(value)
+    t_g_arr = np.asarray(t_g)
+    statistic = float((t_l - t_g_arr.mean()) / np.sqrt(1.0 + 1.0 / t_g_arr.size))
+    return DimtestResult(
+        statistic=statistic,
+        p_value=float(norm.sf(statistic)),
+        t_l=float(t_l),
+        t_g=t_g_arr,
+        assessment_items=[names[i] for i in at_idx],
+        partitioning_items=[names[i] for i in pt_idx],
+        n_groups=int(n_groups),
+        training_rows=train,
+        test_rows=test,
     )
