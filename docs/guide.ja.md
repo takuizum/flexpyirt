@@ -856,6 +856,8 @@ print(efa(pc, n_factors=1).loadings.head(3).round(3))
   （`power=2` で元の版）。
 - `hull()` は 0, 1, …, $J$ 因子の因子モデル（`efa()`、ULS または ML）を当てはめ、使う自由度に比べて因子を増やしても
   適合度がほとんど上がらなくなる直前の数を選ぶ（Lorenzo-Seva, Timmerman & Kiers, 2011）。項目が 6 つ以上必要。
+- `comparison_data()`（Ruscio & Roche, 2012）は、観測された相関と項目の分布を再現する 1, 2, … 因子の母集団を
+  生成し、その母集団からの標本の固有値が観測固有値に近づく限り因子を加える。
 - `empirical_kaiser()` は各固有値を標本サイズに応じた参照値と比べる（Braeken & van Assen, 2017）。
 - これらは次元の数を数えるもので、1 次元 IRT モデルが当てはまるかを検定するものではない。それには
   18 節、`FitResult.m2()`、`FitResult.item_fit()` を使う。

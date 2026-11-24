@@ -932,6 +932,9 @@ print(efa(pc, n_factors=1).loadings.head(3).round(3))
 - `hull()` fits factor models with $0, 1, \dots, J$ factors (`efa()`, ULS or ML) and picks the
   number after which more factors add little fit relative to the degrees of freedom they use
   (Lorenzo-Seva, Timmerman & Kiers, 2011); it needs at least 6 items.
+- `comparison_data()` (Ruscio & Roche, 2012) generates populations with $1, 2, \dots$ factors that
+  reproduce the observed correlations and item distributions, and adds a factor while it makes
+  the eigenvalues of samples from that population closer to the observed ones.
 - `empirical_kaiser()` compares each eigenvalue with a sample-size-dependent reference
   (Braeken & van Assen, 2017).
 - These count dimensions; they do not test whether a unidimensional IRT model fits. For that,

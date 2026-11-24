@@ -11,7 +11,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - 相関: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) とその結果
+- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) とその結果
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -857,6 +857,28 @@ $st_k = \frac{(f_k - f_{k-1})/(df_k - df_{k-1})}{(f_{k+1} - f_k)/(df_{k+1} - df_
 | `table` | DataFrame | $k$ ごとの `n_factors`、`fit`、`df`、`st`、`on_hull`、`heywood`、`converged` |
 | `fit_index`, `method`, `max_factors` | | 使った設定 |
 
+### `comparison_data`
+
+```text
+comparison_data(data, *, key, max_factors=None, n_population=10000, n_samples=500,
+                alpha=0.30, max_iter=50) -> ComparisonDataResult
+```
+
+比較データ法（Ruscio & Roche, 2012）。EFAtools の `CD()` と同じ。$k = 1, 2, \dots$ について、観測された Pearson 相関と
+各変数の分布を再現する $k$ 個の共通因子をもつ母集団を生成し（Ruscio & Kaczetow, 2008）、データと同じ大きさの標本を
+引いて、その固有値と観測固有値の RMSE を記録する。片側の Mann–Whitney 検定が `alpha` で RMSE を下げると言う限り
+因子を加える。欠測のない数値データ。
+
+### `ComparisonDataResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `n_factors` | int | 提案される因子数 |
+| `rmse` | DataFrame | 標本（行）と試した $k$（列）ごとの固有値の RMSE |
+| `p_values` | Series | $k$ と $k - 1$ を比べる順位和の $p$（$k \ge 2$） |
+| `population_rmse` | Series | 各母集団が観測相関をどれだけ再現するか |
+| `max_factors` | int | 試せた最大の $k$ |
+
 ### `model_parallel_analysis`
 
 ```text
@@ -944,7 +966,7 @@ dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=
 いくつかの診断を実行して並べ、2 つの合意を別々に示す（単独で信頼できる手法はない。Auerswald & Moshagen, 2019）。
 
 - **次元はいくつか**: `parallel_analysis()`（ポリコリック、PCA、並べ替え、95%）、`velicer_map()`（改訂版）、
-  `empirical_kaiser()`、項目が 6 つ以上なら `hull()`（CAF、ULS）。合意は最頻値（同数ならすべて）と中央値、および一致した手法の数。
+  `empirical_kaiser()`、項目が 6 つ以上なら `hull()`（CAF、ULS）、欠測がなければ `comparison_data()`。合意は最頻値（同数ならすべて）と中央値、および一致した手法の数。
 - **本質的一次元性は認められるか**: 欠測のないデータで `exploratory_detect()`（選んだ分割の検証用の半分での
   DETECT $<$ `detect_threshold`）、`fit` を与えればさらに `model_parallel_analysis()`（$p \ge$ `alpha`）、最大の
   Q3\* $<$ `q3_star_threshold`（0.2 はよく使われる目安で、臨界値はテストと標本による）、`FitResult.m2()` の

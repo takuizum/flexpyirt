@@ -26,6 +26,7 @@
 | LD $X^2$ / $G^2$、符号付き $V$・Q3（推定し直したモデル）、モデルに基づく平行分析の観測値 / シミュレーションの平均 / 95 パーセンタイル | 1e-5（相対）、1e-6、2e-4 / $\lvert z\rvert\le4.5$ / 0.02 |
 | DETECT の条件付き共分散、指標（両方の半分）、Ward の併合の高さ | 1e-12 |
 | EFA の含意する $\Lambda\Lambda^\top$ / 共通性、CAF・CFI・RMSEA、$\chi^2$、Hull の適合度 / $st$ | 1e-4、2e-4、1e-4（相対）、1e-5 / 1e-2（相対） |
+| CD: 主因子法の $\Lambda\Lambda^\top$、同じ乱数による 1 因子の母集団、順位和の $p$、平均 RMSE | 1e-12、厳密、1e-10（相対）、15%（相対） |
 
 ## ケース一覧（マイルストーンと対応）
 | ID | 内容 | mirt 側の呼び出し | MS |
@@ -58,6 +59,7 @@
 | V26 | 局所依存（LSAT7 の 2PL、Science の GRM、依存するペアと 5% MCAR を含むシミュレーションの 2PL）とモデルに基づく平行分析（LSAT7） | `residuals(m, type = "LD" / "LDG2" / "Q3")`、ltm の `unidimTest(data = , thetas = cbind(d, a1), IRT = FALSE)` | M5 |
 | V27 | DETECT: 確認的（シミュレーションの 2 次元で正しい・誤った分割、1 次元、Science）と探索的（3 クラスタのシミュレーション、分割を指定） | sirt の `conf.detect(use_sum_score = TRUE, smooth = FALSE)`、`expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
 | V28 | EFA（ULS、ML。Hull の上限までのすべての $k$）と Hull 法（CAF、CFI、RMSEA）。V24 の行列のうち変数が 6 つ以上のものとシミュレーションの行列 2 つ | EFAtools の `EFA(method = , rotation = "none")`、`HULL(method = , gof = )`、psych の `fa(fm = "minres" / "ml", rotate = "none")` | M5 |
+| V29 | 比較データ法: 主因子法、書き出した乱数による 1 因子の母集団の生成、順位和検定、3 因子の連続・2 因子の順序・1 因子の 2 値のデータでの `CD()` | EFAtools の `.paf_iter`、`.simulate_cfm_empirical`、`CD()`、`wilcox.test(x, y, "less")` | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -583,6 +585,11 @@
   記録し、テストはそれを `max_factors` として渡す。EFAtools の `optim()` による解は flexpyirt より収束が粗いので、
   テストでは EFAtools の $\psi=1-h^2$ での目的関数値を flexpyirt の値が上回らないことも確かめる。残る差は Heywood の解
   （独自性が境界にある）で最も大きく、Hull は真の因子数を超える $k$ でそれを含む。
+- **比較データ法（V29、M5）**: CD は両側とも乱数を使う。生成器は、EFAtools の乱数を R で再現し（`set.seed` の
+  あと、生成器と同じ順に `sample()` / `rnorm()` を呼ぶ）、書き出して flexpyirt に与えることで厳密に確かめる。負荷量の
+  符号が生成器で決まる 1 因子では厳密に一致する。選択は答えがはっきりしたデータで確かめ、平均 RMSE は各側が別の
+  母集団を引くので緩く比べる。JSON の `auto_unbox` は要素が 1 つの $p$ 値のベクトルをスカラーにするので、スクリプトは
+  `as.list()` で書く。
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。

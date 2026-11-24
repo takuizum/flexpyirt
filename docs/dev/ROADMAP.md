@@ -81,5 +81,6 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   - [x] D5a ULS / ML EFA implemented in flexpyirt (`efa()`; `factor_analyzer` fails with scikit-learn
     1.8+, DESIGN §16.8) and the Hull method (`hull()`); validated in V28 against EFAtools `EFA` / `HULL`
     and `psych::fa`.
-  - [ ] D5b comparison data (vs `EFAtools::CD`).
+  - [x] D5b comparison data (`comparison_data()`; validated in V29 against EFAtools `CD()` and
+    its generator).
   - [ ] D6 DIMTEST with bootstrap bias correction (accepted on a simulation study: type I error and power).

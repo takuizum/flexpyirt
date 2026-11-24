@@ -1719,8 +1719,34 @@ data-independent shapes (§15.21).
     exactly; psych's `fa()` on the 3-factor matrix to $10^{-4}$. Hull for every matrix x estimator x
     fit index with EFAtools' recorded $J$: the selected $k$ and the hull membership identical, the
     fit values to $10^{-5}$ (observed $\le1.4\times10^{-6}$), $st$ to 1% relative (a ratio of small
-    differences; observed $\le3.5\times10^{-3}$ absolute). Comparison data (CD) is not part of this
-    item yet.
+    differences; observed $\le3.5\times10^{-3}$ absolute). Comparison data is §16.15.
+15. **Comparison data (`comparison_data()`, D5b of §16.8, V29)**: `_comparison_data.py` (NumPy;
+    random draws from a JAX key are passed in, so the generator is deterministic given them).
+    For $k=1..K$ ($K$ = largest $k$ with positive $df$, or `max_factors`): resample each variable's
+    observed values `n_population` times and sort them; draw $F$ $(N,k)$ and $E$ $(N,p)$ standard
+    normal; generate the population (Ruscio & Kaczetow, 2008, as EFAtools'
+    `.simulate_cfm_empirical`): principal axis factoring of an intermediate $R^*$ (EFAtools'
+    `.paf_iter`: unit starting communalities, absolute eigenvalues, criterion $10^{-3}$ on the
+    largest change, `max_iter` 50), loadings clipped to $[-1,1]$ and flipped when the first is
+    negative, scores $F\Lambda^\top+E\,\mathrm{diag}(\sqrt{\max(1-h^2,0)})$, then for each column in
+    turn the rows are reordered by that column (stable sort) and the column replaced by its sorted
+    resampled values; $R^*$ starts at $R$ and moves by the residual $R-R_{\text{rep}}$ while the RMSE
+    of the lower-triangle residuals improves (from 1), otherwise halves the step from the best
+    $R^*$, stopping after 5 failures in a row. `n_samples` bootstrap samples of the data's size are
+    drawn from the population, and the RMSE of their Pearson-correlation eigenvalues against the
+    observed ones is recorded. $k$ is kept while the one-sided Mann–Whitney test (normal
+    approximation with continuity and tie corrections, as R's `wilcox.test` for $n\ge50$) says
+    the RMSE with $k$ factors is smaller than with $k-1$ at $\alpha=0.30$ (Ruscio & Roche's
+    recommendation); the result is the last kept $k$. Pearson correlations only (as Ruscio & Roche
+    and EFAtools); complete data. PAF loadings are signed to non-negative column sums: EFAtools
+    takes LAPACK's signs, which only matter for $k\ge2$ and do not change the population's
+    distribution. **Ensemble**: `dimensionality()` adds CD to question (A) with complete data
+    (fifth split of the key). **Validation (V29)**: `validation/r/m5_comparison_data_reference.R`
+    (EFAtools 1.1.0): PAF loadings for $k=1..3$ to $10^{-12}$ in $\Lambda\Lambda^\top$; the one-factor
+    population from EFAtools' own random draws (reproduced with the same seed and exported)
+    identical; the rank-sum $p$-values on EFAtools' RMSE columns to $10^{-10}$ relative; `CD()` on a
+    3-factor, a 2-factor ordinal and a 1-factor binary data set: the same suggestion for two keys
+    each and mean RMSEs within 15% (different random populations).
 
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1785,6 +1811,7 @@ data-independent shapes (§15.21).
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
+- Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.

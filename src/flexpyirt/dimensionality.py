@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from flexpyirt import _detect, _efa
+from flexpyirt import _comparison_data, _detect, _efa
 from flexpyirt._compile import coerce_responses
 from flexpyirt._precision import check_x64
 from flexpyirt.correlation import (
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from flexpyirt.result import FitResult
 
 __all__ = [
+    "ComparisonDataResult",
     "DetectResult",
     "DimensionalityResult",
     "EFAResult",
@@ -48,6 +49,7 @@ __all__ = [
     "MAPResult",
     "ModelParallelAnalysisResult",
     "ParallelAnalysisResult",
+    "comparison_data",
     "detect",
     "dimensionality",
     "efa",
@@ -737,7 +739,8 @@ class DimensionalityResult:
         Number of available question-(B) methods.
     results : dict of str to object
         The individual results (``polychoric``, ``parallel_analysis``, ``velicer_map``,
-        ``empirical_kaiser``, ``hull``, ``exploratory_detect`` and, with ``fit``,
+        ``empirical_kaiser``, ``hull``, ``comparison_data``, ``exploratory_detect`` and, with
+        ``fit``,
         ``model_parallel_analysis``, ``local_dependence``, ``m2``; ``None`` when unavailable).
     """
 
@@ -798,8 +801,9 @@ def dimensionality(
 
     (A) **How many dimensions?** :func:`parallel_analysis` (polychoric, PCA eigenvalues,
     permutation reference, 95th percentile), :func:`velicer_map` (revised, fourth power) and
-    :func:`empirical_kaiser`, and :func:`hull` (CAF, ULS; with at least 6 items), all on one
-    polychoric matrix. The consensus is the mode (all values
+    :func:`empirical_kaiser` and :func:`hull` (CAF, ULS; with at least 6 items), all on one
+    polychoric matrix, and :func:`comparison_data` (Pearson; complete data only). The consensus
+    is the mode (all values
     on a tie) and the median of the suggested numbers, with the number of methods agreeing.
 
     (B) **Is essential unidimensionality tenable?**
@@ -828,7 +832,8 @@ def dimensionality(
         Respondents x items, ordered category codes; NaN is missing. With ``fit``, the fitting
         data (the fitted items, in any column order when a DataFrame).
     key : jax.Array
-        JAX PRNG key; split for the parallel analyses, the Hull bound and the DETECT split.
+        JAX PRNG key; split for the parallel analyses, the Hull bound, the DETECT split and the
+        comparison data.
     fit : FitResult, optional
         Fitted unidimensional model for question (B).
     n_replications : int, default 100
@@ -868,7 +873,7 @@ def dimensionality(
     ):
         if not (lo < float(value) < hi):
             raise SpecificationError(f"{name} must be in ({lo:g}, {hi:g}), got {value!r}.")
-    key_a, key_b, key_c, key_d = jax.random.split(key, 4)
+    key_a, key_b, key_c, key_d, key_e = jax.random.split(key, 5)
     results: dict[str, object] = {}
 
     if fit is not None:
@@ -939,6 +944,30 @@ def dimensionality(
         )
     else:
         results["hull"] = None
+    if not frame.isna().to_numpy().any():
+        cd = comparison_data(frame, key=key_e)
+        results["comparison_data"] = cd
+        number = pd.concat(
+            [
+                number,
+                pd.DataFrame(
+                    [
+                        {
+                            "method": "comparison data (Pearson)",
+                            "n_factors": cd.n_factors,
+                            "detail": (
+                                "mean eigenvalue RMSE "
+                                f"{np.round(cd.rmse.mean().to_numpy(), 4).tolist()}"
+                            ),
+                            "source": "Ruscio & Roche (2012)",
+                        }
+                    ]
+                ),
+            ],
+            ignore_index=True,
+        )
+    else:
+        results["comparison_data"] = None
     suggested = number["n_factors"].to_numpy()
     values_k, counts_k = np.unique(suggested, return_counts=True)
     mode = tuple(int(v) for v in values_k[counts_k == np.max(counts_k)])
@@ -1599,4 +1628,146 @@ def hull(
         )
     return HullResult(
         n_factors=selected, table=table, fit_index=fit_index, method=method, max_factors=j
+    )
+
+
+# ----------------------------------------------------------------------------- comparison data
+@dataclass(frozen=True)
+class ComparisonDataResult:
+    """Result of :func:`comparison_data`.
+
+    Attributes
+    ----------
+    n_factors : int
+        Suggested number of factors.
+    rmse : pandas.DataFrame
+        Eigenvalue RMSE of every bootstrap sample (rows) for each tested number of factors
+        (columns ``1..``).
+    p_values : pandas.Series
+        For ``k >= 2``, the one-sided rank-sum :math:`p` of "RMSE with ``k`` factors is smaller
+        than with ``k - 1``".
+    population_rmse : pandas.Series
+        RMSE of the generated populations' correlations against the observed ones.
+    max_factors : int
+        Largest number of factors that could be tested.
+    """
+
+    n_factors: int
+    rmse: pd.DataFrame
+    p_values: pd.Series
+    population_rmse: pd.Series
+    max_factors: int
+
+
+def comparison_data(
+    data: pd.DataFrame | np.ndarray,
+    *,
+    key: jax.Array,
+    max_factors: int | None = None,
+    n_population: int = 10000,
+    n_samples: int = 500,
+    alpha: float = 0.30,
+    max_iter: int = 50,
+) -> ComparisonDataResult:
+    r"""Comparison-data method for the number of factors (Ruscio & Roche, 2012).
+
+    For :math:`k=1,2,\dots`, a population of ``n_population`` cases with :math:`k` common
+    factors that reproduces the observed Pearson correlations and every variable's observed
+    distribution is generated (Ruscio & Kaczetow, 2008); ``n_samples`` samples of the data's
+    size are drawn from it and the RMSE between their eigenvalues and the observed eigenvalues is
+    recorded. Adding the :math:`k`-th factor is kept while the RMSE with :math:`k` factors is
+    smaller than with :math:`k-1` by a one-sided Mann–Whitney test at ``alpha`` (0.30, as
+    recommended); the suggestion is the last kept :math:`k`. This is EFAtools' ``CD()``.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame or numpy.ndarray
+        Respondents x variables, complete numeric data (Pearson correlations).
+    key : jax.Array
+        JAX PRNG key.
+    max_factors : int, optional
+        Largest :math:`k` (default and cap: the largest :math:`k` with positive degrees of
+        freedom).
+    n_population : int, default 10000
+        Size of each comparison population.
+    n_samples : int, default 500
+        Samples drawn from each population.
+    alpha : float, default 0.30
+        Level of the sequential tests.
+    max_iter : int, default 50
+        Iterations of the principal axis factoring inside the generator.
+
+    Returns
+    -------
+    ComparisonDataResult
+
+    Raises
+    ------
+    SpecificationError
+        Missing responses, a constant variable, too few variables, or invalid options.
+    PrecisionError
+        If JAX is not running in 64-bit mode.
+    """
+    check_x64()
+    _, values = _coerce_ordinal(data)
+    if np.isnan(values).any():
+        raise SpecificationError("comparison_data() needs complete data.")
+    n_obs, p = values.shape
+    if np.any(np.ptp(values, axis=0) == 0):
+        raise SpecificationError("Every variable must have at least two distinct values.")
+    cap = _efa.max_identified_factors(p)
+    if cap < 1:
+        raise SpecificationError("comparison_data() needs enough variables for one factor.")
+    if max_factors is None:
+        k_max = cap
+    elif isinstance(max_factors, (int, np.integer)) and max_factors >= 1:
+        k_max = min(int(max_factors), cap)
+    else:
+        raise SpecificationError(f"max_factors must be a positive integer, got {max_factors!r}.")
+    for name, value in (("n_population", n_population), ("n_samples", n_samples)):
+        if not (isinstance(value, (int, np.integer)) and value >= 2):
+            raise SpecificationError(f"{name} must be an integer of at least 2, got {value!r}.")
+    if not (0.0 < float(alpha) < 1.0):
+        raise SpecificationError(f"alpha must be in (0, 1), got {alpha!r}.")
+
+    corr = np.corrcoef(values, rowvar=False)
+    observed = _descending_eigenvalues(corr)
+    rmse: dict[int, np.ndarray] = {}
+    p_values: dict[int, float] = {}
+    population_rmse: dict[int, float] = {}
+    chunk = max(1, int(2e7 // (n_obs * p)))
+    k = 1  # as EFAtools: k is kept while adding it helps; the result is the last kept k
+    for k_key in jax.random.split(key, k_max):
+        k_draw, k_shared, k_unique, k_boot = jax.random.split(k_key, 4)
+        rows = np.asarray(jax.random.randint(k_draw, (int(n_population), p), 0, n_obs))
+        dists = np.sort(values[rows, np.arange(p)], axis=0)
+        if np.any(dists[0] == dists[-1]):
+            raise SpecificationError(
+                "Resampling a variable's distribution gave a constant column; increase "
+                "n_population or collapse very rare categories."
+            )
+        shared = np.asarray(jax.random.normal(k_shared, (int(n_population), k), dtype=jnp.float64))
+        unique = np.asarray(jax.random.normal(k_unique, (int(n_population), p), dtype=jnp.float64))
+        pop, pop_rmse = _comparison_data.generate_population(
+            corr, dists, shared, unique, max_iter=int(max_iter)
+        )
+        population_rmse[k] = pop_rmse
+        boot = np.asarray(jax.random.randint(k_boot, (int(n_samples), n_obs), 0, int(n_population)))
+        rmse[k] = np.concatenate(
+            [
+                _comparison_data.eigenvalue_rmse(pop[boot[s : s + chunk]], observed)
+                for s in range(0, int(n_samples), chunk)
+            ]
+        )
+        if k > 1:
+            p_values[k] = _comparison_data.wilcoxon_less(rmse[k], rmse[k - 1])
+            if not p_values[k] < float(alpha):
+                break
+        k += 1
+    return ComparisonDataResult(
+        n_factors=k - 1,
+        rmse=pd.DataFrame(rmse),
+        p_values=pd.Series(p_values, name="p", dtype=np.float64),
+        population_rmse=pd.Series(population_rmse, name="population_rmse"),
+        max_factors=k_max,
     )
