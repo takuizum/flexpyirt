@@ -8,6 +8,7 @@ dimensions?"; they are diagnostics and never feed a fit.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -16,6 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
+from flexpyirt import _detect
 from flexpyirt._compile import coerce_responses
 from flexpyirt._precision import check_x64
 from flexpyirt.correlation import (
@@ -30,14 +32,18 @@ if TYPE_CHECKING:
     from flexpyirt.result import FitResult
 
 __all__ = [
+    "DetectResult",
     "DimensionalityResult",
     "EmpiricalKaiserResult",
+    "ExploratoryDetectResult",
     "LocalDependenceResult",
     "MAPResult",
     "ModelParallelAnalysisResult",
     "ParallelAnalysisResult",
+    "detect",
     "dimensionality",
     "empirical_kaiser",
+    "exploratory_detect",
     "model_parallel_analysis",
     "parallel_analysis",
     "velicer_map",
@@ -706,7 +712,7 @@ class DimensionalityResult:
     number_of_dimensions : pandas.DataFrame
         Question (A), one row per method: ``method``, ``n_factors``, ``detail``, ``source``.
     unidimensionality : pandas.DataFrame
-        Question (B), one row per method (only with ``fit``): ``method``, ``statistic``,
+        Question (B), one row per method: ``method``, ``statistic``,
         ``threshold``, ``supports_unidimensionality`` (``None`` when unavailable), ``detail``,
         ``source``.
     n_factors_mode : tuple of int
@@ -720,8 +726,9 @@ class DimensionalityResult:
     n_unidimensionality_methods : int
         Number of available question-(B) methods.
     results : dict of str to object
-        The individual results (``parallel_analysis``, ``velicer_map``, ``empirical_kaiser``,
-        ``model_parallel_analysis``, ``local_dependence``, ``m2``).
+        The individual results (``polychoric``, ``parallel_analysis``, ``velicer_map``,
+        ``empirical_kaiser``, ``exploratory_detect`` and, with ``fit``,
+        ``model_parallel_analysis``, ``local_dependence``, ``m2``; ``None`` when unavailable).
     """
 
     number_of_dimensions: pd.DataFrame
@@ -770,6 +777,8 @@ def dimensionality(
     alpha: float = 0.05,
     q3_star_threshold: float = 0.2,
     rmsea_threshold: float = 0.05,
+    detect_threshold: float = 0.2,
+    max_clusters: int = 4,
     item_names: list[str] | None = None,
 ) -> DimensionalityResult:
     r"""Run several dimensionality diagnostics and report them side by side.
@@ -782,8 +791,14 @@ def dimensionality(
     :func:`empirical_kaiser`, all on one polychoric matrix. The consensus is the mode (all values
     on a tie) and the median of the suggested numbers, with the number of methods agreeing.
 
-    (B) **Is essential unidimensionality tenable?** Only with ``fit`` (a single-group
-    unidimensional model with a ``Normal`` latent distribution):
+    (B) **Is essential unidimensionality tenable?**
+
+    * :func:`exploratory_detect` (complete data only): supports when the validation-half DETECT
+      of the selected partition is below ``detect_threshold`` (0.2; Jang & Roussos, 2007;
+      Zhang, 2007).
+
+    Only with ``fit`` (a single-group unidimensional model with a ``Normal`` latent
+    distribution):
 
     * :func:`model_parallel_analysis`: supports when :math:`p\ge` ``alpha``;
     * :meth:`FitResult.local_dependence`: supports when the largest Q3* is below
@@ -802,7 +817,7 @@ def dimensionality(
         Respondents x items, ordered category codes; NaN is missing. With ``fit``, the fitting
         data (the fitted items, in any column order when a DataFrame).
     key : jax.Array
-        JAX PRNG key; split for the two simulation-based methods.
+        JAX PRNG key; split for the parallel analyses and the DETECT split.
     fit : FitResult, optional
         Fitted unidimensional model for question (B).
     n_replications : int, default 100
@@ -815,6 +830,10 @@ def dimensionality(
         Largest acceptable Q3*.
     rmsea_threshold : float, default 0.05
         Largest acceptable RMSEA\ :sub:`2` of :meth:`FitResult.m2`.
+    detect_threshold : float, default 0.2
+        Largest DETECT (validation half) still read as essential unidimensionality.
+    max_clusters : int, default 4
+        Largest number of clusters searched by :func:`exploratory_detect`.
     item_names : list of str, optional
         Column names when ``data`` is an array and ``fit`` is given.
 
@@ -834,10 +853,11 @@ def dimensionality(
         ("alpha", alpha, 0.0, 1.0),
         ("q3_star_threshold", q3_star_threshold, 0.0, 1.0),
         ("rmsea_threshold", rmsea_threshold, 0.0, 1.0),
+        ("detect_threshold", detect_threshold, 0.0, np.inf),
     ):
         if not (lo < float(value) < hi):
             raise SpecificationError(f"{name} must be in ({lo:g}, {hi:g}), got {value!r}.")
-    key_a, key_b = jax.random.split(key)
+    key_a, key_b, key_c = jax.random.split(key, 3)
     results: dict[str, object] = {}
 
     if fit is not None:
@@ -889,6 +909,38 @@ def dimensionality(
     mode = tuple(int(v) for v in values_k[counts_k == np.max(counts_k)])
 
     rows: list[dict[str, object]] = []
+    n_items = len(names)
+    if frame.isna().to_numpy().any() or n_items < 3:
+        results["exploratory_detect"] = None
+        rows.append(
+            {
+                "method": "DETECT (exploratory, validation half)",
+                "statistic": float("nan"),
+                "threshold": detect_threshold,
+                "supports_unidimensionality": None,
+                "detail": "not available: DETECT needs complete data",
+                "source": "Zhang & Stout (1999); Jang & Roussos (2007)",
+            }
+        )
+    else:
+        xd = exploratory_detect(frame, max_clusters=min(max_clusters, n_items), key=key_c)
+        results["exploratory_detect"] = xd
+        best = xd.table[xd.table["n_clusters"] == xd.n_clusters].to_dict("records")[0]
+        value = float(best["DETECT_validation"])
+        rows.append(
+            {
+                "method": "DETECT (exploratory, validation half)",
+                "statistic": value,
+                "threshold": detect_threshold,
+                "supports_unidimensionality": bool(value < detect_threshold),
+                "detail": (
+                    f"DETECT {value:.3f} for {xd.n_clusters} clusters ({best['cluster_sizes']}), "
+                    f"ASSI {float(best['ASSI_validation']):.3f}, "
+                    f"RATIO {float(best['RATIO_validation']):.3f}"
+                ),
+                "source": "Zhang & Stout (1999); Jang & Roussos (2007)",
+            }
+        )
     if fit is not None:
         mpa = model_parallel_analysis(
             fit,
@@ -968,4 +1020,242 @@ def dimensionality(
         n_supporting=int(sum(bool(v) for v in available)),
         n_unidimensionality_methods=len(available),
         results=results,
+    )
+
+
+# ----------------------------------------------------------------------------- DETECT
+def _complete_scores(data: pd.DataFrame | np.ndarray, what: str) -> tuple[list[str], np.ndarray]:
+    names, values = _coerce_ordinal(data)
+    if np.isnan(values).any():
+        raise SpecificationError(
+            f"{what} needs complete data: the total and rest scores are undefined with missing "
+            "responses."
+        )
+    if values.shape[1] < 3:
+        raise SpecificationError(f"{what} needs at least 3 items.")
+    return names, values
+
+
+def _index_frame(indices: dict[str, tuple[float, float]]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [indices[name] for name in _detect.INDEX_NAMES],
+        index=list(_detect.INDEX_NAMES),
+        columns=["unweighted", "weighted"],
+    )
+
+
+@dataclass(frozen=True)
+class DetectResult:
+    """Result of :func:`detect`.
+
+    Attributes
+    ----------
+    indices : pandas.DataFrame
+        Rows ``DETECT``, ``ASSI``, ``RATIO``, ``MADCOV100``, ``MCOV100``; columns
+        ``unweighted`` and ``weighted`` (pairs weighted by the square root of their sample size;
+        identical with complete data).
+    conditional_covariance : pandas.DataFrame
+        Item x item conditional covariances (zero diagonal).
+    clusters : pandas.Series
+        The item partition used.
+    n_obs : int
+        Number of respondents.
+    """
+
+    indices: pd.DataFrame
+    conditional_covariance: pd.DataFrame
+    clusters: pd.Series
+    n_obs: int
+
+    @property
+    def detect(self) -> float:
+        """DETECT index (unweighted)."""
+        return float(self.indices["unweighted"].to_numpy()[0])
+
+    @property
+    def assi(self) -> float:
+        """ASSI (unweighted)."""
+        return float(self.indices["unweighted"].to_numpy()[1])
+
+    @property
+    def ratio(self) -> float:
+        """RATIO (unweighted)."""
+        return float(self.indices["unweighted"].to_numpy()[2])
+
+
+def _coerce_clusters(clusters: object, names: list[str]) -> np.ndarray:
+    if isinstance(clusters, (pd.Series, Mapping)):
+        mapping = dict(clusters.items())
+        missing = [n for n in names if n not in mapping]
+        extra = [k for k in mapping if str(k) not in names]
+        if missing or extra:
+            raise SpecificationError(
+                f"clusters must name every item exactly once; missing {missing}, unknown {extra}."
+            )
+        labels = [mapping[n] for n in names]
+    else:
+        labels = list(clusters)  # type: ignore[call-overload]
+        if len(labels) != len(names):
+            raise SpecificationError(f"clusters has {len(labels)} labels for {len(names)} items.")
+    _, codes = np.unique(np.asarray(labels, dtype=object).astype(str), return_inverse=True)
+    return np.asarray(codes, dtype=np.int64)
+
+
+def detect(
+    data: pd.DataFrame | np.ndarray,
+    clusters: pd.Series | Mapping[str, object] | Sequence[object] | np.ndarray,
+) -> DetectResult:
+    r"""Confirmatory DETECT for a given partition of the items (Zhang & Stout, 1999).
+
+    The conditional covariance of each pair is the average of the covariances given the total
+    score and given the rest score (:func:`flexpyirt._detect.conditional_covariances`), and
+
+    .. math::
+        \mathrm{DETECT}=\frac{100}{\binom J2}\sum_{i<j}\delta_{ij}\,\widehat{\mathrm{ccov}}_{ij},
+        \qquad \delta_{ij}=\begin{cases}1&\text{same cluster}\\-1&\text{otherwise,}\end{cases}
+
+    together with ASSI and RATIO (Zhang, 2007), as sirt's ``conf.detect(...,
+    use_sum_score = TRUE)``. Under essential unidimensionality the conditional covariances are
+    near (slightly below) zero, so DETECT is near zero or negative for any partition. A common
+    classification (Jang & Roussos, 2007; Zhang, 2007) is DETECT < 0.2 essentially
+    unidimensional, 0.2–0.4 weak, 0.4–1 moderate, > 1 strong multidimensionality, and ASSI > 0.25
+    or RATIO > 0.36 an essential deviation from unidimensionality for the partition.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame or numpy.ndarray
+        Respondents x items, complete numeric item scores.
+    clusters : pandas.Series, dict, list or numpy.ndarray
+        Cluster label of every item: a mapping item name -> label, or labels in column order.
+
+    Returns
+    -------
+    DetectResult
+
+    Raises
+    ------
+    SpecificationError
+        Missing responses, fewer than 3 items, or clusters that do not match the items.
+    """
+    names, values = _complete_scores(data, "detect()")
+    codes = _coerce_clusters(clusters, names)
+    ccov = _detect.conditional_covariances(values)
+    indices = _detect.detect_indices(ccov, codes)
+    return DetectResult(
+        indices=_index_frame(indices),
+        conditional_covariance=pd.DataFrame(ccov, index=names, columns=names),
+        clusters=pd.Series(codes + 1, index=names, name="cluster"),
+        n_obs=int(values.shape[0]),
+    )
+
+
+@dataclass(frozen=True)
+class ExploratoryDetectResult:
+    """Result of :func:`exploratory_detect`.
+
+    Attributes
+    ----------
+    table : pandas.DataFrame
+        One row per number of clusters ``k``: ``n_clusters``, ``cluster_sizes`` and the
+        unweighted ``DETECT``, ``ASSI``, ``RATIO`` on the estimation half (``*_estimation``) and
+        the validation half (``*_validation``).
+    clusters : dict of int to pandas.Series
+        The partition into ``k`` clusters (labels numbered by first appearance).
+    n_clusters : int
+        ``k`` with the largest estimation-half DETECT (sirt's choice).
+    estimation_rows, validation_rows : numpy.ndarray
+        Row positions of the two halves.
+    """
+
+    table: pd.DataFrame
+    clusters: dict[int, pd.Series]
+    n_clusters: int
+    estimation_rows: np.ndarray
+    validation_rows: np.ndarray
+
+
+def exploratory_detect(
+    data: pd.DataFrame | np.ndarray,
+    *,
+    max_clusters: int = 4,
+    key: jax.Array | None = None,
+    estimation_rows: np.ndarray | list[int] | None = None,
+) -> ExploratoryDetectResult:
+    r"""Exploratory DETECT with a cross-validated partition search.
+
+    The rows are split into an estimation half and a validation half. On the estimation half
+    the items are clustered by Ward's method on :math:`\max(\mathrm{ccov})-\mathrm{ccov}`
+    (sirt's ``expl.detect``); every partition into :math:`k=2,\dots,` ``max_clusters`` clusters
+    is then evaluated by DETECT on both halves (Zhang & Stout, 1999, recommend judging the
+    selected partition on data not used to select it). The reported ``n_clusters`` maximizes
+    the estimation-half DETECT, as in sirt; compare it with the validation columns.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame or numpy.ndarray
+        Respondents x items, complete numeric item scores.
+    max_clusters : int, default 4
+        Largest number of clusters (at least 2, at most the number of items).
+    key : jax.Array, optional
+        JAX PRNG key for the random split into halves (``floor(N/2)`` estimation rows).
+    estimation_rows : array-like of int, optional
+        Row positions of the estimation half instead of a random split (the rest validate). An
+        empty validation half is not allowed. Exactly one of ``key`` and ``estimation_rows`` is
+        needed.
+
+    Returns
+    -------
+    ExploratoryDetectResult
+
+    Raises
+    ------
+    SpecificationError
+        Invalid options or data.
+    """
+    names, values = _complete_scores(data, "exploratory_detect()")
+    n_obs, n_items = values.shape
+    if not (isinstance(max_clusters, (int, np.integer)) and 2 <= max_clusters <= n_items):
+        raise SpecificationError(
+            f"max_clusters must be an integer in [2, {n_items}], got {max_clusters!r}."
+        )
+    if (key is None) == (estimation_rows is None):
+        raise SpecificationError("Pass exactly one of key= and estimation_rows=.")
+    if estimation_rows is None:
+        assert key is not None
+        perm = np.asarray(jax.random.permutation(key, n_obs))
+        est = np.sort(perm[: n_obs // 2])
+    else:
+        est = np.unique(np.asarray(estimation_rows, dtype=np.int64))
+        if est.size == 0 or est.min() < 0 or est.max() >= n_obs:
+            raise SpecificationError("estimation_rows must be row positions within the data.")
+    val = np.setdiff1d(np.arange(n_obs), est)
+    if val.size == 0:
+        raise SpecificationError("The validation half is empty.")
+    ccov_est = _detect.conditional_covariances(values[est])
+    ccov_val = _detect.conditional_covariances(values[val])
+    ks = list(range(2, int(max_clusters) + 1))
+    partitions = _detect.ward_clusters(ccov_est, ks)
+    rows = []
+    clusters: dict[int, pd.Series] = {}
+    for k in ks:
+        labels = partitions[k]
+        clusters[k] = pd.Series(labels, index=names, name="cluster")
+        on_est = _detect.detect_indices(ccov_est, labels)
+        on_val = _detect.detect_indices(ccov_val, labels)
+        rows.append(
+            {
+                "n_clusters": k,
+                "cluster_sizes": "-".join(str(int(s)) for s in np.bincount(labels)[1:]),
+                **{f"{n}_estimation": on_est[n][0] for n in ("DETECT", "ASSI", "RATIO")},
+                **{f"{n}_validation": on_val[n][0] for n in ("DETECT", "ASSI", "RATIO")},
+            }
+        )
+    table = pd.DataFrame(rows)
+    best = int(table["n_clusters"].to_numpy()[np.argmax(table["DETECT_estimation"].to_numpy())])
+    return ExploratoryDetectResult(
+        table=table,
+        clusters=clusters,
+        n_clusters=best,
+        estimation_rows=est,
+        validation_rows=val,
     )

@@ -26,6 +26,7 @@ from flexpyirt import (
     TwoPL,
     dimensionality,
     empirical_kaiser,
+    exploratory_detect,
     fit,
     model_parallel_analysis,
     parallel_analysis,
@@ -57,7 +58,7 @@ def _ensemble() -> DimensionalityResult:
 def test_ensemble_reuses_the_individual_methods() -> None:
     res = _ensemble()
     data = _lsat7()
-    key_a, key_b = jax.random.split(jax.random.key(7))
+    key_a, key_b, key_c = jax.random.split(jax.random.key(7), 3)
     pa = parallel_analysis(data, key=key_a, n_replications=20)
     pc = polychoric(data)
     assert list(res.number_of_dimensions["n_factors"]) == [
@@ -74,7 +75,13 @@ def test_ensemble_reuses_the_individual_methods() -> None:
     assert q3["statistic"] == pytest.approx(ld.max_q3_star)
     m2 = res.unidimensionality.set_index("method").loc["M2 RMSEA"]
     assert m2["statistic"] == pytest.approx(float(_fit().m2(data)["rmsea"].iloc[0]))
+    xd = exploratory_detect(data, key=key_c)
+    det = res.unidimensionality.set_index("method").loc["DETECT (exploratory, validation half)"]
+    best = xd.table[xd.table["n_clusters"] == xd.n_clusters].to_dict("records")[0]
+    assert det["statistic"] == pytest.approx(float(best["DETECT_validation"]))
+    assert det["supports_unidimensionality"] == (float(best["DETECT_validation"]) < 0.2)
     assert set(res.results) == {
+        "exploratory_detect",
         "polychoric",
         "parallel_analysis",
         "velicer_map",
@@ -93,7 +100,7 @@ def test_ensemble_consensus_lines() -> None:
     assert res.n_agreeing == np.max(counts)
     assert res.n_factors_median == float(np.median(k))
     flags = list(res.unidimensionality["supports_unidimensionality"])
-    assert res.n_unidimensionality_methods == 3
+    assert res.n_unidimensionality_methods == 4
     assert res.n_supporting == sum(bool(f) for f in flags)
     text = res.summary()
     assert "question A" in text and "question B" in text
@@ -120,12 +127,11 @@ def test_ensemble_reports_ties_without_breaking_them(monkeypatch: pytest.MonkeyP
     assert res.n_agreeing == (2 if pa in (2, 3) else 1)
 
 
-def test_ensemble_without_fit_has_no_unidimensionality_rows() -> None:
+def test_ensemble_without_fit_has_only_the_detect_row() -> None:
     res = dimensionality(_lsat7(), key=jax.random.key(1), n_replications=5)
-    assert res.unidimensionality.empty
-    assert res.n_unidimensionality_methods == 0
-    assert res.n_supporting == 0
-    assert "question B" not in res.summary()
+    assert list(res.unidimensionality["method"]) == ["DETECT (exploratory, validation half)"]
+    assert res.n_unidimensionality_methods == 1
+    assert "question B" in res.summary()
 
 
 def test_ensemble_marks_m2_unavailable_with_missing_data() -> None:
@@ -137,6 +143,7 @@ def test_ensemble_marks_m2_unavailable_with_missing_data() -> None:
     assert row["supports_unidimensionality"] is None
     assert "not available" in row["detail"]
     assert res.results["m2"] is None
+    assert res.results["exploratory_detect"] is None
     assert res.n_unidimensionality_methods == 2
 
 
@@ -146,6 +153,7 @@ def test_ensemble_marks_m2_unavailable_with_missing_data() -> None:
         ({"alpha": 0.0}, "alpha"),
         ({"q3_star_threshold": 1.5}, "q3_star_threshold"),
         ({"rmsea_threshold": -0.1}, "rmsea_threshold"),
+        ({"detect_threshold": 0.0}, "detect_threshold"),
     ],
 )
 def test_ensemble_invalid_thresholds(kwargs: dict[str, Any], match: str) -> None:
