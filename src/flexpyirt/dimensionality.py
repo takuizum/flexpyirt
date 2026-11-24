@@ -886,7 +886,7 @@ def dimensionality(
     )
     suggested = number["n_factors"].to_numpy()
     values_k, counts_k = np.unique(suggested, return_counts=True)
-    mode = tuple(int(v) for v in values_k[counts_k == counts_k.max()])
+    mode = tuple(int(v) for v in values_k[counts_k == np.max(counts_k)])
 
     rows: list[dict[str, object]] = []
     if fit is not None:
@@ -964,7 +964,7 @@ def dimensionality(
         unidimensionality=unidim,
         n_factors_mode=mode,
         n_factors_median=float(np.median(suggested)),
-        n_agreeing=int(counts_k.max()),
+        n_agreeing=int(np.max(counts_k)),
         n_supporting=int(sum(bool(v) for v in available)),
         n_unidimensionality_methods=len(available),
         results=results,

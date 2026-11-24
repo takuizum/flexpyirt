@@ -89,8 +89,8 @@ def test_ensemble_consensus_lines() -> None:
     res = _ensemble()
     k = res.number_of_dimensions["n_factors"].to_numpy()
     values, counts = np.unique(k, return_counts=True)
-    assert res.n_factors_mode == tuple(int(v) for v in values[counts == counts.max()])
-    assert res.n_agreeing == counts.max()
+    assert res.n_factors_mode == tuple(int(v) for v in values[counts == np.max(counts)])
+    assert res.n_agreeing == np.max(counts)
     assert res.n_factors_median == float(np.median(k))
     flags = list(res.unidimensionality["supports_unidimensionality"])
     assert res.n_unidimensionality_methods == 3
