@@ -65,7 +65,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - [x] Nominal response model (`Nominal(n_categories)`, Thissen, Cai & Bock (2010) parameterization as in
   mirt's `itemtype = "nominal"`; validated in V23 for one and two factors, three factors
   unit-tested only).
-- [ ] Dimensionality diagnostics (DESIGN.md §16.8; question A "how many dimensions" kept apart
+- [x] Dimensionality diagnostics (DESIGN.md §16.8; question A "how many dimensions" kept apart
   from question B "is essential unidimensionality tenable"; no exploratory MIRT):
   - [x] D1 polychoric / tetrachoric correlations with smoothing (`polychoric()`, `PolychoricResult`;
     validated in V24 against `lavaan::lavCor` and `psych::polychoric` / `cor.smooth`).
