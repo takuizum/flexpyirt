@@ -1604,6 +1604,57 @@ data-independent shapes (§15.21).
     EFAtools' `PARALLEL` within Monte Carlo error ($|z|\le4.5$ for the means with a fixed key,
     $6\times10^{-3}$ for the 95th percentiles). The permutation path is checked by properties
     (independent permutations, recovery of two factors, reproducibility by key).
+11. **Local dependence and model-based parallel analysis (`FitResult.local_dependence()`,
+    `model_parallel_analysis()`, D3 of §16.8, V26)**: both need a single-group unidimensional
+    model with a `Normal` latent distribution (`FitResult._require_unidimensional_normal`).
+    `FitResult._traces(prob, nodes)` evaluates every item's category probabilities at arbitrary
+    nodes by replacing `CompiledProblem.nodes` (the kernels only read the nodes), so the same
+    code serves the fitted grid, EAP scores and simulated $\theta$. **Q3**: residuals
+    $x_{ij}-\sum_k kP_{jk}(\hat\theta_i)$ with EAP $\hat\theta$ from `score()` (missing responses
+    allowed), pairwise-complete Pearson correlations (mirt's `na.omit` per pair). **Q3\***: Q3 minus
+    the mean off-diagonal Q3 (Christensen, Makransky & Horton, 2017), so `max_q3_star` is their
+    $Q3_{\max}-\overline{Q3}$. **LD** (Chen & Thissen, 1997, as mirt's `residuals(type = "LD")`):
+    per pair the full $K_i\times K_j$ observed table over respondents answering both, the expected
+    table $n_{ij}\sum_q P_{ia}P_{jb}w_q$ with the fitted grid weights (identical to mirt's
+    normalized normal density on its 61-point grid), $X^2$, $G^2$ (cells with $O>0$), $p$ from
+    $\chi^2_{(K_i-1)(K_j-1)}$, and $V=\operatorname{sign}(\gamma_O-\gamma_E)\sqrt{X^2/(n
+    \min(K_i-1,K_j-1))}$ with Goodman–Kruskal $\gamma$ (sign $+$ on a tie, $V$ NaN when a $\gamma$
+    is undefined). **Model-based PA** (Drasgow & Lissak, 1983): statistic = second eigenvalue of the
+    observed smoothed polychoric matrix; `_simulate_responses` draws $\theta\sim N(\hat\mu,
+    \hat\sigma^2)$ and responses by inverting uniforms against cumulative category probabilities,
+    and copies the data's missingness; $B$ replications through `polychoric()` (warnings
+    silenced, unusable ones skipped with a `FlexpyirtWarning`); $p=(1+\#\{T_b\ge T\})/(B+1)$.
+    `eigen_type="max"` (default) sets the whole diagonal to the largest off-diagonal correlation,
+    as ltm's `unidimTest` does; `"smc"` and `"pca"` reuse §16.10. ltm draws $\theta$ from
+    $N(\mathrm{EAP}_i,\mathrm{SE}_i^2)$ when given a fitted object; flexpyirt uses the fitted
+    latent distribution (the reference generating model), which ltm does when given parameters.
+    The parameters come from the same data, so the $p$-value is conservative under a correct
+    model (30 simulated 2PL data sets, $B=50$: mean $p$ 0.66, 1 of 30 below 0.05); the docstring
+    and the guide say so.
+    **Not implemented**: JSI (Edwards, Houts & Cai, 2018), which re-estimates item parameters within
+    subgroups; it is a separate ROADMAP item.
+    **Validation (V26)**: `validation/r/m5_local_dependence_reference.R` (mirt 1.46.1, ltm 1.2.0):
+    LSAT7 2PL, Science GRM and a simulated 2PL with one locally dependent pair and 5% MCAR.
+    flexpyirt refits the models (log-likelihoods agree to $10^{-9}$ relative) and agrees with
+    `residuals()` to $10^{-5}$ (relative, $X^2$, $G^2$) and $10^{-6}$ ($V$, Q3; observed $\le
+    4\times10^{-8}$). ltm's `unidimTest` on LSAT7 with mirt's estimates (`thetas = cbind(d, a1)`,
+    $B=4000$): observed eigenvalues to $2\times10^{-4}$ (polycor's `optimise()` tolerance; observed
+    $2.4\times10^{-5}$), the simulated second-eigenvalue mean within $|z|\le4.5$ (observed
+    $|z|<1$ with 2000 replications on two keys) and its 95th percentile to 0.02.
+12. **The `dimensionality()` ensemble (§16.8)**: one polychoric matrix (with `fit`, the data are
+    first coerced to the fitted items) feeds question (A): `parallel_analysis()` (defaults),
+    `velicer_map()` (power 4) and `empirical_kaiser()`; the key is split into one key for each
+    simulation-based method. Question (B), only with `fit`: `model_parallel_analysis()` ($p\ge
+    \alpha=0.05$), largest Q3\* $<0.2$ and `m2()` RMSEA $\le0.05$ (Maydeu-Olivares & Joe, 2014);
+    an `m2()` `SpecificationError` (e.g. missing data) is reported as an unavailable row
+    (`supports_unidimensionality=None`), not hidden. Consensus (A): mode (every value on a tie),
+    median and number agreeing; (B): number of available methods supporting. No weights, and the
+    two questions are never merged (§16.8). Thresholds are arguments with their sources in the
+    docstring; the 0.2 rule for Q3\* is labelled as a rule of thumb. `DimensionalityResult.summary()`
+    prints every method, its detail and both consensus lines. The module and the function share
+    the name `dimensionality` (as `fit`), so `flexpyirt.dimensionality` is the function; tests
+    reach the module with `importlib.import_module`. Checked in `tests/test_m5_ensemble.py` by
+    recomputing each row with the individual functions and the same keys.
 
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1647,6 +1698,7 @@ data-independent shapes (§15.21).
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Maydeu-Olivares, A., & Joe, H. (2005). Limited- and full-information estimation and goodness-of-fit testing in $2^n$ contingency tables: A unified framework. *Journal of the American Statistical Association*, 100(471), 1009–1020.
 - Maydeu-Olivares, A., & Joe, H. (2006). Limited information goodness-of-fit testing in multidimensional contingency tables. *Psychometrika*, 71(4), 713–732.
+- Maydeu-Olivares, A., & Joe, H. (2014). Assessing approximate fit in categorical data analysis. *Multivariate Behavioral Research*, 49(4), 305–328.
 - McLachlan, G. J., & Peel, D. (2000). *Finite Mixture Models*. Wiley.
 - Mislevy, R. J. (1984). Estimating latent distributions. *Psychometrika*, 49(3), 359–381.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.

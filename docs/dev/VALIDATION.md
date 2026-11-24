@@ -28,6 +28,7 @@ English | [日本語](VALIDATION.ja.md)
 | Scale linking $(A, B)$ / criterion / SE, end-to-end (calibration + linking) | 1e-6 / 1e-5 (relative) / 1e-3 (relative) |
 | Polychoric correlation vs lavaan / psych; thresholds; smoothing vs `cor.smooth` | 1e-6 / 1e-3; 1e-12; 1e-12 |
 | EKC, MAP, observed eigenvalues on the same matrix; normal reference mean / 95th percentile | 1e-11; $\lvert z\rvert\le4.5$ / 6e-3 |
+| LD $X^2$ / $G^2$; signed $V$, Q3 (refitted models); model-based PA observed / simulated mean / 95th percentile | 1e-5 (relative); 1e-6; 2e-4 / $\lvert z\rvert\le4.5$ / 0.02 |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -57,6 +58,7 @@ English | [日本語](VALIDATION.ja.md)
 | V23 | Nominal response model (Science; simulated with unordered/negative scoring coefficients; nominal + 2PL mixed; mostly non-monotone items; two-factor confirmatory) | `mirt(..., "nominal")` with `pars` starting at the GPCM point (or the best alternative start); `itemfit(fit_stats = "S_X2")` | M5 |
 | V24 | Polychoric / tetrachoric correlations (simulated tetrachoric, mixed 2–5 categories, 10% MCAR, one-empty-cell 2 x 2 tables, LSAT7, Science) and smoothing | lavaan `lavCor(..., ordered = , missing = )`; psych `polychoric(..., smooth = FALSE, correct = 0)`, `cor.smooth()` | M5 |
 | V25 | Number of dimensions: EKC, MAP (squared and fourth power), PCA / SMC eigenvalues on the V24 matrices; normal-data parallel-analysis references (3 sizes) | EFAtools `EKC()`, `PARALLEL()`; psych `vss()$map`; EFA.dimensions `MAP()`; independent R fourth-power MAP | M5 |
+| V26 | Local dependence (LSAT7 2PL, Science GRM, simulated 2PL with a dependent pair and 5% MCAR) and model-based parallel analysis (LSAT7) | `residuals(m, type = "LD" / "LDG2" / "Q3")`; ltm `unidimTest(data = , thetas = cbind(d, a1), IRT = FALSE)` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -696,6 +698,13 @@ English | [日本語](VALIDATION.ja.md)
   and EFA.dimensions' values are only recorded. Normal-data references are stochastic on both
   sides; the test uses a fixed key and compares the means by $z$ (standard error from the
   replications, $\sqrt2$ for two independent means) and the 95th percentiles in absolute value.
+- **Local dependence and model-based PA (V26, M5)**: mirt fits use `quadpts = 61`, `TOL = 1e-10`,
+  `optimizer = "NR"`; flexpyirt refits with `BAEM(tol=1e-9)`, so the comparison includes the
+  estimation agreement (log-likelihoods to $10^{-9}$ relative). ltm ships its own `Science` and
+  `LSAT` data (factor-coded), so the script names mirt's data with `mirt::`. ltm's `unidimTest`
+  is called with data and parameters rather than a fitted ltm object, so it simulates
+  $\theta\sim N(0,1)$ as flexpyirt does with a standard normal fit; its tetrachorics come from
+  polycor (`optimise()` tolerance), which bounds the observed-statistic agreement.
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is

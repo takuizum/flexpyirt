@@ -39,6 +39,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 尺度リンキング | 微分可能な特性曲線法リンキング（`link()`, `LinkResult`: Haebara・Stocking–Lord の非対称・対称版、Ogasawara デルタ法 SE、項目・$\theta$ の変換。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目で R の独立な実装と照合済み） | ✓ |
 | ポリコリック相関 | ポリコリック・テトラコリック相関行列（`polychoric()`: two-step の最尤法、欠測は利用可能なケース、lavaan と同じ 2 x 2 表の空セル補正、正定値でない行列の平滑化。lavaan の `lavCor` と照合済み） | ✓ |
 | 次元数 | 平行分析（`parallel_analysis()`: ポリコリックまたは Pearson 相関、PCA または SMC の固有値、並べ替えまたは正規の参照データ、分位点または平均の基準）、Velicer の MAP（`velicer_map()`、元の版と改訂版）、経験的カイザー基準（`empirical_kaiser()`）。EFAtools・psych・EFA.dimensions と照合済み） | ✓ |
+| 局所依存と一次元性 | Q3、Q3\*、Chen & Thissen の LD $X^2$ / $G^2$（`FitResult.local_dependence()`、mirt の `residuals()` と同じ）、モデルに基づく平行分析（`model_parallel_analysis()`、ltm の `unidimTest` と同じ）、複数の手法を実行して合意を別々に示す `dimensionality()` のレポート | ✓ |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
 
 ## インストール

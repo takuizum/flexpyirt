@@ -6,7 +6,7 @@ import html
 import os
 import warnings
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from jax import Array
 
-from flexpyirt import _core, _itemfit, _m2, _scoring
+from flexpyirt import _core, _itemfit, _local_dependence, _m2, _scoring
 from flexpyirt._compile import (
     LATENT_ITEM,
     coerce_groups,
@@ -40,6 +40,7 @@ from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
     from flexpyirt._dif import DIFScheme, PAdjust
+    from flexpyirt.dimensionality import LocalDependenceResult
     from flexpyirt.model import Model
 
 __all__ = ["FitResult"]
@@ -756,6 +757,138 @@ class FitResult:
                 row = {"item": name, "s_x2": stat, "df": df, "rmsea": rmsea, "p": pval}
                 rows.append({"group": g_name, **row} if model.is_multigroup else row)
         return pd.DataFrame(rows)
+
+    def _require_unidimensional_normal(self, what: str) -> None:
+        """Raise unless the model is single-group, unidimensional with a ``Normal`` latent."""
+        model = self._model
+        if (
+            model.is_multidimensional
+            or model.is_multigroup
+            or model.is_empirical_histogram
+            or model.is_davidian
+            or model.is_mixture
+        ):
+            raise SpecificationError(
+                f"{what} supports single-group unidimensional models with a Normal latent "
+                "distribution only."
+            )
+
+    def _traces(
+        self, prob: _core.CompiledProblem, nodes: np.ndarray | None = None
+    ) -> list[np.ndarray]:
+        """Per item, ``(Q, K_j)`` category probabilities of group 0 at ``nodes`` (default: grid)."""
+        if nodes is not None:
+            prob = replace(prob, nodes=jnp.asarray(nodes, dtype=jnp.float64).reshape(-1, 1))
+        log_probs = _core._item_log_probs(prob, jnp.asarray(self._eta))
+        traces: list[np.ndarray] = [np.empty(0)] * len(self._model.items)
+        for fam, lp in zip(prob.families, log_probs, strict=True):
+            lp_np = np.exp(np.asarray(lp))
+            for pos, col in enumerate(np.asarray(fam.columns)):
+                traces[int(col)] = lp_np[0, pos]
+        return traces
+
+    def _compiled_for(self, y: np.ndarray) -> _core.CompiledProblem:
+        codes, _ = coerce_groups(None, self._model, y.shape[0], require_all=False)
+        return compile_problem(self._model, y, codes, self.parameters, self._quadrature).problem
+
+    def _simulate_responses(self, key: Any, missing: np.ndarray) -> np.ndarray:
+        r"""Simulate responses from the fitted model, NaN where ``missing`` (``(N, J)`` bool).
+
+        :math:`\theta_i\sim N(\hat\mu,\hat\sigma^2)` (the fitted latent distribution), then each
+        response is drawn from :math:`P_{jk}(\theta_i)` by inversion of a uniform draw.
+        """
+        latent = self.latent.iloc[0]
+        n, n_items = missing.shape
+        k_theta, k_unif = jax.random.split(key)
+        theta = float(latent["mean"]) + np.sqrt(float(latent["var"])) * np.asarray(
+            jax.random.normal(k_theta, (n,), dtype=jnp.float64)
+        )
+        unif = np.asarray(jax.random.uniform(k_unif, (n, n_items), dtype=jnp.float64))
+        prob = self._compiled_for(np.zeros((1, n_items), dtype=np.int64))
+        traces = self._traces(prob, theta)
+        out = np.empty((n, n_items), dtype=np.float64)
+        for j, trace in enumerate(traces):
+            cum = np.cumsum(trace, axis=1)[:, :-1]
+            out[:, j] = (unif[:, j : j + 1] > cum).sum(axis=1)
+        out[missing] = np.nan
+        return out
+
+    def local_dependence(
+        self,
+        data: Any,
+        *,
+        item_names: list[str] | None = None,
+    ) -> LocalDependenceResult:
+        r"""Local-dependence statistics for every item pair (DESIGN.md §16.11).
+
+        * **Q3** (Yen, 1984): the correlation over respondents of the residuals
+          :math:`d_{ij}=x_{ij}-E(X_j\mid\hat\theta_i)` with EAP :math:`\hat\theta_i`
+          (pairwise-complete), and **Q3\*** :math:`=Q3-\overline{Q3}` with
+          :math:`\overline{Q3}` the mean off-diagonal Q3 (Christensen, Makransky & Horton, 2017).
+        * **LD** :math:`X^2` and :math:`G^2` (Chen & Thissen, 1997) comparing each pair's
+          table with :math:`E_{ab}=n_{ij}\sum_q P_{ia}(\theta_q)P_{jb}(\theta_q)w_q` on the
+          fitted grid, with :math:`df=(K_i-1)(K_j-1)`, :math:`p`-values and the signed
+          Cramér's :math:`V` (sign of :math:`\gamma_O-\gamma_E`), as mirt's
+          ``residuals(type = "LD" / "LDG2" / "Q3")``.
+
+        Parameters
+        ----------
+        data : DataFrame or array-like
+            Responses on the fitted items (typically the fitting data); missing as NaN.
+        item_names : list of str, optional
+            Column names when ``data`` is an array.
+
+        Returns
+        -------
+        LocalDependenceResult
+
+        Raises
+        ------
+        PrecisionError
+            If JAX is not configured for 64-bit floating point.
+        SpecificationError
+            For multiple-group, multidimensional or non-``Normal`` latent models, or invalid
+            data.
+        """
+        from flexpyirt.dimensionality import LocalDependenceResult
+
+        check_x64()
+        self._require_unidimensional_normal("local_dependence()")
+        y = coerce_responses(data, self._model, item_names=item_names)
+        names = [name for name, _ in self._model.items]
+        prob = self._compiled_for(y)
+        eap = self.score(pd.DataFrame(np.where(y >= 0, y, np.nan), columns=names))[
+            "theta"
+        ].to_numpy(dtype=np.float64)
+        expected = np.column_stack(
+            [t @ np.arange(t.shape[1], dtype=np.float64) for t in self._traces(prob, eap)]
+        )
+        residuals = np.where(y >= 0, y - expected, np.nan)
+        q3 = _local_dependence.q3_matrix(residuals)
+        upper = np.triu_indices(len(names), k=1)
+        q3_mean = float(np.mean(q3[upper]))
+        weights = np.exp(np.asarray(_core._latent_log_weights(prob, jnp.asarray(self._eta))))[0]
+        ld = _local_dependence.ld_pairs(y, self._traces(prob), weights)
+        pairs = pd.DataFrame(
+            {
+                "item_i": [names[int(i)] for i in ld["i"]],
+                "item_j": [names[int(j)] for j in ld["j"]],
+                "n": ld["n"].astype(np.int64),
+                "q3": q3[upper],
+                "q3_star": q3[upper] - q3_mean,
+                "x2": ld["x2"],
+                "g2": ld["g2"],
+                "df": ld["df"].astype(np.int64),
+                "p_x2": ld["p_x2"],
+                "p_g2": ld["p_g2"],
+                "cramer_v": ld["cramer_v"],
+            }
+        )
+        return LocalDependenceResult(
+            pairs=pairs,
+            q3=pd.DataFrame(q3, index=names, columns=names),
+            q3_mean=q3_mean,
+        )
 
     def m2(
         self,
