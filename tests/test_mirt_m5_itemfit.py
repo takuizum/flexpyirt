@@ -33,6 +33,9 @@ from flexpyirt import (
 from flexpyirt.errors import SpecificationError
 from tests._reference import check_reference_meta
 
+# mirt reference comparison: nightly and release-PR CI only (CONTRIBUTING.md, "Tests").
+pytestmark = pytest.mark.slow
+
 REFERENCE_DIR = Path(__file__).parent / "reference"
 TOL_SX2_REL = 1e-6
 CASES = [

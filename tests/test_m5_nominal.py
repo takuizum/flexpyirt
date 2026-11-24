@@ -61,6 +61,7 @@ def _sim_nominal(
 # ---- NominalKernel -------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 @settings(deadline=None)
 @given(
     a=st.floats(-3.0, 3.0),
@@ -139,6 +140,7 @@ def test_nominal_n_cat_and_n_factors_validation() -> None:
             NominalKernel(3, n_factors=bad_f)
 
 
+@pytest.mark.slow
 def test_nominal_reduces_to_gpcm_and_twopl() -> None:
     """Fixing ak_k = k reduces Nominal(K) to GPCM(K) in kernel, estimates, SEs, and EAP."""
     theta = jnp.linspace(-6.0, 6.0, 61)
@@ -190,6 +192,7 @@ def test_nominal_reduces_to_gpcm_and_twopl() -> None:
     np.testing.assert_allclose(fit_nom["s_x2"], fit_gpcm["s_x2"], rtol=1e-7, atol=1e-8)
 
 
+@pytest.mark.slow
 def test_nominal_two_categories_equals_twopl_fit() -> None:
     """Nominal(2) has no free ak parameters and matches TwoPL."""
     rng = np.random.default_rng(88)
@@ -316,6 +319,7 @@ def test_nominal_fix_from() -> None:
 # ---- Downstream machinery: JSON, item_fit, scoring, MG/DIF, priors, equal_items, 2D --------
 
 
+@pytest.mark.slow
 def test_nominal_json_item_fit_and_scoring() -> None:
     """Fit a nominal model with an unordered item, test JSON round-trip, item_fit, and scoring."""
     a_arr = np.array([1.1, 1.0, 1.2, 0.9, 1.1])
@@ -392,6 +396,7 @@ def test_nominal_json_item_fit_and_scoring() -> None:
     assert pvs.shape == (4, 4) and np.isfinite(pvs.to_numpy()).all()
 
 
+@pytest.mark.slow
 def test_nominal_priors_equal_items_multigroup_and_2d() -> None:
     """Nominal works with priors, equal_across_items, multiple groups + DIF, EH, and 2D MIRT."""
     a_arr = np.array([1.1, 1.0, 1.2, 0.9])

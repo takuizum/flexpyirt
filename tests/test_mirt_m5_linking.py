@@ -32,6 +32,9 @@ from flexpyirt.items import ItemKernel, ItemModel
 from flexpyirt.latent import normal_log_weights
 from tests._reference import check_reference_meta
 
+# mirt reference comparison: nightly and release-PR CI only (CONTRIBUTING.md, "Tests").
+pytestmark = pytest.mark.slow
+
 REFERENCE_DIR = Path(__file__).parent / "reference"
 REFERENCE_FILE = "v20_linking.json"
 

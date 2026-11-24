@@ -45,6 +45,9 @@ from flexpyirt import (
 from flexpyirt._compile import LATENT_ITEM, coerce_groups, coerce_responses, compile_problem
 from tests._reference import check_reference_meta
 
+# mirt reference comparison: nightly and release-PR CI only (CONTRIBUTING.md, "Tests").
+pytestmark = pytest.mark.slow
+
 REFERENCE_DIR = Path(__file__).parent / "reference"
 SQUAREM = (False, True)
 CASES = ("lsat7_2pl", "sim_2pl", "threepl", "rasch_free_var", "grm_sim", "gpcm_sim")

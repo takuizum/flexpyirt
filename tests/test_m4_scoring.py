@@ -106,6 +106,7 @@ def test_score_validation_errors(fitted_2pl: tuple[FitResult, pd.DataFrame]) -> 
             res.score(small, method=det_method, key=key)
 
 
+@pytest.mark.slow
 def test_score_raises_precision_error_without_x64() -> None:
     """FitResult.score() checks float64 at entry and raises PrecisionError when x64 is off."""
     code = textwrap.dedent(
@@ -365,6 +366,7 @@ def test_zero_slope_items_treated_as_missing_for_pattern_flags() -> None:
 # ---- WLE finite on extremes & stationary equation check ------------------------------------
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     ("model_cls", "n_categories", "params_by_name"),
     [
@@ -509,6 +511,7 @@ def test_pv_moments_match_eap_within_mc_error() -> None:
 # ---- Multiple groups, missing data, array inputs, and invariance ---------------------------
 
 
+@pytest.mark.slow
 def test_all_methods_with_groups_missing_and_permutation_invariance() -> None:
     ref = _sim_2pl(300, 10, A_2PL, D_2PL, mu=0.0, sd=1.0)
     d_foc = D_2PL.copy()

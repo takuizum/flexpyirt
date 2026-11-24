@@ -42,6 +42,9 @@ from flexpyirt._compile import LATENT_ITEM
 from flexpyirt.latent import davidian_log_weights
 from tests._reference import check_reference_meta
 
+# mirt reference comparison: nightly and release-PR CI only (CONTRIBUTING.md, "Tests").
+pytestmark = pytest.mark.slow
+
 REFERENCE_DIR = Path(__file__).parent / "reference"
 CASES = ["v19_davidian_2pl_k3", "v19_davidian_grm_k2", "v19_davidian_fipc_k3"]
 BUILTIN_CASES = ["v19_davidian_2pl_k3", "v19_davidian_grm_k2"]

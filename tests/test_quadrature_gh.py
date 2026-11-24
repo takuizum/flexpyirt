@@ -85,6 +85,7 @@ def test_marginal_loglik_matches_numerical_integration() -> None:
     np.testing.assert_allclose(got[comp.inverse], expected, rtol=1e-9)
 
 
+@pytest.mark.slow
 def test_rasch_free_variance_matches_fine_equispaced_fit() -> None:
     rng = np.random.default_rng(1)
     d = rng.normal(size=10)
@@ -103,6 +104,7 @@ def test_rasch_free_variance_matches_fine_equispaced_fit() -> None:
     np.testing.assert_allclose(res.items["d_se"], ref.items["d_se"], rtol=1e-7)
 
 
+@pytest.mark.slow
 def test_two_dimensional_product_rule_matches_fine_grid() -> None:
     rng = np.random.default_rng(2)
     a = np.zeros((8, 2))
@@ -127,6 +129,7 @@ def test_two_dimensional_product_rule_matches_fine_grid() -> None:
     )
 
 
+@pytest.mark.slow
 def test_scoring_json_and_errors() -> None:
     df, _, _ = _sim_2pl(3, 500, 8, 0.0, 1.0)
     spec = Model.uniform(TwoPL(), items=df.columns)

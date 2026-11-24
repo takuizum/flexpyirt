@@ -11,3 +11,6 @@ validation/r/.Rhistory
 .hypothesis/
 benchmarks/data/
 site/
+
+# Persistent JAX compilation cache (CI)
+.jax-cache/

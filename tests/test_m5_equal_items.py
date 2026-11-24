@@ -114,6 +114,7 @@ def test_coupled_blocks_are_compiled_only_when_needed() -> None:
     assert sizes == [3, 3]  # (a, d0, d1) and (a4, a5, d)
 
 
+@pytest.mark.slow
 def test_common_slope_matches_shared_free_id_loglik_and_is_monotone() -> None:
     df = _sim()
     spec = Model.uniform(TwoPL(), items=df.columns).equal_across_items(items=None, params=["a"])
@@ -132,6 +133,7 @@ def test_common_slope_matches_shared_free_id_loglik_and_is_monotone() -> None:
     assert sq.loglik == pytest.approx(res.loglik, abs=1e-7)
 
 
+@pytest.mark.slow
 def test_shared_prior_is_counted_once() -> None:
     df = _sim()
     prior = LogNormalPrior(0.0, 0.5)
@@ -149,6 +151,7 @@ def test_shared_prior_is_counted_once() -> None:
     np.testing.assert_allclose(res.vcov, hess.vcov, rtol=1e-6, atol=1e-12)
 
 
+@pytest.mark.slow
 def test_mixed_families_oakes_equals_hessian() -> None:
     df2 = _sim(n=1500, j=4, seed=5)
     df3 = _sim(n=1500, j=3, seed=5, n_categories=3).rename(columns=lambda c: f"g{c}")
@@ -197,6 +200,7 @@ def test_latent_and_item_cannot_share_free_id() -> None:
         fit(spec, df, table=table)
 
 
+@pytest.mark.slow
 def test_eh_with_equal_items_runs_and_is_monotone() -> None:
     df = _sim(n=1500)
     spec = (
@@ -211,6 +215,7 @@ def test_eh_with_equal_items_runs_and_is_monotone() -> None:
     assert _val(items, "i0", "a") == _val(items, "i2", "a")
 
 
+@pytest.mark.slow
 def test_multidimensional_equal_loadings() -> None:
     rng = np.random.default_rng(11)
     n = 1500
@@ -234,6 +239,7 @@ def test_multidimensional_equal_loadings() -> None:
     np.testing.assert_allclose(oakes.vcov, hess.vcov, rtol=1e-6, atol=1e-12)
 
 
+@pytest.mark.slow
 def test_json_round_trip() -> None:
     df = _sim()
     spec = Model.uniform(TwoPL(), items=df.columns).equal_across_items(
@@ -260,6 +266,7 @@ def test_json_round_trip() -> None:
         FitResult.from_json(json.dumps(v2))
 
 
+@pytest.mark.slow
 def test_core_m_step_does_not_decrease_q() -> None:
     """One M-step on a coupled problem never decreases Q (generalized EM, §16.1)."""
     df = _sim()

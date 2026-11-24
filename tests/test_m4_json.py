@@ -164,6 +164,7 @@ def _roundtrip(
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_roundtrip_2pl_oakes_and_hessian(tmp_path: Path) -> None:
     case = load("v1_lsat7_2pl")
     spec = Model.uniform(TwoPL(), items=case.items)
@@ -183,6 +184,7 @@ def test_roundtrip_2pl_oakes_and_hessian(tmp_path: Path) -> None:
     _assert_fit_result_identical(res_h, loaded_h, score_sub)
 
 
+@pytest.mark.slow
 def test_roundtrip_rasch_free_variance(tmp_path: Path) -> None:
     case = load("v2_lsat7_rasch")
     spec = Model.uniform(Rasch(), items=case.items)
@@ -233,6 +235,7 @@ def test_roundtrip_grm_gpcm_pcm_and_mixed(tmp_path: Path) -> None:
     _assert_fit_result_identical(res_mix, from_file, df_mix.iloc[:25])
 
 
+@pytest.mark.slow
 def test_roundtrip_3pl_4pl_and_priors_map(tmp_path: Path) -> None:
     rng = np.random.default_rng(5002)
     theta = rng.normal(0.0, 1.0, 1500)
@@ -271,6 +274,7 @@ def test_roundtrip_3pl_4pl_and_priors_map(tmp_path: Path) -> None:
     _assert_fit_result_identical(res4, from_str4, score_sub)
 
 
+@pytest.mark.slow
 def test_roundtrip_two_group_with_anchors(tmp_path: Path) -> None:
     rng = np.random.default_rng(5003)
     n_g = 500
@@ -308,6 +312,7 @@ def test_roundtrip_two_group_with_anchors(tmp_path: Path) -> None:
     _assert_fit_result_identical(res, from_str, df.iloc[idx], group=grp[idx])
 
 
+@pytest.mark.slow
 def test_roundtrip_fipc(tmp_path: Path) -> None:
     case = load("v1_lsat7_2pl")
     bank = pd.DataFrame({"item": ["Item.1", "Item.2"], "a": [1.0, 1.1], "d": [1.8, 0.8]})
@@ -323,6 +328,7 @@ def test_roundtrip_fipc(tmp_path: Path) -> None:
     _assert_fit_result_identical(res, from_str, case.data.iloc[:25])
 
 
+@pytest.mark.slow
 def test_roundtrip_missing_data_and_all_missing_scoring(tmp_path: Path) -> None:
     case = load("v1_lsat7_2pl")
     rng = np.random.default_rng(5004)
@@ -344,6 +350,7 @@ def test_roundtrip_missing_data_and_all_missing_scoring(tmp_path: Path) -> None:
     _assert_fit_result_identical(res, from_str, score_df)
 
 
+@pytest.mark.slow
 def test_roundtrip_squarem_and_se_none(tmp_path: Path) -> None:
     case = load("v1_lsat7_2pl")
     spec = Model.uniform(TwoPL(), items=case.items)
@@ -367,6 +374,7 @@ def test_roundtrip_squarem_and_se_none(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_roundtrip_edited_parameter_table(tmp_path: Path) -> None:
     case = load("v1_lsat7_2pl")
     spec = Model.uniform(TwoPL(), items=case.items)
@@ -387,6 +395,7 @@ def test_roundtrip_edited_parameter_table(tmp_path: Path) -> None:
     _assert_fit_result_identical(res, from_file, case.data.iloc[:25])
 
 
+@pytest.mark.slow
 def test_roundtrip_nonconverged_nonpd_vcov_and_all_fixed(tmp_path: Path) -> None:
     case = load("v1_lsat7_2pl")
     spec = Model.uniform(TwoPL(), items=case.items)
@@ -424,6 +433,7 @@ def test_roundtrip_nonconverged_nonpd_vcov_and_all_fixed(tmp_path: Path) -> None
     _assert_fit_result_identical(res_zero, from_zero, case.data.iloc[:15])
 
 
+@pytest.mark.slow
 def test_roundtrip_special_item_and_group_names(tmp_path: Path) -> None:
     case = load("v1_lsat7_2pl")
     # Include string names that coincide with special float tokens, HTML chars, and Unicode.
@@ -447,6 +457,7 @@ def test_roundtrip_special_item_and_group_names(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_from_json_raises_precision_error_without_x64(tmp_path: Path) -> None:
     case = load("v1_lsat7_2pl")
     res = fit(Model.uniform(TwoPL(), items=case.items), case.data, se=None)
@@ -735,6 +746,7 @@ def test_malformed_parameter_invariants_and_se(sample_payload: dict[str, Any]) -
             FitResult.from_json(json.dumps(bad_free_se))
 
 
+@pytest.mark.slow
 def test_malformed_asymptotes_grm_order_and_shared_bounds() -> None:
     # 3PL asymptote invariant 0 <= g < u <= 1 on value and estimate
     rng = np.random.default_rng(5010)
@@ -978,6 +990,7 @@ def test_malformed_cross_field_consistency(sample_payload: dict[str, Any]) -> No
         FitResult.from_json(json.dumps(bad_zero_iter))
 
 
+@pytest.mark.slow
 def test_read_source_non_utf8_and_brace_prefixed_filename(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1024,6 +1037,7 @@ def _mirt_data(n_factors: int, seed: int) -> tuple[pd.DataFrame, dict[str, list[
     return pd.DataFrame(y, columns=items), factors
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(("n_factors", "correlated"), [(2, True), (3, False)])
 def test_multidimensional_round_trip(n_factors: int, correlated: bool, tmp_path: Path) -> None:
     df, factors = _mirt_data(n_factors, seed=40 + n_factors)
@@ -1117,6 +1131,7 @@ def test_malformed_factor_structure(
         FitResult.from_json(json.dumps(bad))
 
 
+@pytest.mark.slow
 def test_schema_version_3_names_still_load() -> None:
     """Schema 1-3 files use ``n_cat`` and ``LogNormal(meanlog, sdlog)`` / ``Beta`` (§15.46)."""
     rng = np.random.default_rng(5046)

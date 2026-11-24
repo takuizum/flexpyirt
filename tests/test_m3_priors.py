@@ -245,6 +245,7 @@ def test_model_prior_validation_and_table_column() -> None:
 # ---- Fixed parameter ignores its prior ------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_prior_on_fixed_parameter_has_no_effect() -> None:
     df = load_m1("v1_lsat7_2pl").data
     base = Model.uniform(TwoPL(), items=df.columns).fix(item="Item.1", a=1.0, d=0.0)
@@ -283,6 +284,7 @@ def test_prior_on_fixed_parameter_has_no_effect() -> None:
 # ---- Shared (free_id) parameter counted once ------------------------------------------------
 
 
+@pytest.mark.slow
 def test_shared_free_id_prior_counted_once_across_groups() -> None:
     a = np.array([1.1, 1.4, 0.9, 1.3, 1.2, 1.0])
     d = np.array([-0.8, -0.3, 0.2, 0.6, -0.4, 0.5])
@@ -335,6 +337,7 @@ def test_shared_free_id_prior_counted_once_across_groups() -> None:
 # ---- Edited ParameterTable priors -----------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_edited_table_priors_match_spec_and_validate() -> None:
     df = load_m1("v1_lsat7_2pl").data
     spec_plain = Model.uniform(TwoPL(), items=df.columns)
@@ -417,6 +420,7 @@ def test_aic_bic_warn_when_priors_present_and_silent_without() -> None:
     assert bic == pytest.approx(-2.0 * r_map.loglik + r_map.n_params * np.log(r_map.n_obs))
 
 
+@pytest.mark.slow
 def test_posterior_information_adds_prior_hessian_exactly() -> None:
     """I_MAP(eta) - I_lik(eta) == -diag(d^2/dx^2 log_pdf(x)) for both Oakes and Hessian."""
     a = np.array([1.2, 1.5, 1.0, 1.3, 1.6])
@@ -449,6 +453,7 @@ def test_posterior_information_adds_prior_hessian_exactly() -> None:
     np.testing.assert_allclose(info_map_oakes - info_lik, -prior_hess, rtol=1e-10, atol=1e-12)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("squarem", [False, True])
 def test_map_3pl_monotone_and_prevents_heywood(squarem: bool) -> None:
     """Beta(5, 17) prior stabilizes 3PL guessing estimates and stays monotone under EM/SQUAREM."""
@@ -486,6 +491,7 @@ def _simulate_grm(a: np.ndarray, d: np.ndarray, n: int, seed: int) -> pd.DataFra
     return pd.DataFrame(cols)
 
 
+@pytest.mark.slow
 def test_default_starts_adjusted_into_prior_support() -> None:
     """Default starts move strictly into (model bounds ∩ prior support) for 2PL, 3PL/4PL, GRM."""
     # 1. BetaPrior(2, 2) on 2PL slopes (heuristic a0 > 1 on LSAT7 Item.2).
@@ -600,6 +606,7 @@ def test_default_starts_adjusted_into_prior_support() -> None:
     assert (res_grm_beta.items["d2"] > res_grm_beta.items["d3"]).all()
 
 
+@pytest.mark.slow
 def test_heywood_warning_on_prior_support_boundary() -> None:
     """Finite bounds induced by an attached prior's support also trigger HeywoodWarning."""
     df = _simulate_2pl(
