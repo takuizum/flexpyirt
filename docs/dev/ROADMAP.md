@@ -78,6 +78,8 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   - [x] D4 DETECT, confirmatory and exploratory (`detect()`, `exploratory_detect()`; validated in V27
     against `sirt::conf.detect` / `expl.detect` with sum-score conditioning; kernel-smoothed
     conditioning and the genetic partition search not implemented).
-  - [ ] D5 EFA through the optional `factor_analyzer` (extra `flexpyirt[efa]`, vs `psych::fa`), Hull
-    (vs `EFAtools::HULL`), comparison data (vs `EFAtools::CD`).
+  - [x] D5a ULS / ML EFA implemented in flexpyirt (`efa()`; `factor_analyzer` fails with scikit-learn
+    1.8+, DESIGN §16.8) and the Hull method (`hull()`); validated in V28 against EFAtools `EFA` / `HULL`
+    and `psych::fa`.
+  - [ ] D5b comparison data (vs `EFAtools::CD`).
   - [ ] D6 DIMTEST with bootstrap bias correction (accepted on a simulation study: type I error and power).

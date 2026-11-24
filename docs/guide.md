@@ -912,11 +912,13 @@ support. Each method below is a diagnostic with known biases, so look at several
 ```python
 import jax
 
-from flexpyirt import empirical_kaiser, parallel_analysis, velicer_map
+from flexpyirt import efa, empirical_kaiser, hull, parallel_analysis, velicer_map
 
 pa = parallel_analysis(df, key=jax.random.key(0), n_replications=20)
 print(pa.n_factors, pa.observed[:3].round(3), pa.reference[:3].round(3))
 print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
+print(hull(pc, key=jax.random.key(4)).n_factors)
+print(efa(pc, n_factors=1).loadings.head(3).round(3))
 ```
 
 - `parallel_analysis()` (Horn, 1965) counts the leading eigenvalues of the polychoric matrix
@@ -927,6 +929,9 @@ print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
   final analysis.
 - `velicer_map()` minimizes the average partial correlation after removing $m$ principal
   components; the revised fourth-power version is the default (`power=2` for the original).
+- `hull()` fits factor models with $0, 1, \dots, J$ factors (`efa()`, ULS or ML) and picks the
+  number after which more factors add little fit relative to the degrees of freedom they use
+  (Lorenzo-Seva, Timmerman & Kiers, 2011); it needs at least 6 items.
 - `empirical_kaiser()` compares each eigenvalue with a sample-size-dependent reference
   (Braeken & van Assen, 2017).
 - These count dimensions; they do not test whether a unidimensional IRT model fits. For that,

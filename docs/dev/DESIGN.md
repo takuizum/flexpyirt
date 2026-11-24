@@ -1491,15 +1491,11 @@ data-independent shapes (§15.21).
    that cannot be validated from formulas; the Kaiser criterion is reported for reference only and
    never counted. EGA (Golino & Epskamp, 2017) and bifactor indices (ECV, $\omega_h$, PUC;
    Rodriguez, Reise & Haviland, 2016) are deferred.
-   **EFA through an optional dependency**: Hull (and factor-analytic eigenvalues where needed) call
-   `factor_analyzer` (>= 0.5.1) from the outer Python layer, never inside jit, installed as the extra
-   `flexpyirt[efa]` (it pulls in scikit-learn). It is imported lazily; a missing install raises
-   `ImportError` naming the extra. It is called with `is_corr_matrix=True` on flexpyirt's polychoric
-   matrix, `rotation=None` and `svd_method="lapack"` (deterministic). `factor_analyzer` only reports
-   loadings, uniquenesses and an ML $\chi^2$ (`sufficiency`), so the fit measures Hull needs (CAF,
-   RMSEA, CFI) are computed in flexpyirt from the model-implied matrix
-   $\hat\Sigma=\Lambda\Lambda^\top+\Psi$. Its estimates are checked against `psych::fa` (minres, ML)
-   on the same matrix before Hull is validated, so a disagreement is attributed to the right layer.
+   **EFA (revised 2026-11-24)**: the plan was to call `factor_analyzer` as an optional extra, but
+   its last release (0.5.1, February 2024) fails in `fit()` with scikit-learn 1.8 and later (it
+   passes the removed `force_all_finite` argument to `check_array`). ULS and ML EFA are therefore
+   implemented in flexpyirt (§16.14) with SciPy only and checked against EFAtools and `psych::fa`
+   on the same matrices; there is no `efa` extra.
    **Stages** (each validated before the next; ROADMAP M5):
    D1 polychoric / tetrachoric correlations (two-step, Olsson, 1979; pairwise `vmap`) with
    smoothing of non-positive-definite matrices, against `psych::polychoric` and `lavaan::lavCor`.
@@ -1514,8 +1510,8 @@ data-independent shapes (§15.21).
    `ltm::unidimTest`.
    D4 DETECT, confirmatory and exploratory (Zhang & Stout, 1999; Zhang, 2007), with ASSI and $R$,
    against `sirt::conf.detect` / `expl.detect`; the partition search runs in the outer layer.
-   D5 the EFA bridge above and Hull (Lorenzo-Seva, Timmerman & Kiers, 2011), against `psych::fa`
-   and `EFAtools::HULL`; comparison data (Ruscio & Roche, 2012) against `EFAtools::CD`.
+   D5 EFA (§16.14) and Hull (Lorenzo-Seva, Timmerman & Kiers, 2011), against EFAtools' `EFA` /
+   `HULL` and `psych::fa`; comparison data (Ruscio & Roche, 2012) against `EFAtools::CD`.
    D6 DIMTEST with bootstrap bias correction (Stout, Froelich & Gao, 2001; Froelich & Habing, 2008).
    No CRAN reference exists, so it is accepted on a simulation study (type I error at the nominal
    level for unidimensional data, power for two-dimensional data) recorded in VALIDATION.md.
@@ -1688,6 +1684,43 @@ data-independent shapes (§15.21).
     `smooth = TRUE`, sirt's `conf.detect(use_sum_score = TRUE)` standardizes the total score and then
     subtracts raw item scores for the rest score, so its rest-score groups are wrong (DETECT 6.73
     instead of 1.60 for `sim_2d`); recorded on the accuracy page, not followed.
+14. **EFA and the Hull method (`efa()`, `hull()`, D5 of §16.8, V28)**: `_efa.py` (NumPy / SciPy).
+    **Estimation**: unrotated solutions from the uniquenesses $\Psi$, minimized by SciPy L-BFGS-B
+    (`ftol=1e-15`, `gtol=1e-11`) from $\psi_i=1-\mathrm{SMC}_i$ within $[0.005,\max(1,\mathrm{SMC})]$
+    (psych / EFAtools' bounds). ULS: $F=\tfrac12\lVert R-\Psi-\Lambda\Lambda^\top\rVert_F^2$, with
+    $\Lambda$ the leading eigenvectors of $R-\Psi$ scaled by $\sqrt{\max(\lambda,0)}$, gradient
+    $\operatorname{diag}(\Lambda\Lambda^\top+\Psi-R)$ (psych's `FAgr.minres`, which is the exact
+    gradient of this $F$); this is psych's minres and EFAtools' ULS (psych's `fit.residuals` sums
+    only off-diagonal residuals, which has the same minimizer in the interior). ML: Jöreskog's
+    concentrated discrepancy on the eigenvalues of $\Psi^{-1/2}R\Psi^{-1/2}$ with gradient
+    $\operatorname{diag}(\Lambda\Lambda^\top+\Psi-R)/\psi^2$ (psych's `FAfn` / `FAgr`). Columns are
+    signed to non-negative sums; no rotation. A uniqueness at the floor is a Heywood case
+    (`HeywoodWarning` from `efa()`). The tolerances are tighter than R's `optim()` defaults, so the
+    flexpyirt objective is never above EFAtools' at its solution (checked in the tests).
+    **Fit indices** (EFAtools' `.gof`): CAF $=1-$KMO of the residual matrix with unit diagonal;
+    $\chi^2$ with Bartlett's multiplier $N-1-(2p+5)/6-2k/3$ and its $p$; CFI and RMSEA from the
+    uncorrected $F(N-1)$ and the null $-\log|R|(N-1)$, $df_0=p(p-1)/2$; $df=((p-k)^2-(p+k))/2$.
+    **Hull** (EFAtools' `HULL` / `.hull_calc`): rows $k=0..J$ with fit CAF, CFI or $1-$RMSEA
+    ($k=0$: $1-$KMO($R$), 0, $1-$RMSEA$_0$; $df_0$); drop solutions whose fit does not increase,
+    remove interior points on or below the chord of their neighbours until none is, scree values
+    $st$ on the remaining interior, select the largest $st$ (fewer than three hull points: the best
+    fit, with a warning). Default $J$: one more than parallel analysis with SMC eigenvalues of normal
+    data and the mean rule (EFAtools' `efa_parallel` defaults, here 1000 replications from a JAX key),
+    capped at the largest $k$ with $df>0$ and raised to at least $\min(3,\text{cap})$; with
+    `max_factors` given, $J$ is taken as is. At least 6 variables. The table records `heywood` and
+    `converged` per solution, and a `HeywoodWarning` is emitted when the selected one is
+    inadmissible (as EFAtools). **Ensemble**: `dimensionality()` adds Hull (CAF, ULS, default $J$ from a
+    fourth split of the key) to question (A) when there are at least 6 items.
+    **Validation (V28)**: `validation/r/m5_efa_hull_reference.R` (EFAtools 1.1.0, psych 2.6.9) on the
+    V24 polychoric matrices with $\ge6$ variables and two simulated Pearson matrices (3 factors,
+    $N=500$; 2 weak factors, $N=300$): every $k\le J$ with ULS and ML — implied
+    $\Lambda\Lambda^\top$ and communalities to $10^{-4}$ (observed $\le7\times10^{-5}$, the largest at
+    Heywood solutions), CAF / CFI / RMSEA to $2\times10^{-4}$, $\chi^2$ to $10^{-4}$ relative, $df$
+    exactly; psych's `fa()` on the 3-factor matrix to $10^{-4}$. Hull for every matrix x estimator x
+    fit index with EFAtools' recorded $J$: the selected $k$ and the hull membership identical, the
+    fit values to $10^{-5}$ (observed $\le1.4\times10^{-6}$), $st$ to 1% relative (a ratio of small
+    differences; observed $\le3.5\times10^{-3}$ absolute). Comparison data (CD) is not part of this
+    item yet.
 
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1718,10 +1751,12 @@ data-independent shapes (§15.21).
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
 - Goretzko, D., & Bühner, M. (2020). One model to rule them all? Using machine learning algorithms to determine the number of factors in exploratory factor analysis. *Psychological Methods*, 25(6), 776–786.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
+- Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
+- Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.

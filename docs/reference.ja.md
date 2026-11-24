@@ -11,7 +11,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - 相関: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) とその結果
+- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) とその結果
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -816,6 +816,47 @@ $\max\{(1+\sqrt{p/n})^2 (p-\sum_{i<j}\lambda_i)/(p-j+1),\ 1\}$ と比べる。`c
 | `eigenvalues`, `reference` | ndarray | 固有値と参照値 |
 | `n_obs` | int | 使った標本サイズ |
 
+### `efa`
+
+```text
+efa(correlation, *, n_factors, method="uls", n_obs=None) -> EFAResult
+```
+
+相関行列（DataFrame、配列、`PolychoricResult`）の回転しない探索的因子分析。ULS（minres。Harman & Jones, 1966）または
+ML（Jöreskog, 1967）で、独自性を $1 - \mathrm{SMC}$ から $[0.005, \max(1, \mathrm{SMC})]$ の範囲で最小化する。psych の
+`fa(rotate = "none")`、EFAtools の `EFA(rotation = "none")` と同じ。`n_obs`（`PolychoricResult` ならペアごとの $n$ の
+最小値が既定）を与えると、適合度に Bartlett の補正をした $\chi^2$、その $p$ 値、CFI、RMSEA が加わる。CAF と $df$ は
+常に報告する。独自性が境界に達すると `HeywoodWarning`、最適化が途中で止まると `ConvergenceWarning` を出す。
+
+### `EFAResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `loadings` | DataFrame | 回転しない負荷量（列の和が非負になるよう符号をそろえる） |
+| `uniquenesses`, `communalities` | Series | $\psi_i$ と $h_i^2$ |
+| `fit` | dict | `caf`、`df`、`n_obs` があれば `chi2`、`p`、`cfi`、`rmsea` |
+| `method`, `converged`, `heywood`, `objective` | | 推定法と診断 |
+
+### `hull`
+
+```text
+hull(correlation, *, n_obs=None, max_factors=None, key=None, method="uls",
+     fit_index="caf", n_replications=1000) -> HullResult
+```
+
+Hull 法（Lorenzo-Seva, Timmerman & Kiers, 2011）。EFAtools の `HULL()` と同じ。$k = 0, \dots, J$ 因子の解を適合度
+（CAF、CFI、$1-$RMSEA）と自由度で並べ、上側の凸包の上で scree 比
+$st_k = \frac{(f_k - f_{k-1})/(df_k - df_{k-1})}{(f_{k+1} - f_k)/(df_{k+1} - df_k)}$ を最大にする $k$ を選ぶ。既定の $J$ は
+平行分析の結果に 1 を足したもの（`key` と `n_obs` が要る）で、自由度が正になる範囲に抑える。変数は 6 つ以上。
+
+### `HullResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `n_factors` | int | 選ばれた因子数 |
+| `table` | DataFrame | $k$ ごとの `n_factors`、`fit`、`df`、`st`、`on_hull`、`heywood`、`converged` |
+| `fit_index`, `method`, `max_factors` | | 使った設定 |
+
 ### `model_parallel_analysis`
 
 ```text
@@ -903,7 +944,7 @@ dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=
 いくつかの診断を実行して並べ、2 つの合意を別々に示す（単独で信頼できる手法はない。Auerswald & Moshagen, 2019）。
 
 - **次元はいくつか**: `parallel_analysis()`（ポリコリック、PCA、並べ替え、95%）、`velicer_map()`（改訂版）、
-  `empirical_kaiser()`。合意は最頻値（同数ならすべて）と中央値、および一致した手法の数。
+  `empirical_kaiser()`、項目が 6 つ以上なら `hull()`（CAF、ULS）。合意は最頻値（同数ならすべて）と中央値、および一致した手法の数。
 - **本質的一次元性は認められるか**: 欠測のないデータで `exploratory_detect()`（選んだ分割の検証用の半分での
   DETECT $<$ `detect_threshold`）、`fit` を与えればさらに `model_parallel_analysis()`（$p \ge$ `alpha`）、最大の
   Q3\* $<$ `q3_star_threshold`（0.2 はよく使われる目安で、臨界値はテストと標本による）、`FitResult.m2()` の

@@ -59,6 +59,7 @@ $10^{-8}$ 程度）。
 | 平行分析、MAP、経験的カイザー基準 | 同じ相関行列に対する EFAtools の `EKC()`・`PARALLEL()`、psych の `vss()`、EFA.dimensions の `MAP()`、4 乗版 MAP の R による独立な実装と $10^{-11}$ まで。正規データの参照固有値は Monte Carlo 誤差の範囲で |
 | Q3、LD $X^2$ / $G^2$ | mirt で推定した同じモデルでの `residuals(m, type = "Q3" / "LD" / "LDG2")` |
 | モデルに基づく平行分析 | 同じ項目パラメタでの ltm の `unidimTest()`。観測された統計量と、Monte Carlo 誤差の範囲でシミュレーションの分布 |
+| 因子分析（ULS、ML）と Hull 法 | 同じ行列での EFAtools の `EFA()`・`HULL()` と psych の `fa()`。含意する負荷量は $10^{-4}$、適合度は $2\times10^{-4}$ まで、Hull の選択は同じ |
 | DETECT（確認的・探索的） | 同じ分割での sirt の `conf.detect(use_sum_score = TRUE, smooth = FALSE)` と `expl.detect(use_sum_score = TRUE)`。条件付き共分散・指標・分割が $10^{-12}$ まで |
 | 尺度リンキング（Haebara、Stocking–Lord） | mirt の反応関数を使って規準を計算する R の独立な実装（mirt 自体に特性曲線法のリンキングはない） |
 

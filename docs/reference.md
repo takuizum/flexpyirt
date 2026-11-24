@@ -12,7 +12,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Correlations: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) and their results
+- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) and their results
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -890,6 +890,51 @@ $\max\{(1+\sqrt{p/n})^2 (p-\sum_{i<j}\lambda_i)/(p-j+1),\ 1\}$. `n_obs` is requi
 | `eigenvalues`, `reference` | ndarray | Eigenvalues and reference values |
 | `n_obs` | int | Sample size used |
 
+### `efa`
+
+```text
+efa(correlation, *, n_factors, method="uls", n_obs=None) -> EFAResult
+```
+
+Unrotated exploratory factor analysis of a correlation matrix (DataFrame, array or
+`PolychoricResult`) by ULS (minres; Harman & Jones, 1966) or ML (Jöreskog, 1967), minimizing over
+the uniquenesses from $1 - \mathrm{SMC}$ within $[0.005, \max(1, \mathrm{SMC})]$, as psych's
+`fa(rotate = "none")` and EFAtools' `EFA(rotation = "none")`. With `n_obs` (default for a
+`PolychoricResult`: its smallest pairwise $n$) the fit includes the Bartlett-corrected $\chi^2$, its
+$p$-value, CFI and RMSEA; CAF and $df$ are always reported. Warns `HeywoodWarning` when a
+uniqueness reaches its bound and `ConvergenceWarning` when the optimizer stops early.
+
+### `EFAResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `loadings` | DataFrame | Unrotated loadings, columns signed to non-negative sums |
+| `uniquenesses`, `communalities` | Series | $\psi_i$ and $h_i^2$ |
+| `fit` | dict | `caf`, `df` and, with `n_obs`, `chi2`, `p`, `cfi`, `rmsea` |
+| `method`, `converged`, `heywood`, `objective` | | Estimator and diagnostics |
+
+### `hull`
+
+```text
+hull(correlation, *, n_obs=None, max_factors=None, key=None, method="uls",
+     fit_index="caf", n_replications=1000) -> HullResult
+```
+
+Hull method (Lorenzo-Seva, Timmerman & Kiers, 2011), as EFAtools' `HULL()`: solutions with
+$k = 0, \dots, J$ factors are placed by fit (CAF, CFI or $1-$RMSEA) and degrees of freedom; on the
+upper convex boundary the selected $k$ maximizes the scree ratio
+$st_k = \frac{(f_k - f_{k-1})/(df_k - df_{k-1})}{(f_{k+1} - f_k)/(df_{k+1} - df_k)}$. By default
+$J$ is one more than parallel analysis (needs `key` and `n_obs`), capped for positive degrees of
+freedom. At least 6 variables.
+
+### `HullResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `n_factors` | int | Selected number of factors |
+| `table` | DataFrame | `n_factors`, `fit`, `df`, `st`, `on_hull`, `heywood`, `converged` per $k$ |
+| `fit_index`, `method`, `max_factors` | | Settings used |
+
 ### `model_parallel_analysis`
 
 ```text
@@ -983,7 +1028,7 @@ Runs several diagnostics and reports them side by side, with two separate consen
 (no method is reliable alone; Auerswald & Moshagen, 2019).
 
 - **How many dimensions?** `parallel_analysis()` (polychoric, PCA, permutation, 95%),
-  `velicer_map()` (revised) and `empirical_kaiser()`; consensus = mode (all values on a tie) and
+  `velicer_map()` (revised), `empirical_kaiser()` and, with at least 6 items, `hull()` (CAF, ULS); consensus = mode (all values on a tie) and
   median, with the number of methods agreeing.
 - **Is essential unidimensionality tenable?** `exploratory_detect()` on complete data (the
   validation-half DETECT of the selected partition $<$ `detect_threshold`), and with `fit`:
