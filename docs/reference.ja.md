@@ -11,6 +11,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - 相関: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
+- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser) とその結果
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -717,6 +718,86 @@ polychoric(data, *, smooth=True, zero_cell_correction=0.5, tol=1e-10,
 | `converged`, `at_boundary`, `zero_cell_corrected` | DataFrame (bool) | ペアごとに、収束したか、$\lvert\rho\rvert \to 1$ で最大か（推定値は $\pm\tanh 8$）、`zero_cell_correction` を適用したか |
 | `smoothed` | bool | 平滑化で行列が変わったか |
 | `min_eigenvalue` | float | `unsmoothed_correlation` の最小固有値 |
+
+## 次元数
+
+いずれも「次元はいくつか」を診断として答える。1 つの手法だけを信頼せず、いくつかを組み合わせて判断する
+（[ガイド 17 節](guide.ja.md#17-次元数)）。
+
+### `parallel_analysis`
+
+```text
+parallel_analysis(data, *, key, correlation="polychoric", eigen_type="pca",
+                  reference="permutation", n_replications=100, quantile=0.95,
+                  zero_cell_correction=0.5) -> ParallelAnalysisResult
+```
+
+Horn (1965) の平行分析。観測された相関行列の固有値のうち、共通因子をもたない参照データの固有値の `quantile`
+（Glorfeld, 1995）を上回るものを先頭から数える。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `data` | DataFrame / 2 次元配列 | 回答者 x 項目（順序のある符号。`correlation="pearson"` なら連続量でもよい）。欠測は NaN |
+| `key` | JAX の PRNG キー | 参照データの乱数キー（例 `jax.random.key(0)`） |
+| `correlation` | `"polychoric"` / `"pearson"` | データと並べ替えの反復で使う相関（正定値でなければどちらも平滑化） |
+| `eigen_type` | `"pca"` / `"smc"` | 相関行列の固有値、または対角を重相関係数の 2 乗にした縮約行列の固有値 |
+| `reference` | `"permutation"` / `"normal"` | 項目ごとに独立に並べ替える（周辺分布を保つ。Garrido, Abad & Ponsoda, 2013）、または同じ大きさの独立な正規データ（Pearson） |
+| `n_replications` | int | 参照データの数（既定 `100`） |
+| `quantile` | float / None | 参照固有値の (0, 1) の分位点（既定 `0.95`）。`None` で平均 |
+| `zero_cell_correction` | float | `polychoric()` に渡す |
+
+**戻り値**: [`ParallelAnalysisResult`](#parallelanalysisresult)
+
+**例外**: `PrecisionError`、`SpecificationError`（不正な指定やデータ、項目が 3 つ未満）。
+
+**警告**: 並べ替えの反復を飛ばしたとき（欠測のため、並べ替えたペアに使える回答がない）に `FlexpyirtWarning`。
+
+### `ParallelAnalysisResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `n_factors` | int | `reference` を上回る観測固有値の数（先頭から） |
+| `observed` | ndarray | 観測固有値（降順） |
+| `reference`, `reference_mean` | ndarray | 位置ごとの参照の分位点（または平均）と平均 |
+| `replications` | ndarray | `(n_replications - n_skipped, p)` の参照固有値 |
+| `correlation` | DataFrame | 観測された相関行列 |
+| `eigen_type`, `reference_kind`, `correlation_kind`, `quantile`, `n_skipped` | | 使った設定と飛ばした反復の数 |
+
+### `velicer_map`
+
+```text
+velicer_map(correlation, *, power=4) -> MAPResult
+```
+
+Velicer の最小平均偏相関（MAP）検定。最初の $m$ 個の主成分を偏相関で除いたあと、非対角の偏相関の `power` 乗の
+平均を $m = 0, \dots, p - 1$ で最小にする。`power=2` は元の検定（Velicer, 1976）、`power=4` は改訂版（Velicer, Eaton &
+Fava, 2000）。`correlation` は行列（DataFrame / 配列）または `PolychoricResult`。
+
+### `MAPResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `n_factors` | int | 最小にする $m$ |
+| `statistic` | ndarray | $m = 0, \dots, p - 1$ の平均偏相関の統計量（偏分散が 0 になって以降は NaN） |
+| `power` | int | 2 または 4 |
+
+### `empirical_kaiser`
+
+```text
+empirical_kaiser(correlation, *, n_obs=None) -> EmpiricalKaiserResult
+```
+
+経験的カイザー基準（Braeken & van Assen, 2017）。$j$ 番目の固有値を
+$\max\{(1+\sqrt{p/n})^2 (p-\sum_{i<j}\lambda_i)/(p-j+1),\ 1\}$ と比べる。`correlation` が `PolychoricResult` でなければ
+`n_obs` が必要（`PolychoricResult` ならペアごとの $n$ の最小値を使う）。
+
+### `EmpiricalKaiserResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `n_factors` | int | 参照値を上回る固有値の数（先頭から） |
+| `eigenvalues`, `reference` | ndarray | 固有値と参照値 |
+| `n_obs` | int | 使った標本サイズ |
 
 ---
 

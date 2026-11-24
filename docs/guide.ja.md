@@ -22,7 +22,8 @@ flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめ�
 14. [確認的多次元モデル](#14-確認的多次元モデル)
 15. [尺度リンキング](#15-尺度リンキング)
 16. [ポリコリック相関](#16-ポリコリック相関)
-17. [エラーと警告](#17-エラーと警告)
+17. [次元数](#17-次元数)
+18. [エラーと警告](#18-エラーと警告)
 
 ## 1. 準備
 
@@ -828,7 +829,32 @@ print(pc.n_obs.iloc[:2, :2])
 - ペアごとの推定値を並べた行列は正定値とは限らない。その場合は平滑化し（psych の `cor.smooth` と同じ規則）、
   `NotPositiveDefiniteWarning` を出す。`pc.unsmoothed_correlation` にはペアごとの推定値がそのまま残る。
 
-## 17. エラーと警告
+## 17. 次元数
+
+1 次元モデルを当てはめる前に、回答がいくつの次元を支持するかを確かめておくとよい。以下の手法はいずれも
+偏りが知られた診断なので、いくつかを合わせて見る。
+
+```python
+import jax
+
+from flexpyirt import empirical_kaiser, parallel_analysis, velicer_map
+
+pa = parallel_analysis(df, key=jax.random.key(0), n_replications=20)
+print(pa.n_factors, pa.observed[:3].round(3), pa.reference[:3].round(3))
+print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
+```
+
+- `parallel_analysis()`（Horn, 1965）は、ポリコリック相関行列の固有値のうち、共通因子をもたない参照データの固有値の
+  95 パーセンタイルを上回るものを先頭から数える。既定の参照データは各項目の回答を独立に並べ替えたもので、項目の
+  周辺分布を保つ。`reference="normal"` で正規データ、`eigen_type="smc"` で縮約行列を使う。結果は `key` によって
+  変わるので、最終的な分析では反復を増やす（既定は 100）。
+- `velicer_map()` は $m$ 個の主成分を除いたあとの平均偏相関を最小にする。既定は 4 乗を使う改訂版
+  （`power=2` で元の版）。
+- `empirical_kaiser()` は各固有値を標本サイズに応じた参照値と比べる（Braeken & van Assen, 2017）。
+- これらは次元の数を数えるもので、1 次元 IRT モデルが当てはまるかを検定するものではない。それには
+  `FitResult.m2()` と `FitResult.item_fit()` を使う。
+
+## 18. エラーと警告
 
 | 種類 | いつ出るか |
 |---|---|
@@ -838,7 +864,7 @@ print(pc.n_obs.iloc[:2, :2])
 | `ConvergenceWarning` | `max_iter` までに収束しなかった、または SQUAREM が反復の 50% 超（5 回以上）で通常の EM に戻った |
 | `HeywoodWarning` | 自由な項目パラメタが有限の境界から `1e-4` 以内（3PL / 4PL で `g` が 0 付近、`u` が 1 付近など）、または自由な傾きが $|a| > 20$。`NormalMixture` の成分の退化。ポリコリック相関のペアが $|\rho| \to 1$ |
 | `NotPositiveDefiniteWarning` | ポリコリック相関行列が正定値でなく、平滑化した |
-| `FlexpyirtWarning` | 情報行列が正定値でない（SE が NaN）、アンカーが 1 パラメタだけ、または MAP 推定で `aic` / `bic` を参照した |
+| `FlexpyirtWarning` | 情報行列が正定値でない（SE が NaN）、アンカーが 1 パラメタだけ、MAP 推定で `aic` / `bic` を参照した、または平行分析の反復を飛ばした |
 
 すべての例外は `flexpyirt.errors.FlexpyirtError`、警告は `flexpyirt.errors.FlexpyirtWarning` を継承する。
 `SpecificationError` と `IdentificationError` は `ValueError` でもある。

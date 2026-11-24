@@ -22,7 +22,8 @@ for the models and algorithms behind them, see [Theory](theory.md).
 14. [Confirmatory multidimensional models](#14-confirmatory-multidimensional-models)
 15. [Scale linking](#15-scale-linking)
 16. [Polychoric correlations](#16-polychoric-correlations)
-17. [Errors and warnings](#17-errors-and-warnings)
+17. [Number of dimensions](#17-number-of-dimensions)
+18. [Errors and warnings](#18-errors-and-warnings)
 
 ## 1. Setup
 
@@ -901,7 +902,35 @@ print(pc.n_obs.iloc[:2, :2])
   (psych's `cor.smooth` rule) with a `NotPositiveDefiniteWarning`; `pc.unsmoothed_correlation`
   keeps the pairwise estimates.
 
-## 17. Errors and warnings
+## 17. Number of dimensions
+
+Before fitting a unidimensional model it is worth asking how many dimensions the responses
+support. Each method below is a diagnostic with known biases, so look at several of them together.
+
+```python
+import jax
+
+from flexpyirt import empirical_kaiser, parallel_analysis, velicer_map
+
+pa = parallel_analysis(df, key=jax.random.key(0), n_replications=20)
+print(pa.n_factors, pa.observed[:3].round(3), pa.reference[:3].round(3))
+print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
+```
+
+- `parallel_analysis()` (Horn, 1965) counts the leading eigenvalues of the polychoric matrix
+  above the 95th percentile of eigenvalues from reference data without common factors. By
+  default the reference permutes each item's responses independently, which keeps the item
+  marginals; `reference="normal"` uses normal data instead, and `eigen_type="smc"` uses the
+  reduced matrix. Results depend on `key`; use more replications (the default is 100) for a
+  final analysis.
+- `velicer_map()` minimizes the average partial correlation after removing $m$ principal
+  components; the revised fourth-power version is the default (`power=2` for the original).
+- `empirical_kaiser()` compares each eigenvalue with a sample-size-dependent reference
+  (Braeken & van Assen, 2017).
+- These count dimensions; they do not test whether a unidimensional IRT model fits. For that,
+  see `FitResult.m2()` and `FitResult.item_fit()`.
+
+## 18. Errors and warnings
 
 | Type | When |
 |---|---|
@@ -911,7 +940,7 @@ print(pc.n_obs.iloc[:2, :2])
 | `ConvergenceWarning` | EM did not converge within `max_iter`, or SQUAREM fell back to plain EM on > 50% of iterations (at least 5 times) |
 | `HeywoodWarning` | A free item parameter ended within `1e-4` of a finite bound (e.g. `g` near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$; or a `NormalMixture` component is degenerate; or a polychoric pair is at $|\rho| \to 1$ |
 | `NotPositiveDefiniteWarning` | A polychoric matrix was not positive definite and was smoothed |
-| `FlexpyirtWarning` | The information matrix is not positive definite (SEs are NaN), an anchor is a single parameter, or `aic` / `bic` is accessed under MAP |
+| `FlexpyirtWarning` | The information matrix is not positive definite (SEs are NaN), an anchor is a single parameter, `aic` / `bic` is accessed under MAP, or parallel-analysis replications were skipped |
 
 Every exception derives from `flexpyirt.errors.FlexpyirtError` and every warning from
 `flexpyirt.errors.FlexpyirtWarning`. `SpecificationError` and `IdentificationError` are also

@@ -1093,6 +1093,30 @@ class ItemKernel(Protocol):
    含む極端な 2 値項目、LSAT7、Science。lavaan と $3.1\times10^{-8}$ 以内（その `nlminb` の許容誤差。flexpyirt の
    ペアごとの勾配は $10^{-7}n$ まで 0）、閾値は $10^{-12}$ 以内、psych とは補正したペアを除く欠測のないデータで
    $2\times10^{-5}$ 以内（その `optimize()` の許容誤差）、`cor.smooth` とは $10^{-12}$ 以内で一致する。
+10. **平行分析・MAP・EKC（`parallel_analysis()`、`velicer_map()`、`empirical_kaiser()`、§16.8 の D2、V25）**:
+    `dimensionality.py`（シェル。$p\times p$ の線形代数は NumPy、正規の参照データは JAX の `vmap`）に置く。3 つとも
+    問い (A) に答え、`n_factors` をもつ変更不可の結果を返す。行列の入力（DataFrame、配列、`PolychoricResult`）は
+    正方・有限・対称・対角 1・$p\ge3$ であること。**数え方**: 参照を厳密に上回る固有値を先頭から数え、最初に下回った
+    ところで止める（psych・EFAtools と同じ逐次の規則）。**SMC の固有値**: 対角を $h_j=1-1/(R^{-1})_{jj}$ にした $R$
+    （Humphreys & Ilgen, 1969）。psych・EFAtools の EFA の共通性を使う版は EFA 連携（D5）を待つ。**平行分析の参照**:
+    `"permutation"`（既定）は JAX の PRNG キーで各項目を独立に並べ替え（入れ子の `vmap` で `(R, p, N)` の置換）、
+    周辺分布と欠測を保ったまま、反復ごとに照合済みの `polychoric()`（またはペアごとの Pearson）で相関を求め直す
+    （警告は抑える）。並べ替えたペアが推定できない反復（欠測による）は飛ばして数え、`FlexpyirtWarning` を出す。
+    使える反復が 2 つ未満なら `SpecificationError`。`"normal"` は同じ $N\times p$ の独立な $N(0,1)$ データ（欠測のある
+    行も数える）の Pearson 相関で、`vmap` を分割して計算する。分位点は NumPy の既定（線形補間、R の type 7）。既定の
+    分位点 0.95（Glorfeld, 1995）、PCA の固有値、ポリコリック相関での並べ替えの参照は Garrido, Abad & Ponsoda (2013)
+    に従う。**MAP**: 主成分の負荷量 $V_m\Lambda_m^{1/2}$（負の固有値は 0 に切る）で $m=0,\dots,p-1$ の $f_m$ を
+    求める。4 乗は要素ごと（O'Connor, 2000）で、推奨される改訂版（Velicer, Eaton & Fava, 2000）なので既定にした。
+    偏分散が $10^{-10}$ 以下になったところで NaN として打ち切り、最小値は NaN を除いて探す。EFA.dimensions の 4 乗の
+    統計量は行列のべき乗である（記録するが従わない）。**EKC**: EFAtools と同じ Braeken & van Assen (2017)（残りの
+    分散の項に観測固有値を使う）。`PolychoricResult` を渡して `n_obs` を省くと、ペアごとの $n$ の最小値を使う
+    （欠測があるときに保守的）。
+    **照合（V25）**: `validation/r/m5_dimensionality_reference.R` は V24 の lavaan のポリコリック行列 6 つを EFAtools
+    1.1.0（`EKC`）、psych 2.6.9（`vss()$map`）、EFA.dimensions 0.1.9.3（`MAP`）、両方の MAP のべきの R による独立な
+    実装、PCA・SMC の固有値には `eigen()` に与える。選ばれる因子数も含めすべて $10^{-11}$ 以内で一致する。正規の
+    参照固有値（3 つの大きさ x PCA・SMC、各 20000 データセット）は EFAtools の `PARALLEL` と Monte Carlo 誤差の範囲で
+    一致する（固定のキーで平均は $|z|\le4.5$、95 パーセンタイルは $6\times10^{-3}$）。並べ替えの経路は性質（独立な
+    置換、2 因子の回復、キーによる再現性）で確かめる。
 
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1125,6 +1149,7 @@ class ItemKernel(Protocol):
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
+- Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
@@ -1140,6 +1165,7 @@ class ItemKernel(Protocol):
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
+- O'Connor, B. P. (2000). SPSS and SAS programs for determining the number of components using parallel analysis and Velicer's MAP test. *Behavior Research Methods, Instruments, & Computers*, 32(3), 396–402.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
@@ -1160,6 +1186,7 @@ class ItemKernel(Protocol):
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
+- Velicer, W. F. (1976). Determining the number of components from the matrix of partial correlations. *Psychometrika*, 41(3), 321–327.
 - Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.

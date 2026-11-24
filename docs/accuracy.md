@@ -61,6 +61,7 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | DIF tests | `DIF(mg, scheme = "add" / "drop")` |
 | SQUAREM | every comparison above is repeated with `BAEM(squarem=True)` |
 | Polychoric correlations | lavaan's `lavCor()` on ordered variables to $10^{-6}$, psych's `polychoric()` to $10^{-3}$ (its optimizer's tolerance) and psych's `cor.smooth()` for smoothing |
+| Parallel analysis, MAP, empirical Kaiser criterion | EFAtools' `EKC()` and `PARALLEL()`, psych's `vss()`, EFA.dimensions' `MAP()` and an independent R implementation of the fourth-power MAP, on the same correlation matrices to $10^{-11}$; reference eigenvalues of normal data within Monte Carlo error |
 | Scale linking (Haebara, Stocking–Lord) | independent R implementations of the criteria using mirt's response functions (mirt itself has no characteristic-curve linking) |
 
 ## Known differences from mirt
@@ -111,6 +112,9 @@ small or absent in typical use, but you may see them when comparing the two prog
 
 The complete validation plan, with every case, mirt call and measured difference, is in the
 [validation plan](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/VALIDATION.md) on GitHub.
+## Known differences from other packages
+
+- **Fourth-power MAP in EFA.dimensions.** EFA.dimensions (0.1.9.3) computes its "4th power" MAP statistic with a matrix power, $(\operatorname{tr}(R^{*4})-p)/(p(p-1))$, not by raising each partial correlation to the fourth power as Velicer, Eaton & Fava (2000) do (its values can exceed 1). flexpyirt uses the elementwise power; the squared version agrees with EFA.dimensions and psych.
 
 ## References
 

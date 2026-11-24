@@ -56,6 +56,7 @@ $10^{-8}$ 程度）。
 | DIF 検定 | `DIF(mg, scheme = "add" / "drop")` |
 | SQUAREM | 上のすべての照合を `BAEM(squarem=True)` でも行う |
 | ポリコリック相関 | 順序変数に対する lavaan の `lavCor()` と $10^{-6}$ まで、psych の `polychoric()` と $10^{-3}$ まで（その最適化の許容誤差による）、平滑化は psych の `cor.smooth()` |
+| 平行分析、MAP、経験的カイザー基準 | 同じ相関行列に対する EFAtools の `EKC()`・`PARALLEL()`、psych の `vss()`、EFA.dimensions の `MAP()`、4 乗版 MAP の R による独立な実装と $10^{-11}$ まで。正規データの参照固有値は Monte Carlo 誤差の範囲で |
 | 尺度リンキング（Haebara、Stocking–Lord） | mirt の反応関数を使って規準を計算する R の独立な実装（mirt 自体に特性曲線法のリンキングはない） |
 
 ## mirt との既知の違い
@@ -97,6 +98,9 @@ $10^{-8}$ 程度）。
 
 すべてのケース、mirt の呼び出し、測った差を載せた完全な検証計画は、GitHub の
 [検証計画](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/VALIDATION.ja.md) にある。
+## 他のパッケージとの既知の違い
+
+- **EFA.dimensions の 4 乗版 MAP。** EFA.dimensions (0.1.9.3) は「4 乗」の MAP 統計量を行列のべき乗 $(\operatorname{tr}(R^{*4})-p)/(p(p-1))$ で計算しており、Velicer, Eaton & Fava (2000) のように各偏相関を 4 乗していない（値が 1 を超えることがある）。flexpyirt は要素ごとの 4 乗を使う。2 乗版は EFA.dimensions・psych と一致する。
 
 ## 参考文献
 

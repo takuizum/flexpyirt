@@ -42,6 +42,7 @@ calibration and fixed item parameter calibration (FIPC).
 | DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | ✓ |
 | Scale linking | Differentiable characteristic-curve linking (`link()`, `LinkResult`: Haebara and Stocking–Lord, non-symmetric and symmetric, Ogasawara delta-method SEs, transformed items and $\theta$ scores; checked against independent R implementations for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items) | ✓ |
 | Polychoric correlations | Polychoric / tetrachoric correlation matrices (`polychoric()`: two-step ML, available-case missing data, lavaan's 2 x 2 zero-cell correction, smoothing of non-positive-definite matrices; checked against lavaan's `lavCor`) | ✓ |
+| Number of dimensions | Parallel analysis (`parallel_analysis()`: polychoric or Pearson, PCA or SMC eigenvalues, permutation or normal reference data, quantile or mean rule), Velicer's MAP (`velicer_map()`, original and revised) and the empirical Kaiser criterion (`empirical_kaiser()`); checked against EFAtools, psych and EFA.dimensions | ✓ |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
 ## Installation
