@@ -893,12 +893,14 @@ DETECT（Zhang & Stout, 1999）は、総得点（または残りの得点）が�
 一次元なら、この条件付き共分散は 0 に近い。複数の次元があると、項目のクラスタ内では正、クラスタ間では負になる。
 
 ```python
-from flexpyirt import detect, exploratory_detect
+from flexpyirt import detect, dimtest, exploratory_detect
 
 halves = {item: ("A" if i < len(items) // 2 else "B") for i, item in enumerate(items)}
 print(detect(df, halves).indices.round(3))
 explore = exploratory_detect(df, max_clusters=3, key=jax.random.key(3))
 print(explore.table.round(3))
+test = dimtest(df, key=jax.random.key(5))
+print(test.assessment_items, round(test.statistic, 3), round(test.p_value, 3))
 ```
 
 - `detect()` は与えた分割を評価する（確認的 DETECT）。`exploratory_detect()` は回答者の半分で分割を探し、両方の
@@ -908,6 +910,9 @@ print(explore.table.round(3))
   ように、どの分割でも DETECT は 0 に近いか負になる。
 - DETECT には欠測のないデータが要る。`dimensionality()` は一次元性の確認の 1 つとして、探索的 DETECT（検証用の
   半分）を含める。
+- `dimtest()`（Stout, 1987; Stout, Froelich & Gao, 2001）は同じ考え方を 2 値項目の検定にしたもので、回答者の
+  3 分の 1 で検定用の部分テストを選び、残りで検定する。保守的なので、小さい $p$ は第 2 の次元の強い証拠だが、大きい
+  $p$ は一次元性の弱い証拠にとどまる。
 
 ## 20. エラーと警告
 

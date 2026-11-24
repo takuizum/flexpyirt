@@ -1747,6 +1747,47 @@ data-independent shapes (§15.21).
     identical; the rank-sum $p$-values on EFAtools' RMSE columns to $10^{-10}$ relative; `CD()` on a
     3-factor, a 2-factor ordinal and a 1-factor binary data set: the same suggestion for two keys
     each and mean RMSEs within 15% (different random populations).
+16. **DIMTEST (`dimtest()`, D6 of §16.8, V30)**: `_dimtest.py` (NumPy; random draws from a JAX key
+    are arguments). Binary complete data, at least 4 items. **Statistic** (Nandakumar & Stout,
+    1993): respondents grouped by the PT score; groups smaller than `min_group` (20) or with
+    $S_k\le0$ dropped; $T_L=K^{-1/2}\sum_k(\hat\sigma_k^2-\hat\sigma_{U,k}^2)/S_k$ with
+    $\hat\sigma_k^2$ the (divide-by-$J_k$) variance of the AT score, $\hat\sigma_{U,k}^2=\sum_i\hat
+    p_{ik}(1-\hat p_{ik})$ and $S_k^2=(\hat\mu_{4,k}-\hat\sigma_k^4+\hat\delta_{4,k})/J_k$,
+    $\hat\delta_{4,k}=\sum_i\hat p_{ik}(1-\hat p_{ik})(1-2\hat p_{ik})^2$. **Bias correction**
+    (Stout, Froelich & Gao, 2001): kernel-smoothed IRFs of the test sample (abilities
+    $\Phi^{-1}(r/(N+1))$ of total-score ranks with ties broken by uniform draws, Gaussian kernel
+    with bandwidth $1.1N^{-1/5}$ on 161 points of $[-4,4]$; Ramsay, 1991), $B$ (100) unidimensional
+    data sets of the test sample's size with $\theta\sim N(0,1)$ and IRFs interpolated linearly,
+    $T=(T_L-\bar T_G)/\sqrt{1+1/B}$, $p=1-\Phi(T)$. **AT selection**: with `assessment_items` the
+    whole sample is tested; otherwise a random third (`training_fraction`) selects the AT and the
+    rest is tested (Froelich & Habing, 2008, use a separate subsample): among the clusters of the
+    Ward clusterings into 2–6 groups of the training conditional covariances (§16.13), with 2 to
+    `max_assessment_size` (half the items) members, the one whose split {AT, rest} has the largest
+    DETECT. This is in the spirit of Froelich & Habing's conditional-covariance AT selection, not
+    their exact ATFIND, and is documented as such. **Ensemble**: `dimensionality()` adds DIMTEST
+    ($p\ge\alpha$) to question (B) for complete binary data (sixth split of the key), otherwise an
+    unavailable row. **Validation (V30)**: no implementation outside the stand-alone DIMPACK, so the
+    test is accepted on `validation/simulation/dimtest_study.py` (results in
+    `dimtest_study.json`): 2PL data, slopes $U(0.8,1.8)$, intercepts $N(0,0.8)$, items in two halves
+    on dimensions correlated $\rho$, 200 replications per condition, defaults throughout:
+
+    | Data | $N$ | $J$ | $\rho$ | mean $T$ | SD $T$ | reject at .05 | reject at .10 |
+    |---|---|---|---|---|---|---|---|
+    | unidimensional | 1000 | 20 | 1 | -0.07 | 0.79 | 0.020 | 0.050 |
+    | unidimensional | 2000 | 20 | 1 | -0.10 | 0.73 | 0.005 | 0.015 |
+    | unidimensional | 2000 | 30 | 1 | -0.15 | 0.74 | 0.000 | 0.025 |
+    | two-dimensional | 1000 | 20 | 0.7 | 4.83 | 1.00 | 0.990 | 0.995 |
+    | two-dimensional | 2000 | 20 | 0.7 | 6.91 | 0.92 | 1.000 | 1.000 |
+    | two-dimensional | 2000 | 30 | 0.8 | 6.44 | 0.87 | 1.000 | 1.000 |
+
+    The test is conservative: $\bar T_G$ removes the bias of $T_L$ (mean $T$ near 0) but $T_L$'s
+    standard deviation under the null is about 0.75 rather than 1, so the type I error is below the
+    nominal level; power against two dimensions correlated 0.7–0.8 is 0.99–1. A small $p$ is
+    therefore strong evidence of multidimensionality, a large $p$ weak evidence for unidimensionality
+    (stated in the docstring and the guide). Standardizing by the bootstrap SD of $T_G$ instead would
+    recalibrate it but departs from the published statistic; not done. The pieces are unit-tested
+    against direct computations, and `tests/test_m5_dimtest.py` reruns a small version of the
+    study (20 null and 10 alternative replications).
 
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1799,6 +1840,7 @@ data-independent shapes (§15.21).
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
+- Nandakumar, R., & Stout, W. (1993). Refinements of Stout's procedure for assessing latent trait unidimensionality. *Journal of Educational Statistics*, 18(1), 41–68.
 - O'Connor, B. P. (2000). SPSS and SAS programs for determining the number of components using parallel analysis and Velicer's MAP test. *Behavior Research Methods, Instruments, & Computers*, 32(3), 396–402.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
@@ -1807,6 +1849,7 @@ data-independent shapes (§15.21).
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
+- Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
@@ -1815,6 +1858,7 @@ data-independent shapes (§15.21).
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
+- Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
 - Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.

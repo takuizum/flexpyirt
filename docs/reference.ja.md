@@ -11,7 +11,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - 相関: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) とその結果
+- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) とその結果
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -955,6 +955,31 @@ DETECT・ASSI・RATIO を両方の半分で報告する。
 | `n_clusters` | int | 推定用の半分での DETECT が最大のクラスタ数 |
 | `estimation_rows`, `validation_rows` | ndarray | 2 つの半分の行位置 |
 
+### `dimtest`
+
+```text
+dimtest(data, *, key, assessment_items=None, training_fraction=1/3, n_bootstrap=100,
+        min_group=20, max_assessment_size=None) -> DimtestResult
+```
+
+欠測のない 2 値データに対する DIMTEST（Stout, 1987; Nandakumar & Stout, 1993; Stout, Froelich & Gao, 2001）。項目を
+検定用の部分テスト（AT）と分割用の部分テスト（PT）に分ける。本質的に一次元なら、PT の得点が同じ回答者の中での AT の
+項目の共分散は 0 に近い。その標準化した和 $T_L$ を、カーネル平滑化した項目反応関数から生成した 1 次元データでの平均で
+補正し、$T = (T_L - \bar T_G)/\sqrt{1 + 1/B}$、$p = 1 - \Phi(T)$ とする。`assessment_items` を与えなければ、回答者の
+無作為な `training_fraction` で条件付き共分散（DETECT）により AT を選び、残りで検定する。検定は保守的である
+（シミュレーションで第 1 種の誤りは名目水準を下回る）。小さい $p$ は第 2 の次元の強い証拠だが、大きい $p$ は一次元性の
+弱い証拠にとどまる。
+
+### `DimtestResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `statistic`, `p_value` | float | $T$ と $1 - \Phi(T)$ |
+| `t_l`, `t_g` | float, ndarray | $T_L$ とブートストラップの $T_L$ |
+| `assessment_items`, `partitioning_items` | list[str] | AT と PT |
+| `n_groups` | int | 使った PT の得点の群の数 |
+| `training_rows`, `test_rows` | ndarray | AT を選ぶ行と検定する行 |
+
 ### `dimensionality`
 
 ```text
@@ -968,7 +993,7 @@ dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=
 - **次元はいくつか**: `parallel_analysis()`（ポリコリック、PCA、並べ替え、95%）、`velicer_map()`（改訂版）、
   `empirical_kaiser()`、項目が 6 つ以上なら `hull()`（CAF、ULS）、欠測がなければ `comparison_data()`。合意は最頻値（同数ならすべて）と中央値、および一致した手法の数。
 - **本質的一次元性は認められるか**: 欠測のないデータで `exploratory_detect()`（選んだ分割の検証用の半分での
-  DETECT $<$ `detect_threshold`）、`fit` を与えればさらに `model_parallel_analysis()`（$p \ge$ `alpha`）、最大の
+  DETECT $<$ `detect_threshold`）、欠測のない 2 値データで `dimtest()`（$p \ge$ `alpha`）、`fit` を与えればさらに `model_parallel_analysis()`（$p \ge$ `alpha`）、最大の
   Q3\* $<$ `q3_star_threshold`（0.2 はよく使われる目安で、臨界値はテストと標本による）、`FitResult.m2()` の
   RMSEA $\le$ `rmsea_threshold`（近似的な適合。欠測があると使えず、その旨を示す）。合意は支持する手法の数（使えた
   手法のうち）。手法に重みは付けない。

@@ -32,6 +32,7 @@ English | [日本語](VALIDATION.ja.md)
 | DETECT conditional covariances, indices (both halves), Ward heights | 1e-12 |
 | EFA implied $\Lambda\Lambda^\top$ / communalities; CAF, CFI, RMSEA; $\chi^2$; Hull fit / $st$ | 1e-4; 2e-4; 1e-4 (relative); 1e-5 / 1e-2 (relative) |
 | CD: PAF $\Lambda\Lambda^\top$; one-factor population from the same draws; rank-sum $p$; mean RMSE | 1e-12; exact; 1e-10 (relative); 15% (relative) |
+| DIMTEST (simulation study; small version in the tests): type I error at .05 / power | $\le 0.15$ of 20 / $\ge 8$ of 10 |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -65,6 +66,7 @@ English | [日本語](VALIDATION.ja.md)
 | V27 | DETECT: confirmatory (simulated 2D with true / wrong partitions, 1D, Science) and exploratory (simulated 3 clusters, given split) | sirt `conf.detect(use_sum_score = TRUE, smooth = FALSE)`, `expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
 | V28 | EFA (ULS, ML; every $k$ up to Hull's bound) and the Hull method (CAF, CFI, RMSEA) on the V24 matrices with $\ge 6$ variables and two simulated matrices | EFAtools `EFA(method = , rotation = "none")`, `HULL(method = , gof = )`; psych `fa(fm = "minres" / "ml", rotate = "none")` | M5 |
 | V29 | Comparison data: PAF, the one-factor population generator from exported draws, rank-sum tests, `CD()` on 3-factor continuous, 2-factor ordinal and 1-factor binary data | EFAtools `.paf_iter`, `.simulate_cfm_empirical`, `CD()`; `wilcox.test(x, y, "less")` | M5 |
+| V30 | DIMTEST: type I error and power (2PL; $N$ 1000–2000, $J$ 20–30; unidimensional and two dimensions correlated 0.7–0.8; 200 replications each) | none (no implementation outside DIMPACK): `validation/simulation/dimtest_study.py` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -731,6 +733,11 @@ English | [日本語](VALIDATION.ja.md)
   checked on data sets where the answer is clear; the mean RMSEs are compared loosely because
   each side draws its own populations. JSON `auto_unbox` would turn a one-element $p$-value vector
   into a scalar, so the script writes `as.list()`.
+- **DIMTEST (V30, M5)**: accepted on a simulation study instead of a reference
+  comparison (DESIGN §16.16 has the table): with 200 replications the type I error at .05 is
+  0.0–2.0% (conservative; the bootstrap removes the bias but $T$'s SD under the null is about 0.75)
+  and the power 0.99–1.00. Rerun with `uv run python validation/simulation/dimtest_study.py`
+  (about 4 minutes); the tests run 20 null and 10 alternative replications.
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is

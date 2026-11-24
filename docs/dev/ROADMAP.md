@@ -83,4 +83,5 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
     and `psych::fa`.
   - [x] D5b comparison data (`comparison_data()`; validated in V29 against EFAtools `CD()` and
     its generator).
-  - [ ] D6 DIMTEST with bootstrap bias correction (accepted on a simulation study: type I error and power).
+  - [x] D6 DIMTEST with bootstrap bias correction (`dimtest()`; accepted in V30 on a simulation study:
+    type I error 0.0–2.0% at .05, conservative; power 0.99–1.00).

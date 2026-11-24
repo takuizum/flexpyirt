@@ -12,7 +12,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Correlations: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) and their results
+- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -1039,6 +1039,33 @@ into $2, \dots,$ `max_clusters` clusters on both halves.
 | `n_clusters` | int | Number of clusters with the largest estimation-half DETECT |
 | `estimation_rows`, `validation_rows` | ndarray | Row positions of the halves |
 
+### `dimtest`
+
+```text
+dimtest(data, *, key, assessment_items=None, training_fraction=1/3, n_bootstrap=100,
+        min_group=20, max_assessment_size=None) -> DimtestResult
+```
+
+DIMTEST (Stout, 1987; Nandakumar & Stout, 1993; Stout, Froelich & Gao, 2001) for complete binary
+data. The items are split into an assessment subtest (AT) and a partitioning subtest (PT); given
+the PT score, the AT items' covariances are near zero under essential unidimensionality. Their
+standardized sum $T_L$ is corrected by its mean in unidimensional data generated from
+kernel-smoothed item response functions, $T = (T_L - \bar T_G)/\sqrt{1 + 1/B}$, and
+$p = 1 - \Phi(T)$. Without `assessment_items` the AT is chosen by conditional covariances
+(DETECT) on a random `training_fraction` of the respondents and the test uses the rest. The test
+is conservative (type I error below the nominal level in simulations): a small $p$ is strong
+evidence of a second dimension, a large $p$ only weak evidence for unidimensionality.
+
+### `DimtestResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `statistic`, `p_value` | float | $T$ and $1 - \Phi(T)$ |
+| `t_l`, `t_g` | float, ndarray | $T_L$ and the bootstrap $T_L$ values |
+| `assessment_items`, `partitioning_items` | list[str] | AT and PT |
+| `n_groups` | int | PT-score groups used |
+| `training_rows`, `test_rows` | ndarray | Rows used to choose the AT and to test |
+
 ### `dimensionality`
 
 ```text
@@ -1055,7 +1082,8 @@ Runs several diagnostics and reports them side by side, with two separate consen
   `comparison_data()`; consensus = mode (all values on a tie) and
   median, with the number of methods agreeing.
 - **Is essential unidimensionality tenable?** `exploratory_detect()` on complete data (the
-  validation-half DETECT of the selected partition $<$ `detect_threshold`), and with `fit`:
+  validation-half DETECT of the selected partition $<$ `detect_threshold`), `dimtest()` on
+  complete binary data ($p \ge$ `alpha`), and with `fit`:
   `model_parallel_analysis()`
   ($p \ge$ `alpha`), the largest Q3\* $<$ `q3_star_threshold` (0.2 is a common rule; critical
   values depend on the test and sample) and the RMSEA of `FitResult.m2()` $\le$ `rmsea_threshold`

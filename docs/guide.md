@@ -978,12 +978,14 @@ near zero; with several dimensions they are positive within clusters of items an
 across them.
 
 ```python
-from flexpyirt import detect, exploratory_detect
+from flexpyirt import detect, dimtest, exploratory_detect
 
 halves = {item: ("A" if i < len(items) // 2 else "B") for i, item in enumerate(items)}
 print(detect(df, halves).indices.round(3))
 explore = exploratory_detect(df, max_clusters=3, key=jax.random.key(3))
 print(explore.table.round(3))
+test = dimtest(df, key=jax.random.key(5))
+print(test.assessment_items, round(test.statistic, 3), round(test.p_value, 3))
 ```
 
 - `detect()` scores a partition you supply (confirmatory DETECT); `exploratory_detect()`
@@ -995,6 +997,10 @@ print(explore.table.round(3))
   negative for every partition, as here.
 - DETECT needs complete data. `dimensionality()` includes the exploratory DETECT (validation half)
   among its unidimensionality checks.
+- `dimtest()` (Stout, 1987; Stout, Froelich & Gao, 2001) turns the same idea into a test for
+  binary items: it picks an assessment subtest on a third of the respondents and tests it on
+  the rest. It is conservative, so a small $p$ is strong evidence of a second dimension and a
+  large $p$ is only weak evidence for unidimensionality.
 
 ## 20. Errors and warnings
 
