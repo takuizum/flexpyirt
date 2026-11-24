@@ -58,7 +58,7 @@ def _ensemble() -> DimensionalityResult:
 def test_ensemble_reuses_the_individual_methods() -> None:
     res = _ensemble()
     data = _lsat7()
-    key_a, key_b, key_c = jax.random.split(jax.random.key(7), 3)
+    key_a, key_b, key_c, _ = jax.random.split(jax.random.key(7), 4)
     pa = parallel_analysis(data, key=key_a, n_replications=20)
     pc = polychoric(data)
     assert list(res.number_of_dimensions["n_factors"]) == [
@@ -82,6 +82,7 @@ def test_ensemble_reuses_the_individual_methods() -> None:
     assert det["supports_unidimensionality"] == (float(best["DETECT_validation"]) < 0.2)
     assert set(res.results) == {
         "exploratory_detect",
+        "hull",
         "polychoric",
         "parallel_analysis",
         "velicer_map",

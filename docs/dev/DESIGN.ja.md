@@ -1029,13 +1029,10 @@ class ItemKernel(Protocol):
    あり推定にはつなげない。学習済み予測器（Factor Forest; Goretzko & Bühner, 2020）は学習済みモデルを同梱し、数式から
    照合できないため採らない。カイザー基準は参考表示のみで集計に数えない。EGA（Golino & Epskamp, 2017）と
    バイファクター指標（ECV、$\omega_h$、PUC; Rodriguez, Reise & Haviland, 2016）は後回し。
-   **EFA は任意依存で呼ぶ**: Hull（と必要な場合の因子分析固有値）は外側の Python 層から `factor_analyzer`
-   （>= 0.5.1）を呼ぶ（jit 内では呼ばない）。任意依存 `flexpyirt[efa]` として入れる（scikit-learn も入る）。遅延
-   import し、未導入なら extra 名を示す `ImportError` を出す。flexpyirt のポリコリック行列を `is_corr_matrix=True`、
-   `rotation=None`、`svd_method="lapack"`（決定的）で渡す。`factor_analyzer` が返すのは負荷量・独自性・ML の
-   $\chi^2$（`sufficiency`）だけなので、Hull に要る適合度（CAF、RMSEA、CFI）はモデルの含意する行列
-   $\hat\Sigma=\Lambda\Lambda^\top+\Psi$ から flexpyirt で計算する。Hull を照合する前に、同じ行列での推定値を
-   `psych::fa`（minres、ML）と照合し、不一致の原因の層を切り分けられるようにする。
+   **EFA（2026-11-24 改訂）**: 当初は `factor_analyzer` を任意依存として呼ぶ計画だったが、その最新版（0.5.1、
+   2024 年 2 月）は scikit-learn 1.8 以降で `fit()` が失敗する（削除された `force_all_finite` 引数を `check_array` に
+   渡す）。そのため ULS と ML の EFA は SciPy だけで flexpyirt に実装し（§16.14）、同じ行列で EFAtools と
+   `psych::fa` と照合する。`efa` extra は設けない。
    **段階**（前の段階の照合が通ってから次へ。ROADMAP M5）:
    D1 ポリコリック・テトラコリック相関（two-step、Olsson, 1979。ペアごとに `vmap`）と非正定値行列の平滑化。
    `psych::polychoric` と `lavaan::lavCor` と照合。
@@ -1048,8 +1045,8 @@ class ItemKernel(Protocol):
    （Drasgow & Lissak, 1983）を `ltm::unidimTest` と照合。
    D4 DETECT の確認的・探索的版（Zhang & Stout, 1999; Zhang, 2007）と ASSI・$R$。`sirt::conf.detect` /
    `expl.detect` と照合。分割の探索は外側の層で行う。
-   D5 上記の EFA 連携と Hull（Lorenzo-Seva, Timmerman & Kiers, 2011）を `psych::fa` と `EFAtools::HULL` と照合。
-   比較データ法（Ruscio & Roche, 2012）を `EFAtools::CD` と照合。
+   D5 EFA（§16.14）と Hull（Lorenzo-Seva, Timmerman & Kiers, 2011）を EFAtools の `EFA` / `HULL` と `psych::fa` と
+   照合。比較データ法（Ruscio & Roche, 2012）を `EFAtools::CD` と照合。
    D6 ブートストラップでバイアス補正する DIMTEST（Stout, Froelich & Gao, 2001; Froelich & Habing, 2008）。CRAN に
    参照実装がないため、シミュレーション研究（1 次元データで名目水準どおりの第 1 種の誤り、2 次元データでの検出力）を
    VALIDATION.md に記録して受け入れる。
@@ -1181,6 +1178,35 @@ class ItemKernel(Protocol):
     既定の `smooth = TRUE` のままだと、sirt の `conf.detect(use_sum_score = TRUE)` は総得点を標準化してから生の項目得点を
     引いて残りの得点とするので、残りの得点の群が誤る（`sim_2d` で DETECT 1.60 が 6.73 になる）。精度のページに記録し、
     従わない。
+14. **EFA と Hull 法（`efa()`、`hull()`、§16.8 の D5、V28）**: `_efa.py`（NumPy / SciPy）。
+    **推定**: 独自性 $\Psi$ から回転しない解を求め、SciPy の L-BFGS-B（`ftol=1e-15`、`gtol=1e-11`）で
+    $\psi_i=1-\mathrm{SMC}_i$ から $[0.005,\max(1,\mathrm{SMC})]$ の範囲（psych・EFAtools と同じ境界）で最小化する。
+    ULS: $F=\tfrac12\lVert R-\Psi-\Lambda\Lambda^\top\rVert_F^2$。$\Lambda$ は $R-\Psi$ の先頭の固有ベクトルを
+    $\sqrt{\max(\lambda,0)}$ でスケールしたもので、勾配は $\operatorname{diag}(\Lambda\Lambda^\top+\Psi-R)$（psych の
+    `FAgr.minres` で、この $F$ の厳密な勾配）。psych の minres、EFAtools の ULS と同じ（psych の `fit.residuals` は
+    非対角の残差だけを足すが、内点では最小点が同じ）。ML: $\Psi^{-1/2}R\Psi^{-1/2}$ の固有値による Jöreskog の
+    集約した不一致度で、勾配は $\operatorname{diag}(\Lambda\Lambda^\top+\Psi-R)/\psi^2$（psych の `FAfn` / `FAgr`）。
+    列は和が非負になるよう符号をそろえ、回転はしない。独自性が下限にあれば Heywood ケース（`efa()` は
+    `HeywoodWarning`）。許容誤差は R の `optim()` の既定より厳しいので、flexpyirt の目的関数値は EFAtools の解での値を
+    上回らない（テストで確認）。**適合度**（EFAtools の `.gof`）: CAF $=1-$（対角を 1 にした残差行列の KMO）。
+    $\chi^2$ は Bartlett の乗数 $N-1-(2p+5)/6-2k/3$ を使い、その $p$ 値も求める。CFI と RMSEA は補正しない
+    $F(N-1)$ と独立モデルの $-\log|R|(N-1)$（$df_0=p(p-1)/2$）から求める。$df=((p-k)^2-(p+k))/2$。
+    **Hull**（EFAtools の `HULL` / `.hull_calc`）: $k=0..J$ の行で、適合度は CAF、CFI、$1-$RMSEA のいずれか
+    （$k=0$ は $1-$KMO($R$)、0、$1-$RMSEA$_0$ と $df_0$）。適合度が増えない解を除き、両隣を結ぶ弦以下の内点が
+    なくなるまで除き、残った内点で scree 値 $st$ を求めて最大のものを選ぶ（凸包上の点が 3 未満なら、警告を出して
+    適合度が最大の解）。既定の $J$ は、正規データの SMC 固有値と平均の基準による平行分析（EFAtools の `efa_parallel`
+    の既定。ここでは JAX のキーで 1000 反復）の結果に 1 を足し、$df>0$ となる最大の $k$ で上を抑え、
+    $\min(3,\text{上限})$ 以上にする。`max_factors` を与えればその $J$ をそのまま使う。変数は 6 つ以上。表には解ごとの
+    `heywood` と `converged` を記録し、選ばれた解が不適切なら EFAtools と同じく `HeywoodWarning` を出す。
+    **アンサンブル**: 項目が 6 つ以上なら、`dimensionality()` は問い (A) に Hull（CAF、ULS、キーの 4 つ目の分割による
+    既定の $J$）を加える。
+    **照合（V28）**: `validation/r/m5_efa_hull_reference.R`（EFAtools 1.1.0、psych 2.6.9）。V24 のポリコリック行列のうち
+    変数が 6 つ以上のものと、シミュレーションの Pearson 行列 2 つ（3 因子、$N=500$。弱い 2 因子、$N=300$）。
+    $k\le J$ のすべてで ULS と ML について、含意する $\Lambda\Lambda^\top$ と共通性は $10^{-4}$（実測 $7\times10^{-5}$
+    以下で、最大は Heywood の解）、CAF / CFI / RMSEA は $2\times10^{-4}$、$\chi^2$ は相対 $10^{-4}$、$df$ は厳密に一致。
+    3 因子の行列での psych の `fa()` とも $10^{-4}$ で一致する。Hull は行列 x 推定法 x 適合度のすべてで EFAtools が
+    記録した $J$ を使い、選ばれる $k$ と凸包上の点は同じ、適合度は $10^{-5}$（実測 $1.4\times10^{-6}$ 以下）、$st$ は
+    相対 1%（小さな差の比なので。実測は絶対 $3.5\times10^{-3}$ 以下）で一致する。比較データ法（CD）はまだ含まない。
 
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1211,10 +1237,12 @@ class ItemKernel(Protocol):
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
 - Goretzko, D., & Bühner, M. (2020). One model to rule them all? Using machine learning algorithms to determine the number of factors in exploratory factor analysis. *Psychological Methods*, 25(6), 776–786.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
+- Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
+- Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.

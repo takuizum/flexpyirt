@@ -30,6 +30,7 @@ English | [日本語](VALIDATION.ja.md)
 | EKC, MAP, observed eigenvalues on the same matrix; normal reference mean / 95th percentile | 1e-11; $\lvert z\rvert\le4.5$ / 6e-3 |
 | LD $X^2$ / $G^2$; signed $V$, Q3 (refitted models); model-based PA observed / simulated mean / 95th percentile | 1e-5 (relative); 1e-6; 2e-4 / $\lvert z\rvert\le4.5$ / 0.02 |
 | DETECT conditional covariances, indices (both halves), Ward heights | 1e-12 |
+| EFA implied $\Lambda\Lambda^\top$ / communalities; CAF, CFI, RMSEA; $\chi^2$; Hull fit / $st$ | 1e-4; 2e-4; 1e-4 (relative); 1e-5 / 1e-2 (relative) |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -61,6 +62,7 @@ English | [日本語](VALIDATION.ja.md)
 | V25 | Number of dimensions: EKC, MAP (squared and fourth power), PCA / SMC eigenvalues on the V24 matrices; normal-data parallel-analysis references (3 sizes) | EFAtools `EKC()`, `PARALLEL()`; psych `vss()$map`; EFA.dimensions `MAP()`; independent R fourth-power MAP | M5 |
 | V26 | Local dependence (LSAT7 2PL, Science GRM, simulated 2PL with a dependent pair and 5% MCAR) and model-based parallel analysis (LSAT7) | `residuals(m, type = "LD" / "LDG2" / "Q3")`; ltm `unidimTest(data = , thetas = cbind(d, a1), IRT = FALSE)` | M5 |
 | V27 | DETECT: confirmatory (simulated 2D with true / wrong partitions, 1D, Science) and exploratory (simulated 3 clusters, given split) | sirt `conf.detect(use_sum_score = TRUE, smooth = FALSE)`, `expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
+| V28 | EFA (ULS, ML; every $k$ up to Hull's bound) and the Hull method (CAF, CFI, RMSEA) on the V24 matrices with $\ge 6$ variables and two simulated matrices | EFAtools `EFA(method = , rotation = "none")`, `HULL(method = , gof = )`; psych `fa(fm = "minres" / "ml", rotate = "none")` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -713,6 +715,13 @@ English | [日本語](VALIDATION.ja.md)
   forces `smooth = FALSE` itself. Its returned `detect.unweighted` holds only the validation-half
   indices, so the script recomputes the estimation-half indices with `conf.detect()` on the
   estimation rows.
+- **EFA and Hull (V28, M5)**: unrotated loadings are compared through the implied
+  $\Lambda\Lambda^\top$ (invariant to column signs and to the order of equal eigenvalues).
+  `HULL()`'s bound $J$ comes from a random parallel analysis, so the script records
+  `settings$n_fac_max` and the test passes it as `max_factors`. EFAtools' `optim()`-based solutions
+  are less tightly converged than flexpyirt's, so the test also checks that flexpyirt's objective is
+  not above EFAtools' at EFAtools' $\psi=1-h^2$; the remaining differences are largest at Heywood
+  solutions (bounded uniquenesses), which Hull includes for $k$ beyond the true number of factors.
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is
