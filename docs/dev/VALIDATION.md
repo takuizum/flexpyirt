@@ -67,6 +67,7 @@ English | [日本語](VALIDATION.ja.md)
 | V28 | EFA (ULS, ML; every $k$ up to Hull's bound) and the Hull method (CAF, CFI, RMSEA) on the V24 matrices with $\ge 6$ variables and two simulated matrices | EFAtools `EFA(method = , rotation = "none")`, `HULL(method = , gof = )`; psych `fa(fm = "minres" / "ml", rotate = "none")` | M5 |
 | V29 | Comparison data: PAF, the one-factor population generator from exported draws, rank-sum tests, `CD()` on 3-factor continuous, 2-factor ordinal and 1-factor binary data | EFAtools `.paf_iter`, `.simulate_cfm_empirical`, `CD()`; `wilcox.test(x, y, "less")` | M5 |
 | V30 | DIMTEST: type I error and power (2PL; $N$ 1000–2000, $J$ 20–30; unidimensional and two dimensions correlated 0.7–0.8; 200 replications each) | none (no implementation outside DIMPACK): `validation/simulation/dimtest_study.py` | M5 |
+| V31 | Jackknife slope index (LSAT7 2PL, Science GRM, simulated 2PL with two dependent pairs and 5% MCAR, simulated GPCM with a dependent pair); the Newton and one-step approximations against the refit | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step

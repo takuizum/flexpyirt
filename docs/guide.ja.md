@@ -872,6 +872,8 @@ from flexpyirt import dimensionality, model_parallel_analysis
 ld = res.local_dependence(df)
 cols = ["item_i", "item_j", "q3_star", "x2", "p_x2"]
 print(ld.pairs.sort_values("q3_star", ascending=False)[cols].head(3).round(3))
+jsi = res.jsi(df)
+print(jsi.pairs.sort_values("folded", ascending=False).head(3).round(2))
 mpa = model_parallel_analysis(res, df, key=jax.random.key(1), n_replications=20)
 print(round(mpa.statistic, 3), round(mpa.p_value, 3))
 report = dimensionality(df, key=jax.random.key(2), fit=res, n_replications=20)
@@ -881,6 +883,12 @@ print(report)
 - `FitResult.local_dependence()` は、すべてのペアについて Yen の Q3（EAP スコアによる残差の相関）、Q3\*（Q3 から
   ペア全体の平均を引いたもの）、Chen & Thissen の LD $X^2$ / $G^2$ を mirt の `residuals()` と同じく求める。Q3\* や
   $X^2$ が大きいペアは、$\theta$ 以外の何か（共通の問題文、テストレット、第 2 の次元）を共有している可能性がある。
+- `FitResult.jsi()` は Edwards, Houts & Cai (2018) のジャックナイフ傾き指標である。項目を 1 つずつ除いてモデルを
+  推定し直し、他の各項目の傾きの変化をその標準誤差で割る。2 つの項目が依存し合っていると、片方を除くともう片方の
+  傾きが下がるので、そのペアは両方向に大きな値を持つ（`folded` は両方を足したもの）。決まったカットオフはないので、
+  他より目立つペアを探す。既定では mirt の `residuals(type = "JSI")` と同じく、項目ごとにモデルを推定し直す。
+  `method="one_step"` は推定し直さず（全項目モデルからの Taylor 近似 1 ステップ）、長いテストではずっと速い。15 項目
+  程度から既定の値とよく一致するが、短いテストでは一致せず、警告を出す。
 - `model_parallel_analysis()` は推定したモデルからデータをシミュレーションし、観測された第 2 固有値がモデルの生む
   値より大きいかを調べる（Drasgow & Lissak, 1983）。モデルを同じデータに当てはめているので $p$ 値は保守的になる。
   小さい値は第 2 の次元の証拠になるが、大きい値（この例では 1）は一次元性の証明ではない。
