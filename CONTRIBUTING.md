@@ -24,7 +24,7 @@ English | [日本語](CONTRIBUTING.ja.md)
   merged into until CI (`test (3.11/3.12/3.13)`) and `pr-rules` pass.
 - The repository owner reviews PRs before merging them (no automatic merging).
 - Changes to numerical code must pass the agreement tests against R mirt
-  ([docs/VALIDATION.md](docs/VALIDATION.md)).
+  ([docs/dev/VALIDATION.md](docs/dev/VALIDATION.md)).
 
 ## Releases
 
@@ -145,6 +145,14 @@ uv run --group docs mkdocs build --strict  # the CI check (fails on broken links
 - Write links between documents as relative links (they work on GitHub and on the site). On the
   site, links that leave `docs/` point to the file on GitHub (`scripts/mkdocs_hooks.py`).
 - `README.md` / `README.ja.md` are also shown on the PyPI project page, so their links are absolute
-  (site URLs for documents, GitHub URLs for everything else).
+  (site URLs for documents, GitHub URLs for everything else). The README is for package users
+  only: no development setup, test or CI details, branch flow, milestones, or links to
+  CONTRIBUTING and `docs/dev/`.
 - When you add a document to `docs/`, add it to `nav` in `mkdocs.yml` (and to the Japanese
   `nav_translations`).
+- The site is for package users: how to use flexpyirt (`guide`, `reference`), the theory behind it
+  (`theory`) and how its results are checked (`accuracy`). Developer documents live in `docs/dev/`
+  ([design](docs/dev/DESIGN.md), [API sketch](docs/dev/API.md),
+  [validation plan](docs/dev/VALIDATION.md), [roadmap](docs/dev/ROADMAP.md)); they are excluded from
+  the site, so site pages must not link to them with relative links (use a GitHub URL if needed).
+  Keep milestones, design-section numbers and validation case IDs out of user pages.

@@ -21,7 +21,7 @@
 - すべての変更は PR で入れる。`main` と `develop` はルールセットで保護され、CI（`test (3.11/3.12/3.13)`）と
   `pr-rules` が通らないとマージできない。
 - PR はリポジトリのオーナーがレビューしてからマージする（自動マージしない）。
-- 数値計算に関わる変更は、R mirt との照合テスト（[docs/VALIDATION.ja.md](docs/VALIDATION.ja.md)）が通ることが前提。
+- 数値計算に関わる変更は、R mirt との照合テスト（[docs/dev/VALIDATION.ja.md](docs/dev/VALIDATION.ja.md)）が通ることが前提。
 
 ## リリース
 
@@ -133,5 +133,11 @@ uv run --group docs mkdocs build --strict  # CI と同じ検査（リンク切�
 - 文書内のリンクは相対リンクで書く（GitHub でもサイトでも動く）。`docs/` の外を指すリンクは、サイトでは
   GitHub 上のファイルに書き換わる（`scripts/mkdocs_hooks.py`）。
 - `README.md` / `README.ja.md` は PyPI のプロジェクトページにも表示されるので、リンクは絶対 URL で書く
-  （文書はサイトの URL、それ以外は GitHub の URL）。
+  （文書はサイトの URL、それ以外は GitHub の URL）。README はパッケージ利用者だけに向けたもので、開発環境の
+  準備、テストや CI の詳細、ブランチ運用、マイルストーン、CONTRIBUTING や `docs/dev/` へのリンクは書かない。
 - `docs/` に文書を足したら `mkdocs.yml` の `nav`（と日本語の `nav_translations`）にも足す。
+- サイトはパッケージ利用者向け: 使い方（`guide`, `reference`）、理論（`theory`）、結果の検証方法
+  （`accuracy`）。開発者向けの文書は `docs/dev/` に置く（[設計](docs/dev/DESIGN.ja.md)、
+  [API スケッチ](docs/dev/API.ja.md)、[検証計画](docs/dev/VALIDATION.ja.md)、
+  [ロードマップ](docs/dev/ROADMAP.ja.md)）。これらはサイトから除外されるので、サイトのページから相対リンクで
+  指さない（必要なら GitHub の URL）。マイルストーン、設計書の節番号、照合ケース ID は利用者向けページに書かない。
