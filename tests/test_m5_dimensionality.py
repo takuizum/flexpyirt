@@ -9,6 +9,7 @@ are compared with EFAtools' ``PARALLEL`` within Monte Carlo error.
 
 from __future__ import annotations
 
+import importlib
 import json
 from functools import cache
 from typing import Any
@@ -167,7 +168,7 @@ def test_parallel_analysis_pearson_with_missing_data() -> None:
 
 
 def test_parallel_analysis_skips_unusable_permutations(monkeypatch: pytest.MonkeyPatch) -> None:
-    from flexpyirt import dimensionality
+    dimensionality = importlib.import_module("flexpyirt.dimensionality")
 
     original = dimensionality._observed_correlation
     calls = {"n": 0}
@@ -177,7 +178,8 @@ def test_parallel_analysis_skips_unusable_permutations(monkeypatch: pytest.Monke
             calls["n"] += 1
             if calls["n"] % 3 == 0:
                 raise SpecificationError("unusable permuted pair")
-        return original(*args, quiet=quiet, **kwargs)
+        out: np.ndarray = original(*args, quiet=quiet, **kwargs)
+        return out
 
     monkeypatch.setattr(dimensionality, "_observed_correlation", flaky)
     with pytest.warns(FlexpyirtWarning, match="3 of 9"):
@@ -188,7 +190,8 @@ def test_parallel_analysis_skips_unusable_permutations(monkeypatch: pytest.Monke
     def always(*args: Any, quiet: bool = False, **kwargs: Any) -> np.ndarray:
         if quiet:
             raise SpecificationError("unusable permuted pair")
-        return original(*args, quiet=quiet, **kwargs)
+        out: np.ndarray = original(*args, quiet=quiet, **kwargs)
+        return out
 
     monkeypatch.setattr(dimensionality, "_observed_correlation", always)
     with pytest.raises(SpecificationError, match="Fewer than two"):

@@ -7,11 +7,13 @@ from importlib.metadata import PackageNotFoundError, version
 from flexpyirt import errors
 from flexpyirt.correlation import PolychoricResult, polychoric
 from flexpyirt.dimensionality import (
+    DimensionalityResult,
     EmpiricalKaiserResult,
     LocalDependenceResult,
     MAPResult,
     ModelParallelAnalysisResult,
     ParallelAnalysisResult,
+    dimensionality,
     empirical_kaiser,
     model_parallel_analysis,
     parallel_analysis,
@@ -39,6 +41,7 @@ __all__ = [
     "PCM",
     "BetaPrior",
     "DavidianCurve",
+    "DimensionalityResult",
     "EmpiricalHistogram",
     "EmpiricalKaiserResult",
     "FitResult",
@@ -60,6 +63,7 @@ __all__ = [
     "ThreePL",
     "TwoPL",
     "__version__",
+    "dimensionality",
     "empirical_kaiser",
     "errors",
     "fit",

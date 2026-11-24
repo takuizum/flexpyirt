@@ -9,6 +9,7 @@ estimates) and compares.
 
 from __future__ import annotations
 
+import importlib
 import json
 from functools import cache
 from typing import Any
@@ -190,7 +191,7 @@ def test_model_parallel_analysis_other_eigen_types(eigen_type: str) -> None:
 def test_model_parallel_analysis_skips_unusable_replications(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from flexpyirt import dimensionality
+    dimensionality = importlib.import_module("flexpyirt.dimensionality")
 
     original = dimensionality._observed_correlation
     calls = {"n": 0}
@@ -200,7 +201,8 @@ def test_model_parallel_analysis_skips_unusable_replications(
             calls["n"] += 1
             if calls["n"] % 2 == 0:
                 raise SpecificationError("constant item")
-        return original(*args, quiet=quiet, **kwargs)
+        out: np.ndarray = original(*args, quiet=quiet, **kwargs)
+        return out
 
     monkeypatch.setattr(dimensionality, "_observed_correlation", flaky)
     with pytest.warns(FlexpyirtWarning, match="2 of 4"):

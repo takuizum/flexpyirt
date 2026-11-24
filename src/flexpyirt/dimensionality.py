@@ -30,11 +30,13 @@ if TYPE_CHECKING:
     from flexpyirt.result import FitResult
 
 __all__ = [
+    "DimensionalityResult",
     "EmpiricalKaiserResult",
     "LocalDependenceResult",
     "MAPResult",
     "ModelParallelAnalysisResult",
     "ParallelAnalysisResult",
+    "dimensionality",
     "empirical_kaiser",
     "model_parallel_analysis",
     "parallel_analysis",
@@ -686,4 +688,279 @@ def model_parallel_analysis(
         replications=replications,
         eigen_type=eigen_type,
         n_skipped=n_skipped,
+    )
+
+
+# ----------------------------------------------------------------------------- ensemble
+@dataclass(frozen=True)
+class DimensionalityResult:
+    """Result of :func:`dimensionality`.
+
+    Attributes
+    ----------
+    number_of_dimensions : pandas.DataFrame
+        Question (A), one row per method: ``method``, ``n_factors``, ``detail``, ``source``.
+    unidimensionality : pandas.DataFrame
+        Question (B), one row per method (only with ``fit``): ``method``, ``statistic``,
+        ``threshold``, ``supports_unidimensionality`` (``None`` when unavailable), ``detail``,
+        ``source``.
+    n_factors_mode : tuple of int
+        Most frequent suggested number(s) of factors (several on ties).
+    n_factors_median : float
+        Median suggested number of factors.
+    n_agreeing : int
+        Number of methods suggesting a mode value.
+    n_supporting : int
+        Number of available question-(B) methods supporting essential unidimensionality.
+    n_unidimensionality_methods : int
+        Number of available question-(B) methods.
+    results : dict of str to object
+        The individual results (``parallel_analysis``, ``velicer_map``, ``empirical_kaiser``,
+        ``model_parallel_analysis``, ``local_dependence``, ``m2``).
+    """
+
+    number_of_dimensions: pd.DataFrame
+    unidimensionality: pd.DataFrame
+    n_factors_mode: tuple[int, ...]
+    n_factors_median: float
+    n_agreeing: int
+    n_supporting: int
+    n_unidimensionality_methods: int
+    results: dict[str, object]
+
+    def summary(self) -> str:
+        """Return a plain-text report of every method and both consensus lines."""
+        lines = ["Number of dimensions (question A)"]
+        for row in self.number_of_dimensions.itertuples(index=False):
+            lines.append(f"  {row.method:<32} {row.n_factors:>3}   {row.detail}")
+        mode = ", ".join(str(k) for k in self.n_factors_mode)
+        lines.append(
+            f"  consensus: mode {mode} ({self.n_agreeing} of {len(self.number_of_dimensions)} "
+            f"methods), median {self.n_factors_median:g}"
+        )
+        if len(self.unidimensionality):
+            lines.append("Essential unidimensionality (question B)")
+            for rec in self.unidimensionality.to_dict("records"):
+                flag = rec["supports_unidimensionality"]
+                verdict = "n/a" if flag is None else ("supports" if flag else "against")
+                lines.append(f"  {rec['method']!s:<32} {verdict:<9} {rec['detail']}")
+            lines.append(
+                f"  consensus: {self.n_supporting} of {self.n_unidimensionality_methods} "
+                "available methods support essential unidimensionality"
+            )
+        return "\n".join(lines)
+
+    def __str__(self) -> str:
+        """Return :meth:`summary`."""
+        return self.summary()
+
+
+def dimensionality(
+    data: pd.DataFrame | np.ndarray,
+    *,
+    key: jax.Array,
+    fit: FitResult | None = None,
+    n_replications: int = 100,
+    zero_cell_correction: float = 0.5,
+    alpha: float = 0.05,
+    q3_star_threshold: float = 0.2,
+    rmsea_threshold: float = 0.05,
+    item_names: list[str] | None = None,
+) -> DimensionalityResult:
+    r"""Run several dimensionality diagnostics and report them side by side.
+
+    No single method is reliable on its own (Auerswald & Moshagen, 2019), so this reports every
+    method and two separate consensus lines (DESIGN.md §16.8):
+
+    (A) **How many dimensions?** :func:`parallel_analysis` (polychoric, PCA eigenvalues,
+    permutation reference, 95th percentile), :func:`velicer_map` (revised, fourth power) and
+    :func:`empirical_kaiser`, all on one polychoric matrix. The consensus is the mode (all values
+    on a tie) and the median of the suggested numbers, with the number of methods agreeing.
+
+    (B) **Is essential unidimensionality tenable?** Only with ``fit`` (a single-group
+    unidimensional model with a ``Normal`` latent distribution):
+
+    * :func:`model_parallel_analysis`: supports when :math:`p\ge` ``alpha``;
+    * :meth:`FitResult.local_dependence`: supports when the largest Q3* is below
+      ``q3_star_threshold`` (0.2 is a common rule; Christensen, Makransky & Horton, 2017, show
+      that critical values depend on the test and sample);
+    * :meth:`FitResult.m2`: supports when RMSEA\ :sub:`2` :math:`\le` ``rmsea_threshold``
+      (close fit, Maydeu-Olivares & Joe, 2014); it checks the whole model, not only its
+      dimensionality, and is unavailable with missing data.
+
+    The consensus is the number of available methods supporting essential unidimensionality.
+    Methods are not weighted.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame or numpy.ndarray
+        Respondents x items, ordered category codes; NaN is missing. With ``fit``, the fitting
+        data (the fitted items, in any column order when a DataFrame).
+    key : jax.Array
+        JAX PRNG key; split for the two simulation-based methods.
+    fit : FitResult, optional
+        Fitted unidimensional model for question (B).
+    n_replications : int, default 100
+        Replications of both parallel analyses.
+    zero_cell_correction : float, default 0.5
+        Passed to :func:`~flexpyirt.polychoric`.
+    alpha : float, default 0.05
+        Level for :func:`model_parallel_analysis`.
+    q3_star_threshold : float, default 0.2
+        Largest acceptable Q3*.
+    rmsea_threshold : float, default 0.05
+        Largest acceptable RMSEA\ :sub:`2` of :meth:`FitResult.m2`.
+    item_names : list of str, optional
+        Column names when ``data`` is an array and ``fit`` is given.
+
+    Returns
+    -------
+    DimensionalityResult
+
+    Raises
+    ------
+    SpecificationError
+        Invalid options or data, or a ``fit`` that question (B) does not support.
+    PrecisionError
+        If JAX is not running in 64-bit mode.
+    """
+    check_x64()
+    for name, value, lo, hi in (
+        ("alpha", alpha, 0.0, 1.0),
+        ("q3_star_threshold", q3_star_threshold, 0.0, 1.0),
+        ("rmsea_threshold", rmsea_threshold, 0.0, 1.0),
+    ):
+        if not (lo < float(value) < hi):
+            raise SpecificationError(f"{name} must be in ({lo:g}, {hi:g}), got {value!r}.")
+    key_a, key_b = jax.random.split(key)
+    results: dict[str, object] = {}
+
+    if fit is not None:
+        fit._require_unidimensional_normal("dimensionality(fit=...)")
+        y = coerce_responses(data, fit._model, item_names=item_names)
+        names = [name for name, _ in fit._model.items]
+        frame = pd.DataFrame(np.where(y >= 0, y, np.nan).astype(np.float64), columns=names)
+    else:
+        names, values = _coerce_ordinal(data)
+        frame = pd.DataFrame(values, columns=names)
+
+    pc = polychoric(frame, zero_cell_correction=zero_cell_correction)
+    pa = parallel_analysis(
+        frame,
+        key=key_a,
+        n_replications=n_replications,
+        zero_cell_correction=zero_cell_correction,
+    )
+    vm = velicer_map(pc)
+    ekc = empirical_kaiser(pc)
+    results.update(polychoric=pc, parallel_analysis=pa, velicer_map=vm, empirical_kaiser=ekc)
+    number = pd.DataFrame(
+        [
+            {
+                "method": "parallel analysis (PCA, 95%)",
+                "n_factors": pa.n_factors,
+                "detail": (
+                    f"eigenvalues {np.round(pa.observed[:3], 3).tolist()} vs reference "
+                    f"{np.round(pa.reference[:3], 3).tolist()}"
+                ),
+                "source": "Horn (1965); Glorfeld (1995); Garrido, Abad & Ponsoda (2013)",
+            },
+            {
+                "method": "MAP (revised, 4th power)",
+                "n_factors": vm.n_factors,
+                "detail": f"minimum {np.nanmin(vm.statistic):.4g} at m = {vm.n_factors}",
+                "source": "Velicer, Eaton & Fava (2000)",
+            },
+            {
+                "method": "empirical Kaiser criterion",
+                "n_factors": ekc.n_factors,
+                "detail": f"n = {ekc.n_obs}",
+                "source": "Braeken & van Assen (2017)",
+            },
+        ]
+    )
+    suggested = number["n_factors"].to_numpy()
+    values_k, counts_k = np.unique(suggested, return_counts=True)
+    mode = tuple(int(v) for v in values_k[counts_k == counts_k.max()])
+
+    rows: list[dict[str, object]] = []
+    if fit is not None:
+        mpa = model_parallel_analysis(
+            fit,
+            frame,
+            key=key_b,
+            n_replications=n_replications,
+            zero_cell_correction=zero_cell_correction,
+        )
+        ld = fit.local_dependence(frame)
+        results.update(model_parallel_analysis=mpa, local_dependence=ld)
+        rows.append(
+            {
+                "method": "model-based parallel analysis",
+                "statistic": mpa.p_value,
+                "threshold": alpha,
+                "supports_unidimensionality": bool(mpa.p_value >= alpha),
+                "detail": f"second eigenvalue {mpa.statistic:.4g}, p = {mpa.p_value:.3g}",
+                "source": "Drasgow & Lissak (1983)",
+            }
+        )
+        worst = ld.pairs.iloc[int(np.argmax(ld.pairs["q3_star"].to_numpy()))]
+        rows.append(
+            {
+                "method": "largest Q3*",
+                "statistic": ld.max_q3_star,
+                "threshold": q3_star_threshold,
+                "supports_unidimensionality": bool(ld.max_q3_star < q3_star_threshold),
+                "detail": f"{ld.max_q3_star:.3f} ({worst['item_i']}, {worst['item_j']})",
+                "source": "Yen (1984); Christensen, Makransky & Horton (2017)",
+            }
+        )
+        try:
+            m2 = fit.m2(frame)
+        except SpecificationError as exc:
+            results["m2"] = None
+            rows.append(
+                {
+                    "method": "M2 RMSEA",
+                    "statistic": float("nan"),
+                    "threshold": rmsea_threshold,
+                    "supports_unidimensionality": None,
+                    "detail": f"not available: {exc}",
+                    "source": "Maydeu-Olivares & Joe (2014)",
+                }
+            )
+        else:
+            results["m2"] = m2
+            rmsea = float(m2["rmsea"].iloc[0])
+            rows.append(
+                {
+                    "method": "M2 RMSEA",
+                    "statistic": rmsea,
+                    "threshold": rmsea_threshold,
+                    "supports_unidimensionality": bool(rmsea <= rmsea_threshold),
+                    "detail": f"RMSEA = {rmsea:.4f}, M2 p = {float(m2['p'].iloc[0]):.3g}",
+                    "source": "Maydeu-Olivares & Joe (2014)",
+                }
+            )
+    unidim = pd.DataFrame(
+        rows,
+        columns=[
+            "method",
+            "statistic",
+            "threshold",
+            "supports_unidimensionality",
+            "detail",
+            "source",
+        ],
+    )
+    available = [v for v in unidim["supports_unidimensionality"] if v is not None]
+    return DimensionalityResult(
+        number_of_dimensions=number,
+        unidimensionality=unidim,
+        n_factors_mode=mode,
+        n_factors_median=float(np.median(suggested)),
+        n_agreeing=int(counts_k.max()),
+        n_supporting=int(sum(bool(v) for v in available)),
+        n_unidimensionality_methods=len(available),
+        results=results,
     )
