@@ -39,6 +39,7 @@ PAIRED = [
     "CONTRIBUTING",
     "benchmarks/README",
     *(f"docs/{p.stem}" for p in (ROOT / "docs").glob("*.md")),
+    *(f"docs/dev/{p.stem}" for p in (ROOT / "docs" / "dev").glob("*.md")),
 ]
 
 

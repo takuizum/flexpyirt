@@ -2,7 +2,7 @@
 
 [English](API.md) | 日本語
 
-> **実装済みの API は [API リファレンス](reference.ja.md) と [ユーザーガイド](guide.ja.md) を参照。**
+> **実装済みの API は [API リファレンス](../reference.ja.md) と [ユーザーガイド](../guide.ja.md) を参照。**
 > このファイルは設計段階のスケッチで、未実装の機能（EH、Gauss–Hermite、`TruncNormal`、M4 のスコアリング・MIRT など）も含む。
 
 > 目標: 「仕様（Spec）・推定（fit）・結果（FitResult）」を分ける。仕様は不変オブジェクトで、メソッドチェーンは新しい仕様を返す。

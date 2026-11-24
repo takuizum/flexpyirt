@@ -2,7 +2,7 @@
 
 English | [日本語](API.ja.md)
 
-> **For the implemented API, see the [API reference](reference.md) and the [user guide](guide.md).**
+> **For the implemented API, see the [API reference](../reference.md) and the [user guide](../guide.md).**
 > This file is the design-stage sketch and still includes a few features that are not implemented yet
 > (EH, Gauss–Hermite, `TruncNormal`, M4 scoring/MIRT, ...).
 

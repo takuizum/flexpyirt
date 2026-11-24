@@ -8,10 +8,10 @@ calibration and fixed item parameter calibration (FIPC).
 
 - **Verified against R `mirt`**: every supported feature is checked numerically against mirt
   (parameters, log-likelihood and standard errors agree to about 1e-8; see
-  [validation](https://takuizum.github.io/flexpyirt/VALIDATION/)).
-- **Automatic differentiation**: M-step gradients and Hessians and the standard errors (Oakes'
-  identity) all come from JAX autodiff. A new item model only needs its log-probability for
-  estimation, standard errors and scoring to work.
+  [accuracy and validation](https://takuizum.github.io/flexpyirt/accuracy/)).
+- **Exact derivatives**: gradients, Hessians and standard errors (Oakes' identity) come from JAX
+  automatic differentiation rather than numerical approximation. Estimation is compiled with JAX
+  and also runs on GPUs.
 - **ParameterTable**: a table like mirt's `pars = "values"` for editing fixed values, equality
   constraints and starting values.
 
@@ -21,29 +21,27 @@ calibration and fixed item parameter calibration (FIPC).
 
 ## Features
 
-| Feature | Details | mirt check |
+| Feature | Details | Checked against mirt |
 |---|---|---|
-| Item models | 2PL, Rasch (latent variance estimated), 3PL, 4PL, GRM (graded response model), GPCM, PCM (latent variance estimated), Nominal (nominal response model; validated for one and two factors, three factors unit-tested only) | V1, V2, V3, V8, V11, V23 |
-| Priors and MAP | `NormalPrior`, `LogNormalPrior`, `BetaPrior` on item parameters (`Model.prior()`), natural scale, `FitResult.log_posterior` | V7 |
-| Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | V4 |
-| Equality across items | Common parameters across items and item models (`Model.equal_across_items()`, e.g. one common slope), combined with across-group equalities | V16 |
-| FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | V5 |
-| Missing data | Responses missing at random (MAR) | V9 |
-| Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior, plus delta-method SEs for display IRT thresholds (`b_se` / `bk_se`) | V7, V10, V12, V14 |
-| Scoring | EAP, MAP, ML and WLE (1–3 factors, with standard errors) and plausible values (`PV`, 1–3 factors, explicit JAX PRNG `key`), using each group's latent distribution as the prior where applicable | V1–V5, V7–V9, V11, V13, V14 |
-| Multidimensional models | Confirmatory 2–3 factor MIRT (`Model.with_factors()`, also with multiple groups) with cross-loadings, correlated or orthogonal MVN factors, product quadrature grids, Oakes/Hessian SEs, and EAP / MAP / ML / WLE scoring | V14, V21 |
-| Empirical histogram | `EmpiricalHistogram()` latent distributions (Woods, 2007) for skewed or multimodal traits; reference group standardized to mean 0 / variance 1 by an exact constrained M-step, free under FIPC; weights reported with moments up to the 4th | V6 |
-| Davidian curves | `DavidianCurve(degree)` seminonparametric latent distributions (Zhang & Davidian, 2001; Woods & Lin, 2009) for single-group unidimensional models; analytically standardized to exact continuous `mean`/`var` (optional `free_mean`/`free_var` for Rasch, PCM, FIPC) with joint Oakes/Hessian SEs and EAP/PV scoring | V19 |
-| Normal mixtures | `NormalMixture(n_components)` latent densities (Mislevy, 1984) with one common set of items for single-group unidimensional models; mirt's `dentype = "mixture-k"` class parameterization analytically standardized to exact continuous `mean`/`var`, standardized components (`pi_c`, `mean_c`, `var_c`) with delta-method SEs, joint Oakes/Hessian SEs, EAP/PV scoring, degenerate-solution warnings | V22 |
+| Item models | 2PL, Rasch (latent variance estimated), 3PL, 4PL, GRM (graded response model), GPCM, PCM (latent variance estimated), Nominal (nominal response model; checked against mirt for one and two factors) | ✓ |
+| Priors and MAP | `NormalPrior`, `LogNormalPrior`, `BetaPrior` on item parameters (`Model.prior()`), natural scale, `FitResult.log_posterior` | ✓ |
+| Multiple groups | Group-specific item parameters, anchor items equal across groups, focal-group mean and variance estimated | ✓ |
+| Equality across items | Common parameters across items and item models (`Model.equal_across_items()`, e.g. one common slope), combined with across-group equalities | ✓ |
+| FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | ✓ |
+| Missing data | Responses missing at random (MAR) | ✓ |
+| Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior, plus delta-method SEs for display IRT thresholds (`b_se` / `bk_se`) | ✓ |
+| Scoring | EAP, MAP, ML and WLE (1–3 factors, with standard errors) and plausible values (`PV`, 1–3 factors, explicit JAX PRNG `key`), using each group's latent distribution as the prior where applicable | ✓ |
+| Multidimensional models | Confirmatory 2–3 factor MIRT (`Model.with_factors()`, also with multiple groups) with cross-loadings, correlated or orthogonal MVN factors, product quadrature grids, Oakes/Hessian SEs, and EAP / MAP / ML / WLE scoring | ✓ |
+| Empirical histogram | `EmpiricalHistogram()` latent distributions (Woods, 2007) for skewed or multimodal traits; reference group standardized to mean 0 / variance 1 by an exact constrained M-step, free under FIPC; weights reported with moments up to the 4th | ✓ |
+| Davidian curves | `DavidianCurve(degree)` seminonparametric latent distributions (Zhang & Davidian, 2001; Woods & Lin, 2009) for single-group unidimensional models; analytically standardized to exact continuous `mean`/`var` (optional `free_mean`/`free_var` for Rasch, PCM, FIPC) with joint Oakes/Hessian SEs and EAP/PV scoring | ✓ |
+| Normal mixtures | `NormalMixture(n_components)` latent densities (Mislevy, 1984) with one common set of items for single-group unidimensional models; mirt's `dentype = "mixture-k"` class parameterization analytically standardized to exact continuous `mean`/`var`, standardized components (`pi_c`, `mean_c`, `var_c`) with delta-method SEs, joint Oakes/Hessian SEs, EAP/PV scoring, degenerate-solution warnings | ✓ |
 | Saving results | `FitResult.to_json()` / `FitResult.from_json()` (strict schema, no pickle) | — |
-| EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | V1–V5, V7–V9, V11, V14 |
-| Item fit | Orlando–Thissen S-X2 (`FitResult.item_fit()`, per group for multiple groups) with mirt's cell collapsing, df, RMSEA and p-values | V15 |
-| Limited-information fit | Maydeu-Olivares & Joe M2 / M2* (`FitResult.m2()`) with df, p-value, RMSEA + CI, SRMSR and dichotomous TLI / CFI | V18 |
-| DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | V17 |
-| Scale linking | Differentiable characteristic-curve linking (`link()`, `LinkResult`: Haebara and Stocking–Lord, non-symmetric and symmetric, Ogasawara delta-method SEs, transformed items and $\theta$ scores; validated for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items) | V20 |
+| EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | ✓ |
+| Item fit | Orlando–Thissen S-X2 (`FitResult.item_fit()`, per group for multiple groups) with mirt's cell collapsing, df, RMSEA and p-values | ✓ |
+| Limited-information fit | Maydeu-Olivares & Joe M2 / M2* (`FitResult.m2()`) with df, p-value, RMSEA + CI, SRMSR and dichotomous TLI / CFI | ✓ |
+| DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | ✓ |
+| Scale linking | Differentiable characteristic-curve linking (`link()`, `LinkResult`: Haebara and Stocking–Lord, non-symmetric and symmetric, Ogasawara delta-method SEs, transformed items and $\theta$ scores; checked against independent R implementations for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items) | ✓ |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
-
-See the [roadmap](https://takuizum.github.io/flexpyirt/ROADMAP/) for what comes next.
 
 ## Installation
 
@@ -138,34 +136,27 @@ res3 = fit(spec3, df)
 
 ## Performance
 
-Wall-time benchmarks against R `mirt` (default settings, `TOL = 1e-4`, 61 quadrature points on CPU)
-are in [benchmarks/](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/README.md) with committed Apple M5 results in
-[benchmarks/results/2026-11-21-apple-m5.md](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/results/2026-11-21-apple-m5.md).
-After the first-call JAX/XLA compilation (a cold EM fit takes ~0.8–1.1 s), warm CPU fits are faster
-than `mirt` across all tested cases (`0.12×–0.60×` of `mirt` time), while `mirt` is faster for a
-single cold fit without standard errors.
+In wall-time comparisons with R `mirt` (default settings, `TOL = 1e-4`, 61 quadrature points on
+CPU; [results on an Apple M5](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/results/2026-11-21-apple-m5.md)),
+warm CPU fits are faster than `mirt` in every tested case (`0.12×–0.60×` of `mirt` time) once
+JAX/XLA has compiled the model on the first call (a cold EM fit takes ~0.8–1.1 s); `mirt` is
+faster for a single cold fit without standard errors.
 
 ## Documentation
 
 - [User guide](https://takuizum.github.io/flexpyirt/guide/) — specifying models, multiple groups, FIPC, editing the
   ParameterTable, estimation options
+- [Theory](https://takuizum.github.io/flexpyirt/theory/) — the models, the estimation algorithm, standard errors, scoring, fit
+  statistics and linking, in brief
 - [API reference](https://takuizum.github.io/flexpyirt/reference/) — public classes and functions and their arguments
-- [Validation](https://takuizum.github.io/flexpyirt/VALIDATION/) — how results are checked against R mirt, tolerances, known
-  differences
-- [Design](https://takuizum.github.io/flexpyirt/DESIGN/) — formulas, algorithms and implementation decisions
-- [Roadmap](https://takuizum.github.io/flexpyirt/ROADMAP/)
-- [Contributing](https://github.com/takuizum/flexpyirt/blob/main/CONTRIBUTING.md) — branches, reviews, releases
+- [Accuracy and validation](https://takuizum.github.io/flexpyirt/accuracy/) — how results are checked against R mirt, tolerances,
+  known differences from mirt
 
 Every document is also available in Japanese ([日本語サイト](https://takuizum.github.io/flexpyirt/ja/)).
 
-## Development
+## Feedback
 
-```bash
-uv sync --all-extras --dev
-uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
-```
-
-See [CONTRIBUTING.md](https://github.com/takuizum/flexpyirt/blob/main/CONTRIBUTING.md) for the branch flow and releases.
+Bug reports and questions are welcome on [GitHub Issues](https://github.com/takuizum/flexpyirt/issues).
 
 ## License
 

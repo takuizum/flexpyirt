@@ -5,7 +5,7 @@ English | [日本語](index.ja.md)
 Item response theory (IRT) estimation in Python, built on JAX: marginal maximum likelihood with
 the Bock–Aitkin EM algorithm, multiple-group calibration, fixed item parameter calibration (FIPC),
 and more. Every supported feature is checked numerically against R `mirt`
-(see [validation](VALIDATION.md)).
+(see [accuracy and validation](accuracy.md)).
 
 > Under development (0.x). The public API may change before 1.0.0.
 
@@ -52,8 +52,9 @@ scores = res.score(df)  # EAP and posterior SD per respondent
 
 - [User guide](guide.md): specifying models, multiple groups, FIPC, scoring, item fit, DIF,
   linking and estimation options.
+- [Theory](theory.md): the models and algorithms behind flexpyirt, in brief (IRT models, marginal
+  likelihood, the EM algorithm, identification, standard errors, scoring, fit and linking).
 - [API reference](reference.md): every public class and function.
-- [Validation](VALIDATION.md): how results are checked against R mirt, tolerances and known
-  differences.
-- [Design](DESIGN.md) and [roadmap](ROADMAP.md).
+- [Accuracy and validation](accuracy.md): how results are checked against R mirt, tolerances and
+  known differences from mirt.
 - Source code, issues and releases: [GitHub](https://github.com/takuizum/flexpyirt).

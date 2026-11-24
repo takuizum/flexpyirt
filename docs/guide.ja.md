@@ -2,9 +2,9 @@
 
 [English](guide.md) | 日本語
 
-flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめる。このページのコード例は上から順に実行でき、
-`tests/test_docs.py` が毎回すべて実行して動作を確かめている。関数ごとの引数は
-[API リファレンス](reference.ja.md) を参照。
+flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめる。このページのコード例は上から順に 1 つの
+スクリプトとして実行できる。関数ごとの引数は [API リファレンス](reference.ja.md)、背後にあるモデルと
+アルゴリズムは [理論](theory.ja.md) を参照。
 
 1. [準備](#1-準備)
 2. [データの形式](#2-データの形式)
@@ -121,7 +121,7 @@ print(spec.item_names[:3], mixed.item_names)
 `"Rasch"` は `PCM`）と同じ傾き・切片形式。3PL / 4PL の `g`, `u` は自然尺度（$0 < g < u \le 1$）で推定する
 （mirt は logit 尺度で最適化するが、内点の最尤推定値は一致する）。多値項目のカテゴリは 0 始まり（mirt の
 `Science` のように 1 始まりのデータは 1 を引く）。`Nominal` には表示用の `b` 列がない。カテゴリに順序がない
-ため $	heta$ 尺度の隣接カテゴリ閾値は一般には定義できず（$\mathrm{ak}_k=\mathrm{ak}_{k-1}$ で特異になる）、mirt の
+ため $\theta$ 尺度の隣接カテゴリ閾値は一般には定義できず（$\mathrm{ak}_k=\mathrm{ak}_{k-1}$ で特異になる）、mirt の
 `coef(m, IRTpars = TRUE)` も代わりに Bock のゼロ和の傾きと切片を返す。
 
 ```python
@@ -187,7 +187,7 @@ res = fit(
   EM 写像を 2 回評価してステップ方向に外挿し、安定化の EM ステップを 1 回行う（採択 1 回あたり EM 評価 3 回。
   単調性・実行可能性の安全装置が $\theta_2$ に戻した場合は 2 回）。収束の遅いモデル（分散を推定する Rasch / PCM、
   多母集団、3PL / 4PL、厳しい `tol`）で有効にする。同じ不動点に収束し、`history["loglik"]` は単調で、
-  EM の評価回数が大きく減る。M3 では mirt との実行時間のベンチマークが済むまで、通常の EM（`squarem=False`）を既定とする。
+  EM の評価回数が大きく減る。既定は通常の EM（`squarem=False`）。
 - **`quadrature`**: 潜在変数の求積格子。既定は等間隔 61 点・$[-6, 6]$（mirt の既定と同じ）。
   広げるべき場合は [13 節](#13-求積格子の選び方)。
 - **`se`**: `"oakes"`（既定）、`"hessian"`、`None`（計算しない）。
@@ -275,7 +275,7 @@ print(fit_table.round(3))
 `m2(data)` は Maydeu-Olivares & Joe (2005, 2006) の限定情報の適合度統計量を、項目得点の平均とペアごとの交差積
 （mirt の既定 `M2(type = "M2*")`。2 値項目では厳密に $M_2$）から計算する。あわせて RMSEA とその信頼区間（既定
 `ci=0.90`）、SRMSR、および 2 値モデルでは独立帰無モデルに対する TLI と CFI を返す（多値モデルでは `tli`・`cfi` は
-`NaN`。[DESIGN §16.3](DESIGN.ja.md) 参照）。欠測のないデータと、`Normal` 潜在分布の単一群 1 次元 MLE 推定
+`NaN`。独立帰無モデルは 2 値項目でのみ定義されるため）。欠測のないデータと、`Normal` 潜在分布の単一群 1 次元 MLE 推定
 （事前分布なし）が必要。
 
 ```python
@@ -330,7 +330,7 @@ print(vcov.iloc[:2, :2])
   当て推量により尤度が $-\infty$ へ向かって単調増加する低得点パターンも `"ML"` で $-\infty$・SE NaN となる。
   `Nominal` 項目の「最低」「最高」はカテゴリ傾き $a\,\mathrm{ak}_c$ が最小・最大のカテゴリで、カテゴリ 0 / $K-1$
   とは限らない（例: $\mathrm{ak}_1<0$ では全 0 パターンの ML 推定値は有限。mirt はそこで $-\infty$ を返す。
-  [VALIDATION.md](VALIDATION.ja.md) V23）。
+  [精度と検証](accuracy.ja.md) を参照）。
 - **`method="PV"` は明示的な JAX PRNG の `key`（例: `jax.random.key(0)`）が必須**: flexpyirt は
   グローバルな乱数状態を持たないため、同じ `key` で完全に再現可能であり、同じ反応パターンの回答者にも互いに
   独立な標本を与える。
@@ -479,11 +479,10 @@ print(mix.score(bi_df.iloc[:3], method="EAP").round(3))  # 推定した混合事
   `loglik` が最も高いものを採る。重みがほぼ 0、格子より細い、格子の外に中心がある成分や、一致する 2 つの成分は
   `HeywoodWarning` で知らせる。データが支持する成分数はそれより少ない。
 - **格子の解像度**: 細い成分と情報量の多い項目が多いと、事後分布の幅が格子の間隔と同程度になる。その場合は格子を
-  細かくし（例: `Quadrature.equispaced(121)`、間隔 0.1）、`loglik` がもう変わらないことを確かめる（V22c では 121 点が必要
-  だった）。
+  細かくし（例: `Quadrature.equispaced(121)`、間隔 0.1）、`loglik` がもう変わらないことを確かめる。
 - **mirt**: mirt の `dentype = "mixture-k"` は既定でクラスごとの項目パラメタを推定する（混合 IRT モデル）。flexpyirt の
   モデルは、全項目をクラス間で等値にした mirt のモデル（`invariance = c(<項目>, "free_means", "free_var")`）に
-  $\theta$ の尺度を除いて一致する（[VALIDATION.ja.md](VALIDATION.ja.md) V22）。
+  $\theta$ の尺度を除いて一致する（[精度と検証](accuracy.ja.md) を参照）。
 
 ## 9. 多母集団
 
@@ -679,7 +678,7 @@ wide = Quadrature.equispaced(81, bounds=(-8, 8))  # 刻み 0.2 のまま範囲�
 
 報告される `var` は格子で切る前の正規分布のパラメタで、格子上の分布の分散はそれよりわずかに小さい。
 mirt は分散を閉形式のモーメントで更新するため、格子の端の影響が大きい条件では mirt と値がずれる。格子を
-広げると両者は一致する（[VALIDATION.md](VALIDATION.ja.md)）。
+広げると両者は一致する（[理論](theory.ja.md)・[精度と検証](accuracy.ja.md) を参照）。
 
 **Gauss–Hermite.** `Normal` 潜在分布では、`Quadrature.gauss_hermite(n)` が次元あたり `n` 個の Gauss–Hermite 節点を置き、
 推定した平均・分散に合わせて重みを付け直す。$N(0,1)$ 付近では同じ点数の等間隔格子より精度が高いことが多いが、分散が

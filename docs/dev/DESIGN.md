@@ -381,8 +381,8 @@ data-independent shapes (§15.21).
 - The default target is "fast enough on CPU". GPU should help for large problems
   (N ≥ 10^5, J ≥ 100).
 - Benchmarks: wall time against R mirt (`TOL=1e-4`, default settings and validation settings) in
-  [benchmarks/](../benchmarks/README.md); committed Apple M5 CPU results are in
-  [benchmarks/results/2026-11-21-apple-m5.md](../benchmarks/results/2026-11-21-apple-m5.md).
+  [benchmarks/](../../benchmarks/README.md); committed Apple M5 CPU results are in
+  [benchmarks/results/2026-11-21-apple-m5.md](../../benchmarks/results/2026-11-21-apple-m5.md).
   Summary of that single-machine measurement (61 quadrature points on $[-6, 6]$, CPU only; XLA CPU
   may use multiple threads while mirt is single-threaded by default):
   - **Warm fits**: faster than mirt default across all six tested cases (`0.16×–0.60×` with plain

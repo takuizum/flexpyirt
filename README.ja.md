@@ -6,9 +6,9 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 多母集団の同時推定や固定項目パラメタ推定（FIPC）を Python から扱えるようにする。
 
 - **正しさを検証済み**: 対応済みの機能はすべて R `mirt` と数値照合している（パラメタ・対数尤度・標準誤差が
-  おおむね 1e-8 で一致。[検証の詳細](https://takuizum.github.io/flexpyirt/ja/VALIDATION/)）。
-- **自動微分**: M-step の勾配・Hessian も標準誤差（Oakes の恒等式）も JAX の自動微分で計算する。
-  新しい項目モデルは対数確率を書くだけで推定・SE・スコアリングが動く設計。
+  おおむね 1e-8 で一致。[精度と検証](https://takuizum.github.io/flexpyirt/ja/accuracy/)）。
+- **厳密な微分**: 勾配・Hessian・標準誤差（Oakes の恒等式）は数値近似ではなく JAX の自動微分で計算する。
+  推定は JAX でコンパイルされ、GPU でも動く。
 - **ParameterTable**: mirt の `pars = "values"` に相当する表で、固定・等値・初期値を編集できる。
 
 > 開発中（0.x）。公開 API は 1.0.0 まで変わることがある。
@@ -17,29 +17,27 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 
 ## できること
 
-| 機能 | 内容 | mirt 照合 |
+| 機能 | 内容 | mirt と照合 |
 |---|---|---|
-| 項目モデル | 2PL、Rasch（潜在分散を自由推定）、3PL、4PL、GRM（段階反応モデル）、GPCM、PCM（潜在分散を自由推定）、Nominal（名義反応モデル。1 因子・2 因子で照合済み、3 因子は単体テストのみ） | V1, V2, V3, V8, V11, V23 |
-| 事前分布と MAP | 項目パラメタの事前分布 `NormalPrior`・`LogNormalPrior`・`BetaPrior`（`Model.prior()`）、自然尺度、`FitResult.log_posterior` | V7 |
-| 多母集団 | 群ごとの項目パラメタ、アンカー項目の群間等値、焦点群の平均・分散の推定 | V4 |
-| 項目間の等値制約 | 項目・項目モデルをまたぐ共通パラメタ（`Model.equal_across_items()`、例: 全項目共通の傾き）。群間等値と組み合わせ可 | V16 |
-| FIPC | 項目バンクの値で一部の項目を固定し、残りの項目と潜在分布を推定 | V5 |
-| 欠測 | 欠測（MAR）を含むデータ | V9 |
-| 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度（MAP 時は対数事後）の Hessian、表示用 IRT 閾値のデルタ法 SE（`b_se` / `bk_se`） | V7, V10, V12, V14 |
-| スコアリング | EAP・MAP・ML・WLE（1–3 因子、標準誤差つき）および plausible values（`PV`、1–3 因子、明示的な JAX PRNG `key`）。ベイズ手法は群ごとの潜在分布を事前分布に使う | V1–V5, V7–V9, V11, V13, V14 |
-| 多次元モデル | 確認的 2–3 因子 MIRT（`Model.with_factors()`、多母集団も可）。交差負荷、相関／直交の多変量正規因子、直積求積格子、Oakes/Hessian SE、EAP・MAP・ML・WLE スコアリング | V14, V21 |
-| 経験ヒストグラム | 歪んだ・多峰の潜在分布のための `EmpiricalHistogram()`（Woods, 2007）。参照群は厳密な制約付き M-step で平均 0・分散 1 に標準化、FIPC では自由。重みと 4 次までのモーメントを報告 | V6 |
-| Davidian 曲線 | 単一群 1 次元モデル向けの半ノンパラメトリック潜在分布 `DavidianCurve(degree)`（Zhang & Davidian, 2001; Woods & Lin, 2009）。厳密な連続 `mean`/`var` へ解析的に標準化（Rasch・PCM・FIPC で `free_mean`/`free_var` 可）、項目・潜在パラメタの同時 Oakes/Hessian SE と EAP/PV 採点に対応 | V19 |
-| 混合正規 | 単一群 1 次元モデル向けの、項目を共通とする有限混合正規潜在密度 `NormalMixture(n_components)`（Mislevy, 1984）。mirt の `dentype = "mixture-k"` のクラスのパラメタ化を厳密な連続 `mean`/`var` へ解析的に標準化、標準化した成分（`pi_c`・`mean_c`・`var_c`）とデルタ法 SE、項目・潜在パラメタの同時 Oakes/Hessian SE、EAP/PV 採点、退化解の警告 | V22 |
+| 項目モデル | 2PL、Rasch（潜在分散を自由推定）、3PL、4PL、GRM（段階反応モデル）、GPCM、PCM（潜在分散を自由推定）、Nominal（名義反応モデル。1 因子・2 因子で mirt と照合済み） | ✓ |
+| 事前分布と MAP | 項目パラメタの事前分布 `NormalPrior`・`LogNormalPrior`・`BetaPrior`（`Model.prior()`）、自然尺度、`FitResult.log_posterior` | ✓ |
+| 多母集団 | 群ごとの項目パラメタ、アンカー項目の群間等値、焦点群の平均・分散の推定 | ✓ |
+| 項目間の等値制約 | 項目・項目モデルをまたぐ共通パラメタ（`Model.equal_across_items()`、例: 全項目共通の傾き）。群間等値と組み合わせ可 | ✓ |
+| FIPC | 項目バンクの値で一部の項目を固定し、残りの項目と潜在分布を推定 | ✓ |
+| 欠測 | 欠測（MAR）を含むデータ | ✓ |
+| 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度（MAP 時は対数事後）の Hessian、表示用 IRT 閾値のデルタ法 SE（`b_se` / `bk_se`） | ✓ |
+| スコアリング | EAP・MAP・ML・WLE（1–3 因子、標準誤差つき）および plausible values（`PV`、1–3 因子、明示的な JAX PRNG `key`）。ベイズ手法は群ごとの潜在分布を事前分布に使う | ✓ |
+| 多次元モデル | 確認的 2–3 因子 MIRT（`Model.with_factors()`、多母集団も可）。交差負荷、相関／直交の多変量正規因子、直積求積格子、Oakes/Hessian SE、EAP・MAP・ML・WLE スコアリング | ✓ |
+| 経験ヒストグラム | 歪んだ・多峰の潜在分布のための `EmpiricalHistogram()`（Woods, 2007）。参照群は厳密な制約付き M-step で平均 0・分散 1 に標準化、FIPC では自由。重みと 4 次までのモーメントを報告 | ✓ |
+| Davidian 曲線 | 単一群 1 次元モデル向けの半ノンパラメトリック潜在分布 `DavidianCurve(degree)`（Zhang & Davidian, 2001; Woods & Lin, 2009）。厳密な連続 `mean`/`var` へ解析的に標準化（Rasch・PCM・FIPC で `free_mean`/`free_var` 可）、項目・潜在パラメタの同時 Oakes/Hessian SE と EAP/PV 採点に対応 | ✓ |
+| 混合正規 | 単一群 1 次元モデル向けの、項目を共通とする有限混合正規潜在密度 `NormalMixture(n_components)`（Mislevy, 1984）。mirt の `dentype = "mixture-k"` のクラスのパラメタ化を厳密な連続 `mean`/`var` へ解析的に標準化、標準化した成分（`pi_c`・`mean_c`・`var_c`）とデルタ法 SE、項目・潜在パラメタの同時 Oakes/Hessian SE、EAP/PV 採点、退化解の警告 | ✓ |
 | 結果の保存 | `FitResult.to_json()` / `FitResult.from_json()`（厳密なスキーマ、pickle 不使用） | — |
-| EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | V1–V5, V7–V9, V11, V14 |
-| 項目適合度 | Orlando–Thissen の S-X2（`FitResult.item_fit()`、多母集団は群ごと）。mirt と同じセルのまとめ方・自由度・RMSEA・p 値 | V15 |
-| 限定情報の適合度 | Maydeu-Olivares & Joe の M2 / M2*（`FitResult.m2()`）。自由度・p 値・RMSEA と信頼区間・SRMSR・2 値の TLI / CFI | V18 |
-| DIF | 多母集団の尤度比検定による DIF（`FitResult.dif()`。mirt の `DIF()` の `add` / `drop` 方式、AIC・SABIC・HQ・BIC の差、Holm または BH で補正した p 値） | V17 |
-| 尺度リンキング | 微分可能な特性曲線法リンキング（`link()`, `LinkResult`: Haebara・Stocking–Lord の非対称・対称版、Ogasawara デルタ法 SE、項目・$\theta$ の変換。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目で照合済み） | V20 |
+| EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | ✓ |
+| 項目適合度 | Orlando–Thissen の S-X2（`FitResult.item_fit()`、多母集団は群ごと）。mirt と同じセルのまとめ方・自由度・RMSEA・p 値 | ✓ |
+| 限定情報の適合度 | Maydeu-Olivares & Joe の M2 / M2*（`FitResult.m2()`）。自由度・p 値・RMSEA と信頼区間・SRMSR・2 値の TLI / CFI | ✓ |
+| DIF | 多母集団の尤度比検定による DIF（`FitResult.dif()`。mirt の `DIF()` の `add` / `drop` 方式、AIC・SABIC・HQ・BIC の差、Holm または BH で補正した p 値） | ✓ |
+| 尺度リンキング | 微分可能な特性曲線法リンキング（`link()`, `LinkResult`: Haebara・Stocking–Lord の非対称・対称版、Ogasawara デルタ法 SE、項目・$\theta$ の変換。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目で R の独立な実装と照合済み） | ✓ |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
-
-今後の予定は[ロードマップ](https://takuizum.github.io/flexpyirt/ja/ROADMAP/)を参照。
 
 ## インストール
 
@@ -133,32 +131,23 @@ res3 = fit(spec3, df)
 
 ## 性能
 
-R `mirt`（既定設定、`TOL = 1e-4`、CPU・61 点求積）との wall time ベンチマークを
-[benchmarks/](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/README.ja.md) に、Apple M5 での計測結果を
-[benchmarks/results/2026-11-21-apple-m5.md](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/results/2026-11-21-apple-m5.md) に
-置いている。初回の JAX/XLA コンパイル（cold の EM 推定で約 0.8–1.1 秒）以降は、テストした全ケースで
+R `mirt`（既定設定、`TOL = 1e-4`、CPU・61 点求積）との実行時間の比較
+（[Apple M5 での計測結果](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/results/2026-11-21-apple-m5.md)）では、初回の JAX/XLA コンパイル（cold の EM 推定で約 0.8–1.1 秒）以降は、テストした全ケースで
 warm の CPU 推定が `mirt` より速く（`mirt` 比 `0.12×–0.60×`）、標準誤差なしの 1 回限りの cold 推定では
 `mirt` の方が速い。
 
 ## ドキュメント
 
 - [ユーザーガイド](https://takuizum.github.io/flexpyirt/ja/guide/) — モデルの指定、多母集団、FIPC、ParameterTable の編集、推定オプション
+- [理論](https://takuizum.github.io/flexpyirt/ja/theory/) — モデル、推定アルゴリズム、標準誤差、スコアリング、適合度、リンキングの要点
 - [API リファレンス](https://takuizum.github.io/flexpyirt/ja/reference/) — 公開クラス・関数の一覧と引数
-- [検証](https://takuizum.github.io/flexpyirt/ja/VALIDATION/) — R mirt との照合方法、許容誤差、判明した違い
-- [設計書](https://takuizum.github.io/flexpyirt/ja/DESIGN/) — 数式とアルゴリズム、実装上の決定
-- [ロードマップ](https://takuizum.github.io/flexpyirt/ja/ROADMAP/)
-- [開発フロー](https://github.com/takuizum/flexpyirt/blob/main/CONTRIBUTING.ja.md) — ブランチ運用、レビュー、リリース
+- [精度と検証](https://takuizum.github.io/flexpyirt/ja/accuracy/) — R mirt との照合方法、許容誤差、mirt との既知の違い
 
 すべての文書に英語版（`*.md`）がある。
 
-## 開発
+## フィードバック
 
-```bash
-uv sync --all-extras --dev
-uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
-```
-
-ブランチ運用とリリースの手順は [CONTRIBUTING.md](https://github.com/takuizum/flexpyirt/blob/main/CONTRIBUTING.ja.md) を参照。
+不具合の報告や質問は [GitHub Issues](https://github.com/takuizum/flexpyirt/issues) へ。
 
 ## ライセンス
 
