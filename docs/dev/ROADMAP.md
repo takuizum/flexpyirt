@@ -65,3 +65,13 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - [x] Nominal response model (`Nominal(n_categories)`, Thissen, Cai & Bock (2010) parameterization as in
   mirt's `itemtype = "nominal"`; validated in V23 for one and two factors, three factors
   unit-tested only).
+- [ ] Dimensionality diagnostics (DESIGN.md §16.8; question A "how many dimensions" kept apart
+  from question B "is essential unidimensionality tenable"; no exploratory MIRT):
+  - [ ] D1 polychoric / tetrachoric correlations with smoothing (vs `psych::polychoric`, `lavaan::lavCor`).
+  - [ ] D2 eigenvalues, parallel analysis, revised MAP, EKC (vs `psych::fa.parallel`, `psych::vss`, `EFAtools::EKC`).
+  - [ ] D3 local dependence Q3 / Q3* / LD-X2 / JSI (vs `mirt::residuals`) and model-based parallel
+    analysis (vs `ltm::unidimTest`); then the ensemble `dimensionality()`.
+  - [ ] D4 DETECT, confirmatory and exploratory (vs `sirt::conf.detect` / `expl.detect`).
+  - [ ] D5 EFA through the optional `factor_analyzer` (extra `flexpyirt[efa]`, vs `psych::fa`), Hull
+    (vs `EFAtools::HULL`), comparison data (vs `EFAtools::CD`).
+  - [ ] D6 DIMTEST with bootstrap bias correction (accepted on a simulation study: type I error and power).

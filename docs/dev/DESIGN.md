@@ -1478,8 +1478,58 @@ data-independent shapes (§15.21).
    (121 grid points; VALIDATION.md V22). SEs are checked against the R Richardson Hessian, because mirt 1.46.1's
    `SE.type = "Oakes"` for mixtures is not the observed information (its latent SEs are several
    times too small, close to the complete-data SEs with known class membership).
+8. **Dimensionality diagnostics (plan, decided 2026-11-24; nothing implemented yet)**:
+   **Scope**: two questions are kept apart, because one majority vote over both is meaningless.
+   (A) *How many dimensions?* returns an integer $k$ (parallel analysis, MAP, EKC, Hull, CD).
+   (B) *Is essential unidimensionality (Stout, 1990) tenable?* returns a verdict, a $p$ value or a
+   graded index (DIMTEST, DETECT, local-dependence statistics of a fitted model, $M_2$ / RMSEA,
+   model-based parallel analysis, first-to-second eigenvalue ratio). No single method is trusted on
+   its own (Auerswald & Moshagen, 2019), so the user-facing entry point is an ensemble.
+   **Out of scope**: exploratory MIRT (the product-grid quadrature of §4 does not scale to the
+   dimensions an exploratory model needs), so (A) is a diagnostic and does not feed a fit;
+   learned predictors (Factor Forest; Goretzko & Bühner, 2020), because they ship a trained model
+   that cannot be validated from formulas; the Kaiser criterion is reported for reference only and
+   never counted. EGA (Golino & Epskamp, 2017) and bifactor indices (ECV, $\omega_h$, PUC;
+   Rodriguez, Reise & Haviland, 2016) are deferred.
+   **EFA through an optional dependency**: Hull (and factor-analytic eigenvalues where needed) call
+   `factor_analyzer` (>= 0.5.1) from the outer Python layer, never inside jit, installed as the extra
+   `flexpyirt[efa]` (it pulls in scikit-learn). It is imported lazily; a missing install raises
+   `ImportError` naming the extra. It is called with `is_corr_matrix=True` on flexpyirt's polychoric
+   matrix, `rotation=None` and `svd_method="lapack"` (deterministic). `factor_analyzer` only reports
+   loadings, uniquenesses and an ML $\chi^2$ (`sufficiency`), so the fit measures Hull needs (CAF,
+   RMSEA, CFI) are computed in flexpyirt from the model-implied matrix
+   $\hat\Sigma=\Lambda\Lambda^\top+\Psi$. Its estimates are checked against `psych::fa` (minres, ML)
+   on the same matrix before Hull is validated, so a disagreement is attributed to the right layer.
+   **Stages** (each validated before the next; ROADMAP M5):
+   D1 polychoric / tetrachoric correlations (two-step, Olsson, 1979; pairwise `vmap`) with
+   smoothing of non-positive-definite matrices, against `psych::polychoric` and `lavaan::lavCor`.
+   D2 eigenvalues, parallel analysis (Horn, 1965; polychoric, PCA and FA eigenvalues, percentile
+   per Glorfeld, 1995; Garrido, Abad & Ponsoda, 2013), revised MAP (Velicer, Eaton & Fava, 2000) and
+   EKC (Braeken & van Assen, 2017), against `psych::fa.parallel`, `psych::vss` and `EFAtools::EKC`
+   (deterministic parts exactly; simulated reference eigenvalues by passing R's simulated data or
+   with a Monte Carlo tolerance).
+   D3 local dependence of a fitted unidimensional model, Q3 (Yen, 1984), Q3* (Christensen, Makransky
+   & Horton, 2017), LD-$X^2$ (Chen & Thissen, 1997) and JSI (Edwards, Houts & Cai, 2018), against
+   `mirt::residuals`; model-based parallel analysis (Drasgow & Lissak, 1983) against
+   `ltm::unidimTest`.
+   D4 DETECT, confirmatory and exploratory (Zhang & Stout, 1999; Zhang, 2007), with ASSI and $R$,
+   against `sirt::conf.detect` / `expl.detect`; the partition search runs in the outer layer.
+   D5 the EFA bridge above and Hull (Lorenzo-Seva, Timmerman & Kiers, 2011), against `psych::fa`
+   and `EFAtools::HULL`; comparison data (Ruscio & Roche, 2012) against `EFAtools::CD`.
+   D6 DIMTEST with bootstrap bias correction (Stout, Froelich & Gao, 2001; Froelich & Habing, 2008).
+   No CRAN reference exists, so it is accepted on a simulation study (type I error at the nominal
+   level for unidimensional data, power for two-dimensional data) recorded in VALIDATION.md.
+   **Ensemble** (`dimensionality()`, after D3): each method returns a common result (question A or
+   B, the suggested $k$ or verdict, its statistic, the threshold used and its source). The summary
+   lists every method; the consensus for (A) is the mode and median of $k$ with the agreement count
+   (ties reported, not broken), and for (B) the count of methods supporting essential
+   unidimensionality. No weighted voting until a simulation study supports weights. Thresholds
+   (DETECT 0.1 / 0.5 / 1, Q3* 0.2, RMSEA) are arguments with their sources in docstrings. The
+   polychoric matrix is computed once and shared; simulations use a JAX PRNG key. The ensemble
+   itself is checked by a simulation study (unidimensional, two-dimensional and bifactor data).
 
 ## References
+- Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
@@ -1490,16 +1540,28 @@ data-independent shapes (§15.21).
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Bollen, K. A. (1989). *Structural Equations with Latent Variables*. Wiley.
 - Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
+- Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
+- Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
+- Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
+- Edwards, M. C., Houts, C. R., & Cai, L. (2018). A diagnostic procedure to detect departures from local independence in item response theory models. *Psychological Methods*, 23(1), 138–149.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
+- Froelich, A. G., & Habing, B. (2008). Conditional covariance-based subtest selection for DIMTEST. *Applied Psychological Measurement*, 32(2), 138–155.
+- Garrido, L. E., Abad, F. J., & Ponsoda, V. (2013). A new look at Horn's parallel analysis with ordinal variables. *Psychological Methods*, 18(4), 454–474.
+- Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
+- Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
+- Goretzko, D., & Bühner, M. (2020). One model to rule them all? Using machine learning algorithms to determine the number of factors in exploratory factor analysis. *Psychological Methods*, 25(6), 776–786.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
+- Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
+- Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - MacCallum, R. C., Browne, M. W., & Sugawara, H. M. (1996). Power analysis and determination of sample size for covariance structure modeling. *Psychological Methods*, 1(2), 130–149.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
@@ -1513,18 +1575,27 @@ data-independent shapes (§15.21).
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
+- Olsson, U. (1979). Maximum likelihood estimation of the polychoric correlation coefficient. *Psychometrika*, 44(4), 443–460.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
+- Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
+- Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.
+- Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
+- Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
+- Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.
+- Zhang, J., & Stout, W. (1999). The theoretical DETECT index of dimensionality and its application to approximate simple structure. *Psychometrika*, 64(2), 213–249.
