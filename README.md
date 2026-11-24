@@ -41,6 +41,7 @@ calibration and fixed item parameter calibration (FIPC).
 | Limited-information fit | Maydeu-Olivares & Joe M2 / M2* (`FitResult.m2()`) with df, p-value, RMSEA + CI, SRMSR and dichotomous TLI / CFI | ✓ |
 | DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | ✓ |
 | Scale linking | Differentiable characteristic-curve linking (`link()`, `LinkResult`: Haebara and Stocking–Lord, non-symmetric and symmetric, Ogasawara delta-method SEs, transformed items and $\theta$ scores; checked against independent R implementations for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items) | ✓ |
+| Polychoric correlations | Polychoric / tetrachoric correlation matrices (`polychoric()`: two-step ML, available-case missing data, lavaan's 2 x 2 zero-cell correction, smoothing of non-positive-definite matrices; checked against lavaan's `lavCor`) | ✓ |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
 ## Installation

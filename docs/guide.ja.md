@@ -21,7 +21,8 @@ flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめ�
 13. [求積格子の選び方](#13-求積格子の選び方)
 14. [確認的多次元モデル](#14-確認的多次元モデル)
 15. [尺度リンキング](#15-尺度リンキング)
-16. [エラーと警告](#16-エラーと警告)
+16. [ポリコリック相関](#16-ポリコリック相関)
+17. [エラーと警告](#17-エラーと警告)
 
 ## 1. 準備
 
@@ -804,15 +805,39 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
   項目は傾きが $1/A$ になる）。`linked.transform_theta()` はスカラー・配列・Series・採点 DataFrame（`theta`、`se`、
   plausible values `pv1..`）を変換し、$(A, B)$ を既知として扱う（変換後の `se` はリンキング誤差を含まない）。
 
-## 16. エラーと警告
+## 16. ポリコリック相関
+
+`flexpyirt.polychoric(data)` は順序反応のポリコリック相関行列（2 値項目ではテトラコリック相関）を推定する。固有値に
+基づく次元性の確認で入力として使うのが一般的である。two-step の最尤法（Olsson, 1979）で、各項目の周辺比率から閾値を
+求め、そのうえで項目のペアごとに相関を 1 つずつ求める。
+
+```python
+from flexpyirt import polychoric
+
+pc = polychoric(df)
+print(pc.correlation.iloc[:4, :4].round(3))
+print(pc.thresholds[items[0]].round(3))
+print(pc.n_obs.iloc[:2, :2])
+```
+
+- 回答は順序のある符号であればどんな番号付けでもよい（`1..5`、`0, 10, 20` など）。意味を持つのは順序だけである。
+  欠測（NaN）は利用可能なケースで扱う。閾値は項目へのすべての回答から、各ペアは両方に回答した回答者から求める。
+- 空のセルがちょうど 1 つの 2 x 2 表では、尤度は $|\rho| = 1$ で最大になる。既定では lavaan と同じく、周辺を
+  変えないように空のセルを含む対角へ 0.5 を移す（`zero_cell_correction=0` で無効）。それでも $|\rho| \to 1$ で最大になる
+  ペアは `HeywoodWarning` を出し、`pc.at_boundary` に示す。
+- ペアごとの推定値を並べた行列は正定値とは限らない。その場合は平滑化し（psych の `cor.smooth` と同じ規則）、
+  `NotPositiveDefiniteWarning` を出す。`pc.unsmoothed_correlation` にはペアごとの推定値がそのまま残る。
+
+## 17. エラーと警告
 
 | 種類 | いつ出るか |
 |---|---|
-| `PrecisionError` | JAX の 64 ビット浮動小数点が無効なまま `fit()` を呼んだ |
+| `PrecisionError` | JAX の 64 ビット浮動小数点が無効なまま `fit()`（または推定を行う他の関数）を呼んだ |
 | `SpecificationError` | 仕様とデータの矛盾（列の過不足、範囲外の値、観測されないカテゴリ、存在しない項目の固定、表や事前分布の不正な編集、群ラベルの不一致） |
 | `IdentificationError` | 尺度が識別できない（[8 節](#8-潜在分布と識別性)） |
 | `ConvergenceWarning` | `max_iter` までに収束しなかった、または SQUAREM が反復の 50% 超（5 回以上）で通常の EM に戻った |
-| `HeywoodWarning` | 自由な項目パラメタが有限の境界から `1e-4` 以内（3PL / 4PL で `g` が 0 付近、`u` が 1 付近など）、または自由な傾きが $|a| > 20$。`NormalMixture` の成分の退化 |
+| `HeywoodWarning` | 自由な項目パラメタが有限の境界から `1e-4` 以内（3PL / 4PL で `g` が 0 付近、`u` が 1 付近など）、または自由な傾きが $|a| > 20$。`NormalMixture` の成分の退化。ポリコリック相関のペアが $|\rho| \to 1$ |
+| `NotPositiveDefiniteWarning` | ポリコリック相関行列が正定値でなく、平滑化した |
 | `FlexpyirtWarning` | 情報行列が正定値でない（SE が NaN）、アンカーが 1 パラメタだけ、または MAP 推定で `aic` / `bic` を参照した |
 
 すべての例外は `flexpyirt.errors.FlexpyirtError`、警告は `flexpyirt.errors.FlexpyirtWarning` を継承する。

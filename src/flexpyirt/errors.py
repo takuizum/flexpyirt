@@ -12,6 +12,7 @@ __all__ = [
     "FlexpyirtWarning",
     "HeywoodWarning",
     "IdentificationError",
+    "NotPositiveDefiniteWarning",
     "PrecisionError",
     "SpecificationError",
 ]
@@ -55,3 +56,10 @@ class ConvergenceWarning(FlexpyirtWarning):
 
 class HeywoodWarning(FlexpyirtWarning):
     """A boundary solution was reached (e.g. guessing parameter near 0, diverging slope)."""
+
+
+class NotPositiveDefiniteWarning(FlexpyirtWarning):
+    """A correlation matrix (e.g. a pairwise polychoric matrix) was not positive definite.
+
+    It was smoothed to a positive definite matrix.
+    """

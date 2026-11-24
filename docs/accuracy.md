@@ -60,6 +60,7 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | $M_2$ / $M_2^*$ | `M2(m)`, plus an exact R computation where mirt differs (see below) |
 | DIF tests | `DIF(mg, scheme = "add" / "drop")` |
 | SQUAREM | every comparison above is repeated with `BAEM(squarem=True)` |
+| Polychoric correlations | lavaan's `lavCor()` on ordered variables to $10^{-6}$, psych's `polychoric()` to $10^{-3}$ (its optimizer's tolerance) and psych's `cor.smooth()` for smoothing |
 | Scale linking (Haebara, Stocking–Lord) | independent R implementations of the criteria using mirt's response functions (mirt itself has no characteristic-curve linking) |
 
 ## Known differences from mirt

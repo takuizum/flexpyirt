@@ -67,7 +67,8 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   unit-tested only).
 - [ ] Dimensionality diagnostics (DESIGN.md §16.8; question A "how many dimensions" kept apart
   from question B "is essential unidimensionality tenable"; no exploratory MIRT):
-  - [ ] D1 polychoric / tetrachoric correlations with smoothing (vs `psych::polychoric`, `lavaan::lavCor`).
+  - [x] D1 polychoric / tetrachoric correlations with smoothing (`polychoric()`, `PolychoricResult`;
+    validated in V24 against `lavaan::lavCor` and `psych::polychoric` / `cor.smooth`).
   - [ ] D2 eigenvalues, parallel analysis, revised MAP, EKC (vs `psych::fa.parallel`, `psych::vss`, `EFAtools::EKC`).
   - [ ] D3 local dependence Q3 / Q3* / LD-X2 / JSI (vs `mirt::residuals`) and model-based parallel
     analysis (vs `ltm::unidimTest`); then the ensemble `dimensionality()`.

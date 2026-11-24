@@ -1059,6 +1059,40 @@ class ItemKernel(Protocol):
    （DETECT の 0.1 / 0.5 / 1、Q3* の 0.2、RMSEA）は引数にし、出典を docstring に書く。ポリコリック行列は 1 回だけ計算して
    共有し、シミュレーションは JAX の PRNG キーを使う。アンサンブル自体はシミュレーション研究（1 次元・2 次元・
    バイファクター構造のデータ）で確かめる。
+9. **ポリコリック・テトラコリック相関（`polychoric()`、§16.8 の D1、V24）**:
+   `flexpyirt.polychoric(data, *, smooth=True, zero_cell_correction=0.5, tol=1e-10, max_iter=100)` を
+   `correlation.py`（シェル）と `_polychoric.py`（jit カーネル）に置き、変更不可の `PolychoricResult` を返す。
+   **データ**: 任意の数値符号でよい。各項目を観測された値の昇順で $0..K_j-1$ に符号化し直すので、観測されない符号は
+   カテゴリにならない（psych・lavaan でも空のカテゴリは確率 0 のセルを足すだけなので結果は同じ）。観測されたカテゴリが
+   1 つの項目、両方に回答した回答者がいないペア、その回答者の中で一方の項目が一定のペアは `SpecificationError`。
+   **閾値**: $\hat\tau_{jk}=\Phi^{-1}(\hat P(Y_j\le k))$ を項目へのすべての観測された回答（利用可能なケース）から求め、
+   その項目を含むすべてのペアで共有する（two-step）。ペアの分割表は両方に回答した回答者から作る。lavaan の
+   `missing = "pairwise"`、psych の `global = TRUE` と同じ。psych は項目のカテゴリ数が異なると、ペアごとの閾値
+   （`global = FALSE`）に切り替えるため、照合は欠測のないデータに限る。
+   **2 変量正規分布**: Genz (2004) の `BVNU`。$r$ によらず 20 点の Gauss–Legendre 則を使い（6 点・12 点の則は安価な
+   だけ）、$|r|\ge0.925$ では Drezner & Wesolowsky (1990) の展開を使う。分岐はすべて評価して `jnp.where` で選び、
+   無限の端点は厳密に扱う（式の中では $\pm40$ で代用）。`custom_jvp` で解析的な微分
+   $\partial_r\Phi_2=\phi_2$、$\partial_h\Phi_2=\phi(h)\Phi((k-rh)/\sqrt{1-r^2})$ を与えるので、Newton に使う 2 階微分も
+   厳密である。Plackett の積分を適応求積で計算した値と絶対誤差 $10^{-14}$ で一致する。**ペアごと**: セル確率
+   $\pi_{ab}=\Phi_2(\tau_a,\tau'_b)-\Phi_2(\tau_{a-1},\tau'_b)-\Phi_2(\tau_a,\tau'_{b-1})+\Phi_2(\tau_{a-1},\tau'_{b-1})$
+   を $+\infty$ で $K_{\max}$ までパディングした格子で計算し（パディングのセルは度数も確率も 0）、
+   $\ell=\sum n_{ab}\log\pi_{ab}$ を $z=\operatorname{atanh}\rho$ について Newton 法（凹でないときは勾配ステップ、
+   ステップ半減、$|z|\le 8$）で最大化する。全ペアを `vmap` + `lax.while_loop` で処理する。初期値は符号の Pearson
+   相関（クリップ）の atanh。射影勾配が `tol` $\times n$ 以下、またはステップが $10^{-14}$ 未満で収束とする。
+   **境界**: $\ell$ が $|\rho|=1$ に向けて単調に増える場合（例: 空のセルがある 2 x 2 表）、$z$ での勾配は指数的に
+   小さくなり、反復は早く止まる。そこで反復の後に、$\hat z$ の側の $\pm8$ での $\ell$ を $\ell(\hat z)$ と比べ、
+   それ以上なら推定値を $\pm\tanh 8$ とし、`at_boundary` を立てて `HeywoodWarning` を出す。**空のセル**: lavaan の
+   既定（`zero.add = c(0.5, 0)`、`zero.keep.margins = TRUE`）。空のセルがちょうど 1 つの 2 x 2 表で、空のセルを含む
+   対角に $+c$、もう一方に $-c$ を加え、周辺は変えない。それより大きい表は補正しない。次元性の手法は内点の推定値を
+   要するので、既定の $c=0.5$ は lavaan に合わせた。$c=0$ でそのままの最尤推定。**平滑化**: psych の `cor.smooth` と
+   同じ（最小固有値がマシンイプシロン未満なら、$10^{-12}$ 未満の固有値を $10^{-10}$ にし、和を $p$ にそろえ、行列を
+   組み直し、対角を 1 にそろえる）。`errors` に新設した `NotPositiveDefiniteWarning` を出す。$\hat\rho$ の標準誤差は
+   返さない（照合しておらず、次元性の手法も使わない）。
+   **照合（V24）**: `validation/r/m5_polychoric_reference.R`（lavaan 0.7-3、psych 2.6.9）。シミュレーションの
+   テトラコリック（8 項目）、2 因子で 2〜5 カテゴリの混在、その 10% MCAR（pairwise）、空のセルが 1 つの 2 x 2 表を
+   含む極端な 2 値項目、LSAT7、Science。lavaan と $3.1\times10^{-8}$ 以内（その `nlminb` の許容誤差。flexpyirt の
+   ペアごとの勾配は $10^{-7}n$ まで 0）、閾値は $10^{-12}$ 以内、psych とは補正したペアを除く欠測のないデータで
+   $2\times10^{-5}$ 以内（その `optimize()` の許容誤差）、`cor.smooth` とは $10^{-12}$ 以内で一致する。
 
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1078,10 +1112,12 @@ class ItemKernel(Protocol):
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
 - Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
+- Drezner, Z., & Wesolowsky, G. O. (1990). On the computation of the bivariate normal integral. *Journal of Statistical Computation and Simulation*, 35(1–2), 101–107.
 - Edwards, M. C., Houts, C. R., & Cai, L. (2018). A diagnostic procedure to detect departures from local independence in item response theory models. *Psychological Methods*, 23(1), 138–149.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Froelich, A. G., & Habing, B. (2008). Conditional covariance-based subtest selection for DIMTEST. *Applied Psychological Measurement*, 32(2), 138–155.
 - Garrido, L. E., Abad, F. J., & Ponsoda, V. (2013). A new look at Horn's parallel analysis with ordinal variables. *Psychological Methods*, 18(4), 454–474.
+- Genz, A. (2004). Numerical computation of rectangular bivariate and trivariate normal and t probabilities. *Statistics and Computing*, 14(3), 251–260.
 - Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
 - Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
@@ -1110,7 +1146,9 @@ class ItemKernel(Protocol):
 - Olsson, U. (1979). Maximum likelihood estimation of the polychoric correlation coefficient. *Psychometrika*, 44(4), 443–460.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
+- Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
@@ -1127,6 +1165,7 @@ class ItemKernel(Protocol):
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
 - Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.

@@ -1527,6 +1527,49 @@ data-independent shapes (§15.21).
    (DETECT 0.1 / 0.5 / 1, Q3* 0.2, RMSEA) are arguments with their sources in docstrings. The
    polychoric matrix is computed once and shared; simulations use a JAX PRNG key. The ensemble
    itself is checked by a simulation study (unidimensional, two-dimensional and bifactor data).
+9. **Polychoric / tetrachoric correlations (`polychoric()`, D1 of §16.8, V24)**:
+   `flexpyirt.polychoric(data, *, smooth=True, zero_cell_correction=0.5, tol=1e-10, max_iter=100)`
+   in `correlation.py` (shell) and `_polychoric.py` (jit kernels) returns a frozen
+   `PolychoricResult`. **Data**: any numeric codes; each item is recoded to $0..K_j-1$ over its
+   observed values (ascending), so unobserved codes are not categories (psych and lavaan do the
+   same in effect: an empty category only adds zero-probability cells). An item with one observed
+   category, a pair with no jointly observed respondent, or a pair in which one item is constant
+   among them raise `SpecificationError`. **Thresholds**: $\hat\tau_{jk}=\Phi^{-1}(\hat P(Y_j\le k))$
+   from every observed response to the item (available cases), shared by all pairs (two-step).
+   Pair tables use respondents who answered both items. This is lavaan's `missing = "pairwise"`
+   and psych's `global = TRUE`; psych switches to per-pair thresholds (`global = FALSE`) when
+   items differ in category counts, so it is compared on complete data only.
+   **Bivariate normal**: Genz's (2004) `BVNU` with the 20-point Gauss–Legendre rule for every $r$
+   (the 6- and 12-point rules are only cheaper), Drezner & Wesolowsky's (1990) expansion for
+   $|r|\ge0.925$, every branch evaluated and selected with `jnp.where`, infinite limits exact
+   (finite stand-in $\pm40$ inside formulas). A `custom_jvp` supplies the analytic derivatives
+   $\partial_r\Phi_2=\phi_2$ and $\partial_h\Phi_2=\phi(h)\Phi((k-rh)/\sqrt{1-r^2})$, so second
+   derivatives for Newton are exact too. It agrees with Plackett's integral by adaptive quadrature
+   to $10^{-14}$ in absolute value. **Per pair**: cells
+   $\pi_{ab}=\Phi_2(\tau_a,\tau'_b)-\Phi_2(\tau_{a-1},\tau'_b)-\Phi_2(\tau_a,\tau'_{b-1})+\Phi_2(\tau_{a-1},\tau'_{b-1})$
+   on a grid padded to $K_{\max}$ with $+\infty$ (padded cells have zero counts and probability),
+   $\ell=\sum n_{ab}\log\pi_{ab}$ maximized in $z=\operatorname{atanh}\rho$ by Newton (gradient
+   step when not concave, step halving, $|z|\le 8$), all pairs under `vmap` + `lax.while_loop`.
+   Start: atanh of the clipped Pearson correlation of the codes. Converged when the projected
+   gradient is $\le$ `tol` $\times n$ or the step is below $10^{-14}$. **Boundary**: when $\ell$
+   increases monotonically to $|\rho|=1$ (e.g. a 2 x 2 table with an empty cell) its gradient in $z$
+   decays exponentially and the loop stops early, so after the loop $\ell$ at $\pm8$ (the side of
+   $\hat z$) is compared with $\ell(\hat z)$; if it is at least as large the estimate is
+   $\pm\tanh 8$, `at_boundary` is set and `HeywoodWarning` is emitted. **Zero cells**: lavaan's
+   default (`zero.add = c(0.5, 0)`, `zero.keep.margins = TRUE`): a 2 x 2 table with exactly one empty
+   cell gets $+c$ on the empty cell's diagonal and $-c$ on the other, margins unchanged; larger
+   tables are not corrected. The default $c=0.5$ follows lavaan because dimensionality methods need
+   interior estimates; $c=0$ gives the plain ML. **Smoothing**: psych's `cor.smooth` exactly
+   (eigenvalues below $10^{-12}$ set to $10^{-10}$ when the smallest is below machine epsilon,
+   rescaled to sum to $p$, rebuilt, rescaled to unit diagonal), `NotPositiveDefiniteWarning`
+   (new in `errors`). Not reported: standard errors of $\hat\rho$ (not validated; the
+   dimensionality methods do not use them).
+   **Validation (V24)**: `validation/r/m5_polychoric_reference.R` (lavaan 0.7-3, psych 2.6.9):
+   simulated tetrachoric (8 items), mixed 2–5 categories with two factors, the same with 10% MCAR
+   (pairwise), extreme binary items with one-empty-cell 2 x 2 tables, LSAT7 and Science. lavaan
+   agrees to $\le 3.1\times10^{-8}$ (its `nlminb` tolerance; flexpyirt's pair gradients vanish to
+   $10^{-7}n$), thresholds to $10^{-12}$; psych to $\le 2\times10^{-5}$ on complete data without
+   corrected pairs (its `optimize()` tolerance); `cor.smooth` to $10^{-12}$.
 
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1546,10 +1589,12 @@ data-independent shapes (§15.21).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
 - Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
+- Drezner, Z., & Wesolowsky, G. O. (1990). On the computation of the bivariate normal integral. *Journal of Statistical Computation and Simulation*, 35(1–2), 101–107.
 - Edwards, M. C., Houts, C. R., & Cai, L. (2018). A diagnostic procedure to detect departures from local independence in item response theory models. *Psychological Methods*, 23(1), 138–149.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Froelich, A. G., & Habing, B. (2008). Conditional covariance-based subtest selection for DIMTEST. *Applied Psychological Measurement*, 32(2), 138–155.
 - Garrido, L. E., Abad, F. J., & Ponsoda, V. (2013). A new look at Horn's parallel analysis with ordinal variables. *Psychological Methods*, 18(4), 454–474.
+- Genz, A. (2004). Numerical computation of rectangular bivariate and trivariate normal and t probabilities. *Statistics and Computing*, 14(3), 251–260.
 - Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
 - Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
@@ -1578,7 +1623,9 @@ data-independent shapes (§15.21).
 - Olsson, U. (1979). Maximum likelihood estimation of the polychoric correlation coefficient. *Psychometrika*, 44(4), 443–460.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
+- Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
@@ -1595,6 +1642,7 @@ data-independent shapes (§15.21).
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
 - Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.

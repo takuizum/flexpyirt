@@ -11,6 +11,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
+- Correlations: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -733,6 +734,58 @@ Returned by `link()`. Immutable.
 | `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | Transform source-scale ability scores via $\theta^* = A\theta + B$ (`theta` and all `pv1..` columns of a scoring DataFrame; `se` $\mapsto A\,\mathrm{se}$, excluding linking error) |
 | `summary(*, digits=4)` | str | Readable plain-text summary (Jupyter displays HTML via `_repr_html_()`) |
 
+## Correlations
+
+### `polychoric`
+
+```text
+polychoric(data, *, smooth=True, zero_cell_correction=0.5, tol=1e-10,
+           max_iter=100) -> PolychoricResult
+```
+
+Polychoric correlation matrix (tetrachoric for binary items) of ordinal responses, by two-step
+maximum likelihood ([guide section 16](guide.md#16-polychoric-correlations)): each item's
+thresholds come from its marginal proportions, then each pair's correlation maximizes the
+likelihood of the pair's table under a discretized bivariate normal (Olsson, 1979). The
+bivariate normal probabilities use Genz's (2004) algorithm. Agrees with lavaan's `lavCor` on
+ordered variables.
+
+| Argument | Type | Description |
+|---|---|---|
+| `data` | DataFrame / 2-D array | One row per respondent, one column per item. Ordered category codes (any numbers; ascending order is the category order); missing as NaN. Each item needs at least two observed categories; unobserved codes are not categories |
+| `smooth` | bool | Smooth a matrix that is not positive definite (psych's `cor.smooth` rule) with a `NotPositiveDefiniteWarning` (default `True`) |
+| `zero_cell_correction` | float | For a 2 x 2 table with exactly one empty cell, add this to the diagonal containing the empty cell and subtract it from the other diagonal, keeping the margins (lavaan's default rule). Without it the estimate is $\pm 1$. `0` disables it (default `0.5`) |
+| `tol` | float | Convergence criterion on the gradient per observation (default `1e-10`) |
+| `max_iter` | int | Maximum Newton iterations per pair (default `100`) |
+
+Missing responses use available cases: thresholds use every observed response to the item, and a
+pair's table uses respondents who answered both items.
+
+**Returns**: [`PolychoricResult`](#polychoricresult)
+
+**Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (non-numeric data, fewer
+than two items, an item with one observed category, a pair with no respondent answering both, or
+one item constant among those who did).
+
+**Warns**: `HeywoodWarning` (a pair's likelihood is largest at $|\rho| \to 1$),
+`ConvergenceWarning` (a pair did not converge), `NotPositiveDefiniteWarning` (the matrix was
+smoothed).
+
+### `PolychoricResult`
+
+Returned by `polychoric()`. Immutable.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `correlation` | DataFrame | Item x item correlation matrix (smoothed when `smooth=True` and needed) |
+| `unsmoothed_correlation` | DataFrame | The pairwise estimates before smoothing |
+| `thresholds` | dict[str, ndarray] | Per item, the $K - 1$ thresholds $\tau_k = \Phi^{-1}(P(Y \le k))$ of its $K$ observed categories |
+| `categories` | dict[str, ndarray] | Per item, the observed response values in ascending order |
+| `n_obs` | DataFrame | Respondents with both responses observed (diagonal: responses to the item) |
+| `converged`, `at_boundary`, `zero_cell_corrected` | DataFrame (bool) | Per pair: convergence, maximum at $\lvert\rho\rvert \to 1$ (the estimate is then $\pm\tanh 8$), whether `zero_cell_correction` was applied |
+| `smoothed` | bool | Whether smoothing changed the matrix |
+| `min_eigenvalue` | float | Smallest eigenvalue of `unsmoothed_correlation` |
+
 ---
 
 ## Settings
@@ -818,3 +871,7 @@ Emitted after fitting when a free item parameter ends within `1e-4` of a finite 
 near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$, naming every affected item; also
 for a degenerate `NormalMixture` solution (a component with weight below `1e-3`, standard
 deviation below half the grid spacing, or mean outside the grid, or two coinciding components).
+
+#### `NotPositiveDefiniteWarning`
+
+Emitted by `polychoric()` when the pairwise matrix is not positive definite and `smooth=True` smoothed it.
