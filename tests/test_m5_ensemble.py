@@ -26,6 +26,7 @@ from flexpyirt import (
     TwoPL,
     comparison_data,
     dimensionality,
+    dimtest,
     empirical_kaiser,
     exploratory_detect,
     fit,
@@ -59,7 +60,7 @@ def _ensemble() -> DimensionalityResult:
 def test_ensemble_reuses_the_individual_methods() -> None:
     res = _ensemble()
     data = _lsat7()
-    key_a, key_b, key_c, _, key_e = jax.random.split(jax.random.key(7), 5)
+    key_a, key_b, key_c, _, key_e, key_f = jax.random.split(jax.random.key(7), 6)
     pa = parallel_analysis(data, key=key_a, n_replications=20)
     pc = polychoric(data)
     assert list(res.number_of_dimensions["n_factors"]) == [
@@ -82,8 +83,12 @@ def test_ensemble_reuses_the_individual_methods() -> None:
     best = xd.table[xd.table["n_clusters"] == xd.n_clusters].to_dict("records")[0]
     assert det["statistic"] == pytest.approx(float(best["DETECT_validation"]))
     assert det["supports_unidimensionality"] == (float(best["DETECT_validation"]) < 0.2)
+    dt = dimtest(data, key=key_f)
+    row_dt = res.unidimensionality.set_index("method").loc["DIMTEST"]
+    assert row_dt["statistic"] == pytest.approx(dt.p_value)
     assert set(res.results) == {
         "comparison_data",
+        "dimtest",
         "exploratory_detect",
         "hull",
         "polychoric",
@@ -104,7 +109,7 @@ def test_ensemble_consensus_lines() -> None:
     assert res.n_agreeing == np.max(counts)
     assert res.n_factors_median == float(np.median(k))
     flags = list(res.unidimensionality["supports_unidimensionality"])
-    assert res.n_unidimensionality_methods == 4
+    assert res.n_unidimensionality_methods == 5
     assert res.n_supporting == sum(bool(f) for f in flags)
     text = res.summary()
     assert "question A" in text and "question B" in text
@@ -143,8 +148,11 @@ def test_ensemble_reports_ties_without_breaking_them(monkeypatch: pytest.MonkeyP
 
 def test_ensemble_without_fit_has_only_the_detect_row() -> None:
     res = dimensionality(_lsat7(), key=jax.random.key(1), n_replications=5)
-    assert list(res.unidimensionality["method"]) == ["DETECT (exploratory, validation half)"]
-    assert res.n_unidimensionality_methods == 1
+    assert list(res.unidimensionality["method"]) == [
+        "DETECT (exploratory, validation half)",
+        "DIMTEST",
+    ]
+    assert res.n_unidimensionality_methods == 2
     assert "question B" in res.summary()
 
 
@@ -159,6 +167,7 @@ def test_ensemble_marks_m2_unavailable_with_missing_data() -> None:
     assert res.results["m2"] is None
     assert res.results["exploratory_detect"] is None
     assert res.results["comparison_data"] is None
+    assert res.results["dimtest"] is None
     assert res.n_unidimensionality_methods == 2
 
 

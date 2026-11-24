@@ -1227,6 +1227,39 @@ class ItemKernel(Protocol):
     書き出す）による 1 因子の母集団は完全に同じ、EFAtools の RMSE の列に対する順位和の $p$ 値は相対 $10^{-10}$ で
     一致する。3 因子、2 因子の順序、1 因子の 2 値のデータでの `CD()` とは、それぞれ 2 つのキーで同じ提案、平均 RMSE は
     15% 以内（母集団の乱数が違うため）で一致する。
+16. **DIMTEST（`dimtest()`、§16.8 の D6、V30）**: `_dimtest.py`（NumPy。JAX のキーから引いた乱数を引数で渡す）。
+    欠測のない 2 値データ、項目は 4 つ以上。**統計量**（Nandakumar & Stout, 1993）: 回答者を PT の得点で群に分け、
+    `min_group`（20）未満の群と $S_k\le0$ の群を除く。$T_L=K^{-1/2}\sum_k(\hat\sigma_k^2-\hat\sigma_{U,k}^2)/S_k$。
+    $\hat\sigma_k^2$ は AT の得点の（$J_k$ で割る）分散、$\hat\sigma_{U,k}^2=\sum_i\hat p_{ik}(1-\hat p_{ik})$、
+    $S_k^2=(\hat\mu_{4,k}-\hat\sigma_k^4+\hat\delta_{4,k})/J_k$、$\hat\delta_{4,k}=\sum_i\hat p_{ik}(1-\hat p_{ik})
+    (1-2\hat p_{ik})^2$。**バイアス補正**（Stout, Froelich & Gao, 2001）: 検定用の標本のカーネル平滑化した IRF（能力は
+    総得点の順位の $\Phi^{-1}(r/(N+1))$ で同順位は一様乱数で分け、$[-4,4]$ の 161 点上で帯域幅 $1.1N^{-1/5}$ の
+    ガウスカーネル。Ramsay, 1991）から、$\theta\sim N(0,1)$ と線形補間した IRF で検定用の標本と同じ大きさの 1 次元
+    データを $B$（100）個作り、$T=(T_L-\bar T_G)/\sqrt{1+1/B}$、$p=1-\Phi(T)$。**AT の選択**: `assessment_items` を
+    与えれば標本全体で検定する。与えなければ無作為な 3 分の 1（`training_fraction`）で AT を選び、残りで検定する
+    （Froelich & Habing, 2008 は別の部分標本を使う）。訓練用の条件付き共分散（§16.13）の Ward 法で 2〜6 群に分けた
+    ときのクラスタのうち、要素が 2 から `max_assessment_size`（項目の半分）までで、{AT, 残り} への分割の DETECT が
+    最大のもの。Froelich & Habing の条件付き共分散による AT の選択の考え方に沿うが、彼らの ATFIND そのものではなく、
+    そう明記する。**アンサンブル**: 欠測のない 2 値データなら `dimensionality()` は問い (B) に DIMTEST（$p\ge\alpha$）を
+    加える（キーの 6 つ目の分割）。そうでなければ使えない行とする。**照合（V30）**: 単独のプログラム DIMPACK 以外に
+    実装がないので、`validation/simulation/dimtest_study.py`（結果は `dimtest_study.json`）のシミュレーション研究で
+    受け入れる。2PL のデータ（傾き $U(0.8,1.8)$、切片 $N(0,0.8)$、項目を半分ずつ相関 $\rho$ の次元に置く）、各条件
+    200 反復、すべて既定値:
+
+    | データ | $N$ | $J$ | $\rho$ | $T$ の平均 | $T$ の SD | .05 で棄却 | .10 で棄却 |
+    |---|---|---|---|---|---|---|---|
+    | 1 次元 | 1000 | 20 | 1 | -0.07 | 0.79 | 0.020 | 0.050 |
+    | 1 次元 | 2000 | 20 | 1 | -0.10 | 0.73 | 0.005 | 0.015 |
+    | 1 次元 | 2000 | 30 | 1 | -0.15 | 0.74 | 0.000 | 0.025 |
+    | 2 次元 | 1000 | 20 | 0.7 | 4.83 | 1.00 | 0.990 | 0.995 |
+    | 2 次元 | 2000 | 20 | 0.7 | 6.91 | 0.92 | 1.000 | 1.000 |
+    | 2 次元 | 2000 | 30 | 0.8 | 6.44 | 0.87 | 1.000 | 1.000 |
+
+    検定は保守的である。$\bar T_G$ は $T_L$ の偏りを除く（$T$ の平均は 0 に近い）が、帰無仮説の下での $T_L$ の標準
+    偏差は 1 ではなく 0.75 程度なので、第 1 種の誤りは名目水準を下回る。相関 0.7〜0.8 の 2 次元に対する検出力は 0.99〜1。
+    したがって小さい $p$ は多次元性の強い証拠であり、大きい $p$ は一次元性の弱い証拠にとどまる（docstring とガイドに
+    書く）。$T_G$ のブートストラップ SD で標準化し直せば較正できるが、公表された統計量から離れるので行わない。各部分は
+    直接の計算と単体テストで比べ、`tests/test_m5_dimtest.py` で研究の小さい版（帰無 20 反復、対立 10 反復）を実行する。
 
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1279,6 +1312,7 @@ class ItemKernel(Protocol):
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
+- Nandakumar, R., & Stout, W. (1993). Refinements of Stout's procedure for assessing latent trait unidimensionality. *Journal of Educational Statistics*, 18(1), 41–68.
 - O'Connor, B. P. (2000). SPSS and SAS programs for determining the number of components using parallel analysis and Velicer's MAP test. *Behavior Research Methods, Instruments, & Computers*, 32(3), 396–402.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
@@ -1287,6 +1321,7 @@ class ItemKernel(Protocol):
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
+- Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
@@ -1295,6 +1330,7 @@ class ItemKernel(Protocol):
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
+- Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
 - Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
