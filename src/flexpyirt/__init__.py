@@ -8,9 +8,12 @@ from flexpyirt import errors
 from flexpyirt.correlation import PolychoricResult, polychoric
 from flexpyirt.dimensionality import (
     EmpiricalKaiserResult,
+    LocalDependenceResult,
     MAPResult,
+    ModelParallelAnalysisResult,
     ParallelAnalysisResult,
     empirical_kaiser,
+    model_parallel_analysis,
     parallel_analysis,
     velicer_map,
 )
@@ -41,9 +44,11 @@ __all__ = [
     "FitResult",
     "FourPL",
     "LinkResult",
+    "LocalDependenceResult",
     "LogNormalPrior",
     "MAPResult",
     "Model",
+    "ModelParallelAnalysisResult",
     "Nominal",
     "Normal",
     "NormalMixture",
@@ -59,6 +64,7 @@ __all__ = [
     "errors",
     "fit",
     "link",
+    "model_parallel_analysis",
     "parallel_analysis",
     "polychoric",
     "velicer_map",

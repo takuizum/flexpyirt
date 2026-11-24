@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
+from flexpyirt._compile import coerce_responses
 from flexpyirt._precision import check_x64
 from flexpyirt.correlation import (
     PolychoricResult,
@@ -25,11 +26,17 @@ from flexpyirt.correlation import (
 )
 from flexpyirt.errors import FlexpyirtWarning, NotPositiveDefiniteWarning, SpecificationError
 
+if TYPE_CHECKING:
+    from flexpyirt.result import FitResult
+
 __all__ = [
     "EmpiricalKaiserResult",
+    "LocalDependenceResult",
     "MAPResult",
+    "ModelParallelAnalysisResult",
     "ParallelAnalysisResult",
     "empirical_kaiser",
+    "model_parallel_analysis",
     "parallel_analysis",
     "velicer_map",
 ]
@@ -503,5 +510,180 @@ def parallel_analysis(
         reference_kind=reference,
         correlation_kind=correlation,
         quantile=None if quantile is None else float(quantile),
+        n_skipped=n_skipped,
+    )
+
+
+# ----------------------------------------------------------------------------- local dependence
+@dataclass(frozen=True)
+class LocalDependenceResult:
+    """Result of :meth:`flexpyirt.FitResult.local_dependence`.
+
+    Attributes
+    ----------
+    pairs : pandas.DataFrame
+        One row per item pair: ``item_i``, ``item_j``, ``n`` (respondents answering both),
+        ``q3``, ``q3_star``, ``x2``, ``g2``, ``df``, ``p_x2``, ``p_g2``, ``cramer_v``.
+    q3 : pandas.DataFrame
+        Item x item Q3 matrix (unit diagonal).
+    q3_mean : float
+        Mean off-diagonal Q3 (subtracted in ``q3_star``).
+    """
+
+    pairs: pd.DataFrame
+    q3: pd.DataFrame
+    q3_mean: float
+
+    @property
+    def max_q3_star(self) -> float:
+        """Largest Q3* over pairs (Christensen, Makransky & Horton, 2017)."""
+        return float(self.pairs["q3_star"].max())
+
+
+# ----------------------------------------------------------------------------- model-based PA
+ModelEigenType = Literal["max", "smc", "pca"]
+_MODEL_EIGEN_TYPES: tuple[str, ...] = ("max", "smc", "pca")
+
+
+def _model_eigenvalues(mat: np.ndarray, eigen_type: str) -> np.ndarray:
+    """Return descending eigenvalues (``"max"``: largest off-diagonal r on the diagonal)."""
+    if eigen_type == "max":
+        out = mat.copy()
+        np.fill_diagonal(out, np.max(mat[np.triu_indices_from(mat, k=1)]))
+        return _descending_eigenvalues(out)
+    return _eigenvalues(mat, eigen_type)
+
+
+@dataclass(frozen=True)
+class ModelParallelAnalysisResult:
+    r"""Result of :func:`model_parallel_analysis`.
+
+    Attributes
+    ----------
+    statistic : float
+        Second eigenvalue :math:`T` of the observed matrix.
+    p_value : float
+        :math:`(1+\#\{b: T_b\ge T\})/(B+1)` over the usable replications.
+    observed : numpy.ndarray
+        Observed eigenvalues (descending).
+    replications : numpy.ndarray
+        ``(B, p)`` eigenvalues of the data simulated from the fitted model.
+    eigen_type : str
+        The eigenvalue type used.
+    n_skipped : int
+        Replications whose correlations could not be estimated (excluded).
+    """
+
+    statistic: float
+    p_value: float
+    observed: np.ndarray
+    replications: np.ndarray
+    eigen_type: str
+    n_skipped: int
+
+
+def model_parallel_analysis(
+    fit: FitResult,
+    data: pd.DataFrame | np.ndarray,
+    *,
+    key: jax.Array,
+    n_replications: int = 100,
+    eigen_type: ModelEigenType = "max",
+    zero_cell_correction: float = 0.5,
+    item_names: list[str] | None = None,
+) -> ModelParallelAnalysisResult:
+    r"""Model-based (modified) parallel analysis of a fitted unidimensional model.
+
+    Drasgow & Lissak (1983): the second eigenvalue :math:`T` of the observed polychoric
+    (tetrachoric) matrix is compared with its distribution in data simulated from the fitted
+    unidimensional model, :math:`T_1,\dots,T_B`; a small
+
+    .. math::
+        p=\frac{1+\#\{b: T_b\ge T\}}{B+1}
+
+    indicates more second-dimension structure than the model produces. Simulated data have the
+    same size and missingness pattern as ``data``; :math:`\theta\sim N(\hat\mu,\hat\sigma^2)`.
+    With ``eigen_type="max"`` every diagonal element is the largest off-diagonal correlation, as
+    in ltm's ``unidimTest``; ``"smc"`` and ``"pca"`` are as in :func:`parallel_analysis`.
+
+    Parameters
+    ----------
+    fit : FitResult
+        Single-group unidimensional fit with a ``Normal`` latent distribution.
+    data : pandas.DataFrame or numpy.ndarray
+        Responses on the fitted items (the fitting data); missing as NaN.
+    key : jax.Array
+        JAX PRNG key for the simulations.
+    n_replications : int, default 100
+        Number of simulated data sets :math:`B`.
+    eigen_type : {"max", "smc", "pca"}, default "max"
+        Diagonal of the matrix whose eigenvalues are used.
+    zero_cell_correction : float, default 0.5
+        Passed to :func:`~flexpyirt.polychoric`.
+    item_names : list of str, optional
+        Column names when ``data`` is an array.
+
+    Returns
+    -------
+    ModelParallelAnalysisResult
+
+    Raises
+    ------
+    SpecificationError
+        Unsupported model, invalid options or data.
+    PrecisionError
+        If JAX is not running in 64-bit mode.
+
+    Warns
+    -----
+    FlexpyirtWarning
+        If some simulated data sets had to be skipped.
+    """
+    check_x64()
+    fit._require_unidimensional_normal("model_parallel_analysis()")
+    if eigen_type not in _MODEL_EIGEN_TYPES:
+        raise SpecificationError(
+            f"eigen_type must be one of {_MODEL_EIGEN_TYPES}, got {eigen_type!r}."
+        )
+    if not (isinstance(n_replications, (int, np.integer)) and n_replications >= 2):
+        raise SpecificationError(
+            f"n_replications must be an integer of at least 2, got {n_replications!r}."
+        )
+    y = coerce_responses(data, fit._model, item_names=item_names)
+    names = [name for name, _ in fit._model.items]
+    if len(names) < 3:
+        raise SpecificationError("model_parallel_analysis() needs at least 3 items.")
+    values = np.where(y >= 0, y, np.nan).astype(np.float64)
+    observed_corr = _observed_correlation(values, names, "polychoric", zero_cell_correction)
+    observed = _model_eigenvalues(observed_corr, eigen_type)
+    missing = y < 0
+    rows: list[np.ndarray] = []
+    n_skipped = 0
+    for k in jax.random.split(key, int(n_replications)):
+        sim = fit._simulate_responses(k, missing)
+        try:
+            corr = _observed_correlation(sim, names, "polychoric", zero_cell_correction, quiet=True)
+        except SpecificationError:
+            n_skipped += 1
+            continue
+        rows.append(_model_eigenvalues(corr, eigen_type))
+    if len(rows) < 2:
+        raise SpecificationError("Fewer than two simulated data sets could be estimated.")
+    if n_skipped:
+        warnings.warn(
+            f"{n_skipped} of {n_replications} simulated data sets were skipped (an item was "
+            "constant among jointly observed respondents).",
+            FlexpyirtWarning,
+            stacklevel=2,
+        )
+    replications = np.vstack(rows)
+    statistic = float(observed[1])
+    p_value = float((1 + np.sum(replications[:, 1] >= statistic)) / (replications.shape[0] + 1))
+    return ModelParallelAnalysisResult(
+        statistic=statistic,
+        p_value=p_value,
+        observed=observed,
+        replications=replications,
+        eigen_type=eigen_type,
         n_skipped=n_skipped,
     )
