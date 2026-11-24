@@ -71,9 +71,27 @@ uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
 
-テストは pytest-xdist で並列に走る（`-n auto`）。直列にしたいときは `-n 0` を付ける。
-10 秒程度を超えるテストには `@pytest.mark.slow` を付ける。PR の CI はこれを飛ばし（`-m "not slow"`）、
-`develop`/`main` への push では全テストを走らせる。手元で素早く確かめるなら `uv run pytest -m "not slow"`。新しく 10 秒を超えるテストを書いたら `slow` を付ける。
+### テスト
+
+テストは pytest-xdist で並列に走る（`-n auto`、1 モジュールを 1 ワーカーで実行）。直列にしたいときは `-n 0` を付ける。
+テストは 2 層に分かれる。
+
+| 層 | 内容 | 実行するタイミング |
+|---|---|---|
+| fast | `-m "not slow"`：単体テスト、ドキュメント、M1 の mirt スモークテスト（CI で数分） | すべての PR、`develop`/`main` へのすべての push |
+| full | mirt 参照値との照合をすべて含む全テスト。Python ごとに 4 シャードに分割 | `develop` の夜間実行、リリース PR（`develop` → `main`）、手動実行（*Run workflow*） |
+
+mirt 参照値との照合は、full 層（夜間実行またはリリース PR）が通って初めて完了とする。ROADMAP の項目にチェックを付ける前に夜間実行の結果を確認する。
+
+- 約 5 秒を超えるテストには `@pytest.mark.slow` を付ける。`functools.cache` で共有するフィッティングの時間も含める（そのフィッティングを最初に使うテストが時間を払う）。
+  fast 層の結果の最後に、`slow` なしで 5 秒を超えたテストが一覧される（"tests over 5 s not marked slow"）。
+- `tests/test_mirt_*.py` はモジュールごと slow にする（`pytestmark = pytest.mark.slow`）。`test_mirt_m1.py` だけは例外。
+- 1 モジュールは 1 ワーカーで走るので、数分かかるフィッティングは専用のモジュールに分ける（`tests/_mirt_multigroup.py` と `tests/test_mirt_m4_multigroup_*.py` を参照）。
+- CI は JAX の永続コンパイルキャッシュ（`JAX_COMPILATION_CACHE_DIR`）を実行間で引き継ぐ。
+- full 層のシャードは、`tests/durations.json` に記録したモジュールごとの秒数で均等に分ける。重いモジュールを足したり分けたりしたら、全テストを走らせて更新する：
+  `uv run pytest --write-durations tests/durations.json`（または full 層の CI 実行が残す `durations-*` アーティファクトをまとめる）。ファイルにないモジュールは 1 テスト 1 秒として扱う。
+
+手元で素早く確かめるなら `uv run pytest -m "not slow"`。CI と同じ 1 シャードだけ走らせるなら `uv run pytest --shard 2/4`。
 
 mirt の参照値を作り直すとき（R 4.4+ と mirt が必要）:
 

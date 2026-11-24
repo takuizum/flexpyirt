@@ -79,10 +79,34 @@ uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
 
-Tests run in parallel (pytest-xdist, `-n auto`); pass `-n 0` to run serially. Tests that take
-more than about 10 s are marked `@pytest.mark.slow`. PR CI skips them (`-m "not slow"`); pushes
-to `develop`/`main` run the full suite. Run `uv run pytest -m "not slow"` locally for a quick
-check, and mark any new test that takes more than ~10 s as `slow`.
+### Tests
+
+Tests run in parallel (pytest-xdist, `-n auto`, one module per worker); pass `-n 0` to run
+serially. They come in two tiers:
+
+| Tier | What | Where it runs |
+|---|---|---|
+| fast | `-m "not slow"`: unit tests, docs, the M1 mirt smoke test (a few minutes on CI) | every PR, every push to `develop`/`main` |
+| full | everything, including all mirt reference comparisons, split into 4 shards per Python | nightly on `develop`, release PRs (`develop` → `main`), manual runs (*Run workflow*) |
+
+A mirt reference comparison is complete only when the full tier passes (nightly or on the
+release PR); check the nightly run before ticking a ROADMAP item.
+
+- Mark a test `@pytest.mark.slow` when it takes more than ~5 s, counting its share of a fit it
+  caches with `functools.cache` (the first test that needs the fit pays for it). The fast-tier
+  summary lists unmarked tests over 5 s ("tests over 5 s not marked slow").
+- `tests/test_mirt_*.py` modules are slow as a whole (`pytestmark = pytest.mark.slow`), except
+  `test_mirt_m1.py`.
+- A module runs on one worker, so a fit that takes minutes goes in a module of its own (see
+  `tests/_mirt_multigroup.py` and `tests/test_mirt_m4_multigroup_*.py`).
+- CI keeps a persistent JAX compilation cache between runs (`JAX_COMPILATION_CACHE_DIR`).
+- Full-tier shards are balanced by the seconds per module in `tests/durations.json`. After adding
+  or splitting heavy modules, refresh it from a full run:
+  `uv run pytest --write-durations tests/durations.json` (or merge the `durations-*` artifacts of
+  a full CI run). A module missing from the file counts as 1 s per test.
+
+Run `uv run pytest -m "not slow"` locally for a quick check, and `uv run pytest --shard 2/4` to
+run one shard as CI does.
 
 To regenerate the mirt reference values (needs R 4.4+ and mirt):
 
