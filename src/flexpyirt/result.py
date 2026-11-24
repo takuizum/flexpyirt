@@ -40,10 +40,13 @@ from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
     from flexpyirt._dif import DIFScheme, PAdjust
-    from flexpyirt.dimensionality import LocalDependenceResult
+    from flexpyirt.dimensionality import JSIMethod, JSIResult, LocalDependenceResult
     from flexpyirt.model import Model
 
 __all__ = ["FitResult"]
+
+_JSI_APPROXIMATION_MIN_ITEMS = 10
+"""Below this many items ``jsi(method="newton" | "one_step")`` warns (DESIGN.md §16.17)."""
 
 ScoreMethod = Literal["EAP", "MAP", "ML", "WLE", "PV"]
 _SCORE_METHODS: tuple[str, ...] = ("EAP", "MAP", "ML", "WLE", "PV")
@@ -888,6 +891,179 @@ class FitResult:
             pairs=pairs,
             q3=pd.DataFrame(q3, index=names, columns=names),
             q3_mean=q3_mean,
+        )
+
+    def jsi(
+        self,
+        data: Any,
+        *,
+        item_names: list[str] | None = None,
+        method: JSIMethod = "refit",
+        newton_steps: int = 1,
+        tol: float = 1e-8,
+        max_iter: int = 100,
+    ) -> JSIResult:
+        r"""Jackknife slope index (Edwards, Houts & Cai, 2018; DESIGN.md §16.17).
+
+        For every item :math:`j` the model is re-estimated without item :math:`j`, and for
+        every other item :math:`i`
+
+        .. math::
+            \mathrm{JSI}_{ji}=\frac{\hat a_i-\hat a_i^{(-j)}}
+            {\mathrm{SE}\bigl(\hat a_i^{(-j)}\bigr)}.
+
+        A large positive value means item :math:`i`'s slope was inflated by item :math:`j`, a
+        sign of local dependence between the two. There is no fixed cutoff: look for values that
+        stand out from the rest of the matrix.
+
+        Removing item :math:`j` is done by treating its responses as missing, so the latent
+        distribution, constraints across items and priors of the remaining parameters stay as
+        fitted. The three methods differ only in how :math:`\hat\eta^{(-j)}` is obtained, all
+        starting from the full-model estimates :math:`\hat\eta`:
+
+        * ``"refit"`` (as mirt's ``residuals(type = "JSI")``): Newton–Raphson with step
+          halving on :math:`\ell_{(-j)}` until the largest step is below ``tol``; the SE is
+          from the observed information at the refit.
+        * ``"newton"``: ``newton_steps`` Newton steps (a Taylor approximation of the refit),
+          the SE from the information at the last evaluation. One step usually agrees with
+          the refit to a few hundredths; two steps to about 0.01.
+        * ``"one_step"``: one step with the full model's covariance matrix,
+          :math:`\hat\eta^{(-j)}\approx\hat\eta+V\nabla\ell_{(-j)}(\hat\eta)`, and the full
+          model's SE in the denominator. It needs only :math:`J` gradients (one ``vmap``), but
+          the different denominator makes it differ from the refit by up to about 0.1 in small
+          samples.
+
+        Parameters
+        ----------
+        data : DataFrame or array-like
+            The fitting data; missing as NaN.
+        item_names : list of str, optional
+            Column names when ``data`` is an array.
+        method : {"refit", "newton", "one_step"}
+            How the estimates without each item are obtained.
+        newton_steps : int
+            Steps for ``method="newton"`` (at least 1).
+        tol : float
+            Convergence tolerance on the largest step for ``method="refit"``.
+        max_iter : int
+            Maximum Newton steps for ``method="refit"``.
+
+        Returns
+        -------
+        JSIResult
+
+        Raises
+        ------
+        PrecisionError
+            If JAX is not configured for 64-bit floating point.
+        SpecificationError
+            For multiple-group, multidimensional or non-``Normal`` latent models, fewer than
+            three items, invalid options, or ``method="one_step"`` without a covariance matrix.
+
+        Warns
+        -----
+        ConvergenceWarning
+            If a refit does not converge in ``max_iter`` steps.
+        """
+        from flexpyirt import _jsi
+        from flexpyirt.dimensionality import JSIResult
+        from flexpyirt.errors import ConvergenceWarning
+
+        check_x64()
+        self._require_unidimensional_normal("jsi()")
+        if method not in ("refit", "newton", "one_step"):
+            raise SpecificationError(
+                f"Unknown method={method!r}; use 'refit', 'newton' or 'one_step'."
+            )
+        if method == "newton" and (int(newton_steps) != newton_steps or newton_steps < 1):
+            raise SpecificationError("newton_steps must be a positive integer.")
+        if method == "refit" and (not tol > 0 or int(max_iter) != max_iter or max_iter < 1):
+            raise SpecificationError("tol must be positive and max_iter a positive integer.")
+        if method == "one_step" and self.vcov is None:
+            raise SpecificationError("method='one_step' needs a fit with standard errors (se).")
+        names = [name for name, _ in self._model.items]
+        n_items = len(names)
+        if n_items < 3:
+            raise SpecificationError("jsi() needs at least three items.")
+        if method != "refit" and n_items < _JSI_APPROXIMATION_MIN_ITEMS:
+            warnings.warn(
+                f"With {n_items} items, removing one changes the estimates too much for "
+                f"method={method!r} to approximate the refit; use method='refit'.",
+                FlexpyirtWarning,
+                stacklevel=2,
+            )
+        y = coerce_responses(data, self._model, item_names=item_names)
+        prob = self._compiled_for(y)
+        eta = np.asarray(self._eta, dtype=np.float64)
+
+        params = self.parameters
+        free = params["free"].to_numpy(dtype=bool)
+        fid = params["free_id"].to_numpy(dtype=np.int64)
+        item_col = params["item"].to_numpy()
+        lookup = dict(self._model.items)
+        slope_id = np.full(n_items, -1, dtype=np.int64)
+        for k, name in enumerate(names):
+            slope = self._model.item_kernel(lookup[name]).slope_params
+            if not slope:
+                continue
+            row = (item_col == name) & (params["param"].to_numpy() == slope[0]) & free
+            if row.any():
+                slope_id[k] = fid[row][0]
+        a_full = np.where(slope_id >= 0, eta[np.maximum(slope_id, 0)], np.nan)
+
+        out = np.full((n_items, n_items), np.nan)
+        converged = np.ones(n_items, dtype=bool)
+        if method == "one_step":
+            assert self.vcov is not None
+            grads = np.asarray(_jsi.gradients_without(prob, jnp.asarray(eta), jnp.arange(n_items)))
+            se_full = np.sqrt(np.clip(np.diag(self.vcov), 0.0, None))
+        for j, name in enumerate(names):
+            keep = np.unique(fid[free & (item_col != name)])
+            if method == "one_step":
+                grad = np.zeros_like(eta)
+                grad[keep] = grads[j, keep]
+                eta_j = eta + self.vcov @ grad  # type: ignore[operator]
+                se_j = se_full
+            else:
+                outcome = _jsi.newton_without(
+                    prob,
+                    eta,
+                    j,
+                    keep,
+                    max_steps=int(max_iter if method == "refit" else newton_steps),
+                    tol=tol if method == "refit" else None,
+                )
+                converged[j] = outcome.converged
+                eta_j = outcome.eta
+                se_j = np.full(eta.size, np.nan)
+                se_j[keep] = np.sqrt(np.clip(np.diag(outcome.vcov), 0.0, None))
+            for i in range(n_items):
+                sid = slope_id[i]
+                if i == j or sid < 0 or sid not in keep:
+                    continue
+                out[j, i] = (a_full[i] - eta_j[sid]) / se_j[sid]
+        if not converged.all():
+            bad = [names[k] for k in np.flatnonzero(~converged)]
+            warnings.warn(
+                f"The refit without items {bad} did not converge in {max_iter} steps.",
+                ConvergenceWarning,
+                stacklevel=2,
+            )
+        upper_i, upper_j = np.triu_indices(n_items, k=1)
+        pairs = pd.DataFrame(
+            {
+                "item_i": [names[int(i)] for i in upper_i],
+                "item_j": [names[int(j)] for j in upper_j],
+                "jsi_ij": out[upper_j, upper_i],
+                "jsi_ji": out[upper_i, upper_j],
+            }
+        )
+        pairs["folded"] = pairs["jsi_ij"] + pairs["jsi_ji"]
+        return JSIResult(
+            matrix=pd.DataFrame(out, index=pd.Index(names, name="removed"), columns=names),
+            pairs=pairs,
+            method=method,
+            converged=pd.Series(converged, index=names, name="converged"),
         )
 
     def m2(
