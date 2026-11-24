@@ -1056,7 +1056,7 @@ class ItemKernel(Protocol):
    **アンサンブル**（`dimensionality()`、D3 の後）: 各手法は共通の結果（問い A か B か、推奨 $k$ または判定、統計量、
    用いた閾値とその出典）を返す。要約には全手法を並べ、(A) の合意は $k$ の最頻値・中央値と一致数（同数は決めずに報告）、
    (B) は本質的一次元性を支持する手法の数とする。重みはシミュレーション研究の裏付けができるまで付けない。閾値
-   （DETECT の 0.1 / 0.5 / 1、Q3* の 0.2、RMSEA）は引数にし、出典を docstring に書く。ポリコリック行列は 1 回だけ計算して
+   （DETECT の 0.2 / 0.4 / 1、Q3* の 0.2、RMSEA）は引数にし、出典を docstring に書く。ポリコリック行列は 1 回だけ計算して
    共有し、シミュレーションは JAX の PRNG キーを使う。アンサンブル自体はシミュレーション研究（1 次元・2 次元・
    バイファクター構造のデータ）で確かめる。
 9. **ポリコリック・テトラコリック相関（`polychoric()`、§16.8 の D1、V24）**:
@@ -1156,6 +1156,31 @@ class ItemKernel(Protocol):
     表示する。モジュールと関数が同じ名前 `dimensionality` を持つ（`fit` と同じ）ので、`flexpyirt.dimensionality` は
     関数を指す。テストではモジュールを `importlib.import_module` で取得する。`tests/test_m5_ensemble.py` で、各行を
     個々の関数と同じキーで計算し直して確かめる。
+13. **DETECT（`detect()`、`exploratory_detect()`、§16.8 の D4、V27）**: `_detect.py`（NumPy）。
+    **条件付き共分散**: Zhang & Stout (1999)。各ペアについて、総得点 $S$ が等しい群と残りの得点 $S-X_i-X_j$ が等しい
+    群のそれぞれで最尤の共分散を求め、群の割合で平均し、さらに 2 つを平均する（総得点による推定は負に、残りの得点に
+    よる推定は正に偏る）。群は `np.unique` と `np.bincount` でペアごとに 1 回で作る。生の項目得点を使い（多値項目も
+    可）、欠測のないデータを要する（そうでなければ得点が定義できない）。そのため `dimensionality()` は欠測があると
+    DETECT を使えないと示す。**指標**（sirt の `detect.index`）: DETECT $=100\,\overline{\delta\,\mathrm{ccov}}$、ASSI、
+    RATIO、MADCOV100、MCOV100 の、重みなしと $\sqrt{n_{ij}}$ で重み付けした版（欠測がなければ同じ。sirt の形に合わせて
+    残す）。sirt の既定の `conf.detect` の平滑化した（カーネルによる）条件付き共分散は実装しない。**探索的**: 行を半分に
+    分け（JAX のキーで `floor(N/2)` 行を推定用に、または指定）、推定用の半分の行列から作る
+    $d=\max(\mathrm{ccov})-\mathrm{ccov}$（最大値は sirt の `create.ccov` と同じく 0 の対角を含む）に Ward 法を当てる。
+    R の `hclust(method = "ward.D")` は Lance–Williams の Ward の更新を $d$ そのものに当て、SciPy の `"ward"` は 2 乗距離に
+    当てるので、SciPy には $\sqrt d$ を渡す（併合の高さは 2 乗すると R と同じ）。`cutree` はクラスタを最初に現れた順に
+    番号付けするので、SciPy の `fcluster` の出力も同じく付け直す。$k=2..$`max_clusters` の各分割を両方の半分で評価し、
+    `n_clusters` は推定用の半分での DETECT を最大にする（sirt と同じ選び方）。Zhang & Stout の遺伝的アルゴリズムによる
+    分割の探索は実装しない。**閾値**（docstring、ガイド）: DETECT $<0.2$ / $0.4$ / $1$、ASSI $0.25$、RATIO $0.36$
+    （Jang & Roussos, 2007; Zhang, 2007。§16.8 の 0.1 / 0.5 / 1 はここで訂正した）。**アンサンブル**:
+    `dimensionality()` は選んだ分割の検証用の半分での DETECT を問い (B) の行として加える（`detect_threshold` $=0.2$
+    未満なら支持）。`fit` がなくても使える。キーは 3 つ（平行分析、モデルに基づく平行分析、DETECT）に分ける。
+    **照合（V27）**: `validation/r/m5_detect_reference.R`（sirt 4.2.133）。シミュレーションの 2 次元（正しい分割と
+    誤った分割）、1 次元、Science（多値）のデータで `conf.detect(use_sum_score = TRUE, bias_corr = TRUE, smooth = FALSE)`、
+    3 クラスタのデータで `expl.detect(use_sum_score = TRUE, estsample = )`。条件付き共分散、5 つの指標（両方の
+    重み付け）、分割、両方の半分での指標は $10^{-12}$（実測 $10^{-14}$）で、Ward の併合の高さは $10^{-12}$ で一致する。
+    既定の `smooth = TRUE` のままだと、sirt の `conf.detect(use_sum_score = TRUE)` は総得点を標準化してから生の項目得点を
+    引いて残りの得点とするので、残りの得点の群が誤る（`sim_2d` で DETECT 1.60 が 6.73 になる）。精度のページに記録し、
+    従わない。
 
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1189,6 +1214,7 @@ class ItemKernel(Protocol):
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
+- Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.

@@ -64,6 +64,7 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | Parallel analysis, MAP, empirical Kaiser criterion | EFAtools' `EKC()` and `PARALLEL()`, psych's `vss()`, EFA.dimensions' `MAP()` and an independent R implementation of the fourth-power MAP, on the same correlation matrices to $10^{-11}$; reference eigenvalues of normal data within Monte Carlo error |
 | Q3 and LD $X^2$ / $G^2$ | `residuals(m, type = "Q3" / "LD" / "LDG2")` on the same models fitted by mirt |
 | Model-based parallel analysis | ltm's `unidimTest()` with the same item parameters: the observed statistic, and the simulated distribution within Monte Carlo error |
+| DETECT (confirmatory, exploratory) | sirt's `conf.detect(use_sum_score = TRUE, smooth = FALSE)` and `expl.detect(use_sum_score = TRUE)` with the same split: conditional covariances, indices, partitions, to $10^{-12}$ |
 | Scale linking (Haebara, Stocking–Lord) | independent R implementations of the criteria using mirt's response functions (mirt itself has no characteristic-curve linking) |
 
 ## Known differences from mirt
@@ -117,6 +118,11 @@ The complete validation plan, with every case, mirt call and measured difference
 ## Known differences from other packages
 
 - **Fourth-power MAP in EFA.dimensions.** EFA.dimensions (0.1.9.3) computes its "4th power" MAP statistic with a matrix power, $(\operatorname{tr}(R^{*4})-p)/(p(p-1))$, not by raising each partial correlation to the fourth power as Velicer, Eaton & Fava (2000) do (its values can exceed 1). flexpyirt uses the elementwise power; the squared version agrees with EFA.dimensions and psych.
+- **Sum-score DETECT in sirt's `conf.detect()`.** With `use_sum_score = TRUE` and the default
+  `smooth = TRUE`, sirt 4.2 standardizes the total score before subtracting the two item scores,
+  so the "rest score" groups are not rest-score groups and the indices differ (DETECT 6.73
+  instead of 1.60 on one test case). With `smooth = FALSE`, and in `expl.detect()`, sirt and
+  flexpyirt agree.
 
 ## References
 

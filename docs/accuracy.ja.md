@@ -59,6 +59,7 @@ $10^{-8}$ 程度）。
 | 平行分析、MAP、経験的カイザー基準 | 同じ相関行列に対する EFAtools の `EKC()`・`PARALLEL()`、psych の `vss()`、EFA.dimensions の `MAP()`、4 乗版 MAP の R による独立な実装と $10^{-11}$ まで。正規データの参照固有値は Monte Carlo 誤差の範囲で |
 | Q3、LD $X^2$ / $G^2$ | mirt で推定した同じモデルでの `residuals(m, type = "Q3" / "LD" / "LDG2")` |
 | モデルに基づく平行分析 | 同じ項目パラメタでの ltm の `unidimTest()`。観測された統計量と、Monte Carlo 誤差の範囲でシミュレーションの分布 |
+| DETECT（確認的・探索的） | 同じ分割での sirt の `conf.detect(use_sum_score = TRUE, smooth = FALSE)` と `expl.detect(use_sum_score = TRUE)`。条件付き共分散・指標・分割が $10^{-12}$ まで |
 | 尺度リンキング（Haebara、Stocking–Lord） | mirt の反応関数を使って規準を計算する R の独立な実装（mirt 自体に特性曲線法のリンキングはない） |
 
 ## mirt との既知の違い
@@ -103,6 +104,10 @@ $10^{-8}$ 程度）。
 ## 他のパッケージとの既知の違い
 
 - **EFA.dimensions の 4 乗版 MAP。** EFA.dimensions (0.1.9.3) は「4 乗」の MAP 統計量を行列のべき乗 $(\operatorname{tr}(R^{*4})-p)/(p(p-1))$ で計算しており、Velicer, Eaton & Fava (2000) のように各偏相関を 4 乗していない（値が 1 を超えることがある）。flexpyirt は要素ごとの 4 乗を使う。2 乗版は EFA.dimensions・psych と一致する。
+- **sirt の `conf.detect()` の総得点による DETECT。** `use_sum_score = TRUE` で既定の `smooth = TRUE` のまま
+  だと、sirt 4.2 は総得点を標準化してから 2 項目の得点を引くため、「残りの得点」の群が残りの得点の群にならず、
+  指標が変わる（あるテストケースで DETECT 1.60 が 6.73 になる）。`smooth = FALSE` と `expl.detect()` では sirt と
+  flexpyirt は一致する。
 
 ## 参考文献
 

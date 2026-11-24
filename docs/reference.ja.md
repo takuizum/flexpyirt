@@ -11,7 +11,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - 相関: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`model_parallel_analysis`](#model_parallel_analysis), [`dimensionality`](#dimensionality) とその結果
+- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) とその結果
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -849,19 +849,63 @@ $p = (1 + \#\{T_b \ge T\})/(B + 1)$。`eigen_type="max"` は ltm の `unidimTest
 | `q3_mean` | float | 非対角の Q3 の平均 |
 | `max_q3_star` | float | 最大の Q3\* |
 
+### `detect`
+
+```text
+detect(data, clusters) -> DetectResult
+```
+
+与えた項目の分割に対する確認的 DETECT（Zhang & Stout, 1999）。各ペアの条件付き共分散は、総得点で条件付けた共分散と
+残りの得点で条件付けた共分散の平均。DETECT $= 100 \times$ $\delta_{ij}\,\mathrm{ccov}_{ij}$ の平均（同じクラスタなら
+$\delta = 1$、異なれば $-1$）で、ASSI と RATIO（Zhang, 2007）も求める。`data` は欠測のない数値の項目得点。
+`clusters` は項目 → ラベルの対応、または列の順のラベル。よく使われる読み方（Jang & Roussos, 2007; Zhang, 2007）は、
+DETECT $< 0.2$ で本質的に一次元、$0.2$〜$0.4$ で弱い、$0.4$〜$1$ で中程度、$> 1$ で強い多次元性。ASSI $> 0.25$ または
+RATIO $> 0.36$ でその分割について一次元性からの本質的なずれ。
+
+### `DetectResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `indices` | DataFrame | 行 `DETECT`, `ASSI`, `RATIO`, `MADCOV100`, `MCOV100`、列 `unweighted`, `weighted` |
+| `detect`, `assi`, `ratio` | float | 重みなしの指標 |
+| `conditional_covariance` | DataFrame | 項目 x 項目の条件付き共分散 |
+| `clusters` | Series | 使った分割 |
+| `n_obs` | int | 回答者数 |
+
+### `exploratory_detect`
+
+```text
+exploratory_detect(data, *, max_clusters=4, key=None,
+                   estimation_rows=None) -> ExploratoryDetectResult
+```
+
+行を推定用と検証用の半分に分け（`key` で無作為に、または `estimation_rows` で指定）、推定用の半分で
+$\max(\mathrm{ccov}) - \mathrm{ccov}$ に Ward 法を当てて項目をクラスタに分け、$2, \dots,$ `max_clusters` 個への各分割の
+DETECT・ASSI・RATIO を両方の半分で報告する。
+
+### `ExploratoryDetectResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `table` | DataFrame | クラスタ数ごとの `cluster_sizes` と、推定用・検証用の半分での `DETECT` / `ASSI` / `RATIO` |
+| `clusters` | dict[int, Series] | クラスタ数ごとの分割 |
+| `n_clusters` | int | 推定用の半分での DETECT が最大のクラスタ数 |
+| `estimation_rows`, `validation_rows` | ndarray | 2 つの半分の行位置 |
+
 ### `dimensionality`
 
 ```text
 dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=0.5,
                alpha=0.05, q3_star_threshold=0.2, rmsea_threshold=0.05,
-               item_names=None) -> DimensionalityResult
+               detect_threshold=0.2, max_clusters=4, item_names=None) -> DimensionalityResult
 ```
 
 いくつかの診断を実行して並べ、2 つの合意を別々に示す（単独で信頼できる手法はない。Auerswald & Moshagen, 2019）。
 
 - **次元はいくつか**: `parallel_analysis()`（ポリコリック、PCA、並べ替え、95%）、`velicer_map()`（改訂版）、
   `empirical_kaiser()`。合意は最頻値（同数ならすべて）と中央値、および一致した手法の数。
-- **本質的一次元性は認められるか**: `fit` を与えたときだけ。`model_parallel_analysis()`（$p \ge$ `alpha`）、最大の
+- **本質的一次元性は認められるか**: 欠測のないデータで `exploratory_detect()`（選んだ分割の検証用の半分での
+  DETECT $<$ `detect_threshold`）、`fit` を与えればさらに `model_parallel_analysis()`（$p \ge$ `alpha`）、最大の
   Q3\* $<$ `q3_star_threshold`（0.2 はよく使われる目安で、臨界値はテストと標本による）、`FitResult.m2()` の
   RMSEA $\le$ `rmsea_threshold`（近似的な適合。欠測があると使えず、その旨を示す）。合意は支持する手法の数（使えた
   手法のうち）。手法に重みは付けない。

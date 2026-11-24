@@ -24,7 +24,8 @@ for the models and algorithms behind them, see [Theory](theory.md).
 16. [Polychoric correlations](#16-polychoric-correlations)
 17. [Number of dimensions](#17-number-of-dimensions)
 18. [Local dependence and the dimensionality report](#18-local-dependence-and-the-dimensionality-report)
-19. [Errors and warnings](#19-errors-and-warnings)
+19. [DETECT](#19-detect)
+20. [Errors and warnings](#20-errors-and-warnings)
 
 ## 1. Setup
 
@@ -956,11 +957,38 @@ print(report)
   second eigenvalue is larger than the model produces (Drasgow & Lissak, 1983). Because the
   model was fitted to the same data the $p$-value is conservative: a small value is evidence of a
   second dimension, a large one (here even 1) is not proof of unidimensionality.
-- `dimensionality()` runs the methods of section 17 and, with `fit=`, these checks and $M_2$,
+- `dimensionality()` runs the methods of section 17, DETECT (section 19) and, with `fit=`,
+  these checks and $M_2$,
   and prints every result with two separate consensus lines: how many dimensions, and how many
   checks support essential unidimensionality. It does not merge them into one verdict.
 
-## 19. Errors and warnings
+## 19. DETECT
+
+DETECT (Zhang & Stout, 1999) looks at the covariance of item pairs among respondents with the
+same total (or rest) score. Under essential unidimensionality these conditional covariances are
+near zero; with several dimensions they are positive within clusters of items and negative
+across them.
+
+```python
+from flexpyirt import detect, exploratory_detect
+
+halves = {item: ("A" if i < len(items) // 2 else "B") for i, item in enumerate(items)}
+print(detect(df, halves).indices.round(3))
+explore = exploratory_detect(df, max_clusters=3, key=jax.random.key(3))
+print(explore.table.round(3))
+```
+
+- `detect()` scores a partition you supply (confirmatory DETECT); `exploratory_detect()`
+  searches partitions on half of the respondents and reports them on both halves, so a
+  partition that only fits the noise of the first half shows up as a low validation DETECT.
+- A common reading: DETECT below 0.2 is essentially unidimensional, 0.2–0.4 weak, 0.4–1
+  moderate and above 1 strong multidimensionality; ASSI above 0.25 or RATIO above 0.36 points to
+  an approximately simple structure. For unidimensional data DETECT is close to zero or
+  negative for every partition, as here.
+- DETECT needs complete data. `dimensionality()` includes the exploratory DETECT (validation half)
+  among its unidimensionality checks.
+
+## 20. Errors and warnings
 
 | Type | When |
 |---|---|

@@ -29,6 +29,7 @@ English | [日本語](VALIDATION.ja.md)
 | Polychoric correlation vs lavaan / psych; thresholds; smoothing vs `cor.smooth` | 1e-6 / 1e-3; 1e-12; 1e-12 |
 | EKC, MAP, observed eigenvalues on the same matrix; normal reference mean / 95th percentile | 1e-11; $\lvert z\rvert\le4.5$ / 6e-3 |
 | LD $X^2$ / $G^2$; signed $V$, Q3 (refitted models); model-based PA observed / simulated mean / 95th percentile | 1e-5 (relative); 1e-6; 2e-4 / $\lvert z\rvert\le4.5$ / 0.02 |
+| DETECT conditional covariances, indices (both halves), Ward heights | 1e-12 |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -59,6 +60,7 @@ English | [日本語](VALIDATION.ja.md)
 | V24 | Polychoric / tetrachoric correlations (simulated tetrachoric, mixed 2–5 categories, 10% MCAR, one-empty-cell 2 x 2 tables, LSAT7, Science) and smoothing | lavaan `lavCor(..., ordered = , missing = )`; psych `polychoric(..., smooth = FALSE, correct = 0)`, `cor.smooth()` | M5 |
 | V25 | Number of dimensions: EKC, MAP (squared and fourth power), PCA / SMC eigenvalues on the V24 matrices; normal-data parallel-analysis references (3 sizes) | EFAtools `EKC()`, `PARALLEL()`; psych `vss()$map`; EFA.dimensions `MAP()`; independent R fourth-power MAP | M5 |
 | V26 | Local dependence (LSAT7 2PL, Science GRM, simulated 2PL with a dependent pair and 5% MCAR) and model-based parallel analysis (LSAT7) | `residuals(m, type = "LD" / "LDG2" / "Q3")`; ltm `unidimTest(data = , thetas = cbind(d, a1), IRT = FALSE)` | M5 |
+| V27 | DETECT: confirmatory (simulated 2D with true / wrong partitions, 1D, Science) and exploratory (simulated 3 clusters, given split) | sirt `conf.detect(use_sum_score = TRUE, smooth = FALSE)`, `expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -705,6 +707,12 @@ English | [日本語](VALIDATION.ja.md)
   is called with data and parameters rather than a fitted ltm object, so it simulates
   $\theta\sim N(0,1)$ as flexpyirt does with a standard normal fit; its tetrachorics come from
   polycor (`optimise()` tolerance), which bounds the observed-statistic agreement.
+- **DETECT (V27, M5)**: sirt's `conf.detect()` is called with `smooth = FALSE`; with the
+  default `smooth = TRUE` and `use_sum_score = TRUE` it subtracts raw item scores from the
+  standardized total score, which mis-forms the rest-score groups (DESIGN §16.13). `expl.detect()`
+  forces `smooth = FALSE` itself. Its returned `detect.unweighted` holds only the validation-half
+  indices, so the script recomputes the estimation-half indices with `conf.detect()` on the
+  estimation rows.
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is

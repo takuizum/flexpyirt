@@ -24,6 +24,7 @@
 | ポリコリック相関（lavaan / psych と）、閾値、平滑化（`cor.smooth` と） | 1e-6 / 1e-3、1e-12、1e-12 |
 | 同じ行列での EKC・MAP・観測固有値、正規の参照の平均 / 95 パーセンタイル | 1e-11、$\lvert z\rvert\le4.5$ / 6e-3 |
 | LD $X^2$ / $G^2$、符号付き $V$・Q3（推定し直したモデル）、モデルに基づく平行分析の観測値 / シミュレーションの平均 / 95 パーセンタイル | 1e-5（相対）、1e-6、2e-4 / $\lvert z\rvert\le4.5$ / 0.02 |
+| DETECT の条件付き共分散、指標（両方の半分）、Ward の併合の高さ | 1e-12 |
 
 ## ケース一覧（マイルストーンと対応）
 | ID | 内容 | mirt 側の呼び出し | MS |
@@ -54,6 +55,7 @@
 | V24 | ポリコリック・テトラコリック相関（シミュレーションのテトラコリック、2〜5 カテゴリの混在、10% MCAR、空のセルが 1 つの 2 x 2 表、LSAT7、Science）と平滑化 | lavaan の `lavCor(..., ordered = , missing = )`、psych の `polychoric(..., smooth = FALSE, correct = 0)`、`cor.smooth()` | M5 |
 | V25 | 次元数: V24 の行列での EKC、MAP（2 乗と 4 乗）、PCA・SMC の固有値。正規データの平行分析の参照（3 つの大きさ） | EFAtools の `EKC()`、`PARALLEL()`、psych の `vss()$map`、EFA.dimensions の `MAP()`、4 乗版 MAP の R による独立な実装 | M5 |
 | V26 | 局所依存（LSAT7 の 2PL、Science の GRM、依存するペアと 5% MCAR を含むシミュレーションの 2PL）とモデルに基づく平行分析（LSAT7） | `residuals(m, type = "LD" / "LDG2" / "Q3")`、ltm の `unidimTest(data = , thetas = cbind(d, a1), IRT = FALSE)` | M5 |
+| V27 | DETECT: 確認的（シミュレーションの 2 次元で正しい・誤った分割、1 次元、Science）と探索的（3 クラスタのシミュレーション、分割を指定） | sirt の `conf.detect(use_sum_score = TRUE, smooth = FALSE)`、`expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -570,6 +572,10 @@
   `mirt::` で指定する。ltm の `unidimTest` は推定済みの ltm オブジェクトではなくデータとパラメタで呼ぶので、
   標準正規の推定での flexpyirt と同じく $\theta\sim N(0,1)$ からシミュレーションする。テトラコリック相関は polycor
   （`optimise()` の許容誤差）によるので、観測された統計量の一致はそれで決まる。
+- **DETECT（V27、M5）**: sirt の `conf.detect()` は `smooth = FALSE` で呼ぶ。既定の `smooth = TRUE` で
+  `use_sum_score = TRUE` だと、標準化した総得点から生の項目得点を引くので、残りの得点の群が誤る（DESIGN §16.13）。
+  `expl.detect()` は自分で `smooth = FALSE` にする。その戻り値の `detect.unweighted` は検証用の半分の指標だけを
+  持つので、推定用の半分の指標はスクリプトで推定用の行に `conf.detect()` を当てて計算し直す。
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。

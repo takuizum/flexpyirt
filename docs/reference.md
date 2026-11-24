@@ -12,7 +12,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Correlations: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`model_parallel_analysis`](#model_parallel_analysis), [`dimensionality`](#dimensionality) and their results
+- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) and their results
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -925,12 +925,58 @@ Returned by `FitResult.local_dependence()`.
 | `q3_mean` | float | Mean off-diagonal Q3 |
 | `max_q3_star` | float | Largest Q3\* |
 
+### `detect`
+
+```text
+detect(data, clusters) -> DetectResult
+```
+
+Confirmatory DETECT (Zhang & Stout, 1999) for a given partition of the items. The conditional
+covariance of each pair is the average of its covariances given the total score and given the
+rest score; DETECT $= 100 \times$ the mean of $\delta_{ij}\,\mathrm{ccov}_{ij}$ ($\delta = 1$
+within a cluster, $-1$ across), with ASSI and RATIO (Zhang, 2007). `data` must be complete
+numeric item scores; `clusters` is a mapping item → label or labels in column order. A common
+reading (Jang & Roussos, 2007; Zhang, 2007): DETECT $< 0.2$ essentially unidimensional,
+$0.2$–$0.4$ weak, $0.4$–$1$ moderate, $> 1$ strong; ASSI $> 0.25$ or RATIO $> 0.36$ an essential
+deviation for the partition.
+
+### `DetectResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `indices` | DataFrame | Rows `DETECT`, `ASSI`, `RATIO`, `MADCOV100`, `MCOV100`; columns `unweighted`, `weighted` |
+| `detect`, `assi`, `ratio` | float | Unweighted indices |
+| `conditional_covariance` | DataFrame | Item x item conditional covariances |
+| `clusters` | Series | Partition used |
+| `n_obs` | int | Respondents |
+
+### `exploratory_detect`
+
+```text
+exploratory_detect(data, *, max_clusters=4, key=None,
+                   estimation_rows=None) -> ExploratoryDetectResult
+```
+
+Splits the rows into an estimation half and a validation half (`key` for a random split, or
+`estimation_rows`), clusters the items on the estimation half by Ward's method on
+$\max(\mathrm{ccov}) - \mathrm{ccov}$, and reports DETECT, ASSI and RATIO of every partition
+into $2, \dots,$ `max_clusters` clusters on both halves.
+
+### `ExploratoryDetectResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `table` | DataFrame | Per number of clusters: `cluster_sizes` and `DETECT` / `ASSI` / `RATIO` on the estimation and validation halves |
+| `clusters` | dict[int, Series] | Partition for each number of clusters |
+| `n_clusters` | int | Number of clusters with the largest estimation-half DETECT |
+| `estimation_rows`, `validation_rows` | ndarray | Row positions of the halves |
+
 ### `dimensionality`
 
 ```text
 dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=0.5,
                alpha=0.05, q3_star_threshold=0.2, rmsea_threshold=0.05,
-               item_names=None) -> DimensionalityResult
+               detect_threshold=0.2, max_clusters=4, item_names=None) -> DimensionalityResult
 ```
 
 Runs several diagnostics and reports them side by side, with two separate consensus lines
@@ -939,7 +985,9 @@ Runs several diagnostics and reports them side by side, with two separate consen
 - **How many dimensions?** `parallel_analysis()` (polychoric, PCA, permutation, 95%),
   `velicer_map()` (revised) and `empirical_kaiser()`; consensus = mode (all values on a tie) and
   median, with the number of methods agreeing.
-- **Is essential unidimensionality tenable?** Only with `fit`: `model_parallel_analysis()`
+- **Is essential unidimensionality tenable?** `exploratory_detect()` on complete data (the
+  validation-half DETECT of the selected partition $<$ `detect_threshold`), and with `fit`:
+  `model_parallel_analysis()`
   ($p \ge$ `alpha`), the largest Q3\* $<$ `q3_star_threshold` (0.2 is a common rule; critical
   values depend on the test and sample) and the RMSEA of `FitResult.m2()` $\le$ `rmsea_threshold`
   (close fit; unavailable with missing data, then reported as such). Consensus = number of
