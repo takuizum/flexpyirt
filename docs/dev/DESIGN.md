@@ -1627,8 +1627,7 @@ data-independent shapes (§15.21).
     The parameters come from the same data, so the $p$-value is conservative under a correct
     model (30 simulated 2PL data sets, $B=50$: mean $p$ 0.66, 1 of 30 below 0.05); the docstring
     and the guide say so.
-    **Not implemented**: JSI (Edwards, Houts & Cai, 2018), which re-estimates item parameters within
-    subgroups; it is a separate ROADMAP item.
+    **JSI** (Edwards, Houts & Cai, 2018): item 17 below.
     **Validation (V26)**: `validation/r/m5_local_dependence_reference.R` (mirt 1.46.1, ltm 1.2.0):
     LSAT7 2PL, Science GRM and a simulated 2PL with one locally dependent pair and 5% MCAR.
     flexpyirt refits the models (log-likelihoods agree to $10^{-9}$ relative) and agrees with
@@ -1788,6 +1787,55 @@ data-independent shapes (§15.21).
     recalibrate it but departs from the published statistic; not done. The pieces are unit-tested
     against direct computations, and `tests/test_m5_dimtest.py` reruns a small version of the
     study (20 null and 10 alternative replications).
+17. **Jackknife slope index (`FitResult.jsi()`, V31)**: `_jsi.py`. **Definition** (Edwards, Houts
+    & Cai, 2018, as mirt's `residuals(type = "JSI")`): the jackknife is over items, not
+    respondents (an earlier version of item 11 said "subgroups"; corrected). For each item $j$ the
+    model is re-estimated without item $j$ and $\mathrm{JSI}_{ji}=(\hat a_i-\hat a_i^{(-j)})/
+    \mathrm{SE}(\hat a_i^{(-j)})$ for every other item $i$, the SE from the refit; the matrix is not
+    symmetric, and mirt's `fold = TRUE` adds its transpose (the `folded` column of `pairs`). mirt
+    gives no cutoff and neither does flexpyirt; the docstring says to look for values that stand
+    out. **Removing an item = masking**: item $j$'s responses are set to missing (`y[:, j] = -1`,
+    all-zero one-hot rows), so it drops out of $\ell$ while every array keeps its shape; the
+    removed item index is a traced argument and one jit compilation serves every $j$ (§5). The
+    parameters kept are the free ids used by any other row (other items and the latent
+    distribution), so across-item equality constraints and priors carry over; item $j$'s own ids
+    stay at their estimates and are ignored. Items without a free slope (Rasch, PCM, fixed
+    slopes) give NaN columns. Single-group unidimensional `Normal` models only (mirt requires one
+    factor); at least three items. **Methods**, all from the full estimates $\hat\eta$:
+    `"refit"` (default): Newton–Raphson on $\ell_{(-j)}+\log\pi$ over the kept ids with step
+    halving and a ridge when the information is not positive definite, until the largest step is
+    below `tol` ($10^{-8}$; `ConvergenceWarning` after `max_iter`); the SE is from the observed
+    information (`information_hessian`, equal to Oakes' at any point) of the last evaluation.
+    Newton from a warm start converges in about five steps; EM would take tens. `"newton"`:
+    `newton_steps` steps of the same iteration, the SE from the information of the last
+    evaluation (the start for one step). `"one_step"` (the Julia sketch the owner proposed):
+    $\hat\eta^{(-j)}\approx\hat\eta+V\nabla\ell_{(-j)}(\hat\eta)$ with the full model's $V$
+    (`FitResult.vcov`) and the full model's SE in the denominator; the $J$ gradients come from one
+    `vmap`, so it costs about $J$ E-steps. One EM step was rejected: it moves only the fraction
+    $1-$(missing information) of the way (JSI shrunk by about a third in a pilot study).
+    **Accuracy of the approximations** (largest absolute difference from the refit; 2PL / GRM
+    with one locally dependent pair):
+
+    | Data | $J$ | refit | `"newton"` 1 step | 2 steps | `"one_step"` |
+    |---|---|---|---|---|---|
+    | 2PL, $N=1000$ | 15 | 0.7 s | 0.012 (0.20 s) | 0.010 | 0.021 (0.02 s) |
+    | 2PL, $N=2000$ | 30 | 4.6 s | 0.002 (1.2 s) | <0.001 | 0.002 (0.06 s) |
+    | 2PL, $N=3000$ | 60 | 45 s | 0.001 (15 s) | <0.001 | <0.001 (0.2 s) |
+    | GRM(4), $N=2000$ | 30 | 17 s | 0.002 (5.1 s) | <0.001 | 0.002 (0.06 s) |
+    | LSAT7 2PL | 5 | | 2.0 | 0.88 | 1.3 |
+    | Science GRM | 4 | | 2.7 | 2.9 | 2.5 |
+    | GPCM(4), $N=800$ | 8 | | 0.11 | 0.45 | 0.39 |
+
+    With few items removing one is not a small perturbation and the Taylor approximations fail
+    (two steps can be worse than one before Newton's quadratic phase); with 15 or more items
+    `"one_step"` is within 0.02 of the refit at a few hundredths of its cost. Below 10 items
+    (`_JSI_APPROXIMATION_MIN_ITEMS`) the approximations warn and point to the refit.
+    **Validation (V31)**: `validation/r/m5_jsi_reference.R` (mirt 1.46.1, TOL $=10^{-10}$ in the
+    fits and the refits): LSAT7 2PL, Science GRM, a simulated 2PL with two dependent pairs and 5%
+    MCAR, and a simulated GPCM with one dependent pair; the refit agrees to $10^{-5}$ (observed
+    $\le1.2\times10^{-7}$). The tests also check the refit against `fit()` on the data without the
+    item, the approximations against the refit on a 15-item data set (`"newton"` 1 step 0.03, 2
+    steps 0.02, `"one_step"` 0.05) and the vmapped gradients against single ones.
 
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.

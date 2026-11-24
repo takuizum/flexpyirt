@@ -192,6 +192,37 @@ $p$ 値、符号付きの Cramér の $V$）。mirt の `residuals(type = "Q3" /
 **例外**: `PrecisionError`。多母集団・多次元・`Normal` 以外の潜在分布のモデル、不正なデータは
 `SpecificationError`。
 
+#### `FitResult.jsi`
+
+```text
+jsi(data, *, item_names=None, method="refit", newton_steps=1, tol=1e-8, max_iter=100) -> JSIResult
+```
+
+単一群・1 次元・`Normal` 潜在分布で項目が 3 つ以上のモデルについて、Edwards, Houts & Cai (2018) のジャックナイフ
+傾き指標を求める（[ガイド 18 節](guide.ja.md#18-局所依存と次元性のレポート)）。各項目 $j$ について項目 $j$ を除いて
+モデルを推定し直し（その反応を欠測として扱うので、潜在分布・制約・事前分布は指定どおり残る）、他のすべての項目
+$i$ について
+
+$$\mathrm{JSI}_{ji} = \frac{\hat a_i - \hat a_i^{(-j)}}{\mathrm{SE}(\hat a_i^{(-j)})}$$
+
+を求める。自由な傾きを持たない項目は NaN。`data` は推定に使ったデータ。
+
+| 引数 | 意味 |
+|---|---|
+| `method` | `"refit"`（既定）: 全項目モデルの推定値から、最大のステップが `tol` 未満になるまで Newton–Raphson で推定し直し、SE も推定し直したモデルから求める。mirt の `residuals(type = "JSI")` と同じ。`"newton"`: Newton 法を `newton_steps` ステップだけ行う（Taylor 近似）。`"one_step"`: 全項目モデルの共分散行列で 1 ステップ進め、分母にも全項目モデルの SE を使う。全体で E ステップ $J$ 回分ほど |
+| `newton_steps` | `"newton"` のステップ数 |
+| `tol`, `max_iter` | `"refit"` の収束条件 |
+
+近似は 15 項目程度から推定し直した値と 0.02 程度で一致する。10 項目未満では 1 項目を除いたときの推定値の変化が
+大きすぎるので、警告（`FlexpyirtWarning`）を出す。
+
+**戻り値**: [`JSIResult`](#jsiresult)
+
+**例外**: `PrecisionError`。対応しないモデル、項目が 3 つ未満、不正な指定、標準誤差のない推定結果での `"one_step"` は
+`SpecificationError`。
+
+**警告**: 推定し直しが収束しなければ `ConvergenceWarning`。
+
 #### `FitResult.dif`
 
 ```text
@@ -911,6 +942,17 @@ $p = (1 + \#\{T_b \ge T\})/(B + 1)$。`eigen_type="max"` は ltm の `unidimTest
 | `q3` | DataFrame | 項目 x 項目の Q3 行列 |
 | `q3_mean` | float | 非対角の Q3 の平均 |
 | `max_q3_star` | float | 最大の Q3\* |
+
+### `JSIResult`
+
+`FitResult.jsi()` の戻り値。
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `matrix` | DataFrame | 除いた項目（行）x 項目（列）の $\mathrm{JSI}_{ji}$。対角は NaN |
+| `pairs` | DataFrame | ペア $i<j$ ごとに 1 行: `item_i`, `item_j`, `jsi_ij`（$j$ を除いたときの項目 $i$ の傾き）, `jsi_ji`, `folded`（両者の和。mirt の `fold = TRUE`） |
+| `method` | str | 使った方法 |
+| `converged` | Series | 除いた項目ごとに、推定し直しが収束したか |
 
 ### `detect`
 

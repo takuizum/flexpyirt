@@ -74,7 +74,8 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   - [x] D3 local dependence Q3 / Q3* / LD-X2 / G2 (`FitResult.local_dependence()`, vs `mirt::residuals`)
     and model-based parallel analysis (`model_parallel_analysis()`, vs `ltm::unidimTest`); the ensemble
     `dimensionality()` (validated in V26; the ensemble by recomputation).
-  - [ ] JSI (Edwards, Houts & Cai, 2018; vs `mirt::residuals(type = "JSI")`).
+  - [x] JSI (Edwards, Houts & Cai, 2018; `FitResult.jsi()` with the refit and two approximations
+    without refitting; the refit validated in V31 against `mirt::residuals(type = "JSI")`).
   - [x] D4 DETECT, confirmatory and exploratory (`detect()`, `exploratory_detect()`; validated in V27
     against `sirt::conf.detect` / `expl.detect` with sum-score conditioning; kernel-smoothed
     conditioning and the genetic partition search not implemented).

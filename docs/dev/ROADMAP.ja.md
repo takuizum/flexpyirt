@@ -52,7 +52,8 @@
   - [x] D1 ポリコリック・テトラコリック相関と平滑化（`polychoric()`、`PolychoricResult`。V24 で `lavaan::lavCor`、`psych::polychoric` / `cor.smooth` と照合済み）。
   - [x] D2 固有値、平行分析、改訂 MAP、EKC（`parallel_analysis()`、`velicer_map()`、`empirical_kaiser()`。V25 で EFAtools・psych・EFA.dimensions と照合済み）。
   - [x] D3 局所依存 Q3 / Q3* / LD-X2 / G2（`FitResult.local_dependence()`、`mirt::residuals` と照合）とモデルに基づく平行分析（`model_parallel_analysis()`、`ltm::unidimTest` と照合）、アンサンブル `dimensionality()`（V26 で照合済み。アンサンブルは再計算で確認）。
-  - [ ] JSI（Edwards, Houts & Cai, 2018。`mirt::residuals(type = "JSI")` と照合）。
+  - [x] JSI（Edwards, Houts & Cai, 2018。`FitResult.jsi()`。推定し直す方法と、推定し直さない 2 つの近似。推定し直す方法は
+    V31 で `mirt::residuals(type = "JSI")` と照合済み）。
   - [x] D4 DETECT の確認的・探索的版（`detect()`、`exploratory_detect()`。総得点による条件付けで `sirt::conf.detect` / `expl.detect` と V27 で照合済み。カーネル平滑化による条件付けと遺伝的アルゴリズムによる分割の探索は未実装）。
   - [x] D5a flexpyirt に実装した ULS / ML の EFA（`efa()`。`factor_analyzer` は scikit-learn 1.8 以降で失敗する。DESIGN §16.8）と Hull 法（`hull()`）。V28 で EFAtools の `EFA` / `HULL` と `psych::fa` と照合済み。
   - [x] D5b 比較データ法（`comparison_data()`。V29 で EFAtools の `CD()` とその生成器と照合済み）。

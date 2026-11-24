@@ -563,6 +563,37 @@ class LocalDependenceResult:
         return float(self.pairs["q3_star"].max())
 
 
+JSIMethod = Literal["refit", "newton", "one_step"]
+
+
+@dataclass(frozen=True)
+class JSIResult:
+    r"""Result of :meth:`flexpyirt.FitResult.jsi` (Edwards, Houts & Cai, 2018).
+
+    Attributes
+    ----------
+    matrix : pandas.DataFrame
+        Removed item (rows) x item (columns): row :math:`j`, column :math:`i` is
+        :math:`(\hat a_i-\hat a_i^{(-j)})/\mathrm{SE}(\hat a_i^{(-j)})`, the standardized drop in
+        item :math:`i`'s slope when item :math:`j` is removed (mirt's
+        ``residuals(type = "JSI", fold = FALSE)``). The diagonal is NaN, as is every column of
+        an item without a free slope.
+    pairs : pandas.DataFrame
+        One row per item pair :math:`i<j`: ``item_i``, ``item_j``, ``jsi_ij`` (item
+        :math:`i`'s slope when :math:`j` is removed), ``jsi_ji`` and ``folded``
+        (:math:`\mathrm{JSI}_{ij}+\mathrm{JSI}_{ji}`, mirt's ``fold = TRUE``).
+    method : str
+        ``"refit"``, ``"newton"`` or ``"one_step"``.
+    converged : pandas.Series
+        Per removed item, whether its refit converged (always ``True`` for the approximations).
+    """
+
+    matrix: pd.DataFrame
+    pairs: pd.DataFrame
+    method: str
+    converged: pd.Series
+
+
 # ----------------------------------------------------------------------------- model-based PA
 ModelEigenType = Literal["max", "smc", "pca"]
 _MODEL_EIGEN_TYPES: tuple[str, ...] = ("max", "smc", "pca")

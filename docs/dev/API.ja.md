@@ -147,9 +147,18 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
 | `BAEM`, `Quadrature` | frozen dataclass | 推定設定 |
 | `fit` | 関数 | 推定。`FitResult` を返す |
-| `FitResult` | クラス | 結果（`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `dif`, `m2`, `to_json` / `from_json`） |
+| `FitResult` | クラス | 結果（`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`） |
 | `link` | 関数 | 微分可能な IRT 尺度リンキング（Haebara・Stocking–Lord の非対称・対称版）。`LinkResult` を返す |
 | `LinkResult` | クラス | 尺度リンキング結果（`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `items`, `transform_theta`, `summary`） |
+| `polychoric` | 関数 | ポリコリック・テトラコリック相関行列（2 段階の最尤法、平滑化）。`PolychoricResult` を返す |
+| `parallel_analysis`, `velicer_map`, `empirical_kaiser` | 関数 | 次元数の診断。`ParallelAnalysisResult`, `MAPResult`, `EmpiricalKaiserResult`（`n_factors` を持つ frozen dataclass）を返す |
+| `comparison_data` | 関数 | 比較データ法（Ruscio & Roche, 2012）。`ComparisonDataResult` を返す |
+| `efa`, `hull` | 関数 | 相関行列の回転なしの ULS / ML 因子分析（EFAtools と同じ適合度指標）と Hull 法。`EFAResult`, `HullResult` を返す |
+| `dimtest` | 関数 | ブートストラップでバイアス補正する DIMTEST。`DimtestResult` を返す |
+| `detect`, `exploratory_detect` | 関数 | 確認的・探索的 DETECT。`DetectResult`, `ExploratoryDetectResult` を返す |
+| `model_parallel_analysis`, `dimensionality` | 関数 | `FitResult` のモデルに基づく平行分析と、まとめのレポート。`ModelParallelAnalysisResult`, `DimensionalityResult` を返す |
+| `LocalDependenceResult` | frozen dataclass | `FitResult.local_dependence()` の戻り値（`pairs`, `q3`, `q3_mean`, `max_q3_star`） |
+| `JSIResult` | frozen dataclass | `FitResult.jsi()` の戻り値（`matrix`, `pairs`, `method`, `converged`） |
 
 ## 8. 設計上の約束
 - 公開関数は keyword-only を基本にする（`fit(spec, data, *, group=None, ...)`）。

@@ -63,6 +63,7 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | Polychoric correlations | lavaan's `lavCor()` on ordered variables to $10^{-6}$, psych's `polychoric()` to $10^{-3}$ (its optimizer's tolerance) and psych's `cor.smooth()` for smoothing |
 | Parallel analysis, MAP, empirical Kaiser criterion | EFAtools' `EKC()` and `PARALLEL()`, psych's `vss()`, EFA.dimensions' `MAP()` and an independent R implementation of the fourth-power MAP, on the same correlation matrices to $10^{-11}$; reference eigenvalues of normal data within Monte Carlo error |
 | Q3 and LD $X^2$ / $G^2$ | `residuals(m, type = "Q3" / "LD" / "LDG2")` on the same models fitted by mirt |
+| Jackknife slope index | `residuals(m, type = "JSI")` on the same models: the default (refit) to $10^{-5}$. The approximations without refitting are compared with the refit: within about 0.02 from 15 items on, but off by more than 1 on 4–5 item tests |
 | Model-based parallel analysis | ltm's `unidimTest()` with the same item parameters: the observed statistic, and the simulated distribution within Monte Carlo error |
 | Factor analysis (ULS, ML) and the Hull method | EFAtools' `EFA()` and `HULL()` and psych's `fa()` on the same matrices: implied loadings to $10^{-4}$, fit indices to $2\times10^{-4}$, the same Hull selections |
 | Comparison data | EFAtools' `CD()`: the same population from the same random draws, the same rank-sum tests and the same suggested numbers |

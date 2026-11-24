@@ -951,6 +951,8 @@ from flexpyirt import dimensionality, model_parallel_analysis
 ld = res.local_dependence(df)
 cols = ["item_i", "item_j", "q3_star", "x2", "p_x2"]
 print(ld.pairs.sort_values("q3_star", ascending=False)[cols].head(3).round(3))
+jsi = res.jsi(df)
+print(jsi.pairs.sort_values("folded", ascending=False).head(3).round(2))
 mpa = model_parallel_analysis(res, df, key=jax.random.key(1), n_replications=20)
 print(round(mpa.statistic, 3), round(mpa.p_value, 3))
 report = dimensionality(df, key=jax.random.key(2), fit=res, n_replications=20)
@@ -961,6 +963,14 @@ print(report)
   from EAP scores), Q3\* (Q3 minus its mean over pairs) and Chen & Thissen's LD $X^2$ / $G^2$,
   as mirt's `residuals()`. Large Q3\* or $X^2$ point to pairs that share something beyond
   $\theta$ (a common stem, a testlet, a second dimension).
+- `FitResult.jsi()` is Edwards, Houts & Cai's (2018) jackknife slope index: each item is removed
+  in turn, the model is re-estimated, and every other item's slope change is divided by its
+  standard error. If two items depend on each other, removing one lowers the other's slope, so
+  the pair has large values in both directions (`folded` adds them). There is no fixed cutoff;
+  look for pairs that stand out. The default re-estimates the model for every item, as mirt's
+  `residuals(type = "JSI")`. `method="one_step"` skips the re-estimation (one Taylor step from
+  the full model) and is far faster on long tests; it agrees closely with the default from about
+  15 items on, but not on short tests, where it warns.
 - `model_parallel_analysis()` simulates data from the fitted model and asks whether the observed
   second eigenvalue is larger than the model produces (Drasgow & Lissak, 1983). Because the
   model was fitted to the same data the $p$-value is conservative: a small value is evidence of a

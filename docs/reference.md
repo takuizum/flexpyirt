@@ -212,6 +212,38 @@ $df = (K_i-1)(K_j-1)$, $p$-values and a signed Cramér's $V$, as mirt's
 **Raises**: `PrecisionError`; `SpecificationError` for multiple-group, multidimensional or
 non-`Normal` latent models, or invalid data.
 
+#### `FitResult.jsi`
+
+```text
+jsi(data, *, item_names=None, method="refit", newton_steps=1, tol=1e-8, max_iter=100) -> JSIResult
+```
+
+Edwards, Houts & Cai's (2018) jackknife slope index for a single-group unidimensional model with
+a `Normal` latent distribution and at least three items
+([guide section 18](guide.md#18-local-dependence-and-the-dimensionality-report)). For each item
+$j$ the model is re-estimated without item $j$ (its responses treated as missing, so the latent
+distribution, constraints and priors stay as specified), and for every other item $i$
+
+$$\mathrm{JSI}_{ji} = \frac{\hat a_i - \hat a_i^{(-j)}}{\mathrm{SE}(\hat a_i^{(-j)})}.$$
+
+Items without a free slope give NaN. `data` is the fitting data.
+
+| Argument | Meaning |
+|---|---|
+| `method` | `"refit"` (default): Newton–Raphson from the full estimates until the largest step is below `tol`, SE from the refit, as mirt's `residuals(type = "JSI")`. `"newton"`: `newton_steps` Newton steps (a Taylor approximation). `"one_step"`: one step with the full model's covariance matrix and the full model's SE in the denominator, about $J$ E-steps in all |
+| `newton_steps` | Steps for `"newton"` |
+| `tol`, `max_iter` | Convergence of `"refit"` |
+
+The approximations agree with the refit to about 0.02 from 15 items on; with fewer than 10 items
+they warn (`FlexpyirtWarning`), because removing one item changes the estimates too much.
+
+**Returns**: [`JSIResult`](#jsiresult)
+
+**Raises**: `PrecisionError`; `SpecificationError` for unsupported models, fewer than three
+items, invalid options, or `"one_step"` without standard errors.
+
+**Warns**: `ConvergenceWarning` if a refit does not converge.
+
 #### `FitResult.dif`
 
 ```text
@@ -992,6 +1024,17 @@ Returned by `FitResult.local_dependence()`.
 | `q3` | DataFrame | Item x item Q3 matrix |
 | `q3_mean` | float | Mean off-diagonal Q3 |
 | `max_q3_star` | float | Largest Q3\* |
+
+### `JSIResult`
+
+Returned by `FitResult.jsi()`.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `matrix` | DataFrame | Removed item (rows) x item (columns): $\mathrm{JSI}_{ji}$, NaN on the diagonal |
+| `pairs` | DataFrame | One row per pair $i<j$: `item_i`, `item_j`, `jsi_ij` (item $i$'s slope with $j$ removed), `jsi_ji`, `folded` (their sum, mirt's `fold = TRUE`) |
+| `method` | str | Method used |
+| `converged` | Series | Per removed item, whether the refit converged |
 
 ### `detect`
 

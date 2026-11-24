@@ -157,7 +157,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
 | `fit` | function | Estimation; returns a `FitResult` |
-| `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `local_dependence`, `dif`, `m2`, `to_json` / `from_json`) |
+| `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
 | `link` | function | Differentiable IRT scale linking (Haebara / Stocking–Lord, non-symmetric & symmetric); returns a `LinkResult` |
 | `LinkResult` | class | Scale-linking result (`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `items`, `transform_theta`, `summary`) |
 | `polychoric` | function | Polychoric / tetrachoric correlation matrix (two-step ML, smoothing); returns a `PolychoricResult` |
@@ -168,6 +168,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | `detect`, `exploratory_detect` | function | Confirmatory / exploratory DETECT; return `DetectResult`, `ExploratoryDetectResult` |
 | `model_parallel_analysis`, `dimensionality` | function | Model-based parallel analysis of a `FitResult`; the ensemble report. Return `ModelParallelAnalysisResult`, `DimensionalityResult` |
 | `LocalDependenceResult` | frozen dataclass | Returned by `FitResult.local_dependence()` (`pairs`, `q3`, `q3_mean`, `max_q3_star`) |
+| `JSIResult` | frozen dataclass | Returned by `FitResult.jsi()` (`matrix`, `pairs`, `method`, `converged`) |
 | `PolychoricResult` | frozen dataclass | `correlation`, `unsmoothed_correlation`, `thresholds`, `categories`, `n_obs`, per-pair `converged` / `at_boundary` / `zero_cell_corrected`, `smoothed`, `min_eigenvalue` |
 
 ## 8. Design commitments
