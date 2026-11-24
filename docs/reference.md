@@ -12,7 +12,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Correlations: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) and their results
+- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimensionality`](#dimensionality) and their results
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -935,6 +935,29 @@ freedom. At least 6 variables.
 | `table` | DataFrame | `n_factors`, `fit`, `df`, `st`, `on_hull`, `heywood`, `converged` per $k$ |
 | `fit_index`, `method`, `max_factors` | | Settings used |
 
+### `comparison_data`
+
+```text
+comparison_data(data, *, key, max_factors=None, n_population=10000, n_samples=500,
+                alpha=0.30, max_iter=50) -> ComparisonDataResult
+```
+
+Comparison-data method (Ruscio & Roche, 2012), as EFAtools' `CD()`. For $k = 1, 2, \dots$ a
+population with $k$ common factors that reproduces the observed Pearson correlations and every
+variable's distribution is generated (Ruscio & Kaczetow, 2008); samples of the data's size are
+drawn and the RMSE between their eigenvalues and the observed ones is recorded. A factor is added
+while a one-sided Mann–Whitney test at `alpha` says it lowers the RMSE. Complete numeric data.
+
+### `ComparisonDataResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `n_factors` | int | Suggested number of factors |
+| `rmse` | DataFrame | Eigenvalue RMSE per sample (rows) and tested $k$ (columns) |
+| `p_values` | Series | Rank-sum $p$ for $k$ vs $k - 1$ ($k \ge 2$) |
+| `population_rmse` | Series | How well each population reproduces the observed correlations |
+| `max_factors` | int | Largest $k$ that could be tested |
+
 ### `model_parallel_analysis`
 
 ```text
@@ -1028,7 +1051,8 @@ Runs several diagnostics and reports them side by side, with two separate consen
 (no method is reliable alone; Auerswald & Moshagen, 2019).
 
 - **How many dimensions?** `parallel_analysis()` (polychoric, PCA, permutation, 95%),
-  `velicer_map()` (revised), `empirical_kaiser()` and, with at least 6 items, `hull()` (CAF, ULS); consensus = mode (all values on a tie) and
+  `velicer_map()` (revised), `empirical_kaiser()`, with at least 6 items `hull()` (CAF, ULS), and with complete data
+  `comparison_data()`; consensus = mode (all values on a tie) and
   median, with the number of methods agreeing.
 - **Is essential unidimensionality tenable?** `exploratory_detect()` on complete data (the
   validation-half DETECT of the selected partition $<$ `detect_threshold`), and with `fit`:

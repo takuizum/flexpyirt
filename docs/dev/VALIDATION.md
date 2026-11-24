@@ -31,6 +31,7 @@ English | [日本語](VALIDATION.ja.md)
 | LD $X^2$ / $G^2$; signed $V$, Q3 (refitted models); model-based PA observed / simulated mean / 95th percentile | 1e-5 (relative); 1e-6; 2e-4 / $\lvert z\rvert\le4.5$ / 0.02 |
 | DETECT conditional covariances, indices (both halves), Ward heights | 1e-12 |
 | EFA implied $\Lambda\Lambda^\top$ / communalities; CAF, CFI, RMSEA; $\chi^2$; Hull fit / $st$ | 1e-4; 2e-4; 1e-4 (relative); 1e-5 / 1e-2 (relative) |
+| CD: PAF $\Lambda\Lambda^\top$; one-factor population from the same draws; rank-sum $p$; mean RMSE | 1e-12; exact; 1e-10 (relative); 15% (relative) |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -63,6 +64,7 @@ English | [日本語](VALIDATION.ja.md)
 | V26 | Local dependence (LSAT7 2PL, Science GRM, simulated 2PL with a dependent pair and 5% MCAR) and model-based parallel analysis (LSAT7) | `residuals(m, type = "LD" / "LDG2" / "Q3")`; ltm `unidimTest(data = , thetas = cbind(d, a1), IRT = FALSE)` | M5 |
 | V27 | DETECT: confirmatory (simulated 2D with true / wrong partitions, 1D, Science) and exploratory (simulated 3 clusters, given split) | sirt `conf.detect(use_sum_score = TRUE, smooth = FALSE)`, `expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
 | V28 | EFA (ULS, ML; every $k$ up to Hull's bound) and the Hull method (CAF, CFI, RMSEA) on the V24 matrices with $\ge 6$ variables and two simulated matrices | EFAtools `EFA(method = , rotation = "none")`, `HULL(method = , gof = )`; psych `fa(fm = "minres" / "ml", rotate = "none")` | M5 |
+| V29 | Comparison data: PAF, the one-factor population generator from exported draws, rank-sum tests, `CD()` on 3-factor continuous, 2-factor ordinal and 1-factor binary data | EFAtools `.paf_iter`, `.simulate_cfm_empirical`, `CD()`; `wilcox.test(x, y, "less")` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -722,6 +724,13 @@ English | [日本語](VALIDATION.ja.md)
   are less tightly converged than flexpyirt's, so the test also checks that flexpyirt's objective is
   not above EFAtools' at EFAtools' $\psi=1-h^2$; the remaining differences are largest at Heywood
   solutions (bounded uniquenesses), which Hull includes for $k$ beyond the true number of factors.
+- **Comparison data (V29, M5)**: CD is random on both sides. The generator is checked
+  exactly by reproducing EFAtools' random draws in R (`set.seed`, then the same `sample()` /
+  `rnorm()` calls in the generator's order), exporting them and feeding them to flexpyirt; this is
+  exact for one factor, where the loadings' sign is fixed by the generator. The selection is
+  checked on data sets where the answer is clear; the mean RMSEs are compared loosely because
+  each side draws its own populations. JSON `auto_unbox` would turn a one-element $p$-value vector
+  into a scalar, so the script writes `as.list()`.
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is

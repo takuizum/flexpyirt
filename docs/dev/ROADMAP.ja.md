@@ -55,5 +55,5 @@
   - [ ] JSI（Edwards, Houts & Cai, 2018。`mirt::residuals(type = "JSI")` と照合）。
   - [x] D4 DETECT の確認的・探索的版（`detect()`、`exploratory_detect()`。総得点による条件付けで `sirt::conf.detect` / `expl.detect` と V27 で照合済み。カーネル平滑化による条件付けと遺伝的アルゴリズムによる分割の探索は未実装）。
   - [x] D5a flexpyirt に実装した ULS / ML の EFA（`efa()`。`factor_analyzer` は scikit-learn 1.8 以降で失敗する。DESIGN §16.8）と Hull 法（`hull()`）。V28 で EFAtools の `EFA` / `HULL` と `psych::fa` と照合済み。
-  - [ ] D5b 比較データ法（`EFAtools::CD` と照合）。
+  - [x] D5b 比較データ法（`comparison_data()`。V29 で EFAtools の `CD()` とその生成器と照合済み）。
   - [ ] D6 ブートストラップでバイアス補正する DIMTEST（シミュレーション研究の第 1 種の誤りと検出力で受け入れる）。

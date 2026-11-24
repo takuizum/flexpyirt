@@ -1206,7 +1206,27 @@ class ItemKernel(Protocol):
     以下で、最大は Heywood の解）、CAF / CFI / RMSEA は $2\times10^{-4}$、$\chi^2$ は相対 $10^{-4}$、$df$ は厳密に一致。
     3 因子の行列での psych の `fa()` とも $10^{-4}$ で一致する。Hull は行列 x 推定法 x 適合度のすべてで EFAtools が
     記録した $J$ を使い、選ばれる $k$ と凸包上の点は同じ、適合度は $10^{-5}$（実測 $1.4\times10^{-6}$ 以下）、$st$ は
-    相対 1%（小さな差の比なので。実測は絶対 $3.5\times10^{-3}$ 以下）で一致する。比較データ法（CD）はまだ含まない。
+    相対 1%（小さな差の比なので。実測は絶対 $3.5\times10^{-3}$ 以下）で一致する。比較データ法は §16.15。
+15. **比較データ法（`comparison_data()`、§16.8 の D5b、V29）**: `_comparison_data.py`（NumPy。JAX のキーから
+    引いた乱数を引数で渡すので、それを与えれば生成は決定的）。$k=1..K$（$K$ は $df$ が正になる最大の $k$、または
+    `max_factors`）について、各変数の観測値を `n_population` 回復元抽出して並べ、標準正規の $F$ $(N,k)$ と
+    $E$ $(N,p)$ を引き、母集団を生成する（Ruscio & Kaczetow, 2008。EFAtools の `.simulate_cfm_empirical` と同じ）。
+    中間の $R^*$ を主因子法（EFAtools の `.paf_iter`。共通性の初期値は 1、固有値は絶対値、最大の変化に対する
+    基準 $10^{-3}$、`max_iter` 50）で分解し、負荷量を $[-1,1]$ に切り、最初の負荷量が負なら符号を反転して、得点
+    $F\Lambda^\top+E\,\mathrm{diag}(\sqrt{\max(1-h^2,0)})$ を作る。そのあと列ごとに順に、その列で行を並べ替え（安定な
+    整列）、その列を並べた復元抽出値で置き換える。$R^*$ は $R$ から始め、下三角の残差の RMSE が（1 から）改善する
+    限り残差 $R-R_{\text{rep}}$ だけ動かし、改善しなければ最良の $R^*$ からステップを半分にし、5 回続けて失敗したら
+    止める。母集団からデータと同じ大きさの標本を `n_samples` 個引き、Pearson 相関の固有値と観測固有値の RMSE を
+    記録する。$k$ 因子での RMSE が $k-1$ 因子より小さいと片側の Mann–Whitney 検定（連続性と同順位の補正を含む正規
+    近似で、$n\ge50$ での R の `wilcox.test` と同じ）が $\alpha=0.30$（Ruscio & Roche の推奨）で言う限り $k$ を
+    残し、最後に残した $k$ を結果とする。Pearson 相関のみ（Ruscio & Roche、EFAtools と同じ）、欠測のないデータ。
+    主因子法の負荷量は列の和が非負になるよう符号をそろえる。EFAtools は LAPACK の符号をそのまま使うが、効くのは
+    $k\ge2$ のときだけで、母集団の分布は変わらない。**アンサンブル**: 欠測がなければ `dimensionality()` は問い (A) に
+    CD を加える（キーの 5 つ目の分割）。**照合（V29）**: `validation/r/m5_comparison_data_reference.R`（EFAtools 1.1.0）。
+    $k=1..3$ の主因子法の負荷量は $\Lambda\Lambda^\top$ で $10^{-12}$、EFAtools 自身の乱数（同じシードで再現して
+    書き出す）による 1 因子の母集団は完全に同じ、EFAtools の RMSE の列に対する順位和の $p$ 値は相対 $10^{-10}$ で
+    一致する。3 因子、2 因子の順序、1 因子の 2 値のデータでの `CD()` とは、それぞれ 2 つのキーで同じ提案、平均 RMSE は
+    15% 以内（母集団の乱数が違うため）で一致する。
 
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1271,6 +1291,7 @@ class ItemKernel(Protocol):
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
+- Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.

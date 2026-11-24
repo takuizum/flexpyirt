@@ -65,6 +65,7 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | Q3 and LD $X^2$ / $G^2$ | `residuals(m, type = "Q3" / "LD" / "LDG2")` on the same models fitted by mirt |
 | Model-based parallel analysis | ltm's `unidimTest()` with the same item parameters: the observed statistic, and the simulated distribution within Monte Carlo error |
 | Factor analysis (ULS, ML) and the Hull method | EFAtools' `EFA()` and `HULL()` and psych's `fa()` on the same matrices: implied loadings to $10^{-4}$, fit indices to $2\times10^{-4}$, the same Hull selections |
+| Comparison data | EFAtools' `CD()`: the same population from the same random draws, the same rank-sum tests and the same suggested numbers |
 | DETECT (confirmatory, exploratory) | sirt's `conf.detect(use_sum_score = TRUE, smooth = FALSE)` and `expl.detect(use_sum_score = TRUE)` with the same split: conditional covariances, indices, partitions, to $10^{-12}$ |
 | Scale linking (Haebara, Stocking–Lord) | independent R implementations of the criteria using mirt's response functions (mirt itself has no characteristic-curve linking) |
 
