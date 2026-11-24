@@ -21,7 +21,8 @@ for the models and algorithms behind them, see [Theory](theory.md).
 13. [Choosing the quadrature grid](#13-choosing-the-quadrature-grid)
 14. [Confirmatory multidimensional models](#14-confirmatory-multidimensional-models)
 15. [Scale linking](#15-scale-linking)
-16. [Errors and warnings](#16-errors-and-warnings)
+16. [Polychoric correlations](#16-polychoric-correlations)
+17. [Errors and warnings](#17-errors-and-warnings)
 
 ## 1. Setup
 
@@ -873,15 +874,43 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
   scalars, arrays, Series, or scoring DataFrames (`theta`, `se`, and plausible values `pv1..`),
   treating $(A, B)$ as known (the transformed `se` excludes linking error).
 
-## 16. Errors and warnings
+## 16. Polychoric correlations
+
+`flexpyirt.polychoric(data)` estimates the polychoric correlation matrix of ordinal responses
+(tetrachoric for binary items), the usual input to eigenvalue-based checks of dimensionality. It
+uses two-step maximum likelihood (Olsson, 1979): thresholds from each item's marginal proportions,
+then one correlation per pair of items.
+
+```python
+from flexpyirt import polychoric
+
+pc = polychoric(df)
+print(pc.correlation.iloc[:4, :4].round(3))
+print(pc.thresholds[items[0]].round(3))
+print(pc.n_obs.iloc[:2, :2])
+```
+
+- Responses are ordered codes in any numbering (`1..5`, `0, 10, 20`, ...); only their order
+  matters. Missing responses (NaN) use available cases: thresholds from every response to the
+  item, each pair from respondents who answered both.
+- A 2 x 2 table with exactly one empty cell has its maximum at $|\rho| = 1$. By default 0.5 is
+  moved into the empty cell's diagonal, keeping the margins, as lavaan does
+  (`zero_cell_correction=0` turns it off). Remaining maxima at $|\rho| \to 1$ give a
+  `HeywoodWarning` and are listed in `pc.at_boundary`.
+- A matrix assembled from pairwise estimates need not be positive definite. It is then smoothed
+  (psych's `cor.smooth` rule) with a `NotPositiveDefiniteWarning`; `pc.unsmoothed_correlation`
+  keeps the pairwise estimates.
+
+## 17. Errors and warnings
 
 | Type | When |
 |---|---|
-| `PrecisionError` | `fit()` was called with JAX's 64-bit floating point disabled |
+| `PrecisionError` | `fit()` (or another estimating function) was called with JAX's 64-bit floating point disabled |
 | `SpecificationError` | The specification and data disagree (missing or extra columns, out-of-range values, unobserved categories, fixing an unknown item, invalid table or prior edits, unknown group labels) |
 | `IdentificationError` | The scale is not identified ([section 8](#8-latent-distributions-and-identification)) |
 | `ConvergenceWarning` | EM did not converge within `max_iter`, or SQUAREM fell back to plain EM on > 50% of iterations (at least 5 times) |
-| `HeywoodWarning` | A free item parameter ended within `1e-4` of a finite bound (e.g. `g` near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$; or a `NormalMixture` component is degenerate |
+| `HeywoodWarning` | A free item parameter ended within `1e-4` of a finite bound (e.g. `g` near 0 or `u` near 1 in 3PL/4PL) or a free slope has $|a| > 20$; or a `NormalMixture` component is degenerate; or a polychoric pair is at $|\rho| \to 1$ |
+| `NotPositiveDefiniteWarning` | A polychoric matrix was not positive definite and was smoothed |
 | `FlexpyirtWarning` | The information matrix is not positive definite (SEs are NaN), an anchor is a single parameter, or `aic` / `bic` is accessed under MAP |
 
 Every exception derives from `flexpyirt.errors.FlexpyirtError` and every warning from

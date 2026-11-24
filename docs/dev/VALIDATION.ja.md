@@ -21,6 +21,7 @@
 | 尺度リンキング $(A, B)$ / 目的関数（同一の項目推定値） | 1e-9 / 1e-9（相対） |
 | 尺度リンキングのデルタ法 SE / `vcov`（同一の推定値・共分散） | 1e-5（相対） |
 | 尺度リンキング $(A, B)$ / 目的関数 / SE（推定 + リンキングの一連） | 1e-6 / 1e-5（相対） / 1e-3（相対） |
+| ポリコリック相関（lavaan / psych と）、閾値、平滑化（`cor.smooth` と） | 1e-6 / 1e-3、1e-12、1e-12 |
 
 ## ケース一覧（マイルストーンと対応）
 | ID | 内容 | mirt 側の呼び出し | MS |
@@ -48,6 +49,7 @@
 | V21 | 多母集団の確認的 2 次元 MIRT（単純構造・交差負荷。両因子にアンカー、焦点群の平均・分散を自由） | `COV = F1*F2` での `multipleGroup(..., invariance = c(anchors, "free_means", "free_var"))` | M4 |
 | V22 | 混合正規潜在分布（2PL $k=2$ の二峰、小さい成分を持つ GRM $k=2$、GPCM $k=3$） | 像の格子での `multipleGroup(..., dentype = "mixture-k", invariance = c(<全項目>, "free_means", "free_var"))` と、標準化した尤度の R による独立な実装（Newton による仕上げ、Richardson ヘッセ行列 SE、EAP） | M5 |
 | V23 | 名義反応モデル（Science、順序のない・負の採点係数を含むシミュレーション、名義 + 2PL の混在、大半が非単調な項目、2 因子の確認的モデル） | GPCM の点（またはより良い別の初期値）から開始する `pars` を与えた `mirt(..., "nominal")`、`itemfit(fit_stats = "S_X2")` | M5 |
+| V24 | ポリコリック・テトラコリック相関（シミュレーションのテトラコリック、2〜5 カテゴリの混在、10% MCAR、空のセルが 1 つの 2 x 2 表、LSAT7、Science）と平滑化 | lavaan の `lavCor(..., ordered = , missing = )`、psych の `polychoric(..., smooth = FALSE, correct = 0)`、`cor.smooth()` | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -545,6 +547,13 @@
   S-X2・スコアリング・事前分布・等値制約・多群と DIF・EH・2 次元・退化項目の `HeywoodWarning`）:
   `tests/test_m5_nominal.py`。テスト: `tests/test_mirt_m5_nominal.py`。参照値生成:
   `validation/r/m5_nominal_reference.R`。
+- **ポリコリック相関（V24、M5）**: mirt との照合ではない。順序変数に対する lavaan の `lavCor`（`nlminb` に解析的な
+  勾配とヘッセ行列を与えた two-step 最尤法、$|\rho|\le0.999$、既定の `zero.add = c(0.5, 0)`）を厳密な参照値とする。
+  lavaan が非収束の警告を出したらスクリプトを止める。psych の `polychoric` は既定の許容誤差の `optimize()` と
+  `mnormt::sadmvn` を使うので、1e-3 までの照合とし、欠測のないデータで、空のセルを補正したペアを除いて比べる
+  （`global = TRUE` の psych は補正しない）。カテゴリ数が異なると psych はペアごとの閾値を使い、欠測があると結果が
+  ずれる（MCAR のケースで 6e-3）ため、そのケースは lavaan とだけ比べる。さらに各ペアの two-step の勾配が推定値で
+  0 になることも確かめる。2 変量正規分布の分布関数は Plackett の積分と単体テストで比べる。
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。

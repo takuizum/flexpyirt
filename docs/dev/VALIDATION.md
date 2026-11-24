@@ -26,6 +26,7 @@ English | [日本語](VALIDATION.ja.md)
 | Scale linking $(A, B)$ / criterion, on identical item estimates | 1e-9 / 1e-9 (relative) |
 | Scale linking delta-method SE / `vcov`, on identical estimates and covariance | 1e-5 (relative) |
 | Scale linking $(A, B)$ / criterion / SE, end-to-end (calibration + linking) | 1e-6 / 1e-5 (relative) / 1e-3 (relative) |
+| Polychoric correlation vs lavaan / psych; thresholds; smoothing vs `cor.smooth` | 1e-6 / 1e-3; 1e-12; 1e-12 |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -53,6 +54,7 @@ English | [日本語](VALIDATION.ja.md)
 | V21 | Multiple-group confirmatory 2D MIRT (simple structure, cross-loading; anchors on both factors, focal means/variances free) | `multipleGroup(..., invariance = c(anchors, "free_means", "free_var"))` with `COV = F1*F2` | M4 |
 | V22 | Normal-mixture latent distributions (2PL $k=2$ bimodal, GRM $k=2$ with a small component, GPCM $k=3$) | `multipleGroup(..., dentype = "mixture-k", invariance = c(<all items>, "free_means", "free_var"))` on the image grid, plus an independent R implementation of the standardized likelihood (Newton polish, Richardson-Hessian SEs, EAP) | M5 |
 | V23 | Nominal response model (Science; simulated with unordered/negative scoring coefficients; nominal + 2PL mixed; mostly non-monotone items; two-factor confirmatory) | `mirt(..., "nominal")` with `pars` starting at the GPCM point (or the best alternative start); `itemfit(fit_stats = "S_X2")` | M5 |
+| V24 | Polychoric / tetrachoric correlations (simulated tetrachoric, mixed 2–5 categories, 10% MCAR, one-empty-cell 2 x 2 tables, LSAT7, Science) and smoothing | lavaan `lavCor(..., ordered = , missing = )`; psych `polychoric(..., smooth = FALSE, correct = 0)`, `cor.smooth()` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -675,6 +677,15 @@ English | [日本語](VALIDATION.ja.md)
   scoring, priors, equality constraints, multiple groups and DIF, EH, 2D, the degenerate-item
   `HeywoodWarning`): `tests/test_m5_nominal.py`. Tests: `tests/test_mirt_m5_nominal.py`.
   Reference generator: `validation/r/m5_nominal_reference.R`.
+- **Polychoric correlations (V24, M5)**: not a mirt comparison. lavaan's `lavCor` on ordered
+  variables (two-step ML by `nlminb` with analytic gradient and Hessian, $|\rho|\le0.999$, default
+  `zero.add = c(0.5, 0)`) is the tight reference; a lavaan warning about non-convergence stops the
+  script. psych's `polychoric` uses `optimize()` at its default tolerance and `mnormt::sadmvn`, so
+  it is checked to 1e-3 only, on complete data and excluding pairs with a corrected zero cell
+  (psych with `global = TRUE` applies no correction); with unequal category counts psych takes
+  per-pair thresholds, which differs under missing data (6e-3 on the MCAR case), so that case is
+  lavaan-only. A further self-check confirms that each pair's two-step gradient vanishes at the
+  estimate. The bivariate normal CDF is unit-tested against Plackett's integral.
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is

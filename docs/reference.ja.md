@@ -10,6 +10,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
+- 相関: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -670,6 +671,53 @@ Rasch・4PL・PCM は同じカーネルを共有し単体テストでのみ確�
 | `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | 能力値を $\theta^* = A\theta + B$ で変換（採点 DataFrame の `theta` と全 `pv1..` 列。`se` は $A\,\mathrm{se}$ でリンキング誤差を含まない） |
 | `summary(*, digits=4)` | str | 読みやすいテキスト要約（Jupyter では `_repr_html_()` で HTML 表示） |
 
+## 相関
+
+### `polychoric`
+
+```text
+polychoric(data, *, smooth=True, zero_cell_correction=0.5, tol=1e-10,
+           max_iter=100) -> PolychoricResult
+```
+
+順序反応のポリコリック相関行列（2 値項目ではテトラコリック相関）を two-step の最尤法で求める
+（[ガイド 16 節](guide.ja.md#16-ポリコリック相関)）。各項目の閾値を周辺比率から求め、そのうえで各ペアの相関を、離散化した
+2 変量正規分布のもとでのペアの分割表の尤度を最大にする値とする（Olsson, 1979）。2 変量正規分布の確率は Genz (2004) の
+方法で計算する。順序変数に対する lavaan の `lavCor` と一致する。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `data` | DataFrame / 2 次元配列 | 1 行が 1 回答者、1 列が 1 項目。順序のあるカテゴリの符号（任意の数値で、昇順がカテゴリの順序）、欠測は NaN。各項目に観測されたカテゴリが 2 つ以上必要。観測されない符号はカテゴリとみなさない |
+| `smooth` | bool | 正定値でない行列を平滑化する（psych の `cor.smooth` と同じ規則）。`NotPositiveDefiniteWarning` を出す（既定 `True`） |
+| `zero_cell_correction` | float | 空のセルがちょうど 1 つの 2 x 2 表で、空のセルを含む対角にこの値を足し、もう一方の対角から引く（周辺は変わらない。lavaan の既定の規則）。補正しないと推定値は $\pm 1$ になる。`0` で無効（既定 `0.5`） |
+| `tol` | float | 1 観測あたりの勾配に対する収束判定（既定 `1e-10`） |
+| `max_iter` | int | ペアごとの Newton 反復の上限（既定 `100`） |
+
+欠測は利用可能なケースで扱う。閾値は項目への観測された回答をすべて使い、ペアの分割表は両方に回答した回答者を使う。
+
+**戻り値**: [`PolychoricResult`](#polychoricresult)
+
+**例外**: `PrecisionError`（JAX の 64 ビットが無効）、`SpecificationError`（数値でないデータ、項目が 2 つ未満、観測された
+カテゴリが 1 つだけの項目、両方に回答した回答者がいないペア、またはその回答者の中で一方の項目が一定）。
+
+**警告**: `HeywoodWarning`（ペアの尤度が $|\rho| \to 1$ で最大）、`ConvergenceWarning`（収束しないペアがある）、
+`NotPositiveDefiniteWarning`（行列を平滑化した）。
+
+### `PolychoricResult`
+
+`polychoric()` の戻り値。変更不可。
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `correlation` | DataFrame | 項目 x 項目の相関行列（`smooth=True` で必要なときは平滑化後） |
+| `unsmoothed_correlation` | DataFrame | 平滑化前のペアごとの推定値 |
+| `thresholds` | dict[str, ndarray] | 項目ごとに、観測された $K$ カテゴリの $K - 1$ 個の閾値 $\tau_k = \Phi^{-1}(P(Y \le k))$ |
+| `categories` | dict[str, ndarray] | 項目ごとに、観測された回答の値（昇順） |
+| `n_obs` | DataFrame | 両方の回答が観測された回答者数（対角は項目への回答数） |
+| `converged`, `at_boundary`, `zero_cell_corrected` | DataFrame (bool) | ペアごとに、収束したか、$\lvert\rho\rvert \to 1$ で最大か（推定値は $\pm\tanh 8$）、`zero_cell_correction` を適用したか |
+| `smoothed` | bool | 平滑化で行列が変わったか |
+| `min_eigenvalue` | float | `unsmoothed_correlation` の最小固有値 |
+
 ---
 
 ## 設定
@@ -746,3 +794,7 @@ flexpyirt が出すすべての警告の基底クラス（`UserWarning` を継�
 推定後、自由な項目パラメタが有限の境界から `1e-4` 以内に到達した（3PL / 4PL で `g` が 0 付近、`u` が 1 付近
 など）か、自由な傾きが $|a| > 20$ になった場合に出る。該当する項目名をすべて列挙する。`NormalMixture` の解が退化した
 場合（重みが `1e-3` 未満、標準偏差が格子間隔の半分未満、平均が格子の外のいずれかの成分、または 2 つの成分の一致）にも出る。
+
+#### `NotPositiveDefiniteWarning`
+
+`polychoric()` でペアごとの行列が正定値でなく、`smooth=True` により平滑化したときに出る。

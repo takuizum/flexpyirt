@@ -55,6 +55,7 @@ $10^{-8}$ 程度）。
 | $M_2$ / $M_2^*$ | `M2(m)`。mirt と異なる場合は R による厳密な計算（下記参照） |
 | DIF 検定 | `DIF(mg, scheme = "add" / "drop")` |
 | SQUAREM | 上のすべての照合を `BAEM(squarem=True)` でも行う |
+| ポリコリック相関 | 順序変数に対する lavaan の `lavCor()` と $10^{-6}$ まで、psych の `polychoric()` と $10^{-3}$ まで（その最適化の許容誤差による）、平滑化は psych の `cor.smooth()` |
 | 尺度リンキング（Haebara、Stocking–Lord） | mirt の反応関数を使って規準を計算する R の独立な実装（mirt 自体に特性曲線法のリンキングはない） |
 
 ## mirt との既知の違い

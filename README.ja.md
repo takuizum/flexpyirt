@@ -37,6 +37,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 限定情報の適合度 | Maydeu-Olivares & Joe の M2 / M2*（`FitResult.m2()`）。自由度・p 値・RMSEA と信頼区間・SRMSR・2 値の TLI / CFI | ✓ |
 | DIF | 多母集団の尤度比検定による DIF（`FitResult.dif()`。mirt の `DIF()` の `add` / `drop` 方式、AIC・SABIC・HQ・BIC の差、Holm または BH で補正した p 値） | ✓ |
 | 尺度リンキング | 微分可能な特性曲線法リンキング（`link()`, `LinkResult`: Haebara・Stocking–Lord の非対称・対称版、Ogasawara デルタ法 SE、項目・$\theta$ の変換。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目で R の独立な実装と照合済み） | ✓ |
+| ポリコリック相関 | ポリコリック・テトラコリック相関行列（`polychoric()`: two-step の最尤法、欠測は利用可能なケース、lavaan と同じ 2 x 2 表の空セル補正、正定値でない行列の平滑化。lavaan の `lavCor` と照合済み） | ✓ |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
 
 ## インストール
