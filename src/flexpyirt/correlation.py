@@ -256,7 +256,7 @@ def polychoric(
         counts = np.bincount(inverse, minlength=uniq.size).astype(np.float64)
         thresholds[name] = ndtri(np.cumsum(counts)[:-1] / counts.sum())
 
-    k_max = int(n_categories.max())
+    k_max = int(np.max(n_categories))
     bounds = np.full((n_items, k_max + 1), np.inf)
     bounds[:, 0] = -np.inf
     for j, name in enumerate(names):
