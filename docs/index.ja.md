@@ -4,7 +4,7 @@
 
 JAX による Python の項目反応理論（IRT）推定ライブラリ。Bock–Aitkin EM による周辺最尤推定を中心に、
 多母集団の同時推定や固定項目パラメタ推定（FIPC）などを備える。対応済みの機能はすべて R `mirt` と
-数値照合している（[検証](VALIDATION.ja.md)）。
+数値照合している（[精度と検証](accuracy.ja.md)）。
 
 > 開発中（0.x）。1.0.0 までは公開 API が変わることがある。
 
@@ -51,7 +51,8 @@ scores = res.score(df)  # 受検者ごとの EAP と事後 SD
 
 - [ユーザーガイド](guide.ja.md): モデルの指定、多母集団、FIPC、スコアリング、項目適合度、DIF、
   リンキング、推定オプション。
+- [理論](theory.ja.md): flexpyirt の背後にあるモデルとアルゴリズムの要点（IRT モデル、周辺尤度、EM
+  アルゴリズム、識別性、標準誤差、スコアリング、適合度、リンキング）。
 - [API リファレンス](reference.ja.md): 公開クラス・関数の一覧。
-- [検証](VALIDATION.ja.md): R mirt との照合方法、許容誤差、既知の差。
-- [設計](DESIGN.ja.md)と[ロードマップ](ROADMAP.ja.md)。
+- [精度と検証](accuracy.ja.md): R mirt との照合方法、許容誤差、mirt との既知の違い。
 - ソースコード・Issue・リリース: [GitHub](https://github.com/takuizum/flexpyirt)。

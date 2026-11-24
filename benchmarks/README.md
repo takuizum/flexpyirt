@@ -85,7 +85,7 @@ All datasets are simulated with fixed NumPy seeds so Python and R fit identical 
 - **CPU only and threading**: `run_flexpyirt.py` forces `JAX_PLATFORMS=cpu`. XLA CPU may use
   multiple threads internally, whereas R `mirt` runs single-threaded by default unless
   `mirtCluster()` is configured. GPU acceleration is not measured here; see
-  [DESIGN §9](../docs/DESIGN.md#9-performance).
+  [DESIGN §9](../docs/dev/DESIGN.md#9-performance).
 - **Machine dependence**: Absolute times and ratios depend strongly on CPU architecture, memory
   bandwidth, OS, BLAS/XLA backend, and library versions. Treat the committed table as one hardware
   data point and rerun on your own machine when making performance decisions.

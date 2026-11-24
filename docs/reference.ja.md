@@ -3,7 +3,7 @@
 [English](reference.md) | 日本語
 
 flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の一覧。使い方の流れは
-[ユーザーガイド](guide.ja.md)、数式とアルゴリズムは [設計書](DESIGN.ja.md) を参照。
+[ユーザーガイド](guide.ja.md)、数式とアルゴリズムは [理論](theory.ja.md) を参照。
 各関数の docstring にも同じ内容と対応する式・出典がある（`help(flexpyirt.fit)` など）。
 
 公開関数の引数は、最初の 1〜2 個を除いてキーワード専用（`*` の後ろ）。
@@ -136,7 +136,7 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 |---|---|
 | `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
 | `min_cell` | まとめる前のセルあたり最小期待度数（既定 `1.0`） |
-| `group` | 群ラベル（多母集団モデルでは必須。群ごとに S-X2 を計算する、DESIGN §15.45） |
+| `group` | 群ラベル（多母集団モデルでは必須。群ごとに S-X2 を計算する） |
 | `item_names` | `data` が配列のときの列名 |
 
 **戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
@@ -167,7 +167,7 @@ $\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、す
 `rmsea_<lo>`, `rmsea_<hi>`（`ci` に従う。例: `0.90` で `rmsea_5`, `rmsea_95`）, `srmsr`,
 `tli`, `cfi`。`df <= 0` または $\Delta_2$ がランク落ちしているとき（1 次・2 次モーメントから局所識別できないとき）は
 `FlexpyirtWarning` を出し、`m2`・`p`・RMSEA・信頼区間・`tli`・`cfi` を `NaN` とする（`df` と `srmsr` は有限のまま）。
-多値モデルでは `tli` と `cfi` を `NaN` とする（DESIGN §16.3）。2 値モデルで帰無モデルの $M_2$ が当てはめモデルの $M_2$
+多値モデルでは `tli` と `cfi` を `NaN` とする（独立帰無モデルは 2 値項目でのみ定義されるため）。2 値モデルで帰無モデルの $M_2$ が当てはめモデルの $M_2$
 以下のときは `FlexpyirtWarning` を出し `tli`・`cfi` を `NaN` とする。
 
 **例外**: JAX 64 ビットが無効なとき `PrecisionError`。多次元・多母集団・`EmpiricalHistogram`・`NormalMixture`・事前分布つきの
@@ -477,7 +477,7 @@ mirt の `itemtype = "nominal"` と同じ。$\mathrm{ak}_k=k$ に固定すると
 
 ## 事前分布
 
-ヤコビアンなしの自然尺度で項目パラメタに課す事前分布の不変データクラス（DESIGN §4.7）。いずれもハイパーパラメタを検証し
+ヤコビアンなしの自然尺度で項目パラメタに課す事前分布の不変データクラス（mirt と同じ）。いずれもハイパーパラメタを検証し
 （不正なら `SpecificationError`）、`support` と `log_pdf(x) -> Array` を持つ。
 
 ### `NormalPrior`
@@ -625,7 +625,7 @@ link(source, target, *, items=None, method="stocking_lord", symmetric=False,
 
 別々に推定した 1 次元の `source`（新フォーム）尺度を、共通項目を通じて `target`（基準フォーム）尺度へ結ぶ
 線形変換 $\theta^* = A\theta + B$（$A > 0$）の係数 $(A, B)$ を推定する（[ガイド 15 節](guide.ja.md#15-尺度リンキング)、
-[設計書 §16.5](DESIGN.ja.md)）。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目について照合済み（V20）で、
+[理論](theory.ja.md)）。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目について R の独立な実装と照合済みで、
 Rasch・4PL・PCM は同じカーネルを共有し単体テストでのみ確認している。Newton 最適化と Ogasawara (2001) のデルタ法
 標準誤差の微分は JAX の自動微分で計算する。SE は独立な推定を仮定し（1 つの多母集団推定を `source` と `target` の
 両方に使うときは同時共分散を使う）、求積重みを固定し、収束しないときは報告しない。
@@ -701,7 +701,7 @@ mirt の既定と同じく、1 因子で 61 点、2 因子で各軸 31 点（$31
 直積格子 `(n_points**n_factors, n_factors)` を返す。軸あたり点数は 3 以上、範囲は有限で `lower < upper`。
 
 `Quadrature.gauss_hermite(n_points)` は `Normal` 潜在分布用に Gauss–Hermite 節点 $\sqrt2\,x_q$（次元あたり 3–200 点、
-2・3 次元では直積則）を使い、推定した平均・共分散に合わせて重みを付け直す（DESIGN §15.44）。`base_log_weights(n_factors)` は
+2・3 次元では直積則）を使い、推定した平均・共分散に合わせて重みを付け直す。`base_log_weights(n_factors)` は
 節点ごとの固定の対数重み（等間隔格子では 0）を返す。`NormalMixture` でも使える（各成分はその平均・分散の `Normal` と同じ重みを受け取る）。`EmpiricalHistogram`・`DavidianCurve` とは併用できない。
 
 ---

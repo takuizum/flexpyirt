@@ -3,7 +3,7 @@
 English | [日本語](reference.ja.md)
 
 The public API of flexpyirt (everything importable with `from flexpyirt import ...`). For the
-workflow see the [user guide](guide.md); for formulas and algorithms see the [design](DESIGN.md).
+workflow see the [user guide](guide.md); for the formulas and algorithms see [Theory](theory.md).
 The docstrings carry the same information plus the formulas and sources
 (`help(flexpyirt.fit)` and so on).
 
@@ -149,7 +149,7 @@ free latent parameters (mirt's convention).
 |---|---|
 | `data` | Complete responses on the fitted items (typically the fitting data) |
 | `min_cell` | Minimum expected count per cell before collapsing (default `1.0`) |
-| `group` | Group labels (required for a multiple-group model; S-X2 is computed within each group, DESIGN §15.45) |
+| `group` | Group labels (required for a multiple-group model; S-X2 is computed within each group) |
 | `item_names` | Column names when `data` is an array |
 
 **Returns**: `DataFrame` with columns `item`, `s_x2`, `df`, `rmsea`
@@ -184,7 +184,7 @@ every free item and latent parameter (shared parameters once) via JAX autodiff.
 `tli`, `cfi`. When `df <= 0` or $\Delta_2$ is rank-deficient (the model is not locally identified
 from first- and second-order moments), a `FlexpyirtWarning` is emitted and `m2`, `p`, RMSEA, its
 CI, `tli` and `cfi` are `NaN` (`df` and `srmsr` remain finite). Polytomous models return `NaN` for
-`tli` and `cfi` (DESIGN §16.3); if the dichotomous null $M_2$ is not greater than the fitted $M_2$,
+`tli` and `cfi` (the independence null model is dichotomous only); if the dichotomous null $M_2$ is not greater than the fitted $M_2$,
 a `FlexpyirtWarning` is emitted and `tli`/`cfi` are `NaN`.
 
 **Raises**: `PrecisionError` if JAX 64-bit is disabled; `SpecificationError` for multidimensional,
@@ -524,7 +524,7 @@ parameters, so `Nominal(2)` equals `GPCM(2)` / `TwoPL`). Uses `NominalKernel(n_c
 ## Priors
 
 Frozen dataclasses representing item-parameter priors on the natural parameter scale without a
-Jacobian term (DESIGN §4.7). Each validates its hyperparameters (`SpecificationError`), exposes
+Jacobian term (as in mirt). Each validates its hyperparameters (`SpecificationError`), exposes
 `support`, and provides `log_pdf(x) -> Array`.
 
 ### `NormalPrior`
@@ -685,7 +685,7 @@ link(source, target, *, items=None, method="stocking_lord", symmetric=False,
 
 Link a separately calibrated unidimensional `source` (new) scale onto `target` (base) via common
 items by finding linear constants $(A, B)$ ($A > 0$) for $\theta^* = A\theta + B$
-([guide section 15](guide.md#15-scale-linking), [DESIGN §16.5](DESIGN.md)). Validated (V20) for
+([guide section 15](guide.md#15-scale-linking), [Theory](theory.md)). Validated against R for
 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items; Rasch, 4PL and PCM share these kernels and
 are covered by unit tests only. Derivatives for Newton optimization and delta-method standard
 errors (Ogasawara, 2001) come from JAX automatic differentiation. SEs assume independent
@@ -767,7 +767,7 @@ dimension; limits must be finite with `lower < upper`.
 
 `Quadrature.gauss_hermite(n_points)` uses the Gauss–Hermite nodes $\sqrt2\,x_q$ (3–200 per
 dimension, product rule in 2–3 dimensions) for `Normal` latent distributions, reweighted for the
-estimated mean and covariance (DESIGN §15.44); `base_log_weights(n_factors)` returns the fixed
+estimated mean and covariance; `base_log_weights(n_factors)` returns the fixed
 per-node log weights (0 for equispaced grids). Also used by `NormalMixture` (each component gets
 the weights of a `Normal` with its mean and variance). Not available with `EmpiricalHistogram` or
 `DavidianCurve`.

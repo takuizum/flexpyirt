@@ -297,8 +297,8 @@ class ItemKernel(Protocol):
 - item family ごとの `vmap`。異種項目混在でも family 数（静的）だけのループ。
 - 既定は CPU で十分速いことを目標。GPU は大規模（N ≥ 10^5, J ≥ 100）で効けばよい。
 - ベンチマーク: R mirt（`TOL=1e-4`、既定設定および検証設定）との wall time 比較を
-  [benchmarks/](../benchmarks/README.ja.md) に置き、Apple M5 CPU での計測結果を
-  [benchmarks/results/2026-11-21-apple-m5.md](../benchmarks/results/2026-11-21-apple-m5.md) に
+  [benchmarks/](../../benchmarks/README.ja.md) に置き、Apple M5 CPU での計測結果を
+  [benchmarks/results/2026-11-21-apple-m5.md](../../benchmarks/results/2026-11-21-apple-m5.md) に
   コミットしている。この 1 環境の計測（$[-6, 6]$ 上の 61 点求積、CPU 専用。XLA CPU は複数スレッドを
   使う場合がある一方、mirt は既定で単一スレッド）の要約:
   - **warm 実行**: 全 6 ケースで mirt 既定より速い（通常 EM で `0.16×–0.60×`、`squarem=True` で

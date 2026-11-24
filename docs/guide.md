@@ -3,8 +3,8 @@
 English | [日本語](guide.ja.md)
 
 How to specify, fit and interpret IRT models with flexpyirt. The code on this page runs top to
-bottom, and `tests/test_docs.py` runs all of it on every test run. For the arguments of each
-function, see the [API reference](reference.md).
+bottom as one script. For the arguments of each function, see the [API reference](reference.md);
+for the models and algorithms behind them, see [Theory](theory.md).
 
 1. [Setup](#1-setup)
 2. [Data format](#2-data-format)
@@ -125,7 +125,7 @@ The parameterization is mirt's slope–intercept form (`itemtype = "2PL"`, `"Ras
 `g` and `u` are estimated on the natural scale with $0 < g < u \le 1$ (mirt optimizes them on the
 logit scale; the interior ML estimates agree). Polytomous categories start at 0 (subtract 1 from
 data coded from 1, such as mirt's `Science`). `Nominal` has no display `b` columns: its
-categories are not ordered, so adjacent-category thresholds on the $	heta$ scale are not defined
+categories are not ordered, so adjacent-category thresholds on the $\theta$ scale are not defined
 in general (they are singular when $\mathrm{ak}_k=\mathrm{ak}_{k-1}$), and mirt's
 `coef(m, IRTpars = TRUE)` reports Bock's zero-sum slopes and intercepts instead.
 
@@ -194,8 +194,8 @@ res = fit(
   stabilizing EM step (3 EM evaluations per accepted iterate, or 2 if the monotonicity/feasibility
   safeguard falls back to $\theta_2$). Turn it on for slow-converging models (Rasch/PCM with free
   variance, multiple groups, 3PL/4PL, or tight `tol`). It converges to the same fixed point with
-  monotone `history["loglik"]` and far fewer EM evaluations. Plain EM (`squarem=False`) stays the
-  default in M3 until wall-time benchmarks against mirt are complete.
+  monotone `history["loglik"]` and far fewer EM evaluations. Plain EM (`squarem=False`) is the
+  default.
 - **`quadrature`**: the latent-variable grid. The default is 61 equally spaced points on
   $[-6, 6]$ (mirt's default). See [section 13](#13-choosing-the-quadrature-grid) for when to
   widen it.
@@ -289,7 +289,8 @@ print(fit_table.round(3))
 statistic on the item-score means and pairwise cross-products (mirt's default `M2(type = "M2*")`;
 identically $M_2$ for dichotomous items), together with RMSEA and its confidence interval
 (`ci=0.90` by default), SRMSR, and — for dichotomous models — TLI and CFI against the independence
-null model (polytomous models report `NaN` for `tli` and `cfi`; see [DESIGN §16.3](DESIGN.md)).
+null model (polytomous models report `NaN` for `tli` and `cfi`, because the independence null
+model is defined for dichotomous items only).
 It requires complete data and a single-group, unidimensional, `Normal` MLE fit (no priors).
 
 ```python
@@ -347,7 +348,8 @@ entering a threshold is fixed.
   $-\infty$ due to guessing also return $-\infty$ with SE NaN under `"ML"`. For `Nominal` items,
   "lowest" / "highest" means the category with the smallest / largest category slope
   $a\,\mathrm{ak}_c$, which need not be category 0 / $K-1$ (e.g. with $\mathrm{ak}_1<0$ the all-0
-  pattern has a finite ML estimate; mirt returns $-\infty$ there, [VALIDATION.md](VALIDATION.md) V23).
+  pattern has a finite ML estimate; mirt returns $-\infty$ there, see
+  [Accuracy and validation](accuracy.md)).
 - **`method="PV"` requires an explicit JAX PRNG `key`** (e.g. `jax.random.key(0)`): flexpyirt
   never uses global random state, so results are fully deterministic given `key` while giving
   independent draws to respondents even when they share the same response pattern.
@@ -519,11 +521,11 @@ print(mix.score(bi_df.iloc[:3], method="EAP").round(3))  # uses the fitted mixtu
   then support fewer components.
 - **Grid resolution**: narrow components with many informative items make the posteriors about as
   narrow as the grid spacing; then refine the grid (e.g. `Quadrature.equispaced(121)`, spacing
-  0.1) and check that `loglik` no longer changes (V22c needed 121 points).
+  0.1) and check that `loglik` no longer changes.
 - **mirt**: mirt's `dentype = "mixture-k"` estimates class-specific item parameters by default (a
   mixture IRT model). The flexpyirt model equals mirt's with every item constrained equal across
   classes (`invariance = c(<items>, "free_means", "free_var")`), up to the scale of $\theta$
-  ([VALIDATION.md](VALIDATION.md) V22).
+  (see [Accuracy and validation](accuracy.md)).
 
 ## 9. Multiple groups
 
@@ -733,7 +735,7 @@ wide = Quadrature.equispaced(81, bounds=(-8, 8))  # same 0.2 spacing, wider rang
 The reported `var` is the parameter of the normal distribution before the grid cuts it off; the
 variance of the distribution on the grid is slightly smaller. mirt updates the variance with
 closed-form moments, so where the grid ends matter its values differ from flexpyirt's. Widening
-the grid makes them agree ([VALIDATION.md](VALIDATION.md)).
+the grid makes them agree (see [Theory](theory.md) and [Accuracy and validation](accuracy.md)).
 
 **Gauss–Hermite.** For `Normal` latent distributions, `Quadrature.gauss_hermite(n)` places `n`
 Gauss–Hermite nodes per dimension and reweights them for the estimated mean and variance; it is
@@ -857,7 +859,7 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 ```
 
 - Common items must share the same kernel and category count on both sides. Linking is validated
-  against base-R references (V20) for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items; Rasch,
+  against independent R implementations for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items; Rasch,
   4PL and PCM items use the same kernels and are covered by unit tests only. Haebara sums over
   all categories (Kim & Lee, 2006), so a dichotomous item counts twice Haebara's original term.
 - Standard errors assume independent calibrations. Passing the same multiple-group fit as
