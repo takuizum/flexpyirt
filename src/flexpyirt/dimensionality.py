@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from flexpyirt import _detect
+from flexpyirt import _detect, _efa
 from flexpyirt._compile import coerce_responses
 from flexpyirt._precision import check_x64
 from flexpyirt.correlation import (
@@ -26,7 +26,13 @@ from flexpyirt.correlation import (
     polychoric,
     smooth_correlation,
 )
-from flexpyirt.errors import FlexpyirtWarning, NotPositiveDefiniteWarning, SpecificationError
+from flexpyirt.errors import (
+    ConvergenceWarning,
+    FlexpyirtWarning,
+    HeywoodWarning,
+    NotPositiveDefiniteWarning,
+    SpecificationError,
+)
 
 if TYPE_CHECKING:
     from flexpyirt.result import FitResult
@@ -34,16 +40,20 @@ if TYPE_CHECKING:
 __all__ = [
     "DetectResult",
     "DimensionalityResult",
+    "EFAResult",
     "EmpiricalKaiserResult",
     "ExploratoryDetectResult",
+    "HullResult",
     "LocalDependenceResult",
     "MAPResult",
     "ModelParallelAnalysisResult",
     "ParallelAnalysisResult",
     "detect",
     "dimensionality",
+    "efa",
     "empirical_kaiser",
     "exploratory_detect",
+    "hull",
     "model_parallel_analysis",
     "parallel_analysis",
     "velicer_map",
@@ -727,7 +737,7 @@ class DimensionalityResult:
         Number of available question-(B) methods.
     results : dict of str to object
         The individual results (``polychoric``, ``parallel_analysis``, ``velicer_map``,
-        ``empirical_kaiser``, ``exploratory_detect`` and, with ``fit``,
+        ``empirical_kaiser``, ``hull``, ``exploratory_detect`` and, with ``fit``,
         ``model_parallel_analysis``, ``local_dependence``, ``m2``; ``None`` when unavailable).
     """
 
@@ -788,7 +798,8 @@ def dimensionality(
 
     (A) **How many dimensions?** :func:`parallel_analysis` (polychoric, PCA eigenvalues,
     permutation reference, 95th percentile), :func:`velicer_map` (revised, fourth power) and
-    :func:`empirical_kaiser`, all on one polychoric matrix. The consensus is the mode (all values
+    :func:`empirical_kaiser`, and :func:`hull` (CAF, ULS; with at least 6 items), all on one
+    polychoric matrix. The consensus is the mode (all values
     on a tie) and the median of the suggested numbers, with the number of methods agreeing.
 
     (B) **Is essential unidimensionality tenable?**
@@ -817,7 +828,7 @@ def dimensionality(
         Respondents x items, ordered category codes; NaN is missing. With ``fit``, the fitting
         data (the fitted items, in any column order when a DataFrame).
     key : jax.Array
-        JAX PRNG key; split for the parallel analyses and the DETECT split.
+        JAX PRNG key; split for the parallel analyses, the Hull bound and the DETECT split.
     fit : FitResult, optional
         Fitted unidimensional model for question (B).
     n_replications : int, default 100
@@ -857,7 +868,7 @@ def dimensionality(
     ):
         if not (lo < float(value) < hi):
             raise SpecificationError(f"{name} must be in ({lo:g}, {hi:g}), got {value!r}.")
-    key_a, key_b, key_c = jax.random.split(key, 3)
+    key_a, key_b, key_c, key_d = jax.random.split(key, 4)
     results: dict[str, object] = {}
 
     if fit is not None:
@@ -904,6 +915,30 @@ def dimensionality(
             },
         ]
     )
+    if len(names) >= 6:
+        hl = hull(pc, key=key_d)
+        results["hull"] = hl
+        on = hl.table[hl.table["on_hull"]]
+        number = pd.concat(
+            [
+                number,
+                pd.DataFrame(
+                    [
+                        {
+                            "method": "Hull (CAF, ULS)",
+                            "n_factors": hl.n_factors,
+                            "detail": (
+                                f"J = {hl.max_factors}, on hull k = {on['n_factors'].tolist()}"
+                            ),
+                            "source": "Lorenzo-Seva, Timmerman & Kiers (2011)",
+                        }
+                    ]
+                ),
+            ],
+            ignore_index=True,
+        )
+    else:
+        results["hull"] = None
     suggested = number["n_factors"].to_numpy()
     values_k, counts_k = np.unique(suggested, return_counts=True)
     mode = tuple(int(v) for v in values_k[counts_k == np.max(counts_k)])
@@ -1258,4 +1293,310 @@ def exploratory_detect(
         n_clusters=best,
         estimation_rows=est,
         validation_rows=val,
+    )
+
+
+# ----------------------------------------------------------------------------- EFA and Hull
+EFAMethod = Literal["uls", "ml"]
+HullFitIndex = Literal["caf", "cfi", "rmsea"]
+_EFA_METHODS: tuple[str, ...] = ("uls", "ml")
+_HULL_FIT: tuple[str, ...] = ("caf", "cfi", "rmsea")
+
+
+@dataclass(frozen=True)
+class EFAResult:
+    r"""Result of :func:`efa`.
+
+    Attributes
+    ----------
+    loadings : pandas.DataFrame
+        Unrotated loadings (items x factors), each column signed to a non-negative sum.
+    uniquenesses : pandas.Series
+        Estimated uniquenesses :math:`\psi_i`.
+    communalities : pandas.Series
+        :math:`h_i^2=\sum_f\lambda_{if}^2`.
+    method : str
+        ``"uls"`` or ``"ml"``.
+    converged : bool
+        Whether the optimizer met its criterion.
+    heywood : bool
+        Whether some uniqueness is at the lower bound 0.005.
+    objective : float
+        Minimized objective.
+    fit : dict of str to float
+        ``chi2`` (Bartlett-corrected), ``df``, ``p``, ``caf``, ``cfi``, ``rmsea`` when ``n_obs``
+        was given; otherwise only ``caf`` and ``df``.
+    """
+
+    loadings: pd.DataFrame
+    uniquenesses: pd.Series
+    communalities: pd.Series
+    method: str
+    converged: bool
+    heywood: bool
+    objective: float
+    fit: dict[str, float]
+
+
+def efa(
+    correlation: pd.DataFrame | np.ndarray | PolychoricResult,
+    *,
+    n_factors: int,
+    method: EFAMethod = "uls",
+    n_obs: int | None = None,
+) -> EFAResult:
+    r"""Unrotated exploratory factor analysis of a correlation matrix.
+
+    The uniquenesses :math:`\Psi` minimize the ULS (minres) criterion
+    :math:`\tfrac12\lVert R-\Psi-\Lambda\Lambda^\top\rVert_F^2` (Harman & Jones, 1966) or the
+    ML discrepancy (Jöreskog, 1967), with :math:`\Lambda` from the leading eigenvectors of
+    :math:`R-\Psi` (ULS) or :math:`\Psi^{-1/2}R\Psi^{-1/2}` (ML), by L-BFGS-B with analytic
+    gradients from :math:`\psi_i=1-\mathrm{SMC}_i`, bounded to :math:`[0.005,\max(1,
+    \mathrm{SMC})]`. This is psych's ``fa(fm = "minres" / "ml", rotate = "none")`` and EFAtools'
+    ``EFA(method = "ULS" / "ML", rotation = "none")``. Fit indices follow EFAtools (CAF,
+    Bartlett-corrected :math:`\chi^2`, CFI, RMSEA; see :func:`flexpyirt._efa.fit_indices`).
+
+    Parameters
+    ----------
+    correlation : pandas.DataFrame, numpy.ndarray or PolychoricResult
+        Positive definite correlation matrix.
+    n_factors : int
+        Number of factors (at least 1, with positive degrees of freedom).
+    method : {"uls", "ml"}, default "uls"
+        Estimator.
+    n_obs : int, optional
+        Sample size for :math:`\chi^2`, CFI and RMSEA (default for a ``PolychoricResult``: its
+        smallest pairwise :math:`n`).
+
+    Returns
+    -------
+    EFAResult
+
+    Raises
+    ------
+    SpecificationError
+        Invalid options or a matrix that is not positive definite.
+
+    Warns
+    -----
+    ConvergenceWarning
+        If the optimizer did not converge.
+    HeywoodWarning
+        If a uniqueness is at its lower bound.
+    """
+    names, mat = _as_correlation(correlation)
+    if method not in _EFA_METHODS:
+        raise SpecificationError(f"method must be one of {_EFA_METHODS}, got {method!r}.")
+    p = mat.shape[0]
+    max_k = _efa.max_identified_factors(p)
+    if not (isinstance(n_factors, (int, np.integer)) and 1 <= n_factors <= max_k):
+        raise SpecificationError(
+            f"n_factors must be an integer in [1, {max_k}] for {p} variables (positive "
+            f"degrees of freedom), got {n_factors!r}."
+        )
+    if np.linalg.eigvalsh(mat).min() <= 0:
+        raise SpecificationError("efa() needs a positive definite correlation matrix.")
+    n = None
+    if n_obs is not None or isinstance(correlation, PolychoricResult):
+        n = _default_n_obs(correlation, n_obs)
+    sol = _efa.fit_factors(mat, int(n_factors), method)
+    _warn_efa(sol, int(n_factors))
+    fit: dict[str, float]
+    if n is None:
+        full = _efa.fit_indices(sol.loadings, mat, 2)
+        fit = {"caf": full["caf"], "df": full["df"]}
+    else:
+        fit = _efa.fit_indices(sol.loadings, mat, n)
+    columns = [f"F{f + 1}" for f in range(int(n_factors))]
+    h2 = np.sum(sol.loadings**2, axis=1)
+    return EFAResult(
+        loadings=pd.DataFrame(sol.loadings, index=names, columns=columns),
+        uniquenesses=pd.Series(sol.uniquenesses, index=names, name="uniqueness"),
+        communalities=pd.Series(h2, index=names, name="communality"),
+        method=method,
+        converged=sol.converged,
+        heywood=bool(np.any(sol.uniquenesses <= _efa.UNIQUENESS_FLOOR * (1 + 1e-9))),
+        objective=sol.objective,
+        fit=fit,
+    )
+
+
+def _warn_efa(sol: _efa.FactorSolution, k: int) -> None:
+    if not sol.converged:
+        warnings.warn(
+            f"The {k}-factor solution did not converge.", ConvergenceWarning, stacklevel=3
+        )
+    if np.any(sol.uniquenesses <= _efa.UNIQUENESS_FLOOR * (1 + 1e-9)):
+        warnings.warn(
+            f"The {k}-factor solution has a uniqueness at its lower bound (Heywood case).",
+            HeywoodWarning,
+            stacklevel=3,
+        )
+
+
+@dataclass(frozen=True)
+class HullResult:
+    """Result of :func:`hull`.
+
+    Attributes
+    ----------
+    n_factors : int
+        Selected number of factors.
+    table : pandas.DataFrame
+        Rows ``k = 0..max_factors``: ``n_factors``, ``fit`` (CAF, CFI or 1 - RMSEA), ``df``,
+        ``st`` (scree test value, NaN off the hull's interior), ``on_hull``, ``heywood`` and
+        ``converged`` (of each EFA solution).
+    fit_index : str
+        ``"caf"``, ``"cfi"`` or ``"rmsea"``.
+    method : str
+        EFA estimator.
+    max_factors : int
+        Largest number of factors fitted.
+    """
+
+    n_factors: int
+    table: pd.DataFrame
+    fit_index: str
+    method: str
+    max_factors: int
+
+
+def hull(
+    correlation: pd.DataFrame | np.ndarray | PolychoricResult,
+    *,
+    n_obs: int | None = None,
+    max_factors: int | None = None,
+    key: jax.Array | None = None,
+    method: EFAMethod = "uls",
+    fit_index: HullFitIndex = "caf",
+    n_replications: int = 1000,
+) -> HullResult:
+    r"""Hull method for the number of factors (Lorenzo-Seva, Timmerman & Kiers, 2011).
+
+    Factor solutions with :math:`k=0,\dots,J` factors are placed by their fit :math:`f_k` and
+    degrees of freedom :math:`df_k`; the solutions on the upper convex boundary are kept and the
+    selected :math:`k` maximizes
+
+    .. math::
+        st_k=\frac{(f_k-f_{k-1})/(df_k-df_{k-1})}{(f_{k+1}-f_k)/(df_{k+1}-df_k)},
+
+    the point after which more factors buy little fit. Fit is CAF (common part accounted for,
+    :math:`1-\mathrm{KMO}` of the residual matrix), CFI or :math:`1-\mathrm{RMSEA}`; the
+    :math:`k=0` row uses the correlation matrix itself. This is EFAtools' ``HULL()``. By default
+    :math:`J` is one more than parallel analysis (SMC eigenvalues of normal data, mean rule, as
+    EFAtools), capped at the largest :math:`k` with positive degrees of freedom and at least 3.
+
+    Parameters
+    ----------
+    correlation : pandas.DataFrame, numpy.ndarray or PolychoricResult
+        Positive definite correlation matrix of at least 6 variables.
+    n_obs : int, optional
+        Sample size (needed for CFI and RMSEA and for the default ``max_factors``; default for a
+        ``PolychoricResult``: its smallest pairwise :math:`n`).
+    max_factors : int, optional
+        :math:`J`. If omitted, from parallel analysis with ``key``.
+    key : jax.Array, optional
+        JAX PRNG key for the default ``max_factors``.
+    method : {"uls", "ml"}, default "uls"
+        EFA estimator (see :func:`efa`).
+    fit_index : {"caf", "cfi", "rmsea"}, default "caf"
+        Fit measure.
+    n_replications : int, default 1000
+        Parallel-analysis data sets for the default ``max_factors``.
+
+    Returns
+    -------
+    HullResult
+
+    Raises
+    ------
+    SpecificationError
+        Invalid options, fewer than 6 variables, or missing ``n_obs`` / ``key`` when needed.
+
+    Warns
+    -----
+    HeywoodWarning
+        If the selected solution has a Heywood case or did not converge (as EFAtools).
+    FlexpyirtWarning
+        If fewer than three solutions are on the hull.
+    """
+    _, mat = _as_correlation(correlation)
+    p = mat.shape[0]
+    if p < 6:
+        raise SpecificationError("hull() needs at least 6 variables.")
+    if method not in _EFA_METHODS:
+        raise SpecificationError(f"method must be one of {_EFA_METHODS}, got {method!r}.")
+    if fit_index not in _HULL_FIT:
+        raise SpecificationError(f"fit_index must be one of {_HULL_FIT}, got {fit_index!r}.")
+    if np.linalg.eigvalsh(mat).min() <= 0:
+        raise SpecificationError("hull() needs a positive definite correlation matrix.")
+    needs_n = fit_index != "caf" or max_factors is None
+    n = None
+    if n_obs is not None or isinstance(correlation, PolychoricResult):
+        n = _default_n_obs(correlation, n_obs)
+    elif needs_n:
+        raise SpecificationError(
+            "n_obs is required for CFI / RMSEA and for the default max_factors."
+        )
+    cap = _efa.max_identified_factors(p)
+    if max_factors is None:
+        if key is None:
+            raise SpecificationError("Pass max_factors= or a key= for parallel analysis.")
+        assert n is not None
+        reps = _normal_reference(key, n, p, int(n_replications), "smc", chunk=500)
+        n_pa = _count_leading(_eigenvalues(mat, "smc"), reps.mean(axis=0))
+        j = min(n_pa + 1, cap)
+        j = max(j, min(3, cap))
+    else:
+        if not (isinstance(max_factors, (int, np.integer)) and 1 <= max_factors <= cap):
+            raise SpecificationError(
+                f"max_factors must be an integer in [1, {cap}] for {p} variables, "
+                f"got {max_factors!r}."
+            )
+        j = int(max_factors)
+    n_eval = n if n is not None else 2
+    rows = [{**_efa.null_row(mat, n_eval), "heywood": False, "converged": True}]
+    for k in range(1, j + 1):
+        sol = _efa.fit_factors(mat, k, method)
+        idx = _efa.fit_indices(sol.loadings, mat, n_eval)
+        rows.append(
+            {
+                "caf": idx["caf"],
+                "cfi": idx["cfi"],
+                "rmsea": 1.0 - idx["rmsea"],
+                "df": idx["df"],
+                "heywood": bool(np.any(sol.uniquenesses <= _efa.UNIQUENESS_FLOOR * (1 + 1e-9))),
+                "converged": sol.converged,
+            }
+        )
+    fit = np.array([r[fit_index] for r in rows], dtype=np.float64)
+    df = np.array([r["df"] for r in rows], dtype=np.float64)
+    selected, st, on_hull = _efa.hull_select(fit, df)
+    if int(np.sum(on_hull)) < 3:
+        warnings.warn(
+            "Fewer than three solutions are on the hull; the solution with the best fit is "
+            "returned.",
+            FlexpyirtWarning,
+            stacklevel=2,
+        )
+    table = pd.DataFrame(
+        {
+            "n_factors": np.arange(j + 1),
+            "fit": fit,
+            "df": df,
+            "st": st,
+            "on_hull": on_hull,
+            "heywood": [bool(r["heywood"]) for r in rows],
+            "converged": [bool(r["converged"]) for r in rows],
+        }
+    )
+    if rows[selected]["heywood"] or not rows[selected]["converged"]:
+        warnings.warn(
+            f"The selected {selected}-factor solution has a Heywood case or did not converge; "
+            "cross-check the number of factors with other criteria.",
+            HeywoodWarning,
+            stacklevel=2,
+        )
+    return HullResult(
+        n_factors=selected, table=table, fit_index=fit_index, method=method, max_factors=j
     )
