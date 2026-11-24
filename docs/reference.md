@@ -12,6 +12,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Correlations: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
+- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser) and their results
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -785,6 +786,90 @@ Returned by `polychoric()`. Immutable.
 | `converged`, `at_boundary`, `zero_cell_corrected` | DataFrame (bool) | Per pair: convergence, maximum at $\lvert\rho\rvert \to 1$ (the estimate is then $\pm\tanh 8$), whether `zero_cell_correction` was applied |
 | `smoothed` | bool | Whether smoothing changed the matrix |
 | `min_eigenvalue` | float | Smallest eigenvalue of `unsmoothed_correlation` |
+
+## Number of dimensions
+
+These answer "how many dimensions?" as diagnostics; combine several rather than trusting one
+([guide section 17](guide.md#17-number-of-dimensions)).
+
+### `parallel_analysis`
+
+```text
+parallel_analysis(data, *, key, correlation="polychoric", eigen_type="pca",
+                  reference="permutation", n_replications=100, quantile=0.95,
+                  zero_cell_correction=0.5) -> ParallelAnalysisResult
+```
+
+Horn's (1965) parallel analysis: the leading eigenvalues of the observed correlation matrix that
+exceed the `quantile` (Glorfeld, 1995) of eigenvalues from reference data without common factors
+are counted.
+
+| Argument | Type | Description |
+|---|---|---|
+| `data` | DataFrame / 2-D array | Respondents x items (ordered codes, or continuous scores for `correlation="pearson"`); NaN is missing |
+| `key` | JAX PRNG key | Random key for the reference data, e.g. `jax.random.key(0)` |
+| `correlation` | `"polychoric"` / `"pearson"` | Correlation of the data and of permutation replications (both smoothed when not positive definite) |
+| `eigen_type` | `"pca"` / `"smc"` | Eigenvalues of the correlation matrix, or of the reduced matrix with squared multiple correlations on the diagonal |
+| `reference` | `"permutation"` / `"normal"` | Permute each item independently (keeps the marginals; Garrido, Abad & Ponsoda, 2013), or i.i.d. normal data of the same size (Pearson) |
+| `n_replications` | int | Number of reference data sets (default `100`) |
+| `quantile` | float / None | Quantile in (0, 1) of the reference eigenvalues (default `0.95`); `None` uses the mean |
+| `zero_cell_correction` | float | Passed to `polychoric()` |
+
+**Returns**: [`ParallelAnalysisResult`](#parallelanalysisresult)
+
+**Raises**: `PrecisionError`, `SpecificationError` (invalid options or data, fewer than 3 items).
+
+**Warns**: `FlexpyirtWarning` when permutation replications had to be skipped (missing data
+leaving a permuted pair without usable responses).
+
+### `ParallelAnalysisResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `n_factors` | int | Number of leading observed eigenvalues above `reference` |
+| `observed` | ndarray | Observed eigenvalues, descending |
+| `reference`, `reference_mean` | ndarray | Reference quantile (or mean) and mean per position |
+| `replications` | ndarray | `(n_replications - n_skipped, p)` reference eigenvalues |
+| `correlation` | DataFrame | The observed correlation matrix |
+| `eigen_type`, `reference_kind`, `correlation_kind`, `quantile`, `n_skipped` | | Settings used and skipped replications |
+
+### `velicer_map`
+
+```text
+velicer_map(correlation, *, power=4) -> MAPResult
+```
+
+Velicer's minimum average partial test: after partialling out the first $m$ principal
+components, the average of the off-diagonal partial correlations raised to `power` is minimized
+over $m = 0, \dots, p - 1$. `power=2` is the original test (Velicer, 1976), `power=4` the revised
+one (Velicer, Eaton & Fava, 2000). `correlation` is a matrix (DataFrame / array) or a
+`PolychoricResult`.
+
+### `MAPResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `n_factors` | int | The minimizing $m$ |
+| `statistic` | ndarray | Average partial correlation statistic for $m = 0, \dots, p - 1$ (NaN once a partial variance is 0) |
+| `power` | int | 2 or 4 |
+
+### `empirical_kaiser`
+
+```text
+empirical_kaiser(correlation, *, n_obs=None) -> EmpiricalKaiserResult
+```
+
+Empirical Kaiser criterion (Braeken & van Assen, 2017): the $j$-th eigenvalue is compared with
+$\max\{(1+\sqrt{p/n})^2 (p-\sum_{i<j}\lambda_i)/(p-j+1),\ 1\}$. `n_obs` is required unless
+`correlation` is a `PolychoricResult` (whose smallest pairwise $n$ is used).
+
+### `EmpiricalKaiserResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `n_factors` | int | Number of leading eigenvalues above the reference |
+| `eigenvalues`, `reference` | ndarray | Eigenvalues and reference values |
+| `n_obs` | int | Sample size used |
 
 ---
 

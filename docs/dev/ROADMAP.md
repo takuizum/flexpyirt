@@ -69,7 +69,8 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   from question B "is essential unidimensionality tenable"; no exploratory MIRT):
   - [x] D1 polychoric / tetrachoric correlations with smoothing (`polychoric()`, `PolychoricResult`;
     validated in V24 against `lavaan::lavCor` and `psych::polychoric` / `cor.smooth`).
-  - [ ] D2 eigenvalues, parallel analysis, revised MAP, EKC (vs `psych::fa.parallel`, `psych::vss`, `EFAtools::EKC`).
+  - [x] D2 eigenvalues, parallel analysis, revised MAP, EKC (`parallel_analysis()`, `velicer_map()`,
+    `empirical_kaiser()`; validated in V25 against EFAtools, psych and EFA.dimensions).
   - [ ] D3 local dependence Q3 / Q3* / LD-X2 / JSI (vs `mirt::residuals`) and model-based parallel
     analysis (vs `ltm::unidimTest`); then the ensemble `dimensionality()`.
   - [ ] D4 DETECT, confirmatory and exploratory (vs `sirt::conf.detect` / `expl.detect`).

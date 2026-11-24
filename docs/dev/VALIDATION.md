@@ -27,6 +27,7 @@ English | [日本語](VALIDATION.ja.md)
 | Scale linking delta-method SE / `vcov`, on identical estimates and covariance | 1e-5 (relative) |
 | Scale linking $(A, B)$ / criterion / SE, end-to-end (calibration + linking) | 1e-6 / 1e-5 (relative) / 1e-3 (relative) |
 | Polychoric correlation vs lavaan / psych; thresholds; smoothing vs `cor.smooth` | 1e-6 / 1e-3; 1e-12; 1e-12 |
+| EKC, MAP, observed eigenvalues on the same matrix; normal reference mean / 95th percentile | 1e-11; $\lvert z\rvert\le4.5$ / 6e-3 |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -55,6 +56,7 @@ English | [日本語](VALIDATION.ja.md)
 | V22 | Normal-mixture latent distributions (2PL $k=2$ bimodal, GRM $k=2$ with a small component, GPCM $k=3$) | `multipleGroup(..., dentype = "mixture-k", invariance = c(<all items>, "free_means", "free_var"))` on the image grid, plus an independent R implementation of the standardized likelihood (Newton polish, Richardson-Hessian SEs, EAP) | M5 |
 | V23 | Nominal response model (Science; simulated with unordered/negative scoring coefficients; nominal + 2PL mixed; mostly non-monotone items; two-factor confirmatory) | `mirt(..., "nominal")` with `pars` starting at the GPCM point (or the best alternative start); `itemfit(fit_stats = "S_X2")` | M5 |
 | V24 | Polychoric / tetrachoric correlations (simulated tetrachoric, mixed 2–5 categories, 10% MCAR, one-empty-cell 2 x 2 tables, LSAT7, Science) and smoothing | lavaan `lavCor(..., ordered = , missing = )`; psych `polychoric(..., smooth = FALSE, correct = 0)`, `cor.smooth()` | M5 |
+| V25 | Number of dimensions: EKC, MAP (squared and fourth power), PCA / SMC eigenvalues on the V24 matrices; normal-data parallel-analysis references (3 sizes) | EFAtools `EKC()`, `PARALLEL()`; psych `vss()$map`; EFA.dimensions `MAP()`; independent R fourth-power MAP | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -686,6 +688,14 @@ English | [日本語](VALIDATION.ja.md)
   per-pair thresholds, which differs under missing data (6e-3 on the MCAR case), so that case is
   lavaan-only. A further self-check confirms that each pair's two-step gradient vanishes at the
   estimate. The bivariate normal CDF is unit-tested against Plackett's integral.
+- **Number of dimensions (V25, M5)**: deterministic quantities are computed in R from the V24
+  lavaan matrices, so both sides see the same input. EFA.dimensions' `PARALLEL()` masks
+  EFAtools' when both are attached; the script calls `EFAtools::` explicitly. EFA.dimensions'
+  fourth-power MAP is $(\operatorname{tr}(R^{*4})-p)/(p(p-1))$ (a matrix power; it exceeds 1 on
+  these data), so the fourth power is compared with an independent elementwise implementation
+  and EFA.dimensions' values are only recorded. Normal-data references are stochastic on both
+  sides; the test uses a fixed key and compares the means by $z$ (standard error from the
+  replications, $\sqrt2$ for two independent means) and the 95th percentiles in absolute value.
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is

@@ -1570,6 +1570,40 @@ data-independent shapes (§15.21).
    agrees to $\le 3.1\times10^{-8}$ (its `nlminb` tolerance; flexpyirt's pair gradients vanish to
    $10^{-7}n$), thresholds to $10^{-12}$; psych to $\le 2\times10^{-5}$ on complete data without
    corrected pairs (its `optimize()` tolerance); `cor.smooth` to $10^{-12}$.
+10. **Parallel analysis, MAP and EKC (`parallel_analysis()`, `velicer_map()`,
+    `empirical_kaiser()`, D2 of §16.8, V25)**: in `dimensionality.py` (shell; NumPy for the
+    $p\times p$ linear algebra, JAX `vmap` for normal reference data). All three answer question
+    (A) and return frozen results with `n_factors`. Matrix inputs (DataFrame, array or
+    `PolychoricResult`) must be square, finite, symmetric, unit-diagonal, $p\ge3$.
+    **Counting**: leading eigenvalues strictly above the reference, stopping at the first miss
+    (psych's and EFAtools' sequential rule). **SMC eigenvalues**: $R$ with $h_j=1-1/(R^{-1})_{jj}$
+    on the diagonal (Humphreys & Ilgen, 1969); the EFA-communality variant of psych /
+    EFAtools waits for the EFA bridge (D5). **Parallel analysis references**: `"permutation"`
+    (default) permutes each item independently with a JAX PRNG key (`(R, p, N)` permutations by
+    nested `vmap`), so marginals and missingness are kept, then recomputes the correlation with
+    the validated `polychoric()` (or pairwise Pearson) per replication, warnings silenced; a
+    replication whose permuted pair is not estimable (missing data) is skipped and counted, with a
+    `FlexpyirtWarning`, and fewer than two usable replications raise `SpecificationError`.
+    `"normal"`: i.i.d. $N(0,1)$ data of the same $N\times p$ (rows of incomplete data count),
+    Pearson correlations, chunked `vmap`. Quantiles use NumPy's default (linear interpolation, R's
+    type 7). Default quantile 0.95 (Glorfeld, 1995), PCA eigenvalues and the permutation
+    reference with polychoric correlations, following Garrido, Abad & Ponsoda (2013).
+    **MAP**: $f_m$ for $m=0,\dots,p-1$ with principal-component loadings
+    $V_m\Lambda_m^{1/2}$ (negative eigenvalues clipped at 0); power 4 is elementwise (O'Connor,
+    2000), and the default because the revised test is the recommended one (Velicer, Eaton &
+    Fava, 2000). The loop stops with NaN once a partial variance is $\le10^{-10}$ and the minimum
+    ignores NaN. EFA.dimensions' fourth-power statistic is a matrix power (documented, not
+    followed). **EKC**: Braeken & van Assen (2017) as in EFAtools (observed eigenvalues in the
+    remaining-variance term); with a `PolychoricResult` and no `n_obs`, the smallest pairwise
+    $n$ is used (conservative under missing data).
+    **Validation (V25)**: `validation/r/m5_dimensionality_reference.R` feeds the six lavaan
+    polychoric matrices of V24 to EFAtools 1.1.0 (`EKC`), psych 2.6.9 (`vss()$map`),
+    EFA.dimensions 0.1.9.3 (`MAP`) and an independent R implementation of both MAP powers, plus
+    `eigen()` for PCA / SMC eigenvalues: all agree to $10^{-11}$, including the selected numbers of
+    factors. Normal reference eigenvalues (3 sizes x PCA / SMC, 20000 data sets each) agree with
+    EFAtools' `PARALLEL` within Monte Carlo error ($|z|\le4.5$ for the means with a fixed key,
+    $6\times10^{-3}$ for the 95th percentiles). The permutation path is checked by properties
+    (independent permutations, recovery of two factors, reproducibility by key).
 
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1602,6 +1636,7 @@ data-independent shapes (§15.21).
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
+- Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
@@ -1617,6 +1652,7 @@ data-independent shapes (§15.21).
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
+- O'Connor, B. P. (2000). SPSS and SAS programs for determining the number of components using parallel analysis and Velicer's MAP test. *Behavior Research Methods, Instruments, & Computers*, 32(3), 396–402.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Oehlert, G. W. (1992). A note on the delta method. *The American Statistician*, 46(1), 27–29.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
@@ -1637,6 +1673,7 @@ data-independent shapes (§15.21).
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
+- Velicer, W. F. (1976). Determining the number of components from the matrix of partial correlations. *Psychometrika*, 41(3), 321–327.
 - Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
