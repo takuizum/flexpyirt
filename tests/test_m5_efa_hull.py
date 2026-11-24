@@ -165,7 +165,7 @@ def test_ensemble_includes_hull_with_six_or_more_items() -> None:
     data = pd.DataFrame(case["data"], columns=case["items"], dtype=float)
     res = dimensionality(data, key=jax.random.key(4), n_replications=10)
     row = res.number_of_dimensions.set_index("method").loc["Hull (CAF, ULS)"]
-    expected = hull(polychoric(data), key=jax.random.split(jax.random.key(4), 4)[3])
+    expected = hull(polychoric(data), key=jax.random.split(jax.random.key(4), 5)[3])
     assert row["n_factors"] == expected.n_factors == 2
     assert res.results["hull"] is not None
 

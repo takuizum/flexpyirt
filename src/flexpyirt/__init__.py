@@ -7,6 +7,7 @@ from importlib.metadata import PackageNotFoundError, version
 from flexpyirt import errors
 from flexpyirt.correlation import PolychoricResult, polychoric
 from flexpyirt.dimensionality import (
+    ComparisonDataResult,
     DetectResult,
     DimensionalityResult,
     EFAResult,
@@ -17,6 +18,7 @@ from flexpyirt.dimensionality import (
     MAPResult,
     ModelParallelAnalysisResult,
     ParallelAnalysisResult,
+    comparison_data,
     detect,
     dimensionality,
     efa,
@@ -48,6 +50,7 @@ __all__ = [
     "GRM",
     "PCM",
     "BetaPrior",
+    "ComparisonDataResult",
     "DavidianCurve",
     "DetectResult",
     "DimensionalityResult",
@@ -75,6 +78,7 @@ __all__ = [
     "ThreePL",
     "TwoPL",
     "__version__",
+    "comparison_data",
     "detect",
     "dimensionality",
     "efa",

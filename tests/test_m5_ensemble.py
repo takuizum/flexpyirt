@@ -24,6 +24,7 @@ from flexpyirt import (
     FitResult,
     Model,
     TwoPL,
+    comparison_data,
     dimensionality,
     empirical_kaiser,
     exploratory_detect,
@@ -58,13 +59,14 @@ def _ensemble() -> DimensionalityResult:
 def test_ensemble_reuses_the_individual_methods() -> None:
     res = _ensemble()
     data = _lsat7()
-    key_a, key_b, key_c, _ = jax.random.split(jax.random.key(7), 4)
+    key_a, key_b, key_c, _, key_e = jax.random.split(jax.random.key(7), 5)
     pa = parallel_analysis(data, key=key_a, n_replications=20)
     pc = polychoric(data)
     assert list(res.number_of_dimensions["n_factors"]) == [
         pa.n_factors,
         velicer_map(pc).n_factors,
         empirical_kaiser(pc).n_factors,
+        comparison_data(data, key=key_e).n_factors,
     ]
     mpa = model_parallel_analysis(_fit(), data, key=key_b, n_replications=20)
     row = res.unidimensionality.set_index("method").loc["model-based parallel analysis"]
@@ -81,6 +83,7 @@ def test_ensemble_reuses_the_individual_methods() -> None:
     assert det["statistic"] == pytest.approx(float(best["DETECT_validation"]))
     assert det["supports_unidimensionality"] == (float(best["DETECT_validation"]) < 0.2)
     assert set(res.results) == {
+        "comparison_data",
         "exploratory_detect",
         "hull",
         "polychoric",
@@ -112,7 +115,11 @@ def test_ensemble_consensus_lines() -> None:
 
 def test_ensemble_reports_ties_without_breaking_them(monkeypatch: pytest.MonkeyPatch) -> None:
     module = importlib.import_module("flexpyirt.dimensionality")
-    real_map, real_ekc = module.velicer_map, module.empirical_kaiser
+    real_map, real_ekc, real_cd = (
+        module.velicer_map,
+        module.empirical_kaiser,
+        module.comparison_data,
+    )
 
     def map_two(*args: Any, **kwargs: Any) -> Any:
         return dataclasses.replace(real_map(*args, **kwargs), n_factors=2)
@@ -120,12 +127,18 @@ def test_ensemble_reports_ties_without_breaking_them(monkeypatch: pytest.MonkeyP
     def ekc_three(*args: Any, **kwargs: Any) -> Any:
         return dataclasses.replace(real_ekc(*args, **kwargs), n_factors=3)
 
+    def cd_four(*args: Any, **kwargs: Any) -> Any:
+        return dataclasses.replace(real_cd(*args, **kwargs), n_factors=4)
+
     monkeypatch.setattr(module, "velicer_map", map_two)
     monkeypatch.setattr(module, "empirical_kaiser", ekc_three)
+    monkeypatch.setattr(module, "comparison_data", cd_four)
     res = dimensionality(_lsat7(), key=jax.random.key(0), n_replications=5)
     pa = int(res.number_of_dimensions["n_factors"].iloc[0])
-    assert res.n_factors_mode == tuple(sorted({pa, 2, 3}))
-    assert res.n_agreeing == (2 if pa in (2, 3) else 1)
+    values, counts = np.unique([pa, 2, 3, 4], return_counts=True)
+    assert res.n_factors_mode == tuple(int(v) for v in values[counts == np.max(counts)])
+    assert res.n_agreeing == int(np.max(counts))
+    assert len(res.n_factors_mode) >= 3
 
 
 def test_ensemble_without_fit_has_only_the_detect_row() -> None:
@@ -145,6 +158,7 @@ def test_ensemble_marks_m2_unavailable_with_missing_data() -> None:
     assert "not available" in row["detail"]
     assert res.results["m2"] is None
     assert res.results["exploratory_detect"] is None
+    assert res.results["comparison_data"] is None
     assert res.n_unidimensionality_methods == 2
 
 
