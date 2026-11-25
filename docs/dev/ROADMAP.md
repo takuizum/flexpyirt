@@ -92,7 +92,9 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 - [ ] Davidian curve and normal-mixture latent distributions in multiple-group models (#75).
 - [ ] M2 for multiple groups, missing data and MAP fits (#76).
 - [ ] M2 and S-X2 for confirmatory multidimensional models (#77).
-- [ ] Linking for 4PL, nominal and multidimensional models (#78).
+- [x] Linking for 4PL, nominal and multidimensional models (#78; `link(..., transformation=)` with a
+  diagonal, orthogonal or oblique $\mathbf A$ for confirmatory two- and three-factor models;
+  validated in V40).
 - [ ] Many groups: per-group latent distributions vmapped over groups (#79; DESIGN §12 open question 2).
 - **Acceptance**: each item validated against mirt (or an independent R implementation) within the
   VALIDATION.md tolerances.

@@ -10,8 +10,8 @@ orthogonal (Li & Lissitz, 2000) or oblique ``A``, using ``mirt::probtrace()`` an
 ``mirt::expected.item()``. Ogasawara (2001) delta-method covariances of ``(vec(A), beta)`` come
 from category probabilities written out in R and nested central finite differences.
 
-The checks on mirt's own item estimates and covariance blocks need no calibration; two variants
-of the two-factor 2PL case run in the fast tier (each variant compiles its own solver, about 10 s).
+The checks on mirt's own item estimates and covariance blocks need no calibration; one variant
+of the two-factor 2PL case runs in the fast tier (each variant compiles its own solver, about 10 s).
 The other variants and the checks through :func:`flexpyirt.link` are slow.
 """
 
@@ -51,25 +51,25 @@ VARIANTS = [f"{t}_{c}" for t in TRANSFORMATIONS for c in CRITERIA]
 
 # Linking on identical mirt item estimates: limited by the R reference's optimization accuracy
 # (central-FD gradient polish).
-TOL_CONST_DIRECT = 1e-8
+TOL_CONST_DIRECT = 1e-9
 TOL_CRIT_REL_DIRECT = 1e-9
 # Delta-method covariance on identical inputs: limited by the R reference's nested central
 # finite differences (step 1e-5); absolute tolerance relative to the largest element.
-TOL_VCOV_REL_DIRECT = 1e-4
+TOL_VCOV_REL_DIRECT = 1e-5
 # End-to-end: both forms calibrated in flexpyirt.
-TOL_CONST_FULL = 2e-4
-TOL_CRIT_REL_FULL = 1e-3
-TOL_VCOV_REL_FULL = 2e-2
+TOL_CONST_FULL = 1e-6
+TOL_CRIT_REL_FULL = 1e-5
+TOL_VCOV_REL_FULL = 1e-4
 
 _solve = jax.jit(solve_multidim_linking, static_argnames=("method", "symmetric", "transformation"))
 _vcov = jax.jit(multidim_linking_vcov, static_argnames=("method", "symmetric", "transformation"))
 
 
-FAST_VARIANTS = ("diagonal_haebara", "oblique_haebara")
+FAST_VARIANTS = ("diagonal_haebara",)
 
 
 def _grid(case_names: list[str], *, fast: bool = True) -> list[Any]:
-    """(case, variant) pairs; two variants of the two-factor 2PL case are in the fast tier."""
+    """(case, variant) pairs; one variant of the two-factor 2PL case is in the fast tier."""
     return [
         pytest.param(
             c,

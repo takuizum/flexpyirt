@@ -46,9 +46,9 @@ TOL_CRIT_REL_DIRECT = 1e-9
 # differences (step 1e-5).
 TOL_SE_REL_DIRECT = 1e-5
 # End-to-end: both forms calibrated in flexpyirt.
-TOL_AB_FULL = 1e-5
-TOL_CRIT_REL_FULL = 1e-4
-TOL_SE_REL = 1e-3
+TOL_AB_FULL = 1e-6
+TOL_CRIT_REL_FULL = 1e-5
+TOL_SE_REL = 1e-4
 
 _solve = jax.jit(solve_linking, static_argnames=("method", "symmetric"))
 _vcov = jax.jit(linking_vcov, static_argnames=("method", "symmetric"))
@@ -320,7 +320,7 @@ def test_form_calibration_matches_mirt(case_name: str, side: str) -> None:
     items_df = res.items.set_index("item")
     for item, pvals in form["params"].items():
         for col, ref_val in pvals.items():
-            assert items_df.loc[item, col] == pytest.approx(float(ref_val), abs=2e-3)
+            assert items_df.loc[item, col] == pytest.approx(float(ref_val), abs=1e-4)
 
 
 @pytest.mark.slow

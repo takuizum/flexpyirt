@@ -69,6 +69,7 @@
 | V33 | 次元縮約による two-tier モデル（相関する主因子 2 つと特殊因子 3 つ（1 つは両方の主因子にまたがる）の 2PL、交差負荷項目 1 つとテストレット 2 つの GRM $K=4$） | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
 | V36 | 合計得点分布のカーネル（Poisson 二項分布: 確率ベクトル 5 例、$J$ 10〜300。多値: GRM $K=4$ と 2PL + GRM の混合） | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`、`poibin::dpoibin()`、`stats::dpois()`。mirt の `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 | V37 | mirt の推定値での情報関数・期待得点・信頼性・合計得点 EAP（2PL $J=12$。同じモデルで欠測 8%。3PL $J=12$。GRM と GPCM $K=4$、$J=8$。名義 $K=4$、$J=6$。2PL + 3PL + GRM + GPCM + 名義の混合 $J=14$。2 群の 2PL + GRM で焦点群の平均・分散を推定） | `iteminfo()`、`testinfo()`、`expected.item()`、`expected.test()`、`marginal_rxx()`、`empirical_rxx()`、`fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
+| V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -473,13 +474,66 @@
   - **V20f（`v20f_mixed`、2PL + GPCM $K=4$ 混在、各フォーム $J=16$、共通 5 + 3 項目、各群 $N=2000$）**: 直接比較
     `max |Δ(A, B)| = 2.0e-11`、目的関数相対 `6.2e-14`、mirt の共分散での SE 相対 `2.1e-8`。一連の比較
     `max |Δ(A, B)| = 1.3e-10`、目的関数相対 `3.6e-10`、Ogasawara SE 相対 `2.1e-8`。
-  したがってリンキングで照合済みの項目モデルは 2PL・3PL・GRM・GPCM と 2PL + GPCM 混在である。Rasch・4PL・PCM は
-  同じカーネルを共有し、厳密回復の単体テストでのみ確認している。
+  したがって V20 でリンキングを照合済みの項目モデルは 2PL・3PL・GRM・GPCM と 2PL + GPCM 混在である（4PL と名義は下の
+  V40）。Rasch・PCM は同じカーネルを共有し、厳密回復の単体テストでのみ確認している。
   照合テスト: `tests/test_mirt_m5_linking.py`。単体テスト（全 7 種の 1 次元モデル、ICC・閾値の不変性、恒等変換と厳密回復、
   対称版の可逆性、独自格子、EH・多母集団、1 つの多母集団推定を `source` と `target` の両方に使うときの同時共分散、
   非収束時に SE を出さないこと、Rasch・PCM の傾き $1/A$、`transform_theta`、勾配の有限差分検証、Ogasawara SE の
   中心有限差分検証、および $N(\hat\eta, \Sigma)$ からのパラメタ抽出ごとに重み固定でリンキングを解き直すモンテカルロ
   線形化検証（推定のブートストラップではない））: `tests/test_m5_linking.py`。
+- **4PL・名義反応モデル・多次元モデルのリンキング（V40、M6、#78）**: V20 と同じ方法による拡張。
+  `validation/r/m5_linking_extensions_reference.R` は共通項目を持つ 2 つのフォームを `mirt` で推定し
+  （`accelerate = "none"`、`TOL = 1e-10`、`SE.type = "Oakes"`、どちらの推定も潜在平均 0・分散 1）、リンキングを flexpyirt と
+  独立に素の R で計算する。規準は推定に使った格子の上で `mirt::probtrace()` / `mirt::expected.item()` から計算し、
+  `optim(BFGS)` + `nlm` と中心差分の Newton 仕上げで最小化する（`max |grad| <= 4.2e-11`、Hessian の正定値性を確認）。
+  Ogasawara (2001) の共分散は、R で書き下したカテゴリ確率と入れ子の中心差分（刻み 1e-5）から求める。各ケースを
+  Stocking–Lord・Haebara の非対称・対称の 4 通りで計算し、(i) mirt の項目推定値と mirt の Oakes 共分散ブロックをそのまま
+  使った比較（コアの関数で直接、および mirt の推定値に固定した `FitResult` に `link()` をライブラリ自身の初期値で適用）、
+  (ii) end-to-end（両フォームを flexpyirt で推定）で照合する。参照解はシミュレーションの真の変換とも比べ、デルタ法の
+  標準誤差の 4 倍以内で再現することを確認する。
+  **1 次元**（`tests/reference/v40_linking_unidim.json`、`tests/test_mirt_v40_linking.py`。$[-6, 6]$ の 61 節点、
+  `optimizer = "NR"`。基準 $\theta\sim N(0,1)$、新フォーム $\theta\sim N(0.5, 1.2^2)$、真値 $A = 1.2$、$B = 0.5$）。
+  ソルバーは $(1, 0)$、$(0.4, -2)$、$(3, 2.5)$ からも出発させる。
+  - **V40a（`v40a_4pl`、4PL、各フォーム $J=12$、共通 8 項目、各群 $N=20000$、$g$ と $u$ は内点。mirt は V11b と同じく
+    $a = 2$ から出発）**: 直接比較 `max |Δ(A, B)| = 5.5e-12`、規準の相対差 `2.1e-14`、共分散の相対差 `4.1e-7`。
+    end-to-end `max |Δ(A, B)| = 1.2e-9`、規準の相対差 `6.8e-8`、共分散の相対差 `4.2e-7`（項目パラメタは mirt と `2.5e-8` で一致）。
+    共分散ブロックは $g$ と $u$（自然尺度）を含む。
+  - **V40b（`v40b_nominal`、名義 $K=4$、各フォーム $J=12$、共通 6 項目、各群 $N=3000$。推定されたスコアリング係数には
+    負の値がある）**: 直接比較 `max |Δ(A, B)| = 1.2e-12`、規準の相対差 `5.5e-14`、共分散の相対差 `4.2e-7`。
+    end-to-end `max |Δ(A, B)| = 3.3e-9`、規準の相対差 `1.3e-8`、共分散の相対差 `4.4e-7`。Stocking–Lord 法は
+    `expected.item()` と同じくカテゴリを $0..K-1$ で採点する。
+  - **V40c（`v40c_mixed`、2PL + 名義 $K=3$、各フォーム $J=15$、共通 6 + 3 項目、各群 $N=3000$）**: 直接比較
+    `max |Δ(A, B)| = 1.9e-12`、規準の相対差 `2.6e-14`、共分散の相対差 `1.6e-7`。end-to-end `max |Δ(A, B)| = 2.2e-10`、
+    規準の相対差 `5.7e-10`、共分散の相対差 `1.6e-7`。
+  **多次元**（`tests/reference/v40_linking_multidim.json`、`tests/test_mirt_v40_linking_multidim.py`。DESIGN §19）。
+  因子間相関が自由な確認的モデル。基準の母集団は標準、新フォームの母集団は因子の平均 $\boldsymbol\mu$・標準偏差
+  $\boldsymbol\sigma$ なので、真の変換は $\mathbf A = \operatorname{diag}(\boldsymbol\sigma)$、
+  $\boldsymbol\beta = \boldsymbol\mu$ である。各ケースを $\mathbf A$ の 3 つの族で解く（1 ケース 12 通り）。R の参照実装は
+  回転を閉じた式（2 因子は余弦・正弦、3 因子は Rodrigues の公式）で書いており、flexpyirt の行列指数関数とは独立である。
+  コアの比較は恒等変換から出発する。差は 4 つの規準のうち最大のもので、共分散の差は $(D^2+D)$ 次の参照行列の最大要素に
+  対する相対値である。対角と斜交の族はシミュレーションの変換を標準誤差の 4 倍以内で再現する（拡大率が 1 つしかない
+  直交の族はこの変換を含まない）。
+
+  | ケース | 族 | 直接比較 `max \|Δ(A, β)\|` | 直接比較の共分散 | end-to-end `max \|Δ(A, β)\|` | end-to-end の共分散 |
+  |---|---|---|---|---|---|
+  | V40d（`v40d_2pl_2d`）: 2PL、2 因子、各フォーム $J=16$、共通 10 項目（2 項目は両因子に負荷）、各群 $N=3000$、各次元 31 節点、$\boldsymbol\mu=(0.4,-0.3)$、$\boldsymbol\sigma=(1.2,0.8)$ | 対角 | `1.4e-11` | `2.9e-7` | `4.0e-10` | `2.9e-7` |
+  | | 直交 | `3.2e-11` | `8.2e-7` | `4.1e-10` | `8.2e-7` |
+  | | 斜交 | `3.2e-11` | `4.8e-7` | `3.6e-10` | `4.8e-7` |
+  | V40e（`v40e_grm_2d`）: GRM $K=3$、2 因子、各フォーム $J=12$、共通 8 項目（2 項目は両因子に負荷）、各群 $N=3000$、各次元 31 節点、$\boldsymbol\mu=(-0.3,0.5)$、$\boldsymbol\sigma=(0.85,1.25)$ | 対角 | `4.3e-12` | `1.7e-7` | `3.8e-10` | `1.7e-7` |
+  | | 直交 | `1.5e-11` | `8.6e-7` | `4.1e-10` | `8.6e-7` |
+  | | 斜交 | `2.9e-11` | `1.2e-7` | `4.1e-10` | `1.2e-7` |
+  | V40f（`v40f_2pl_3d`）: 2PL、3 因子、各フォーム $J=15$、共通 12 項目（3 項目は 2 因子に負荷）、各群 $N=3000$、各次元 15 節点、mirt は `optimizer = "BFGS"`（`reltol = 1e-13`）、$\boldsymbol\mu=(0.3,-0.2,0.4)$、$\boldsymbol\sigma=(1.2,0.9,1.1)$ | 対角 | `2.8e-11` | `6.1e-7` | `1.5e-8` | `6.2e-7` |
+  | | 直交 | `2.2e-10` | `1.6e-6` | `7.0e-9` | `1.5e-6` |
+  | | 斜交 | `1.5e-10` | `1.4e-6` | `2.3e-8` | `1.3e-6` |
+
+  規準の値は相対差で `7.9e-14`（直接比較）、`1.3e-7`（end-to-end）まで一致する。mirt の推定値に固定した `FitResult` への
+  `link()` は、最小二乗の初期値から Newton 反復 3–6 回でコアの比較と同じ定数（R との差は最大 `2.2e-10`）を返す。flexpyirt で
+  推定した項目パラメタは mirt と `5.1e-10`（2 因子）、`1.3e-7`（3 因子。mirt は BFGS）で一致する。
+  **照合していない範囲**: 多次元の 3PL/4PL・GPCM・名義の共通項目（変換とソルバーは厳密な再現の単体テストだけで確認）。
+  多母集団の多次元推定を `source` / `target` にする場合。鏡映（$\det\mathbf A < 0$。探索しない）。双因子・two-tier モデル
+  （拒否する）。外部の R リンキングパッケージは使っていない。単体テスト（全カーネル・全族での曲線の不変性、3 つの族の
+  閉じた式、1 因子の規準が §16.5 に一致、有限差分の勾配、2・3 因子での既知の変換の厳密な再現、リンキングを解き直して確かめる
+  デルタ法のヤコビアン、`transform_theta`、エラー）: `tests/test_m6_linking_multidim.py`。
 
 - **混合正規潜在分布（V22、M5）**: flexpyirt の `NormalMixture`（DESIGN §16.7）は形状に mirt のクラスのパラメタ化を
   使い、混合を解析的に標準化する。したがって格子 $\theta_q$ 上では、像の格子 $z_q=M+\sqrt V\theta_q$ 上の mirt の

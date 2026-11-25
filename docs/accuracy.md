@@ -72,7 +72,7 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | Comparison data | EFAtools' `CD()`: the same population from the same random draws, the same rank-sum tests and the same suggested numbers |
 | DIMTEST | No implementation outside the stand-alone DIMPACK exists, so it is checked by simulation: type I error 0.5–1% at the 5% level (conservative) and power 99–100% against two dimensions correlated 0.7–0.8 |
 | DETECT (confirmatory, exploratory) | sirt's `conf.detect(use_sum_score = TRUE, smooth = FALSE)` and `expl.detect(use_sum_score = TRUE)` with the same split: conditional covariances, indices, partitions, to $10^{-12}$ |
-| Scale linking (Haebara, Stocking–Lord) | independent R implementations of the criteria using mirt's response functions (mirt itself has no characteristic-curve linking) |
+| Scale linking (Haebara, Stocking–Lord; unidimensional and confirmatory multidimensional models) | independent R implementations of the criteria using mirt's response functions (mirt itself has no characteristic-curve linking) |
 
 Polychoric correlations, parallel analysis, MAP, the empirical Kaiser criterion, factor analysis,
 the Hull method, comparison data, DETECT and DIMTEST are functions of the companion package

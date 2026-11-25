@@ -74,6 +74,7 @@ English | [日本語](VALIDATION.ja.md)
 | V33 | Two-tier models with dimension reduction (2PL with two correlated primary factors and three specific factors, one spanning both; GRM $K=4$ with a cross-loading item and two testlets) | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
 | V36 | Summed-score distribution kernel (Poisson-binomial: five probability vectors, $J$ 10–300; polytomous: GRM $K=4$ and mixed 2PL + GRM) | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`, `poibin::dpoibin()`, `stats::dpois()`; mirt `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 | V37 | Information, expected score, reliability and summed-score EAP at mirt's estimates (2PL $J=12$; the same with 8% missing; 3PL $J=12$; GRM and GPCM $K=4$, $J=8$; nominal $K=4$, $J=6$; mixed 2PL + 3PL + GRM + GPCM + nominal, $J=14$; two groups, 2PL + GRM, focal mean and variance free) | `iteminfo()`, `testinfo()`, `expected.item()`, `expected.test()`, `marginal_rxx()`, `empirical_rxx()`, `fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
+| V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -574,8 +575,9 @@ English | [日本語](VALIDATION.ja.md)
     direct `max |Δ(A, B)| = 2.0e-11`, criterion rel `6.2e-14`, SE rel on mirt's covariance
     `2.1e-8`; end-to-end `max |Δ(A, B)| = 1.3e-10`, criterion rel `3.6e-10`, Ogasawara SE rel
     `2.1e-8`.
-  Validated item models for linking are therefore 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM; Rasch,
-  4PL and PCM share these kernels and are covered by exact-recovery unit tests only.
+  Validated item models for linking in V20 are therefore 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM
+  (4PL and nominal: V40 below); Rasch and PCM share these kernels and are covered by
+  exact-recovery unit tests only.
   Tests: `tests/test_mirt_m5_linking.py`. Unit tests (all 7 unidimensional models, ICC/threshold
   invariance, exact identity & recovery, symmetric reversibility, custom grids, EH/multiple-group,
   joint covariance when one multiple-group fit is both source and target, no SEs without
@@ -583,6 +585,75 @@ English | [日本語](VALIDATION.ja.md)
   checks vs finite differences and a Monte Carlo linearization check that re-solves the linking
   for parameter draws from $N(\hat\eta, \Sigma)$ with fixed weights — not a bootstrap of the
   calibrations): `tests/test_m5_linking.py`.
+- **Linking for 4PL, nominal and multidimensional models (V40, M6, #78)**: an extension of V20
+  with the same method. `validation/r/m5_linking_extensions_reference.R` calibrates two forms with
+  common items in `mirt` (`accelerate = "none"`, `TOL = 1e-10`, `SE.type = "Oakes"`, latent means
+  0 and variances 1 in both calibrations) and computes the linking in base R, independently of
+  flexpyirt: the criteria from `mirt::probtrace()` / `mirt::expected.item()` on the calibration
+  grid, minimized with `optim(BFGS)` + `nlm` and a central-finite-difference Newton polish
+  (`max |grad| <= 4.2e-11`, Hessian checked positive definite), and the Ogasawara (2001)
+  covariances from category probabilities written out in R with nested central finite
+  differences (step 1e-5). Every case is run for Stocking–Lord and Haebara, non-symmetric and
+  symmetric, and checked (i) on identical mirt item estimates with mirt's Oakes covariance
+  blocks — at the core level, and through `link()` on `FitResult`s fixed at mirt's estimates
+  with the library's own starting values — and (ii) end-to-end (both forms calibrated in
+  flexpyirt). Each reference optimum is also compared with the simulated transformation, which
+  it recovers within 4 delta-method standard errors.
+  **Unidimensional** (`tests/reference/v40_linking_unidim.json`, `tests/test_mirt_v40_linking.py`;
+  61 nodes on $[-6, 6]$, `optimizer = "NR"`; target $\theta\sim N(0,1)$, source
+  $\theta\sim N(0.5, 1.2^2)$, true $A = 1.2$, $B = 0.5$). The solver is also started from
+  $(1, 0)$, $(0.4, -2)$ and $(3, 2.5)$.
+  - **V40a (`v40a_4pl`, 4PL, $J=12$/form, 8 common, $N=20000$/group, interior $g$ and $u$; mirt
+    started at $a = 2$ as in V11b)**: direct `max |Δ(A, B)| = 5.5e-12`, criterion rel `2.1e-14`,
+    covariance rel `4.1e-7`; end-to-end `max |Δ(A, B)| = 1.2e-9`, criterion rel `6.8e-8`,
+    covariance rel `4.2e-7` (item parameters agree with mirt to `2.5e-8`). The covariance blocks
+    include $g$ and $u$ (natural scale).
+  - **V40b (`v40b_nominal`, nominal $K=4$, $J=12$/form, 6 common, $N=3000$/group; estimated
+    scoring coefficients include negative values)**: direct `max |Δ(A, B)| = 1.2e-12`, criterion
+    rel `5.5e-14`, covariance rel `4.2e-7`; end-to-end `max |Δ(A, B)| = 3.3e-9`, criterion rel
+    `1.3e-8`, covariance rel `4.4e-7`. Stocking–Lord scores categories $0..K-1$ as
+    `expected.item()` does.
+  - **V40c (`v40c_mixed`, 2PL + nominal $K=3$, $J=15$/form, 6 + 3 common, $N=3000$/group)**:
+    direct `max |Δ(A, B)| = 1.9e-12`, criterion rel `2.6e-14`, covariance rel `1.6e-7`;
+    end-to-end `max |Δ(A, B)| = 2.2e-10`, criterion rel `5.7e-10`, covariance rel `1.6e-7`.
+  **Multidimensional** (`tests/reference/v40_linking_multidim.json`,
+  `tests/test_mirt_v40_linking_multidim.py`; DESIGN §19). Confirmatory models with free factor
+  correlations; the target population is standard and the source population has factor means
+  $\boldsymbol\mu$ and standard deviations $\boldsymbol\sigma$, so the true transformation is
+  $\mathbf A = \operatorname{diag}(\boldsymbol\sigma)$, $\boldsymbol\beta = \boldsymbol\mu$. Each
+  case is solved for the three families of $\mathbf A$ (12 variants per case). The R reference
+  parameterizes the rotation in closed form (cosine/sine for two factors, Rodrigues' formula for
+  three), independently of flexpyirt's matrix exponential. The core check starts from the
+  identity transformation. Differences are the largest over the 4 criteria; covariance
+  differences are relative to the largest element of the $(D^2+D)$-square reference matrix.
+  The simulated transformation is recovered within 4 standard errors by the diagonal and
+  oblique families (the orthogonal family, with one common dilation, does not contain it).
+
+  | Case | Family | Direct `max \|Δ(A, β)\|` | Direct covariance | End-to-end `max \|Δ(A, β)\|` | End-to-end covariance |
+  |---|---|---|---|---|---|
+  | V40d (`v40d_2pl_2d`): 2PL, 2 factors, $J=16$/form, 10 common (2 cross-loading), $N=3000$/group, 31 nodes per dimension, $\boldsymbol\mu=(0.4,-0.3)$, $\boldsymbol\sigma=(1.2,0.8)$ | diagonal | `1.4e-11` | `2.9e-7` | `4.0e-10` | `2.9e-7` |
+  | | orthogonal | `3.2e-11` | `8.2e-7` | `4.1e-10` | `8.2e-7` |
+  | | oblique | `3.2e-11` | `4.8e-7` | `3.6e-10` | `4.8e-7` |
+  | V40e (`v40e_grm_2d`): GRM $K=3$, 2 factors, $J=12$/form, 8 common (2 cross-loading), $N=3000$/group, 31 nodes per dimension, $\boldsymbol\mu=(-0.3,0.5)$, $\boldsymbol\sigma=(0.85,1.25)$ | diagonal | `4.3e-12` | `1.7e-7` | `3.8e-10` | `1.7e-7` |
+  | | orthogonal | `1.5e-11` | `8.6e-7` | `4.1e-10` | `8.6e-7` |
+  | | oblique | `2.9e-11` | `1.2e-7` | `4.1e-10` | `1.2e-7` |
+  | V40f (`v40f_2pl_3d`): 2PL, 3 factors, $J=15$/form, 12 common (3 cross-loading), $N=3000$/group, 15 nodes per dimension, mirt `optimizer = "BFGS"` (`reltol = 1e-13`), $\boldsymbol\mu=(0.3,-0.2,0.4)$, $\boldsymbol\sigma=(1.2,0.9,1.1)$ | diagonal | `2.8e-11` | `6.1e-7` | `1.5e-8` | `6.2e-7` |
+  | | orthogonal | `2.2e-10` | `1.6e-6` | `7.0e-9` | `1.5e-6` |
+  | | oblique | `1.5e-10` | `1.4e-6` | `2.3e-8` | `1.3e-6` |
+
+  Criterion values agree to `7.9e-14` (direct) and `1.3e-7` (end-to-end) in relative terms;
+  `link()` on the fixed mirt estimates gives the same constants as the core check (at most
+  `2.2e-10` from R) in 3–6 Newton iterations from its least-squares start. Item parameters of the
+  flexpyirt calibrations agree with mirt to `5.1e-10` (two factors) and `1.3e-7` (three factors,
+  where mirt uses BFGS).
+  **Not validated**: multidimensional 3PL/4PL, GPCM and nominal common items (their
+  transformation and the solver are covered by exact-recovery unit tests only); multiple-group
+  multidimensional fits as `source` or `target`; reflections ($\det\mathbf A < 0$), which are
+  not searched; bifactor and two-tier models, which are rejected. No external R linking package
+  is used. Unit tests (curve invariance for every kernel and family, the three families'
+  closed forms, the one-factor criterion equal to §16.5's, finite-difference gradients, exact
+  recovery of known transformations for two and three factors, the delta-method Jacobian
+  against re-solving the linking, `transform_theta`, errors): `tests/test_m6_linking_multidim.py`.
 - **Bifactor models (V32, M7)**: two simulated cases in `tests/test_mirt_m7_bifactor.py` (plain
   EM and SQUAREM; generator `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`,
   mirt 1.46.1 `bfactor()`, `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`,
