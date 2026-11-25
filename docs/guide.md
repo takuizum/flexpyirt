@@ -1158,7 +1158,11 @@ print(report)
   models (pass `group=`; the statistics are computed within each group and `pairs` gets a
   `group` column), for `EmpiricalHistogram`, `DavidianCurve` and `NormalMixture` latent
   distributions (the fitted distribution is used) and for models with 2 or 3 factors (pairs
-  that still depend on each other given all the factors). `jsi()`, `model_parallel_analysis()`
+  that still depend on each other given all the factors). For bifactor and two-tier models
+  (section 14) a pair inside a specific factor is tested for dependence beyond that factor, so
+  a testlet you did not declare shows up as large positive values among its items; the
+  expected tables are summed on the reduced grids, so the cost does not grow with the number of
+  specific factors. `jsi()`, `model_parallel_analysis()`
   and `dimensionality(fit=...)` need a single-group unidimensional model with a `Normal`
   latent distribution.
 - `FitResult.jsi()` is Edwards, Houts & Cai's (2018) jackknife slope index: each item is removed

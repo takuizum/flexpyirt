@@ -78,7 +78,9 @@
    - [x] `FitResult.local_dependence()`（Q3、Q3\*、LD-X²、G²）を多母集団、`EmpiricalHistogram` /
      `DavidianCurve` / `NormalMixture` の潜在分布、確認的な 2〜3 因子モデルに広げた（V26 で mirt の
      `residuals()` と照合。混合分布は密度を与えたときの統計量のみ）。
-     未対応: 双因子 / two-tier モデルと、単一群・1 次元・正規分布以外の JSI。
+   - [x] 双因子・two-tier モデルの `FitResult.local_dependence()`。期待度数表は縮約した格子の上で求める
+     （V38 で `bfactor()` の適合に対する mirt の `residuals()` と照合）。
+     未対応: 単一群・1 次元・正規分布以外の JSI（複数の傾きを持つ項目についての定義がなく、mirt にも参照値がない）。
 3. [ ] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
    カーネル（#83）の上に作る。
    - [x] カーネル（#83）: `summed_score_distribution()`。Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰
