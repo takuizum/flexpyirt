@@ -58,4 +58,30 @@
   - [x] D5a flexpyirt に実装した ULS / ML の EFA（`efa()`。`factor_analyzer` は scikit-learn 1.8 以降で失敗する。DESIGN §16.8）と Hull 法（`hull()`）。V28 で EFAtools の `EFA` / `HULL` と `psych::fa` と照合済み。
   - [x] D5b 比較データ法（`comparison_data()`。V29 で EFAtools の `CD()` とその生成器と照合済み）。
   - [x] D6 ブートストラップでバイアス補正する DIMTEST（`dimtest()`。V30 のシミュレーション研究で受け入れ済み: .05 での第 1 種の誤り 0.0〜2.0%（保守的）、検出力 0.99〜1.00）。
-- [x] Gibbons–Hedeker の次元縮約による双因子モデル（`Model.with_bifactor()`、単一群、特殊因子数に制限なし、Oakes/Hessian SE、EAP スコアリング。V32 で mirt の `bfactor()` と照合済み。#80 の M7 項目 1 のうち two-tier モデルは未着手）。
+
+## M6 単一群・1 次元の制限をなくす
+各項目は mirt（または独立な実装）との照合が通って完了とする。参照先は issue に書く。
+- [ ] Davidian 曲線・混合正規の潜在分布を多母集団モデルで使えるようにする（#75）。
+- [ ] M2 を多母集団・欠測ありのデータ・MAP 推定に広げる（#76）。
+- [ ] 確認的多次元モデルでの M2 と S-X2（#77）。
+- [ ] 4PL・名義反応モデル・多次元モデルのリンキング（#78）。
+- [ ] 群の数が多い場合: 群ごとの潜在分布を群について vmap する（#79、DESIGN §12 の未決事項 2）。
+- **受け入れ基準**: 各項目が VALIDATION.md の許容誤差内で mirt（または R による独立な実装）と一致。
+
+## M7 双因子・診断・情報関数・調査設計（この順に実装する）
+1. [ ] 次元縮約つきの双因子モデル・two-tier モデル（#80）。
+   - [x] 双因子モデル（`Model.with_bifactor()`、単一群、特殊因子数に制限なし、Oakes/Hessian SE、EAP スコアリング。
+     V32 で mirt の `bfactor()` と照合済み）。
+   - [ ] two-tier モデル。
+2. [ ] 局所依存（Q3, LD-X², JSI）を多母集団・正規以外の潜在分布・多次元 / 双因子モデルに広げる（#81）。
+3. [ ] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
+   カーネル（#83）の上に作る。
+4. [ ] 標本ウェイト（#84）。
+5. [ ] ロバスト標準誤差: sandwich と cross-product（#85）。
+- **受け入れ基準**: mirt の `bfactor()`、`residuals()`、`iteminfo()` / `testinfo()` / `marginal_rxx()` /
+  `fscores(method = "EAPsum")`、`survey.weights`、`SE.type = "sandwich"` / `"crossprod"` との V 番号つき照合。
+
+## 継続的な作業
+- [ ] GitHub 上の最新の R mirt で照合し、参照値を定期的に確認する（#74）。
+- [ ] ユーザー定義の項目モデルの公開拡張 API と docs の例（#86）。新しい項目モデル（GGUM など）は本体に
+  組み込まず、この API の照合済みの例として追加する。
