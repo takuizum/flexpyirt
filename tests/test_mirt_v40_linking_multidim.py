@@ -10,8 +10,9 @@ orthogonal (Li & Lissitz, 2000) or oblique ``A``, using ``mirt::probtrace()`` an
 ``mirt::expected.item()``. Ogasawara (2001) delta-method covariances of ``(vec(A), beta)`` come
 from category probabilities written out in R and nested central finite differences.
 
-The checks on mirt's own item estimates and covariance blocks need no calibration; those of the
-two-factor 2PL case run in the fast tier. Checks through :func:`flexpyirt.link` are slow.
+The checks on mirt's own item estimates and covariance blocks need no calibration; two variants
+of the two-factor 2PL case run in the fast tier (each variant compiles its own solver, about 10 s).
+The other variants and the checks through :func:`flexpyirt.link` are slow.
 """
 
 from __future__ import annotations
@@ -64,10 +65,17 @@ _solve = jax.jit(solve_multidim_linking, static_argnames=("method", "symmetric",
 _vcov = jax.jit(multidim_linking_vcov, static_argnames=("method", "symmetric", "transformation"))
 
 
+FAST_VARIANTS = ("diagonal_haebara", "oblique_haebara")
+
+
 def _grid(case_names: list[str], *, fast: bool = True) -> list[Any]:
-    """(case, variant) pairs; only the two-factor 2PL case is in the fast tier."""
+    """(case, variant) pairs; two variants of the two-factor 2PL case are in the fast tier."""
     return [
-        pytest.param(c, v, marks=() if (fast and c == FAST_CASE) else pytest.mark.slow)
+        pytest.param(
+            c,
+            v,
+            marks=() if (fast and c == FAST_CASE and v in FAST_VARIANTS) else pytest.mark.slow,
+        )
         for c in case_names
         for v in VARIANTS
     ]
