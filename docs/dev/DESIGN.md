@@ -2072,6 +2072,49 @@ data-independent shapes (§15.21).
    **JSON** (schema version 6): the model stores `"n_primary_factors"` (0 unless two-tier);
    versions 1–5 must not contain it. On load a two-tier structure is rebuilt through
    `with_two_tier()`.
+3. **Local dependence for bifactor and two-tier models (`FitResult.local_dependence`, V38,
+   issue #81)**: the statistics of §16.11 on the reduced grids of items 1–2, without the
+   $n^{P+S}$ product grid. Notation as above: primary nodes $\boldsymbol\theta_g$ with weights
+   $w^{(0)}_g$ ($g=1..Q_p$, $Q_p=n^P$), specific nodes $\theta_t$ with weights $w^{(s)}_t$,
+   $s(j)$ the specific factor of item $j$ ($\varnothing$ when it has none) and
+   $P_{ja}(\boldsymbol\theta_g,\theta_t)$ its category probabilities on its block grid.
+   **Expected tables.** Integrating the specific factor out of one item gives its trace given
+   the primary factors,
+   $$\bar P_{ja}(\boldsymbol\theta_g)=\sum_t w^{(s(j))}_t\,P_{ja}(\boldsymbol\theta_g,\theta_t)$$
+   ($\bar P_{ja}=P_{ja}$ when $s(j)=\varnothing$; the uniform weights of that block give the same
+   value). Because the specific factors are independent of each other and of the primary
+   factors, the model-implied table of a pair answered by $n_{ij}$ respondents is
+   $$E_{ab}=n_{ij}\sum_g w^{(0)}_g\sum_t w^{(s)}_t\,P_{ia}(\boldsymbol\theta_g,\theta_t)
+   P_{jb}(\boldsymbol\theta_g,\theta_t)\qquad s(i)=s(j)=s,$$
+   $$E_{ab}=n_{ij}\sum_g w^{(0)}_g\,\bar P_{ia}(\boldsymbol\theta_g)\,\bar P_{jb}(\boldsymbol\theta_g)
+   \qquad s(i)\ne s(j)\ \text{or}\ s(i)=s(j)=\varnothing .$$
+   Both are exact rearrangements of the sum over the full product grid with weights
+   $w^{(0)}_g\prod_s w^{(s)}_{t_s}$ (every factor that neither item loads on sums to 1), so they
+   equal mirt's `residuals(type = "LD")`, which builds that grid (`thetaComb(theta, nfact)`),
+   when the one-dimensional grid is the same. Cost: $O(Q_p n K_iK_j)$ per pair instead of
+   $O(n^{P+S}K_iK_j)$. $X^2$, $G^2$, $df=(K_i-1)(K_j-1)$, the $p$-values and the signed
+   Cramér's $V$ follow from $O_{ab}$ and $E_{ab}$ as in §16.11.
+   **Q3.** $d_{ij}=x_{ij}-E(X_j\mid\hat{\boldsymbol\theta}_i)$ at the vector EAP of all $D=P+S$
+   factors from the factorized posterior (`_bifactor_eap`); the kernels are evaluated at the
+   `(N, D)` scores with the reduction switched off (`CompiledProblem.reduction = None`, so
+   `_family_nodes` returns the scores). Q3\* as in §16.11.
+   **Implementation.** `_local_dependence.ld_pairs` is split: `ld_pairs_from_tables(y,
+   pair_probabilities)` computes the statistics from a function returning the $K_i\times K_j$
+   joint probabilities of a pair, `ld_pairs` (shared grid) and `reduced_pair_probabilities`
+   (the two formulas above, from the traces on the block grids `(Q_p, n, K_j)`, the weights of
+   `_bifactor_log_weights` and each item's block) supply that function. Bifactor and two-tier
+   models are single-group (items 1–2), so there is no group loop here beyond the existing one.
+   **Interpretation.** A pair within a specific factor is tested for dependence *beyond* that
+   factor; a testlet left out of `specific` shows up as large positive $V$ / Q3 within it.
+   **Validation (V38).** mirt's estimates of a bifactor 2PL (with general-only items and
+   missing data), a bifactor GRM and a two-tier 2PL (`bfactor(model2 = )`) are put into a
+   `FitResult` with every parameter fixed and compared with `residuals(type = "LD" / "LDG2" /
+   "Q3")` (Q3 with `Theta = fscores(m, quadpts = <the fit's>)`, because `fscores()` otherwise
+   uses its own grid); a unit test compares the factorized tables with the brute-force product
+   grid. **Not extended.** `jsi()` keeps raising `SpecificationError` for these models: the
+   statistic is defined for one slope per item (Edwards, Houts & Cai, 2018), an item here has a
+   primary and a specific slope, and mirt's `type = "JSI"` requires one factor, so both the
+   definition and a reference are missing.
 
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
