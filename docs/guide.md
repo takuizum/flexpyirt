@@ -221,9 +221,8 @@ log-likelihood $\sum_i w_i \log L_i$ (mirt's `survey.weights`).
 
 ```python
 sampling_weights = np.random.default_rng(7).uniform(0.5, 2.0, len(df))
-sampling_weights *= (
-    len(df) / sampling_weights.sum()
-)  # optional: weights that sum to the number of rows
+# Optional: rescale so that the weights sum to the number of rows.
+sampling_weights *= len(df) / sampling_weights.sum()
 res_w = fit(spec, df, weights=sampling_weights, se=None)
 print(res_w.loglik, res_w.bic)
 ```

@@ -211,7 +211,8 @@ print(res_sq.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeg
 
 ```python
 sampling_weights = np.random.default_rng(7).uniform(0.5, 2.0, len(df))
-sampling_weights *= len(df) / sampling_weights.sum()  # 任意: 合計が行数になるようにする
+# 任意: 合計が行数になるように調整する。
+sampling_weights *= len(df) / sampling_weights.sum()
 res_w = fit(spec, df, weights=sampling_weights, se=None)
 print(res_w.loglik, res_w.bic)
 ```
