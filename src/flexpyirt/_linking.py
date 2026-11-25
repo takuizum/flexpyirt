@@ -91,7 +91,7 @@ class LinkingProblem:
         Common items grouped by :class:`ItemKernel` (static length/kernels).
     tgt_nodes : Array, shape (Q_t,)
         Target-scale quadrature nodes :math:`\theta_q^{(t)}`. For multidimensional linking
-        (DESIGN.md §17.5) both node arrays have shape ``(Q, D)``.
+        (DESIGN.md §19) both node arrays have shape ``(Q, D)``.
     tgt_weights : Array, shape (Q_t,)
         Target-scale quadrature weights :math:`w_q^{(t)}` (non-negative, summing to 1).
     src_nodes : Array, shape (Q_s,)
@@ -577,11 +577,11 @@ def linking_vcov(
     return jnp.where(valid, cov, jnp.nan), valid
 
 
-# ---- Multidimensional linking: theta* = A theta + beta (DESIGN.md §17.5) -------------------------
+# ---- Multidimensional linking: theta* = A theta + beta (DESIGN.md §19) -------------------------
 
 
 def n_transformation_params(n_factors: int, transformation: LinkTransformation) -> int:
-    r"""Number of free transformation parameters :math:`p` (DESIGN.md §17.5).
+    r"""Return the number of free transformation parameters :math:`p` (DESIGN.md §19).
 
     :math:`2D` (``"diagonal"``), :math:`1 + D(D-1)/2 + D` (``"orthogonal"``) or :math:`D^2 + D`
     (``"oblique"``).
@@ -640,12 +640,11 @@ def linking_constants(c: Array, n_factors: int, transformation: LinkTransformati
 def transform_multidim_kernel_params(
     kernel: ItemKernel, params: Array, a_mat: Array, beta: Array
 ) -> Array:
-    r"""Transform slope–intercept item parameters under :math:`\boldsymbol\theta^*=\mathbf A
-    \boldsymbol\theta+\boldsymbol\beta`.
+    r"""Transform item parameters under :math:`\theta^*=\mathbf A\theta+\boldsymbol\beta`.
 
     Substituting :math:`\boldsymbol\theta=\mathbf A^{-1}(\boldsymbol\theta^*-\boldsymbol\beta)`
     into the linear predictor :math:`\mathbf a^\top\boldsymbol\theta+d` leaves every category
-    probability invariant with (Oshima, Davey & Lee, 2000; DESIGN.md §17.5)
+    probability invariant with (Oshima, Davey & Lee, 2000; DESIGN.md §19)
 
     .. math::
         \mathbf a^* = \mathbf A^{-\top}\mathbf a, \qquad
@@ -711,7 +710,7 @@ def multidim_linking_criterion(
     symmetric: bool,
     transformation: LinkTransformation,
 ) -> Array:
-    r"""Multidimensional Haebara or Stocking–Lord criterion (DESIGN.md §17.5).
+    r"""Multidimensional Haebara or Stocking–Lord criterion (DESIGN.md §19).
 
     With :math:`\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta` mapping the
     source scale onto the target scale and :math:`(\boldsymbol\theta_q^{(t)}, w_q^{(t)})` the
@@ -922,7 +921,7 @@ def multidim_linking_vcov(
 
     The reported constants :math:`\kappa(c) = (\operatorname{vec}(\mathbf A), \boldsymbol\beta)`
     are a smooth function of :math:`c`, so with :math:`G = \partial\kappa/\partial c^\top`
-    (``jax.jacfwd``; DESIGN.md §17.5)
+    (``jax.jacfwd``; DESIGN.md §19)
 
     .. math::
         \operatorname{Cov}(\hat\kappa) = G\operatorname{Cov}(\hat c)\,G^\top,

@@ -2248,6 +2248,85 @@ data-independent shapes (§15.21).
    **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
    **Measured agreement** is recorded in VALIDATION.md (V37).
 
+## 19. Multidimensional scale linking (M6)
+
+1. **Linking of confirmatory multidimensional models (`link(..., transformation=)`, V40, #78)**:
+   `link()` (§16.5) also accepts two fits with the same number of factors $D \in \{2, 3\}$ declared
+   with `Model.with_factors` (product grids; bifactor and two-tier fits are rejected). Factors are
+   matched by position: source factor $m$ is mapped onto target factor $m$.
+   **Transformation.** The source scale is mapped onto the target scale by
+   $\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta$ with a nonsingular
+   $D \times D$ matrix $\mathbf A$ (Oshima, Davey & Lee, 2000; Li & Lissitz, 2000). Substituting
+   $\boldsymbol\theta = \mathbf A^{-1}(\boldsymbol\theta^* - \boldsymbol\beta)$ into the linear
+   predictor $\mathbf a^\top\boldsymbol\theta + d$ gives, for every kernel,
+   $$\mathbf a^* = \mathbf A^{-\top}\mathbf a, \qquad d_k^* = d_k - m_k\,\mathbf a^{*\top}\boldsymbol\beta,$$
+   where $m_k$ is the multiplier of the linear predictor in category $k$: 1 (2PL/Rasch, 3PL/4PL,
+   GRM), $k$ (GPCM/PCM) or $\mathrm{ak}_k$ (nominal, $\mathrm{ak}_{K-1} = K-1$). Asymptotes and
+   nominal scoring coefficients are unchanged, and $P_{jk}(\boldsymbol\theta^*; \xi^*) =
+   P_{jk}(\mathbf A^{-1}(\boldsymbol\theta^* - \boldsymbol\beta); \xi)$. For $D = 1$ this is §16.5.
+   A latent distribution $N(\boldsymbol\mu, \boldsymbol\Sigma)$ becomes
+   $N(\mathbf A\boldsymbol\mu + \boldsymbol\beta, \mathbf A\boldsymbol\Sigma\mathbf A^\top)$.
+   **Three families of $\mathbf A$** (`transformation`, a static argument; $p$ free parameters $c$):
+   - `"diagonal"` (default; $p = 2D$): $\mathbf A = \operatorname{diag}(A_1, \dots, A_D)$,
+     $A_m > 0$, $c = (A_1..A_D, \beta_1..\beta_D)$. Each factor is rescaled and shifted separately.
+     This is the transformation between two calibrations of the *same* confirmatory structure
+     (means 0, variances 1 in each): zero slopes stay zero and factor correlations are unchanged,
+     so it is the only family under which the transformed items keep the source model's
+     structure.
+   - `"orthogonal"` ($p = 1 + D(D-1)/2 + D$; Li & Lissitz, 2000): $\mathbf A = k\,\mathbf R$ with a
+     central dilation $k > 0$ and a rotation $\mathbf R = \exp(\mathbf S(\boldsymbol\phi))$, where
+     $\mathbf S$ is skew-symmetric with $S_{ij} = -\phi_{ij}$, $S_{ji} = \phi_{ij}$ ($i < j$ in
+     lexicographic order), $c = (k, \boldsymbol\phi, \boldsymbol\beta)$. For $D = 2$,
+     $\mathbf R = \begin{pmatrix}\cos\phi & -\sin\phi\\ \sin\phi & \cos\phi\end{pmatrix}$. Only
+     proper rotations ($\det\mathbf R = +1$) are reached: reflections are excluded.
+   - `"oblique"` ($p = D^2 + D$; Oshima, Davey & Lee, 2000): any $\mathbf A$ with
+     $\det\mathbf A > 0$, $c = (\operatorname{vec}(\mathbf A)$ row-major$, \boldsymbol\beta)$.
+   Rotations and oblique transformations turn structural zero slopes of the source items into
+   non-zero slopes; they are for forms whose factors were identified differently.
+   **Criteria** on the target product grid $(\boldsymbol\theta_q^{(t)}, w_q^{(t)})$ (the fitted
+   multivariate normal weights of §15.30, or user `nodes` of shape $(Q, D)$ and `weights`):
+   $$H_{\mathrm{fwd}}(c) = \sum_q w_q^{(t)} \sum_{j\in\mathcal C}\sum_{k=0}^{K_j-1}\big[P_{jk}^{\mathrm{tgt}}(\boldsymbol\theta_q^{(t)}) - P_{jk}^{\mathrm{src}}(\mathbf A^{-1}(\boldsymbol\theta_q^{(t)} - \boldsymbol\beta))\big]^2,$$
+   $$\mathrm{SL}_{\mathrm{fwd}}(c) = \sum_q w_q^{(t)} \big[\mathrm{TCC}^{\mathrm{tgt}}(\boldsymbol\theta_q^{(t)}) - \mathrm{TCC}^{\mathrm{src}}(\mathbf A^{-1}(\boldsymbol\theta_q^{(t)} - \boldsymbol\beta))\big]^2,$$
+   the item and test characteristic function methods of Oshima, Davey & Lee (2000) in the
+   category form of Kim & Lee (2006), with $\mathrm{TCC}(\boldsymbol\theta) = \sum_j\sum_k k\,P_{jk}(\boldsymbol\theta)$.
+   `symmetric=True` adds the reverse term on the source grid (source curves at
+   $\boldsymbol\theta_q^{(s)}$ against target curves at $\mathbf A\boldsymbol\theta_q^{(s)} + \boldsymbol\beta$).
+   Stocking–Lord matches one scalar surface, so it identifies $\mathbf A$ only through the
+   variety of slope directions among the common items; Haebara uses every item surface. A
+   criterion Hessian that is not positive definite gives no standard errors.
+   **Optimization.** `_linking.solve_multidim_linking` is the Newton iteration of §16.5 in $p$
+   dimensions (exact step when the Hessian is positive definite, Levenberg–Marquardt otherwise,
+   step norm capped at 1, 40 parallel step sizes, gradient polish). Parameters outside the valid
+   region ($A_m \le 0$, $k \le 0$, $\det\mathbf A \le 0$) evaluate to NaN and are rejected by the
+   step-size search, so the iterates stay in the connected component of the start. **Start**:
+   with $X_s, X_t$ the $J_c \times D$ slope matrices of the common items, $\mathbf a_s =
+   \mathbf A^\top\mathbf a_t$ gives the least-squares $\mathbf A_0 = (X_t^{+} X_s)$ (oblique; the
+   "direct" estimate of Oshima, Davey & Lee, 2000); the orthogonal start is its polar factor
+   ($\mathbf A_0 = U\Sigma V^\top \Rightarrow \mathbf R_0 = UV^\top$, $k_0 = \operatorname{mean}\Sigma$,
+   $\boldsymbol\phi_0$ from the matrix logarithm; $\mathbf R_0 = I$ if $\det UV^\top < 0$); the
+   diagonal start is $A_{m,0} = \sum_j |a^{\mathrm{src}}_{jm}| / \sum_j |a^{\mathrm{tgt}}_{jm}|$. An
+   invalid $\mathbf A_0$ falls back to the diagonal start. $\boldsymbol\beta_0$ is the
+   least-squares solution of $d^{\mathrm{tgt}}_{jk} - d^{\mathrm{src}}_{jk} = -m_k\,
+   \mathbf a_j^{\mathrm{tgt}\top}\boldsymbol\beta$ over all intercepts of the common items.
+   **Standard errors.** As in §16.5, $J_s = -H_{cc}^{-1}H_{c,\eta_s}$,
+   $J_t = -H_{cc}^{-1}H_{c,\eta_t}$ and $\operatorname{Cov}(\hat c) = J_s\Sigma_sJ_s^\top +
+   J_t\Sigma_tJ_t^\top (+ \text{cross terms for one joint fit})$. The reported constants
+   $\kappa(c) = (\operatorname{vec}(\mathbf A)$ row-major$, \boldsymbol\beta)$ are a smooth
+   function of $c$, so $\operatorname{Cov}(\hat\kappa) = G\operatorname{Cov}(\hat c)G^\top$ with
+   $G = \partial\kappa/\partial c^\top$ by `jax.jacfwd`. This $(D^2 + D)$-square matrix has rank
+   at most $p$: structural zeros of a diagonal $\mathbf A$ have zero variance, and the entries of
+   an orthogonal $\mathbf A$ are linearly dependent to first order.
+   **Result.** For $D > 1$, `LinkResult.A` is the $D \times D$ array $\mathbf A$, `B` the length-$D$
+   array $\boldsymbol\beta$, `A_se` / `B_se` arrays of the same shapes, and `vcov` the
+   $(D^2 + D)$-square covariance of $(\operatorname{vec}(\mathbf A), \boldsymbol\beta)$; for
+   $D = 1$ they remain floats and a $2 \times 2$ matrix. `LinkResult.transformation` records the
+   family (always `"diagonal"` for $D = 1$, where the three coincide). `items` holds the
+   transformed slopes `a1..aD` and intercepts. `transform_theta` maps `theta_<factor>` columns,
+   `pv<m>_<factor>` columns and arrays of shape $(\dots, D)$ by $\mathbf A\boldsymbol\theta +
+   \boldsymbol\beta$; `se_<factor>` columns become $A_m\,\mathrm{se}_m$ under a diagonal
+   $\mathbf A$ and NaN otherwise (a rotated standard error needs the posterior covariance, which
+   the score table does not carry).
+
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -2292,6 +2371,7 @@ data-independent shapes (§15.21).
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
+- Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24(2), 115–138.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -2313,6 +2393,7 @@ data-independent shapes (§15.21).
 - Olsson, U. (1979). Maximum likelihood estimation of the polychoric correlation coefficient. *Psychometrika*, 44(4), 443–460.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
+- Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37(4), 357–373.
 - Owen, D. B. (1956). Tables for computing bivariate normal probabilities. *The Annals of Mathematical Statistics*, 27(4), 1075–1090.
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
