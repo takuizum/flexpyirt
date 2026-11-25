@@ -375,6 +375,22 @@ model.with_bifactor(*, specific, general="general") -> Model
 次元縮約（特殊因子ごとに 2 次元格子 1 つ。既定は $[-6, 6]$ 上の 31 点）。群、`with_latent()`、`with_factors()` との
 併用、Rasch / PCM 項目、編集したテーブルでの潜在パラメタの自由推定は `SpecificationError`。スコアリングは `"EAP"` のみ。
 
+#### `Model.with_two_tier`
+
+```text
+model.with_two_tier(*, primary, specific, correlated=True) -> Model
+```
+
+two-tier モデルを宣言する（[ガイド 14 節](guide.ja.md#two-tier-モデル)）。`primary` の主因子と `specific` の特殊因子
+（どちらも因子名から項目への辞書、順序つき。主因子は 1〜2 個）からなる。各項目は主因子の少なくとも 1 つに負荷し、
+特殊因子には高々 1 つに負荷する。各特殊因子は 2 項目以上が必要。項目パラメタは `a1`…`aP`（主因子）、`a(P+1)`…`aD`
+（特殊因子。負荷しない因子への傾きは `0` に固定）、`d`（または `d1`…）で、mirt の `bfactor(data, model, model2 = )` と
+一致する。潜在パラメタの行は `mean_1`…`mean_D`（`0` 固定）、`var_1`…`var_D`（`1` 固定）と、主因子が 2 つのときの
+`cor_12`（`correlated=True` なら自由）。特殊因子は他のすべての因子と直交する。E ステップは、主因子の直積格子と
+特殊因子 1 つずつについて積分する（既定は、主因子 2 つで $[-6, 6]$ 上の次元あたり 15 点、1 つで 31 点）。主因子が
+3 つ以上、主因子に負荷しない項目、群、`with_latent()`、`with_factors()` / `with_bifactor()` との併用、Rasch / PCM 項目、
+編集したテーブルでの潜在平均・分散の自由推定は `SpecificationError`。スコアリングは `"EAP"` のみ。
+
 #### `Model.with_latent`
 
 ```text
@@ -445,10 +461,11 @@ model.parameter_table(data, *, group=None, item_names=None) -> DataFrame
 |---|---|
 | `item_names` | 項目名のタプル |
 | `is_multigroup` | `with_groups()` で群を宣言したか |
-| `is_multidimensional` | `with_factors()` または `with_bifactor()` で因子を宣言したか |
-| `n_factors` | 潜在因子数（`1`, `2`, または `3`。双因子モデルでは `1 + S`） |
+| `is_multidimensional` | `with_factors()`・`with_bifactor()`・`with_two_tier()` のいずれかで因子を宣言したか |
+| `n_factors` | 潜在因子数（`1`, `2`, または `3`。双因子モデルでは `1 + S`、two-tier モデルでは `P + S`） |
 | `bifactor` | `with_bifactor()` で宣言したか |
-| `quadrature_dimension` | E ステップが積分する格子の次元（双因子モデルでは `2`） |
+| `n_primary_factors` | `with_two_tier()` で宣言したモデルの主因子数（それ以外は `0`） |
+| `quadrature_dimension` | E ステップが積分する格子の次元（双因子モデルでは `2`、two-tier モデルでは `P + 1`） |
 | `latent_parameter_names()` | 各群の Normal 潜在パラメタ名 |
 | `factor_names` | 因子名のタプル（1 次元モデルでは空タプル） |
 | `resolved_latent()` | 単一群モデルの潜在分布（既定則を適用したもの） |

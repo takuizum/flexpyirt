@@ -67,6 +67,9 @@ class Model:
         Whether ``factors`` is a bifactor structure from :meth:`with_bifactor` (the first factor
         is the general factor; the E-step uses Gibbons–Hedeker dimension reduction, DESIGN.md
         §17.1).
+    n_primary_factors : int
+        Number of leading primary factors of a two-tier structure from :meth:`with_two_tier`
+        (DESIGN.md §17.2); 0 for every other model.
     """
 
     items: tuple[tuple[str, ItemModel], ...]
@@ -79,6 +82,7 @@ class Model:
     factors: tuple[tuple[str, tuple[str, ...]], ...] | None = None
     correlated_factors: bool = True
     bifactor: bool = False
+    n_primary_factors: int = 0
 
     def __post_init__(self) -> None:
         """Validate item names and group latent-distribution consistency."""
@@ -86,9 +90,20 @@ class Model:
             raise SpecificationError("A model needs at least one item.")
         if self.bifactor and self.factors is None:
             raise SpecificationError("A bifactor model needs factors; use with_bifactor().")
-        if self.bifactor and self.groups is not None:
+        if self.n_primary_factors < 0 or (self.bifactor and self.n_primary_factors):
             raise SpecificationError(
-                "Bifactor models do not support multiple groups yet (DESIGN.md §17.1)."
+                "n_primary_factors must be 0 for bifactor models and non-negative otherwise."
+            )
+        if self.n_primary_factors and (
+            self.factors is None or len(self.factors) <= self.n_primary_factors
+        ):
+            raise SpecificationError(
+                "A two-tier model needs primary and specific factors; use with_two_tier()."
+            )
+        if self.is_reduced and self.groups is not None:
+            raise SpecificationError(
+                "Bifactor and two-tier models do not support multiple groups yet (DESIGN.md "
+                "§17.1, §17.2)."
             )
         names = [name for name, _ in self.items]
         if LATENT_ITEM in names:
@@ -177,26 +192,48 @@ class Model:
         return () if self.factors is None else tuple(name for name, _ in self.factors)
 
     @property
+    def is_reduced(self) -> bool:
+        """Whether the E-step uses dimension reduction (bifactor or two-tier; DESIGN.md §17)."""
+        return self.bifactor or self.n_primary_factors > 0
+
+    @property
+    def n_primary(self) -> int:
+        """Number of primary factors of a reduced model.
+
+        1 for bifactor (the general factor), ``n_primary_factors`` for two-tier, and 0 for
+        models without dimension reduction.
+        """
+        return 1 if self.bifactor else self.n_primary_factors
+
+    @property
     def quadrature_dimension(self) -> int:
         """Dimension of the quadrature grid the E-step integrates over.
 
-        ``n_factors`` for product grids; 2 for bifactor models, whose E-step uses the
-        :math:`(1+1)`-dimensional grid of the general and one specific factor (DESIGN.md §17.1).
+        ``n_factors`` for product grids; ``n_primary + 1`` for bifactor and two-tier models,
+        whose E-step uses the grid of the primary factors and one specific factor (DESIGN.md
+        §17.1, §17.2).
         """
-        return 2 if self.bifactor else self.n_factors
+        return self.n_primary + 1 if self.is_reduced else self.n_factors
 
     def latent_parameter_names(self) -> tuple[str, ...]:
         """Return the names of the Normal latent parameters of each group (DESIGN.md §15.30).
 
         ``("mean", "var")`` for one factor, ``(mean_1..D, var_1..D, cor_ij...)`` for 2–3 factors,
-        and ``(mean_1..D, var_1..D)`` for bifactor models, whose factors are orthogonal
-        (DESIGN.md §17.1).
+        ``(mean_1..D, var_1..D)`` for bifactor models, whose factors are orthogonal
+        (DESIGN.md §17.1), and ``(mean_1..D, var_1..D, cor_ij...)`` with correlations among the
+        primary factors only (``i < j <= P``) for two-tier models (DESIGN.md §17.2).
         """
-        if self.bifactor:
+        if self.is_reduced:
             d = self.n_factors
+            n_primary = self.n_primary
             return (
                 *(f"mean_{m}" for m in range(1, d + 1)),
                 *(f"var_{m}" for m in range(1, d + 1)),
+                *(
+                    f"cor_{i}{j}"
+                    for i in range(1, n_primary + 1)
+                    for j in range(i + 1, n_primary + 1)
+                ),
             )
         return latent_param_names(self.n_factors)
 
@@ -410,10 +447,10 @@ class Model:
             any factor is empty or lists unknown/duplicated items, any model item loads on no
             factor, or ``with_groups()`` / ``with_latent()`` is already set.
         """
-        if self.bifactor:
+        if self.is_reduced:
             raise SpecificationError(
-                "This model is a bifactor model; with_factors() and with_bifactor() cannot be "
-                "combined."
+                "This model is a bifactor or two-tier model; with_factors() cannot be combined "
+                "with with_bifactor() or with_two_tier()."
             )
         if self.groups is not None and any(
             isinstance(dist, EmpiricalHistogram) for _, dist in self.groups
@@ -537,31 +574,50 @@ class Model:
         if self.factors is not None:
             raise SpecificationError(
                 "This model already has factors; call with_bifactor() on a model without "
-                "with_factors() or with_bifactor()."
+                "with_factors(), with_bifactor() or with_two_tier()."
             )
+        self._check_reducible("with_bifactor", "Bifactor", specific)
+        if not isinstance(general, str) or not general.strip():
+            raise SpecificationError("The general factor name must be a non-empty string.")
+        resolved: list[tuple[str, tuple[str, ...]]] = [(general, self.item_names)]
+        resolved.extend(self._resolve_specific(specific, {general}))
+        if len(resolved) > MAX_KERNEL_FACTORS:
+            raise SpecificationError(
+                f"with_bifactor() supports at most {MAX_KERNEL_FACTORS - 1} specific factors, got "
+                f"{len(resolved) - 1}."
+            )
+        candidate = replace(self, factors=tuple(resolved), correlated_factors=False, bifactor=True)
+        self._check_parameter_names(candidate, "with_bifactor")
+        return candidate
+
+    def _check_reducible(self, builder: str, label: str, specific: object) -> None:
+        """Run the checks shared by :meth:`with_bifactor` and :meth:`with_two_tier`."""
         if self.groups is not None:
             raise SpecificationError(
-                "Bifactor models do not support multiple groups yet (DESIGN.md §17.1)."
+                f"{label} models do not support multiple groups yet (DESIGN.md §17.1, §17.2)."
             )
         if self.latent is not None:
             raise SpecificationError(
-                "with_latent() is not supported for bifactor models; their factors are "
-                "orthogonal standard normals."
+                f"with_latent() is not supported for {label.lower()} models; their factors are "
+                "standard normals."
             )
         if not isinstance(specific, Mapping) or len(specific) == 0:
             raise SpecificationError(
-                "with_bifactor() requires a non-empty mapping specific factor name -> items."
+                f"{builder}() requires a non-empty mapping specific factor name -> items."
             )
         rasch_like = [name for name, m in self.items if isinstance(m, (Rasch, PCM))]
         if rasch_like:
             raise SpecificationError(
-                f"Bifactor models need free slopes; Rasch / PCM items {rasch_like} are not "
+                f"{label} models need free slopes; Rasch / PCM items {rasch_like} are not "
                 "supported yet (their factor variances would have to be free)."
             )
-        if not isinstance(general, str) or not general.strip():
-            raise SpecificationError("The general factor name must be a non-empty string.")
-        resolved: list[tuple[str, tuple[str, ...]]] = [(general, self.item_names)]
-        seen: set[str] = {general}
+
+    def _resolve_specific(
+        self, specific: Mapping[str, ItemSelector], seen: set[str]
+    ) -> list[tuple[str, tuple[str, ...]]]:
+        """Resolve specific factors: at least two items each, each item under at most one."""
+        seen = set(seen)
+        resolved: list[tuple[str, tuple[str, ...]]] = []
         owner: dict[str, str] = {}
         for raw_name, selector in specific.items():
             name = str(raw_name)
@@ -592,13 +648,114 @@ class Model:
                     )
                 owner[item] = name
             resolved.append((name, chosen))
+        return resolved
+
+    def with_two_tier(
+        self,
+        *,
+        primary: Mapping[str, ItemSelector],
+        specific: Mapping[str, ItemSelector],
+        correlated: bool = True,
+    ) -> Model:
+        r"""Return a two-tier model: correlated primary factors plus specific factors (§17.2).
+
+        Every item loads on at least one primary factor (cross-loadings among primary factors
+        are allowed) and on at most one specific factor. Primary factors are standard normal
+        and may correlate with each other; specific factors are standard normal and orthogonal
+        to every other factor. Item parameters are ``a1``..``aP`` (primary, in the order of
+        ``primary``), ``a(P+1)``..``aD`` (specific, in the order of ``specific``; slopes an item
+        does not load on are fixed at 0) and ``d`` (or ``d1``..), matching the columns of mirt's
+        ``bfactor(data, model, model2 = )`` (Chalmers, 2012).
+
+        The marginal likelihood is integrated with Cai's (2010) dimension reduction: with the
+        primary product grid :math:`\boldsymbol\theta_g` and its multivariate-normal weights
+        :math:`w^{(0)}_g`,
+
+        .. math::
+            L_p=\sum_g w^{(0)}_g\prod_{s}\Big[\sum_t w^{(s)}_t
+            \prod_{j\in s}P_j(y_{pj}\mid\boldsymbol\theta_g,\theta_t)\Big],
+
+        so each E-step needs one :math:`(P+1)`-dimensional grid per specific factor instead of a
+        :math:`(P+S)`-dimensional product grid. A bifactor model (:meth:`with_bifactor`) is the
+        case of one primary factor on every item.
+
+        Parameters
+        ----------
+        primary : mapping of str to iterable of item names or callable
+            Primary factor names (in order, 1 or 2 factors) mapped to the items loading on each.
+            Every model item must load on at least one primary factor.
+        specific : mapping of str to iterable of item names or callable
+            Specific factor names (in order, at least one) mapped to their items; each needs at
+            least two items and an item may appear under at most one specific factor.
+        correlated : bool, default True
+            Whether the correlations among primary factors are estimated (mirt's ``COV =
+            F1*F2`` in ``model2``); ``False`` fixes them at 0.
+
+        Raises
+        ------
+        SpecificationError
+            If there are no or more than two primary factors, factor names are empty or
+            duplicated, a primary factor is empty or lists unknown/duplicated items, an item
+            loads on no primary factor, a specific factor has fewer than two items, an item is
+            under two specific factors, the model already has factors, groups or a latent
+            distribution, or any item is :class:`Rasch` or :class:`PCM`.
+        """
+        if self.factors is not None:
+            raise SpecificationError(
+                "This model already has factors; call with_two_tier() on a model without "
+                "with_factors(), with_bifactor() or with_two_tier()."
+            )
+        self._check_reducible("with_two_tier", "Two-tier", specific)
+        if not isinstance(primary, Mapping) or len(primary) == 0:
+            raise SpecificationError(
+                "with_two_tier() requires a non-empty mapping primary factor name -> items."
+            )
+        if len(primary) > MAX_FACTORS - 1:
+            raise SpecificationError(
+                f"with_two_tier() supports 1 to {MAX_FACTORS - 1} primary factors, got "
+                f"{len(primary)} (the reduced grid has one more dimension than the primary "
+                "factors; DESIGN.md §17.2)."
+            )
+        resolved: list[tuple[str, tuple[str, ...]]] = []
+        seen: set[str] = set()
+        assigned_all: set[str] = set()
+        for raw_name, selector in primary.items():
+            name = str(raw_name)
+            if not name.strip():
+                raise SpecificationError("Factor names must be non-empty strings.")
+            if name in seen:
+                raise SpecificationError(f"Duplicated factor name: {name!r}.")
+            seen.add(name)
+            if isinstance(selector, str):
+                raise SpecificationError(
+                    f"Factor {name!r} items must be an iterable of item names or a callable, "
+                    f"not a single string {selector!r}."
+                )
+            chosen = self._select(selector)
+            if not chosen:
+                raise SpecificationError(f"Factor {name!r} must have at least one item.")
+            if len(set(chosen)) != len(chosen):
+                dup = sorted({i for i in chosen if chosen.count(i) > 1})
+                raise SpecificationError(f"Factor {name!r} lists duplicated items: {dup}.")
+            resolved.append((name, chosen))
+            assigned_all.update(chosen)
+        unassigned = [i for i in self.item_names if i not in assigned_all]
+        if unassigned:
+            raise SpecificationError(f"Items not assigned to any primary factor: {unassigned}.")
+        n_primary = len(resolved)
+        resolved.extend(self._resolve_specific(specific, seen))
         if len(resolved) > MAX_KERNEL_FACTORS:
             raise SpecificationError(
-                f"with_bifactor() supports at most {MAX_KERNEL_FACTORS - 1} specific factors, got "
-                f"{len(resolved) - 1}."
+                f"with_two_tier() supports at most {MAX_KERNEL_FACTORS} factors in total, got "
+                f"{len(resolved)}."
             )
-        candidate = replace(self, factors=tuple(resolved), correlated_factors=False, bifactor=True)
-        self._check_parameter_names(candidate, "with_bifactor")
+        candidate = replace(
+            self,
+            factors=tuple(resolved),
+            correlated_factors=bool(correlated) and n_primary > 1,
+            n_primary_factors=n_primary,
+        )
+        self._check_parameter_names(candidate, "with_two_tier")
         return candidate
 
     def with_latent(self, dist: LatentSpec) -> Model:

@@ -601,10 +601,10 @@ class FitResult:
         elif key is not None:
             raise SpecificationError(f"key= is only used with method='PV', not {method!r}.")
 
-        if self._model.bifactor and method != "EAP":
+        if self._model.is_reduced and method != "EAP":
             raise SpecificationError(
-                f"method={method!r} is not supported for bifactor models yet; use method='EAP' "
-                "(DESIGN.md §17.1)."
+                f"method={method!r} is not supported for bifactor and two-tier models yet; use "
+                "method='EAP' (DESIGN.md §17.1, §17.2)."
             )
         y = coerce_responses(data, self._model, item_names=item_names)
         codes, _ = coerce_groups(group, self._model, y.shape[0], require_all=False)
@@ -1286,11 +1286,13 @@ class FitResult:
         """Concise description of the quadrature grid."""
         quad = self._quadrature
         d = self._model.n_factors
-        if self._model.bifactor:
+        if self._model.is_reduced:
             kind = "Gauss-Hermite" if quad.kind == "gauss_hermite" else "equispaced"
+            dim = self._model.quadrature_dimension
+            label = "bifactor" if self._model.bifactor else "two-tier"
             return (
-                f"{quad.n_points}^2 = {quad.n_points**2} {kind} nodes per specific factor on "
-                f"[{quad.lower:g}, {quad.upper:g}]^2 (bifactor dimension reduction)"
+                f"{quad.n_points}^{dim} = {quad.n_points**dim} {kind} nodes per specific factor "
+                f"on [{quad.lower:g}, {quad.upper:g}]^{dim} ({label} dimension reduction)"
             )
         if d == 1:
             return f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
@@ -1305,6 +1307,12 @@ class FitResult:
         fnames = self._model.factor_names
         if self._model.bifactor:
             return f"bifactor: general {fnames[0]}; specific {', '.join(fnames[1:])}"
+        if self._model.n_primary_factors:
+            n_primary = self._model.n_primary_factors
+            return (
+                f"two-tier: primary {', '.join(fnames[:n_primary])}; "
+                f"specific {', '.join(fnames[n_primary:])}"
+            )
         return f"{len(fnames)} ({', '.join(fnames)})"
 
     def summary(self, *, digits: int = 4) -> str:

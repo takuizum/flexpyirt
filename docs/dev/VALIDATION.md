@@ -70,6 +70,7 @@ English | [日本語](VALIDATION.ja.md)
 | V30 | DIMTEST: type I error and power (2PL; $N$ 1000–2000, $J$ 20–30; unidimensional and two dimensions correlated 0.7–0.8; 200 replications each) | none (no implementation outside DIMPACK): `packages/flexpyctt/validation/simulation/dimtest_study.py` | M5 |
 | V31 | Jackknife slope index (LSAT7 2PL, Science GRM, simulated 2PL with two dependent pairs and 5% MCAR, simulated GPCM with a dependent pair); the Newton and one-step approximations against the refit | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | Bifactor models with dimension reduction (2PL with three specific factors and three general-only items; GRM $K=4$ with three testlets) | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
+| V33 | Two-tier models with dimension reduction (2PL with two correlated primary factors and three specific factors, one spanning both; GRM $K=4$ with a cross-loading item and two testlets) | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -601,6 +602,35 @@ English | [日本語](VALIDATION.ja.md)
     $10^{-12}$ or better, with missing data, a GRM item, 3PL items and general-only items), and a
     one-specific-factor bifactor model against the validated 2D path
     (`with_factors(..., correlated=False)`; log-likelihood to $10^{-12}$).
+- **Two-tier models (V33, M7)**: two simulated cases in `tests/test_mirt_m7_two_tier.py` (plain
+  EM and SQUAREM; generator `validation/r/m7_two_tier_reference.R` → `tests/reference/v33_two_tier.json`,
+  mirt 1.48 `bfactor(data, model, model2 = )`, `accelerate = "none"`, `TOL = 1e-10`,
+  `SE.type = "Oakes"`, 15 points per dimension on $[-6, 6]$, i.e. one $15^3$ grid per specific
+  factor). As in the 3D case of V14, the M-step optimizer is `BFGS` with
+  `control = list(reltol = 1e-13, maxit = 500L)`, because mirt's `NR` uses numerical Hessians for
+  `GroupPars` and is very slow on 3,375 nodes. The primary correlation is mirt's `COV_21` (both
+  variances are fixed at 1). mirt's `fscores()` integrates over the full product grid, which equals
+  the factorized posterior on the same one-dimensional grid; EAPs are compared with every parameter
+  fixed at mirt's estimates. In both cases the reduced log-likelihood at mirt's estimates equals
+  mirt's to $2.1\times10^{-15}$ (relative), `flexpyirt.loglik >= fixed_at_mirt.loglik` holds, EM
+  and SQUAREM are monotone, and Oakes agrees with the Hessian to $6.2\times10^{-17}$ (covariance
+  entries):
+  - **V33a (`two_tier_2pl`, 2PL, $J=16, N=2000$, `F1 = q01-q08`, `F2 = q09-q16`, $\rho=0.5$,
+    `s1 = q01-q04`, `s2 = q09-q12`, `s3 = q05, q06, q13, q14`; four items primary only)**: `loglik`
+    rel `2.1e-15`, item parameters `3.0e-7` (EM, 192 iterations; SQUAREM `3.1e-7`, 33 iterations),
+    `cor_12` `2.2e-8` (SQUAREM `1.3e-8`), item Oakes SE rel `4.4e-7` (SQUAREM `4.6e-7`), `cor_12_se`
+    rel `7.3e-6`, EAP $\theta$ `6.9e-15` / SD `4.0e-15` ($9^5$ nodes in mirt).
+  - **V33b (`two_tier_grm`, GRM $K=4$, $J=12, N=2000$, `F1 = g01-g06`, `F2 = g06-g12` with `g06`
+    cross-loading, $\rho=0.4$, `s1 = g01-g04`, `s2 = g07-g10`)**: `loglik` rel `1.1e-15`, item
+    parameters `7.8e-9` (EM, 192 iterations; SQUAREM `1.6e-8`, 30 iterations), `cor_12` `6.3e-9`
+    (SQUAREM `3.9e-9`), item Oakes SE rel `1.0e-7` (SQUAREM `1.1e-7`), `cor_12_se` rel `1.6e-6`, EAP
+    $\theta$ `7.1e-15` / SD `3.4e-15` ($15^4$ nodes in mirt).
+  - The unit tests (`tests/test_m7_two_tier.py`) check the reduced likelihood, expected counts and
+    EAP against brute-force integration over the full $(P+S)$-dimensional product grid (to
+    $10^{-12}$ or better, with missing data, a GRM item, a cross-loading item and items without a
+    specific factor), a one-primary-factor two-tier model against the bifactor path, and a
+    one-specific-factor model against the validated 3D path (`with_factors()` with the specific
+    factor's correlations fixed at 0; log-likelihood to $10^{-12}$).
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)

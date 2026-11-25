@@ -1393,7 +1393,7 @@ class ItemKernel(Protocol):
    （直積格子は `with_factors()` と `Quadrature.grid()` で 3 次元までのまま）。未対応（いずれも
    `SpecificationError`）: 多母集団、`with_latent()`、`with_factors()` との併用、Rasch / PCM 項目
    （一般因子・特殊因子の分散を自由にする必要がある）、編集したテーブルでの潜在パラメータの自由
-   推定、two-tier モデル（相関する主因子。後日）。
+   推定。two-tier モデル（相関する主因子）は下の 2 を参照。
    **尤度**（Gibbons & Hedeker, 1992; Cai, 2010）。項目 $j$ は $(\theta_0,\theta_{s(j)})$ にしか
    依存せず因子は独立なので、1 次元格子 $\{\theta_g\}_{g=1}^{n}$（一般）と
    $\{\theta_t\}_{t=1}^{n}$（各特殊）で
@@ -1432,6 +1432,44 @@ class ItemKernel(Protocol):
    `select_quadpts(nfact - nspec + 1)` を使う）。**JSON**（schema version 5）: モデルに
    `"bifactor": true|false` を保存する。版 1–4 はこのキーを含んではならず、`false` として読む。
    読み込み時、双因子構造は `with_bifactor()` で組み立て直す。
+
+2. **two-tier モデル（`Model.with_two_tier`、V33）**（Cai, 2010）:
+   **指定。** `Model.with_two_tier(*, primary, specific, correlated=True)` は $P\in\{1,2\}$ 個の
+   主因子（primary）と $S\ge1$ 個の特殊因子を宣言する（どちらも `Mapping[str, ItemSelector]`）。
+   各項目は主因子の少なくとも 1 つに負荷し（主因子どうしのクロスローディングは可）、特殊因子には
+   1 つまで負荷する。各特殊因子には 2 項目以上が必要。因子の順は主因子が先で、傾き `a1..aP` が
+   主因子、`a(P+1)..aD` が特殊因子（$D=P+S$）。mirt の `bfactor(data, model, model2 = )` の列順と
+   同じ。主因子どうしは相関してよく（`correlated=True` で `cor_ij`、$i<j\le P$ を自由推定）、
+   特殊因子は他のすべてと直交する。潜在分布の行は `mean_1..D`（0 固定）、`var_1..D`（1 固定）と、
+   主因子の組だけの `cor_ij`。`Model.n_primary_factors = P` がこの構造を示す（他のモデルでは 0）。
+   双因子モデルは $P=1$ で主因子が全項目に負荷する場合にあたり、どちらも Core の同じ縮約経路を
+   使う（`Model.is_reduced`、`Model.n_primary`）。$P=3$ はブロックごとに 4 次元格子が必要なので、
+   積格子の 3 次元までという制限（§4.9）に合わせて受け付けない。未対応（いずれも
+   `SpecificationError`）: 双因子モデルと同じもの（多母集団、`with_latent()`、Rasch / PCM 項目、
+   平均・分散の自由推定）と、`with_factors()` / `with_bifactor()` との併用。
+   **尤度。** 主因子の積格子 $\{\boldsymbol\theta_g\}_{g=1}^{n^P}$ と、その正規化した多変量正規の
+   重み $w^{(0)}_g(\boldsymbol\rho)$（§15.30）を使って
+   $$L_p=\sum_g w^{(0)}_g\,\prod_{s=1}^{S}\Big[\sum_t w^{(s)}_t\prod_{j\in s}P_j(y_{pj}\mid\boldsymbol\theta_g,\theta_t)\Big]
+   \prod_{j\in s_\varnothing}P_j(y_{pj}\mid\boldsymbol\theta_g)$$
+   となる。§17.1 の一般因子の節点を主因子の節点に置き換えたもので、計算量はパターンあたり
+   $O(n^{P+S})$ ではなく $O(S\,n^{P+1})$。**実装。** `BifactorBlock` を一般化する: 主因子の格子
+   `(Q_p, P)`（$Q_p=n^P$）とその基底重み、形 $(B, Q_p n, D)$ のブロック節点（列 $0..P-1$ が主因子の
+   節点、列 $P+b$ が特殊因子の節点、主因子の添字が上位）、static な `n_primary` を持つ。§17.1 の
+   式は、$g$ が $Q_p$ 個の主因子節点を動くと読み替えればすべて成り立つ。$\bar n$ は平坦に
+   `(G, Q_p + B n)` で持つ（主因子の周辺、続いて各ブロックの特殊因子の周辺）。
+   **潜在分布の M ステップ。** $Q$ の潜在部分は
+   $Q^{\text{lat}}=\sum_g\bar n^{(0)}_g\log w^{(0)}_g(\boldsymbol\rho)+\sum_{s,t}\bar n^{(s)}_t\log w^{(s)}_t$
+   で、自由な相関に依存するのは第 1 項だけ。これを §4.4 のマスク付き Newton で主因子の多変量正規
+   パラメタについて最大化する（離散化した尤度に対して厳密なので EM は単調のまま。正定値でない
+   候補は NaN になり、直線探索で棄却される）。双因子モデルには自由な潜在パラメタがないので、
+   これまでどおり何もしない。**識別。** §15.31 の規則を主因子に適用する（相関を自由にするには
+   固定した傾きが必要。因子構造による 0 固定の傾きも数える）。**標準誤差・スコアリング。** §17.1 と
+   同じ: 縮約した対数尤度のヘッセ行列、E ステップを通した全微分としての Oakes（相関を含む）、
+   分解した事後分布による EAP（主因子の平均は主因子の格子上でとる）。**求積。** 次元あたり
+   `Quadrature.default(P+1)` 点: $P=1$ で 31、$P=2$ で 15（mirt の
+   `select_quadpts(nfact - nspec + 1)`）。**JSON**（schema version 6）: モデルに
+   `"n_primary_factors"`（two-tier 以外は 0）を保存する。版 1–5 はこのキーを含んではならない。
+   読み込み時、two-tier 構造は `with_two_tier()` で組み立て直す。
 
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.

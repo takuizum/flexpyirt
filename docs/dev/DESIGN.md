@@ -1946,8 +1946,8 @@ data-independent shapes (§15.21).
    dimensions (product grids stay limited to 3 by `with_factors()` and `Quadrature.grid()`).
    Not supported yet, each with `SpecificationError`: multiple groups, `with_latent()`, combining
    with `with_factors()`, Rasch / PCM items (the general and specific variances would have to be
-   free), free latent parameters in an edited table, and two-tier models (correlated primary
-   factors; later).
+   free) and free latent parameters in an edited table. Two-tier models (correlated primary
+   factors) are item 2 below.
    **Likelihood** (Gibbons & Hedeker, 1992; Cai, 2010). Item $j$ depends on
    $(\theta_0,\theta_{s(j)})$ only, and the factors are independent, so with one-dimensional
    grids $\{\theta_g\}_{g=1}^{n}$ (general) and $\{\theta_t\}_{t=1}^{n}$ (each specific),
@@ -1990,6 +1990,48 @@ data-independent shapes (§15.21).
    `select_quadpts(nfact - nspec + 1)`). **JSON** (schema version 5): the model stores
    `"bifactor": true|false`; versions 1–4 must not contain it and load as `false`. On load a
    bifactor structure is rebuilt through `with_bifactor()`.
+
+2. **Two-tier models (`Model.with_two_tier`, V33)** (Cai, 2010):
+   **Specification.** `Model.with_two_tier(*, primary, specific, correlated=True)` declares
+   $P\in\{1,2\}$ primary factors and $S\ge1$ specific factors (both `Mapping[str, ItemSelector]`).
+   Every item loads on at least one primary factor (cross-loadings among primary factors are
+   allowed) and on at most one specific factor; every specific factor needs at least two items.
+   Factors are ordered primary first: slopes `a1..aP` are primary and `a(P+1)..aD` specific
+   ($D=P+S$), the column order of mirt's `bfactor(data, model, model2 = )`. Primary factors may
+   correlate with each other (`correlated=True` frees `cor_ij`, $i<j\le P$); specific factors are
+   orthogonal to everything. The latent rows are `mean_1..D` (fixed 0), `var_1..D` (fixed 1) and
+   `cor_ij` for primary pairs only. `Model.n_primary_factors = P` marks the structure (0 for every
+   other model); a bifactor model is the case $P=1$ with the primary factor on every item, and
+   both share the reduced Core path (`Model.is_reduced`, `Model.n_primary`). $P=3$ would need a
+   four-dimensional grid per block and is rejected, in line with the three-dimension limit of
+   product grids (§4.9). Not supported, each with `SpecificationError`: as for bifactor models
+   (multiple groups, `with_latent()`, Rasch / PCM items, free means or variances), and combining
+   with `with_factors()` / `with_bifactor()`.
+   **Likelihood.** With the primary product grid $\{\boldsymbol\theta_g\}_{g=1}^{n^P}$ and its
+   normalized multivariate-normal weights $w^{(0)}_g(\boldsymbol\rho)$ (§15.30),
+   $$L_p=\sum_g w^{(0)}_g\,\prod_{s=1}^{S}\Big[\sum_t w^{(s)}_t\prod_{j\in s}P_j(y_{pj}\mid\boldsymbol\theta_g,\theta_t)\Big]
+   \prod_{j\in s_\varnothing}P_j(y_{pj}\mid\boldsymbol\theta_g),$$
+   which is §17.1 with the general node replaced by the primary node: cost $O(S\,n^{P+1})$ per
+   pattern instead of $O(n^{P+S})$. **Implementation.** `BifactorBlock` is generalized: it holds
+   the primary grid `(Q_p, P)` ($Q_p=n^P$) with its base weights, block nodes of shape
+   $(B, Q_p n, D)$ (columns $0..P-1$ the primary node, column $P+b$ the specific node, primary
+   index major) and the static `n_primary`. All formulas of §17.1 hold with $g$ running over the
+   $Q_p$ primary nodes. $\bar n$ is stored flat, `(G, Q_p + B n)`: the primary marginal followed
+   by each block's specific marginal. **Latent M-step.** The latent part of $Q$ is
+   $Q^{\text{lat}}=\sum_g\bar n^{(0)}_g\log w^{(0)}_g(\boldsymbol\rho)+\sum_{s,t}\bar n^{(s)}_t\log w^{(s)}_t$;
+   only the first term depends on the free correlations, and it is maximized by the masked Newton
+   of §4.4 over the primary multivariate-normal parameters (exact for the discretized likelihood,
+   so EM stays monotone; a non-positive-definite candidate gives NaN and is rejected by the line
+   search). Bifactor models have no free latent parameter and skip it as before.
+   **Identification.** The rules of §15.31 apply to the primary factors (a free correlation needs
+   fixed slopes; the zero slopes of the factor structure count). **Standard errors, scoring.**
+   As §17.1: Hessian of the reduced log-likelihood, Oakes as the total derivative through the
+   E-step (now including the correlation), EAP from the factorized posterior with the primary
+   means taken on the primary grid. **Quadrature.** `Quadrature.default(P+1)` points per
+   dimension: 31 for $P=1$, 15 for $P=2$ (mirt's `select_quadpts(nfact - nspec + 1)`).
+   **JSON** (schema version 6): the model stores `"n_primary_factors"` (0 unless two-tier);
+   versions 1–5 must not contain it. On load a two-tier structure is rebuilt through
+   `with_two_tier()`.
 
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.

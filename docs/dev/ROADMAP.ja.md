@@ -69,10 +69,11 @@
 - **受け入れ基準**: 各項目が VALIDATION.md の許容誤差内で mirt（または R による独立な実装）と一致。
 
 ## M7 双因子・診断・情報関数・調査設計（この順に実装する）
-1. [ ] 次元縮約つきの双因子モデル・two-tier モデル（#80）。
+1. [x] 次元縮約つきの双因子モデル・two-tier モデル（#80）。
    - [x] 双因子モデル（`Model.with_bifactor()`、単一群、特殊因子数に制限なし、Oakes/Hessian SE、EAP スコアリング。
      V32 で mirt の `bfactor()` と照合済み）。
-   - [ ] two-tier モデル。
+   - [x] two-tier モデル（`Model.with_two_tier()`、相関してよい主因子 1〜2 個と特殊因子、単一群、Oakes/Hessian SE、
+     EAP スコアリング。V33 で mirt の `bfactor(model2 = )` と照合済み）。
 2. [ ] 局所依存（Q3, LD-X², JSI）を多母集団・正規以外の潜在分布・多次元 / 双因子モデルに広げる（#81）。
 3. [ ] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
    カーネル（#83）の上に作る。

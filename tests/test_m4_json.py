@@ -526,7 +526,7 @@ def test_malformed_format_and_schema_version(
         FitResult.from_json(json.dumps(no_fmt))
 
     # Unknown schema_version
-    for bad_ver in (0, 6, 99, "1", True):
+    for bad_ver in (0, 7, 99, "1", True):
         bad = _clone(sample_payload)
         bad["schema_version"] = bad_ver
         with pytest.raises(SpecificationError, match="schema_version"):
@@ -1072,6 +1072,7 @@ def test_schema_version_1_payload_still_loads(sample_payload: dict[str, Any]) ->
     del old["model"]["correlated_factors"]
     del old["model"]["equal_items"]
     del old["model"]["bifactor"]
+    del old["model"]["n_primary_factors"]  # added in version 6
     loaded = FitResult.from_json(json.dumps(old))
     assert not loaded._model.is_multidimensional
     expected = FitResult.from_json(json.dumps(sample_payload))
@@ -1081,6 +1082,7 @@ def test_schema_version_1_payload_still_loads(sample_payload: dict[str, Any]) ->
     with_keys["schema_version"] = 1
     del with_keys["model"]["equal_items"]
     del with_keys["model"]["bifactor"]
+    del with_keys["model"]["n_primary_factors"]  # added in version 6
     with pytest.raises(SpecificationError, match="factors"):
         FitResult.from_json(json.dumps(with_keys))
     missing = _clone(sample_payload)
@@ -1152,6 +1154,7 @@ def test_schema_version_3_names_still_load() -> None:
     old_obj = json.loads(text)
     old_obj["schema_version"] = 3
     del old_obj["model"]["bifactor"]  # added in version 5
+    del old_obj["model"]["n_primary_factors"]  # added in version 6
     old = json.dumps(old_obj)
     for new_name, old_name in [
         ('"n_categories"', '"n_cat"'),

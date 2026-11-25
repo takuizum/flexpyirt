@@ -809,7 +809,49 @@ print(res_bif.score(bif_df.iloc[:3]).round(3))  # theta_G, theta_s1, ..., se_G, 
 - **対応**: 傾きが自由な全項目モデル（2PL・3PL・4PL・GRM・GPCM・名義）、Oakes / Hessian SE、`"EAP"`
   スコアリング（因子ごとの列）、等値制約、事前分布、JSON。
 - **未対応**（`SpecificationError`）: 多母集団、Rasch / PCM 項目（因子分散を自由にする必要がある）、潜在平均・分散の
-  自由推定、MAP / ML / WLE / PV スコアリング、項目適合度、$M_2$、局所依存、two-tier モデル。
+  自由推定、MAP / ML / WLE / PV スコアリング、項目適合度、$M_2$、局所依存。
+
+### two-tier モデル
+
+`.with_two_tier(primary={...}, specific={...}, correlated=True)` は双因子モデルを一般化したもの（Cai, 2010）。
+互いに相関してよい 1〜2 個の**主因子**（primary）と、他のすべてと直交する特殊因子からなる。各項目は主因子の
+少なくとも 1 つに負荷し（主因子どうしの交差負荷は可）、特殊因子には高々 1 つに負荷する。項目パラメタは `a1`…
+（主因子、宣言順）、続いて特殊因子の傾き、`d` で、mirt の `bfactor(data, model, model2 = ...)` の列と一致する。
+`correlated=True` なら 2 つの主因子の相関（`cor_12`）を推定し、`correlated=False` なら 0 に固定する。
+
+尤度は、主因子の直積格子に特殊因子 1 つ分の次元を足した格子で積分する。主因子が 2 つなら、特殊因子がいくつあっても
+特殊因子ごとに 3 次元格子 1 つで済む。既定は、主因子 2 つで $[-6, 6]$ 上の次元あたり 15 点（1 つなら 31 点）で、
+mirt と同じ。結果は mirt の `bfactor()` と照合している。
+
+```python
+a_tt = np.zeros((10, 4))
+a_tt[0:5, 0] = [1.4, 1.2, 1.5, 1.1, 1.3]  # primary math
+a_tt[5:10, 1] = [1.6, 1.0, 1.2, 1.4, 1.3]  # primary reading
+a_tt[0:3, 2] = [0.9, 1.0, 0.8]  # specific t1 (a testlet within math)
+a_tt[5:8, 3] = [1.1, 0.7, 0.9]  # specific t2 (a testlet within reading)
+cov_tt = np.eye(4)
+cov_tt[0, 1] = cov_tt[1, 0] = 0.5
+theta_tt = rng.multivariate_normal(np.zeros(4), cov_tt, size=1500)
+p_tt = 1.0 / (1.0 + np.exp(-(theta_tt @ a_tt.T + np.linspace(-1.0, 1.0, 10))))
+tt_items = [f"t{j}" for j in range(1, 11)]
+tt_df = pd.DataFrame((rng.random(p_tt.shape) < p_tt).astype(float), columns=tt_items)
+
+tt_spec = Model.uniform(TwoPL(), items=tt_items).with_two_tier(
+    primary={"math": tt_items[0:5], "reading": tt_items[5:10]},
+    specific={"t1": tt_items[0:3], "t2": tt_items[5:8]},
+)
+res_tt = fit(
+    tt_spec,
+    tt_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(11, bounds=(-6, 6)),  # 11^3 nodes per specific factor
+)
+print(res_tt.items[["item", "a1", "a2", "a3", "a4", "d"]].round(3))
+print(res_tt.latent[["cor_12", "cor_12_se"]].round(3))  # correlation of math and reading
+print(res_tt.score(tt_df.iloc[:3]).round(3))  # theta_math, theta_reading, theta_t1, ...
+```
+
+対応している機能・していない機能は双因子モデルと同じ。主因子が 3 つ以上のモデルは `SpecificationError`。
 
 ## 15. 尺度リンキング
 
