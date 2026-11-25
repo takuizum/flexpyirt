@@ -852,6 +852,14 @@ class ItemKernel(Protocol):
    - `GradedKernel`（GRM）: $d_k^* = d_k - aB/A$（$k = 1, \dots, K-1$。順序 $d_1 > \dots > d_{K-1}$ を保存）。
    - `GPCMKernel`（GPCM/PCM）: $d_k^* = d_k - k\,aB/A$（$k = 1, \dots, K-1$、$d_0 = 0$）。
      $k a^* \theta^* + d_k^* = k a\theta + d_k$ とステップ困難度 $b_k^* = A b_k + B$ を保存する。
+   - `NominalKernel`（名義反応モデル。V40）: スコアリング係数は不変で $\mathrm{ak}_k^* = \mathrm{ak}_k$
+     （$k = 1, \dots, K-2$。$\mathrm{ak}_0 = 0$ と $\mathrm{ak}_{K-1} = K-1$ は固定のまま）、切片は
+     $d_k^* = d_k - \mathrm{ak}_k\,aB/A$（$k = 1, \dots, K-1$、$d_0 = 0$）。
+     $\mathrm{ak}_k a^* \theta^* + d_k^* = \mathrm{ak}_k a\theta + d_k$ を保存する。GPCM の変換で $k$ を
+     $\mathrm{ak}_k$ に置き換えたもので、$1/A$ は $a$ だけが吸収するので mirt の識別制約
+     （$\mathrm{ak}_0 = 0$、$\mathrm{ak}_{K-1} = K-1$、$d_0 = 0$）の中に収まる。
+   4PL の上方漸近線 $u$ は $g$ と同じく不変である（どちらも確率であり $\theta$ 上の位置ではない）。変わるのは
+   $a$ と $d$ だけである（V40）。
    任意の 1 次元 `ItemKernel` で $P_j(y=k \mid \theta^*; \xi_j^*) = P_j(y=k \mid (\theta^* - B)/A; \xi_j)$ が成り立つため、
    目的関数は `kernel.log_prob` から直接計算し、手書きの導関数を持たない。
    - **Haebara 法**（Haebara, 1980; 多値拡張 Kim & Lee, 2006）:
@@ -862,6 +870,9 @@ class ItemKernel(Protocol):
    - **Stocking–Lord 法**（Stocking & Lord, 1983; 多値拡張 Kim & Lee, 2006）:
      $\mathrm{SL}_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} [\mathrm{TCC}^{\mathrm{tgt}}(\theta_q^{(t)}) - \mathrm{TCC}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$。
      ただし $\mathrm{TCC}(\theta) = \sum_{j\in\mathcal{C}}\sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)$。
+     名義項目も他の項目と同じくカテゴリ番号 $k$ で採点する（mirt の `expected.item()` と同じ。$\mathrm{ak}_k$ では
+     ない）。変換が厳密に成り立てば曲線が一致するときに限り 0 になる損失である点は変わらないが、名義項目の得点は
+     カテゴリの符号化に依存するので、順序のないカテゴリでは得点を使わない Haebara 法が自然な選択である。
    - **対称版**（`symmetric=True`; Kim & Lee, 2006）: 逆方向（$P_{jk}^{\mathrm{src}}(\theta_q^{(s)})$ と
      $P_{jk}^{\mathrm{tgt}}(A\theta_q^{(s)} + B)$、$\mathrm{TCC}$ も同様）の二乗差を加える。既定では $(\theta^{(t)}, w^{(t)})$ は
      `target` 群の推定済み潜在分布の求積格子・重み、$(\theta^{(s)}, w^{(s)})$ は `source` 群のものを使うため、対称版は
@@ -876,7 +887,9 @@ class ItemKernel(Protocol):
    1-ULP 勾配仕上げを行う。収束判定は $\|\nabla F\|_\infty \le$ `tol`（絶対値、既定 $10^{-10}$。重みの和が 1 で
    $F$ は共通項目数とともに大きくなるが、スケール調整はしない）。`tol` に達する前に $F$ を減らすステップがなくなると
    `converged = False` で終了し `ConvergenceWarning` を出す。Mean/Mean は初期値にすぎず、傾きの絶対値を合計し、
-   全共通項目の表示用閾値をすべてまとめて平均するため、多値項目は項目単位の平均より重みが大きい。
+   全共通項目の表示用閾値をすべてまとめて平均するため、多値項目は項目単位の平均より重みが大きい。名義項目には
+   表示用閾値がないので、位置 $-d_{K-1}/((K-1)a)$（最初と最後のカテゴリ曲線の交点）1 つを $\bar b$ に入れる。
+   これは $Ab + B$ で変換される。
    **標準誤差（Ogasawara, 2001）**: 最適点 $\hat c = (\hat A, \hat B)$ の停留条件
    $g(c, \eta_s, \eta_t) = \nabla_c F(c, \eta_s, \eta_t) = 0$ に陰関数定理を適用し、共通項目に現れる一意な自由パラメタ
    （固定パラメタや共有 `free_id` をそのまま反映）に対して `jax.jacfwd(g, 0)` と `jax.jacrev(g, 1/2)` から

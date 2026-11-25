@@ -1256,6 +1256,15 @@ data-independent shapes (§15.21).
    - `GradedKernel` (GRM): $d_k^* = d_k - aB/A$ for $k = 1, \dots, K-1$ (preserving $d_1 > \dots > d_{K-1}$);
    - `GPCMKernel` (GPCM/PCM): $d_k^* = d_k - k\,aB/A$ for $k = 1, \dots, K-1$ (with $d_0 = 0$),
      preserving $k a^* \theta^* + d_k^* = k a\theta + d_k$ and step difficulties $b_k^* = A b_k + B$.
+   - `NominalKernel` (nominal response model; V40): the scoring coefficients are unchanged,
+     $\mathrm{ak}_k^* = \mathrm{ak}_k$ ($k = 1, \dots, K-2$; $\mathrm{ak}_0 = 0$ and
+     $\mathrm{ak}_{K-1} = K-1$ stay fixed), and $d_k^* = d_k - \mathrm{ak}_k\,aB/A$ for
+     $k = 1, \dots, K-1$ (with $d_0 = 0$), preserving
+     $\mathrm{ak}_k a^* \theta^* + d_k^* = \mathrm{ak}_k a\theta + d_k$. The transformation is the
+     GPCM's with $k$ replaced by $\mathrm{ak}_k$; it stays inside mirt's identification
+     ($\mathrm{ak}_0 = 0$, $\mathrm{ak}_{K-1} = K-1$, $d_0 = 0$) because only $a$ absorbs $1/A$.
+   For the 4PL the upper asymptote $u$ is invariant like $g$ (both are probabilities, not
+   locations on $\theta$), so only $a$ and $d$ change (V40).
    Because $P_j(y=k \mid \theta^*; \xi_j^*) = P_j(y=k \mid (\theta^* - B)/A; \xi_j)$ for any
    unidimensional `ItemKernel`, the criteria are evaluated directly from `kernel.log_prob` with no
    hand-written derivatives:
@@ -1269,6 +1278,11 @@ data-independent shapes (§15.21).
    - **Stocking–Lord** (Stocking & Lord, 1983; polytomous form Kim & Lee, 2006):
      $\mathrm{SL}_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} [\mathrm{TCC}^{\mathrm{tgt}}(\theta_q^{(t)}) - \mathrm{TCC}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$,
      where $\mathrm{TCC}(\theta) = \sum_{j\in\mathcal{C}}\sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)$.
+     A nominal item is scored by its category index $k$ like every other item (mirt's
+     `expected.item()`), not by $\mathrm{ak}_k$: the criterion is still a valid loss (zero iff the
+     curves coincide when the transformation holds exactly), but the scores of a nominal item
+     depend on how its categories are coded, so with unordered categories Haebara, which does
+     not use scores, is the natural choice.
    - **Symmetric variants** (`symmetric=True`; Kim & Lee, 2006): add the reverse-direction term
      comparing $P_{jk}^{\mathrm{src}}(\theta_q^{(s)})$ against $P_{jk}^{\mathrm{tgt}}(A\theta_q^{(s)} + B)$
      (likewise for $\mathrm{TCC}$). By default, $(\theta^{(t)}, w^{(t)})$ is the target group's
@@ -1288,7 +1302,9 @@ data-independent shapes (§15.21).
    that no longer decreases $F$ before reaching `tol` ends the loop with `converged = False` and a
    `ConvergenceWarning`. Mean/Mean is only a starting value: it sums absolute slopes and pools
    every display threshold of every common item, so polytomous items weigh more than in per-item
-   averages.
+   averages. A nominal item has no display thresholds; it enters $\bar b$ with the single location
+   $-d_{K-1}/((K-1)a)$ (where its first and last category curves cross), which transforms as
+   $Ab + B$.
    **Standard errors (Ogasawara, 2001)**: from the stationarity condition
    $g(c, \eta_s, \eta_t) = \nabla_c F(c, \eta_s, \eta_t) = 0$ at $\hat c = (\hat A, \hat B)$, the
    implicit function theorem gives $J_s = -H_{cc}^{-1} H_{c,\eta_s}$ and

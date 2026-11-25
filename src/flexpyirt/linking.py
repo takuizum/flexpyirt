@@ -33,7 +33,7 @@ from flexpyirt._linking import (
 )
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import ConvergenceWarning, SpecificationError
-from flexpyirt.items import ItemKernel
+from flexpyirt.items import ItemKernel, NominalKernel
 from flexpyirt.latent import davidian_param_names, latent_param_names, mixture_param_names
 from flexpyirt.result import _HTML_STYLE, FitResult, _frame_to_html_table
 
@@ -248,7 +248,10 @@ def _mean_mean_start(
     computed across all common items (falling back to ``(1.0, 0.0)`` when slopes vanish). These
     are starting values only: absolute slopes are summed, and :math:`\bar b` pools every display
     threshold of every common item (one per dichotomous item, :math:`K_j - 1` per polytomous
-    item), so polytomous items weigh more than in per-item Mean/Mean averages.
+    item), so polytomous items weigh more than in per-item Mean/Mean averages. A nominal item has
+    no display thresholds; it contributes the single location
+    :math:`-d_{K-1} / ((K-1)\,a)` (the crossing point of its first and last category curves),
+    which transforms as :math:`A\,b + B` like a threshold.
     """
     sum_s = sum(abs(float(src_est[s][0])) for s, _ in pairs)
     sum_t = sum(abs(float(tgt_est[t][0])) for _, t in pairs)
@@ -261,8 +264,13 @@ def _mean_mean_start(
     for s, t in pairs:
         if abs(float(src_est[s][0])) > 1e-8 and abs(float(tgt_est[t][0])) > 1e-8:
             k = kernels[s]
-            bs = np.asarray(k.irt_thresholds(jnp.asarray(src_est[s])), dtype=float)
-            bt = np.asarray(k.irt_thresholds(jnp.asarray(tgt_est[t])), dtype=float)
+            if isinstance(k, NominalKernel):
+                top = float(k.n_categories - 1)
+                bs = np.array([-float(src_est[s][-1]) / (top * float(src_est[s][0]))])
+                bt = np.array([-float(tgt_est[t][-1]) / (top * float(tgt_est[t][0]))])
+            else:
+                bs = np.asarray(k.irt_thresholds(jnp.asarray(src_est[s])), dtype=float)
+                bt = np.asarray(k.irt_thresholds(jnp.asarray(tgt_est[t])), dtype=float)
             if np.all(np.isfinite(bs)) and np.all(np.isfinite(bt)):
                 b_src.extend(bs.tolist())
                 b_tgt.extend(bt.tolist())

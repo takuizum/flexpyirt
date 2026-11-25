@@ -24,6 +24,7 @@ from flexpyirt.items import (
     GPCMKernel,
     GradedKernel,
     ItemKernel,
+    NominalKernel,
 )
 
 __all__ = [
@@ -119,6 +120,11 @@ def transform_kernel_params(
       :math:`a^*=a/A`, :math:`d_k^*=d_k-k\,aB/A` for :math:`k=1,\dots,K-1` (with :math:`d_0=0`),
       preserving :math:`k\,a^*\theta^*+d_k^*=k\,a\theta+d_k` and step difficulties
       :math:`b_k^*=A\,b_k+B`.
+    - :class:`~flexpyirt.items.NominalKernel` (nominal response model): :math:`a^*=a/A`, scoring
+      coefficients :math:`\mathrm{ak}_k^*=\mathrm{ak}_k` unchanged (:math:`k=1,\dots,K-2`), and
+      :math:`d_k^*=d_k-\mathrm{ak}_k\,aB/A` for :math:`k=1,\dots,K-1` (with
+      :math:`\mathrm{ak}_{K-1}=K-1`, :math:`d_0=0`), preserving
+      :math:`\mathrm{ak}_k a^*\theta^*+d_k^*=\mathrm{ak}_k a\theta+d_k`.
 
     Parameters
     ----------
@@ -145,6 +151,21 @@ def transform_kernel_params(
     if isinstance(kernel, GPCMKernel):
         ks = jnp.arange(1, kernel.n_categories, dtype=params.dtype)
         return jnp.concatenate([a_new[None], params[1:] - ks * shift])
+    if isinstance(kernel, NominalKernel):
+        n_free_scoring = kernel.n_categories - 2
+        scoring = jnp.concatenate(
+            [
+                params[1 : 1 + n_free_scoring],
+                jnp.array([float(kernel.n_categories - 1)], dtype=params.dtype),
+            ]
+        )
+        return jnp.concatenate(
+            [
+                a_new[None],
+                params[1 : 1 + n_free_scoring],
+                params[1 + n_free_scoring :] - scoring * shift,
+            ]
+        )
     raise SpecificationError(
         f"Scale parameter transformation is not implemented for kernel {type(kernel).__name__}."
     )
