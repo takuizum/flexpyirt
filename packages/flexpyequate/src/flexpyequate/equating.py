@@ -1,7 +1,13 @@
-"""Observed-score equating of score distributions: identity, mean, linear, equipercentile."""
+"""Observed-score equating of score distributions.
+
+Identity, mean, linear and equipercentile equating for equivalent groups and a single group, and
+the linear methods for non-equivalent groups with an anchor test (Tucker, Levine, Braun-Holland,
+chained).
+"""
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Literal, get_args
 
@@ -9,6 +15,16 @@ import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike
 
+from flexpyequate._neat import (
+    Anchor,
+    GroupMoments,
+    chained_linear_coefficients,
+    levine_gamma,
+    levine_true_coefficients,
+    post_stratified_distributions,
+    synthetic_moments,
+    tucker_gamma,
+)
 from flexpyequate.distributions import (
     BivariateScoreDistribution,
     FloatArray,
@@ -17,12 +33,25 @@ from flexpyequate.distributions import (
     percentile_from_proportion,
     percentile_rank_proportion,
 )
-from flexpyequate.errors import SpecificationError
+from flexpyequate.errors import SparseDataWarning, SpecificationError
 
 __all__ = ["EquatingMethod", "EquatingResult", "equate"]
 
-EquatingMethod = Literal["identity", "mean", "linear", "equipercentile"]
-Design = Literal["equivalent_groups", "single_group"]
+EquatingMethod = Literal[
+    "identity",
+    "mean",
+    "linear",
+    "equipercentile",
+    "tucker",
+    "levine_observed",
+    "levine_true",
+    "braun_holland",
+    "chained_linear",
+]
+Design = Literal["equivalent_groups", "single_group", "nonequivalent_groups"]
+
+_ANCHOR_METHODS = ("tucker", "levine_observed", "levine_true", "braun_holland", "chained_linear")
+_SYNTHETIC_METHODS = ("tucker", "levine_observed", "braun_holland")
 
 
 @dataclass(frozen=True, eq=False)
@@ -32,21 +61,33 @@ class EquatingResult:
     Attributes
     ----------
     method : str
-        The equating method (``"identity"``, ``"mean"``, ``"linear"`` or ``"equipercentile"``).
+        The equating method, as passed to :func:`equate`.
     design : str
-        ``"equivalent_groups"`` or ``"single_group"``.
+        ``"equivalent_groups"``, ``"single_group"`` or ``"nonequivalent_groups"``.
     x, y : ScoreDistribution
-        The distributions of form X and form Y that were equated (the margins for a single
-        group).
+        The distributions of form X and form Y that were equated: the margins for a single
+        group; for non-equivalent groups, form X in the population that took it and form Y in the
+        population that took it.
     scores : numpy.ndarray
         The possible scores of form X.
     equated : numpy.ndarray
         Form-Y equivalents :math:`e_Y(x_j)` of the possible scores of form X.
     slope, intercept : float or None
         Coefficients of :math:`e_Y(x) = \mathrm{intercept} + \mathrm{slope}\,x` for the
-        identity, mean and linear methods; ``None`` for equipercentile equating.
+        linear methods; ``None`` for equipercentile equating.
     ddof : int
-        Delta degrees of freedom used for the standard deviations of linear equating.
+        Delta degrees of freedom used for the variances and covariances of the linear methods.
+    synthetic_weight : float or None
+        Weight :math:`w_1` of the population that took form X in the synthetic population
+        (Tucker, Levine observed-score and Braun-Holland methods); ``None`` otherwise.
+    anchor : str or None
+        ``"internal"`` or ``"external"`` for the Levine methods; ``None`` otherwise.
+    gamma : tuple of float or None
+        :math:`(\gamma_1, \gamma_2)` of the Tucker and Levine methods; ``None`` otherwise.
+    synthetic_moments : pandas.DataFrame or None
+        Mean and standard deviation of X and Y in the synthetic population (rows ``x`` and ``y``,
+        columns ``mean`` and ``sd``) for the Tucker, Levine observed-score and Braun-Holland
+        methods; ``None`` otherwise.
     """
 
     method: EquatingMethod
@@ -58,6 +99,10 @@ class EquatingResult:
     slope: float | None
     intercept: float | None
     ddof: int
+    synthetic_weight: float | None = None
+    anchor: Anchor | None = None
+    gamma: tuple[float, float] | None = None
+    synthetic_moments: pd.DataFrame | None = None
 
     def transform(self, values: ArrayLike) -> FloatArray:
         """Equate arbitrary form-X scores (also between possible scores) to the form-Y scale.
@@ -129,21 +174,130 @@ def _equipercentile(x: ScoreDistribution, y: ScoreDistribution, values: FloatArr
     return percentile_from_proportion(y.scores, y.cumulative, rank)
 
 
+def _weighted_moments(scores: FloatArray, probabilities: FloatArray) -> tuple[float, float]:
+    mean = float(probabilities @ scores)
+    return mean, float(np.sqrt(probabilities @ (scores - mean) ** 2))
+
+
+def _synthetic_frame(mean_x: float, sd_x: float, mean_y: float, sd_y: float) -> pd.DataFrame:
+    return pd.DataFrame({"mean": [mean_x, mean_y], "sd": [sd_x, sd_y]}, index=["x", "y"])
+
+
+def _equate_with_anchor(
+    x: BivariateScoreDistribution,
+    y: BivariateScoreDistribution,
+    method: EquatingMethod,
+    ddof: int,
+    synthetic_weight: float | None,
+    anchor: Anchor | None,
+) -> EquatingResult:
+    """Linear equating for non-equivalent groups with an anchor test."""
+    for name, joint in (("x", x), ("y", y)):
+        if not (joint.x.variance() > 0 and joint.y.variance() > 0):
+            raise SpecificationError(
+                f"The total and the anchor score of {name} must both have positive variance."
+            )
+    weight: float | None = None
+    if method in _SYNTHETIC_METHODS:
+        weight = x.n / (x.n + y.n) if synthetic_weight is None else float(synthetic_weight)
+        if not 0.0 <= weight <= 1.0:
+            raise SpecificationError(f"synthetic_weight must lie in [0, 1], got {weight}.")
+    uses_levine = method in ("levine_observed", "levine_true")
+    if uses_levine and anchor not in ("internal", "external"):
+        raise SpecificationError(
+            f'method={method!r} needs anchor="internal" (the anchor items count towards the '
+            'total score) or anchor="external".'
+        )
+
+    group_1 = GroupMoments.of(x, ddof)
+    group_2 = GroupMoments.of(y, ddof)
+    gamma: tuple[float, float] | None = None
+    synthetic: pd.DataFrame | None = None
+
+    if method == "chained_linear":
+        slope, intercept = chained_linear_coefficients(group_1, group_2)
+    elif method == "braun_holland":
+        if x.y_scores.shape != y.y_scores.shape or not np.allclose(x.y_scores, y.y_scores):
+            raise SpecificationError(
+                "The Braun-Holland method needs the same possible anchor scores in x and y."
+            )
+        assert weight is not None
+        synthetic_x, synthetic_y, dropped = post_stratified_distributions(
+            x.probabilities, y.probabilities, weight
+        )
+        if dropped > 0:
+            warnings.warn(
+                "Some anchor scores were observed in one population only; that part of the other "
+                f"population (probability up to {dropped:.4g}) is left out of the synthetic "
+                "distributions. Presmoothing the joint distributions avoids this.",
+                SparseDataWarning,
+                stacklevel=3,
+            )
+        mean_x, sd_x = _weighted_moments(x.x_scores, synthetic_x)
+        mean_y, sd_y = _weighted_moments(y.x_scores, synthetic_y)
+        slope = sd_y / sd_x
+        intercept = mean_y - slope * mean_x
+        synthetic = _synthetic_frame(mean_x, sd_x, mean_y, sd_y)
+    else:
+        if method == "tucker":
+            gamma = (tucker_gamma(group_1), tucker_gamma(group_2))
+        else:
+            assert anchor is not None
+            if not (group_1.covariance > 0 and group_2.covariance > 0):
+                raise SpecificationError(
+                    "Levine's methods need a positive covariance between total and anchor score "
+                    "in both populations."
+                )
+            gamma = (levine_gamma(group_1, anchor), levine_gamma(group_2, anchor))
+        if method == "levine_true":
+            slope, intercept = levine_true_coefficients(group_1, group_2, *gamma)
+        else:
+            assert weight is not None
+            moments = synthetic_moments(group_1, group_2, gamma[0], gamma[1], weight)
+            slope = moments.sd_y / moments.sd_x
+            intercept = moments.mean_y - slope * moments.mean_x
+            synthetic = _synthetic_frame(moments.mean_x, moments.sd_x, moments.mean_y, moments.sd_y)
+
+    x_margin, y_margin = x.x, y.x
+    return EquatingResult(
+        method=method,
+        design="nonequivalent_groups",
+        x=x_margin,
+        y=y_margin,
+        scores=x_margin.scores,
+        equated=_freeze(intercept + slope * x_margin.scores),
+        slope=float(slope),
+        intercept=float(intercept),
+        ddof=ddof,
+        synthetic_weight=weight,
+        anchor=anchor if uses_levine else None,
+        gamma=gamma,
+        synthetic_moments=synthetic,
+    )
+
+
 def equate(
     x: ScoreDistribution | BivariateScoreDistribution,
-    y: ScoreDistribution | None = None,
+    y: ScoreDistribution | BivariateScoreDistribution | None = None,
     *,
     method: EquatingMethod = "equipercentile",
     ddof: int = 0,
+    synthetic_weight: float | None = None,
+    anchor: Anchor | None = None,
 ) -> EquatingResult:
     r"""Equate form X to the scale of form Y from their score distributions.
 
-    The data collection design follows from the input: two separate distributions are equivalent
-    groups; one bivariate distribution is a single group, whose two margins are equated.
+    The data collection design follows from the input:
 
-    Methods (Kolen & Brennan, 2014, ch. 2), with :math:`\mu` and :math:`\sigma` the means and
-    standard deviations, :math:`P` the percentile-rank function of X and :math:`Q^{-1}` the
-    percentile function of Y:
+    - two ``ScoreDistribution`` objects: equivalent groups;
+    - one ``BivariateScoreDistribution``: a single group, whose two margins are equated;
+    - two ``BivariateScoreDistribution`` objects: non-equivalent groups with an anchor test. The
+      first holds form X and the anchor in the population that took X, the second form Y and the
+      anchor in the population that took Y; in both, the anchor is the second variable.
+
+    **Equivalent groups and single group** (Kolen & Brennan, 2014, ch. 2), with :math:`\mu` and
+    :math:`\sigma` the means and standard deviations, :math:`P` the percentile-rank function of X
+    and :math:`Q^{-1}` the percentile function of Y:
 
     .. math::
 
@@ -156,30 +310,89 @@ def equate(
     wide (see :meth:`ScoreDistribution.percentile_rank` and
     :meth:`ScoreDistribution.percentile`).
 
+    **Non-equivalent groups with an anchor test** (Kolen & Brennan, 2014, ch. 4). Population 1
+    takes X and the anchor V, population 2 takes Y and V. ``"tucker"``, ``"levine_observed"`` and
+    ``"braun_holland"`` equate linearly in the synthetic population
+    :math:`T = w_1 P_1 + w_2 P_2`,
+
+    .. math::
+
+        l_Y(x) = \frac{\sigma_s(Y)}{\sigma_s(X)}\,[x - \mu_s(X)] + \mu_s(Y),
+
+    with
+
+    .. math::
+
+        \mu_s(X) &= \mu_1(X) - w_2 \gamma_1 [\mu_1(V) - \mu_2(V)] \\
+        \mu_s(Y) &= \mu_2(Y) + w_1 \gamma_2 [\mu_1(V) - \mu_2(V)] \\
+        \sigma_s^2(X) &= \sigma_1^2(X) - w_2 \gamma_1^2 [\sigma_1^2(V) - \sigma_2^2(V)]
+                         + w_1 w_2 \gamma_1^2 [\mu_1(V) - \mu_2(V)]^2 \\
+        \sigma_s^2(Y) &= \sigma_2^2(Y) + w_1 \gamma_2^2 [\sigma_1^2(V) - \sigma_2^2(V)]
+                         + w_1 w_2 \gamma_2^2 [\mu_1(V) - \mu_2(V)]^2
+
+    for the Tucker and Levine observed-score methods, where
+
+    .. math::
+
+        \text{Tucker:}\quad & \gamma_1 = \frac{\sigma_1(X, V)}{\sigma_1^2(V)} \\
+        \text{Levine, internal anchor:}\quad & \gamma_1 = \frac{\sigma_1^2(X)}{\sigma_1(X, V)} \\
+        \text{Levine, external anchor:}\quad &
+            \gamma_1 = \frac{\sigma_1^2(X) + \sigma_1(X, V)}{\sigma_1^2(V) + \sigma_1(X, V)}
+
+    and :math:`\gamma_2` likewise from Y and V in population 2. The Braun-Holland method takes
+    the synthetic means and standard deviations from the frequency-estimation distributions
+    :math:`f_s(x) = w_1 f_1(x) + w_2 \sum_v f_1(x \mid v) h_2(v)` and
+    :math:`g_s(y) = w_1 \sum_v g_2(y \mid v) h_1(v) + w_2 g_2(y)`. Two methods do not use a
+    synthetic population:
+
+    .. math::
+
+        \text{Levine true score:}\quad & l_Y(x) = \frac{\gamma_2}{\gamma_1}[x - \mu_1(X)]
+            + \mu_2(Y) + \gamma_2 [\mu_1(V) - \mu_2(V)] \\
+        \text{chained linear:}\quad & l_Y(x) = \mu_2(Y) + \frac{\sigma_2(Y)}{\sigma_2(V)}
+            \Bigl[\mu_1(V) + \frac{\sigma_1(V)}{\sigma_1(X)}(x - \mu_1(X)) - \mu_2(V)\Bigr]
+
     Parameters
     ----------
     x : ScoreDistribution or BivariateScoreDistribution
-        Distribution of form X (equivalent groups), or the joint distribution of forms X and Y
-        taken by the same examinees (single group).
-    y : ScoreDistribution, optional
-        Distribution of form Y from an independent, equivalent group. Omit it for a single group.
-    method : {"identity", "mean", "linear", "equipercentile"}, default "equipercentile"
-        The equating method.
+        Distribution of form X (equivalent groups); the joint distribution of forms X and Y taken
+        by the same examinees (single group); or the joint distribution of form X and the anchor
+        (non-equivalent groups).
+    y : ScoreDistribution or BivariateScoreDistribution, optional
+        Distribution of form Y from an independent, equivalent group, or the joint distribution
+        of form Y and the anchor in the other population. Omit it for a single group.
+    method : str, default "equipercentile"
+        ``"identity"``, ``"mean"``, ``"linear"`` or ``"equipercentile"`` for equivalent groups
+        and a single group; ``"tucker"``, ``"levine_observed"``, ``"levine_true"``,
+        ``"braun_holland"`` or ``"chained_linear"`` for non-equivalent groups.
     ddof : int, default 0
-        Delta degrees of freedom of the standard deviations in linear equating: 0 (population
-        form, as in Kolen & Brennan) or 1 (sample form, as R ``equate``). It matters only when the
-        two sample sizes differ.
+        Delta degrees of freedom of the variances and covariances in the linear methods: 0
+        (population form, as in Kolen & Brennan) or 1 (sample form, as R ``equate``). The
+        Braun-Holland method always uses the moments of the synthetic distributions.
+    synthetic_weight : float, optional
+        Weight :math:`w_1` of the population that took form X, between 0 and 1, for the Tucker,
+        Levine observed-score and Braun-Holland methods. By default the weights are proportional
+        to the sample sizes, :math:`w_1 = N_1 / (N_1 + N_2)`. Other methods ignore it.
+    anchor : {"internal", "external"}, optional
+        Required by the Levine methods: ``"internal"`` if the anchor items count towards the
+        total scores, ``"external"`` if the anchor is scored separately. Other methods ignore it.
 
     Returns
     -------
     EquatingResult
-        The conversion table and, for the linear family, slope and intercept.
+        The conversion table and, for the linear methods, slope and intercept.
 
     Raises
     ------
     SpecificationError
-        If the inputs do not match a supported design, the method is unknown, or linear equating
-        is asked for a form-X distribution without variance.
+        If the inputs do not match a supported design, the method does not belong to the design,
+        a required argument is missing, or a variance or covariance the method divides by is not
+        positive.
+
+    Warns
+    -----
+    SparseDataWarning
+        Braun-Holland method: an anchor score was observed in one population only.
 
     References
     ----------
@@ -201,11 +414,23 @@ def equate(
     if ddof not in (0, 1):
         raise SpecificationError(f"ddof must be 0 or 1, got {ddof}.")
     design: Design
+    if isinstance(x, BivariateScoreDistribution) and isinstance(y, BivariateScoreDistribution):
+        if method not in _ANCHOR_METHODS:
+            raise SpecificationError(
+                f"method={method!r} is not available for non-equivalent groups with an anchor "
+                f"test; choose one of {', '.join(_ANCHOR_METHODS)}."
+            )
+        return _equate_with_anchor(x, y, method, ddof, synthetic_weight, anchor)
+    if method in _ANCHOR_METHODS:
+        raise SpecificationError(
+            f"method={method!r} needs two BivariateScoreDistribution objects: form X with the "
+            "anchor, and form Y with the anchor."
+        )
     if isinstance(x, BivariateScoreDistribution):
         if y is not None:
             raise SpecificationError(
-                "A bivariate distribution is a single-group design and is equated on its own; "
-                "do not pass y. Designs with an anchor test are not supported yet."
+                "Pass one BivariateScoreDistribution (single group) or two (non-equivalent "
+                "groups with an anchor test), not a bivariate and a univariate distribution."
             )
         design = "single_group"
         x_margin, y_margin = x.x, x.y
@@ -214,8 +439,8 @@ def equate(
         x_margin, y_margin = x, y
     else:
         raise SpecificationError(
-            "Pass two ScoreDistribution objects (equivalent groups) or one "
-            "BivariateScoreDistribution (single group)."
+            "Pass two ScoreDistribution objects (equivalent groups), one "
+            "BivariateScoreDistribution (single group) or two (non-equivalent groups)."
         )
 
     slope: float | None = None
