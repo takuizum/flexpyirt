@@ -408,6 +408,26 @@ the general factor only, and each specific factor needs at least two items. Item
 `SpecificationError` for groups, `with_latent()`, combining with `with_factors()`, Rasch / PCM
 items, or free latent parameters in an edited table. Scoring supports `"EAP"` only.
 
+#### `Model.with_two_tier`
+
+```text
+model.with_two_tier(*, primary, specific, correlated=True) -> Model
+```
+
+Declare a two-tier model ([guide section 14](guide.md#two-tier-models)): the primary factors of
+`primary` and the specific factors of `specific` (both mappings from factor name to items, in
+order; one or two primary factors). Every item loads on at least one primary factor and on at most
+one specific factor, and each specific factor needs at least two items. Item parameters are
+`a1`…`aP` (primary), `a(P+1)`…`aD` (specific; slopes an item does not load on are fixed at `0`)
+and `d` (or `d1`…), matching mirt's `bfactor(data, model, model2 = )`. The latent rows are
+`mean_1`…`mean_D` (fixed `0`), `var_1`…`var_D` (fixed `1`) and, for two primary factors, `cor_12`
+(free when `correlated=True`); specific factors are orthogonal to every other factor. The E-step
+integrates over the primary factors' product grid and one specific factor at a time (default 15
+points per dimension on $[-6, 6]$ for two primary factors, 31 for one). Raises
+`SpecificationError` for more than two primary factors, an item on no primary factor, groups,
+`with_latent()`, combining with `with_factors()` or `with_bifactor()`, Rasch / PCM items, or free
+latent means or variances in an edited table. Scoring supports `"EAP"` only.
+
 #### `Model.with_latent`
 
 ```text
@@ -485,10 +505,11 @@ The default ParameterTable for `data`, with columns `group`, `item`, `model`, `p
 |---|---|
 | `item_names` | Tuple of item names |
 | `is_multigroup` | Whether groups were declared with `with_groups()` |
-| `is_multidimensional` | Whether factors were declared with `with_factors()` or `with_bifactor()` |
-| `n_factors` | Number of latent factors (`1`, `2`, or `3`; `1 + S` for a bifactor model) |
+| `is_multidimensional` | Whether factors were declared with `with_factors()`, `with_bifactor()` or `with_two_tier()` |
+| `n_factors` | Number of latent factors (`1`, `2`, or `3`; `1 + S` for a bifactor model, `P + S` for a two-tier model) |
 | `bifactor` | Whether the model was declared with `with_bifactor()` |
-| `quadrature_dimension` | Dimension of the grid the E-step integrates over (`2` for bifactor models) |
+| `n_primary_factors` | Number of primary factors of a model declared with `with_two_tier()` (`0` otherwise) |
+| `quadrature_dimension` | Dimension of the grid the E-step integrates over (`2` for bifactor models, `P + 1` for two-tier models) |
 | `latent_parameter_names()` | Names of the Normal latent parameters of each group |
 | `factor_names` | Tuple of factor names (empty for a unidimensional model) |
 | `resolved_latent()` | The single-group latent distribution, with the default rule applied |

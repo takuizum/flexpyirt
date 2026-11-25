@@ -875,7 +875,54 @@ print(res_bif.score(bif_df.iloc[:3]).round(3))  # theta_G, theta_s1, ..., se_G, 
   Hessian SEs, `"EAP"` scoring (columns per factor), equality constraints, priors, and JSON.
 - **Not yet supported** (`SpecificationError`): multiple groups, Rasch / PCM items (their factor
   variances would have to be free), free latent means or variances, MAP / ML / WLE / PV scoring,
-  item fit, $M_2$, local dependence, and two-tier models.
+  item fit, $M_2$, and local dependence.
+
+### Two-tier models
+
+`.with_two_tier(primary={...}, specific={...}, correlated=True)` generalizes the bifactor model
+(Cai, 2010): one or two **primary** factors, which may correlate with each other, plus specific
+factors that are orthogonal to everything. Every item loads on at least one primary factor
+(cross-loadings among primary factors are allowed) and on at most one specific factor. Item
+parameters are `a1`… (primary, in declared order), then the specific slopes, and `d`, matching the
+columns of mirt's `bfactor(data, model, model2 = ...)`. With `correlated=True` the correlation of
+two primary factors (`cor_12`) is estimated; `correlated=False` fixes it at 0.
+
+The likelihood is integrated over the product grid of the primary factors and one more dimension
+per specific factor, so a model with two primary factors needs one three-dimensional grid per
+specific factor, however many specific factors there are. The default is 15 points per dimension
+on $[-6, 6]$ for two primary factors (31 for one), as in mirt. The results are validated against
+mirt's `bfactor()`.
+
+```python
+a_tt = np.zeros((10, 4))
+a_tt[0:5, 0] = [1.4, 1.2, 1.5, 1.1, 1.3]  # primary math
+a_tt[5:10, 1] = [1.6, 1.0, 1.2, 1.4, 1.3]  # primary reading
+a_tt[0:3, 2] = [0.9, 1.0, 0.8]  # specific t1 (a testlet within math)
+a_tt[5:8, 3] = [1.1, 0.7, 0.9]  # specific t2 (a testlet within reading)
+cov_tt = np.eye(4)
+cov_tt[0, 1] = cov_tt[1, 0] = 0.5
+theta_tt = rng.multivariate_normal(np.zeros(4), cov_tt, size=1500)
+p_tt = 1.0 / (1.0 + np.exp(-(theta_tt @ a_tt.T + np.linspace(-1.0, 1.0, 10))))
+tt_items = [f"t{j}" for j in range(1, 11)]
+tt_df = pd.DataFrame((rng.random(p_tt.shape) < p_tt).astype(float), columns=tt_items)
+
+tt_spec = Model.uniform(TwoPL(), items=tt_items).with_two_tier(
+    primary={"math": tt_items[0:5], "reading": tt_items[5:10]},
+    specific={"t1": tt_items[0:3], "t2": tt_items[5:8]},
+)
+res_tt = fit(
+    tt_spec,
+    tt_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(11, bounds=(-6, 6)),  # 11^3 nodes per specific factor
+)
+print(res_tt.items[["item", "a1", "a2", "a3", "a4", "d"]].round(3))
+print(res_tt.latent[["cor_12", "cor_12_se"]].round(3))  # correlation of math and reading
+print(res_tt.score(tt_df.iloc[:3]).round(3))  # theta_math, theta_reading, theta_t1, ...
+```
+
+The same features are supported, and the same ones are not, as for bifactor models; a model with
+three or more primary factors raises `SpecificationError`.
 
 ## 15. Scale linking
 
