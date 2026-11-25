@@ -981,6 +981,11 @@ class FitResult:
             raise SpecificationError("tol must be positive and max_iter a positive integer.")
         if method == "one_step" and self.vcov is None:
             raise SpecificationError("method='one_step' needs a fit with standard errors (se).")
+        if method == "one_step" and self.se_method not in ("oakes", "hessian"):
+            raise SpecificationError(
+                "method='one_step' takes a Newton step with the inverse observed information; "
+                f"it needs a fit with se='oakes' or se='hessian', not se={self.se_method!r}."
+            )
         names = [name for name, _ in self._model.items]
         n_items = len(names)
         if n_items < 3:

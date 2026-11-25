@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from flexpyirt import _core
+from flexpyirt import _core, _robust_se
 from flexpyirt._compile import LATENT_ITEM, compile_problem, prepare
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import (
@@ -28,7 +28,8 @@ from flexpyirt.result import FitResult
 
 __all__ = ["fit"]
 
-SEMethod = Literal["oakes", "hessian"]
+SEMethod = Literal["oakes", "hessian", "sandwich", "crossprod"]
+_SE_METHODS: tuple[str, ...] = ("oakes", "hessian", "sandwich", "crossprod")
 
 HEYWOOD_BOUND_TOL = 1e-4
 """Distance to a finite bound below which a free parameter is reported as a boundary solution."""
@@ -52,6 +53,7 @@ _squarem = jax.jit(_core.squarem, static_argnames=("max_iter", "n_newton"))
 _information = {
     "oakes": jax.jit(_core.information_oakes),
     "hessian": jax.jit(_core.information_hessian),
+    "crossprod": jax.jit(_robust_se.information_cross_product),
 }
 
 
@@ -72,7 +74,8 @@ def fit(
     ``prior`` column of ``table``), EM finds the Bayes modal (MAP) estimate on the natural
     parameter scale without a Jacobian term (DESIGN.md §4.7). Standard errors come from Oakes'
     identity (Oakes, 1999) or the direct Hessian of the log-likelihood (or log posterior with
-    priors), both by automatic differentiation (DESIGN.md §4.8).
+    priors), both by automatic differentiation (DESIGN.md §4.8). ``se="sandwich"`` and
+    ``se="crossprod"`` use the cross-product of the per-pattern scores (DESIGN.md §17.5).
 
     Parameters
     ----------
@@ -93,8 +96,15 @@ def fit(
     quadrature : Quadrature, optional
         Quadrature grid (default: 61 points on [-6, 6] for 1 factor, 31 per dimension for 2
         factors, and 15 per dimension for 3 factors, matching mirt's defaults).
-    se : {"oakes", "hessian"} or None
-        Standard-error method, or ``None`` to skip.
+    se : {"oakes", "hessian", "sandwich", "crossprod"} or None
+        Standard-error method, or ``None`` to skip. ``"oakes"`` (Oakes, 1999) and ``"hessian"``
+        invert the observed information :math:`H`. ``"crossprod"`` inverts the cross-product of
+        the per-pattern scores :math:`B=\sum_p c_p s_p s_p^\top` (mirt
+        ``SE.type = "crossprod"``), and ``"sandwich"`` is the robust covariance
+        :math:`H^{-1}BH^{-1}` (Huber, 1967; White, 1982; mirt ``SE.type = "sandwich"``), which
+        stays valid when the model is misspecified. With priors, the prior curvature is added
+        to :math:`B` as it is to :math:`H`. Both are unavailable for ``DavidianCurve`` and
+        ``NormalMixture`` latent distributions.
 
     Returns
     -------
@@ -108,8 +118,16 @@ def fit(
         If the specification is invalid, before estimation starts.
     """
     check_x64()
-    if se not in (None, "oakes", "hessian"):
-        raise SpecificationError(f"Unknown se={se!r}; use 'oakes', 'hessian' or None.")
+    if se is not None and se not in _SE_METHODS:
+        raise SpecificationError(
+            f"Unknown se={se!r}; use 'oakes', 'hessian', 'sandwich', 'crossprod' or None."
+        )
+    if se in ("sandwich", "crossprod") and (spec.is_davidian or spec.is_mixture):
+        latent_name = "DavidianCurve" if spec.is_davidian else "NormalMixture"
+        raise SpecificationError(
+            f"se={se!r} is not available with a {latent_name} latent distribution; "
+            "use se='oakes' or se='hessian'."
+        )
     method = BAEM() if method is None else method
     quadrature = Quadrature.default(spec.n_factors) if quadrature is None else quadrature
 
@@ -169,8 +187,13 @@ def fit(
     if eh_weights is not None:
         _check_eh_reference_moments(problem, eh_weights[0])
     if se is not None and eta.shape[0] > 0:
-        info = np.asarray(_information[se](problem_fin, out.eta))
-        vcov = _invert_information(info)
+        if se == "sandwich":
+            bread = _invert_information(np.asarray(_information["oakes"](problem_fin, out.eta)))
+            meat = np.asarray(_information["crossprod"](problem_fin, out.eta))
+            vcov = bread @ (0.5 * (meat + meat.T)) @ bread
+            vcov = 0.5 * (vcov + vcov.T)
+        else:
+            vcov = _invert_information(np.asarray(_information[se](problem_fin, out.eta)))
         se_values = np.sqrt(np.clip(np.diag(vcov), 0.0, None))
 
     params = final_table.copy()
