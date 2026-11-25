@@ -2,8 +2,8 @@
 
 English | [日本語](DESIGN.ja.md)
 
-> Status: draft v0.2 (2026-11-25). Milestones E1–E4 are implemented and validated against R
-> (§7); E5 and later are plans. Decisions are marked "Decision".
+> Status: draft v0.3 (2026-11-25). Milestones E1–E5 are implemented and validated against R
+> (§7); E6 and later are plans. Decisions are marked "Decision".
 
 ## 1. Purpose and non-goals
 
@@ -37,7 +37,7 @@ English | [日本語](DESIGN.ja.md)
 | Equivalent groups (EG) | X from sample 1, Y from an independent sample 2 | two `ScoreDistribution` |
 | Single group (SG) | X and Y from the same examinees | one `BivariateScoreDistribution` |
 | Counterbalanced (CB) | two SG samples taking the forms in opposite orders | two `BivariateScoreDistribution` (E6) |
-| Non-equivalent groups with anchor test (NEAT) | (X, A) from population P and (Y, A) from population Q | two `BivariateScoreDistribution`, anchor as the second variable (linear methods: E4; E5–E6 planned) |
+| Non-equivalent groups with anchor test (NEAT) | (X, A) from population P and (Y, A) from population Q | two `BivariateScoreDistribution`, anchor as the second variable (E4, E5; kernel equating in E6) |
 
 For NEAT, two families of methods exist and both are planned: **chained** equating (X → A on P,
 then A → Y on Q) and **post-stratification** (a synthetic population
@@ -260,10 +260,37 @@ observed-score methods. It cancels in $\gamma$, in Levine true-score and in chai
 equating (ratios of moments of one population), and the Braun–Holland method uses the moments of
 the synthetic distributions, which have no sample size of their own.
 
-### 4.7 NEAT, equipercentile methods (E5, planned)
+### 4.7 NEAT, equipercentile methods (E5)
 
-Frequency estimation (post-stratification on the anchor; Kolen & Brennan, 2014, ch. 5) and
-chained equipercentile equating, both with optional presmoothing of the bivariate distributions.
+Kolen & Brennan (2014, ch. 5). Both methods reuse the percentile-rank and percentile functions of
+§4.1.
+
+**Frequency estimation** (post-stratification on the anchor): equipercentile equating of the
+synthetic distributions $f_s$ and $g_s$ of §4.6,
+
+$$e_Y(x) = Q_s^{-1}\bigl(P_s(x)\bigr).$$
+
+**Chained equipercentile** equating: X is equated to the anchor in population 1 and the anchor to
+Y in population 2,
+
+$$e_Y(x) = Q_2^{-1}\Bigl(H_2\bigl(H_1^{-1}(P_1(x))\bigr)\Bigr),$$
+
+with $P_1$, $H_1$ the percentile-rank functions of X and V in population 1 and $H_2$, $Q_2$ those
+of V and Y in population 2. $H_2$ is evaluated at the non-integer anchor equivalents with the
+continuous percentile-rank function of §4.1.
+
+Presmoothing is not an option of `equate()`: pass the presmoothed joint distributions
+(`presmooth(xa, degree=(…, …), cross_terms=…).distribution`).
+
+**Decision**: for frequency estimation, `EquatingResult.x` and `.y` are the synthetic
+distributions (total frequency $N_1 + N_2$), because that is the population in which the
+equating is defined; `moments` then describes the synthetic population. For chained equating
+they are X in population 1 and Y in population 2, and the two anchor distributions are kept in
+`anchor_distributions` so that `transform()` can equate arbitrary scores.
+
+**Decision** (all anchor methods): `x` and `y` must have the same possible anchor scores. The
+anchor is one test taken by both populations; different anchor scales are rejected rather than
+silently compared.
 
 ## 5. Public API sketch
 
@@ -302,11 +329,14 @@ ya = fe.BivariateScoreDistribution.from_scores(y_scores, y_anchor, x_range=(0, 3
 tucker = fe.equate(xa, ya, method="tucker")  # w1 = N1 / (N1 + N2)
 levine = fe.equate(xa, ya, method="levine_observed", anchor="internal", synthetic_weight=1.0)
 tucker.gamma, tucker.synthetic_moments, tucker.synthetic_weight
+fe.equate(xa, ya, method="frequency_estimation")
+fe.equate(xa, ya, method="chained_equipercentile")
 ```
 
 - All arguments after the data are keyword-only. Options are `Literal` strings in lower
   snake_case: `method="identity" | "mean" | "linear" | "equipercentile"` (EG, SG) and
-  `"tucker" | "levine_observed" | "levine_true" | "braun_holland" | "chained_linear"` (NEAT).
+  `"tucker" | "levine_observed" | "levine_true" | "braun_holland" | "chained_linear" |
+  "frequency_estimation" | "chained_equipercentile"` (NEAT).
 - Results are frozen dataclasses (`EquatingResult`, `LoglinearResult`, `KernelEquatingResult`)
   holding NumPy arrays (read-only) and exposing DataFrames as properties.
 - Errors are `flexpyequate.errors` classes: `ScoreDistributionError` (invalid scores or
@@ -314,8 +344,7 @@ tucker.gamma, tucker.synthetic_moments, tucker.synthetic_weight
   `SparseDataWarning`.
 - Names are Python names; the R name is given in the docstring where it helps (`ddof=1` ↔ R
   `equate`'s variance, `penalty_weight` ↔ `kequate`'s `KPEN`).
-- Planned (E5–E6): `equate(xa, ya, method="frequency_estimation" | "chained_equipercentile",
-  synthetic_weight=...)`, `kernel_equate(..., design="single_group" | "counterbalanced" |
+- Planned (E6): `kernel_equate(..., design="single_group" | "counterbalanced" |
   "chained" | "post_stratification")`, `KernelEquatingResult.seed(other)`.
 
 ## 6. Layout
@@ -346,6 +375,7 @@ Rscript validation/r/equate_e1_reference.R
 Rscript validation/r/equate_e2_reference.R
 Rscript validation/r/equate_e3_reference.R
 Rscript validation/r/equate_e4_reference.R
+Rscript validation/r/equate_e5_reference.R
 ```
 
 ### Cases
@@ -358,7 +388,7 @@ Rscript validation/r/equate_e4_reference.R
 | Q4 | Kernel equating, EG: continuized CDFs, equated scores, SEE, PRE with given bandwidths; with presmoothing (three data sets) and without (one) | `kequate::kequate("EG", ...)`; `SNSequate::ker.eq`; an independent R implementation with a strict root tolerance and a finite-difference SEE | E3 |
 | Q5 | Penalty function values and penalty bandwidths ($K = 0$ and $K = 1$) | `kequate` (`KPEN = 0`), `SNSequate::bandwidth`, independent R implementation | E3 |
 | Q6 | Tucker, Levine observed score, Braun–Holland (four synthetic weights each), Levine true score, chained linear; internal anchor (`KBneat`) and external anchor (simulated, unequal sample sizes and form lengths) | `equate::equate(type = "linear", method = "tucker" / "levine" / "braun/holland" / "chained", lts = )`; the Kolen & Brennan formulas written out in R with population moments | E4 |
-| Q7 | Frequency estimation, chained equipercentile | `equate::equate(method = ...)` | E5 |
+| Q7 | Frequency estimation (four synthetic weights) and chained equipercentile equating on `KBneat` and the simulated external-anchor data; both methods on `KBneat` presmoothed with a bivariate log-linear model | `equate::equate(type = "equipercentile", method = "frequency estimation" / "chained", smoothmethod = )`; Kolen & Brennan written out in R without rounding | E5 |
 | Q8 | Kernel equating SG / CB / NEAT CE / NEAT PSE, SEED | `kequate`, `SNSequate` | E6 |
 
 ### Tolerances (maximum absolute difference unless stated)
@@ -371,6 +401,9 @@ Rscript validation/r/equate_e4_reference.R
 | Equipercentile equated scores (ranks strictly between 0 and 1) | `equate` | 1e-7 |
 | NEAT linear methods: slope, intercept, $\gamma$, synthetic means and SDs | `equate` (`ddof=1`); independent R implementation (`ddof=0`) | 1e-10 |
 | Frequency-estimation synthetic probabilities | independent R implementation | 1e-13 |
+| Frequency estimation and chained equipercentile equated scores | independent R implementation | 1e-10 |
+| Frequency estimation and chained equipercentile equated scores (ranks strictly between 0 and 1) | `equate` | 5e-7 |
+| The same on presmoothed joint distributions (tables smoothed by `equate`, and end to end) | `equate` | 5e-6 |
 | Presmoothed frequencies, relative | `glm` (`epsilon = 1e-13`) | 1e-8 |
 | Presmoothed frequencies, relative | `equate::presmoothing` (default `glm` tolerance) | 1e-5 |
 | $G^2$, Pearson and Freeman–Tukey $\chi^2$, log-likelihood, AIC (relative) | `glm` | 1e-7 |

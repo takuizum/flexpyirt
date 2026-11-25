@@ -23,6 +23,7 @@ flexpyequate finds the function that puts scores of form X on the scale of form 
 | Mean and linear equating | `equate(x, y, method="mean")`, `method="linear"` (population or sample standard deviations) | R `equate` |
 | Equipercentile equating | `equate(x, y, method="equipercentile")` with the percentile-rank definition of Kolen & Brennan (2014), including distributions with zero frequencies | R `equate`; independent R implementation of the textbook formulas |
 | Linear equating with an anchor test | `equate(xa, ya, method=...)` with `"tucker"`, `"levine_observed"`, `"levine_true"` (internal or external anchor), `"braun_holland"` and `"chained_linear"`; synthetic population weights | R `equate`; independent R implementation of the textbook formulas |
+| Equipercentile equating with an anchor test | `equate(xa, ya, method="frequency_estimation")` (post-stratification, synthetic population weights) and `method="chained_equipercentile"`; presmoothed joint distributions can be passed | R `equate`; independent R implementation of the textbook formulas |
 | Log-linear presmoothing | `presmooth()`: polynomial log-linear models for one score or for the joint distribution of two scores (with cross terms); likelihood-ratio, Pearson and Freeman–Tukey chi-squares, AIC | R `glm`, `equate` |
 | Kernel equating | `kernel_equate()` for equivalent groups: Gaussian kernel, bandwidths chosen by the penalty of von Davier, Holland & Thayer (2004) or given, standard error of equating (with or without presmoothing), percent relative error | R `kequate`, `SNSequate`; independent R implementation |
 
@@ -79,6 +80,14 @@ tucker.synthetic_moments  # mean and sd of X and Y in the synthetic population
 
 fe.equate(xa, ya, method="levine_observed", anchor="internal", synthetic_weight=1.0)
 fe.equate(xa, ya, method="chained_linear")
+
+fe.equate(xa, ya, method="frequency_estimation")
+fe.equate(xa, ya, method="chained_equipercentile")
+
+# With presmoothed joint distributions:
+xa_smooth = fe.presmooth(xa, degree=(6, 6), cross_terms=[(1, 1)]).distribution
+ya_smooth = fe.presmooth(ya, degree=(6, 6), cross_terms=[(1, 1)]).distribution
+fe.equate(xa_smooth, ya_smooth, method="frequency_estimation")
 ```
 
 Presmoothing and kernel equating:
@@ -107,7 +116,7 @@ kernel.percent_relative_error  # first ten moments
   upper and lower percentiles of form Y, as defined by Kolen & Brennan; `equate` returns the end of
   the form-Y range. The two differ only when nobody obtained the lowest (or highest) form-Y scores.
 
-- For the Braun–Holland method, R `equate` mixes the two groups as counts, which changes the
+- For the Braun–Holland and frequency-estimation methods, R `equate` mixes the two groups as counts, which changes the
   weight of the first group from w to wN₁ / (wN₁ + (1 − w)N₂) when the sample sizes differ.
   flexpyequate uses w itself, as in Kolen & Brennan; pass that effective weight as
   `synthetic_weight` to reproduce `equate`.

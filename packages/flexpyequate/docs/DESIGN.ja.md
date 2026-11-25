@@ -2,7 +2,7 @@
 
 [English](DESIGN.md) | 日本語
 
-> 状態: ドラフト v0.2（2026-11-25）。マイルストーン E1〜E4 は実装し、R と照合済み（§7）。E5 以降は計画。
+> 状態: ドラフト v0.3（2026-11-25）。マイルストーン E1〜E5 は実装し、R と照合済み（§7）。E6 以降は計画。
 > 決めたことは「決定」と書く。
 
 ## 1. 目的と対象外
@@ -34,7 +34,7 @@
 | 等価群（EG） | 標本 1 から X、独立な標本 2 から Y | `ScoreDistribution` を 2 つ |
 | 単一群（SG） | 同じ受検者から X と Y | `BivariateScoreDistribution` を 1 つ |
 | カウンターバランス（CB） | 版の順序を入れ替えた 2 つの SG 標本 | `BivariateScoreDistribution` を 2 つ（E6） |
-| アンカーテストつき非等価群（NEAT） | 母集団 P から (X, A)、母集団 Q から (Y, A) | `BivariateScoreDistribution` を 2 つ。アンカーは 2 番目の変数（線形手法は E4。E5〜E6 は計画） |
+| アンカーテストつき非等価群（NEAT） | 母集団 P から (X, A)、母集団 Q から (Y, A) | `BivariateScoreDistribution` を 2 つ。アンカーは 2 番目の変数（E4・E5。カーネル等化は E6） |
 
 NEAT には 2 系統の手法があり、どちらも実装する計画である。**連鎖**等化（P 上で X → A、Q 上で A → Y）と、
 **事後層化**（合成母集団 $T = wP + (1 - w)Q$。Tucker、Levine、Braun–Holland、頻度推定、カーネル等化の PSE）。
@@ -234,10 +234,30 @@ $h_1, h_2$ はアンカーの分布。同じ合成分布を E5 の頻度推定�
 等化では打ち消し合う（1 つの母集団のモーメントの比であるため）。Braun–Holland 法は合成分布のモーメントを
 使い、合成分布には固有の標本サイズがない。
 
-### 4.7 NEAT の等パーセンタイル手法（E5、計画）
+### 4.7 NEAT の等パーセンタイル手法（E5）
 
-頻度推定（アンカーによる事後層化。Kolen & Brennan, 2014, 5 章）と連鎖等パーセンタイル等化。どちらも
-2 変量分布の事前平滑化と組み合わせられるようにする。
+Kolen & Brennan (2014, 5 章)。どちらの手法も §4.1 のパーセンタイル順位関数とパーセンタイル関数を使う。
+
+**頻度推定**（アンカーによる事後層化）: §4.6 の合成分布 $f_s$・$g_s$ の等パーセンタイル等化。
+
+$$e_Y(x) = Q_s^{-1}\bigl(P_s(x)\bigr).$$
+
+**連鎖等パーセンタイル**等化: 母集団 1 で X をアンカーに、母集団 2 でアンカーを Y に等化する。
+
+$$e_Y(x) = Q_2^{-1}\Bigl(H_2\bigl(H_1^{-1}(P_1(x))\bigr)\Bigr),$$
+
+$P_1$・$H_1$ は母集団 1 での X・V のパーセンタイル順位関数、$H_2$・$Q_2$ は母集団 2 での V・Y のもの。
+$H_2$ は、整数でないアンカー上の等化値に対して、§4.1 の連続なパーセンタイル順位関数で評価する。
+
+事前平滑化は `equate()` のオプションにしない。事前平滑化した同時分布
+（`presmooth(xa, degree=(…, …), cross_terms=…).distribution`）を渡す。
+
+**決定**: 頻度推定では `EquatingResult.x`・`.y` を合成分布（総度数 $N_1 + N_2$）にする。等化が定義されるのが
+その母集団だからで、`moments` も合成母集団を表す。連鎖等化では母集団 1 の X と母集団 2 の Y とし、2 つの
+アンカー分布を `anchor_distributions` に保持して、`transform()` で任意の得点を等化できるようにする。
+
+**決定**（アンカーを使うすべての手法）: `x` と `y` のとりうるアンカー得点は同じでなければならない。
+アンカーは両方の母集団が受ける 1 つのテストである。尺度の違うアンカーは、黙って比較せずにエラーにする。
 
 ## 5. 公開 API のスケッチ
 
@@ -276,19 +296,21 @@ ya = fe.BivariateScoreDistribution.from_scores(y_scores, y_anchor, x_range=(0, 3
 tucker = fe.equate(xa, ya, method="tucker")  # w1 = N1 / (N1 + N2)
 levine = fe.equate(xa, ya, method="levine_observed", anchor="internal", synthetic_weight=1.0)
 tucker.gamma, tucker.synthetic_moments, tucker.synthetic_weight
+fe.equate(xa, ya, method="frequency_estimation")
+fe.equate(xa, ya, method="chained_equipercentile")
 ```
 
 - データより後ろの引数はすべて keyword-only。選択肢は小文字 snake_case の `Literal` 文字列:
   `method="identity" | "mean" | "linear" | "equipercentile"`（EG・SG）と
-  `"tucker" | "levine_observed" | "levine_true" | "braun_holland" | "chained_linear"`（NEAT）。
+  `"tucker" | "levine_observed" | "levine_true" | "braun_holland" | "chained_linear" |
+  "frequency_estimation" | "chained_equipercentile"`（NEAT）。
 - 結果は frozen dataclass（`EquatingResult`、`LoglinearResult`、`KernelEquatingResult`）。NumPy 配列
   （読み取り専用）を持ち、DataFrame はプロパティで返す。
 - エラーは `flexpyequate.errors` のクラス: `ScoreDistributionError`（得点や度数が不正）、
   `SpecificationError`（引数が矛盾）、`ConvergenceWarning`、`SparseDataWarning`。
 - 名前は Python の名前にする。役に立つところでは R の名前を docstring に書く（`ddof=1` ↔ R `equate` の
   分散、`penalty_weight` ↔ `kequate` の `KPEN`）。
-- 計画（E5〜E6）: `equate(xa, ya, method="frequency_estimation" | "chained_equipercentile",
-  synthetic_weight=...)`、`kernel_equate(..., design="single_group" | "counterbalanced" |
+- 計画（E6）: `kernel_equate(..., design="single_group" | "counterbalanced" |
   "chained" | "post_stratification")`、`KernelEquatingResult.seed(other)`。
 
 ## 6. 構成
@@ -319,6 +341,7 @@ Rscript validation/r/equate_e1_reference.R
 Rscript validation/r/equate_e2_reference.R
 Rscript validation/r/equate_e3_reference.R
 Rscript validation/r/equate_e4_reference.R
+Rscript validation/r/equate_e5_reference.R
 ```
 
 ### ケース
@@ -331,7 +354,7 @@ Rscript validation/r/equate_e4_reference.R
 | Q4 | カーネル等化（EG）。バンド幅を与えたときの連続化 CDF、等化後得点、SEE、PRE。事前平滑化あり（3 データ）・なし（1 データ） | `kequate::kequate("EG", ...)`、`SNSequate::ker.eq`、厳しい求根精度と有限差分 SEE による独立 R 実装 | E3 |
 | Q5 | ペナルティ関数の値と、ペナルティによるバンド幅（$K = 0$ と $K = 1$） | `kequate`（`KPEN = 0`）、`SNSequate::bandwidth`、独立 R 実装 | E3 |
 | Q6 | Tucker、Levine 観測得点、Braun–Holland（それぞれ合成母集団の重み 4 通り）、Levine 真値、連鎖線形。内部アンカー（`KBneat`）と外部アンカー（シミュレーション。標本サイズと版の長さが異なる） | `equate::equate(type = "linear", method = "tucker" / "levine" / "braun/holland" / "chained", lts = )`、母集団モーメントで Kolen & Brennan の式を書き下した R 実装 | E4 |
-| Q7 | 頻度推定、連鎖等パーセンタイル | `equate::equate(method = ...)` | E5 |
+| Q7 | 頻度推定（合成母集団の重み 4 通り）と連鎖等パーセンタイル等化。`KBneat` と外部アンカーのシミュレーションデータ。2 変量対数線形モデルで事前平滑化した `KBneat` での両手法 | `equate::equate(type = "equipercentile", method = "frequency estimation" / "chained", smoothmethod = )`、丸めをしない Kolen & Brennan の R 実装 | E5 |
 | Q8 | SG・CB・NEAT CE・NEAT PSE のカーネル等化、SEED | `kequate`、`SNSequate` | E6 |
 
 ### 許容誤差（断りがなければ最大絶対差）
@@ -344,6 +367,9 @@ Rscript validation/r/equate_e4_reference.R
 | 等パーセンタイル等化の等化後得点（順位が 0 と 1 の間にあるもの） | `equate` | 1e-7 |
 | NEAT の線形手法: 傾き、切片、$\gamma$、合成母集団の平均と標準偏差 | `equate`（`ddof=1`）、独立 R 実装（`ddof=0`） | 1e-10 |
 | 頻度推定の合成確率 | 独立 R 実装 | 1e-13 |
+| 頻度推定・連鎖等パーセンタイルの等化後得点 | 独立 R 実装 | 1e-10 |
+| 頻度推定・連鎖等パーセンタイルの等化後得点（順位が 0 と 1 の間にあるもの） | `equate` | 5e-7 |
+| 同上、事前平滑化した同時分布（`equate` が平滑化した表、および平滑化から通した場合） | `equate` | 5e-6 |
 | 事前平滑化後の度数（相対） | `glm`（`epsilon = 1e-13`） | 1e-8 |
 | 事前平滑化後の度数（相対） | `equate::presmoothing`（`glm` の既定の収束判定） | 1e-5 |
 | $G^2$、Pearson・Freeman–Tukey の $\chi^2$、対数尤度、AIC（相対） | `glm` | 1e-7 |
