@@ -25,6 +25,8 @@
 | アンカーテストを使う等パーセンタイル等化 | `equate(xa, ya, method="frequency_estimation")`（事後層化。合成母集団の重みを指定可能）と `method="chained_equipercentile"`。事前平滑化した同時分布も渡せる | R `equate`、教科書の式の独立 R 実装 |
 | 対数線形モデルによる事前平滑化 | `presmooth()`: 1 つの得点、または 2 つの得点の同時分布（交差項つき）に対する多項式対数線形モデル。尤度比・Pearson・Freeman–Tukey のカイ二乗、AIC | R `glm`、`equate` |
 | カーネル等化 | `kernel_equate()`。等価群、単一群、カウンターバランス、アンカーテストつきデザイン（連鎖・事後層化）。ガウスカーネル、von Davier, Holland & Thayer (2004) のペナルティによるバンド幅選択または指定、等化の標準誤差（事前平滑化あり・なし）、線形版、2 つの等化関数の差の標準誤差（`seed()`）、相対誤差（PRE） | R `kequate`、`SNSequate`、独立 R 実装 |
+| 他のカーネルとバンド幅の選び方 | すべてのデザインで `kernel_equate(..., kernel="logistic")` と `kernel="uniform"`（Lee & von Davier, 2011）、標準誤差つき。ガウスカーネルでは `bandwidth_method="rule_of_thumb"`、`"double_smoothing"`、`"cross_validation"`（`kequate` の 1 個抜き基準） | R `kequate`、`SNSequate`、独立 R 実装 |
+| 等化の標準誤差 | `equate(..., standard_error="analytic")`: 平均・線形・Tucker・Levine・連鎖線形・Braun–Holland 等化のデルタ法（分布を仮定しない版、または `"analytic_normal"`）、等価群の等パーセンタイル等化の Lord (1982) の式。`standard_error="bootstrap"`（`n_replications` と `rng` を指定）はすべての手法で使える | R `equate`（解析的）、独立 R 実装。ブートストラップは `equate::bootstrap` および解析的な値との統計的な一致 |
 
 ## インストール
 
