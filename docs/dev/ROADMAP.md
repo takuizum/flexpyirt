@@ -86,7 +86,34 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
     its generator).
   - [x] D6 DIMTEST with bootstrap bias correction (`dimtest()`; accepted in V30 on a simulation study:
     type I error 0.0–2.0% at .05, conservative; power 0.99–1.00).
-- [x] Robust standard errors without sampling weights (`fit(se="sandwich" | "crossprod")`, single and
-  multiple groups, FIPC, EH, 2–3 factors, priors; not with Davidian curves or normal mixtures;
-  validated in V35 against mirt `SE.type = "sandwich"` / `"crossprod"`; M7 item 5, #85 — weighted
-  and cluster-robust versions still open).
+
+## M6 Lifting the single-group / unidimensional restrictions
+Each item is accepted when its mirt (or independent) comparison passes; the issue lists the reference.
+- [ ] Davidian curve and normal-mixture latent distributions in multiple-group models (#75).
+- [ ] M2 for multiple groups, missing data and MAP fits (#76).
+- [ ] M2 and S-X2 for confirmatory multidimensional models (#77).
+- [ ] Linking for 4PL, nominal and multidimensional models (#78).
+- [ ] Many groups: per-group latent distributions vmapped over groups (#79; DESIGN §12 open question 2).
+- **Acceptance**: each item validated against mirt (or an independent R implementation) within the
+  VALIDATION.md tolerances.
+
+## M7 Bifactor, diagnostics, information and survey designs (in this order)
+1. [ ] Bifactor and two-tier models with dimension reduction (#80).
+2. [ ] Local dependence (Q3, LD-X², JSI) for multiple groups, non-Normal latent and
+   multidimensional / bifactor models (#81).
+3. [ ] Item / test information, reliability and summed-score EAP (#82), on a public Lord–Wingersky /
+   Poisson-binomial kernel (#83).
+4. [ ] Sampling (survey) weights (#84).
+5. [ ] Robust standard errors: sandwich and cross-product (#85).
+   - [x] Without sampling weights: `fit(se="sandwich" | "crossprod")` for single and multiple groups,
+     FIPC, EH, 2–3 factors and priors (not with Davidian curves or normal mixtures); validated in V35
+     against mirt `SE.type = "sandwich"` / `"crossprod"`. Weighted and cluster-robust versions still
+     open.
+- **Acceptance**: V-numbered comparisons with mirt `bfactor()`, `residuals()`, `iteminfo()` /
+  `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and
+  `SE.type = "sandwich"` / `"crossprod"`.
+
+## Ongoing
+- [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).
+- [ ] Public extension API for user-defined item models, with docs examples (#86). New item models
+  (e.g. GGUM) are added as validated examples of this API rather than as built-ins.
