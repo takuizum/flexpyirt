@@ -6,6 +6,9 @@
 - Every document has its counterpart (``X.md`` <-> ``X.ja.md``).
 - Every public name in ``flexpyirt.__all__`` and ``flexpyirt.errors.__all__`` is documented in
   docs/reference.md and docs/reference.ja.md.
+- The package README that a page of the site includes (``<!-- include: ... -->``, see
+  scripts/mkdocs_hooks.py) exists in the same language and has the title and switcher lines the
+  hook removes.
 - Japanese documents link to Japanese documents (except the language switcher), including absolute
   links to GitHub files and to the documentation site (README links are absolute so they work on
   PyPI).
@@ -13,6 +16,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import warnings
 from pathlib import Path
@@ -39,6 +43,8 @@ PAIRED = [
     "CONTRIBUTING",
     "benchmarks/README",
     "packages/flexpyctt/README",
+    "packages/flexpyequate/README",
+    "packages/flexpyequate/docs/DESIGN",
     *(f"docs/{p.stem}" for p in (ROOT / "docs").glob("*.md")),
     *(f"docs/dev/{p.stem}" for p in (ROOT / "docs" / "dev").glob("*.md")),
 ]
@@ -141,3 +147,31 @@ def test_japanese_docs_link_to_japanese_docs(doc: str) -> None:
     site_links = re.findall(rf"\]\(({re.escape(DOCS_SITE)}[^)\s]*)\)", text)
     english += [s for s in site_links if not s.startswith(DOCS_SITE + "ja/")]
     assert not english, f"{doc} links to English documents: {english}"
+
+
+INCLUDE_RE = re.compile(r"^<!-- include: (\S+) -->$", re.M)
+
+
+@pytest.mark.parametrize("doc", ["docs/equating.md", "docs/equating.ja.md"])
+def test_included_package_readme(doc: str) -> None:
+    """The site shows the flexpyequate README inside docs/equating*.md (scripts/mkdocs_hooks.py)."""
+    spec = importlib.util.spec_from_file_location("mkdocs_hooks", ROOT / "scripts/mkdocs_hooks.py")
+    assert spec is not None and spec.loader is not None
+    hooks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+
+    source = (ROOT / doc).read_text(encoding="utf-8")
+    suffix = ".ja.md" if doc.endswith(".ja.md") else ".md"
+    assert INCLUDE_RE.findall(source) == [f"packages/flexpyequate/README{suffix}"]
+    page = hooks.on_page_markdown(source)
+    assert "<!-- include" not in page
+    readme = (ROOT / f"packages/flexpyequate/README{suffix}").read_text(encoding="utf-8")
+    # Everything after the README's title and language switcher is on the page, once.
+    body = readme.split("\n", 3)[3].strip()
+    assert page.count(body) == 1
+    # One title (the page's own) and no language switcher: the site has its own.
+    assert page.startswith("# ") and "\n# flexpyequate\n" not in page
+    assert not re.search(r"^(English \||\[English\]\()", page, re.M)
+    # README links are absolute (it is a PyPI page), so none breaks when shown under docs/.
+    relative = [t for t in re.findall(r"\]\(([^)#\s]+)", body) if not t.startswith("https://")]
+    assert not relative, relative
