@@ -252,6 +252,9 @@ $g_2(y \mid v)$) is not estimable. That part of the other population is left out
 distribution is renormalized, and a `SparseDataWarning` reports the probability left out.
 Presmoothing the joint distributions avoids the situation.
 
+**Decision**: `x` and `y` must have the same possible anchor scores. The anchor is one test
+taken by both populations; different anchor scales are rejected rather than silently compared.
+
 **Decision**: `ddof` applies to the variances and covariances of the Tucker and Levine
 observed-score methods. It cancels in $\gamma$, in Levine true-score and in chained linear
 equating (ratios of moments of one population), and the Braun–Holland method uses the moments of

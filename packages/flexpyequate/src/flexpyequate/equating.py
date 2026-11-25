@@ -192,6 +192,11 @@ def _equate_with_anchor(
     anchor: Anchor | None,
 ) -> EquatingResult:
     """Linear equating for non-equivalent groups with an anchor test."""
+    if x.y_scores.shape != y.y_scores.shape or not np.allclose(x.y_scores, y.y_scores):
+        raise SpecificationError(
+            "The anchor must be the same test in both populations: x and y need the same "
+            "possible anchor scores (their second variable)."
+        )
     for name, joint in (("x", x), ("y", y)):
         if not (joint.x.variance() > 0 and joint.y.variance() > 0):
             raise SpecificationError(
@@ -217,10 +222,6 @@ def _equate_with_anchor(
     if method == "chained_linear":
         slope, intercept = chained_linear_coefficients(group_1, group_2)
     elif method == "braun_holland":
-        if x.y_scores.shape != y.y_scores.shape or not np.allclose(x.y_scores, y.y_scores):
-            raise SpecificationError(
-                "The Braun-Holland method needs the same possible anchor scores in x and y."
-            )
         assert weight is not None
         synthetic_x, synthetic_y, dropped = post_stratified_distributions(
             x.probabilities, y.probabilities, weight

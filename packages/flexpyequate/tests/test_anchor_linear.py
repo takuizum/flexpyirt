@@ -225,10 +225,9 @@ def test_specification_errors() -> None:
     with pytest.raises(SpecificationError, match="needs two BivariateScoreDistribution"):
         equate(x, method="chained_linear")
     other_anchor = _population(3, 500, 32, 0.0, n_anchor=12)
-    with pytest.raises(SpecificationError, match="same possible anchor scores"):
-        equate(x, other_anchor, method="braun_holland")
-    # The other methods only use moments, so the anchor may be scored on different scales.
-    assert equate(x, other_anchor, method="chained_linear").slope is not None
+    for method in ANCHOR_METHODS:
+        with pytest.raises(SpecificationError, match="same possible anchor scores"):
+            equate(x, other_anchor, method=method, anchor="internal")
     constant = BivariateScoreDistribution.from_frequencies(
         x_scores=[0, 1, 2], y_scores=[0, 1], frequencies=[[0, 0], [3, 4], [0, 0]]
     )
