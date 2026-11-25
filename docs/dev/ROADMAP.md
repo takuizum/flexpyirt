@@ -86,3 +86,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
     its generator).
   - [x] D6 DIMTEST with bootstrap bias correction (`dimtest()`; accepted in V30 on a simulation study:
     type I error 0.0–2.0% at .05, conservative; power 0.99–1.00).
+- [x] Robust standard errors without sampling weights (`fit(se="sandwich" | "crossprod")`, single and
+  multiple groups, FIPC, EH, 2–3 factors, priors; not with Davidian curves or normal mixtures;
+  validated in V35 against mirt `SE.type = "sandwich"` / `"crossprod"`; M7 item 5, #85 — weighted
+  and cluster-robust versions still open).

@@ -3,7 +3,8 @@
 # Writes tests/reference/v35_<case>.json. CI does not run R; the JSON files are committed.
 #
 # Every case is fitted three times with the same EM settings (optimizer = "NR", accelerate =
-# "none", TOL = 1e-10), once per SE.type in "crossprod", "sandwich" and "sandwich.Louis"; the
+# "none", TOL = 1e-10; BFGS for the three-factor case and TOL = 1e-9 for the empirical histogram,
+# as in the V14 and V6 generators), once per SE.type in "crossprod", "sandwich" and "sandwich.Louis"; the
 # estimates are identical and only vcov(m) differs. The file stores mirt's parameter table
 # (mod2values) and the full covariance matrices, each row labelled by the first `parnum` of its
 # (possibly constrained) parameter, so the tests can rebuild mirt's solution and compare whole
@@ -49,7 +50,8 @@ vcov_block <- function(m) {
 }
 
 write_case <- function(case, description, dat, grp, fit_fun, quad,
-                       types = c("crossprod", "sandwich", "sandwich.Louis"), extra = list()) {
+                       types = c("crossprod", "sandwich", "sandwich.Louis"), extra = list(),
+                       optimizer = "NR", tol = 1e-10) {
   dat <- as.matrix(dat)
   fits <- lapply(types, function(t) tryCatch(suppressMessages(fit_fun(t)), error = function(e) NULL))
   names(fits) <- types
@@ -74,9 +76,9 @@ write_case <- function(case, description, dat, grp, fit_fun, quad,
   stopifnot(isTRUE(extract.mirt(m, "converged")), all(grid_check == quad$theta_lim))
   res <- c(list(
     meta = list(case = case, description = description, r_version = R.version.string,
-                mirt_version = as.character(packageVersion("mirt")), TOL = 1e-10,
+                mirt_version = as.character(packageVersion("mirt")), TOL = tol,
                 quadpts = quad$quadpts, theta_lim = quad$theta_lim, grid_check = grid_check,
-                accelerate = "none", optimizer = "NR", converged = TRUE,
+                accelerate = "none", optimizer = optimizer, converged = TRUE,
                 iterations = extract.mirt(m, "iterations")),
     items = colnames(dat),
     groups = I(unique(glabel)),
@@ -229,10 +231,14 @@ if (run("three_factor")) {
   dat <- simdata(a, d, N, itemtype = "2PL", sigma = sigma)
   colnames(dat) <- sprintf("q%02d", 1:J)
   mod <- mirt.model("F1 = 1-4\nF2 = 5-8\nF3 = 9-12\nCOV = F1*F2*F3")
+  # As in m4_mirt_reference.R (V14d): the NR M-step is very slow on the 15^3 grid, so BFGS with a
+  # tight tolerance is used here.
+  bfgs <- list(TOL = 1e-10, accelerate = "none", optimizer = "BFGS", verbose = FALSE,
+               control = list(reltol = 1e-13))
   write_case("three_factor", "3D 2PL, simple structure, correlated, N=2000", dat, NULL,
              function(t) do.call(mirt, c(list(dat, mod, itemtype = "2PL", SE = TRUE, SE.type = t,
-                                              quadpts = 15, technical = tech(quad15)), common)),
-             quad15, extra = list(factors = list(F1 = sprintf("q%02d", 1:4), F2 = sprintf("q%02d", 5:8),
+                                              quadpts = 15, technical = tech(quad15)), bfgs)),
+             quad15, optimizer = "BFGS (reltol 1e-13)", extra = list(factors = list(F1 = sprintf("q%02d", 1:4), F2 = sprintf("q%02d", 5:8),
                                                  F3 = sprintf("q%02d", 9:12))))
 }
 
@@ -257,7 +263,7 @@ if (run("fipc_eh")) {
   }
   m <- fit_fun("crossprod")
   write_case("fipc_eh", "EH under FIPC (i01-i08 fixed), skewed trait, 2PL J=16, N=3000", dat, NULL,
-             fit_fun, quad61, types = c("crossprod", "Richardson", "sandwich"),
+             fit_fun, quad61, types = c("crossprod", "Richardson", "sandwich"), tol = 1e-9,
              extra = list(bank = bank, nodes = as.vector(m@Model$Theta),
                           eh_weights = as.vector(extract.mirt(m, "Prior")[[1]])))
 }
