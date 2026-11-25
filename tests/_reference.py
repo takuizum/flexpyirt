@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 
 REFERENCE_DIR = Path(__file__).parent / "reference"
+CTT_REFERENCE_DIR = Path(__file__).parents[1] / "packages" / "flexpyctt" / "tests" / "reference"
+"""Reference values of the tools that moved to flexpyctt (V24, V25, V27-V29; DESIGN.md §16.18)."""
 
 
 def check_reference_meta(
