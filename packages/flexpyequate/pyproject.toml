@@ -1,0 +1,100 @@
+[project]
+name = "flexpyequate"
+dynamic = ["version"]
+description = "Equating of test score distributions: mean, linear, equipercentile and kernel equating, checked against R."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "takuizum" }]
+keywords = [
+    "test equating",
+    "equipercentile equating",
+    "kernel equating",
+    "presmoothing",
+    "psychometrics",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pandas>=2.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/takuizum/flexpyirt"
+Repository = "https://github.com/takuizum/flexpyirt"
+Issues = "https://github.com/takuizum/flexpyirt/issues"
+Releases = "https://github.com/takuizum/flexpyirt/releases"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.100",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pandas-stubs>=2.1",
+]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+# One version for every distribution in the repository: the latest vX.Y.Z git tag, read from the
+# repository root (two levels up).
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+root = "../.."
+fallback_version = "0.0.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flexpyequate"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/uv.lock", "/.gitignore"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF", "D"]
+ignore = [
+    "RUF001", "RUF002", "RUF003",  # allow Japanese / math characters in strings and comments
+    "N803", "N806",                # allow math-style capital names (F, G, ...)
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/flexpyequate", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["scipy.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+xfail_strict = true
