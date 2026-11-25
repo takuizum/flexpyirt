@@ -251,14 +251,14 @@ def expected_score(res: FitResult, theta: Any, *, group: str | None = None) -> p
 
 def _marginal_reliability(res: FitResult) -> list[float]:
     r"""Per group, :math:`\int\sigma^2I/(\sigma^2I+1)\,\phi(\theta;\mu,\sigma^2)\,d\theta`."""
-    latent = res.latent.set_index("group") if res._model.is_multigroup else None
+    means = res.latent["mean"].to_numpy(dtype=np.float64)
+    variances = res.latent["var"].to_numpy(dtype=np.float64)
     z = np.linspace(-_MARGINAL_SPAN_SD, _MARGINAL_SPAN_SD, _MARGINAL_N_POINTS)
     weights = np.exp(-0.5 * z * z)
     weights /= weights.sum()
     out = []
-    for g, name in enumerate(_group_names(res)):
-        row = res.latent.iloc[0] if latent is None else latent.loc[name]
-        mean, var = float(row["mean"]), float(row["var"])
+    for g in range(len(_group_names(res))):
+        mean, var = float(means[g]), float(variances[g])
         information, _ = _curves(res, mean + np.sqrt(var) * z, g)
         scaled = var * information.sum(axis=1)
         out.append(float(np.sum(weights * scaled / (scaled + 1.0))))

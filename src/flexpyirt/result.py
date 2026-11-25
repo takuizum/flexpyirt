@@ -561,10 +561,10 @@ class FitResult:
         DataFrame
             For unidimensional ``"EAP"``, ``"MAP"``, ``"ML"``, ``"WLE"`` and ``"EAPsum"``: columns
             ``theta`` and ``se``. For unidimensional ``"PV"``: columns ``pv1`` ..
-            ``pv{n_draws}``. For multidimensional ``"EAP"`` and ``"MAP"``: columns ``theta_<factor>`` and
-            ``se_<factor>`` for each declared factor (``"ML"``, ``"WLE"`` and ``"PV"`` raise
-            :class:`SpecificationError` for ``D > 1``). One row per respondent; index follows
-            ``data`` when it is a DataFrame.
+            ``pv{n_draws}``. For multidimensional ``"EAP"`` and ``"MAP"``: columns
+            ``theta_<factor>`` and ``se_<factor>`` for each declared factor (``"ML"``, ``"WLE"``
+            and ``"PV"`` raise :class:`SpecificationError` for ``D > 1``). One row per
+            respondent; index follows ``data`` when it is a DataFrame.
 
         Raises
         ------
