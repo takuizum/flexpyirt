@@ -1142,6 +1142,32 @@ class ItemKernel(Protocol):
     `unidimTest` を実行し、観測固有値は $2\times10^{-4}$（polycor の `optimise()` の許容誤差。実測 $2.4\times10^{-5}$）、
     シミュレーションの第 2 固有値の平均は $|z|\le4.5$（2 つのキーで 2000 反復なら実測 $|z|<1$）、その
     95 パーセンタイルは 0.02 で一致する。
+    **単一群・1 次元・正規分布以外への拡張（M7、issue #81、V26）**: `local_dependence()` は `group=` を受け取り
+    （`item_fit()` と同じ）、推定したモデルのコンパイル済み問題の上で計算する。これで潜在分布と格子の種類に
+    よらず同じコードになる。重みは `_latent_log_weights`（`(G, Q)`。EH のモデルではその重み）、カテゴリ確率は
+    `_item_log_probs`（`(G, J_f, Q, K)`）、EAP は各受験者の群を事前分布にした `_core.eap`。(a) **多母集団**:
+    すべての統計量を群ごとに、その群の受験者・項目パラメタ・潜在分布の重みで計算する。mirt の `residuals()` が
+    `multipleGroup` の結果に対してすること（群ごとの単一群オブジェクトで繰り返す）と同じ。`pairs` の先頭に
+    `group` 列が付き、`q3` の行インデックスは `(group, item)`、`q3_mean` は群をインデックスにした Series、
+    Q3\* はその群の平均を引き、`max_q3_star` は全群での最大。`data` に受験者がいない群は飛ばす。表は、ある群で
+    観測されないカテゴリがあっても常に $K_i\times K_j$（mirt の `table()` はそのカテゴリを落とし、そこで失敗する）。
+    (b) **`EmpiricalHistogram`、`DavidianCurve`、`NormalMixture`**: $E_{ab}$ は推定した格子の重みを、Q3 は
+    推定した分布のもとでの EAP を使う。mirt の `dentype = "EH"` / `"Davidian-k"` の既定は違い、どちらにも
+    $N(0,1)$ の事前分布を使う。推定した密度を使うのは `residuals(type = "LD", use_dentype_estimate = TRUE)` と、
+    Q3 では `Theta = fscores(m, use_dentype_estimate = TRUE)` を渡したとき（mirt 1.48 の `type = "Q3",
+    use_dentype_estimate = TRUE` は残差をスコアではなく格子点で評価してしまい、使えない）。正規の事前分布は
+    推定したモデルと矛盾するので、flexpyirt は推定した密度を使う。一致する mirt の呼び出しは docstring に書く。
+    (c) **確認的な 2〜3 次元モデル**: 直積格子と推定した多変量正規の重みで $E_{ab}=n\sum_qP_{ia}
+    (\boldsymbol\theta_q)P_{jb}(\boldsymbol\theta_q)w_q$、ベクトルの EAP で
+    $d_{ij}=x_{ij}-E(X_j\mid\hat{\boldsymbol\theta}_i)$。`_traces` はカーネルを `(N, D)` の点で評価する。EAP は
+    推定に使った格子で計算する。mirt の `fscores()` は独自の既定（1 / 2 / 3 因子で各次元 61 / 31 / 15 点）を
+    使うので、推定がその格子なら両者は一致する。$df$ はどの場合も $(K_i-1)(K_j-1)$ のまま（mirt と同じ）で、
+    推定したパラメタを考慮しない。統計量は診断用（Chen & Thissen, 1997）。**拡張しないもの**: bifactor /
+    two-tier モデル（bifactor の PR の後）、`jsi()`、`model_parallel_analysis()`、`dimensionality(fit=...)`。
+    これらは `_require_unidimensional_normal` のまま。mirt の JSI は 1 因子が必要で、Davidian 曲線の SE がなく
+    （`"No standard error method currently supported"`）、混合分布に対応せず、`multipleGroup` では傾きを多母集団の
+    結果から取りながら各群を単独の $N(0,1)$ の単一群モデルとして推定し直す（推定したモデルの再推定ではない）。
+    拡張を照合できる参照値がない。
 12. **`dimensionality()` のアンサンブル（§16.8）**: 1 つのポリコリック行列（`fit` があれば、まずデータを推定した
     項目にそろえる）から問い (A) の `parallel_analysis()`（既定値）、`velicer_map()`（4 乗）、`empirical_kaiser()` を
     計算する。キーはシミュレーションを使う手法ごとに分割する。問い (B) は `fit` があるときだけで、
