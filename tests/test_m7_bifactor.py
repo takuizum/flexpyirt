@@ -390,7 +390,7 @@ def test_three_pl_bifactor_compiles() -> None:
     models["i6"] = GRM(3)
     spec = Model.from_items(models).with_bifactor(specific=SPECIFIC)
     quad = Quadrature.equispaced(7)
-    prob, eta0 = _problem(spec, _sim(), quad)
+    prob, eta0 = _problem(spec, _sim(n=200), quad)
     eta = jnp.asarray(eta0)
     log_joint, _ = _full_log_joint(prob, quad, eta)
     expected = jnp.sum(prob.counts * jax.scipy.special.logsumexp(log_joint, axis=1))

@@ -386,7 +386,10 @@ def _bifactor_parts(prob: CompiledProblem, eta: Array) -> tuple[Array, Array, Ar
     ell = jnp.zeros((n_pat, prob.n_groups, n_blocks, n_pts * n_pts), dtype=prob.nodes.dtype)
     for f, (oh, logp) in enumerate(zip(_one_hots(prob), _item_log_probs(prob, eta), strict=True)):
         blk = jax.nn.one_hot(red.family_block[f], n_blocks, dtype=oh.dtype)  # (J_f, B)
-        ell = ell + jnp.einsum("pjk,jb,gjqk->pgbq", oh, blk, logp)
+        # Mask the small (G, B, J_f, K, Q) table first so the pattern contraction is one matmul
+        # per (group, block) without a (P, J_f, B, Q) intermediate.
+        masked = jnp.einsum("gjqk,jb->gbjkq", logp, blk)
+        ell = ell + jnp.einsum("pjk,gbjkq->pgbq", oh, masked)
     own = jnp.take_along_axis(ell, prob.group[:, None, None, None], axis=1)[:, 0]
     log_wg, log_wb = _bifactor_log_weights(prob, eta)
     inner = own.reshape(n_pat, n_blocks, n_pts, n_pts) + log_wb[prob.group][:, :, None, :]
@@ -483,16 +486,14 @@ def _bifactor_e_step(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts,
     group_one_hot = jax.nn.one_hot(prob.group, prob.n_groups, dtype=h.dtype)
     cg = prob.counts[:, None] * group_one_hot  # (P, G)
     weighted = h_block.reshape(n_pat, n_blocks, n_pts * n_pts)
-    r_bar = tuple(
-        jnp.einsum(
-            "pa,pjk,jb,pbq->ajkq",
-            cg,
-            oh,
-            jax.nn.one_hot(red.family_block[f], n_blocks, dtype=h.dtype),
-            weighted,
-        )
-        for f, oh in enumerate(_one_hots(prob))
-    )
+    r_list = []
+    for f, oh in enumerate(_one_hots(prob)):
+        blk = jax.nn.one_hot(red.family_block[f], n_blocks, dtype=h.dtype)  # (J_f, B)
+        coh = jnp.einsum("pa,pjk->pajk", cg, oh)
+        # One (A J_f K) x P x Q matmul per block, then keep each item's own block.
+        per_block = jnp.einsum("pajk,pbq->bajkq", coh, weighted)
+        r_list.append(jnp.einsum("bajkq,jb->ajkq", per_block, blk))
+    r_bar = tuple(r_list)
     n_general = jnp.einsum("pa,pg->ag", cg, h)
     n_specific = jnp.einsum("pa,pbgt->abt", cg, h_block)
     n_bar = jnp.concatenate([n_general[:, None, :], n_specific], axis=1)
