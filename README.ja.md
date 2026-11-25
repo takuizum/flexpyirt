@@ -184,22 +184,6 @@ warm の CPU 推定が `mirt` より速く（`mirt` 比 `0.12×–0.60×`）、�
 
 不具合の報告や質問は [GitHub Issues](https://github.com/takuizum/flexpyirt/issues) へ。
 
-## 引用
-
-論文などで flexpyirt を使った場合は、使ったバージョン（`flexpyirt.__version__`）を添えて引用してほしい。
-リポジトリの [`CITATION.cff`](https://github.com/takuizum/flexpyirt/blob/main/CITATION.cff) から、GitHub の
-「Cite this repository」でも引用情報を取得できる。
-
-```bibtex
-@software{flexpyirt,
-  author  = {takuizum},
-  title   = {flexpyirt: Item Response Theory Estimation in {Python} with {JAX}},
-  year    = {2026},
-  url     = {https://github.com/takuizum/flexpyirt},
-  note    = {Python package, version x.y.z}
-}
-```
-
 ## ライセンス
 
 MIT

@@ -195,22 +195,6 @@ Every document is also available in Japanese ([日本語サイト](https://takui
 
 Bug reports and questions are welcome on [GitHub Issues](https://github.com/takuizum/flexpyirt/issues).
 
-## Citation
-
-If you use flexpyirt in published work, please cite it, giving the version you used
-(`flexpyirt.__version__`). The repository's [`CITATION.cff`](https://github.com/takuizum/flexpyirt/blob/main/CITATION.cff)
-also provides GitHub's "Cite this repository" button.
-
-```bibtex
-@software{flexpyirt,
-  author  = {takuizum},
-  title   = {flexpyirt: Item Response Theory Estimation in {Python} with {JAX}},
-  year    = {2026},
-  url     = {https://github.com/takuizum/flexpyirt},
-  note    = {Python package, version x.y.z}
-}
-```
-
 ## License
 
 MIT
