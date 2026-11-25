@@ -50,6 +50,7 @@
   "test_mirt_m5_m2": 183.5,
   "test_mirt_m5_mixture": 212.1,
   "test_mirt_m5_nominal": 301.3,
+  "test_mirt_m7_local_dependence": 45.0,
   "test_mirt_v6_eh": 290.9,
   "test_oakes": 398.2,
   "test_quadrature_gh": 127.5,
