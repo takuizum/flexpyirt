@@ -86,3 +86,30 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
     its generator).
   - [x] D6 DIMTEST with bootstrap bias correction (`dimtest()`; accepted in V30 on a simulation study:
     type I error 0.0–2.0% at .05, conservative; power 0.99–1.00).
+
+## M6 Lifting the single-group / unidimensional restrictions
+Each item is accepted when its mirt (or independent) comparison passes; the issue lists the reference.
+- [ ] Davidian curve and normal-mixture latent distributions in multiple-group models (#60).
+- [ ] M2 for multiple groups, missing data and MAP fits (#61).
+- [ ] M2 and S-X2 for confirmatory multidimensional models (#62).
+- [ ] Linking for 4PL, nominal and multidimensional models (#63).
+- [ ] Many groups: per-group latent distributions vmapped over groups (#64; DESIGN §12 open question 2).
+- **Acceptance**: each item validated against mirt (or an independent R implementation) within the
+  VALIDATION.md tolerances.
+
+## M7 Bifactor, diagnostics, information and survey designs (in this order)
+1. [ ] Bifactor and two-tier models with dimension reduction (#65).
+2. [ ] Local dependence (Q3, LD-X², JSI) for multiple groups, non-Normal latent and
+   multidimensional / bifactor models (#66).
+3. [ ] Item / test information, reliability and summed-score EAP (#67), on a public Lord–Wingersky /
+   Poisson-binomial kernel (#68).
+4. [ ] Sampling (survey) weights (#69).
+5. [ ] Robust standard errors: sandwich and cross-product (#70).
+- **Acceptance**: V-numbered comparisons with mirt `bfactor()`, `residuals()`, `iteminfo()` /
+  `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and
+  `SE.type = "sandwich"` / `"crossprod"`.
+
+## Ongoing
+- [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#59).
+- [ ] Public extension API for user-defined item models, with docs examples (#71). New item models
+  (e.g. GGUM) are added as validated examples of this API rather than as built-ins.
