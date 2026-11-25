@@ -53,7 +53,7 @@ univariate[[3]] <- univariate_case(
   "half_points", scores, tabulate_scores(10 + rbinom(700, 40, rbeta(700, 6, 4)) / 2, scores),
   c(3, 5), note = "scores 10..30 by 0.5, N = 700, zero frequencies in the tails")
 
-# Equipercentile equating of the presmoothed ACT forms (Kolen & Brennan, 2014, section 3.1).
+# Equipercentile equating of the presmoothed ACT forms (Kolen & Brennan, 2014, ch. 3).
 xt <- as.freqtab(cbind(ACTmath$scale, ACTmath$xcount))
 yt <- as.freqtab(cbind(ACTmath$scale, ACTmath$ycount))
 smoothed_equating <- lapply(c(4, 6), function(d) {

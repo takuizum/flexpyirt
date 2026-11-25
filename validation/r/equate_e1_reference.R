@@ -11,7 +11,7 @@
 #   end of the Y range instead of the mean of the upper and lower percentiles; the two differ
 #   when Y has no observations at that end.
 # - `kb_equipercentile()` below: an independent implementation of Kolen & Brennan (2014),
-#   eq. 2.14-2.18, without rounding. This is the tight reference.
+#   ch. 2, without rounding. This is the tight reference.
 suppressMessages({
   library(equate)
   library(jsonlite)
@@ -23,7 +23,7 @@ kb_rank <- function(freq) {
   cumsum(p) - p / 2
 }
 
-# Kolen & Brennan eq. 2.15-2.18: mean of the upper and lower percentile at proportion `p`.
+# Kolen & Brennan ch. 2: mean of the upper and lower percentile at proportion `p`.
 kb_percentile <- function(p, scores, freq) {
   inc <- scores[2] - scores[1]
   cum <- cumsum(freq) / sum(freq)
@@ -97,7 +97,7 @@ tabulate_scores <- function(v, scores) as.numeric(table(factor(v, levels = score
 
 cases <- list()
 
-# Q1/Q2-a: ACT mathematics, two 40-item forms (Kolen & Brennan, 2014, Table 2.5; equate::ACTmath).
+# Q1/Q2-a: ACT mathematics, two 40-item forms (Kolen & Brennan, 2014, ch. 2; equate::ACTmath).
 cases[[1]] <- make_case("act_math", "equivalent_groups", ACTmath$scale, ACTmath$xcount,
                         ACTmath$scale, ACTmath$ycount,
                         note = "equate::ACTmath, forms X and Y")
@@ -113,7 +113,7 @@ cases[[2]] <- make_case("unequal_lengths", "equivalent_groups", xs, tabulate_sco
                         note = "X 0..30 (N = 1800), Y 0..50 (N = 2500), beta-binomial")
 
 # Q2-c: small samples, zero frequencies inside both distributions (the upper and lower
-# percentiles of eq. 2.15-2.18 differ) but none at the ends of Y.
+# percentiles of ch. 2 differ) but none at the ends of Y.
 xs <- 0:20
 ys <- 0:20
 xf <- c(0, 0, 1, 3, 0, 5, 8, 0, 0, 11, 14, 9, 0, 7, 6, 0, 3, 2, 0, 1, 0)
@@ -151,7 +151,7 @@ out <- list(
     equate_version = as.character(packageVersion("equate")),
     note = paste("sd_ddof1 and the linear results use N - 1 variances (equate).",
                  "kb_equipercentile is an independent, unrounded implementation of",
-                 "Kolen & Brennan (2014) eq. 2.14-2.18.")
+                 "Kolen & Brennan (2014) ch. 2.")
   ),
   cases = cases
 )

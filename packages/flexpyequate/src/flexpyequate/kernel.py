@@ -22,7 +22,7 @@ from flexpyequate.presmoothing import LoglinearResult, loglinear_c_matrix, satur
 __all__ = ["KernelEquatingResult", "kernel_equate", "penalty_bandwidth"]
 
 _SQRT_2PI = float(np.sqrt(2.0 * np.pi))
-# Half-width at which the derivative of the density is inspected (w in eq. 4.30), in units of the
+# Half-width at which the derivative of the density is inspected (w in ch. 4), in units of the
 # score increment.
 _DERIVATIVE_OFFSET = 0.25
 # Search range of the bandwidth in units of the score increment.
@@ -44,7 +44,7 @@ class _Continuized:
         R_j(x) = \frac{x - a x_j - (1 - a)\mu}{a h}, \qquad
         a^2 = \frac{\sigma^2}{\sigma^2 + h^2}
 
-    (von Davier et al., 2004, eq. 4.5-4.7), with :math:`\mu` and :math:`\sigma^2` the mean and
+    (von Davier et al., 2004, ch. 4), with :math:`\mu` and :math:`\sigma^2` the mean and
     variance of the discrete distribution. The continuized variable keeps both.
     """
 
@@ -124,7 +124,7 @@ class _Continuized:
             M_j(x) &= \tfrac12 (x - \mu)(1 - a^2)\Bigl(\frac{x_j - \mu}{\sigma}\Bigr)^2
                       + (1 - a)\, x_j
 
-        (von Davier et al., 2004, eq. 5.13-5.15). Shape ``(n_values, n_scores)``.
+        (von Davier et al., 2004, ch. 5). Shape ``(n_values, n_scores)``.
         """
         a = self.shrinkage
         standardized_scores = (self.scores - self.mean) ** 2 / self.variance
@@ -148,7 +148,7 @@ def _penalty(
         \mathrm{PEN}(h) = \sum_j \bigl(r_j - f_h(x_j)\bigr)^2 + K \sum_j A_j (1 - B_j),
 
     with :math:`A_j = 1` if :math:`f_h'(x_j - w) < 0`, :math:`B_j = 0` if
-    :math:`f_h'(x_j + w) > 0` and :math:`w = 1/4` (von Davier et al., 2004, eq. 4.27-4.30).
+    :math:`f_h'(x_j + w) > 0` and :math:`w = 1/4` (von Davier et al., 2004, ch. 4).
     """
     continuized = _Continuized.build(unit_scores, probabilities, bandwidth)
     value = float(np.sum((probabilities - continuized.density(unit_scores)) ** 2))
@@ -187,7 +187,7 @@ def penalty_bandwidth(
 
         \mathrm{PEN}(h) = \sum_j \bigl(r_j - f_h(x_j)\bigr)^2 + K \sum_j A_j (1 - B_j)
 
-    (eq. 4.27-4.30). The first term makes the continuized density :math:`f_h` close to the score
+    (ch. 4). The first term makes the continuized density :math:`f_h` close to the score
     probabilities at the possible scores. The second counts the scores around which the density is
     U-shaped: :math:`A_j = 1` if :math:`f_h'(x_j - w) < 0` and :math:`B_j = 0` if
     :math:`f_h'(x_j + w) > 0`, with :math:`w` a quarter of the score increment.
@@ -323,7 +323,7 @@ class KernelEquatingResult:
             \mathrm{PRE}(p) = 100\, \frac{\mu_p(e_Y(X)) - \mu_p(Y)}{\mu_p(Y)}, \qquad
             \mu_p(e_Y(X)) = \sum_j r_j\, e_Y(x_j)^p, \quad \mu_p(Y) = \sum_k s_k\, y_k^p
 
-        (von Davier et al., 2004, eq. 4.32).
+        (von Davier et al., 2004, ch. 4).
 
         Returns
         -------
@@ -394,7 +394,7 @@ def kernel_equate(
     r"""Kernel equating of form X to form Y for equivalent groups (Gaussian kernel).
 
     The discrete distributions with score probabilities :math:`r_j` (X) and :math:`s_k` (Y) are
-    continuized (von Davier et al., 2004, eq. 4.5-4.7),
+    continuized (von Davier et al., 2004, ch. 4),
 
     .. math::
 
@@ -407,7 +407,7 @@ def kernel_equate(
 
         e_Y(x) = G_{h_Y}^{-1}\bigl(F_{h_X}(x)\bigr) .
 
-    The standard error of equating follows from the delta method (eq. 5.1-5.22):
+    The standard error of equating follows from the delta method (ch. 5):
 
     .. math::
 

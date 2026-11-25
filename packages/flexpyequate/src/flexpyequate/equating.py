@@ -123,7 +123,7 @@ class EquatingResult:
 def _equipercentile(x: ScoreDistribution, y: ScoreDistribution, values: FloatArray) -> FloatArray:
     r"""Equipercentile equivalents :math:`e_Y(x) = Q^{-1}(P(x))`.
 
-    Kolen & Brennan (2014), eq. 2.18.
+    Kolen & Brennan (2014), ch. 2.
     """
     rank = percentile_rank_proportion(x.scores, x.cumulative, values)
     return percentile_from_proportion(y.scores, y.cumulative, rank)

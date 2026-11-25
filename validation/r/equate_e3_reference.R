@@ -78,7 +78,7 @@ numeric_see <- function(xs, r, hx, cov_r, ys, s, hy, cov_s, step = 1e-7) {
   })
   sqrt(rowSums((jac_r %*% cov_r) * jac_r) + rowSums((jac_s %*% cov_s) * jac_s))
 }
-# Penalty of eq. 4.27-4.30 (scores with unit increment).
+# Penalty of ch. 4 (scores with unit increment).
 penalty <- function(h, scores, p, weight) {
   pen1 <- sum((p - kernel_density(scores, scores, p, h))^2)
   left <- kernel_density_derivative(scores - 0.25, scores, p, h)

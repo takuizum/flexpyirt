@@ -44,7 +44,7 @@ def test_moments_match_numpy_on_the_raw_scores() -> None:
 
 
 def test_percentile_rank_at_possible_scores_is_below_plus_half() -> None:
-    # Kolen & Brennan (2014), Table 2.1: a four-item test.
+    # Kolen & Brennan (2014), ch. 2: a four-item test with frequencies 2, 3, 2, 2, 1.
     dist = ScoreDistribution.from_frequencies(scores=range(5), frequencies=[2, 3, 2, 2, 1])
     np.testing.assert_allclose(dist.percentile_rank(dist.scores), [10, 35, 60, 80, 95])
     # Between possible scores the rank is piecewise linear on [x - 0.5, x + 0.5).

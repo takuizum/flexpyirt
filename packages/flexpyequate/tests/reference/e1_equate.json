@@ -3,7 +3,7 @@
     "generator": "validation/r/equate_e1_reference.R",
     "r_version": "R version 4.5.2 (2025-10-31)",
     "equate_version": "2.0.9",
-    "note": "sd_ddof1 and the linear results use N - 1 variances (equate). kb_equipercentile is an independent, unrounded implementation of Kolen & Brennan (2014) eq. 2.14-2.18."
+    "note": "sd_ddof1 and the linear results use N - 1 variances (equate). kb_equipercentile is an independent, unrounded implementation of Kolen & Brennan (2014) ch. 2."
   },
   "cases": [
     {

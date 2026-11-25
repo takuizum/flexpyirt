@@ -112,7 +112,7 @@ def percentile_rank_proportion(
                \bigl[F(x^*) - F(x^* - \delta)\bigr],
 
     with :math:`P(x) = 0` for :math:`x < x_1 - \delta/2` and :math:`P(x) = 1` for
-    :math:`x \ge x_J + \delta/2` (Kolen & Brennan, 2014, eq. 2.14).
+    :math:`x \ge x_J + \delta/2` (Kolen & Brennan, 2014, ch. 2).
     """
     increment = scores[1] - scores[0]
     low = scores[0] - increment / 2
@@ -141,7 +141,7 @@ def percentile_from_proportion(
             \qquad x^*_L = \max\{x_j : F(x_j) < p\},
 
     with :math:`P^{-1}_U(1) = x_J + \delta/2`, :math:`P^{-1}_L(0) = x_1 - \delta/2` and
-    :math:`P^{-1}(p) = [P^{-1}_U(p) + P^{-1}_L(p)]/2` (Kolen & Brennan, 2014, eq. 2.15-2.18). The
+    :math:`P^{-1}(p) = [P^{-1}_U(p) + P^{-1}_L(p)]/2` (Kolen & Brennan, 2014, ch. 2). The
     two versions differ only where zero frequencies make :math:`F` flat.
     """
     increment = scores[1] - scores[0]
@@ -348,7 +348,7 @@ class ScoreDistribution:
                    \bigl[F(x^*) - F(x^* - \delta)\bigr]\Bigr\},
 
         0 below :math:`x_1 - \delta/2` and 100 from :math:`x_J + \delta/2` on (Kolen & Brennan,
-        2014, eq. 2.14). At a possible score this is the percentage below it plus half the
+        2014, ch. 2). At a possible score this is the percentage below it plus half the
         percentage at it.
 
         Parameters
@@ -367,7 +367,7 @@ class ScoreDistribution:
     def percentile(self, ranks: ArrayLike) -> FloatArray:
         r"""Score at given percentile ranks (0-100): the inverse of :meth:`percentile_rank`.
 
-        The mean of the upper and lower versions of Kolen & Brennan (2014, eq. 2.15-2.18),
+        The mean of the upper and lower versions of Kolen & Brennan (2014, ch. 2),
 
         .. math::
 

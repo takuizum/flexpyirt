@@ -1,7 +1,7 @@
 """E1 against R: mean, linear and equipercentile equating (DESIGN.md §7, cases Q1 and Q2).
 
 Reference values: R ``equate`` and an independent R implementation of Kolen & Brennan (2014),
-eq. 2.14-2.18 (``validation/r/equate_e1_reference.R``).
+ch. 2 (``validation/r/equate_e1_reference.R``).
 """
 
 from __future__ import annotations
@@ -127,10 +127,13 @@ def test_single_group_joint_moments() -> None:
 
 
 def test_act_math_published_moments() -> None:
-    # Kolen & Brennan (2014), Table 2.6 (raw-score moments of forms X and Y, four decimals).
+    # Raw-score moments of forms X and Y as published by Kolen & Brennan (2014, ch. 2), four
+    # decimals.
     x, y = _distributions(CASES["act_math"])
     assert (x.n, y.n) == (4329, 4152)
     assert round(x.mean, 4) == 19.8524
     assert round(y.mean, 4) == 18.9798
     assert round(x.sd(), 4) == 8.2116
     assert round(y.sd(), 4) == 8.9393
+    assert (round(x.skewness, 4), round(x.kurtosis, 4)) == (0.3753, 2.3024)
+    assert (round(y.skewness, 4), round(y.kurtosis, 4)) == (0.3527, 2.1464)
