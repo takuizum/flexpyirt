@@ -99,9 +99,9 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 
 ## M7 Bifactor, diagnostics, information and survey designs (in this order)
 1. [ ] Bifactor and two-tier models with dimension reduction (#80).
-   - [x] Bifactor models with Gibbons–Hedeker dimension reduction (`Model.with_bifactor()`, single
-     group, any number of specific factors, Oakes/Hessian SEs, EAP scoring; validated in V32 against
-     mirt `bfactor()`). Two-tier models are still open.
+   - [x] Bifactor models (`Model.with_bifactor()`, single group, any number of specific factors,
+     Oakes/Hessian SEs, EAP scoring; validated in V32 against mirt `bfactor()`).
+   - [ ] Two-tier models.
 2. [ ] Local dependence (Q3, LD-X², JSI) for multiple groups, non-Normal latent and
    multidimensional / bifactor models (#81).
 3. [ ] Item / test information, reliability and summed-score EAP (#82), on a public Lord–Wingersky /
