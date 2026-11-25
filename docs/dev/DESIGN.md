@@ -244,7 +244,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - Alternatives: the observed (posterior) information $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$ by
   chunked forward-over-reverse autodiff (`jax.linearize(jax.grad(...))` over basis batches; also
   used to check Oakes).
-- **Decision (M7, §17.5)**: `se="crossprod"` inverts the cross-product of the per-pattern scores,
+- **Decision (M7, §17.3)**: `se="crossprod"` inverts the cross-product of the per-pattern scores,
   $B_{\mathrm{post}}=\sum_p c_p s_p s_p^\top-\nabla^2_\eta\log\pi(\hat\eta)$, and `se="sandwich"` is
   the robust covariance $H^{-1}B_{\mathrm{post}}H^{-1}$ with $H$ the observed (posterior)
   information above (Huber, 1967; White, 1982).
@@ -2077,9 +2077,7 @@ data-independent shapes (§15.21).
    versions 1–5 must not contain it. On load a two-tier structure is rebuilt through
    `with_two_tier()`.
 
-## 17. Implementation decisions (M7)
-
-5. **Robust standard errors: cross-product and sandwich (`fit(se="crossprod" | "sandwich")`, V35, #85)**:
+3. **Robust standard errors: cross-product and sandwich (`fit(se="crossprod" | "sandwich")`, V35, #85)**:
    **Definitions.** With $L_p(\eta)=\sum_q w_{g(p)q}(\eta)\prod_j P_j(y_{pj}\mid\theta_q;\eta)$ the
    marginal likelihood of response pattern $p$ (count $c_p$) and $s_p=\nabla_\eta\log L_p(\hat\eta)$
    its score,
@@ -2114,6 +2112,10 @@ data-independent shapes (§15.21).
    `SpecificationError` for both options: mirt computes neither for them ("No standard error
    method currently supported for Davidian curves"; "Only Oakes and complete SE.types current
    supported for mixture models"), so there is no reference to validate against (principle 1).
+   Bifactor and two-tier models (§17.1, §17.2) also raise `SpecificationError`: their likelihood
+   is evaluated by dimension reduction (`CompiledProblem.reduction`), while the score kernel
+   below works on the node tables of the full grid. mirt does compute both types for `bfactor()`,
+   so this is an implementation gap that can be validated later, not a missing reference.
    Sampling weights and the cluster-robust version (scores summed within clusters) wait for
    sampling weights (#84).
    **Computation** (`_robust_se.py`, a separate Core module so that `_core.py` is untouched).

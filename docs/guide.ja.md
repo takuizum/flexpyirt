@@ -329,7 +329,7 @@ print((res_sw.parameters["se"] / res.parameters["se"]).describe())  # モデル�
   `sd` / `cor` の SE、`link()`。
 - 事前分布があるときは、情報行列と同じように事前分布の曲率をクロス積にも加える。
 - `EmpiricalHistogram` では、ほかの方法と同じくヒストグラムを推定値に固定する。
-- `DavidianCurve`・`NormalMixture` では使えない（`SpecificationError`）。
+- `DavidianCurve`・`NormalMixture`、双因子・two-tier モデルでは使えない（`SpecificationError`）。
 - 受検者は互いに独立として扱う。標本ウェイトやクラスタ抽出には対応していない。
 - `"sandwich"` と `"crossprod"` には、自由パラメタ数より多い異なる応答パターンが必要。小標本では
   `"oakes"` よりばらつきが大きい。

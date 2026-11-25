@@ -48,7 +48,7 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 | `item_names` | list[str], 任意 | `data` が配列のときの列名 |
 | `method` | `BAEM`, 任意 | EM の設定（既定 `BAEM()`） |
 | `quadrature` | `Quadrature`, 任意 | 求積格子（既定: 1 因子は 61 点、2 因子は各軸 31 点、3 因子は各軸 15 点、いずれも $[-6, 6]$） |
-| `se` | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / `None` | 標準誤差の計算方法: 観測情報行列の逆行列（`"oakes"`・`"hessian"`）、パターンごとのスコアのクロス積の逆行列（`"crossprod"`。mirt の `SE.type = "crossprod"`）、ロバストなサンドイッチ共分散（`"sandwich"`。mirt の `SE.type = "sandwich"`）。どれも MAP 時は事前分布の Hessian を含む。`"sandwich"`・`"crossprod"` は `DavidianCurve`・`NormalMixture` では `SpecificationError`。`None` なら計算しない |
+| `se` | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / `None` | 標準誤差の計算方法: 観測情報行列の逆行列（`"oakes"`・`"hessian"`）、パターンごとのスコアのクロス積の逆行列（`"crossprod"`。mirt の `SE.type = "crossprod"`）、ロバストなサンドイッチ共分散（`"sandwich"`。mirt の `SE.type = "sandwich"`）。どれも MAP 時は事前分布の Hessian を含む。`"sandwich"`・`"crossprod"` は `DavidianCurve`・`NormalMixture`、双因子・two-tier モデルでは `SpecificationError`。`None` なら計算しない |
 
 **戻り値**: [`FitResult`](#fitresult)
 

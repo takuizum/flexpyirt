@@ -190,7 +190,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - 代替: 基底ベクトルをチャンク分割した前向き×後ろ向き自動微分
   （`jax.linearize(jax.grad(...))`）による観測（事後）情報行列
   $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$（Oakes の検証にも使う）。
-- **決定（M7, §17.5）**: `se="crossprod"` はパターンごとのスコアのクロス積
+- **決定（M7, §17.3）**: `se="crossprod"` はパターンごとのスコアのクロス積
   $B_{\mathrm{post}}=\sum_p c_p s_p s_p^\top-\nabla^2_\eta\log\pi(\hat\eta)$ の逆行列、`se="sandwich"` は
   上の観測（事後）情報行列 $H$ を使ったロバスト共分散 $H^{-1}B_{\mathrm{post}}H^{-1}$
   （Huber, 1967; White, 1982）。
@@ -1504,9 +1504,7 @@ class ItemKernel(Protocol):
    `"n_primary_factors"`（two-tier 以外は 0）を保存する。版 1–5 はこのキーを含んではならない。
    読み込み時、two-tier 構造は `with_two_tier()` で組み立て直す。
 
-## 17. 実装上の決定（M7）
-
-5. **ロバスト標準誤差: クロス積とサンドイッチ（`fit(se="crossprod" | "sandwich")`, V35, #85）**:
+3. **ロバスト標準誤差: クロス積とサンドイッチ（`fit(se="crossprod" | "sandwich")`, V35, #85）**:
    **定義。** 応答パターン $p$（度数 $c_p$）の周辺尤度を
    $L_p(\eta)=\sum_q w_{g(p)q}(\eta)\prod_j P_j(y_{pj}\mid\theta_q;\eta)$、そのスコアを
    $s_p=\nabla_\eta\log L_p(\hat\eta)$ として
@@ -1535,7 +1533,11 @@ class ItemKernel(Protocol):
    **対象外。** 潜在分布が `DavidianCurve`・`NormalMixture` のとき、どちらのオプションも
    `SpecificationError` を出す。mirt はこれらを計算しないので（"No standard error method currently
    supported for Davidian curves"、"Only Oakes and complete SE.types current supported for mixture
-   models"）、照合する参照値がない（原則 1）。標本ウェイトとクラスタロバスト版（スコアをクラスタ内で
+   models"）、照合する参照値がない（原則 1）。双因子・two-tier モデル（§17.1、§17.2）も
+   `SpecificationError` を出す。これらの尤度は次元縮約（`CompiledProblem.reduction`）で評価するが、下の
+   スコアのカーネルは全体のグリッド上の表を使うためである。mirt は `bfactor()` でどちらの種類も計算する
+   ので、これは参照値がないのではなく実装が未対応なだけで、あとで照合できる。
+   標本ウェイトとクラスタロバスト版（スコアをクラスタ内で
    合計する）は標本ウェイト（#84）のあと。
    **計算**（`_robust_se.py`。`_core.py` を変更しないよう Core の別モジュールにした）。
    `_fold_pattern_scores` はノード上の表 $\log P_{gjqk}(\eta)$ と $\log w_{gq}(\eta)$ を 1 回だけ評価し、

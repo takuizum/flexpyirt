@@ -348,7 +348,8 @@ print((res_sw.parameters["se"] / res.parameters["se"]).describe())  # near 1 if 
   `bk_se`, the latent `sd` / `cor` SEs, and `link()`.
 - With priors, the prior's curvature is added to the cross-product as it is to the information.
 - With `EmpiricalHistogram`, the histogram is held at its estimate, as for the other methods.
-- Not available with `DavidianCurve` or `NormalMixture` (`SpecificationError`).
+- Not available with `DavidianCurve` or `NormalMixture`, or for bifactor and two-tier models
+  (`SpecificationError`).
 - Respondents are treated as independent; sampling weights and clustered samples are not handled.
 - `"sandwich"` and `"crossprod"` need more distinct response patterns than free parameters, and
   are noisier than `"oakes"` in small samples.

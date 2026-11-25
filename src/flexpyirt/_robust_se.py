@@ -1,4 +1,4 @@
-"""Core layer: per-pattern scores and the cross-product information (DESIGN.md §4.8, §17.5).
+"""Core layer: per-pattern scores and the cross-product information (DESIGN.md §4.8, §17.3).
 
 Pure JAX functions on the :class:`~flexpyirt._core.CompiledProblem` pytree. ``fit()`` inverts
 :func:`information_cross_product` for ``se="crossprod"`` and combines it with the observed
@@ -8,7 +8,6 @@ information of :func:`flexpyirt._core.information_oakes` for ``se="sandwich"``.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypeVar
 
 import jax
 import jax.numpy as jnp
@@ -33,8 +32,6 @@ _CHUNK_ELEMENTS = 8_000_000
 _MAX_CHUNK = 1024
 """Maximum number of response patterns differentiated per chunk."""
 
-Carry = TypeVar("Carry")
-
 
 def _chunk_size(prob: CompiledProblem) -> int:
     """Return the static number of patterns per chunk that bounds the score workspace.
@@ -50,7 +47,7 @@ def _chunk_size(prob: CompiledProblem) -> int:
     return int(max(1, min(_MAX_CHUNK, _CHUNK_ELEMENTS // per_pattern)))
 
 
-def _fold_pattern_scores(
+def _fold_pattern_scores[Carry](
     prob: CompiledProblem,
     eta: Array,
     init: Carry,
@@ -134,7 +131,7 @@ def score_cross_product(prob: CompiledProblem, eta: Array) -> Array:
         s_p=\nabla_\eta\log\sum_q w_{g(p)q}(\eta)\prod_j P_j(y_{pj}\mid\theta_q;\eta)
 
     Berndt, Hall, Hall & Hausman (1974). The scores come from reverse-mode autodiff of each
-    pattern's marginal log-likelihood, in pattern chunks (DESIGN.md §17.5). A pattern of group
+    pattern's marginal log-likelihood, in pattern chunks (DESIGN.md §17.3). A pattern of group
     :math:`g` has a zero score for parameters that only enter other groups. For Empirical
     Histogram models the histogram weights are held fixed (they are not in :math:`\eta`;
     DESIGN.md §15.35).
@@ -150,7 +147,7 @@ def score_cross_product(prob: CompiledProblem, eta: Array) -> Array:
 
 
 def information_cross_product(prob: CompiledProblem, eta: Array) -> Array:
-    r"""Return the cross-product estimate of the (posterior) information (DESIGN.md §4.8, §17.5).
+    r"""Return the cross-product estimate of the (posterior) information (DESIGN.md §4.8, §17.3).
 
     .. math::
         B_{\mathrm{post}}(\hat\eta)=\sum_p c_p\,s_p s_p^\top-\nabla^2_\eta\log\pi(\hat\eta)

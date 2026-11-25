@@ -115,7 +115,7 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 4. [ ] Sampling (survey) weights (#84).
 5. [ ] Robust standard errors: sandwich and cross-product (#85).
    - [x] Without sampling weights: `fit(se="sandwich" | "crossprod")` for single and multiple groups,
-     FIPC, EH, 2–3 factors and priors (not with Davidian curves or normal mixtures); validated in V35
+     FIPC, EH, 2–3 factors and priors (not with Davidian curves, normal mixtures, bifactor or two-tier models); validated in V35
      against mirt `SE.type = "sandwich"` / `"crossprod"`. Weighted and cluster-robust versions still
      open.
 - **Acceptance**: V-numbered comparisons with mirt `bfactor()`, `residuals()`, `iteminfo()` /

@@ -1,4 +1,4 @@
-"""Unit tests for the cross-product and sandwich standard errors (DESIGN.md §17.5).
+"""Unit tests for the cross-product and sandwich standard errors (DESIGN.md §17.3).
 
 The agreement with R mirt is in ``tests/test_mirt_m7_robust_se.py`` (VALIDATION.md V35).
 """
@@ -132,6 +132,14 @@ def _named_problem(name: str) -> tuple[_core.CompiledProblem, jax.Array]:
             .prior(param="d", dist=NormalPrior(0.0, 2.0), items=binary)
         )
         return _problem(spec, mixed)
+    if name == "2pl_priors":
+        data = _simulate_2pl(9, 300, 5)
+        spec = (
+            Model.uniform(TwoPL(), items=data.columns)
+            .prior(param="a", dist=LogNormalPrior(0.0, 0.5), items=["q01", "q02", "q03"])
+            .prior(param="d", dist=NormalPrior(0.0, 2.0), items=["q01", "q02"])
+        )
+        return _problem(spec, data)
     if name == "two_group":
         grouped = pd.concat([_simulate_2pl(6, 250, 6), _simulate_2pl(6, 350, 6, mean=0.4, sd=1.2)])
         labels = np.repeat(["ref", "focal"], [250, 350])
@@ -190,7 +198,7 @@ def test_chunked_scores_match_dense_autodiff(
 
 def test_prior_curvature_is_added_like_in_the_hessian() -> None:
     """``B_post - B`` is minus the Hessian of the log prior (zero where there is no prior)."""
-    prob, eta = _named_problem("mixed_priors")
+    prob, eta = _named_problem("2pl_priors")
     with_prior = np.asarray(_jit(_robust_se.information_cross_product)(prob, eta))
     without = np.asarray(_jit(_robust_se.score_cross_product)(prob, eta))
     curvature = -np.asarray(jax.hessian(lambda e: _core.log_prior(prob, e))(eta))
@@ -378,6 +386,24 @@ def test_davidian_and_mixture_are_rejected_before_fitting(se: str) -> None:
     for latent, label in ((DavidianCurve(2), "DavidianCurve"), (NormalMixture(2), "NormalMixture")):
         spec = Model.uniform(TwoPL(), items=data.columns).with_latent(latent)
         with pytest.raises(SpecificationError, match=f"se='{se}' is not available with a {label}"):
+            fit(spec, data, se=se)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("se", ["crossprod", "sandwich"])
+def test_bifactor_and_two_tier_are_rejected_before_fitting(se: str) -> None:
+    """Dimension-reduced models are not covered (DESIGN.md §17.3): the scores use the full grid."""
+    data = _simulate_2pl(18, 50, 6)
+    base = Model.uniform(TwoPL(), items=data.columns)
+    reduced = (
+        base.with_bifactor(specific={"s1": ["q01", "q02", "q03"], "s2": ["q04", "q05", "q06"]}),
+        base.with_two_tier(
+            primary={"p1": ["q01", "q02", "q03"], "p2": ["q04", "q05", "q06"]},
+            specific={"s1": ["q01", "q04"], "s2": ["q02", "q05"]},
+        ),
+    )
+    for spec in reduced:
+        assert spec.is_reduced
+        with pytest.raises(SpecificationError, match="not available for bifactor and two-tier"):
             fit(spec, data, se=se)  # type: ignore[arg-type]
 
 

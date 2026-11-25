@@ -52,7 +52,7 @@ Bock–Aitkin EM algorithm (Bock & Aitkin, 1981).
 | `item_names` | list[str], optional | Column names when `data` is an array |
 | `method` | `BAEM`, optional | EM settings (default `BAEM()`) |
 | `quadrature` | `Quadrature`, optional | Quadrature grid (default: 61 points on $[-6, 6]$ for 1 factor, 31 per dimension for 2 factors, 15 per dimension for 3 factors) |
-| `se` | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / `None` | Standard-error method: the inverse observed information (`"oakes"`, `"hessian"`), the inverse cross-product of the per-pattern scores (`"crossprod"`, mirt `SE.type = "crossprod"`) or the robust sandwich covariance (`"sandwich"`, mirt `SE.type = "sandwich"`). All include the prior Hessian under MAP. `"sandwich"` and `"crossprod"` raise `SpecificationError` with `DavidianCurve` or `NormalMixture`. `None` skips it |
+| `se` | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / `None` | Standard-error method: the inverse observed information (`"oakes"`, `"hessian"`), the inverse cross-product of the per-pattern scores (`"crossprod"`, mirt `SE.type = "crossprod"`) or the robust sandwich covariance (`"sandwich"`, mirt `SE.type = "sandwich"`). All include the prior Hessian under MAP. `"sandwich"` and `"crossprod"` raise `SpecificationError` with `DavidianCurve` or `NormalMixture` and for bifactor and two-tier models. `None` skips it |
 
 **Returns**: [`FitResult`](#fitresult)
 

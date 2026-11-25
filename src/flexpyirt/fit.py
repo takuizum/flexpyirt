@@ -75,7 +75,7 @@ def fit(
     parameter scale without a Jacobian term (DESIGN.md §4.7). Standard errors come from Oakes'
     identity (Oakes, 1999) or the direct Hessian of the log-likelihood (or log posterior with
     priors), both by automatic differentiation (DESIGN.md §4.8). ``se="sandwich"`` and
-    ``se="crossprod"`` use the cross-product of the per-pattern scores (DESIGN.md §17.5).
+    ``se="crossprod"`` use the cross-product of the per-pattern scores (DESIGN.md §17.3).
 
     Parameters
     ----------
@@ -104,7 +104,7 @@ def fit(
         :math:`H^{-1}BH^{-1}` (Huber, 1967; White, 1982; mirt ``SE.type = "sandwich"``), which
         stays valid when the model is misspecified. With priors, the prior curvature is added
         to :math:`B` as it is to :math:`H`. Both are unavailable for ``DavidianCurve`` and
-        ``NormalMixture`` latent distributions.
+        ``NormalMixture`` latent distributions and for bifactor and two-tier models.
 
     Returns
     -------
@@ -126,6 +126,11 @@ def fit(
         latent_name = "DavidianCurve" if spec.is_davidian else "NormalMixture"
         raise SpecificationError(
             f"se={se!r} is not available with a {latent_name} latent distribution; "
+            "use se='oakes' or se='hessian'."
+        )
+    if se in ("sandwich", "crossprod") and spec.is_reduced:
+        raise SpecificationError(
+            f"se={se!r} is not available for bifactor and two-tier models; "
             "use se='oakes' or se='hessian'."
         )
     method = BAEM() if method is None else method
