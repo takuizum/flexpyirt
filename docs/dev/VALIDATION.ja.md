@@ -63,6 +63,7 @@
 | V29 | 比較データ法: 主因子法、書き出した乱数による 1 因子の母集団の生成、順位和検定、3 因子の連続・2 因子の順序・1 因子の 2 値のデータでの `CD()` | EFAtools の `.paf_iter`、`.simulate_cfm_empirical`、`CD()`、`wilcox.test(x, y, "less")` | M5 |
 | V30 | DIMTEST: 第 1 種の誤りと検出力（2PL。$N$ 1000〜2000、$J$ 20〜30。1 次元と相関 0.7〜0.8 の 2 次元。各 200 反復） | なし（DIMPACK 以外に実装がない）。`validation/simulation/dimtest_study.py` | M5 |
 | V31 | ジャックナイフ傾き指標（LSAT7 の 2PL、Science の GRM、依存するペア 2 組と 5% の MCAR を含むシミュレーションの 2PL、依存するペア 1 組を含むシミュレーションの GPCM）。Newton 法と 1 ステップの近似は推定し直した値と比べる | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
+| V32 | 次元縮約による双因子モデル（特殊因子 3 つと一般因子のみの項目 3 つを含む 2PL、テストレット 3 つの GRM $K=4$） | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -597,6 +598,22 @@
   .05 での第 1 種の誤りは 0.0〜2.0%（保守的。ブートストラップは偏りを除くが、帰無仮説の下での $T$ の SD は 0.75 程度）、
   検出力は 0.99〜1.00。`uv run python validation/simulation/dimtest_study.py`（約 4 分）で再実行できる。テストは帰無
   20 反復と対立 10 反復を実行する。
+- **双因子モデル（V32、M7）**: シミュレーション 2 例を `tests/test_mirt_m7_bifactor.py` で照合する（通常の EM と
+  SQUAREM。生成スクリプト `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`、mirt 1.46.1 の
+  `bfactor()`、`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、`SE.type = "Oakes"`、$[-6, 6]$ 上で次元あたり
+  31 点、すなわち特殊因子ごとに $31^2$ 格子 1 つ）。mirt の `fscores()` には双因子用の処理がなく 4 次元の直積格子全体で
+  積分するが、これは同じ 1 次元格子上の分解した事後分布と一致する。そこで EAP は全パラメタを mirt の推定値に固定し、
+  次元あたり 15 点（mirt では $15^4$ 節点）で比べる。どちらの例でも mirt の推定値での縮約対数尤度は mirt の値と相対
+  $10^{-15}$ で一致し、EM と SQUAREM は単調で、Oakes は Hessian と $3\times10^{-16}$（共分散の要素）で一致する:
+  - **V32a（`bifactor_2pl`、2PL、$J=15, N=2000$、`s1 = q01-q04`、`s2 = q05-q08`、`s3 = q09-q12`、`q13-q15` は
+    一般因子のみ）**: `loglik` 相対 `2.2e-16`、項目パラメタ `1.9e-7`（EM、498 反復。SQUAREM は `5.3e-9`、80 反復）、
+    Oakes SE 相対 `3.5e-7`（SQUAREM `8.9e-9`）、EAP $\theta$ `4.9e-14` / SD `8.7e-15`。
+  - **V32b（`bifactor_grm`、GRM $K=4$、$J=12, N=2000$、4 項目のテストレット 3 つ）**: `loglik` 相対 `8.9e-16`、項目
+    パラメタ `1.9e-8`（EM、188 反復。SQUAREM は `2.5e-9`、29 反復）、Oakes SE 相対 `2.5e-8`（SQUAREM `3.7e-9`）、
+    EAP $\theta$ `4.9e-14` / SD `7.9e-15`。
+  - 単体テスト（`tests/test_m7_bifactor.py`）は、縮約した尤度・期待度数・EAP を $(1+S)$ 次元の直積格子全体での
+    総当たり積分と比べ（欠測、GRM 項目、3PL 項目、一般因子のみの項目を含めて $10^{-12}$ 以内）、特殊因子 1 つの
+    双因子モデルを検証済みの 2 次元の経路（`with_factors(..., correlated=False)`、対数尤度 $10^{-12}$）と比べる。
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。

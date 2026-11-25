@@ -354,6 +354,20 @@ model.with_factors(factors, *, correlated=True) -> Model
 組み合わせると、各群の `Normal` がすべての因子に適用される（[ガイド 14 節](guide.ja.md#14-確認的多次元モデル)）。多次元モデルでの
 `with_latent()` と `EmpiricalHistogram` は未対応（`SpecificationError`）。
 
+#### `Model.with_bifactor`
+
+```text
+model.with_bifactor(*, specific, general="general") -> Model
+```
+
+双因子モデルを宣言する（[ガイド 14 節](guide.ja.md#双因子モデル)）。全項目が負荷する一般因子（名前は `general`）と、
+`specific`（因子名から項目への辞書、順序つき）の特殊因子からなる。各項目が負荷する特殊因子は高々 1 つで、どこにも
+挙げない項目は一般因子のみに負荷し、各特殊因子は 2 項目以上が必要。項目パラメタは `a1`（一般因子）、`a2`…`aD`
+（特殊因子。他の特殊因子への傾きは `0` に固定）、`d`（または `d1`…）で、mirt の `bfactor()` と一致する。因子は直交し、
+潜在パラメタの行は `mean_1`…`mean_D`（`0` 固定）と `var_1`…`var_D`（`1` 固定）。E ステップは Gibbons–Hedeker の
+次元縮約（特殊因子ごとに 2 次元格子 1 つ。既定は $[-6, 6]$ 上の 31 点）。群、`with_latent()`、`with_factors()` との
+併用、Rasch / PCM 項目、編集したテーブルでの潜在パラメタの自由推定は `SpecificationError`。スコアリングは `"EAP"` のみ。
+
 #### `Model.with_latent`
 
 ```text
@@ -424,8 +438,11 @@ model.parameter_table(data, *, group=None, item_names=None) -> DataFrame
 |---|---|
 | `item_names` | 項目名のタプル |
 | `is_multigroup` | `with_groups()` で群を宣言したか |
-| `is_multidimensional` | `with_factors()` で確認的因子を宣言したか |
-| `n_factors` | 潜在因子数（`1`, `2`, または `3`） |
+| `is_multidimensional` | `with_factors()` または `with_bifactor()` で因子を宣言したか |
+| `n_factors` | 潜在因子数（`1`, `2`, または `3`。双因子モデルでは `1 + S`） |
+| `bifactor` | `with_bifactor()` で宣言したか |
+| `quadrature_dimension` | E ステップが積分する格子の次元（双因子モデルでは `2`） |
+| `latent_parameter_names()` | 各群の Normal 潜在パラメタ名 |
 | `factor_names` | 因子名のタプル（1 次元モデルでは空タプル） |
 | `resolved_latent()` | 単一群モデルの潜在分布（既定則を適用したもの） |
 | `resolved_groups()` | `(群名, Normal)` のタプル。単一群なら `(("all", ...),)` |

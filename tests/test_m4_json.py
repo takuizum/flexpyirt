@@ -526,7 +526,7 @@ def test_malformed_format_and_schema_version(
         FitResult.from_json(json.dumps(no_fmt))
 
     # Unknown schema_version
-    for bad_ver in (0, 5, 99, "1", True):
+    for bad_ver in (0, 6, 99, "1", True):
         bad = _clone(sample_payload)
         bad["schema_version"] = bad_ver
         with pytest.raises(SpecificationError, match="schema_version"):
@@ -1071,6 +1071,7 @@ def test_schema_version_1_payload_still_loads(sample_payload: dict[str, Any]) ->
     del old["model"]["factors"]
     del old["model"]["correlated_factors"]
     del old["model"]["equal_items"]
+    del old["model"]["bifactor"]
     loaded = FitResult.from_json(json.dumps(old))
     assert not loaded._model.is_multidimensional
     expected = FitResult.from_json(json.dumps(sample_payload))
@@ -1079,6 +1080,7 @@ def test_schema_version_1_payload_still_loads(sample_payload: dict[str, Any]) ->
     with_keys = _clone(sample_payload)
     with_keys["schema_version"] = 1
     del with_keys["model"]["equal_items"]
+    del with_keys["model"]["bifactor"]
     with pytest.raises(SpecificationError, match="factors"):
         FitResult.from_json(json.dumps(with_keys))
     missing = _clone(sample_payload)
@@ -1147,7 +1149,10 @@ def test_schema_version_3_names_still_load() -> None:
     )
     res = fit(spec, df, method=BAEM(tol=1e-6), se=None)
     text = res.to_json()
-    old = text.replace(f'"schema_version": {SCHEMA_VERSION}', '"schema_version": 3')
+    old_obj = json.loads(text)
+    old_obj["schema_version"] = 3
+    del old_obj["model"]["bifactor"]  # added in version 5
+    old = json.dumps(old_obj)
     for new_name, old_name in [
         ('"n_categories"', '"n_cat"'),
         ('"LogNormalPrior"', '"LogNormal"'),
@@ -1162,6 +1167,4 @@ def test_schema_version_3_names_still_load() -> None:
     _assert_fit_result_identical(res, loaded, df.iloc[:20])
     # Version 4 files must use the new names.
     with pytest.raises(SpecificationError):
-        FitResult.from_json(
-            old.replace('"schema_version": 3', f'"schema_version": {SCHEMA_VERSION}')
-        )
+        FitResult.from_json(old.replace('"schema_version": 3', '"schema_version": 4'))
