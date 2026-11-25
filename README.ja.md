@@ -1,5 +1,11 @@
 # flexpyirt
 
+[![PyPI](https://img.shields.io/pypi/v/flexpyirt)](https://pypi.org/project/flexpyirt/)
+[![Python](https://img.shields.io/pypi/pyversions/flexpyirt)](https://pypi.org/project/flexpyirt/)
+[![CI](https://github.com/takuizum/flexpyirt/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/takuizum/flexpyirt/actions/workflows/ci.yml)
+[![Docs](https://github.com/takuizum/flexpyirt/actions/workflows/docs.yml/badge.svg?branch=main)](https://takuizum.github.io/flexpyirt/)
+[![License](https://img.shields.io/pypi/l/flexpyirt)](https://github.com/takuizum/flexpyirt/blob/main/LICENSE)
+
 [English](https://github.com/takuizum/flexpyirt/blob/main/README.md) | 日本語
 
 JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin EM による周辺最尤推定（MMLE）を中核に、
@@ -44,6 +50,20 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 次元数 | 平行分析（`parallel_analysis()`: ポリコリックまたは Pearson 相関、PCA または SMC の固有値、並べ替えまたは正規の参照データ、分位点または平均の基準）、Velicer の MAP（`velicer_map()`、元の版と改訂版）、経験的カイザー基準（`empirical_kaiser()`）、回転しない ULS / ML の因子分析（`efa()`）、Hull 法（`hull()`）、比較データ法（`comparison_data()`）。EFAtools・psych・EFA.dimensions と照合済み）。flexpyctt が提供する | ✓ |
 | 局所依存と一次元性 | Q3、Q3\*、Chen & Thissen の LD $X^2$ / $G^2$（`FitResult.local_dependence()`、mirt の `residuals()` と同じ）、ジャックナイフ傾き指標（`FitResult.jsi()`、mirt と同じ。速い近似もある）、モデルに基づく平行分析（`model_parallel_analysis()`、ltm の `unidimTest` と同じ）、確認的・探索的 DETECT（`detect()`、`exploratory_detect()`、sirt と同じ）、ブートストラップでバイアス補正する DIMTEST（`dimtest()`、シミュレーションで確認）、複数の手法を実行して合意を別々に示す `dimensionality()` のレポート。DETECT と DIMTEST は flexpyctt が提供する | ✓ |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
+
+## まだ対応していないもの
+
+いずれも[ロードマップ](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/ROADMAP.ja.md)で予定・管理している。
+
+- 多母集団モデルでの Davidian 曲線・混合正規（[#75](https://github.com/takuizum/flexpyirt/issues/75)）
+- 多母集団・欠測・MAP 推定での $M_2$（[#76](https://github.com/takuizum/flexpyirt/issues/76)）。双因子・two-tier・多母集団の多次元モデルでの
+  $M_2$ と S-X2
+- 群ごとの潜在分布を群について vmap する多数群の推定（[#79](https://github.com/takuizum/flexpyirt/issues/79)）
+- 多次元モデルの情報行列と方向情報量
+- 標本ウェイトに対する設計に基づく標準誤差: ウェイト付き・クラスタロバストなサンドイッチ SE
+  （[#85](https://github.com/takuizum/flexpyirt/issues/85)）。ウェイト付きの推定結果での項目適合度・$M_2$・局所依存・DIF
+- 単一群・1 次元・正規潜在分布以外のモデルでのジャックナイフ傾き指標
+- ユーザー定義の項目モデルのための公開拡張 API（[#86](https://github.com/takuizum/flexpyirt/issues/86)）
 
 ## インストール
 
@@ -163,6 +183,22 @@ warm の CPU 推定が `mirt` より速く（`mirt` 比 `0.12×–0.60×`）、�
 ## フィードバック
 
 不具合の報告や質問は [GitHub Issues](https://github.com/takuizum/flexpyirt/issues) へ。
+
+## 引用
+
+論文などで flexpyirt を使った場合は、使ったバージョン（`flexpyirt.__version__`）を添えて引用してほしい。
+リポジトリの [`CITATION.cff`](https://github.com/takuizum/flexpyirt/blob/main/CITATION.cff) から、GitHub の
+「Cite this repository」でも引用情報を取得できる。
+
+```bibtex
+@software{flexpyirt,
+  author  = {takuizum},
+  title   = {flexpyirt: Item Response Theory Estimation in {Python} with {JAX}},
+  year    = {2026},
+  url     = {https://github.com/takuizum/flexpyirt},
+  note    = {Python package, version x.y.z}
+}
+```
 
 ## ライセンス
 

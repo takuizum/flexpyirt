@@ -1,5 +1,11 @@
 # flexpyirt
 
+[![PyPI](https://img.shields.io/pypi/v/flexpyirt)](https://pypi.org/project/flexpyirt/)
+[![Python](https://img.shields.io/pypi/pyversions/flexpyirt)](https://pypi.org/project/flexpyirt/)
+[![CI](https://github.com/takuizum/flexpyirt/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/takuizum/flexpyirt/actions/workflows/ci.yml)
+[![Docs](https://github.com/takuizum/flexpyirt/actions/workflows/docs.yml/badge.svg?branch=main)](https://takuizum.github.io/flexpyirt/)
+[![License](https://img.shields.io/pypi/l/flexpyirt)](https://github.com/takuizum/flexpyirt/blob/main/LICENSE)
+
 English | [日本語](https://github.com/takuizum/flexpyirt/blob/main/README.ja.md)
 
 Item response theory (IRT) estimation in Python, built on JAX. At its core is marginal maximum
@@ -48,6 +54,22 @@ calibration and fixed item parameter calibration (FIPC).
 | Number of dimensions | Parallel analysis (`parallel_analysis()`: polychoric or Pearson, PCA or SMC eigenvalues, permutation or normal reference data, quantile or mean rule), Velicer's MAP (`velicer_map()`, original and revised) the empirical Kaiser criterion (`empirical_kaiser()`), unrotated ULS / ML factor analysis (`efa()`), the Hull method (`hull()`) and comparison data (`comparison_data()`); checked against EFAtools, psych and EFA.dimensions. Provided by flexpyctt | ✓ |
 | Local dependence and unidimensionality | Q3, Q3\* and Chen & Thissen LD $X^2$ / $G^2$ (`FitResult.local_dependence()`, as mirt's `residuals()`), the jackknife slope index (`FitResult.jsi()`, as mirt, with faster approximations), model-based parallel analysis (`model_parallel_analysis()`, as ltm's `unidimTest`), confirmatory and exploratory DETECT (`detect()`, `exploratory_detect()`, as sirt), DIMTEST with bootstrap bias correction (`dimtest()`, checked by simulation), and a `dimensionality()` report that runs several methods with separate consensus lines. DETECT and DIMTEST are provided by flexpyctt | ✓ |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
+
+## Not yet supported
+
+These are planned and tracked in the
+[roadmap](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/ROADMAP.md).
+
+- Davidian curves and normal mixtures in multiple-group models ([#75](https://github.com/takuizum/flexpyirt/issues/75))
+- $M_2$ for multiple groups, missing responses and MAP fits ([#76](https://github.com/takuizum/flexpyirt/issues/76)); $M_2$ and S-X2 for
+  bifactor, two-tier and multiple-group multidimensional models
+- Many-group fits with per-group latent distributions vmapped over groups ([#79](https://github.com/takuizum/flexpyirt/issues/79))
+- Information matrices and directional information for multidimensional models
+- Design-consistent standard errors for sampling weights: weighted and cluster-robust sandwich SEs
+  ([#85](https://github.com/takuizum/flexpyirt/issues/85)); item fit, $M_2$, local dependence and DIF for weighted fits
+- The jackknife slope index beyond single-group unidimensional models with a normal latent
+  distribution
+- A public extension API for user-defined item models ([#86](https://github.com/takuizum/flexpyirt/issues/86))
 
 ## Installation
 
@@ -172,6 +194,22 @@ Every document is also available in Japanese ([日本語サイト](https://takui
 ## Feedback
 
 Bug reports and questions are welcome on [GitHub Issues](https://github.com/takuizum/flexpyirt/issues).
+
+## Citation
+
+If you use flexpyirt in published work, please cite it, giving the version you used
+(`flexpyirt.__version__`). The repository's [`CITATION.cff`](https://github.com/takuizum/flexpyirt/blob/main/CITATION.cff)
+also provides GitHub's "Cite this repository" button.
+
+```bibtex
+@software{flexpyirt,
+  author  = {takuizum},
+  title   = {flexpyirt: Item Response Theory Estimation in {Python} with {JAX}},
+  year    = {2026},
+  url     = {https://github.com/takuizum/flexpyirt},
+  note    = {Python package, version x.y.z}
+}
+```
 
 ## License
 
