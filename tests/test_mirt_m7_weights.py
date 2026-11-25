@@ -186,10 +186,11 @@ def test_measured_differences(capsys: pytest.CaptureFixture[str]) -> None:
             est = max(abs(g - w) for _, g, w in _pairs(case, res, "estimate"))
             se = max(abs(g - w) / w for _, g, w in _pairs(case, res, "se"))
             hess = max(abs(g - w) / w for _, g, w in _pairs(case, _fit(name, "hessian"), "se"))
+            loglik = abs(res.loglik - case.raw["loglik"]) / abs(case.raw["loglik"])
+            aic, bic = abs(res.aic - case.raw["aic"]), abs(res.bic - case.raw["bic"])
             with capsys.disabled():
                 print(
-                    f"\n{name} squarem={squarem}: "
-                    f"loglik rel {abs(res.loglik - case.raw['loglik']) / abs(case.raw['loglik']):.1e}, "
+                    f"\n{name} squarem={squarem}: loglik rel {loglik:.1e}, "
                     f"params {est:.1e}, SE oakes rel {se:.1e}, SE hessian rel {hess:.1e}, "
-                    f"AIC {abs(res.aic - case.raw['aic']):.1e}, BIC {abs(res.bic - case.raw['bic']):.1e}"
+                    f"AIC {aic:.1e}, BIC {bic:.1e}"
                 )

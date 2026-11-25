@@ -68,6 +68,7 @@ English | [日本語](VALIDATION.ja.md)
 | V29 | Comparison data: PAF, the one-factor population generator from exported draws, rank-sum tests, `CD()` on 3-factor continuous, 2-factor ordinal and 1-factor binary data | EFAtools `.paf_iter`, `.simulate_cfm_empirical`, `CD()`; `wilcox.test(x, y, "less")` | M5 |
 | V30 | DIMTEST: type I error and power (2PL; $N$ 1000–2000, $J$ 20–30; unidimensional and two dimensions correlated 0.7–0.8; 200 replications each) | none (no implementation outside DIMPACK): `validation/simulation/dimtest_study.py` | M5 |
 | V31 | Jackknife slope index (LSAT7 2PL, Science GRM, simulated 2PL with two dependent pairs and 5% MCAR, simulated GPCM with a dependent pair); the Newton and one-step approximations against the refit | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
+| V34 | Sampling weights: 2PL with non-integer weights (sum $\ne N$, five zero weights), Science GRM with weights normalized to $N$, two groups with anchors, free focal latent and 5% missing, FIPC with a free latent; estimates, log-likelihood, AIC, BIC, Oakes SEs | `mirt(..., survey.weights = w)`, `multipleGroup(..., survey.weights = w)`, `SE.type = "Oakes"` | M7 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -577,6 +578,30 @@ English | [日本語](VALIDATION.ja.md)
   checks vs finite differences and a Monte Carlo linearization check that re-solves the linking
   for parameter draws from $N(\hat\eta, \Sigma)$ with fixed weights — not a bootstrap of the
   calibrations): `tests/test_m5_linking.py`.
+
+- **Sampling weights (V34, M7)**: mirt's `survey.weights` (mirt 1.48, `optimizer = "NR"`,
+  `TOL = 1e-10`, `SE.type = "Oakes"`); the reference files store the raw rows with one weight per
+  row, so the weighted pattern compression is part of what is compared. V34a: simulated 2PL
+  ($J=10$, $N=1000$), log-normal weights related to the sum score, not normalized
+  ($\sum w=1541.7$), five rows with weight 0. V34b: Science GRM ($N=392$), uniform weights
+  normalized to sum to $N$. V34c: two groups of 800, anchors q01–q05, focal mean and variance
+  free, 5% MCAR missing, gamma weights with different totals in the two groups (81 points on
+  $[-8,8]$). V34d: FIPC (q01–q05 fixed, latent mean and variance free, 81 points), log-normal
+  weights normalized to $N$. Measured differences (plain EM / SQUAREM, at most): log-likelihood
+  $1.8\times10^{-15}$ (relative), parameters $7.6\times10^{-8}$, Oakes SEs $1.1\times10^{-7}$
+  (relative), flexpyirt Hessian SEs vs mirt Oakes $1.1\times10^{-7}$ (relative), AIC and BIC
+  $5.1\times10^{-11}$; all within the common tolerances. mirt's BIC uses the sum of the weights as
+  $N$ (so does flexpyirt, DESIGN §17.4); V34a, whose weights do not sum to the number of rows,
+  checks this. Every reference fit differs from the unweighted fit of the same data
+  (log-likelihoods differ by more than $10^{-3}$ and parameters by more than $10^{-3}$), so
+  ignoring the weights would fail the tests. **Not validated against R**: integer weights against
+  row replication (2PL with missing data; two-group GRM with plain EM and SQUAREM; FIPC with an
+  empirical histogram; MAP), zero-weight rows against dropped rows, and rescaled weights are
+  checked as identities in `tests/test_m7_weights.py`. The Oakes / Hessian SEs agree with mirt's
+  but are not valid variance estimates under sampling weights (DESIGN §17.4); item fit, M2,
+  local dependence, JSI, DIF and model-based parallel analysis raise an error for a weighted fit.
+  Tests: `tests/test_mirt_m7_weights.py`. Reference generator:
+  `validation/r/m7_weights_reference.R`.
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)

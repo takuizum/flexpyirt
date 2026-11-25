@@ -27,7 +27,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の�
 
 ```text
 fit(spec, data, *, group=None, table=None, item_names=None, method=None,
-    quadrature=None, se="oakes") -> FitResult
+    quadrature=None, se="oakes", weights=None) -> FitResult
 ```
 
 Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は Bayes modal / MAP 推定。Bock & Aitkin, 1981）。
@@ -42,13 +42,14 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 | `method` | `BAEM`, 任意 | EM の設定（既定 `BAEM()`） |
 | `quadrature` | `Quadrature`, 任意 | 求積格子（既定: 1 因子は 61 点、2 因子は各軸 31 点、3 因子は各軸 15 点、いずれも $[-6, 6]$） |
 | `se` | `"oakes"` / `"hessian"` / `None` | 標準誤差の計算方法（MAP 時は事前分布の Hessian を含む）。`None` なら計算しない |
+| `weights` | 配列（長さ = 行数）, 任意 | 標本ウェイト。有限で非負の数（mirt の `survey.weights`）。推定値は $\sum_i w_i\log L_i$ を最大化する。ウェイトは与えられたまま使う（再スケールしない）。ウェイト 0 の行は無視する。整数ウェイトは行の繰り返しと同じ。このとき `se="oakes"` / `"hessian"` は重み付き情報行列の逆行列で、度数ウェイトでのみ正しく、標本ウェイトでは正しくない（`FlexpyirtWarning` で知らせる） |
 
 **戻り値**: [`FitResult`](#fitresult)
 
 **例外**: `PrecisionError`（JAX の 64 ビットが無効）、`SpecificationError`（仕様やデータの誤り）、
 `IdentificationError`（識別不能）。いずれも推定を始める前に出る。
 
-**警告**: `ConvergenceWarning`（`max_iter` に到達、または SQUAREM が通常 EM へ頻繁に退避）、`HeywoodWarning`（自由な漸近線が境界から `1e-4` 以内、自由な傾きが $|a| > 20$、または `NormalMixture` の成分の退化）、`FlexpyirtWarning`（情報行列が正定値でない、アンカーが 1 パラメタだけ）。
+**警告**: `ConvergenceWarning`（`max_iter` に到達、または SQUAREM が通常 EM へ頻繁に退避）、`HeywoodWarning`（自由な漸近線が境界から `1e-4` 以内、自由な傾きが $|a| > 20$、または `NormalMixture` の成分の退化）、`FlexpyirtWarning`（情報行列が正定値でない、アンカーが 1 パラメタだけ、`weights` と `se="oakes"` / `"hessian"` の併用）。
 
 ### `FitResult`
 
@@ -62,9 +63,9 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 | `parameters` | DataFrame | 検証済みの ParameterTable に `estimate`（推定値。固定なら固定値）と `se` を足したもの |
 | `loglik` | float | 推定値での周辺対数尤度（尤度のみ、事前分布は含めない） |
 | `log_posterior` | float | 推定値での対数事後確率（$\ell(\hat\eta) + \log\pi(\hat\eta)$）。事前分布なしでは `loglik` と同値 |
-| `aic`, `bic` | float | $-2\ell + 2k$、$-2\ell + k\log N$（$k$ = `n_params`, $N$ = `n_obs`）。事前分布が有効なときは `FlexpyirtWarning` を出す |
+| `aic`, `bic` | float | $-2\ell + 2k$、$-2\ell + k\log N$（$k$ = `n_params`, $N$ = `n_obs`。`weights` を付けた推定ではウェイトの和）。事前分布が有効なときは `FlexpyirtWarning` を出す |
 | `n_params` | int | 自由パラメタ数（等値制約は 1 つと数える） |
-| `n_obs` | int | 回答者数 |
+| `n_obs` | int | 回答者数（`weights` を付けた推定ではウェイトが正の行の数） |
 | `converged` | bool | 収束基準を満たしたか |
 | `n_iter` | int | 採択された EM（または SQUAREM）の反復回数 |
 | `n_em_evaluations` | int | EM 写像（E-step + M-step）の総評価回数。通常 EM では `n_iter` と同値、SQUAREM では採択 1 回あたり 2 または 3 |
@@ -72,6 +73,10 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 | `history` | DataFrame | `iter`, `loglik`, `log_posterior`（その反復に入るときの値。反復ごとに単調非減少）, `max_change`, `em_evaluations`（累積 EM 写像評価回数）, `safeguard`（SQUAREM 安全装置が発動したか） |
 | `vcov` | ndarray / None | 自由パラメタの共分散行列（`free_id` 順）。`se=None` なら None |
 | `se_method` | str / None | `"oakes"` / `"hessian"` / None |
+
+`weights` を付けて推定した結果は、`summary()` にウェイトの和を表示する。その `item_fit()`、`m2()`、
+`local_dependence()`、`jsi()`、`dif()` は `SpecificationError` を出す（これらの統計量はウェイトなしのデータに
+対して定義されている）。`model_parallel_analysis()` も同じ。`score()` はふだんどおり使える。
 
 #### `FitResult.log_posterior`
 

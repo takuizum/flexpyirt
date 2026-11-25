@@ -358,12 +358,11 @@ class FitResult:
 
     def _data_label(self) -> str:
         n_items = len(self._model.item_names)
-        weighted = (
-            "" if self._sum_weights is None else f" (weighted, sum of weights {self._sum_weights:.6g})"
-        )
+        weighted = ""
+        if self._sum_weights is not None:
+            weighted = f" (weighted, sum of weights {self._sum_weights:.6g})"
         return (
-            f"{self.n_obs} observations{weighted}, {n_items} items, "
-            f"{self.n_params} free parameters"
+            f"{self.n_obs} observations{weighted}, {n_items} items, {self.n_params} free parameters"
         )
 
     @property
@@ -1356,7 +1355,6 @@ class FitResult:
         est_kind = "MAP, priors active" if self._has_priors else "MMLE"
         se_label = "None" if self.se_method is None else self.se_method
         quad_label = self._quadrature_label()
-        n_items = len(self._model.item_names)
         aic_val = self._aic_value()
         bic_val = self._bic_value()
 
@@ -1439,7 +1437,6 @@ class FitResult:
         est_kind = "MAP, priors active" if self._has_priors else "MMLE"
         se_label = "None" if self.se_method is None else self.se_method
         quad_label = self._quadrature_label()
-        n_items = len(self._model.item_names)
 
         meta_rows = [
             ("Model", f"{self._model_label()} ({est_kind})"),

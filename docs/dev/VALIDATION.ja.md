@@ -63,6 +63,7 @@
 | V29 | 比較データ法: 主因子法、書き出した乱数による 1 因子の母集団の生成、順位和検定、3 因子の連続・2 因子の順序・1 因子の 2 値のデータでの `CD()` | EFAtools の `.paf_iter`、`.simulate_cfm_empirical`、`CD()`、`wilcox.test(x, y, "less")` | M5 |
 | V30 | DIMTEST: 第 1 種の誤りと検出力（2PL。$N$ 1000〜2000、$J$ 20〜30。1 次元と相関 0.7〜0.8 の 2 次元。各 200 反復） | なし（DIMPACK 以外に実装がない）。`validation/simulation/dimtest_study.py` | M5 |
 | V31 | ジャックナイフ傾き指標（LSAT7 の 2PL、Science の GRM、依存するペア 2 組と 5% の MCAR を含むシミュレーションの 2PL、依存するペア 1 組を含むシミュレーションの GPCM）。Newton 法と 1 ステップの近似は推定し直した値と比べる | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
+| V34 | 標本ウェイト: 非整数ウェイト（合計 $\ne N$、ウェイト 0 が 5 行）の 2PL、合計を $N$ に正規化したウェイトの Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC。推定値、対数尤度、AIC、BIC、Oakes の SE | `mirt(..., survey.weights = w)`、`multipleGroup(..., survey.weights = w)`、`SE.type = "Oakes"` | M7 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -597,6 +598,24 @@
   .05 での第 1 種の誤りは 0.0〜2.0%（保守的。ブートストラップは偏りを除くが、帰無仮説の下での $T$ の SD は 0.75 程度）、
   検出力は 0.99〜1.00。`uv run python validation/simulation/dimtest_study.py`（約 4 分）で再実行できる。テストは帰無
   20 反復と対立 10 反復を実行する。
+- **標本ウェイト（V34、M7）**: mirt の `survey.weights`（mirt 1.48、`optimizer = "NR"`、`TOL = 1e-10`、
+  `SE.type = "Oakes"`）。参照ファイルは行ごとのウェイトとともに元の行を保存するので、ウェイトを足し合わせる
+  パターン圧縮も比較の対象になる。V34a: シミュレーションの 2PL（$J=10$、$N=1000$）、合計点と関係する対数正規
+  ウェイト、正規化なし（$\sum w=1541.7$）、ウェイト 0 が 5 行。V34b: Science の GRM（$N=392$）、合計を $N$ に
+  正規化した一様ウェイト。V34c: 各 800 人の 2 群、アンカー q01–q05、focal 群の平均と分散を推定、5% の MCAR 欠測、
+  2 群で合計の異なるガンマウェイト（$[-8,8]$ の 81 点）。V34d: FIPC（q01–q05 を固定、潜在分布の平均と分散を推定、
+  81 点）、合計を $N$ に正規化した対数正規ウェイト。差の実測値（通常の EM・SQUAREM の最大）: 対数尤度
+  $1.8\times10^{-15}$（相対）、パラメタ $7.6\times10^{-8}$、Oakes SE $1.1\times10^{-7}$（相対）、flexpyirt の
+  Hessian SE と mirt の Oakes $1.1\times10^{-7}$（相対）、AIC・BIC $5.1\times10^{-11}$。いずれも共通の許容誤差内。
+  mirt の BIC はウェイトの和を $N$ として使う（flexpyirt も同じ。DESIGN §17.4）。ウェイトの合計が行数と異なる
+  V34a がこれを確かめる。どの参照値も同じデータのウェイトなしの推定とは異なる（対数尤度が $10^{-3}$ 超、
+  パラメタが $10^{-3}$ 超の差）ので、ウェイトを無視すればテストは落ちる。**R と照合していないもの**: 整数ウェイトと
+  行の複製の一致（欠測のある 2PL、通常の EM と SQUAREM での 2 群 GRM、経験ヒストグラムの FIPC、MAP）、
+  ウェイト 0 の行と行の削除の一致、ウェイトの定数倍は、恒等式として `tests/test_m7_weights.py` で確かめる。
+  Oakes・Hessian の SE は mirt と一致するが、標本ウェイトのもとでは正しい分散推定量ではない（DESIGN §17.4）。
+  項目適合度、M2、局所依存、JSI、DIF、モデルに基づく平行分析は、ウェイト付きの推定結果に対してエラーを出す。
+  テスト: `tests/test_mirt_m7_weights.py`。参照値生成: `validation/r/m7_weights_reference.R`。
+
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。

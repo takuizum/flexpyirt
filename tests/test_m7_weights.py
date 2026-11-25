@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import warnings
+from collections.abc import Callable
 from typing import Any
 
 import jax
@@ -53,7 +54,7 @@ def _fit(spec: Model, data: pd.DataFrame, **kwargs: Any) -> FitResult:
 
 
 def _free(res: FitResult, col: str) -> np.ndarray:
-    return res.parameters.loc[res.parameters["free"], col].to_numpy(dtype=float)
+    return np.asarray(res.parameters.loc[res.parameters["free"], col], dtype=float)
 
 
 def _assert_same_fit(res: FitResult, other: FitResult, *, tol: float = 1e-6) -> None:
@@ -95,7 +96,7 @@ def test_group_with_only_zero_weights_raises() -> None:
         .equal_across_groups(items=list(data.columns))
     )
     weights = np.where(group == "a", 1.0, 0.0)
-    with pytest.raises(SpecificationError, match="weights are all zero.*'b'"):
+    with pytest.raises(SpecificationError, match=r"weights are all zero.*'b'"):
         fit(spec, data, group=group, weights=weights)
 
 
@@ -267,7 +268,7 @@ def test_se_warning_only_with_weights_and_se() -> None:
     method = BAEM(tol=1e-4)
     for se in ("oakes", "hessian"):
         with pytest.warns(FlexpyirtWarning, match="sampling weights"):
-            fit(spec, data, weights=weights, method=method, se=se)  # type: ignore[arg-type]
+            fit(spec, data, weights=weights, method=method, se=se)
     with warnings.catch_warnings():
         warnings.simplefilter("error", FlexpyirtWarning)
         res = fit(spec, data, weights=weights, method=method, se=None)
@@ -287,16 +288,14 @@ def test_diagnostics_reject_weighted_fits(
     weighted_result: tuple[FitResult, pd.DataFrame, np.ndarray],
 ) -> None:
     res, data, _ = weighted_result
-    calls = {
+    calls: dict[str, Callable[[], object]] = {
         "item_fit": lambda: res.item_fit(data),
         "m2": lambda: res.m2(data),
         "local_dependence": lambda: res.local_dependence(data),
         "jsi": lambda: res.jsi(data),
         "dif": lambda: res.dif(data, group=np.repeat(["a", "b"], 150), items=["i0"]),
         "model_parallel_analysis": lambda: model_parallel_analysis(
-            res,
-            data,
-            key=jax.random.key(0),  # type: ignore[no-untyped-call]
+            res, data, key=jax.random.key(0)
         ),
     }
     for name, call in calls.items():
@@ -339,7 +338,7 @@ def test_json_round_trip_keeps_sum_of_weights(
             FitResult.from_json(json.dumps(broken))
 
     # Version 4 has no sum_weights: such a file loads without it and rejects the key.
-    with pytest.raises(SpecificationError, match="Unexpected keys.*sum_weights"):
+    with pytest.raises(SpecificationError, match=r"Unexpected keys.*sum_weights"):
         FitResult.from_json(json.dumps({**payload, "schema_version": 4}))
     old = {k: v for k, v in payload.items() if k != "sum_weights"} | {"schema_version": 4}
     assert FitResult.from_json(json.dumps(old))._sum_weights is None
