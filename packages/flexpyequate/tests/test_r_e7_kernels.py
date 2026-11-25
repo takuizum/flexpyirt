@@ -157,8 +157,8 @@ def test_equivalent_groups(kernel: str) -> None:
 def test_penalty(kernel: str) -> None:
     reference = REFERENCE["equivalent_groups"][kernel]
     x, y = _equivalent_groups()
-    scores, probabilities = x.distribution.scores, x.distribution.probabilities
     assert isinstance(x.distribution, ScoreDistribution)
+    scores, probabilities = x.distribution.scores, x.distribution.probabilities
     grid = REFERENCE["equivalent_groups"]["penalty_grid"]
     for weight, source, key in (
         (0.0, "kequate_book", "penalty_x_weight0"),
