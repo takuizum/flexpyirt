@@ -1338,28 +1338,41 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     含むシミュレーションの GPCM。推定し直した値は $10^{-5}$ で一致する（観測値 $\le1.2\times10^{-7}$）。テストでは
     ほかに、推定し直した値を項目を除いたデータへの `fit()` と、近似を 15 項目のデータで推定し直した値と（`"newton"`
     1 ステップ 0.03、2 ステップ 0.02、`"one_step"` 0.05）、vmap した勾配を 1 つずつの勾配と比べる。
-18. **パッケージの分割: `flexpyctt`（2026-11-25 決定、issue #87）**: 推定済みの IRT モデルを使わない道具を、JAX に依存
+18. **パッケージの分割: `flexpyctt` と `flexpyequate`（2026-11-25 決定、issue #87）**: 推定済みの IRT モデルを使わない道具を、JAX に依存
     しない別の配布物としてこのリポジトリから公開する。flexpyirt は BA-EM による推定と、その結果を使う道具に絞る。
 
     | 配布物 | 範囲 | 依存 |
     |---|---|---|
     | `flexpyirt` | 推定。`FitResult` を使う道具（`local_dependence()`、`jsi()`、`model_parallel_analysis()`、`link()`、IRT の等化）。`dimensionality()` のレポート | JAX、`flexpyctt` |
     | `flexpyctt` | モデルを使わない項目・テスト分析: `polychoric()`、`parallel_analysis()`、`velicer_map()`、`empirical_kaiser()`、`efa()`、`hull()`、`comparison_data()`、`detect()`、`exploratory_detect()`、`dimtest()`。今後、古典的項目分析と Mantel–Haenszel DIF | NumPy、SciPy、pandas |
-    | `flexpyequate`（今後） | 得点分布の等化のみ | NumPy、SciPy、pandas |
+    | `flexpyequate` | 得点分布の等化のみ: 平均等化、線形等化、等パーセンタイル等化、アンカーテストを使う方法、対数線形モデルによる事前平滑化、カーネル等化（設計文書は別にある: `packages/flexpyequate/docs/DESIGN.ja.md`） | NumPy、SciPy、pandas |
 
     **配置**: uv ワークスペース。flexpyirt はリポジトリのルートに置いたままにする（`pyproject.toml`、`src/flexpyirt/`、
     `tests/`）。issue の `packages/flexpyirt/` への移動は見送る（ディレクトリを動かすと、開いているすべてのブランチと
     衝突するため）。メンバーは `packages/*`。`packages/flexpyctt/` は自分の `pyproject.toml`、`README.md`（PyPI の
     ページ。リンクは絶対 URL）、`LICENSE`、`src/flexpyctt/`、`tests/`（`tests/reference/` を含む）、`validation/` を持つ。
     flexpyirt は flexpyctt に依存する（`[tool.uv.sources] flexpyctt = { workspace = true }`）ので、
-    `pip install flexpyirt` だけですべての道具が入る。**バージョンは 1 つ**: どちらも同じタグ `vX.Y.Z` を hatch-vcs で
+    `pip install flexpyirt` だけでこの 2 つの道具はすべて入る。`packages/flexpyequate/` も同じ構成である
+    （`docs/DESIGN.md` が加わる。R スクリプトはルートの `validation/r/equate_*.R`）。**flexpyequate は独立している**:
+    JAX も flexpyirt も flexpyctt も import せず、その 2 つも flexpyequate に依存せず、再公開もしない
+    （`pip install flexpyirt` では入らない）。ルートでは `dev` の依存グループにだけ入れてあり、`uv sync` でテスト用に
+    インストールされる。flexpyirt の sdist には含めない。項目パラメータを使う等化は flexpyirt に残す。
+    **バージョンは 1 つ**: 3 つとも同じタグ `vX.Y.Z` を hatch-vcs で
     読む（メンバー側は `raw-options.root = "../.."`）。リリースのワークフローは `uv build --package` でそれぞれをビルド
-    し、flexpyctt を flexpyirt より先に公開する。flexpyirt は flexpyctt の非公開ヘルパーをいくつか使う（後述）ので、
+    し、flexpyctt を flexpyirt より先に公開する。flexpyequate は自分の PyPI のジョブを持ち、どちらも待たない。flexpyirt は flexpyctt の非公開ヘルパーをいくつか使う（後述）ので、
     2 つは同じバージョンで使う前提。依存にはまだバージョンの範囲を付けていない（未決: ビルドフックで
     `flexpyctt==<同じバージョン>` に固定する）。
 
     **flexpyctt は JAX を import しない**。64 ビットの設定も要らない（NumPy は float64）。CI のジョブが flexpyctt
-    だけをインストールし、`jax` が無いことを確かめたうえでテストを実行する。
+    だけをインストールし、`jax` が無いことを確かめたうえでテストを実行する。別のジョブが flexpyequate について同じことを
+    行う（`jax`、`flexpyirt`、`flexpyctt` が無いことを確かめる）。
+    **ツールの設定**: flexpyirt と flexpyctt の ruff と mypy は、ルートの `pyproject.toml` で設定する。flexpyequate は
+    同じ規則の `[tool.ruff]` と `[tool.mypy]` を自分で持つ（ruff はルートから実行してもそのディレクトリにはその設定を
+    使う。mypy は `packages/flexpyequate/` で実行する）。flexpyequate のテストはルートと同じ `tests` という名前の
+    パッケージで、同じ名前のパッケージ 2 つを 1 回の mypy では扱えないためである。**ドキュメントサイト**: flexpyctt の
+    道具はユーザーガイドと API リファレンスで説明する（flexpyirt が再公開している）。flexpyequate は 1 ページ
+    （`docs/equating.md`）で、`scripts/mkdocs_hooks.py` がそこにパッケージの README（PyPI のページ）を入れる。文章は
+    1 か所にしかない。
 
     **ポリコリック相関の 2 つの実装。** `flexpyctt.polychoric()` は §16.9 の推定量を NumPy / SciPy で新しく実装した
     もの（定義、引数、既定値、警告、`PolychoricResult` は同じ）:

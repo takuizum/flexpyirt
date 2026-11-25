@@ -1888,7 +1888,7 @@ data-independent shapes (§15.21).
     $\le1.2\times10^{-7}$). The tests also check the refit against `fit()` on the data without the
     item, the approximations against the refit on a 15-item data set (`"newton"` 1 step 0.03, 2
     steps 0.02, `"one_step"` 0.05) and the vmapped gradients against single ones.
-18. **Package split: `flexpyctt` (decided 2026-11-25, issue #87)**: tools that need no fitted IRT
+18. **Package split: `flexpyctt` and `flexpyequate` (decided 2026-11-25, issue #87)**: tools that need no fitted IRT
     model are released as separate, JAX-free distributions from this repository. flexpyirt keeps
     BA-EM estimation and everything that uses its result.
 
@@ -1896,7 +1896,7 @@ data-independent shapes (§15.21).
     |---|---|---|
     | `flexpyirt` | estimation; tools that take a `FitResult` (`local_dependence()`, `jsi()`, `model_parallel_analysis()`, `link()`, IRT equating); the `dimensionality()` report | JAX, `flexpyctt` |
     | `flexpyctt` | model-free item and test analysis: `polychoric()`, `parallel_analysis()`, `velicer_map()`, `empirical_kaiser()`, `efa()`, `hull()`, `comparison_data()`, `detect()`, `exploratory_detect()`, `dimtest()`; later classical item analysis and Mantel–Haenszel DIF | NumPy, SciPy, pandas |
-    | `flexpyequate` (later) | equating of score distributions only | NumPy, SciPy, pandas |
+    | `flexpyequate` | equating of score distributions only: mean, linear and equipercentile equating, the anchor-test methods, log-linear presmoothing, kernel equating (its own design document: `packages/flexpyequate/docs/DESIGN.md`) | NumPy, SciPy, pandas |
 
     **Layout**: a uv workspace. flexpyirt stays at the repository root (`pyproject.toml`,
     `src/flexpyirt/`, `tests/`); the issue's `packages/flexpyirt/` is postponed, because moving
@@ -1904,15 +1904,31 @@ data-independent shapes (§15.21).
     `packages/flexpyctt/` has its own `pyproject.toml`, `README.md` (the PyPI page, absolute
     links), `LICENSE`, `src/flexpyctt/`, `tests/` (with `tests/reference/`) and `validation/`.
     flexpyirt depends on flexpyctt (`[tool.uv.sources] flexpyctt = { workspace = true }`), so
-    `pip install flexpyirt` still provides every tool. **One version**: both read the same
-    `vX.Y.Z` tag through hatch-vcs (`raw-options.root = "../.."` in the member). The release
-    workflow builds each with `uv build --package` and publishes flexpyctt before flexpyirt.
+    `pip install flexpyirt` still provides every tool of those two. `packages/flexpyequate/` has
+    the same layout (plus `docs/DESIGN.md`; its R scripts are `validation/r/equate_*.R` at the
+    root). **flexpyequate is independent**: it imports neither JAX, flexpyirt nor flexpyctt, and
+    neither of them depends on it or re-exports it (`pip install flexpyirt` does not install it).
+    The root lists it in the `dev` dependency group only, so that `uv sync` installs it for the
+    tests; it is not in flexpyirt's sdist. Equating that needs item parameters stays in
+    flexpyirt. **One version**: all three read the same
+    `vX.Y.Z` tag through hatch-vcs (`raw-options.root = "../.."` in the members). The release
+    workflow builds each with `uv build --package` and publishes flexpyctt before flexpyirt;
+    flexpyequate has a PyPI job of its own that waits for neither.
     flexpyirt imports a few private helpers of flexpyctt (below), so the two are meant to be
     installed at the same version; the dependency carries no version bound yet (open point: pin
     `flexpyctt==<same version>` with a build hook).
 
     **flexpyctt never imports JAX**, and has no 64-bit requirement (NumPy is float64). A CI job
-    installs it alone, asserts that `jax` is absent and runs its tests.
+    installs it alone, asserts that `jax` is absent and runs its tests. A second job does the
+    same for flexpyequate (`jax`, `flexpyirt` and `flexpyctt` absent).
+    **Tooling**: ruff and mypy for flexpyirt and flexpyctt are configured in the root
+    `pyproject.toml`. flexpyequate keeps its own `[tool.ruff]` and `[tool.mypy]` with the same
+    rules (ruff picks them up for that directory when run from the root; mypy runs from
+    `packages/flexpyequate/`), because its tests are a package named `tests`, like the root's,
+    and one mypy run cannot hold two packages of that name. **Documentation site**: flexpyctt's
+    tools are documented in the user guide and the API reference (flexpyirt re-exports them);
+    flexpyequate has one page, `docs/equating.md`, into which `scripts/mkdocs_hooks.py` puts the
+    package README (the PyPI page), so the text exists once.
 
     **Two polychoric implementations.** `flexpyctt.polychoric()` is a new NumPy / SciPy
     implementation of the estimator of §16.9 (same definition, options, defaults, warnings and
