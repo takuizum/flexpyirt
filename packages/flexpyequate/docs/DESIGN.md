@@ -2,8 +2,8 @@
 
 English | [日本語](DESIGN.ja.md)
 
-> Status: draft v0.4 (2026-11-25). Milestones E1–E6 are implemented and validated against R
-> (§7); E7 is planned. Decisions are marked "Decision".
+> Status: draft v0.5 (2026-11-25). Milestones E1–E7 are implemented and validated against R
+> (§7). Decisions are marked "Decision".
 
 ## 1. Purpose and non-goals
 
@@ -96,7 +96,7 @@ the same container.
 - Linear (ch. 2): $e_Y(x) = \dfrac{\sigma_Y}{\sigma_X}(x - \mu_X) + \mu_Y$.
 
 For SG data the same formulas apply to the two margins (the dependence between X and Y matters
-only for standard errors, E7).
+only for standard errors, §4.8).
 
 **Decision**: the population variance (`ddof=0`) is the default because that is the formula in
 Kolen & Brennan; `ddof=1` reproduces R `equate`, which divides by $N - 1$ (§7).
@@ -342,6 +342,262 @@ equating is defined; `moments` then describes the synthetic population. For chai
 they are X in population 1 and Y in population 2, and the two anchor distributions are kept in
 `anchor_distributions` so that `transform()` can equate arbitrary scores.
 
+### 4.8 Standard errors of the traditional methods (E7)
+
+`equate(..., standard_error=...)` returns the standard error of equating at the possible scores
+of X (`EquatingResult.see`, a column `see` of `table`).
+
+**Delta method** (`"analytic"`; Kolen, 1985; Kolen & Brennan, 2014, ch. 7; Zu & Yuan, 2012).
+Every linear method except Braun–Holland is a function $e_Y(x) = c(\theta) + b(\theta)x$ of the
+means, variances and covariances $\theta$ of the samples, so
+
+$$\mathrm{SE}[\hat e_Y(x)]^2 = g(x)^\top \Omega\, g(x), \qquad g(x) = \nabla c + x\,\nabla b,
+\qquad \Omega = \operatorname{Cov}(\hat\theta),$$
+
+with one block of $\Omega$ per independent sample. For a sample of size $N$ with scores $A, B,
+\dots$ and central moments $\mu$,
+
+$$N\operatorname{Cov}(\bar A, \bar B) = \sigma_{AB}, \qquad
+N\operatorname{Cov}(\bar A, s_{BC}) = \mu_{ABC}, \qquad
+N\operatorname{Cov}(s_{AB}, s_{CD}) = \mu_{ABCD} - \sigma_{AB}\sigma_{CD},$$
+
+which is the multinomial covariance of the cell proportions carried to the moments (no
+distributional assumption). For linear equating of equivalent groups this gives the formula of
+Braun & Holland (1982),
+
+$$\mathrm{SE}^2 = \sigma_Y^2\Bigl\{\frac{1}{N_X} + \frac{1}{N_Y}
++ \Bigl[\frac{\mathrm{sk}(X)}{N_X} + \frac{\mathrm{sk}(Y)}{N_Y}\Bigr] z
++ \Bigl[\frac{\mathrm{ku}(X) - 1}{4N_X} + \frac{\mathrm{ku}(Y) - 1}{4N_Y}\Bigr] z^2\Bigr\},
+\qquad z = \frac{x - \mu_X}{\sigma_X}.$$
+
+The gradients: for mean and linear equating, $\partial b/\partial\sigma_X^2 = -b/(2\sigma_X^2)$,
+$\partial b/\partial\sigma_Y^2 = b/(2\sigma_Y^2)$ and
+$\nabla c = \nabla\mu_Y - b\nabla\mu_X - \mu_X\nabla b$ ($b = 1$ for mean equating). For the
+Tucker and Levine observed-score methods, with $\Delta_\mu = \mu_1(V) - \mu_2(V)$ and
+$\Delta_\sigma = \sigma_1^2(V) - \sigma_2^2(V)$ (§4.6),
+
+$$d\mu_s(X) = d\mu_1(X) - w_2\Delta_\mu\, d\gamma_1 - w_2\gamma_1\, d\Delta_\mu, \qquad
+d\mu_s(Y) = d\mu_2(Y) + w_1\Delta_\mu\, d\gamma_2 + w_1\gamma_2\, d\Delta_\mu,$$
+
+$$d\sigma_s^2(X) = d\sigma_1^2(X) + 2\gamma_1(-w_2\Delta_\sigma + w_1w_2\Delta_\mu^2)\, d\gamma_1
+- w_2\gamma_1^2\, d\Delta_\sigma + 2w_1w_2\gamma_1^2\Delta_\mu\, d\Delta_\mu,$$
+
+$$d\sigma_s^2(Y) = d\sigma_2^2(Y) + 2\gamma_2(w_1\Delta_\sigma + w_1w_2\Delta_\mu^2)\, d\gamma_2
++ w_1\gamma_2^2\, d\Delta_\sigma + 2w_1w_2\gamma_2^2\Delta_\mu\, d\Delta_\mu,$$
+
+$$db = \frac b2\Bigl[\frac{d\sigma_s^2(Y)}{\sigma_s^2(Y)} - \frac{d\sigma_s^2(X)}{\sigma_s^2(X)}\Bigr],
+\qquad dc = d\mu_s(Y) - b\, d\mu_s(X) - \mu_s(X)\, db,$$
+
+and $d\gamma$ from the definition of $\gamma$ (Tucker: $\partial\gamma/\partial\sigma_{XV} =
+1/\sigma_V^2$, $\partial\gamma/\partial\sigma_V^2 = -\sigma_{XV}/\sigma_V^4$; Levine, internal:
+$1/\sigma_{XV}$ for $\sigma_X^2$ and $-\sigma_X^2/\sigma_{XV}^2$ for $\sigma_{XV}$; Levine,
+external: $1/(\sigma_V^2 + \sigma_{XV})$, $(\sigma_V^2 - \sigma_X^2)/(\sigma_V^2 +
+\sigma_{XV})^2$ and $-(\sigma_X^2 + \sigma_{XV})/(\sigma_V^2 + \sigma_{XV})^2$ for
+$\sigma_X^2$, $\sigma_{XV}$, $\sigma_V^2$). Levine true-score and chained linear equating are
+differentiated in the same way from their formulas in §4.6. The synthetic weight is a constant.
+
+**Braun–Holland** depends on the whole joint distributions, so it is differentiated with respect
+to the cell probabilities $p_{jl}$ (X, V in population 1) and $q_{kl}$ (Y, V in population 2).
+With $e = \mu_s(Y) + b\,(x - \mu_s(X))$,
+$A_j = -b\,x_j - b\,(x - \mu_s(X))(x_j - \mu_s(X))^2 / (2\sigma_s^2(X))$,
+$B_k = y_k + b\,(x - \mu_s(X))(y_k - \mu_s(Y))^2 / (2\sigma_s^2(Y))$,
+$\bar A_l = \sum_j A_j p_{jl}$ and $\bar B_l = \sum_k B_k q_{kl}$,
+
+$$\frac{\partial e}{\partial p_{jl}} = A_j\Bigl[w_1 + w_2\frac{h_{2l}}{h_{1l}}\Bigr]
+- w_2\frac{h_{2l}}{h_{1l}^2}\bar A_l + w_1\frac{\bar B_l}{h_{2l}}, \qquad
+\frac{\partial e}{\partial q_{kl}} = B_k\Bigl[w_2 + w_1\frac{h_{1l}}{h_{2l}}\Bigr]
+- w_1\frac{h_{1l}}{h_{2l}^2}\bar B_l + w_2\frac{\bar A_l}{h_{1l}},$$
+
+and the variance is $\sum_{\text{samples}}[\sum p\,(\partial e)^2 - (\sum p\,\partial e)^2]/N$.
+
+**Normal theory** (`"analytic_normal"`): the same gradients with $\Omega$ under (bivariate)
+normality, i.e. third moments zero and $\mu_{ABCD} - \sigma_{AB}\sigma_{CD} =
+\sigma_{AC}\sigma_{BD} + \sigma_{AD}\sigma_{BC}$. For linear equating this gives
+$\sigma_Y^2 (1/N_X + 1/N_Y)(1 + z^2/2)$ for equivalent groups and
+$\sigma_Y^2 (1 - \rho)[z^2(1 + \rho) + 2]/N$ for a single group (Lord, 1950; Angoff, 1971; unit
+tests).
+
+**Equipercentile equating, equivalent groups** (Lord, 1982; Kolen & Brennan, 2014, ch. 7). With
+$p = P(x)$ as a proportion, $y^*_U = \min\{y_k : G(y_k) > p\}$, $G_0 = G(y^*_U - \delta_Y)$ and
+$g = G(y^*_U) - G_0$,
+
+$$\mathrm{SE}^2 = \frac{\delta_Y^2}{g^2}\Bigl\{\frac{p(1 - p)}{N_X}
++ \frac{1}{N_Y}\Bigl[G_0 - p^2 + \frac{(p - G_0)^2}{g}\Bigr]\Bigr\}.$$
+
+The second term is the exact delta-method variance of $Q(y)$; the first treats the percentile
+rank as a binomial proportion, which overstates its variance by $f(x)/(4N_X)$ for a discrete
+score. The formula is therefore an approximation: over the scores with percentile rank between
+2 and 98 the ratio of the bootstrap standard error (2000 replications) to Lord's lies between
+0.87 and 1.13, with a mean of 0.98 to 1.01, in the three reference data sets.
+
+**Bootstrap** (`"bootstrap"`; Kolen & Brennan, 2014, ch. 7; as `equate::bootstrap`). Each of
+`n_replications` replications draws $N$ examinees with replacement from every sample, which for
+frequency data is a multinomial draw with the observed relative frequencies (the cells of a
+joint distribution are resampled, so the dependence between the two scores is kept); the
+sample of X is drawn first, then that of Y. Each bootstrap sample is equated with the same
+method, and the standard error is the standard deviation (divisor $B - 1$) of the equated
+scores. `bootstrap_mean` is their mean.
+
+| Method (design) | `analytic` | `analytic_normal` | `bootstrap` |
+|---|---|---|---|
+| identity | 0 | 0 | 0 |
+| mean, linear (EG) | yes (Braun & Holland, 1982) | yes | yes |
+| mean, linear (SG) | yes | yes | yes |
+| equipercentile (EG) | yes (Lord, 1982) | no | yes |
+| equipercentile (SG) | no | no | yes |
+| Tucker, Levine observed score, chained linear | yes | yes | yes |
+| Levine true score | yes | yes | yes |
+| Braun–Holland | yes (cell probabilities) | no | yes |
+| frequency estimation, chained equipercentile | no | no | yes |
+
+**Decision**: the standard error is an option of `equate()` (`standard_error=None` by default,
+so existing calls do not change), not a separate function: it needs the same inputs and the
+same validated options.
+
+**Decision**: `"analytic"` means the distribution-free delta method. R `equate` reports both
+versions for the anchor-test methods and only the distribution-free one for equivalent groups;
+the normal-theory version is the separate option `"analytic_normal"`.
+
+**Decision**: the variances and covariances that are plugged into the analytic formulas follow
+`ddof`, like the equating function itself; third and fourth moments always divide by $N$. With
+`ddof=1` this reproduces `equate`'s standard error of linear equating for equivalent groups
+exactly.
+
+**Decision**: the bootstrap requires `rng` (a `numpy.random.Generator` or a non-negative
+integer seed) and raises without it, so that every bootstrap result can be reproduced. The
+argument is called `rng` as in flexpyctt, and the number of replications `n_replications` as in
+flexpyirt.
+
+**Decision**: the default synthetic weight $N_1/(N_1 + N_2)$ is computed once from the data and
+kept fixed over the bootstrap samples (their sizes are the same).
+
+**Decision**: a bootstrap sample that cannot be equated (a score without variance, a
+non-positive covariance for Levine's methods, a non-finite result) is left out, and a
+`SparseDataWarning` reports how many; `n_replications` of the result is the number used. Fewer
+than two usable samples is an error.
+
+**Decision**: where the percentile rank of $x$ is 0 or 1, Lord's standard error is 0 (as in
+`equate`): the formula has no value there.
+
+**Decision**: all three kinds treat the frequencies as observed. With a presmoothed
+distribution as input the analytic formulas ignore that a model was fitted and the bootstrap
+draws from the smoothed distribution without refitting it (a parametric bootstrap with a fixed
+model); the total frequency, rounded for the bootstrap, is the sample size. Standard errors
+that account for presmoothing are not covered (see below); kernel equating has them.
+
+**Decision**: the analytic standard error of Braun–Holland raises an error when an anchor score
+was observed in one population only (the derivative does not exist); the bootstrap works.
+
+**Not covered**: analytic standard errors of equipercentile equating for a single group, of
+frequency estimation and of chained equipercentile equating (formulas exist in the literature,
+e.g. Jarjoura & Kolen, 1985; Liou & Cheng, 1995; R `equate` has none to compare with, so they
+are bootstrap only); standard errors that account for presmoothing in `equate()` (refitting the
+log-linear model in every bootstrap sample, as `equate::bootstrap` can do); bootstrap standard
+errors for `kernel_equate()`; bootstrap bias, RMSE and percentile intervals.
+
+### 4.9 Further kernels and bandwidth rules (E7)
+
+**Kernels** (Lee & von Davier, 2011). With a kernel variable $V$ with distribution function
+$K$, density $k$, mean 0 and variance $\sigma_V^2$, the continuization of §4.5 becomes
+
+$$F_h(x) = \sum_j r_j\, K\bigl(R_{jX}(x)\bigr), \qquad
+R_{jX}(x) = \frac{x - a_X x_j - (1 - a_X)\mu_X}{a_X h_X}, \qquad
+a_X^2 = \frac{\sigma_X^2}{\sigma_X^2 + \sigma_V^2 h_X^2},$$
+
+$$f_h(x) = \frac{1}{a_X h_X}\sum_j r_j\, k\bigl(R_{jX}(x)\bigr), \qquad
+f_h'(x) = \frac{1}{(a_X h_X)^2}\sum_j r_j\, k'\bigl(R_{jX}(x)\bigr),$$
+
+and the derivative used for the SEE keeps its form,
+$\partial F_h(x)/\partial r_j = K(R_{jX}(x)) - M_{jX}(x) f_h(x)$ with the same $M_{jX}$ and the
+kernel's own $a_X$. Mean and variance are preserved for every kernel (unit test).
+
+| `kernel` | $K(z)$ | $k(z)$ | $k'(z)$ | $\sigma_V^2$ |
+|---|---|---|---|---|
+| `"gaussian"` | $\Phi(z)$ | $\phi(z)$ | $-z\phi(z)$ | 1 |
+| `"logistic"` | $1/(1 + e^{-z})$ | $K(1 - K)$ | $k\,(1 - 2K)$ | $\pi^2/3$ |
+| `"uniform"` | $\min\{\max(z + \tfrac12, 0), 1\}$ | 1 on $[-\tfrac12, \tfrac12)$ | 0 | $1/12$ |
+
+Every design of §4.5, the SEE, the SEED and the percent relative error use the same code with
+the kernel exchanged. The penalty of §4.5 is used with the kernel's density; for the uniform
+kernel its second term is zero.
+
+**Decision**: the logistic kernel is the standard logistic and the uniform kernel is uniform on
+$(-1/2, 1/2)$: the "standard" versions of Lee & von Davier and the defaults of `kequate`
+(`slog = 1`, `bunif = 0.5`) and `SNSequate`. Their rescaled versions are the same continuization
+with another bandwidth ($\sigma_{V1} h_1 = \sigma_{V2} h_2$), so no scale parameter is offered.
+
+**Decision**: the density of the uniform kernel is taken on the half-open interval
+$[-1/2, 1/2)$, so that kernels that touch do not count twice (R's `dunif` includes both ends);
+this matters on a set of measure zero.
+
+**Decision**: with the uniform kernel $F_h$ is flat outside the support of the continuized
+distribution and, when $h$ is below the score increment, between possible scores. The quantile
+is then kept inside the support, and where the density of Y is zero at an equated score the SEE
+is `nan` (the delta method does not apply). A bandwidth of at least one increment avoids gaps.
+
+**Decision**: `linear=True` is refused with the uniform kernel: its support is bounded, so a
+large bandwidth does not give the linear function. With the logistic kernel it does. `kequate`
+always computes its linear function and SEED with the Gaussian kernel, which here is
+`result.seed(kernel_equate(..., linear=True))`.
+
+**Decision**: the penalty of the uniform kernel jumps where the edge of a kernel passes a
+possible score. The same search as for the other kernels is used (grid, then a bounded local
+search); it returns the best point found.
+
+**Bandwidth rules** (`bandwidth_method`, Gaussian kernel) besides the penalty:
+
+- `"rule_of_thumb"` (Andersson & von Davier, 2014):
+  $h = 9\sigma/\sqrt{100N^{2/5} - 81}$, which is Silverman's rule
+  $a h = 0.9\,\sigma N^{-1/5}$ for the density actually used, solved for $h$.
+- `"double_smoothing"` (Häggström & Wiberg, 2014). A pilot continuization $f_g$ with a large
+  bandwidth $g$ stands in for the unknown density. On the grid $x^*_l$, $l = 1..2J - 1$, of the
+  possible scores and the points halfway between them,
+
+  $$\mathrm{DS}(h) = \sum_l \Bigl[\sum_j f_g(x_j)\,\frac{1}{a h}\phi\bigl(R_j(x^*_l)\bigr)
+  - r^*_l\Bigr]^2,$$
+
+  with $r^*_l = r_j$ at a possible score and $f_g(x^*_l)$ halfway between two.
+- `"cross_validation"`: the leave-one-out criterion of `kequate`,
+
+  $$\mathrm{CV}(h) = \sum_j \bigl(r_j - \hat r_{(j)}\bigr)^2, \qquad
+  \hat r_{(j)} = \frac{\sum_{i \ne j} r_i\,\phi(R_i(x_j))}{\sum_{i \ne j}\phi(R_i(x_j))}.$$
+
+Like the penalty, the last two are evaluated with scores in units of their increment and
+minimized by the grid and local search of §4.5.
+
+**Decision**: the three rules are options of `kernel_equate()` (`bandwidth_method`), which
+reports the bandwidths it used; no new public function is added.
+
+**Decision**: $\sigma$ of the rule of thumb is the standard deviation of the distribution that
+is continuized (population form, like everything else in the continuization; `kequate` uses
+$N/(N - 1)$ times the variance), and $N$ is the size of the sample that took the form: $N_X$,
+$N_Y$ for EG, $N$ for SG, the size of population P for X (and its anchor) and of Q for Y (and
+its anchor) in the anchor-test designs, as in `kequate`. The counterbalanced design, where each
+form is observed in two samples, is refused.
+
+**Decision**: the pilot bandwidth of double smoothing is 4 score increments and candidates are
+searched below it. The source describes the pilot as "large, subjectively chosen"; 4 is
+`kequate`'s value (the upper end of its search interval). Without the bound the criterion has
+its global minimum at the largest bandwidth for short tests (the 9-point anchor of the
+reference data).
+
+**Decision**: `"cross_validation"` is `kequate`'s criterion (`CV = TRUE`), named after it. It is
+not the likelihood cross-validation of Liang & von Davier (2014), which splits the sample at
+random into two halves and repeats; the papers were not available for this work and the
+formulas above are taken from Wallin, Häggström & Wiberg (2021) and the `kequate` source, which
+is recorded here as a limit of the verification.
+
+**Decision**: the SEE treats the selected bandwidth as fixed for every rule, as the book does
+for the penalty. Andersson & von Davier (2014) give a SEE for the rule of thumb that accounts
+for $h$ being proportional to $\hat\sigma$; `kequate`'s version of it (`altopt = TRUE`) differs
+from the derivative we obtain (§7), so there is no usable reference and it is not covered.
+
+**Not covered**: the Epanechnikov and adaptive kernels of `SNSequate`; `kequate`'s
+`"stdgaussian"` kernel; scale parameters of the logistic and uniform kernels; the bandwidth
+rules for kernels other than the Gaussian; the likelihood cross-validation of Liang & von
+Davier (2014); the SEE of Andersson & von Davier (2014) for a data-dependent bandwidth; the
+rule of thumb for the counterbalanced design.
+
 ## 5. Public API sketch
 
 ```python
@@ -389,6 +645,26 @@ levine = fe.equate(xa, ya, method="levine_observed", anchor="internal", syntheti
 tucker.gamma, tucker.synthetic_moments, tucker.synthetic_weight
 fe.equate(xa, ya, method="frequency_estimation")
 fe.equate(xa, ya, method="chained_equipercentile")
+
+# Standard errors of equating (E7).
+fe.equate(x, y, method="linear", standard_error="analytic").table  # score, equated, see
+fe.equate(xa, ya, method="tucker", standard_error="analytic_normal").see
+boot = fe.equate(
+    xa,
+    ya,
+    method="chained_equipercentile",
+    standard_error="bootstrap",
+    n_replications=1000,
+    rng=20261125,
+)
+boot.see, boot.bootstrap_mean, boot.n_replications
+
+# Other kernels and bandwidth rules (E7).
+fe.kernel_equate(smooth_x, smooth_y, kernel="logistic")
+fe.kernel_equate(smooth_x, smooth_y, kernel="uniform", bandwidth_x=1.0, bandwidth_y=1.0)
+fe.penalty_bandwidth(smooth_x, kernel="logistic")
+fe.kernel_equate(smooth_x, smooth_y, bandwidth_method="double_smoothing")  # or "rule_of_thumb",
+ke.kernel, ke.bandwidth_method  # "cross_validation"
 ```
 
 - All arguments after the data are keyword-only. Options are `Literal` strings in lower
@@ -402,7 +678,10 @@ fe.equate(xa, ya, method="chained_equipercentile")
   `SparseDataWarning`.
 - Names are Python names; the R name is given in the docstring where it helps (`ddof=1` ↔ R
   `equate`'s variance, `penalty_weight` ↔ `kequate`'s `KPEN`).
-- Planned (E7): standard errors for `equate()` (analytic and bootstrap), further kernels.
+- `standard_error="analytic" | "analytic_normal" | "bootstrap"` (with `n_replications` and
+  `rng`) for `equate()`; `kernel="gaussian" | "logistic" | "uniform"` and
+  `bandwidth_method="penalty" | "rule_of_thumb" | "double_smoothing" | "cross_validation"` for
+  `kernel_equate()` (§4.8, §4.9).
 
 ## 6. Layout
 
@@ -415,6 +694,7 @@ packages/flexpyequate/
     distributions.py    ScoreDistribution, BivariateScoreDistribution
     equating.py         equate(), EquatingResult
     _neat.py            formulas for non-equivalent groups with an anchor test
+    _standard_errors.py delta-method standard errors of the traditional methods
     presmoothing.py     presmooth(), LoglinearResult
     kernel.py           kernel_equate(), KernelEquatingResult
     errors.py
@@ -434,7 +714,12 @@ Rscript validation/r/equate_e3_reference.R
 Rscript validation/r/equate_e4_reference.R
 Rscript validation/r/equate_e5_reference.R
 Rscript validation/r/equate_e6_reference.R
+Rscript validation/r/equate_e7_standard_errors_reference.R  # ~10 min (equate::bootstrap)
+Rscript validation/r/equate_e7_kernel_reference.R           # reads the E3 and E6 files
 ```
+
+The two E7 generators read their data from the committed E1, E3, E4 and E6 reference files, so
+those must be generated first.
 
 ### Cases
 
@@ -448,6 +733,10 @@ Rscript validation/r/equate_e6_reference.R
 | Q6 | Tucker, Levine observed score, Braun–Holland (four synthetic weights each), Levine true score, chained linear; internal anchor (`KBneat`) and external anchor (simulated, unequal sample sizes and form lengths) | `equate::equate(type = "linear", method = "tucker" / "levine" / "braun/holland" / "chained", lts = )`; the Kolen & Brennan formulas written out in R with population moments | E4 |
 | Q7 | Frequency estimation (four synthetic weights) and chained equipercentile equating on `KBneat` and the simulated external-anchor data; both methods on `KBneat` presmoothed with a bivariate log-linear model | `equate::equate(type = "equipercentile", method = "frequency estimation" / "chained", smoothmethod = )`; Kolen & Brennan written out in R without rounding | E5 |
 | Q8 | Kernel equating for SG (presmoothed and observed), CB (three pairs of weights), NEAT PSE (three weights) and NEAT CE: equated scores, SEE, linear version and SEED between kernel and linear, PRE, penalty bandwidths | `kequate::kequate("SG" / "CB" / "NEAT_PSE" / "NEAT_CE", ...)`; the design functions written out in R with a finite-difference SEE over all cell probabilities | E6 |
+| Q9 | Analytic standard errors: mean and linear equating, EG (three data sets) and SG; Lord's standard error of equipercentile equating, EG; Tucker and Levine observed score (three synthetic weights), Levine true score, chained linear and Braun–Holland on `KBneat` (internal anchor) and the simulated external-anchor data; distribution-free and normal-theory versions | `equate::equate(..., verbose = TRUE)$concordance$se` (linear and equipercentile EG; Tucker, Levine observed, chained: `se.g` and `se.n`), also with all frequencies times 1e6; the delta method written out in R with finite-difference Jacobians with respect to all cell probabilities (and to the moments, for the normal-theory version) | E7 |
+| Q10 | Bootstrap standard errors (2000 replications): linear and equipercentile, EG and SG; Tucker, chained linear, frequency estimation and chained equipercentile | `equate::bootstrap(reps = 2000)`: **statistical** comparison of two Monte Carlo estimates (R's random numbers cannot be reproduced); unit tests against the analytic standard errors and of the resampling mechanics | E7 |
+| Q11 | Logistic and uniform kernels in every design (EG, SG, CB with two pairs of weights, PSE with two weights, CE): continuized CDF and density, equated scores, SEE, SEED against the Gaussian linear function, PRE; penalty values and penalty bandwidths | `kequate::kequate(..., kernel = "logistic" / "uniform")`, `kequate:::PEN`; `SNSequate::bandwidth(kert = "logis" / "unif")`; the general-kernel continuization written out in R with a finite-difference SEE | E7 |
+| Q12 | Rule-of-thumb, double-smoothing and leave-one-out cross-validation bandwidths (eight distributions with 9 to 41 possible scores); criterion values on a grid; end to end for EG and CE | `kequate:::bandwidth.select("altopt" / "DS" / "CV")`, `kequate:::DS`, `kequate:::CV`, `kequate(..., DS = TRUE)`, `kequate(..., CV = TRUE)`; the criteria written out in R | E7 |
 
 ### Tolerances (maximum absolute difference unless stated)
 
@@ -481,9 +770,62 @@ Rscript validation/r/equate_e6_reference.R
 | SG, CB, PSE, CE: kernel equated scores; SEE (relative); PRE; bandwidths ($K = 0$) | `kequate` without its variance factor | 1e-6; 1e-6; 1e-5; 1e-6 |
 | SG, CB, PSE, CE: linear equated scores; linear SEE and SEED kernel vs linear (relative) | `kequate` without its variance factor | 1e-6; 1e-5 |
 | Kernel equated scores / SEE (relative) / bandwidth | ordinary `kequate` call | 5e-3 / 1e-3 / 1e-4 |
+| Linear SE, EG (`ddof=1`), relative | `equate` | 1e-10 |
+| Chained linear SE, distribution-free and normal-theory, relative | `equate` | 1e-10 |
+| Tucker, Levine observed-score SE, both versions, relative | `equate` with frequencies times 1e6 | 1e-8 |
+| The same (`ddof=0` and `ddof=1`), relative | ordinary `equate` call | 2e-3 |
+| Mean, linear (EG, SG), Tucker, Levine observed and true score, chained linear, Braun–Holland SE; normal-theory versions; relative | independent R implementation (finite differences) | 1e-8 |
+| Lord's SE of equipercentile equating, EG (absolute and relative) | `equate` | 1e-6 |
+| Bootstrap SE (2000 replications), relative, each score / mean over scores | `equate::bootstrap` (2000 replications) | 0.12 / 0.06 (statistical) |
+| Logistic, uniform kernel: CDF, density | independent R implementation | 1e-12 |
+| Logistic, uniform kernel, all designs: equated scores; SEE (relative) | independent R implementation | 1e-9; 1e-6 |
+| Logistic, uniform kernel, all designs: equated scores; SEE (relative); SEED against the Gaussian linear function (relative); PRE | `kequate` without its variance factor | 1e-6; 1e-6; 1e-5; 5e-5 |
+| Penalty values, logistic and uniform kernel (relative) | `kequate:::PEN` ($K = 0$); independent R implementation ($K = 0, 1$) | 1e-10 |
+| Penalty bandwidth, logistic and uniform kernel | `kequate` ($K = 0$); independent R implementation | 1e-6 |
+| Penalty bandwidth, logistic and uniform kernel ($K = 1$) | `SNSequate::bandwidth` | 1e-5 |
+| Double-smoothing and cross-validation criterion values (relative) | `kequate:::DS`, `kequate:::CV`; independent R implementation | 1e-10 |
+| Double-smoothing bandwidth | `kequate` without its variance factor; independent R implementation | 1e-6 |
+| Cross-validation bandwidth | `kequate` without its variance factor; independent R implementation | 1e-5 |
+| Rule-of-thumb bandwidth (relative) | `kequate` after its factor $\sqrt{N/(N-1)}$; independent R implementation | 1e-10 |
+| Double smoothing, cross-validation end to end (EG, CE): equated scores; SEE (relative) | `kequate(..., DS = TRUE / CV = TRUE)` without its variance factor | 1e-5; 1e-5 |
 
 Observed differences are well inside these: about 1e-8 for the SEE and 2e-7 for the equated
 scores against `kequate` (the latter is `kequate`'s root tolerance).
+
+Measured in E7 (largest over all cases):
+
+| Quantity | Reference | Measured |
+|---|---|---|
+| Linear SE, EG, `ddof=1` (relative) | `equate` | 1.9e-14 |
+| Chained linear SE (relative) | `equate` | 3.6e-15 |
+| Tucker, Levine observed-score SE (relative) | `equate`, frequencies times 1e6 | 8.1e-10 |
+| Tucker, Levine observed-score SE (relative) | ordinary `equate` | 7.6e-4 (`ddof=0`), 3.4e-4 (`ddof=1`) |
+| All delta-method SEs, both versions (relative) | independent R implementation | 4.3e-10 |
+| SG linear SE under normality (relative) | closed form $\sigma_Y^2(1-\rho)[z^2(1+\rho)+2]/N$ | 4.6e-15 |
+| Lord's SE (absolute; relative) | `equate` | 1.4e-7; 1.7e-7 |
+| Bootstrap SE, linear methods (relative, worst score) | `equate::bootstrap` | 0.054 |
+| Bootstrap SE, equipercentile methods, percentile rank 2–98 (relative, worst score) | `equate::bootstrap` | 0.074 |
+| Bootstrap SE, mean over scores (relative, worst case) | `equate::bootstrap` | 0.038 |
+| Logistic / uniform kernel: equated scores; SEE (relative) | independent R implementation | 4.4e-11; 1.3e-9 |
+| Logistic / uniform kernel: equated scores; SEE (relative); SEED (relative); PRE | `kequate` without its variance factor | 5.5e-7; 1.5e-7; 5.3e-8; 9.3e-6 |
+| Penalty values (relative) | `kequate:::PEN`; independent | 2.4e-13 |
+| Penalty bandwidths, logistic / uniform | `kequate`; independent; `SNSequate` | 1.3e-8; 7.4e-9; 6.6e-9 |
+| Double-smoothing, cross-validation criterion values (relative) | `kequate`; independent | 9.8e-15 |
+| Double-smoothing bandwidth | `kequate`; independent | 1.8e-8; 9.4e-9 |
+| Cross-validation bandwidth | `kequate`; independent | 2.6e-7; 1.3e-6 |
+| Rule-of-thumb bandwidth (relative) | `kequate`; independent | 2.5e-13; 4.9e-15 |
+| End to end (EG, CE): equated scores; SEE (relative) | `kequate(DS = TRUE / CV = TRUE)` | 7.7e-7; 7.2e-7 |
+
+**Bootstrap agreement with R is statistical, not numerical.** R's and NumPy's random number
+generators differ, so the two bootstrap standard errors are two Monte Carlo estimates of the
+same quantity; with $B = 2000$ replications each their ratio has a standard deviation of about
+$1/\sqrt{B} = 2.2\%$ per score. The bootstrap is validated in three ways: (a) against the
+analytic standard errors for eight method and design combinations (1500 replications,
+tolerance five Monte Carlo standard errors plus 3%), (b) by a deterministic test that writes
+the documented resampling out (multinomial counts, X's sample first, then Y's, standard
+deviation with divisor $B - 1$) and reproduces `see` and `bootstrap_mean` to rounding error
+from the same seed, for EG, SG and the anchor-test design, and (c) against
+`equate::bootstrap` within the tolerances above.
 
 ### Known differences from the R packages
 
@@ -533,12 +875,74 @@ scores against `kequate` (the latter is `kequate`'s root tolerance).
 - **`SNSequate::ker.eq`** searches the equated score in $(-1, 101)$ and fails when a score
   equates below −1 (one of the two cases tried); its bandwidths come from `optim()` started at
   0.65.
+- **`equate`'s standard errors for Tucker and Levine observed-score equating** are computed from
+  population (divisor $N$) variances and covariances, but with $\gamma$, the synthetic means and
+  the synthetic standard deviations of its equating function, which uses $N - 1$. The mixture
+  changes the standard error by about $1/N$ in relative terms (7.6e-4 at most in the reference
+  data), whichever `ddof` flexpyequate uses. With all frequencies multiplied by $10^6$ (and the
+  result by $10^3$) the two forms coincide and the agreement is 1e-9. Chained linear equating
+  is not affected (ratios within one population).
+- **`equate` has no analytic standard errors** for mean equating, the single-group design,
+  Levine true-score equating, the Braun–Holland method and the equipercentile anchor-test
+  methods (its functions for the first two return `NULL`). flexpyequate's are checked against
+  the independent finite-difference implementation, and the last group is bootstrap only.
+- **`equate`'s standard error of equipercentile equating** has no score increment in it, so for
+  a form Y with increment $\delta_Y \ne 1$ it is in units of the increment; flexpyequate
+  multiplies by $\delta_Y$. Percentile ranks are rounded to 10 decimals (agreement 2e-7).
+- **`equate::bootstrap` and the ends of the score range**: `equate` and flexpyequate define the
+  equipercentile equivalent differently where the percentile rank is 0 or 1 (above), which
+  shows in the bootstrap standard errors of the lowest and highest scores (ratios down to 0.48
+  in the reference data). The comparison uses the scores with percentile rank between 2 and
+  98. For frequency estimation `equate`'s effective synthetic weight (above) is passed.
+- **`kequate`'s penalty for the logistic kernel** multiplies the derivative of the density by an
+  extra factor $1/(a h)$; it is positive, so the sign and the penalty are unaffected.
+- **`kequate` restricts the bandwidth search** to $(0, 4)$ (to $(0, 2.618)$ for the uniform
+  kernel) with `optimize()`, a local search; flexpyequate searches a grid on $(0.05, 10)$
+  increments first (double smoothing: up to the pilot bandwidth 4). The selected bandwidths
+  agreed in all reference cases.
+- **`kequate`'s `altopt`** (rule of thumb) takes effect on the bandwidth only together with
+  `CV = TRUE` in version 1.6.4, and it switches to a different derivative $\partial F/\partial
+  r$ that accounts for $h \propto \hat\sigma$. Differentiating $F$ with $h = c\sigma$ gives the
+  term $\tfrac12 a\,z_j^2 \sum_k x_k r_k \phi(R_k)/(a h)$ where `kequate` has the same without
+  the factor $a$, and its equivalent-groups code passes the mean of X for form Y. That SEE is
+  therefore not used as a reference; only the bandwidth is compared.
+- **`kequate`'s `CV`** is a leave-one-out criterion over score points, not the split-sample
+  likelihood cross-validation of Liang & von Davier (2014). `kequate`'s `DS` returns the
+  squared-difference term only (as a mean; the minimizer is that of the sum).
 - A two-point finite difference with step 1e-6 is not accurate enough for the independent SEE
   where a score probability is about 5e-6 (error 1.4e-3); the generator uses a five-point stencil
   with step 1e-7.
 
 ## References
 
+- Andersson, B., & von Davier, A. A. (2014). Improving the bandwidth selection in kernel
+  equating. *Journal of Educational Measurement, 51*, 223–238.
+- Angoff, W. H. (1971). Scales, norms, and equivalent scores. In R. L. Thorndike (Ed.),
+  *Educational measurement* (2nd ed., pp. 508–600). American Council on Education.
+- Braun, H. I., & Holland, P. W. (1982). Observed-score test equating: A mathematical analysis
+  of some ETS equating procedures. In P. W. Holland & D. B. Rubin (Eds.), *Test equating*
+  (pp. 9–49). Academic Press.
+- Häggström, J., & Wiberg, M. (2014). Optimal bandwidth selection in observed-score kernel
+  equating. *Journal of Educational Measurement, 51*, 201–211.
+- Jarjoura, D., & Kolen, M. J. (1985). Standard errors of equipercentile equating for the
+  common item nonequivalent populations design. *Journal of Educational Statistics, 10*,
+  143–160.
+- Kolen, M. J. (1985). Standard errors of Tucker equating. *Applied Psychological Measurement,
+  9*, 209–223.
+- Lee, Y.-H., & von Davier, A. A. (2011). Equating through alternative kernels. In A. A. von
+  Davier (Ed.), *Statistical models for test equating, scaling, and linking* (pp. 159–173).
+  Springer. (Read as ETS RR-08-12.)
+- Liang, T., & von Davier, A. A. (2014). Cross-validation: An alternative bandwidth selection
+  method in kernel equating. *Applied Psychological Measurement, 38*, 281–295.
+- Liou, M., & Cheng, P. E. (1995). Asymptotic standard error of equipercentile equating.
+  *Journal of Educational and Behavioral Statistics, 20*, 259–286.
+- Lord, F. M. (1950). *Notes on comparable scales for test scores* (ETS RB-50-48).
+- Lord, F. M. (1982). The standard error of equipercentile equating. *Journal of Educational
+  Statistics, 7*, 165–174.
+- Wallin, G., Häggström, J., & Wiberg, M. (2021). How important is the choice of bandwidth in
+  kernel equating? *Applied Psychological Measurement, 45*, 518–535.
+- Zu, J., & Yuan, K.-H. (2012). Standard error of linear observed-score equating for the NEAT
+  design with nonnormally distributed data. *Journal of Educational Measurement, 49*, 190–213.
 - Holland, P. W., & Thayer, D. T. (1987). *Notes on the use of log-linear models for fitting
   discrete probability distributions* (ETS RR-87-31).
 - Holland, P. W., & Thayer, D. T. (2000). Univariate and bivariate loglinear models for discrete

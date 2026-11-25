@@ -353,7 +353,7 @@ step difficulties $b_k=-(d_k-d_{k-1})/a$ with $d_0=0$ for GPCM/PCM) is computed 
 the Jacobian (§15.18).
 
 ## 8. Scoring
-`FitResult.score(data, *, method="EAP"|"MAP"|"ML"|"WLE"|"PV", group=None, item_names=None, key=None, n_draws=5)`:
+`FitResult.score(data, *, method="EAP"|"MAP"|"ML"|"WLE"|"PV"|"EAPsum", group=None, item_names=None, key=None, n_draws=5)`:
 - **EAP** (Bock & Mislevy, 1982): posterior mean and posterior SD on the fitted model's quadrature
   grid using the respondent's group's estimated latent distribution as the prior.
 - **MAP**: Bayes modal estimate maximizing $\log L(\theta\mid y) + \log\phi(\theta;\mu_g,\sigma_g^2)$
@@ -371,9 +371,12 @@ the Jacobian (§15.18).
   equispaced grid with piecewise-linear inverse-CDF interpolation, returning columns `pv1..pvM`.
   Requires an explicit `key: jax.Array` (`SpecificationError` if missing); deterministic given `key`
   (§15.25).
+- **EAPsum** (Thissen, Pommerich, Billeaud & Williams, 1995): posterior mean and SD given the
+  summed score, looked up in the summed-score table of the respondent's group; NaN for a
+  respondent with any missing response; unidimensional `Normal` models only (§18.2).
 
-Missing responses are dropped from the likelihood (and from $I(\theta)$ in WLE) for every method.
-All methods compress unique patterns with power-of-two bucket padding and run inside `jit` with
+Missing responses are dropped from the likelihood (and from $I(\theta)$ in WLE) for every method
+except EAPsum. All other methods compress unique patterns with power-of-two bucket padding and run inside `jit` with
 data-independent shapes (§15.21).
 
 ## 9. Performance
@@ -1885,7 +1888,7 @@ data-independent shapes (§15.21).
     $\le1.2\times10^{-7}$). The tests also check the refit against `fit()` on the data without the
     item, the approximations against the refit on a 15-item data set (`"newton"` 1 step 0.03, 2
     steps 0.02, `"one_step"` 0.05) and the vmapped gradients against single ones.
-18. **Package split: `flexpyctt` (decided 2026-11-25, issue #87)**: tools that need no fitted IRT
+18. **Package split: `flexpyctt` and `flexpyequate` (decided 2026-11-25, issue #87)**: tools that need no fitted IRT
     model are released as separate, JAX-free distributions from this repository. flexpyirt keeps
     BA-EM estimation and everything that uses its result.
 
@@ -1893,7 +1896,7 @@ data-independent shapes (§15.21).
     |---|---|---|
     | `flexpyirt` | estimation; tools that take a `FitResult` (`local_dependence()`, `jsi()`, `model_parallel_analysis()`, `link()`, IRT equating); the `dimensionality()` report | JAX, `flexpyctt` |
     | `flexpyctt` | model-free item and test analysis: `polychoric()`, `parallel_analysis()`, `velicer_map()`, `empirical_kaiser()`, `efa()`, `hull()`, `comparison_data()`, `detect()`, `exploratory_detect()`, `dimtest()`; later classical item analysis and Mantel–Haenszel DIF | NumPy, SciPy, pandas |
-    | `flexpyequate` (later) | equating of score distributions only | NumPy, SciPy, pandas |
+    | `flexpyequate` | equating of score distributions only: mean, linear and equipercentile equating, the anchor-test methods, log-linear presmoothing, kernel equating (its own design document: `packages/flexpyequate/docs/DESIGN.md`) | NumPy, SciPy, pandas |
 
     **Layout**: a uv workspace. flexpyirt stays at the repository root (`pyproject.toml`,
     `src/flexpyirt/`, `tests/`); the issue's `packages/flexpyirt/` is postponed, because moving
@@ -1901,15 +1904,31 @@ data-independent shapes (§15.21).
     `packages/flexpyctt/` has its own `pyproject.toml`, `README.md` (the PyPI page, absolute
     links), `LICENSE`, `src/flexpyctt/`, `tests/` (with `tests/reference/`) and `validation/`.
     flexpyirt depends on flexpyctt (`[tool.uv.sources] flexpyctt = { workspace = true }`), so
-    `pip install flexpyirt` still provides every tool. **One version**: both read the same
-    `vX.Y.Z` tag through hatch-vcs (`raw-options.root = "../.."` in the member). The release
-    workflow builds each with `uv build --package` and publishes flexpyctt before flexpyirt.
+    `pip install flexpyirt` still provides every tool of those two. `packages/flexpyequate/` has
+    the same layout (plus `docs/DESIGN.md`; its R scripts are `validation/r/equate_*.R` at the
+    root). **flexpyequate is independent**: it imports neither JAX, flexpyirt nor flexpyctt, and
+    neither of them depends on it or re-exports it (`pip install flexpyirt` does not install it).
+    The root lists it in the `dev` dependency group only, so that `uv sync` installs it for the
+    tests; it is not in flexpyirt's sdist. Equating that needs item parameters stays in
+    flexpyirt. **One version**: all three read the same
+    `vX.Y.Z` tag through hatch-vcs (`raw-options.root = "../.."` in the members). The release
+    workflow builds each with `uv build --package` and publishes flexpyctt before flexpyirt;
+    flexpyequate has a PyPI job of its own that waits for neither.
     flexpyirt imports a few private helpers of flexpyctt (below), so the two are meant to be
     installed at the same version; the dependency carries no version bound yet (open point: pin
     `flexpyctt==<same version>` with a build hook).
 
     **flexpyctt never imports JAX**, and has no 64-bit requirement (NumPy is float64). A CI job
-    installs it alone, asserts that `jax` is absent and runs its tests.
+    installs it alone, asserts that `jax` is absent and runs its tests. A second job does the
+    same for flexpyequate (`jax`, `flexpyirt` and `flexpyctt` absent).
+    **Tooling**: ruff and mypy for flexpyirt and flexpyctt are configured in the root
+    `pyproject.toml`. flexpyequate keeps its own `[tool.ruff]` and `[tool.mypy]` with the same
+    rules (ruff picks them up for that directory when run from the root; mypy runs from
+    `packages/flexpyequate/`), because its tests are a package named `tests`, like the root's,
+    and one mypy run cannot hold two packages of that name. **Documentation site**: flexpyctt's
+    tools are documented in the user guide and the API reference (flexpyirt re-exports them);
+    flexpyequate has one page, `docs/equating.md`, into which `scripts/mkdocs_hooks.py` puts the
+    package README (the PyPI page), so the text exists once.
 
     **Two polychoric implementations.** `flexpyctt.polychoric()` is a new NumPy / SciPy
     implementation of the estimator of §16.9 (same definition, options, defaults, warnings and
@@ -2116,6 +2135,146 @@ data-independent shapes (§15.21).
    primary and a specific slope, and mirt's `type = "JSI"` requires one factor, so both the
    definition and a reference are missing.
 
+## 18. Summed-score distribution kernel, information and reliability (M7)
+
+1. **Lord–Wingersky recursion as a Poisson-binomial kernel (`summed_score_distribution`, V36)**:
+   **What it computes.** Given $\theta$, the item scores $X_j\in\{0,\dots,K_j-1\}$ are independent
+   with category probabilities $P_{jk}(\theta)$, and the kernel returns the distribution of the
+   summed score $S=\sum_jX_j$, $s=0,\dots,S_{\max}=\sum_j(K_j-1)$. For dichotomous items $S$ is a
+   sum of independent non-identical Bernoulli variables, i.e. the **Poisson-binomial
+   distribution** with success probabilities $p_j(\theta)$ (González, Wiberg & von Davier, 2016);
+   for polytomous items it is the distribution of a sum of independent categorical scores. The
+   Lord–Wingersky (1984) recursion (Thissen, Pommerich, Billeaud & Williams, 1995, for
+   polytomous items) is the direct convolution algorithm for this distribution, the same as the
+   "RF" recursion of the Poisson-binomial literature (Hong, 2013).
+   **API (Decision, owner 2026-11-25).** `summed_score_distribution(probs, *, method="recursion",
+   log=False)`. `probs` has shape `(..., J, K)`: category probabilities of $J$ items, rows summing
+   to 1, items with fewer than $K$ categories padded with zeros; leading axes (quadrature nodes,
+   persons, ...) are batch axes. The result has shape `(..., J(K-1)+1)`; scores above an item
+   set's own maximum have probability 0. The function is a pure JAX kernel: `jit`, `vmap` and
+   autodiff work through every method, and values are not checked (a caller inside `jit` could
+   not be checked). Only the shape and `method` are validated (`SpecificationError`).
+   **Methods.**
+   - `"recursion"` (default, exact): $L_j(s)=\sum_kL_{j-1}(s-k)P_{jk}$, $L_0(0)=1$, as a
+     `lax.scan` over items on a fixed-length vector, $O(JKS_{\max})$ per batch element. Every
+     term is non-negative, so there is no cancellation and the relative error of each
+     probability is a few ulp times $J$, tails included. With `log=True` the recursion runs in
+     log space, $\log L_j(s)=\operatorname{logsumexp}_k[\log L_{j-1}(s-k)+\log P_{jk}]$, which
+     keeps tail probabilities below the smallest double ($\approx10^{-308}$) that the linear
+     recursion underflows to 0 (long tests, extreme $\theta$).
+   - `"fft"` (exact up to round-off): the DFT of the characteristic function (DFT-CF; Hong,
+     2013), $\varphi(\omega_l)=\prod_j\sum_kP_{jk}e^{i\omega_lk}$ at
+     $\omega_l=2\pi l/(S_{\max}+1)$ and $P(S=s)=\frac1{S_{\max}+1}\sum_l\varphi(\omega_l)e^{-i\omega_ls}$,
+     one batched FFT. Its error is **absolute**, about $10^{-16}$, whatever the size of the
+     probability: probabilities below $\sim10^{-15}$ have no correct digits (negative round-off
+     is clipped at 0). It must not be used where tails matter (S-$X^2$, log-likelihoods of
+     extreme scores); `log=True` only takes the logarithm of the result.
+   - `"normal"`, `"refined_normal"`, `"poisson"` (approximations, dichotomous items only,
+     $K=2$; other $K$ raise `SpecificationError` because only the dichotomous case has an R
+     reference): with $\mu=\sum_jp_j$, $\sigma^2=\sum_jp_j(1-p_j)$ and
+     $\gamma=\sigma^{-3}\sum_jp_j(1-p_j)(1-2p_j)$, the normal approximation with continuity
+     correction is $P(S\le s)\approx\Phi(x)$, $x=(s+0.5-\mu)/\sigma$; the refined normal
+     approximation is $P(S\le s)\approx G(x)$, $G(x)=\Phi(x)+\gamma(1-x^2)\phi(x)/6$ clipped to
+     $[0,1]$ (Volkova, 1996; Hong, 2013); the probability of $s$ is the difference of
+     consecutive values, so the result need not sum to exactly 1. The Poisson approximation is
+     $P(S=s)\approx e^{-\mu}\mu^s/s!$ (Le Cam, 1960), with total-variation error at most
+     $\sum_jp_j^2$; it is useful only when every $p_j$ is small. The approximations cost
+     $O(J+S_{\max})$ and are meant as optional fast paths; nothing inside flexpyirt uses them.
+   **Reuse.** `_itemfit.lord_wingersky` (S-$X^2$) now calls the same kernel; the V15 references
+   are unchanged. Summed-score EAP and IRT observed-score equating will use it too (#82).
+   **Measured accuracy and speed** are recorded in VALIDATION.md (V36).
+
+2. **Information, expected score, reliability and summed-score EAP (#82, V37)**:
+   **Scope.** Unidimensional models, single and multiple groups. Every function raises
+   `SpecificationError` for a multidimensional model (the information matrix and directional
+   information are a later change).
+   **API (Decision, owner 2026-11-25).** Module-level functions that take the fit first, like
+   `link()` and `dimensionality()`:
+   `item_information(res, theta, *, group=None)`, `test_information(res, theta, *, group=None)`,
+   `expected_score(res, theta, *, group=None)`,
+   `reliability(res, data=None, *, group=None, item_names=None)`, `summed_score_table(res)`, and
+   `FitResult.score(data, method="EAPsum")`. The three functions of $\theta$ return a DataFrame
+   indexed by `theta` (so `.plot()` draws the curves); in a multiple-group model `group=` (a
+   group name) is required, because items may differ across groups. `reliability()` and
+   `summed_score_table()` return one row (block) per group with a leading `group` column in a
+   multiple-group model, as `item_fit()` does; in `reliability()` `group=` are the group labels
+   of the rows of `data`, as in `score()`.
+   **Item and test information.** For every item family, from JAX autodiff of the category
+   log-probabilities of the item kernel (no hand-written derivatives, the same expression WLE
+   scoring uses in §15.24):
+   $$I_j(\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\theta)\Big(\frac{\partial\log P_{jk}(\theta)}{\partial\theta}\Big)^2,\qquad
+   I(\theta)=\sum_jI_j(\theta),\qquad \mathrm{SE}(\theta)=I(\theta)^{-1/2}$$
+   (Birnbaum, 1968; Samejima, 1969). mirt's `iteminfo()` evaluates the algebraically equal
+   $\sum_k[(P'_{jk})^2/P_{jk}-P''_{jk}]$ ($\sum_kP''_{jk}=0$) from hand-written derivatives.
+   `item_information` has one column per item; `test_information` has the columns
+   `information` and `se` (the conditional standard error of measurement of an efficient
+   estimator of $\theta$).
+   **Expected score.** $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ per item and the test
+   characteristic curve $T(\theta)=\sum_jE_j(\theta)$ (column `total`; an item named `total`
+   raises `SpecificationError`). Categories are scored $0,\dots,K_j-1$, the coding of the
+   data, which is mirt's `expected.item()` / `expected.test()` when the lowest observed
+   category is 0.
+   **Marginal reliability.** For group $g$ with latent distribution $N(\mu_g,\sigma_g^2)$ and
+   test information $I_g$,
+   $$\bar\rho_g=\int\frac{\sigma_g^2I_g(\theta)}{\sigma_g^2I_g(\theta)+1}\,\phi(\theta;\mu_g,\sigma_g^2)\,d\theta ,$$
+   the expectation over the latent distribution of the conditional reliability
+   $\sigma^2/(\sigma^2+I(\theta)^{-1})$ of a score with error variance $1/I(\theta)$ (Green,
+   Bock, Humphreys, Linn & Reckase, 1984; Thissen & Wainer, 2001). mirt's `marginal_rxx()`
+   computes $\int\frac{I(\theta)}{I(\theta)+\sigma^2}\phi(\theta;0,1)\,d\theta$: the same
+   number when $\mu=0$, $\sigma^2=1$ (every single-group model with the default
+   identification), but for other $(\mu,\sigma^2)$ it neither integrates over the fitted
+   density nor is invariant under a linear change of the latent scale. flexpyirt's definition
+   is invariant: with $\theta^*=(\theta-\mu)/\sigma$ the information is
+   $I^*(\theta^*)=\sigma^2I(\theta)$ and $\bar\rho$ becomes $\int I^*/(I^*+1)\,\phi(\theta^*)\,d\theta^*$.
+   So for $\sigma^2\ne1$ or $\mu\ne0$ (a fixed non-standard `Normal`, the focal groups of a
+   multiple-group model) the reference is mirt's `marginal_rxx()` on the *standardized
+   equivalent model* ($a^*=a\sigma$, $d^*=d+a\mu$ with $N(0,1)$), together with a direct
+   `integrate()` of the formula above with mirt's `testinfo()`. The integral is evaluated on a
+   dedicated grid, not the fitted quadrature: 801 equispaced points on $\mu_g\pm8\sigma_g$ with
+   weights $\propto\phi$ (rectangle rule). The integrand is analytic and the Gaussian weight
+   vanishes at the ends, so the rule converges geometrically (truncation $2\Phi(-8)\approx10^{-15}$);
+   the result does not depend on the quadrature the model was fitted with. mirt uses
+   `integrate()` with R's default tolerance (`rel.tol` $\approx1.2\times10^{-4}$), so the
+   reference also stores a recomputation with `rel.tol = 1e-12`.
+   **Empirical reliability.** From the EAP scores $\hat\theta_i$ and posterior SDs
+   $\mathrm{SE}_i$ of the respondents in `data` (`score(method="EAP")`, on the fitted grid),
+   $$\hat\rho=\frac{s^2_{\hat\theta}}{s^2_{\hat\theta}+\overline{\mathrm{SE}^2}},\qquad
+   s^2_{\hat\theta}=\frac1{N-1}\sum_i(\hat\theta_i-\bar{\hat\theta})^2,\quad
+   \overline{\mathrm{SE}^2}=\frac1N\sum_i\mathrm{SE}_i^2 ,$$
+   which is mirt's `empirical_rxx()` with its default `T_as_X = FALSE`: the variance of the EAP
+   scores estimates the true-score variance and the mean posterior variance the error
+   variance, their sum estimating $\sigma^2$ (Thissen & Wainer, 2001). In a multiple-group
+   model it is computed within each group from that group's respondents (mirt pools all
+   respondents of a `multipleGroup` fit; the per-group value is `empirical_rxx()` of that
+   group's rows). Rows with incomplete responses are scored as usual and kept, as in mirt. A
+   group with fewer than two respondents gives NaN. `reliability(res)` returns the column
+   `marginal`; with `data` it adds `empirical`.
+   **Summed-score EAP** (Thissen, Pommerich, Billeaud & Williams, 1995). With the fitted
+   quadrature nodes $\theta_q$ and latent weights $w_{gq}$ (the weights the EM integrates
+   with) and $L_g(s\mid\theta_q)$ from `summed_score_distribution` (item 1, exact recursion),
+   $$P_g(s)=\sum_qL_g(s\mid\theta_q)w_{gq},\qquad
+   \hat\theta_g(s)=\frac{\sum_q\theta_qL_g(s\mid\theta_q)w_{gq}}{P_g(s)},\qquad
+   \mathrm{SD}_g(s)=\Big(\frac{\sum_q(\theta_q-\hat\theta_g(s))^2L_g(s\mid\theta_q)w_{gq}}{P_g(s)}\Big)^{1/2}.$$
+   `summed_score_table(res)` returns `score`, `theta`, `se`, `probability` ($P_g(s)$, the
+   model-implied summed-score distribution) for $s=0,\dots,\sum_j(K_j-1)$. mirt's
+   `fscores(method = "EAPsum", full.scores = FALSE)` is the same table with
+   `expected` $=N\,P(s)$; its observed counts and $X^2$ need data and are not reproduced. A
+   score whose $P_g(s)$ underflows to 0 gets NaN `theta` and `se`.
+   `score(data, method="EAPsum")` looks each respondent's summed score up in the table of
+   the respondent's group. **Incomplete patterns**: a respondent with any missing response gets
+   NaN `theta` and `se`, because the summed score over the observed items is not on the scale
+   of the table; this is what mirt's `fscores(method = "EAPsum", full.scores = TRUE)` returns
+   (`NA`). Scoring the sub-test of observed items instead (one table per missingness pattern)
+   is left out.
+   **Latent distributions.** Information and expected score do not involve the latent
+   distribution and are available for every unidimensional model. Reliability, the
+   summed-score table and EAPsum scoring are validated for `Normal` latent distributions only
+   (any mean and variance, single and multiple groups); `EmpiricalHistogram`, `DavidianCurve`
+   and `NormalMixture` raise `SpecificationError` (mirt's `marginal_rxx()` has no counterpart
+   for a fitted non-Normal density, and mirt's EAPsum uses a normal prior by default).
+   **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
+   **Measured agreement** is recorded in VALIDATION.md (V37).
+
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -2145,10 +2304,13 @@ data-independent shapes (§15.21).
 - Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
 - Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
+- González, J., Wiberg, M., & von Davier, A. A. (2016). A note on the Poisson's binomial distribution in item response theory. *Applied Psychological Measurement*, 40(4), 302–310.
 - Goretzko, D., & Bühner, M. (2020). One model to rule them all? Using machine learning algorithms to determine the number of factors in exploratory factor analysis. *Psychological Methods*, 25(6), 776–786.
+- Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
+- Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
@@ -2156,6 +2318,7 @@ data-independent shapes (§15.21).
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
+- Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -2193,10 +2356,13 @@ data-independent shapes (§15.21).
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
+- Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
+- Thissen, D., & Wainer, H. (Eds.). (2001). *Test Scoring*. Lawrence Erlbaum Associates.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Velicer, W. F. (1976). Determining the number of components from the matrix of partial correlations. *Psychometrika*, 41(3), 321–327.
 - Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
+- Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
