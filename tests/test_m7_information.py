@@ -354,3 +354,32 @@ def test_multidimensional_and_non_normal_models() -> None:
         summed_score_table(histogram)
     with pytest.raises(SpecificationError, match="Normal latent"):
         histogram.score(data, method="EAPsum")
+
+
+@pytest.mark.parametrize("structure", ["bifactor", "two_tier"])
+def test_bifactor_and_two_tier_models_are_rejected(structure: str) -> None:
+    items = [f"q{j}" for j in range(1, 9)]
+    base = Model.uniform(TwoPL(), items=items)
+    if structure == "bifactor":
+        spec = base.with_bifactor(specific={"s1": items[:4], "s2": items[4:]})
+    else:
+        spec = base.with_two_tier(
+            primary={"p1": items[:4], "p2": items[4:]},
+            specific={"s1": items[:2] + items[4:6], "s2": items[2:4] + items[6:]},
+        )
+    assert spec.is_multidimensional
+    dummy = pd.DataFrame(np.vstack([np.zeros(8), np.ones(8)]), columns=items)
+    table = spec.parameter_table(dummy)
+    table["free"] = False
+    res = fit(spec, dummy, table=table, se=None)
+    for fn in (item_information, test_information, expected_score):
+        with pytest.raises(SpecificationError, match="unidimensional"):
+            fn(res, THETA)
+    with pytest.raises(SpecificationError, match="unidimensional"):
+        reliability(res)
+    with pytest.raises(SpecificationError, match="unidimensional"):
+        reliability(res, dummy)
+    with pytest.raises(SpecificationError, match="unidimensional"):
+        summed_score_table(res)
+    with pytest.raises(SpecificationError, match="EAPsum"):
+        res.score(dummy, method="EAPsum")
