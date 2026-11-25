@@ -2,7 +2,7 @@
 
 [English](DESIGN.md) | 日本語
 
-> 状態: ドラフト v0.3（2026-11-25）。マイルストーン E1〜E5 は実装し、R と照合済み（§7）。E6 以降は計画。
+> 状態: ドラフト v0.4（2026-11-25）。マイルストーン E1〜E6 は実装し、R と照合済み（§7）。E7 は計画。
 > 決めたことは「決定」と書く。
 
 ## 1. 目的と対象外
@@ -33,8 +33,8 @@
 |---|---|---|
 | 等価群（EG） | 標本 1 から X、独立な標本 2 から Y | `ScoreDistribution` を 2 つ |
 | 単一群（SG） | 同じ受検者から X と Y | `BivariateScoreDistribution` を 1 つ |
-| カウンターバランス（CB） | 版の順序を入れ替えた 2 つの SG 標本 | `BivariateScoreDistribution` を 2 つ（E6） |
-| アンカーテストつき非等価群（NEAT） | 母集団 P から (X, A)、母集団 Q から (Y, A) | `BivariateScoreDistribution` を 2 つ。アンカーは 2 番目の変数（E4・E5。カーネル等化は E6） |
+| カウンターバランス（CB） | 版の順序を入れ替えた 2 つの SG 標本 | (X, Y) の `BivariateScoreDistribution` を 2 つ。X を先に受けた標本、Y を先に受けた標本の順（カーネル等化、E6） |
+| アンカーテストつき非等価群（NEAT） | 母集団 P から (X, A)、母集団 Q から (Y, A) | `BivariateScoreDistribution` を 2 つ。アンカーは 2 番目の変数（E4・E5。カーネル等化 E6） |
 
 NEAT には 2 系統の手法があり、どちらも実装する計画である。**連鎖**等化（P 上で X → A、Q 上で A → Y）と、
 **事後層化**（合成母集団 $T = wP + (1 - w)Q$。Tucker、Levine、Braun–Holland、頻度推定、カーネル等化の PSE）。
@@ -128,7 +128,7 @@ $$C = D_{\sqrt r}\, Q, \qquad \operatorname{Cov}(\hat r) = \tfrac1N\, C C^\top .
 事前平滑化をしない場合（飽和モデル）は $C = D_{\sqrt r} - r \sqrt r^\top$ で、多項分布の共分散
 $D_r - r r^\top$ になる。
 
-### 4.5 カーネル等化（EG は E3、他のデザインは E6）
+### 4.5 カーネル等化（EG は E3、他のデザインと SEED は E6）
 
 5 つの段階からなる（von Davier, Holland & Thayer, 2004）。事前平滑化（§4.4）、デザイン関数による得点確率
 $r, s$ の推定、連続化、等化、等化の標準誤差。
@@ -180,8 +180,58 @@ $$\mathrm{SEE}_Y(x) = \sqrt{\tfrac1N \bigl\lVert \tfrac{\partial e_Y}{\partial r
 **相対誤差（PRE）**（4 章）: $\mathrm{PRE}(p) = 100\,[\mu_p(e_Y(X)) - \mu_p(Y)]/\mu_p(Y)$。$p$ 次の原点
 モーメント（$p = 1..10$）で、$e_Y(X)$ は確率 $r_j$ で値 $e_Y(x_j)$ をとる。
 
-**SEED**（E6）: 2 つの等化関数（たとえばカーネルと線形）の差の標準誤差
-$\lVert (J_{e_1} - J_{e_2}) J_{DF} C \rVert$（5 章）。
+**デザイン関数**（E6。同書 2・3 章）。どのデザインでも、$r$ と $s$ は推定した同時確率の関数として与えられる。
+SEE は $\lVert J_{e_Y} J_{DF}\, C \rVert$ で、$J_{DF}$ はデザイン関数のヤコビ行列、$C C^\top$ は独立な標本ごとの
+推定確率の共分散（ブロックを横に並べる）。
+
+| デザイン | $r$, $s$ |
+|---|---|
+| EG | 2 組の得点確率そのもの |
+| SG、(X, Y) の同時分布 $P$ | $r_j = \sum_k p_{jk}$、$s_k = \sum_j p_{jk}$ |
+| CB、同時分布 $P_{12}$（X が先）と $P_{21}$（Y が先）、周辺を $r_1, s_1$、$r_2, s_2$ とする | $r = w_X r_1 + (1 - w_X) r_2$、$s = w_Y s_1 + (1 - w_Y) s_2$ |
+| NEAT PSE、(X, A) の $P$ と (Y, A) の $Q$、アンカーの周辺 $t_P$・$t_Q$、$T = wP + (1 - w)Q$ | $r_j = \sum_l \bigl[w + (1 - w)\tfrac{t_{Ql}}{t_{Pl}}\bigr] p_{jl}$、$s_k = \sum_l \bigl[(1 - w) + w\tfrac{t_{Pl}}{t_{Ql}}\bigr] q_{kl}$ |
+
+PSE では
+
+$$dr_j = \sum_l \Bigl[w + (1 - w)\frac{t_{Ql}}{t_{Pl}}\Bigr] dp_{jl}
+- (1 - w)\sum_l \frac{p_{jl}\, t_{Ql}}{t_{Pl}^2}\, dt_{Pl} + (1 - w)\sum_l \frac{p_{jl}}{t_{Pl}}\, dt_{Ql},$$
+
+$s$ も対称な形になる。
+
+**連鎖等化（NEAT CE）**は 4 つの分布を連続化する。P での X と A（$F_P$・$H_P$）、Q での A と Y
+（$H_Q$・$G_Q$）で、それぞれ別のバンド幅を持つ。
+
+$$e_Y(x) = G_Q^{-1}\Bigl(H_Q\bigl(H_P^{-1}(F_P(x))\bigr)\Bigr).$$
+
+$a = H_P^{-1}(F_P(x))$ とすると、連鎖律から独立な 2 つの部分が得られる。
+
+$$\mathrm{SEE}_Y(x)^2 =
+\Bigl\lVert \frac{H_Q'(a)}{G_Q'(e_Y(x))}\,\frac{1}{H_P'(a)}
+\Bigl(\frac{\partial F_P(x)}{\partial r_P} J_r - \frac{\partial H_P(a)}{\partial t_P} J_t\Bigr) C_P \Bigr\rVert^2
++ \Bigl\lVert \frac{1}{G_Q'(e_Y(x))}
+\Bigl(\frac{\partial H_Q(a)}{\partial t_Q} J_t - \frac{\partial G_Q(e_Y(x))}{\partial s_Q} J_s\Bigr) C_Q \Bigr\rVert^2 ,$$
+
+$J_r$・$J_t$ はセル確率をアンカー方向・合計得点方向に足し上げる行列。相対誤差（PRE）は 2 つのリンク
+（P での X → A、Q での A → Y）ごとに報告する。
+
+**SEED**（E6）: 同じデータから推定した 2 つの等化関数の差の標準誤差は $\lVert v_1(x) - v_2(x) \rVert$。
+$v(x) = J_{e}(x) J_{DF} C$ は、ノルムが SEE になるベクトル（5 章）。`KernelEquatingResult` はこのベクトルを
+保持し（`see_vectors`）、`seed(other)` がその差をとる。カーネルと線形（`linear=True`。`kequate` と同じく
+標準偏差の 1000 倍のバンド幅）、2 通りのバンド幅、連鎖と事後層化の比較などに使う。
+
+**決定**: 同時分布を 2 つ渡す場合はデザインを指定させる（`design="counterbalanced"`・`"chained"`・
+`"post_stratification"`）。この 3 つはデータからは区別できない。等価群と単一群は入力から判断する。
+
+**決定**: PSE の重みの既定は §4.6 の手法と同じ $w = N_P/(N_P + N_Q)$（`kequate` の既定は 0.5）。CB の
+重みの既定は $(1/2, 1/2)$。
+
+**決定**: カーネル PSE では、アンカー得点の確率が片方の母集団でだけ 0 のときはエラーにする（§4.6 のように
+除外はしない）。そこではデザイン関数のヤコビ行列が定義できず、カーネル法は事前平滑化を前提にしている
+ためである。
+
+**決定**: `seed()` が確認するのは確認できることだけ（デザインの系統、X の得点、`see_vectors` の列数が
+同じこと）。列は各 C 行列の QR 分解に依存するので、2 つの結果は同じ事前平滑化の結果から作る必要がある。
+これは文書に書くだけで、強制はしない。
 
 ### 4.6 NEAT の線形手法（E4）
 
@@ -287,6 +337,14 @@ ke.bandwidth_x, ke.bandwidth_y
 ke.percent_relative_error
 fe.penalty_bandwidth(smooth_x, penalty_weight=1.0)
 
+sg = fe.kernel_equate(smooth_xy)  # 単一群: 同時分布を 1 つ
+cb = fe.kernel_equate(smooth_12, smooth_21, design="counterbalanced")
+pse = fe.kernel_equate(smooth_xa, smooth_ya, design="post_stratification", synthetic_weight=0.5)
+ce = fe.kernel_equate(smooth_xa, smooth_ya, design="chained")
+ce.anchor_bandwidths, ce.chain_percent_relative_error
+pse.seed(fe.kernel_equate(smooth_xa, smooth_ya, design="post_stratification", linear=True))
+ce.seed(pse)  # DataFrame: score, difference, seed
+
 # 非等価群: X 版とアンカー、Y 版とアンカー
 xa = fe.BivariateScoreDistribution.from_scores(x_scores, x_anchor, x_range=(0, 36), y_range=(0, 12))
 ya = fe.BivariateScoreDistribution.from_scores(y_scores, y_anchor, x_range=(0, 36), y_range=(0, 12))
@@ -307,8 +365,7 @@ fe.equate(xa, ya, method="chained_equipercentile")
   `SpecificationError`（引数が矛盾）、`ConvergenceWarning`、`SparseDataWarning`。
 - 名前は Python の名前にする。役に立つところでは R の名前を docstring に書く（`ddof=1` ↔ R `equate` の
   分散、`penalty_weight` ↔ `kequate` の `KPEN`）。
-- 計画（E6）: `kernel_equate(..., design="single_group" | "counterbalanced" |
-  "chained" | "post_stratification")`、`KernelEquatingResult.seed(other)`。
+- 計画（E7）: `equate()` の標準誤差（解析的・ブートストラップ）、他のカーネル。
 
 ## 6. 構成
 
@@ -339,6 +396,7 @@ Rscript validation/r/equate_e2_reference.R
 Rscript validation/r/equate_e3_reference.R
 Rscript validation/r/equate_e4_reference.R
 Rscript validation/r/equate_e5_reference.R
+Rscript validation/r/equate_e6_reference.R
 ```
 
 ### ケース
@@ -352,7 +410,7 @@ Rscript validation/r/equate_e5_reference.R
 | Q5 | ペナルティ関数の値と、ペナルティによるバンド幅（$K = 0$ と $K = 1$） | `kequate`（`KPEN = 0`）、`SNSequate::bandwidth`、独立 R 実装 | E3 |
 | Q6 | Tucker、Levine 観測得点、Braun–Holland（それぞれ合成母集団の重み 4 通り）、Levine 真値、連鎖線形。内部アンカー（`KBneat`）と外部アンカー（シミュレーション。標本サイズと版の長さが異なる） | `equate::equate(type = "linear", method = "tucker" / "levine" / "braun/holland" / "chained", lts = )`、母集団モーメントで Kolen & Brennan の式を書き下した R 実装 | E4 |
 | Q7 | 頻度推定（合成母集団の重み 4 通り）と連鎖等パーセンタイル等化。`KBneat` と外部アンカーのシミュレーションデータ。2 変量対数線形モデルで事前平滑化した `KBneat` での両手法 | `equate::equate(type = "equipercentile", method = "frequency estimation" / "chained", smoothmethod = )`、丸めをしない Kolen & Brennan の R 実装 | E5 |
-| Q8 | SG・CB・NEAT CE・NEAT PSE のカーネル等化、SEED | `kequate`、`SNSequate` | E6 |
+| Q8 | SG（事前平滑化あり・なし）、CB（重み 3 通り）、NEAT PSE（重み 3 通り）、NEAT CE のカーネル等化。等化後得点、SEE、線形版とカーネル対線形の SEED、PRE、ペナルティによるバンド幅 | `kequate::kequate("SG" / "CB" / "NEAT_PSE" / "NEAT_CE", ...)`、デザイン関数を書き下し全セル確率についての有限差分で SEE を求める R 実装 | E6 |
 
 ### 許容誤差（断りがなければ最大絶対差）
 
@@ -382,6 +440,9 @@ Rscript validation/r/equate_e5_reference.R
 | バンド幅（$K = 0$ と $K = 1$） | 独立 R 実装 | 1e-6 |
 | バンド幅（$K = 0$ と $K = 1$） | `SNSequate` | 1e-3 |
 | カーネル等化の等化後得点 / SEE（相対） | `SNSequate::ker.eq` | 1e-4 / 1e-4 |
+| SG・CB・PSE・CE: カーネル等化の等化後得点、SEE（相対） | 独立 R 実装 | 1e-9、1e-6 |
+| SG・CB・PSE・CE: カーネル等化の等化後得点、SEE（相対）、PRE、バンド幅（$K = 0$） | 分散の係数を除いた `kequate` | 1e-6、1e-6、1e-5、1e-6 |
+| SG・CB・PSE・CE: 線形版の等化後得点、線形版の SEE とカーネル対線形の SEED（相対） | 分散の係数を除いた `kequate` | 1e-6、1e-5 |
 | カーネル等化の等化後得点 / SEE（相対） / バンド幅 | 通常の `kequate` 呼び出し | 5e-3 / 1e-3 / 1e-4 |
 
 実際の差はこれより十分小さい。`kequate` に対して SEE は 1e-8 程度、等化後得点は 2e-7 程度（後者は
@@ -413,6 +474,11 @@ Rscript validation/r/equate_e5_reference.R
   標本サイズを $10^{8}$ 倍して係数の影響を無視できるようにし、SEE を $10^{4}$ 倍して戻す（SEE は
   $N^{-1/2}$ に正確に比例する）。もう 1 つの照合では通常の `kequate` 呼び出しを使い、この係数の影響を
   含む許容誤差にしている（$N \approx 600$、バンド幅 2 の例で等化後得点が最大 1.2e-3 動いた）。
+- **`kequate` のカウンターバランスデザイン**は重みが `wcb` の 1 つで、$r = w r_1 + (1 - w) r_2$、
+  $s = w s_1 + (1 - w) s_2$ とする。ところが SEE では Y の周辺の重みが逆になっている（第 1 標本に
+  $1 - w$）。そのため SEE が等化関数と対応するのは $w = 1/2$ のときだけである。参照データで `wcb = 0.3` と
+  すると、有限差分による SEE と最大 29% 違う（flexpyequate の SEE は 1e-6 で一致する）。flexpyequate は
+  重みを 2 つ $(w_X, w_Y)$ 持ち、`kequate` とは $(1/2, 1/2)$ で照合している。
 - **`kequate` は $G_h(y) = F_h(x)$ を `uniroot(tol = 1e-6)` で解く**。そのため等化後得点の一致は 1e-6 程度
   までになる。
 - **`kequate` のペナルティ第 2 項**は、密度が極大になる得点（左で $f' > 0$、右で $f' < 0$）も数える。
