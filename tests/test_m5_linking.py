@@ -169,9 +169,7 @@ def test_transform_kernel_params_nominal_keeps_scoring_coefficients() -> None:
     shift = 1.1 * 0.6 / 1.5
     np.testing.assert_allclose(
         np.asarray(out),
-        np.array(
-            [1.1 / 1.5, 2.3, -0.4, 0.6 - 2.3 * shift, 0.9 + 0.4 * shift, -0.7 - 3.0 * shift]
-        ),
+        np.array([1.1 / 1.5, 2.3, -0.4, 0.6 - 2.3 * shift, 0.9 + 0.4 * shift, -0.7 - 3.0 * shift]),
         atol=1e-15,
     )
 
