@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 from flexpyctt import errors
-from flexpyctt.correlation import PolychoricResult, polychoric, smooth_correlation
+from flexpyctt.correlation import PolychoricResult, polychoric
 from flexpyctt.dimensionality import (
     ComparisonDataResult,
     DetectResult,
@@ -54,6 +54,5 @@ __all__ = [
     "hull",
     "parallel_analysis",
     "polychoric",
-    "smooth_correlation",
     "velicer_map",
 ]

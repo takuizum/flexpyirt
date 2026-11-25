@@ -84,6 +84,8 @@ packages = ["src/flexpyirt"]
 # The sdist carries the sources, tests (with the mirt reference values), R validation scripts,
 # benchmarks and documentation; repository tooling stays out.
 [tool.hatch.build.targets.sdist]
+# packages/ (the other distributions of the workspace) is included: flexpyirt's tests read
+# reference values from packages/flexpyctt/tests/reference.
 exclude = ["/.github", "/.python-version", "/CLAUDE.md", "/uv.lock", "/site"]
 
 [tool.ruff]

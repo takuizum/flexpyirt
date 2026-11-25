@@ -1,6 +1,6 @@
 # DETECT (VALIDATION.md V27) from sirt's conf.detect / expl.detect with use_sum_score = TRUE.
-# Run from the repository root:  Rscript validation/r/m5_detect_reference.R
-# Writes tests/reference/v27_detect.json. CI does not run R; the JSON is committed.
+# Run from the repository root:  Rscript packages/flexpyctt/validation/r/m5_detect_reference.R
+# Writes packages/flexpyctt/tests/reference/v27_detect.json. CI does not run R; the JSON is committed.
 #
 # use_sum_score = TRUE with bias_corr = TRUE is Zhang & Stout's (1999) estimator: the conditional
 # covariance of each pair is the average of the covariances given the total score and given the
@@ -90,6 +90,6 @@ res <- list(
   index_names = c("DETECT", "ASSI", "RATIO", "MADCOV100", "MCOV100"),
   cases = cases, exploratory = expl_case
 )
-write_json(res, file.path("tests", "reference", "v27_detect.json"), auto_unbox = TRUE,
+write_json(res, file.path("packages", "flexpyctt", "tests", "reference", "v27_detect.json"), auto_unbox = TRUE,
            digits = NA, null = "null", pretty = FALSE)
-cat("wrote tests/reference/v27_detect.json\n")
+cat("wrote packages/flexpyctt/tests/reference/v27_detect.json\n")

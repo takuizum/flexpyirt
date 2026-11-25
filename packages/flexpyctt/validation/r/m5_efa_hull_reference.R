@@ -1,13 +1,13 @@
 # EFA (ULS / ML) and the Hull method (VALIDATION.md V28).
 # Run from the repository root (after m5_polychoric_reference.R):
-#   Rscript validation/r/m5_efa_hull_reference.R
-# Writes tests/reference/v28_efa_hull.json. CI does not run R; the JSON is committed.
+#   Rscript packages/flexpyctt/validation/r/m5_efa_hull_reference.R
+# Writes packages/flexpyctt/tests/reference/v28_efa_hull.json. CI does not run R; the JSON is committed.
 #
 # EFAtools::EFA(method = "ULS" / "ML", rotation = "none") gives the unrotated loadings and fit
 # indices (CAF, Bartlett-corrected chi-square, CFI, RMSEA) for every k up to HULL's maximum;
 # EFAtools::HULL(method = "ULS" / "ML", gof = CAF, CFI, RMSEA) gives the Hull tables. HULL's
 # maximum number of factors comes from parallel analysis (random), so it is recorded
-# (settings$n_fac_max) and passed to flexpyirt explicitly. psych::fa(fm = "minres" / "ml") is
+# (settings$n_fac_max) and passed to flexpyctt explicitly. psych::fa(fm = "minres" / "ml") is
 # recorded for one matrix as a second EFA reference.
 suppressMessages({
   library(EFAtools)
@@ -15,7 +15,7 @@ suppressMessages({
   library(jsonlite)
 })
 
-v24 <- fromJSON(file.path("tests", "reference", "v24_polychoric.json"), simplifyVector = FALSE)
+v24 <- fromJSON(file.path("packages", "flexpyctt", "tests", "reference", "v24_polychoric.json"), simplifyVector = FALSE)
 as_matrix <- function(rows) do.call(rbind, lapply(rows, unlist))
 rows_of <- function(m) lapply(seq_len(nrow(m)), function(i) unname(as.list(m[i, ])))
 
@@ -87,6 +87,6 @@ res <- list(
               psych_version = as.character(packageVersion("psych")), converged = TRUE),
   cases = cases, psych_sim_3f = psych_ref
 )
-write_json(res, file.path("tests", "reference", "v28_efa_hull.json"), auto_unbox = TRUE,
+write_json(res, file.path("packages", "flexpyctt", "tests", "reference", "v28_efa_hull.json"), auto_unbox = TRUE,
            digits = NA, null = "null", pretty = FALSE)
-cat("wrote tests/reference/v28_efa_hull.json\n")
+cat("wrote packages/flexpyctt/tests/reference/v28_efa_hull.json\n")

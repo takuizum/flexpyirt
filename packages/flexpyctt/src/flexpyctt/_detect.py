@@ -1,6 +1,6 @@
 r"""DETECT: conditional covariances and indices (DESIGN.md §16.13).
 
-Pure NumPy helpers for :func:`flexpyirt.detect` and :func:`flexpyirt.exploratory_detect`.
+Pure NumPy helpers for :func:`flexpyctt.detect` and :func:`flexpyctt.exploratory_detect`.
 Conditional covariances follow Zhang & Stout (1999): the average of the covariance conditional
 on the total score and on the rest score, as sirt's ``ccov.np(use_sum_score = TRUE,
 bias_corr = TRUE)``.

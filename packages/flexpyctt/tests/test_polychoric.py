@@ -18,7 +18,7 @@ import pytest
 from scipy.integrate import quad
 from scipy.stats import norm
 
-from flexpyctt import PolychoricResult, polychoric, smooth_correlation
+from flexpyctt import PolychoricResult, polychoric
 from flexpyctt._polychoric import (
     _derivatives,
     bivariate_normal_cdf,
@@ -27,6 +27,7 @@ from flexpyctt._polychoric import (
     fit_pairs,
     pair_log_likelihood,
 )
+from flexpyctt.correlation import smooth_correlation
 from flexpyctt.errors import HeywoodWarning, NotPositiveDefiniteWarning, SpecificationError
 from reference_data import load_reference
 
