@@ -576,3 +576,118 @@ if (part %in% c("all", "unidim")) {
     "non-symmetric and symmetric) for 4PL, nominal and mixed 2PL + nominal common items."
   ))
 }
+
+# =================================================================================================
+# Part 2: confirmatory multidimensional models. Both forms are calibrated with factor means 0,
+# variances 1 and free factor correlations on the same loading pattern; the source population has
+# means mu and standard deviations sigma, so the true transformation is A = diag(sigma),
+# beta = mu ("diagonal"; "oblique" contains it, "orthogonal" does not when the sigma differ).
+# =================================================================================================
+if (part %in% c("all", "multidim")) {
+  cases <- list()
+
+  # pattern: J x D logical loading pattern; returns the mirt.model() string and factor -> items.
+  model_spec <- function(pattern, items) {
+    D <- ncol(pattern)
+    fnames <- paste0("F", seq_len(D))
+    lines <- vapply(seq_len(D), function(m) {
+      sprintf("%s = %s", fnames[m], paste(which(pattern[, m]), collapse = ","))
+    }, character(1))
+    pairs <- combn(D, 2L)
+    cov_line <- paste0("COV = ", paste(sprintf("F%d*F%d", pairs[1, ], pairs[2, ]), collapse = ", "))
+    list(
+      string = paste(c(lines, cov_line), collapse = "\n"),
+      factors = setNames(lapply(seq_len(D), function(m) items[pattern[, m]]), fnames)
+    )
+  }
+  cor_matrix <- function(D, rho) {
+    out <- matrix(rho, D, D); diag(out) <- 1; out
+  }
+  # Forms share the first n_common rows of (a, d); unique items follow.
+  build_case <- function(case_name, description, a, d, itemtype, idx_c, idx_t, idx_s, N, mu, sigma,
+                         rho, quadpts, transformations, optimizer = "NR", control = NULL) {
+    D <- ncol(a)
+    common <- sprintf("c%02d", seq_along(idx_c))
+    form <- function(idx, mean, sds, nms) {
+      Sigma <- diag(sds, D) %*% cor_matrix(D, rho) %*% diag(sds, D)
+      out <- as.data.frame(simdata(a[idx, , drop = FALSE], d[idx, , drop = FALSE], N,
+                                   itemtype = itemtype, mu = mean, sigma = Sigma))
+      colnames(out) <- nms
+      out
+    }
+    dat_tgt <- form(c(idx_c, idx_t), rep(0, D), rep(1, D),
+                    c(common, sprintf("t%02d", seq_along(idx_t))))
+    dat_src <- form(c(idx_c, idx_s), mu, sigma, c(common, sprintf("s%02d", seq_along(idx_s))))
+    spec_tgt <- model_spec(a[c(idx_c, idx_t), , drop = FALSE] != 0, colnames(dat_tgt))
+    spec_src <- model_spec(a[c(idx_c, idx_s), , drop = FALSE] != 0, colnames(dat_src))
+    run_case(
+      case_name, description, dat_src, dat_tgt, named(itemtype, dat_src),
+      named(itemtype, dat_tgt), common, D = D, quadpts = quadpts, theta_lim = c(-6, 6),
+      transformations = transformations, truth = list(A = diag(sigma, D), beta = mu),
+      model_src = spec_src$string, model_tgt = spec_tgt$string,
+      factors_src = spec_src$factors, factors_tgt = spec_tgt$factors,
+      optimizer = optimizer, control = control
+    )
+  }
+  all_tr <- c("diagonal", "orthogonal", "oblique")
+
+  # ---- V40d: 2PL, two factors; 10 common (4 + 4 simple, 2 cross-loading), 6 unique per form ----
+  set.seed(20261213)
+  J <- 22L
+  a <- matrix(0, J, 2L)
+  f1 <- c(1:4, 11:13, 17:19); f2 <- c(5:8, 14:16, 20:22); cross <- 9:10
+  a[f1, 1] <- rlnorm(length(f1), 0.2, 0.2); a[f2, 2] <- rlnorm(length(f2), 0.2, 0.2)
+  a[cross, ] <- matrix(rlnorm(4L, -0.2, 0.2), 2L, 2L)
+  d <- matrix(rnorm(J, 0, 0.8))
+  cases[["v40d_2pl_2d"]] <- build_case(
+    "v40d_2pl_2d",
+    paste("V40d: 2PL, 2 factors (cor 0.5), J=16/form, 10 common (2 cross-loading),",
+          "N=3000/group, source mean (0.4, -0.3), sd (1.2, 0.8)"),
+    a, d, "2PL", 1:10, 11:16, 17:22, N = 3000L, mu = c(0.4, -0.3), sigma = c(1.2, 0.8),
+    rho = 0.5, quadpts = 31L, transformations = all_tr
+  )
+
+  # ---- V40e: GRM K = 3, two factors; 8 common (3 + 3 simple, 2 cross-loading), 4 unique --------
+  set.seed(20261214)
+  J <- 16L
+  a <- matrix(0, J, 2L)
+  f1 <- c(1:3, 9:10, 13:14); f2 <- c(4:6, 11:12, 15:16); cross <- 7:8
+  a[f1, 1] <- rlnorm(length(f1), 0.2, 0.2); a[f2, 2] <- rlnorm(length(f2), 0.2, 0.2)
+  a[cross, ] <- matrix(rlnorm(4L, -0.2, 0.2), 2L, 2L)
+  mid <- rnorm(J, 0, 0.5)
+  d <- cbind(mid + 0.9, mid - 0.9)
+  cases[["v40e_grm_2d"]] <- build_case(
+    "v40e_grm_2d",
+    paste("V40e: GRM (K=3), 2 factors (cor 0.4), J=12/form, 8 common (2 cross-loading),",
+          "N=3000/group, source mean (-0.3, 0.5), sd (0.85, 1.25)"),
+    a, d, "graded", 1:8, 9:12, 13:16, N = 3000L, mu = c(-0.3, 0.5), sigma = c(0.85, 1.25),
+    rho = 0.4, quadpts = 31L, transformations = all_tr
+  )
+
+  # ---- V40f: 2PL, three factors; 12 common (3 + 3 + 3 simple, 3 cross-loading), 3 unique -------
+  # 15 points per dimension (3375 nodes); BFGS with reltol = 1e-13 as in V14's 3D case.
+  set.seed(20261215)
+  J <- 18L
+  a <- matrix(0, J, 3L)
+  a[c(1:3, 13, 16), 1] <- rlnorm(5L, 0.2, 0.2)
+  a[c(4:6, 14, 17), 2] <- rlnorm(5L, 0.2, 0.2)
+  a[c(7:9, 15, 18), 3] <- rlnorm(5L, 0.2, 0.2)
+  a[10, c(1, 2)] <- rlnorm(2L, -0.2, 0.2)
+  a[11, c(2, 3)] <- rlnorm(2L, -0.2, 0.2)
+  a[12, c(1, 3)] <- rlnorm(2L, -0.2, 0.2)
+  d <- matrix(rnorm(J, 0, 0.8))
+  cases[["v40f_2pl_3d"]] <- build_case(
+    "v40f_2pl_3d",
+    paste("V40f: 2PL, 3 factors (cor 0.4), J=15/form, 12 common (3 cross-loading),",
+          "N=3000/group, source mean (0.3, -0.2, 0.4), sd (1.2, 0.9, 1.1)"),
+    a, d, "2PL", 1:12, 13:15, 16:18, N = 3000L, mu = c(0.3, -0.2, 0.4),
+    sigma = c(1.2, 0.9, 1.1), rho = 0.4, quadpts = 15L, transformations = all_tr,
+    optimizer = "BFGS", control = list(reltol = 1e-13)
+  )
+
+  write_bundle(cases, "v40_linking_multidim.json", paste(
+    "V40 (multidimensional): characteristic-curve linking theta* = A theta + beta of confirmatory",
+    "two- and three-factor models (Haebara / Stocking-Lord, non-symmetric and symmetric;",
+    "diagonal, orthogonal and oblique A)."
+  ))
+}
