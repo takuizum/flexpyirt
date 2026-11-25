@@ -72,8 +72,10 @@ English | [日本語](VALIDATION.ja.md)
 | V31 | Jackknife slope index (LSAT7 2PL, Science GRM, simulated 2PL with two dependent pairs and 5% MCAR, simulated GPCM with a dependent pair); the Newton and one-step approximations against the refit | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | Bifactor models with dimension reduction (2PL with three specific factors and three general-only items; GRM $K=4$ with three testlets) | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | Two-tier models with dimension reduction (2PL with two correlated primary factors and three specific factors, one spanning both; GRM $K=4$ with a cross-loading item and two testlets) | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
+| V34 | Sampling weights: 2PL with non-integer weights (sum $\ne N$, five zero weights), Science GRM with weights normalized to $N$, two groups with anchors, free focal latent and 5% missing, FIPC with a free latent, a bifactor 2PL with dimension reduction; estimates, log-likelihood, AIC, BIC, Oakes SEs | `mirt(..., survey.weights = w)`, `multipleGroup(..., survey.weights = w)`, `bfactor(..., survey.weights = w)`, `SE.type = "Oakes"` | M7 |
 | V36 | Summed-score distribution kernel (Poisson-binomial: five probability vectors, $J$ 10–300; polytomous: GRM $K=4$ and mixed 2PL + GRM) | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`, `poibin::dpoibin()`, `stats::dpois()`; mirt `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 | V37 | Information, expected score, reliability and summed-score EAP at mirt's estimates (2PL $J=12$; the same with 8% missing; 3PL $J=12$; GRM and GPCM $K=4$, $J=8$; nominal $K=4$, $J=6$; mixed 2PL + 3PL + GRM + GPCM + nominal, $J=14$; two groups, 2PL + GRM, focal mean and variance free) | `iteminfo()`, `testinfo()`, `expected.item()`, `expected.test()`, `marginal_rxx()`, `empirical_rxx()`, `fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
+| V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 
 ## mirt settings and known differences (found in M1)
@@ -759,6 +761,34 @@ English | [日本語](VALIDATION.ja.md)
     reliability bounds and closeness of the marginal and empirical values on simulated data,
     and the error paths.
 
+- **Sampling weights (V34, M7)**: mirt's `survey.weights` (mirt 1.48, `optimizer = "NR"`,
+  `TOL = 1e-10`, `SE.type = "Oakes"`); the reference files store the raw rows with one weight per
+  row, so the weighted pattern compression is part of what is compared. V34a: simulated 2PL
+  ($J=10$, $N=1000$), log-normal weights related to the sum score, not normalized
+  ($\sum w=1541.7$), five rows with weight 0. V34b: Science GRM ($N=392$), uniform weights
+  normalized to sum to $N$. V34c: two groups of 800, anchors q01–q05, focal mean and variance
+  free, 5% MCAR missing, gamma weights with different totals in the two groups (81 points on
+  $[-8,8]$). V34d: FIPC (q01–q05 fixed, latent mean and variance free, 81 points), log-normal
+  weights normalized to $N$. V34e: bifactor 2PL (`bfactor()`, $J=9$, three specific factors of
+  three items, $N=1000$, 21 points per dimension on $[-6,6]$), log-normal weights not normalized
+  ($\sum w=1467.6$): log-likelihood $4.7\times10^{-16}$ (relative), parameters
+  $9.5\times10^{-7}$, Oakes and Hessian SEs $2.2\times10^{-6}$ (relative), AIC and BIC
+  $3.8\times10^{-11}$. Measured differences of V34a–d (plain EM / SQUAREM, at most): log-likelihood
+  $1.8\times10^{-15}$ (relative), parameters $7.6\times10^{-8}$, Oakes SEs $1.1\times10^{-7}$
+  (relative), flexpyirt Hessian SEs vs mirt Oakes $1.1\times10^{-7}$ (relative), AIC and BIC
+  $5.1\times10^{-11}$; all within the common tolerances. mirt's BIC uses the sum of the weights as
+  $N$ (so does flexpyirt, DESIGN §17.4); V34a, whose weights do not sum to the number of rows,
+  checks this. Every reference fit differs from the unweighted fit of the same data
+  (log-likelihoods differ by more than $10^{-3}$ and parameters by more than $10^{-3}$), so
+  ignoring the weights would fail the tests. **Not validated against R**: integer weights against
+  row replication (2PL with missing data; two-group GRM with plain EM and SQUAREM; FIPC with an
+  empirical histogram; MAP; a bifactor and a two-tier model), zero-weight rows against dropped rows, and rescaled weights are
+  checked as identities in `tests/test_m7_weights.py`. The Oakes / Hessian SEs agree with mirt's
+  but are not valid variance estimates under sampling weights (DESIGN §17.4); item fit, M2,
+  local dependence, JSI, DIF and model-based parallel analysis raise an error for a weighted fit.
+  Tests: `tests/test_mirt_m7_weights.py`. Reference generator:
+  `validation/r/m7_weights_reference.R`.
+
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)
   uses mirt's class parameterization for the shape and standardizes the mixture analytically, so
@@ -936,9 +966,41 @@ English | [日本語](VALIDATION.ja.md)
   is `focal`; the test standardizes the same group. With the other group standardized the
   model is the same but its discretization is not (the grid is cut at $\pm6$ and the free group
   has SD 1.34): the log-likelihood differs by $1.9\times10^{-3}$ and $X^2$ by $3\times10^{-3}$. **Not validated, not
-  implemented**: bifactor / two-tier models; `jsi()` beyond single-group unidimensional Normal
+  implemented**: `jsi()` beyond single-group unidimensional Normal
   models (mirt: one factor only, no SE for Davidian curves, no mixtures, and for
   `multipleGroup` single-group $N(0,1)$ refits per group, which is another statistic).
+  Bifactor and two-tier models are V38.
+- **Local dependence for bifactor and two-tier models (V38, M7, issue #81)**:
+  `validation/r/m7_local_dependence_bifactor_reference.R` (mirt 1.48) writes
+  `tests/reference/v38_local_dependence_bifactor.json`;
+  `tests/test_mirt_m7_local_dependence_bifactor.py` (fast tier) puts mirt's estimates into a
+  flexpyirt `FitResult` with every parameter fixed, as V26 (M7), so the comparison is of the
+  statistics alone (the log-likelihood at mirt's estimates agrees to $10^{-9}$ relative,
+  observed $\le8\times10^{-16}$). mirt's `residuals(type = "LD")` sums over the full product
+  grid `thetaComb(theta, nfact)` with the fit's `quadpts`; flexpyirt sums over the reduced grids
+  (DESIGN.md §17.3), which is the same sum rearranged.
+
+  | Case | mirt call | Points per dimension (mirt's grid) | Pairs | $X^2$ rel. | $G^2$ rel. | $V$ abs. | Q3 abs. |
+  |---|---|---|---|---|---|---|---|
+  | bifactor 2PL, three specific factors, two general-only items, 3% MCAR | `bfactor(data, c(1,1,1,2,2,2,3,3,3,NA,NA))` | 21 ($21^4$) | 55 | $5\times10^{-13}$ | $2\times10^{-11}$ | $2\times10^{-15}$ | $9\times10^{-16}$ |
+  | bifactor GRM (3 categories), two specific factors | `bfactor(..., itemtype = "graded")` | 21 ($21^3$) | 28 | $2\times10^{-14}$ | $7\times10^{-13}$ | $3\times10^{-16}$ | $1\times10^{-15}$ |
+  | two-tier 2PL, two correlated primary factors (one cross-loading item), two specific factors | `bfactor(..., model2 = mirt.model("F1 = 1-5\nF2 = 5-10\nCOV = F1*F2"))` | 15 ($15^4$) | 45 | $1\times10^{-11}$ | $2\times10^{-8}$ | $8\times10^{-15}$ | $3\times10^{-15}$ |
+
+  Tolerances: $10^{-7}$ relative ($X^2$, $G^2$), $10^{-8}$ absolute ($V$, Q3). Q3 is requested
+  with `Theta = fscores(m, quadpts = <the fit's>)`; mirt's default call scores on `fscores()`'s
+  own grid and is stored as `q3_default` (it differs from flexpyirt on the fitted grid by
+  $2\times10^{-6}$, $1\times10^{-8}$ and $2\times10^{-4}$ in the three cases). In the first
+  case two items of a three-item specific factor were simulated with extra shared variance; the
+  specific factor absorbs it and no pair is flagged, in mirt and in flexpyirt alike. Unit tests
+  (`tests/test_m7_local_dependence_reduced.py`) compare the factorized tables with brute-force
+  sums over the product grid ($7^4$ nodes, bifactor and two-tier with a GRM item and missing
+  data; $X^2$ to $10^{-10}$ relative), Q3 with its definition at `score()`'s EAP, and check
+  that a testlet left out of `specific` is flagged. **Not validated**: nothing estimated by
+  flexpyirt is compared here (the fits are V32 and V33); item models other than 2PL and GRM;
+  more than three specific factors; Gauss–Hermite grids (mirt's `residuals()` is equispaced).
+  **Not implemented**: `jsi()` for these models (an item has a primary and a specific slope,
+  and mirt's `type = "JSI"` requires one factor); multiple groups (bifactor and two-tier models
+  are single-group).
 - **DETECT (V27, M5)**: sirt's `conf.detect()` is called with `smooth = FALSE`; with the
   default `smooth = TRUE` and `use_sum_score = TRUE` it subtracts raw item scores from the
   standardized total score, which mis-forms the rest-score groups (DESIGN §16.13). `expl.detect()`

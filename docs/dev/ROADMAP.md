@@ -111,7 +111,10 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
    - [x] `FitResult.local_dependence()` (Q3, Q3\*, LD-X², G²) for multiple groups, `EmpiricalHistogram` /
      `DavidianCurve` / `NormalMixture` latent distributions and confirmatory 2–3 factor models
      (validated in V26 against mirt `residuals()`; the mixture case given the density only).
-     Still open: bifactor / two-tier models and JSI beyond single-group unidimensional Normal models.
+   - [x] `FitResult.local_dependence()` for bifactor and two-tier models, with the expected tables on
+     the reduced grids (validated in V38 against mirt `residuals()` on `bfactor()` fits).
+     Still open: JSI beyond single-group unidimensional Normal models (no definition for items
+     with several slopes and no reference in mirt).
 3. [ ] Item / test information, reliability and summed-score EAP (#82), on a public Lord–Wingersky /
    Poisson-binomial kernel (#83).
    - [x] Kernel (#83): `summed_score_distribution()`, the Lord–Wingersky recursion as a
@@ -126,6 +129,11 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
      mixed-format test and a two-group model.
    - [ ] Multidimensional models: information matrix and directional information.
 4. [ ] Sampling (survey) weights (#84).
+   - [x] `fit(..., weights=...)`: weighted marginal likelihood with weighted pattern compression
+     for EM, SQUAREM, multiple groups, missing data and FIPC; BIC with the sum of the weights;
+     Oakes / Hessian SEs with a warning (valid for frequency weights only); validated in V34
+     against mirt's `survey.weights` (2PL, GRM, two groups, FIPC, bifactor). Design-consistent SEs come with
+     #85; item fit, M2, local dependence, JSI and DIF raise an error for weighted fits.
 5. [ ] Robust standard errors: sandwich and cross-product (#85).
 - **Acceptance**: V-numbered comparisons with mirt `bfactor()`, `residuals()`, `iteminfo()` /
   `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and

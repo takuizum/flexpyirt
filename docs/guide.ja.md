@@ -204,6 +204,29 @@ print(res_sq.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeg
 
 初回の推定には JAX のコンパイル時間がかかる。同じ形のデータを続けて推定すると 2 回目以降は速い。
 
+### 標本ウェイト
+
+複雑な標本設計のデータ（抽出確率が等しくない調査、大規模学力調査）では、`weights=` に行ごとのウェイトを渡す。
+推定値は重み付き対数尤度 $\sum_i w_i \log L_i$ を最大化する（mirt の `survey.weights`）。
+
+```python
+sampling_weights = np.random.default_rng(7).uniform(0.5, 2.0, len(df))
+# 任意: 合計が行数になるように調整する。
+sampling_weights *= len(df) / sampling_weights.sum()
+res_w = fit(spec, df, weights=sampling_weights, se=None)
+print(res_w.loglik, res_w.bic)
+```
+
+- `weights` は行ごとに 1 つの有限で非負の数を持つ配列（`group=`、欠測、固定パラメタ、事前分布、どの潜在分布とも
+  併用できる）。ウェイト 0 の行は無視する。整数ウェイトは、行をその回数だけ繰り返した結果と同じになる。
+- ウェイトは与えられたまま使う。`loglik`・`aic`・`bic` はウェイトの尺度に従い、`bic` は $\log N$ の代わりに
+  ウェイトの和の対数を使う。ウェイトなしの推定と比べたい場合は、合計が行数になるようにウェイトを調整する。
+- **標準誤差**: `se="oakes"` と `se="hessian"` は重み付き対数尤度の情報行列の逆行列を返す。度数ウェイト
+  （行の繰り返し）では正しいが、**標本ウェイトのもとでは正しい分散推定量ではない**。`weights` とともに
+  どちらかを使うと `fit()` は警告（`FlexpyirtWarning`）を出す。ウェイトが度数でなければ `se=None` を渡す。
+- スコアリング（`res_w.score(...)`）はふだんどおり使える。`item_fit()`、`m2()`、`local_dependence()`、
+  `jsi()`、`dif()`、`model_parallel_analysis()` はウェイト付きの推定結果には使えず、`SpecificationError` を出す。
+
 ## 5. 結果を読む
 
 `fit()` は `FitResult` を返す。`res.summary()` で読みやすいテキスト要約が得られる（Jupyter
@@ -1065,7 +1088,9 @@ print(report)
   $X^2$ が大きいペアは、$\theta$ 以外の何か（共通の問題文、テストレット、第 2 の次元）を共有している可能性がある。
   多母集団モデル（`group=` を渡す。統計量は群ごとに求め、`pairs` に `group` 列が付く）、`EmpiricalHistogram`・
   `DavidianCurve`・`NormalMixture` の潜在分布（推定した分布を使う）、2〜3 因子のモデル（すべての因子を与えても
-  なお依存するペア）にも使える。`jsi()`、`model_parallel_analysis()`、`dimensionality(fit=...)` は、単一群・
+  なお依存するペア）にも使える。双因子・two-tier モデル（14 節）では、同じ特殊因子内のペアはその因子を超える
+  依存について検定されるので、宣言しなかったテストレットはその項目間の大きな正の値として現れる。期待度数表は
+  縮約した格子の上で和をとるため、計算量は特殊因子の数とともに増えない。`jsi()`、`model_parallel_analysis()`、`dimensionality(fit=...)` は、単一群・
   1 次元・`Normal` 潜在分布のモデルが必要。
 - `FitResult.jsi()` は Edwards, Houts & Cai (2018) のジャックナイフ傾き指標である。項目を 1 つずつ除いてモデルを
   推定し直し、他の各項目の傾きの変化をその標準誤差で割る。2 つの項目が依存し合っていると、片方を除くともう片方の

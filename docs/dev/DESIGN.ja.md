@@ -62,7 +62,8 @@
 ## 4. アルゴリズム
 
 ### 4.1 前処理: 反応パターン圧縮
-- 群ごとに反応行列（欠測は `-1`）をユニーク化し、度数 $c_p$ を得る。
+- 群ごとに反応行列（欠測は `-1`）をユニーク化し、度数 $c_p$ を得る。標本ウェイトがあるとき、$c_p$ は
+  パターン $p$ を持つ行のウェイトの和（§17.4）。
 - jit の再コンパイルを抑えるため、パターン数を **2 のべき乗のバケットにパディング**（度数 0 の行で埋める）。
 - 群ごとにパターン数が違うので、全群を連結した 1 本の配列 + `group_index` で持つ（群ごとの Python ループを jit 内に持ち込まない）。
 
@@ -548,7 +549,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 23. **ML スコアリング（`method="ML"`、M4, §8）**: 同じ `vmap` 済み安全装置つき 1 次元 Newton（初期値 EAP）で $[-20, 20]$ 上（mirt の既定 `max_theta = 20` に対応）において $f_{\mathrm{ML}}(\theta)=\log L(\theta\mid y)$ を最大化し、観測情報量から $\mathrm{SE}=(-f''_{\mathrm{ML}}(\hat\theta))^{-1/2}$ を求める（mirt 既定の `expected.info = FALSE` に一致）。極端パターンの規約: 全欠測は `(NaN, NaN)`、全観測項目が低 $\theta$ 側の端カテゴリ（$a_j>0$ なら `0`、$a_j<0$ なら `K_j-1`）のときは `(-inf, NaN)`、高 $\theta$ 側の端カテゴリのときは `(+inf, NaN)`。非凹モデル（3PL / 4PL）で全端カテゴリ以外でも有限の内部最大値を持たないパターン（当て推量により低得点パターンで $\log L(\theta)$ が $\theta\to -\infty$ へ単調増加する場合など）も検出し、$|\hat\theta|$ が `±20` の上限に達した・$f''(\hat\theta)\ge 0$・$\mathrm{SE}>30$（`mirt:::ML` の閾値）・$f(\pm 20) > f(\hat\theta)$ のいずれかで `±inf` と SE NaN を返す。`±inf` の符号は、$f(\pm 20) > f(\hat\theta)$ が成り立つときにのみ優越する端点から決め、それ以外は $\operatorname{sign}(\hat\theta)$ に従う（`mirt:::ML` の `Inf * sign(est)` に一致）。特に、3PL の二峰性対数尤度で $-\infty$ の下側漸近線が厳密に凹な内部の局所最頻値を上回る場合、flexpyirt は真の大域上限である `(-inf, NaN)`（本来の最尤推定）を意図的に返すのに対し、mirt 1.46.1 の EAP 出発の局所 `nlm` 探索は内部の局所最頻値で停止するため両者は異なる（`v11_3pl` の 3,790 ユニークパターン中 25 件。この判定により、`nlm` 有限差分 Hessian が `SEest > 30` 判定をすり抜ける境界ケースもあわせて正しく扱える。VALIDATION.ja.md V13 参照）。
 24. **WLE スコアリング（`method="WLE"`、M4, §8）**: Warm (1989) の重み付き最尤推定を、Jeffreys / Firth (1993) の罰則付き対数尤度 $f_{\mathrm{WLE}}(\theta)=\log L(\theta\mid y)+\tfrac{1}{2}\log I(\theta)$ の $[-20, 20]$ 上での最大化として同じ `vmap` 済み安全装置つき 1 次元 Newton（初期値 EAP）で解く。ここで $I(\theta)=\sum_{j:\,y_j\ge 0}\sum_k P_{jk}(\theta)\,(\partial\log P_{jk}/\partial\theta)^2$ は観測項目にわたる Fisher テスト情報量であり、各カーネルの `log_prob` に対する `jax.jacfwd` のみで計算する（手書き微分なし、全項目ファミリーで動作）。停留条件は $\partial\log L/\partial\theta + J(\theta)/(2I(\theta)) = 0$（$J(\theta)=\partial I/\partial\theta$）と恒等的に一致し、2PL・Rasch・GRM・GPCM・PCM・3PL・4PL のすべてで `mirt:::WLE.mirt` と一致する（指数型分布族では $J=\partial I/\partial\theta$ が Warm の $\sum P'P''/P$ と恒等的に一致し、3PL / 4PL / GRM では Firth の Jeffreys 事前分布バイアス補正および mirt と一致する）。極端パターン（全最低・全最高）でも有限の推定値を与え、全欠測パターンは $I(\theta)=0$ のため `(NaN, NaN)` を返す。SE は JAX 自動微分による $(-f''_{\mathrm{WLE}}(\hat\theta))^{-1/2}$ であり、mirt の既定 `fscores(..., method="WLE", full.scores.SE=TRUE)` と一致する（Warm の漸近式 $I(\hat\theta)^{-1/2}$ は mirt の `expected.info=TRUE` に対応し、短いテストや極端パターンで差が出る。VALIDATION.ja.md V13 参照）。
 25. **Plausible values（`method="PV"`、M4, §8）**: 回答者ごとに事後分布 $p(\theta\mid y_i;\mu_{g(i)},\sigma_{g(i)}^2)$ から独立な `n_draws` 個（既定 `5`）の標本を抽出し、`pv1..pvM` 列の DataFrame を返す。求積格子による離散化を避けて連続な標本を得つつ `jit` 内で静的形状・高速動作を保つため、圧縮・2 のべき乗パディングしたユニークパターンごとに推定済みモデルの求積区間 `[quad.lower, quad.upper]` 上の細かい等間隔格子（`501` 点）で事後密度を評価し、台形則で $[0, 1]$ 上の区分線形 CDF を構成したうえで、`jax.random.uniform(key, (N_pad, n_draws))`（回答者数 `N` も 2 のべき乗 `N_pad` へパディングして `N` にスライス）に対し分岐なしの `searchsorted(..., side="right")` 線形補間で逆 CDF 抽出を行う。同じ反応パターンの回答者は事後 CDF を共有しつつ独立な一様乱数を用いるため独立な標本となり、全欠測行は群の事前分布から抽出される。明示的な JAX PRNG の `key`（`jax.random.key` または `jax.random.PRNGKey`、未指定・不正は `SpecificationError`）が必須で、`key` に対して完全に決定的。
-26. **`FitResult` の JSON 入出力 API とバージョン付き形式（M4, API §7）**: `FitResult.to_json(path=None, *, indent=2) -> str` は推定結果を厳格な JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定された場合は UTF-8 ファイルにも書き出す。`FitResult.from_json(source) -> FitResult` はファイルパスまたは JSON 文字列から再推定なしで復元する。素の JSON のみを使い、`pickle` や `eval` は一切使わない。最上位オブジェクトには `"format": "flexpyirt.FitResult"`、`"schema_version"`（§15.46 の命名リファクタから 4。version 1–3 のファイルも読める）、および書き出した版を記録する `"flexpyirt_version": flexpyirt.__version__` を持たせる。`FitResult` は `_model`・`_quadrature` とあわせて推定設定 `_method: BAEM` も保持し、メタデータ全体が往復保存できるようにする。`from_json` は入口で `check_x64()` を呼ぶ（スコアリングに float64 が必要なため、無効なら `PrecisionError`）。
+26. **`FitResult` の JSON 入出力 API とバージョン付き形式（M4, API §7）**: `FitResult.to_json(path=None, *, indent=2) -> str` は推定結果を厳格な JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定された場合は UTF-8 ファイルにも書き出す。`FitResult.from_json(source) -> FitResult` はファイルパスまたは JSON 文字列から再推定なしで復元する。素の JSON のみを使い、`pickle` や `eval` は一切使わない。最上位オブジェクトには `"format": "flexpyirt.FitResult"`、`"schema_version"`（§15.46 の命名リファクタから 4、双因子モデル（§17.1）から 5、two-tier モデル（§17.2）から 6、標本ウェイト（§17.4）から 7。それより前の version のファイルも読める）、および書き出した版を記録する `"flexpyirt_version": flexpyirt.__version__` を持たせる。`FitResult` は `_model`・`_quadrature` とあわせて推定設定 `_method: BAEM` も保持し、メタデータ全体が往復保存できるようにする。`from_json` は入口で `check_x64()` を呼ぶ（スコアリングに float64 が必要なため、無効なら `PrecisionError`）。
 27. **厳格な JSON と正確な float64 往復保存（M4）**: 書き出しは `json.dumps(..., allow_nan=False)` で厳格な RFC 8259 JSON のみを出力し、読み込みは `json.loads` に `parse_constant` を渡して生の `NaN`/`Infinity` リテラルを `SpecificationError` で拒否する。有限な IEEE-754 float64 値は通常の JSON 数値（Python の `repr` 厳密な最短 10 進表現）として書き出し、`-0.0` を含むすべての有限 float64 をビット単位で正確に往復保存する。浮動小数点型のフィールド（無制約の `lower`/`upper`、固定または未計算の `se`、非正定値の `vcov` など）に現れる非有限値（`NaN`, `+Inf`, `-Inf`）は明示的に文字列 `"NaN"`, `"Infinity"`, `"-Infinity"` として符号化する。これらを浮動小数点へ復号するのはスキーマ上 float 型のスロットのみであるため、項目名や群名などの文字列フィールドとは衝突しない。
 28. **明示的レジストリと完全な状態保存（M4）**: 項目モデル（`"2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"GRM"`, `"GPCM"`, `"PCM"`、多値モデルでは `n_categories` を含む）、潜在分布（`"Normal"`）、事前分布（`"NormalPrior"`, `"LogNormalPrior"`, `"BetaPrior"`）、求積（`"equispaced"`）、推定手法（`"BAEM"`）は `_json.py` の明示的な名前レジストリで（逆）直列化する。未知の `format` タグ・スキーマ版・レジストリ名・不正な JSON・整合しない表や行列形状は明確なメッセージつきで `SpecificationError` を送出する。完全な `Model` 仕様（項目名と順序、項目モデル、`fixed`, `latent`, `groups`, `equal`, `priors`）と、`estimate`・`se` を含む検証済み `ParameterTable`（ユーザーによる `table=` 編集もそのまま保持）、`vcov`、`loglik`/`log_posterior`、収束情報と `history`、`quadrature`、`method`、`se_method`、`n_obs` をすべて保存する。`_eta` は `parameters` の検証済み自由行から直接復元し（`free_id` が `0..n_free-1` に連続であること、共有 `free_id` の `estimate` が一致すること、`vcov` 形状が整合することを検証）、推定値の重複を持たせない。復元後の `FitResult` はすべての公開属性・`items`・`latent`・`summary()`・`_repr_html_()`・`aic`/`bic`・全 5 手法の `score()` で完全に同一の結果を返す。
 29. **確認的 2–3 次元 MIRT の仕様とカーネル（M4, §4.9, §6）**:
@@ -1563,7 +1564,89 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    `select_quadpts(nfact - nspec + 1)`）。**JSON**（schema version 6）: モデルに
    `"n_primary_factors"`（two-tier 以外は 0）を保存する。版 1–5 はこのキーを含んではならない。
    読み込み時、two-tier 構造は `with_two_tier()` で組み立て直す。
+3. **双因子・two-tier モデルの局所依存（`FitResult.local_dependence`、V38、issue #81）**:
+   §16.11 の統計量を項目 1–2 の縮約グリッド上で計算し、$n^{P+S}$ の積グリッドは作らない。
+   記法は上と同じ: 主因子のノード $\boldsymbol\theta_g$ と重み $w^{(0)}_g$（$g=1..Q_p$、$Q_p=n^P$）、
+   特殊因子のノード $\theta_t$ と重み $w^{(s)}_t$、$s(j)$ は項目 $j$ の特殊因子（持たないとき
+   $\varnothing$）、$P_{ja}(\boldsymbol\theta_g,\theta_t)$ はブロックグリッド上のカテゴリ確率。
+   **期待度数表。** 1 項目について特殊因子を積分すると、主因子を与えたときのトレースになる:
+   $$\bar P_{ja}(\boldsymbol\theta_g)=\sum_t w^{(s(j))}_t\,P_{ja}(\boldsymbol\theta_g,\theta_t)$$
+   （$s(j)=\varnothing$ なら $\bar P_{ja}=P_{ja}$。そのブロックの一様重みでも同じ値になる）。
+   特殊因子は互いに、また主因子とも独立なので、両方に回答した $n_{ij}$ 人についてのモデル上の表は
+   $$E_{ab}=n_{ij}\sum_g w^{(0)}_g\sum_t w^{(s)}_t\,P_{ia}(\boldsymbol\theta_g,\theta_t)
+   P_{jb}(\boldsymbol\theta_g,\theta_t)\qquad s(i)=s(j)=s,$$
+   $$E_{ab}=n_{ij}\sum_g w^{(0)}_g\,\bar P_{ia}(\boldsymbol\theta_g)\,\bar P_{jb}(\boldsymbol\theta_g)
+   \qquad s(i)\ne s(j)\ \text{または}\ s(i)=s(j)=\varnothing .$$
+   どちらも、重み $w^{(0)}_g\prod_s w^{(s)}_{t_s}$ の完全な積グリッド上の和を並べ替えただけの
+   厳密な式である（どちらの項目も負荷しない因子の和は 1）。したがって 1 次元グリッドが同じなら、
+   積グリッドを作る mirt の `residuals(type = "LD")`（`thetaComb(theta, nfact)`）と一致する。
+   計算量は 1 ペアあたり $O(n^{P+S}K_iK_j)$ ではなく $O(Q_p n K_iK_j)$。$X^2$、$G^2$、
+   $df=(K_i-1)(K_j-1)$、$p$ 値、符号付き Cramér の $V$ は §16.11 と同じく $O_{ab}$ と $E_{ab}$
+   から求める。
+   **Q3。** $d_{ij}=x_{ij}-E(X_j\mid\hat{\boldsymbol\theta}_i)$ を、因子分解した事後分布
+   （`_bifactor_eap`）による全 $D=P+S$ 因子のベクトル EAP で評価する。カーネルは縮約を外して
+   （`CompiledProblem.reduction = None`。`_family_nodes` がスコアを返す）`(N, D)` のスコアで
+   評価する。Q3\* は §16.11 と同じ。
+   **実装。** `_local_dependence.ld_pairs` を分割した: `ld_pairs_from_tables(y,
+   pair_probabilities)` はペアの $K_i\times K_j$ 同時確率を返す関数から統計量を計算し、
+   `ld_pairs`（共通グリッド）と `reduced_pair_probabilities`（上の 2 式。ブロックグリッド上の
+   トレース `(Q_p, n, K_j)`、`_bifactor_log_weights` の重み、各項目のブロックから）がその関数を
+   与える。双因子・two-tier モデルは単一群のみ（項目 1–2）なので、群についての処理は既存のまま。
+   **解釈。** 同じ特殊因子内のペアは、その因子を**超える**依存について検定される。`specific` に
+   入れなかったテストレットは、その中の大きな正の $V$ として現れる（シミュレーションデータの単体テストで確認）。
+   **検証（V38）。** 双因子 2PL（一般因子のみの項目と欠測を含む）、双因子 GRM、two-tier 2PL
+   （`bfactor(model2 = )`）の mirt の推定値を、全パラメータ固定の `FitResult` に入れ、
+   `residuals(type = "LD" / "LDG2" / "Q3")` と比較する（Q3 は `Theta = fscores(m, quadpts =
+   <適合時の値>)`。指定しないと `fscores()` は独自のグリッドを使う）。単体テストでは因子分解した
+   表を積グリッドの総当たり計算と比較する。**拡張しないもの。** `jsi()` はこれらのモデルで
+   引き続き `SpecificationError` を出す。統計量は 1 項目 1 傾きについて定義されており
+   （Edwards, Houts & Cai, 2018）、ここでは 1 項目が主因子と特殊因子の傾きを持ち、mirt の
+   `type = "JSI"` も 1 因子を要求するため、定義も参照値もない。
 
+4. **標本ウェイト（`fit(..., weights=...)`, V34）**: 受験者ごとのウェイト $w_i\ge0$ に対し、`fit()` は重み付き
+   周辺対数尤度（擬似尤度。Skinner, 1989。mirt の `survey.weights`）
+   $$\ell_w(\eta)=\sum_i w_i\log L_i(\eta)=\sum_p c_p\log L_p(\eta),\qquad c_p=\sum_{i:\,y_i=p}w_i$$
+   （MAP では対数事前分布を加える）を最大化する。§4.2 の尤度で、パターンの度数 $c_p$ を、そのパターンを持つ行の
+   ウェイトの和（群ごと）に置き換えたものなので、Core は変更しない。E-step、項目と潜在分布の M-step、SQUAREM、
+   多群、FIPC、すべての潜在分布、2 つの情報行列は、もともと実数の `CompiledProblem.counts` で動く。変わるのは
+   Compile 層だけ（`coerce_weights`、`np.bincount` で和をとる `compress_patterns(..., weights)`）。
+   - **引数**: `weights` は `data` の行ごとに 1 つの数を持つ array-like（NumPy 配列、リスト、pandas / polars の
+     Series）。列名は**受け付けない**。`data` はモデルの項目だけを持つ決まりで、`group=` も array-like のみなので、
+     `weights=` も同じ規則にする。長さや形が違う、数値でない、NaN・無限大・負の値がある、合計が 0、宣言した群の
+     ウェイトがすべて 0、の場合は `SpecificationError`。
+   - **再スケールしない**: ウェイトは与えられたまま使う（mirt と同じ）。したがって `loglik`、`log_posterior`、AIC、
+     情報行列はウェイトの尺度に従う。合計が行数になるウェイトなら、ウェイトなしの推定と比べやすい。事前分布が
+     あるとき、事前分布の絶対的な重みは $w$ の尺度によらないので、ウェイトを定数倍すると MAP 推定値は変わる
+     （MLE は変わらない）。
+   - **ウェイト 0**: $w_i=0$ の行は検証の直後、初期値と推定可能性の検査（§14.5）の前に取り除く。したがって何にも
+     影響しない（ウェイト 0 の行にしか現れないカテゴリは「観測されない」扱い）。
+   - **整数ウェイト**は度数ウェイトである。行 $i$ を $w_i$ 回繰り返したデータへの推定と一致する（尤度・推定値・
+     情報行列が同じ。単体テストで確認）。
+   - **「N」の意味**: `n_obs` はウェイトが正の行の数。BIC は $\log N$ の代わりに $W=\sum_i w_i$ の $\log W$ を使う。
+     mirt と同じで（mirt の $N$ はパターン度数の和）、BIC は mirt と一致し、整数ウェイトでは行の複製とも一致する。
+     AIC は $N$ を使わない。$W$ は非公開の `FitResult._sum_weights`（ウェイトなしでは `None`）に保持し、
+     `summary()` に表示する。**初期値**（§4.10）は、ウェイトが正の行からウェイトなしで計算する。初期値は EM の
+     経路を変えるだけで収束先を変えず、ウェイトなしの積率で十分よい出発点になる。識別性の検査と Heywood・退化解の
+     警告は $N$ を使わない。
+   - **標準誤差**: `se="oakes"`（既定）と `se="hessian"` は $-\nabla^2\ell_w(\hat\eta)$ の逆行列を返す。度数
+     ウェイトなら通常の情報行列である。標本ウェイトでは**正しい分散推定量ではない**。標本設計に整合する分散は
+     サンドイッチ $H^{-1}\big(\sum_i w_i^2 s_i s_i^\top\big)H^{-1}$（Binder, 1983）で、ロバスト標準誤差として
+     別に実装する。決定: 既定は `"oakes"` のままとし（値は `survey.weights` を付けた mirt の
+     `SE.type = "Oakes"` と一致するので照合できる）、`weights` があり `se` が `None` でないとき `fit()` は
+     `FlexpyirtWarning` を出す。
+   - **推定の後**: スコアリング（`score()`）は推定値だけに依存し、変わらない。`link()` は推定値と `vcov` を使う
+     （その SE は上の注意を引き継ぐ）。データを使う診断にはウェイト付きの検証済みの形がない（統計量と参照分布が
+     ウェイトなしの度数を前提とする）ので、`item_fit()`、`m2()`、`local_dependence()`、`jsi()`、`dif()`、
+     `model_parallel_analysis()`、`dimensionality(fit=...)` はウェイト付きの推定結果に対して
+     `SpecificationError` を出す（`FitResult._require_unweighted`）。
+   - **JSON**: `schema_version` 7 で、省略可能なトップレベルのキー `sum_weights` を加える（ウェイト付きの推定に
+     だけ書く。正の有限な数）。version 6 以下のファイルにこのキーがあれば拒否し、version 6 以下のファイルは
+     これまでどおり読める。ウェイトそのものは保存しない（データと同じ）。
+   - **照合（V34）**: `validation/r/m7_weights_reference.R`（mirt 1.48、`survey.weights`、TOL $=10^{-10}$、
+     Oakes）。合計が $N$ でない非整数ウェイトと 5 つのウェイト 0 を持つ 2PL、合計を $N$ に正規化したウェイトの
+     Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC、双因子 2PL（`bfactor()`）。双因子モデルと two-tier モデル（§17.1、§17.2）に
+     特別な扱いは要らない。次元縮約した E-step も `counts` で動く。two-tier は行の複製との一致だけで確かめる。推定値、
+     対数尤度、AIC、BIC、Oakes の SE が共通の許容誤差内で一致する（VALIDATION.ja.md V34）。
 ## 18. 合計得点分布のカーネル、情報関数と信頼性（M7）
 
 1. **Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰（`summed_score_distribution`、V36）**:
@@ -1686,6 +1769,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
+- Binder, D. A. (1983). On the variances of asymptotically normal estimators from complex surveys. *International Statistical Review*, 51(3), 279–292.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
@@ -1756,6 +1840,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Skinner, C. J. (1989). Domain means, regression and multivariate analysis. In C. J. Skinner, D. Holt & T. M. F. Smith (Eds.), *Analysis of Complex Surveys* (pp. 59–87). Wiley.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
 - Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.

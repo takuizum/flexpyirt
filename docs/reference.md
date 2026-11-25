@@ -39,7 +39,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 
 ```text
 fit(spec, data, *, group=None, table=None, item_names=None, method=None,
-    quadrature=None, se="oakes") -> FitResult
+    quadrature=None, se="oakes", weights=None) -> FitResult
 ```
 
 Marginal maximum likelihood (or Bayes modal / MAP when priors are attached) estimation with the
@@ -55,6 +55,7 @@ Bock–Aitkin EM algorithm (Bock & Aitkin, 1981).
 | `method` | `BAEM`, optional | EM settings (default `BAEM()`) |
 | `quadrature` | `Quadrature`, optional | Quadrature grid (default: 61 points on $[-6, 6]$ for 1 factor, 31 per dimension for 2 factors, 15 per dimension for 3 factors) |
 | `se` | `"oakes"` / `"hessian"` / `None` | Standard-error method (includes prior Hessian under MAP); `None` skips it |
+| `weights` | array (one number per row), optional | Sampling (survey) weights, finite and non-negative (mirt's `survey.weights`). The estimates maximize $\sum_i w_i\log L_i$. Weights are used as given (not rescaled); rows with weight 0 are ignored; integer weights are the same as repeating rows. `se="oakes"` / `"hessian"` then invert the weighted information, which is valid for frequency weights only, not for sampling weights (a `FlexpyirtWarning` says so) |
 
 **Returns**: [`FitResult`](#fitresult)
 
@@ -64,8 +65,8 @@ or data), `IdentificationError` (not identified). All are raised before estimati
 **Warns**: `ConvergenceWarning` (`max_iter` reached, or SQUAREM fell back to plain EM frequently),
 `HeywoodWarning` (free asymptote within `1e-4` of its bound or free slope $|a| > 20$, or a
 degenerate `NormalMixture` component),
-`FlexpyirtWarning` (information matrix not positive definite, or an anchor that is a single
-parameter).
+`FlexpyirtWarning` (information matrix not positive definite, an anchor that is a single
+parameter, or `weights` together with `se="oakes"` / `"hessian"`).
 
 ### `FitResult`
 
@@ -79,9 +80,9 @@ Returned by `fit()`. Immutable.
 | `parameters` | DataFrame | The validated ParameterTable plus `estimate` (the estimate, or the fixed value) and `se` |
 | `loglik` | float | Marginal log-likelihood at the estimates (likelihood only, excluding priors) |
 | `log_posterior` | float | Log posterior ($\ell(\hat\eta) + \log\pi(\hat\eta)$) at the estimates; equals `loglik` without priors |
-| `aic`, `bic` | float | $-2\ell + 2k$ and $-2\ell + k\log N$ ($k$ = `n_params`, $N$ = `n_obs`); emits `FlexpyirtWarning` when priors are active |
+| `aic`, `bic` | float | $-2\ell + 2k$ and $-2\ell + k\log N$ ($k$ = `n_params`, $N$ = `n_obs`, or the sum of the weights for a fit with `weights`); emits `FlexpyirtWarning` when priors are active |
 | `n_params` | int | Number of free parameters (an equality constraint counts once) |
-| `n_obs` | int | Number of respondents |
+| `n_obs` | int | Number of respondents (rows with a positive weight for a fit with `weights`) |
 | `converged` | bool | Whether the convergence criterion was met |
 | `n_iter` | int | Number of accepted EM (or SQUAREM) iterations |
 | `n_em_evaluations` | int | Total number of EM map evaluations (E-step + M-step); equals `n_iter` for plain EM, and 2 or 3 per accepted iterate for SQUAREM |
@@ -89,6 +90,10 @@ Returned by `fit()`. Immutable.
 | `history` | DataFrame | `iter`, `loglik`, `log_posterior` (at the parameters entering the iteration; non-decreasing across iterations), `max_change`, `em_evaluations` (cumulative EM map evaluations), `safeguard` (whether the SQUAREM safeguard fired) |
 | `vcov` | ndarray / None | Covariance matrix of the free parameters (in `free_id` order); None if `se=None` |
 | `se_method` | str / None | `"oakes"` / `"hessian"` / None |
+
+A result fitted with `weights` shows the sum of the weights in `summary()`. Its `item_fit()`,
+`m2()`, `local_dependence()`, `jsi()` and `dif()` raise `SpecificationError` (these statistics are
+defined for unweighted data), as does `model_parallel_analysis()`; `score()` works as usual.
 
 #### `FitResult.log_posterior`
 
@@ -228,7 +233,15 @@ The expected tables and the EAP use the fitted latent distribution on the fitted
 `EmpiricalHistogram`, `DavidianCurve` or `NormalMixture`, and the multivariate Normal on the
 product grid (with the vector EAP) for models with 2 or 3 factors. In a multiple-group model
 `group` is required and every statistic is computed within a group, from that group's
-respondents, item parameters and latent distribution. Bifactor models are not covered.
+respondents, item parameters and latent distribution.
+
+For bifactor and two-tier models (`with_bifactor()`, `with_two_tier()`) the expected tables are
+summed on the reduced grids instead of the full product grid: over the primary factors and the
+shared specific factor for a pair inside one specific factor, and over the primary factors only,
+with each item's specific factor integrated out first, for any other pair. Q3 uses the EAP of all
+factors. The results equal mirt's `residuals()` on a `bfactor()` fit with the same grid (mirt
+builds the product grid). A pair inside a specific factor is tested for dependence beyond that
+factor.
 
 Two differences from mirt's defaults: for `dentype = "EH"` / `"Davidian-k"` fits mirt takes a
 standard Normal prior unless called as `residuals(m, type = "LD", use_dentype_estimate = TRUE)`
@@ -317,7 +330,7 @@ to_json(path=None, *, indent=2) -> str
 
 Serialize the fitted result to a strict RFC 8259 JSON string, and also write it (UTF-8) to `path`
 (`str` or `os.PathLike`) when `path` is given. Uses plain, versioned JSON (no `pickle`) with
-top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 4` (files with versions 1–3 are
+top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 7` (files with versions 1–6 are
 still read), and `"flexpyirt_version"`. Multidimensional results store their factor structure.
 Finite float64 values are written as `repr`-exact JSON numbers and non-finite values (`NaN`,
 `+inf`, `-inf`) are encoded explicitly as `"NaN"`, `"Infinity"`, and `"-Infinity"` in float-typed
