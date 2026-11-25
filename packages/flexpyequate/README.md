@@ -29,7 +29,7 @@ flexpyequate finds the function that puts scores of form X on the scale of form 
 
 ## Installation
 
-Python 3.11 or later.
+Python 3.12 or later.
 
 ```bash
 pip install flexpyequate  # or: uv add flexpyequate

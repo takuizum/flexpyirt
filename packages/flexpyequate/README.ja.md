@@ -28,7 +28,7 @@
 
 ## インストール
 
-Python 3.11 以降。
+Python 3.12 以降。
 
 ```bash
 pip install flexpyequate  # または: uv add flexpyequate
