@@ -7,6 +7,7 @@ from importlib.metadata import PackageNotFoundError, version
 from flexpyequate import errors
 from flexpyequate.distributions import BivariateScoreDistribution, ScoreDistribution
 from flexpyequate.equating import EquatingResult, equate
+from flexpyequate.kernel import KernelEquatingResult, kernel_equate, penalty_bandwidth
 from flexpyequate.presmoothing import LoglinearResult, presmooth
 
 try:
@@ -17,10 +18,13 @@ except PackageNotFoundError:  # pragma: no cover - source tree without installat
 __all__ = [
     "BivariateScoreDistribution",
     "EquatingResult",
+    "KernelEquatingResult",
     "LoglinearResult",
     "ScoreDistribution",
     "__version__",
     "equate",
     "errors",
+    "kernel_equate",
+    "penalty_bandwidth",
     "presmooth",
 ]
