@@ -36,7 +36,7 @@ from flexpyirt import (
     fit,
     model_parallel_analysis,
 )
-from flexpyirt._local_dependence import goodman_kruskal_gamma
+from flexpyirt._local_dependence import goodman_kruskal_gamma, ld_pairs
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
 from tests._reference import REFERENCE_DIR, check_reference_meta
 
@@ -400,6 +400,26 @@ def test_davidian_and_mixture_latents_run(latent: DavidianCurve | NormalMixture)
     # With the fitted weights the expected tables add up to the observed margins closely
     # (X2 is small for data generated without local dependence).
     assert float(ld.pairs["x2"].max()) < 20.0
+
+
+def test_ld_tables_keep_unobserved_categories() -> None:
+    """A category nobody chose (e.g. within one group) keeps its row: the table is K_i x K_j."""
+    rng = np.random.default_rng(5)
+    y = np.column_stack([rng.integers(0, 2, size=200), rng.integers(0, 3, size=200)])
+    nodes = np.linspace(-4, 4, 21)
+    weights = _normal_weights(nodes, 0.0, 1.0)
+    low = 1 / (1 + np.exp(-nodes))
+    traces = [
+        np.column_stack([0.6 * (1 - low), 0.4 * (1 - low), low]),  # category 2 never observed
+        np.column_stack([1 - low, 0.5 * low, 0.5 * low]),
+    ]
+    out = ld_pairs(y, traces, weights)
+    assert out["df"][0] == 4
+    expected = 200 * (traces[0] * weights[:, None]).T @ traces[1]
+    observed = np.zeros((3, 3))
+    np.add.at(observed, (y[:, 0], y[:, 1]), 1.0)
+    assert out["x2"][0] == pytest.approx(float(np.sum((observed - expected) ** 2 / expected)))
+    assert np.isfinite(out["g2"][0])
 
 
 def test_unsupported_models_are_rejected() -> None:

@@ -178,19 +178,35 @@ MAP モデル、欠測を含むデータ、不正な `ci`、項目数または�
 #### `FitResult.local_dependence`
 
 ```text
-local_dependence(data, *, item_names=None) -> LocalDependenceResult
+local_dependence(data, *, group=None, item_names=None) -> LocalDependenceResult
 ```
 
-単一群・1 次元・`Normal` 潜在分布のモデルについて、すべての項目ペアの局所依存の統計量を求める
+すべての項目ペアの局所依存の統計量を求める
 （[ガイド 18 節](guide.ja.md#18-局所依存と次元性のレポート)）。Yen (1984) の Q3（EAP の $\hat\theta$ による残差
 $x_{ij} - E(X_j \mid \hat\theta_i)$ の相関）、Q3\* $=$ Q3 $-$ Q3 の平均（Christensen, Makransky & Horton, 2017）、
 推定した格子でモデルが含意する分割表と比べる Chen & Thissen (1997) の LD $X^2$ / $G^2$（$df = (K_i-1)(K_j-1)$、
 $p$ 値、符号付きの Cramér の $V$）。mirt の `residuals(type = "Q3" / "LD" / "LDG2")` と同じ。欠測はペアごとに扱う。
 
+期待度数の表と EAP には、推定した格子の上の推定した潜在分布を使う。`Normal`、`EmpiricalHistogram`、
+`DavidianCurve`、`NormalMixture` と、2〜3 因子のモデルでは直積格子の上の多変量正規分布（EAP はベクトル）。
+多母集団モデルでは `group` が必要で、すべての統計量を群ごとに、その群の受験者・項目パラメタ・潜在分布で求める。
+bifactor モデルは対象外。
+
+mirt の既定との違いが 2 つある。`dentype = "EH"` / `"Davidian-k"` の推定では、mirt は
+`residuals(m, type = "LD", use_dentype_estimate = TRUE)` や
+`residuals(m, type = "Q3", Theta = fscores(m, use_dentype_estimate = TRUE))` と呼ばないかぎり標準正規の
+事前分布を使う。また、mirt の Q3 は `fscores()` 独自の格子（1 / 2 / 3 因子で各次元 121 / 61 / 31 点）で
+スコアを求めるが、flexpyirt は推定した格子を使う。
+
+| 引数 | 型 | 既定値 | 説明 |
+|---|---|---|---|
+| `data` | DataFrame または配列 | | 推定した項目への回答。欠測は NaN |
+| `group` | 配列 | `None` | 群のラベル（多母集団モデルでは必須） |
+| `item_names` | list of str | `None` | `data` が配列のときの列名 |
+
 **戻り値**: [`LocalDependenceResult`](#localdependenceresult)
 
-**例外**: `PrecisionError`。多母集団・多次元・`Normal` 以外の潜在分布のモデル、不正なデータは
-`SpecificationError`。
+**例外**: `PrecisionError`。不正なデータや群のラベルは `SpecificationError`。
 
 #### `FitResult.jsi`
 
@@ -938,10 +954,10 @@ $p = (1 + \#\{T_b \ge T\})/(B + 1)$。`eigen_type="max"` は ltm の `unidimTest
 
 | 属性 | 型 | 説明 |
 |---|---|---|
-| `pairs` | DataFrame | ペアごとに 1 行: `item_i`, `item_j`, `n`, `q3`, `q3_star`, `x2`, `g2`, `df`, `p_x2`, `p_g2`, `cramer_v` |
-| `q3` | DataFrame | 項目 x 項目の Q3 行列 |
-| `q3_mean` | float | 非対角の Q3 の平均 |
-| `max_q3_star` | float | 最大の Q3\* |
+| `pairs` | DataFrame | ペアごとに 1 行: `item_i`, `item_j`, `n`, `q3`, `q3_star`, `x2`, `g2`, `df`, `p_x2`, `p_g2`, `cramer_v`。多母集団モデルでは先頭に `group` 列が付き、群とペアごとに 1 行 |
+| `q3` | DataFrame | 項目 x 項目の Q3 行列。多母集団モデルでは群ごとの行列を `(group, item)` の行インデックスで並べる |
+| `q3_mean` | float または Series | 非対角の Q3 の平均。多母集団モデルでは群をインデックスにした Series（各群の Q3\* はその群の平均を使う） |
+| `max_q3_star` | float | 最大の Q3\*（全群で） |
 
 ### `JSIResult`
 

@@ -63,6 +63,7 @@ English | [日本語](VALIDATION.ja.md)
 | V24 | Polychoric / tetrachoric correlations (simulated tetrachoric, mixed 2–5 categories, 10% MCAR, one-empty-cell 2 x 2 tables, LSAT7, Science) and smoothing | lavaan `lavCor(..., ordered = , missing = )`; psych `polychoric(..., smooth = FALSE, correct = 0)`, `cor.smooth()` | M5 |
 | V25 | Number of dimensions: EKC, MAP (squared and fourth power), PCA / SMC eigenvalues on the V24 matrices; normal-data parallel-analysis references (3 sizes) | EFAtools `EKC()`, `PARALLEL()`; psych `vss()$map`; EFA.dimensions `MAP()`; independent R fourth-power MAP | M5 |
 | V26 | Local dependence (LSAT7 2PL, Science GRM, simulated 2PL with a dependent pair and 5% MCAR) and model-based parallel analysis (LSAT7) | `residuals(m, type = "LD" / "LDG2" / "Q3")`; ltm `unidimTest(data = , thetas = cbind(d, a1), IRT = FALSE)` | M5 |
+| V26 (M7) | Local dependence for two groups (2PL with 4% MCAR, GRM; two factors 2PL), `EmpiricalHistogram`, `DavidianCurve(2)`, `NormalMixture(2)` (V22a's estimates), two factors (2PL with a cross-loading and 3% MCAR, GRM) and three factors (2PL) | `residuals()` on `multipleGroup()`, `dentype = "EH"` / `"Davidian-2"` (`use_dentype_estimate = TRUE`; `Theta = fscores(m, use_dentype_estimate = TRUE)` for Q3) and `mirt.model()` fits; for the mixture a single-group mirt object with the mixture weights as its prior | M7 |
 | V27 | DETECT: confirmatory (simulated 2D with true / wrong partitions, 1D, Science) and exploratory (simulated 3 clusters, given split) | sirt `conf.detect(use_sum_score = TRUE, smooth = FALSE)`, `expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
 | V28 | EFA (ULS, ML; every $k$ up to Hull's bound) and the Hull method (CAF, CFI, RMSEA) on the V24 matrices with $\ge 6$ variables and two simulated matrices | EFAtools `EFA(method = , rotation = "none")`, `HULL(method = , gof = )`; psych `fa(fm = "minres" / "ml", rotate = "none")` | M5 |
 | V29 | Comparison data: PAF, the one-factor population generator from exported draws, rank-sum tests, `CD()` on 3-factor continuous, 2-factor ordinal and 1-factor binary data | EFAtools `.paf_iter`, `.simulate_cfm_empirical`, `CD()`; `wilcox.test(x, y, "less")` | M5 |
@@ -714,6 +715,50 @@ English | [日本語](VALIDATION.ja.md)
   is called with data and parameters rather than a fitted ltm object, so it simulates
   $\theta\sim N(0,1)$ as flexpyirt does with a standard normal fit; its tetrachorics come from
   polycor (`optimise()` tolerance), which bounds the observed-statistic agreement.
+- **Local dependence beyond single-group unidimensional Normal models (V26, M7, issue #81)**:
+  `validation/r/m7_local_dependence_reference.R` (mirt 1.48) writes
+  `tests/reference/v26_local_dependence_extensions.json`; `tests/test_mirt_m7_local_dependence.py`
+  puts mirt's estimates into a flexpyirt `FitResult` with every parameter fixed (`fit(...,
+  table=)`; the EH weights are mirt's `Internals$Prior`), so the comparison is of the statistics
+  alone (the log-likelihood at mirt's estimates agrees to $10^{-9}$ relative, observed
+  $\le4\times10^{-15}$). Nine cases, 641 group-pairs. Largest observed differences: $X^2$
+  $3\times10^{-12}$ and $G^2$ $8\times10^{-9}$ (relative; tolerance $10^{-7}$), $V$
+  $3\times10^{-15}$ and Q3 $2\times10^{-15}$ (absolute; tolerance $10^{-8}$).
+
+  | Case | mirt call | Grid | Pairs |
+  |---|---|---|---|
+  | two groups, 2PL, 4% MCAR | `multipleGroup(invariance = c(anchors, "free_means", "free_var"))` | 121 | 2 x 45 |
+  | two groups, GRM (4 categories) | same | 121 | 2 x 15 |
+  | two groups, two factors, 2PL | same with `mirt.model` | $61^2$ | 2 x 45 |
+  | EH, 2PL, skewed trait, 3% MCAR | `mirt(dentype = "EH")`, `use_dentype_estimate = TRUE` | 61 | 66 |
+  | Davidian curve of degree 2, same data | `mirt(dentype = "Davidian-2")`, same | 61 | 66 |
+  | normal mixture, V22a's estimates | mixture weights put into `Internals$Prior` | 61 | 190 |
+  | two factors, 2PL, cross-loading, 3% MCAR | `mirt(mirt.model(...))` | $31^2$ | 45 |
+  | two factors, GRM (3 categories) | same | $31^2$ | 28 |
+  | three factors, 2PL | same | $15^3$ | 36 |
+
+  Known differences from mirt's defaults, all handled in the script: (1) for EH and Davidian
+  fits `residuals()` takes a $N(0,1)$ prior unless `use_dentype_estimate = TRUE`; with it,
+  `type = "Q3"` evaluates the residuals at the grid nodes (mirt 1.48), so Q3 is requested with
+  `Theta = fscores(m, use_dentype_estimate = TRUE)`. (2) Q3 scores come from `fscores()`, whose
+  grid is 121 / 61 / 31 points per dimension for 1 / 2 / 3 factors whatever the fit used.
+  Single-group cases pass `Theta = fscores(m, quadpts = <the fit's>)`; `multipleGroup` cases,
+  where `Theta` cannot be passed per group, are fitted on `fscores()`'s grid. mirt's default call
+  is stored as `q3_default`: against flexpyirt on the fitted grid it differs by
+  $2\times10^{-9}$ for $31^2$ against $61^2$ and by $1.3\times10^{-4}$ for $15^3$ against
+  $31^3$ (consistent with the $4\times10^{-8}$ of the M5 cases: 61 against 121 points).
+  (3) mirt has no `residuals()` for its mixture class, so the mixture case checks the statistics
+  given the density, not a mirt mixture fit (the fit is V22). (4) A category not observed in a
+  group makes mirt's `table()` smaller than $K_i\times K_j$; flexpyirt keeps the full table and
+  this is unit-tested only. One end-to-end check refits the two-group 2PL with flexpyirt and
+  agrees with mirt (fitted to `TOL = 1e-6`) to $4\times10^{-4}$ ($X^2$, $G^2$) and
+  $5\times10^{-6}$ ($V$, Q3). mirt orders groups alphabetically, so its $N(0,1)$ reference group
+  is `focal`; the test standardizes the same group. With the other group standardized the
+  model is the same but its discretization is not (the grid is cut at $\pm6$ and the free group
+  has SD 1.34): the log-likelihood differs by $1.9\times10^{-3}$ and $X^2$ by $3\times10^{-3}$. **Not validated, not
+  implemented**: bifactor / two-tier models; `jsi()` beyond single-group unidimensional Normal
+  models (mirt: one factor only, no SE for Davidian curves, no mixtures, and for
+  `multipleGroup` single-group $N(0,1)$ refits per group, which is another statistic).
 - **DETECT (V27, M5)**: sirt's `conf.detect()` is called with `smooth = FALSE`; with the
   default `smooth = TRUE` and `use_sum_score = TRUE` it subtracts raw item scores from the
   standardized total score, which mis-forms the rest-score groups (DESIGN §16.13). `expl.detect()`

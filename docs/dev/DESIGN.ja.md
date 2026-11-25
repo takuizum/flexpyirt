@@ -1167,7 +1167,11 @@ class ItemKernel(Protocol):
     これらは `_require_unidimensional_normal` のまま。mirt の JSI は 1 因子が必要で、Davidian 曲線の SE がなく
     （`"No standard error method currently supported"`）、混合分布に対応せず、`multipleGroup` では傾きを多母集団の
     結果から取りながら各群を単独の $N(0,1)$ の単一群モデルとして推定し直す（推定したモデルの再推定ではない）。
-    拡張を照合できる参照値がない。
+    拡張を照合できる参照値がない。**照合（V26、M7）**: `validation/r/m7_local_dependence_reference.R`
+    （mirt 1.48）、9 ケース（1 因子と 2 因子の 2 群、EH、Davidian、混合分布、2 因子と 3 因子）。mirt の推定値を、
+    すべてのパラメタを固定した `FitResult` に入れて比べる。$X^2$ / $G^2$ は相対 $10^{-7}$（実測
+    $8\times10^{-9}$ 以下）、$V$ / Q3 は $10^{-8}$（実測 $3\times10^{-15}$ 以下）。詳細と mirt の既定との違いは
+    VALIDATION.md。
 12. **`dimensionality()` のアンサンブル（§16.8）**: 1 つのポリコリック行列（`fit` があれば、まずデータを推定した
     項目にそろえる）から問い (A) の `parallel_analysis()`（既定値）、`velicer_map()`（4 乗）、`empirical_kaiser()` を
     計算する。キーはシミュレーションを使う手法ごとに分割する。問い (B) は `fit` があるときだけで、

@@ -88,7 +88,8 @@ def _spec(case: dict[str, Any], df: pd.DataFrame) -> Model:
         spec = spec.with_factors(case["factors"])
     kind, first = case["kind"], case["groups"][0]
     if kind == "groups":
-        spec = spec.with_groups(ref=Normal.standard(), focal=Normal.free())
+        # mirt orders the groups alphabetically, so "focal" is its N(0, 1) reference group.
+        spec = spec.with_groups(focal=Normal.standard(), ref=Normal.free())
         spec = spec.equal_across_groups(items=case["anchors"])
     elif kind == "eh":
         spec = spec.with_latent(EmpiricalHistogram())
@@ -209,7 +210,7 @@ def test_group_columns_and_q3_star(name: str) -> None:
     ld = _at_mirt(name).local_dependence(df, group=group)
     n_pairs = len(case["items"]) * (len(case["items"]) - 1) // 2
     assert list(ld.pairs.columns[:3]) == ["group", "item_i", "item_j"]
-    assert list(ld.pairs["group"].unique()) == ["ref", "focal"]
+    assert list(ld.pairs["group"].unique()) == ["focal", "ref"]
     assert len(ld.pairs) == 2 * n_pairs
     assert isinstance(ld.q3_mean, pd.Series)
     for g in ("ref", "focal"):
@@ -233,7 +234,7 @@ def test_refit_agrees_with_mirt_for_two_groups() -> None:
         df,
         group=group,
         method=BAEM(tol=1e-9, max_iter=20000),
-        quadrature=Quadrature.equispaced(61, bounds=(-6, 6)),
+        quadrature=Quadrature.equispaced(int(case["quadpts"]), bounds=(-6, 6)),
         se=None,
     )
     assert res.loglik >= case["loglik"] - 1e-6 * abs(case["loglik"])
@@ -242,5 +243,8 @@ def test_refit_agrees_with_mirt_for_two_groups() -> None:
     index = {item: k for k, item in enumerate(case["items"])}
     got = ld.pairs.assign(i=ld.pairs["item_i"].map(index), j=ld.pairs["item_j"].map(index))
     got = got.sort_values(["group", "i", "j"]).reset_index(drop=True)
-    np.testing.assert_allclose(got["x2"], ref["x2"], rtol=2e-2, atol=2e-3)
-    np.testing.assert_allclose(got["q3"], ref["q3"], rtol=0, atol=2e-3)
+    # mirt was fitted to TOL = 1e-6; observed 4e-4 (X2, G2) and 5e-6 (V, Q3).
+    np.testing.assert_allclose(got["x2"], ref["x2"], rtol=0, atol=2e-3)
+    np.testing.assert_allclose(got["g2"], ref["g2"], rtol=0, atol=2e-3)
+    np.testing.assert_allclose(got["cramer_v"], ref["cramer_v"], rtol=0, atol=5e-5)
+    np.testing.assert_allclose(got["q3"], ref["q3"], rtol=0, atol=5e-5)

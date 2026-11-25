@@ -58,6 +58,7 @@
 | V24 | ポリコリック・テトラコリック相関（シミュレーションのテトラコリック、2〜5 カテゴリの混在、10% MCAR、空のセルが 1 つの 2 x 2 表、LSAT7、Science）と平滑化 | lavaan の `lavCor(..., ordered = , missing = )`、psych の `polychoric(..., smooth = FALSE, correct = 0)`、`cor.smooth()` | M5 |
 | V25 | 次元数: V24 の行列での EKC、MAP（2 乗と 4 乗）、PCA・SMC の固有値。正規データの平行分析の参照（3 つの大きさ） | EFAtools の `EKC()`、`PARALLEL()`、psych の `vss()$map`、EFA.dimensions の `MAP()`、4 乗版 MAP の R による独立な実装 | M5 |
 | V26 | 局所依存（LSAT7 の 2PL、Science の GRM、依存するペアと 5% MCAR を含むシミュレーションの 2PL）とモデルに基づく平行分析（LSAT7） | `residuals(m, type = "LD" / "LDG2" / "Q3")`、ltm の `unidimTest(data = , thetas = cbind(d, a1), IRT = FALSE)` | M5 |
+| V26（M7） | 2 群（4% MCAR を含む 2PL、GRM、2 因子の 2PL）、`EmpiricalHistogram`、`DavidianCurve(2)`、`NormalMixture(2)`（V22a の推定値）、2 因子（交差負荷と 3% MCAR を含む 2PL、GRM）、3 因子（2PL）の局所依存 | `multipleGroup()`、`dentype = "EH"` / `"Davidian-2"`（`use_dentype_estimate = TRUE`。Q3 は `Theta = fscores(m, use_dentype_estimate = TRUE)`）、`mirt.model()` の推定への `residuals()`。混合分布は、混合分布の重みを事前分布に入れた単一群の mirt オブジェクト | M7 |
 | V27 | DETECT: 確認的（シミュレーションの 2 次元で正しい・誤った分割、1 次元、Science）と探索的（3 クラスタのシミュレーション、分割を指定） | sirt の `conf.detect(use_sum_score = TRUE, smooth = FALSE)`、`expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
 | V28 | EFA（ULS、ML。Hull の上限までのすべての $k$）と Hull 法（CAF、CFI、RMSEA）。V24 の行列のうち変数が 6 つ以上のものとシミュレーションの行列 2 つ | EFAtools の `EFA(method = , rotation = "none")`、`HULL(method = , gof = )`、psych の `fa(fm = "minres" / "ml", rotate = "none")` | M5 |
 | V29 | 比較データ法: 主因子法、書き出した乱数による 1 因子の母集団の生成、順位和検定、3 因子の連続・2 因子の順序・1 因子の 2 値のデータでの `CD()` | EFAtools の `.paf_iter`、`.simulate_cfm_empirical`、`CD()`、`wilcox.test(x, y, "less")` | M5 |
@@ -579,6 +580,45 @@
   `mirt::` で指定する。ltm の `unidimTest` は推定済みの ltm オブジェクトではなくデータとパラメタで呼ぶので、
   標準正規の推定での flexpyirt と同じく $\theta\sim N(0,1)$ からシミュレーションする。テトラコリック相関は polycor
   （`optimise()` の許容誤差）によるので、観測された統計量の一致はそれで決まる。
+- **単一群・1 次元・正規分布以外の局所依存（V26、M7、issue #81）**:
+  `validation/r/m7_local_dependence_reference.R`（mirt 1.48）が
+  `tests/reference/v26_local_dependence_extensions.json` を書く。`tests/test_mirt_m7_local_dependence.py` は
+  mirt の推定値を、すべてのパラメタを固定した flexpyirt の `FitResult` に入れる（`fit(..., table=)`。EH の重みは
+  mirt の `Internals$Prior`）。比較するのは統計量だけになる（mirt の推定値での対数尤度は相対 $10^{-9}$ で一致、
+  実測 $4\times10^{-15}$ 以下）。9 ケース、群とペアの組は 641。実測の最大差: $X^2$ $3\times10^{-12}$、$G^2$
+  $8\times10^{-9}$（相対。許容誤差 $10^{-7}$）、$V$ $3\times10^{-15}$、Q3 $2\times10^{-15}$（絶対。許容誤差
+  $10^{-8}$）。
+
+  | ケース | mirt の呼び出し | 格子 | ペア |
+  |---|---|---|---|
+  | 2 群、2PL、4% MCAR | `multipleGroup(invariance = c(anchors, "free_means", "free_var"))` | 121 | 2 x 45 |
+  | 2 群、GRM（4 カテゴリ） | 同じ | 121 | 2 x 15 |
+  | 2 群、2 因子、2PL | 同じ（`mirt.model`） | $61^2$ | 2 x 45 |
+  | EH、2PL、歪んだ特性値、3% MCAR | `mirt(dentype = "EH")`、`use_dentype_estimate = TRUE` | 61 | 66 |
+  | 2 次の Davidian 曲線、同じデータ | `mirt(dentype = "Davidian-2")`、同じ | 61 | 66 |
+  | 正規混合分布、V22a の推定値 | 混合分布の重みを `Internals$Prior` に入れる | 61 | 190 |
+  | 2 因子、2PL、交差負荷、3% MCAR | `mirt(mirt.model(...))` | $31^2$ | 45 |
+  | 2 因子、GRM（3 カテゴリ） | 同じ | $31^2$ | 28 |
+  | 3 因子、2PL | 同じ | $15^3$ | 36 |
+
+  mirt の既定との違い（すべてスクリプトで対処している）: (1) EH と Davidian の推定に対して、`residuals()` は
+  `use_dentype_estimate = TRUE` を付けないと $N(0,1)$ の事前分布を使う。付けた場合、`type = "Q3"` は残差を
+  格子点で評価してしまう（mirt 1.48）ので、Q3 は `Theta = fscores(m, use_dentype_estimate = TRUE)` で求める。
+  (2) Q3 のスコアは `fscores()` から来る。その格子は推定の格子によらず 1 / 2 / 3 因子で各次元 121 / 61 / 31 点。
+  単一群のケースは `Theta = fscores(m, quadpts = <推定の格子>)` を渡す。`Theta` を群ごとに渡せない
+  `multipleGroup` のケースは `fscores()` の格子で推定する。mirt の既定の呼び出しは `q3_default` として保存した。
+  推定した格子での flexpyirt との差は、$31^2$ 対 $61^2$ で $2\times10^{-9}$、$15^3$ 対 $31^3$ で
+  $1.3\times10^{-4}$（M5 のケースの $4\times10^{-8}$ とも整合する。61 点対 121 点）。
+  (3) mirt の混合分布のクラスには `residuals()` がない。混合分布のケースは密度を与えたときの統計量を確かめる
+  もので、mirt の混合分布の推定との比較ではない（推定は V22）。(4) ある群で観測されないカテゴリがあると、mirt の
+  `table()` は $K_i\times K_j$ より小さくなる。flexpyirt は表の大きさを保つ。これは単体テストだけで確かめている。
+  エンドツーエンドの確認として、2 群の 2PL を flexpyirt で推定し直し、mirt（`TOL = 1e-6` で推定）と
+  $4\times10^{-4}$（$X^2$、$G^2$）、$5\times10^{-6}$（$V$、Q3）で一致する。mirt は群をアルファベット順に
+  並べるので、$N(0,1)$ の参照群は `focal` になる。テストも同じ群を標準化する。もう一方の群を標準化しても
+  モデルは同じだが、離散化は同じにならない（格子は $\pm6$ で切れ、自由な群の SD は 1.34）。対数尤度は
+  $1.9\times10^{-3}$、$X^2$ は $3\times10^{-3}$ ずれる。**照合しておらず、実装していないもの**: bifactor / two-tier モデル、単一群・
+  1 次元・正規分布以外の `jsi()`（mirt は 1 因子のみ、Davidian 曲線の SE なし、混合分布は非対応、`multipleGroup`
+  では群ごとに単一群の $N(0,1)$ で推定し直す別の統計量）。
 - **DETECT（V27、M5）**: sirt の `conf.detect()` は `smooth = FALSE` で呼ぶ。既定の `smooth = TRUE` で
   `use_sum_score = TRUE` だと、標準化した総得点から生の項目得点を引くので、残りの得点の群が誤る（DESIGN §16.13）。
   `expl.detect()` は自分で `smooth = FALSE` にする。その戻り値の `detect.unweighted` は検証用の半分の指標だけを

@@ -1670,7 +1670,12 @@ data-independent shapes (§15.21).
     curves (`"No standard error method currently supported"`), does not support mixtures, and
     for `multipleGroup` refits each group alone as a single-group $N(0,1)$ model while taking
     the slopes from the multiple-group fit, which is not the refit of the fitted model; there
-    is no reference to validate an extension against.
+    is no reference to validate an extension against. **Validation (V26, M7)**:
+    `validation/r/m7_local_dependence_reference.R` (mirt 1.48), nine cases (two groups with one
+    and two factors, EH, Davidian, mixture, two and three factors), with mirt's estimates put
+    into a `FitResult` with every parameter fixed: $X^2$ / $G^2$ to $10^{-7}$ relative
+    (observed $\le8\times10^{-9}$), $V$ / Q3 to $10^{-8}$ (observed $\le3\times10^{-15}$);
+    details and mirt's differing defaults in VALIDATION.md.
 12. **The `dimensionality()` ensemble (§16.8)**: one polychoric matrix (with `fit`, the data are
     first coerced to the fitted items) feeds question (A): `parallel_analysis()` (defaults),
     `velicer_map()` (power 4) and `empirical_kaiser()`; the key is split into one key for each
