@@ -283,14 +283,15 @@ class ItemKernel(Protocol):
 （`b_se` / `bk_se`）は JAX の前向き自動微分によるヤコビアンを用いたデルタ法で求める（§15.18）。
 
 ## 8. スコアリング
-`FitResult.score(data, *, method="EAP"|"MAP"|"ML"|"WLE"|"PV", group=None, item_names=None, key=None, n_draws=5)`:
+`FitResult.score(data, *, method="EAP"|"MAP"|"ML"|"WLE"|"PV"|"EAPsum", group=None, item_names=None, key=None, n_draws=5)`:
 - **EAP**（Bock & Mislevy, 1982）: 推定済みモデルと同じ求積格子上で、回答者の群の推定済み潜在分布を事前分布とする事後平均と事後 SD。
 - **MAP**: 群の推定済み正規潜在分布を連続事前分布として $\log L(\theta\mid y) + \log\phi(\theta;\mu_g,\sigma_g^2)$ を最大化するベイズ最頻値推定。SE は最頻値における観測事後情報量 $(-\partial^2/\partial\theta^2)^{-1/2}$（§15.22）。
 - **ML**: $\log L(\theta\mid y)$ を最大化する最尤推定。SE は観測情報量 $(-\partial^2\log L/\partial\theta^2)^{-1/2}$。有限の最大値を持たないパターンは $-\infty$ / $+\infty$（全欠測は NaN）、SE は NaN（§15.23）。
 - **WLE**（Warm, 1989; Firth, 1993）: 観測項目にわたる Fisher テスト情報量 $I(\theta)$ と JAX 自動微分による $J(\theta) = \partial I/\partial\theta$ を用いて $\partial\log L/\partial\theta + J(\theta)/(2I(\theta)) = 0$（等価に $\log L(\theta\mid y) + \tfrac{1}{2}\log I(\theta)$ の最大化）を解く重み付き最尤推定。極端パターンでも有限。SE は mirt の既定に合わせて WLE 目的関数の観測曲率から計算（§15.24）。
 - **PV**（Mislevy, 1991）: 細かい等間隔格子上の事後分布から区分線形逆 CDF 補間により回答者ごとに独立に `n_draws` 個を抽出し、`pv1..pvM` 列の DataFrame を返す。明示的な `key: jax.Array` が必須（未指定は `SpecificationError`）で、`key` に対して決定的（§15.25）。
+- **EAPsum**（Thissen, Pommerich, Billeaud & Williams, 1995）: 合計得点を与えたときの事後平均と事後 SD。回答者の群の合計得点の表を引く。欠測が 1 つでもある回答者は NaN。1 次元で潜在分布が `Normal` のモデルのみ（§18.2）。
 
-すべての手法で欠測反応は尤度（および WLE の $I(\theta)$）から除く。すべての手法がユニークパターン圧縮と 2 のべき乗パディングを用いてデータ値に依存しない形状で `jit` 実行される（§15.21）。
+EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)$）から除く。EAPsum 以外のすべての手法がユニークパターン圧縮と 2 のべき乗パディングを用いてデータ値に依存しない形状で `jit` 実行される（§15.21）。
 
 ## 9. 性能方針
 - パターン圧縮 + バケットパディングで再コンパイルを抑える。

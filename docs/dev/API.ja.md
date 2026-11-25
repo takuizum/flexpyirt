@@ -157,6 +157,9 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | `dimtest` | 関数 | ブートストラップでバイアス補正する DIMTEST。`DimtestResult` を返す |
 | `detect`, `exploratory_detect` | 関数 | 確認的・探索的 DETECT。`DetectResult`, `ExploratoryDetectResult` を返す |
 | `model_parallel_analysis`, `dimensionality` | 関数 | `FitResult` のモデルに基づく平行分析と、まとめのレポート。`ModelParallelAnalysisResult`, `DimensionalityResult` を返す |
+| `item_information`, `test_information`, `expected_score` | 関数 | 1 次元の `FitResult` の、与えた `theta` での項目・テスト情報量（条件付き SE つき）と期待得点。`theta` をインデックスにした DataFrame を返す（DESIGN §18.2） |
+| `reliability`, `summed_score_table` | 関数 | 周辺信頼性・経験的信頼性と、合計得点 EAP の表（`FitResult.score(method="EAPsum")` も）。DataFrame を返す |
+| `summed_score_distribution` | 関数 | カテゴリ確率に対する Lord–Wingersky / Poisson 二項分布のカーネル（DESIGN §18.1） |
 | `LocalDependenceResult` | frozen dataclass | `FitResult.local_dependence()` の戻り値（`pairs`, `q3`, `q3_mean`, `max_q3_star`） |
 | `JSIResult` | frozen dataclass | `FitResult.jsi()` の戻り値（`matrix`, `pairs`, `method`, `converged`） |
 

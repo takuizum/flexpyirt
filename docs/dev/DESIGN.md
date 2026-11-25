@@ -352,7 +352,7 @@ step difficulties $b_k=-(d_k-d_{k-1})/a$ with $d_0=0$ for GPCM/PCM) is computed 
 the Jacobian (§15.18).
 
 ## 8. Scoring
-`FitResult.score(data, *, method="EAP"|"MAP"|"ML"|"WLE"|"PV", group=None, item_names=None, key=None, n_draws=5)`:
+`FitResult.score(data, *, method="EAP"|"MAP"|"ML"|"WLE"|"PV"|"EAPsum", group=None, item_names=None, key=None, n_draws=5)`:
 - **EAP** (Bock & Mislevy, 1982): posterior mean and posterior SD on the fitted model's quadrature
   grid using the respondent's group's estimated latent distribution as the prior.
 - **MAP**: Bayes modal estimate maximizing $\log L(\theta\mid y) + \log\phi(\theta;\mu_g,\sigma_g^2)$
@@ -370,9 +370,12 @@ the Jacobian (§15.18).
   equispaced grid with piecewise-linear inverse-CDF interpolation, returning columns `pv1..pvM`.
   Requires an explicit `key: jax.Array` (`SpecificationError` if missing); deterministic given `key`
   (§15.25).
+- **EAPsum** (Thissen, Pommerich, Billeaud & Williams, 1995): posterior mean and SD given the
+  summed score, looked up in the summed-score table of the respondent's group; NaN for a
+  respondent with any missing response; unidimensional `Normal` models only (§18.2).
 
-Missing responses are dropped from the likelihood (and from $I(\theta)$ in WLE) for every method.
-All methods compress unique patterns with power-of-two bucket padding and run inside `jit` with
+Missing responses are dropped from the likelihood (and from $I(\theta)$ in WLE) for every method
+except EAPsum. All other methods compress unique patterns with power-of-two bucket padding and run inside `jit` with
 data-independent shapes (§15.21).
 
 ## 9. Performance

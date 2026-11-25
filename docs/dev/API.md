@@ -167,6 +167,9 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 | `dimtest` | function | DIMTEST with bootstrap bias correction; returns `DimtestResult` |
 | `detect`, `exploratory_detect` | function | Confirmatory / exploratory DETECT; return `DetectResult`, `ExploratoryDetectResult` |
 | `model_parallel_analysis`, `dimensionality` | function | Model-based parallel analysis of a `FitResult`; the ensemble report. Return `ModelParallelAnalysisResult`, `DimensionalityResult` |
+| `item_information`, `test_information`, `expected_score` | function | Item / test information (with the conditional SE) and expected scores of a unidimensional `FitResult` at given `theta`; return DataFrames indexed by `theta` (DESIGN §18.2) |
+| `reliability`, `summed_score_table` | function | Marginal and empirical reliability; the summed-score EAP table (also `FitResult.score(method="EAPsum")`). Return DataFrames |
+| `summed_score_distribution` | function | Lord–Wingersky / Poisson-binomial kernel on category probabilities (DESIGN §18.1) |
 | `LocalDependenceResult` | frozen dataclass | Returned by `FitResult.local_dependence()` (`pairs`, `q3`, `q3_mean`, `max_q3_star`) |
 | `JSIResult` | frozen dataclass | Returned by `FitResult.jsi()` (`matrix`, `pairs`, `method`, `converged`) |
 | `PolychoricResult` | frozen dataclass | `correlation`, `unsmoothed_correlation`, `thresholds`, `categories`, `n_obs`, per-pair `converged` / `at_boundary` / `zero_cell_corrected`, `smoothed`, `min_eigenvalue` |
