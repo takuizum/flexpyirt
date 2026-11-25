@@ -261,7 +261,7 @@ def _frame_to_html_table(df: pd.DataFrame, *, digits: int = 4) -> str:
 
 @dataclass(frozen=True)
 class FitResult:
-    """Result of :func:`flexpyirt.fit`.
+    r"""Result of :func:`flexpyirt.fit`.
 
     Attributes
     ----------
