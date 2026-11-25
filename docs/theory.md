@@ -340,7 +340,9 @@ Guide: [section 5](guide.md#5-reading-the-results), [section 9](guide.md#9-multi
 When two test forms are calibrated separately, each on its own $N(0,1)$ scale, their parameters
 are on different scales that differ by a linear transformation $\theta^*=A\theta+B$ (section 3).
 Common items let you estimate $A$ and $B$. Under the transformation, the source form's
-slope–intercept parameters become $a^*=a/A$ and $d^*=d-aB/A$ (for GPCM, $d_k^*=d_k-k\,aB/A$).
+slope–intercept parameters become $a^*=a/A$ and $d^*=d-aB/A$ (for GPCM, $d_k^*=d_k-k\,aB/A$; for
+the nominal model, $d_k^*=d_k-\mathrm{ak}_k\,aB/A$ with the scoring coefficients $\mathrm{ak}_k$
+unchanged). Asymptotes of the 3PL and 4PL do not change.
 
 **Characteristic-curve methods** choose $(A,B)$ so that the transformed source items reproduce
 the target items' response curves over the target population:
@@ -359,6 +361,17 @@ mean/sigma), which flexpyirt uses only as starting values. Standard errors of $(
 the delta method applied to the condition that the criterion's gradient is zero (Ogasawara,
 2001), propagating the sampling error of both calibrations. A linking is only as good as its
 common items: check them for DIF across the two forms first.
+
+**Multidimensional models.** With $D$ factors the scales differ by
+$\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$, under which
+$\mathbf a^*=\mathbf A^{-\top}\mathbf a$ and $d^*=d-\mathbf a^{*\top}\boldsymbol\beta$ (Oshima, Davey &
+Lee, 2000). The same two criteria are summed over the $D$-dimensional grid, with source curves
+evaluated at $\mathbf A^{-1}(\boldsymbol\theta_q-\boldsymbol\beta)$. What $\mathbf A$ may be depends
+on how the two calibrations were identified. Two confirmatory calibrations with the same
+structure of zero slopes and unit factor variances differ only by a unit and an origin per
+factor, so $\mathbf A$ is diagonal. If the factor axes themselves may differ, $\mathbf A$ is a
+rotation times a dilation (Li & Lissitz, 2000) or a general nonsingular matrix (Oshima, Davey &
+Lee, 2000), and the transformed items no longer have zero slopes where the source items did.
 
 Guide: [section 15](guide.md#15-scale-linking).
 
@@ -379,6 +392,7 @@ Guide: [section 15](guide.md#15-scale-linking).
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43, 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking* (3rd ed.). Springer.
+- Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24, 115–138.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings". *Applied Psychological Measurement*, 8, 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
@@ -390,6 +404,7 @@ Guide: [section 15](guide.md#15-scale-linking).
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25, 53–67.
+- Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37, 357–373.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24, 50–64.
 - Rasch, G. (1960). *Probabilistic Models for Some Intelligence and Attainment Tests*. Danish Institute for Educational Research.
 - Rubin, D. B. (1976). Inference and missing data. *Biometrika*, 63, 581–592.

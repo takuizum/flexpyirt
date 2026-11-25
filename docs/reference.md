@@ -820,27 +820,32 @@ when `free_mean` or `free_var` lacks fixed intercepts or slopes.
 
 ```text
 link(source, target, *, items=None, method="stocking_lord", symmetric=False,
-     nodes=None, weights=None, source_group=None, target_group=None,
-     tol=1e-10, max_iter=200) -> LinkResult
+     transformation="diagonal", nodes=None, weights=None, source_group=None,
+     target_group=None, tol=1e-10, max_iter=200) -> LinkResult
 ```
 
-Link a separately calibrated unidimensional `source` (new) scale onto `target` (base) via common
+Link a separately calibrated `source` (new) scale onto `target` (base) via common
 items by finding linear constants $(A, B)$ ($A > 0$) for $\theta^* = A\theta + B$
 ([guide section 15](guide.md#15-scale-linking), [Theory](theory.md)). Validated against R for
-2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items; Rasch, 4PL and PCM share these kernels and
-are covered by unit tests only. Derivatives for Newton optimization and delta-method standard
+2PL, 3PL, 4PL, GRM, GPCM, nominal, mixed 2PL + GPCM and mixed 2PL + nominal common items; Rasch
+and PCM share these kernels and are covered by unit tests only. Two confirmatory models with the
+same number of factors $D > 1$ (`Model.with_factors`; factors matched by position) are linked by
+$\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta$ with the same criteria on
+the product grid (validated against R for two- and three-factor 2PL and two-factor GRM models).
+Derivatives for Newton optimization and delta-method standard
 errors (Ogasawara, 2001) come from JAX automatic differentiation. SEs assume independent
 calibrations (the joint covariance is used when one multiple-group fit is both `source` and
 `target`), hold the quadrature weights fixed, and are not reported without convergence.
 
 | Argument | Type | Description |
 |---|---|---|
-| `source` | `FitResult` | Fitted unidimensional model on the source (new) scale |
-| `target` | `FitResult` | Fitted unidimensional model on the target (base) scale |
+| `source` | `FitResult` | Fitted model on the source (new) scale |
+| `target` | `FitResult` | Fitted model on the target (base) scale, with the same number of factors |
 | `items` | iterable[str] / Mapping[str, str], optional | Common items (default `None`: all items sharing the same name). Pass `{source_item: target_item}` when names differ. Common pairs must share the same kernel and category count |
 | `method` | `"stocking_lord"` / `"haebara"` | Criterion: Stocking & Lord (1983) squared TCC difference (default) or Haebara (1980) squared category-curve differences (polytomous forms: Kim & Lee, 2006) |
 | `symmetric` | bool | If `True`, add the reverse-direction squared difference (Kim & Lee, 2006); default `False` |
-| `nodes` | 1-D array-like, optional | Quadrature nodes $\theta_q$ (default: target group's fitted grid, and source group's grid for the reverse direction when `symmetric=True`) |
+| `transformation` | `"diagonal"` / `"orthogonal"` / `"oblique"` | Family of $\mathbf A$ for $D > 1$ factors (no effect for one factor): `"diagonal"` (default) $\operatorname{diag}(A_m)$, $A_m > 0$, the transformation between two calibrations of the same confirmatory structure; `"orthogonal"` a dilation times a rotation, $k\,\mathbf R$ (Li & Lissitz, 2000); `"oblique"` any matrix with $\det\mathbf A > 0$ (Oshima, Davey & Lee, 2000). Reflections are excluded |
+| `nodes` | array-like, optional | Quadrature nodes $\theta_q$, 1-D, or of shape `(Q, D)` for $D > 1$ factors (default: target group's fitted grid, and source group's grid for the reverse direction when `symmetric=True`) |
 | `weights` | 1-D array-like, optional | Non-negative weights normalized to sum to 1 (default: fitted latent distribution weights, or uniform when `nodes` is given without `weights`) |
 | `source_group`, `target_group` | str, optional | Group name when `source` or `target` is a multiple-group `FitResult` |
 | `tol` | float | Convergence tolerance on $\|\nabla F(A, B)\|_\infty$ (default `1e-10`) |
@@ -848,8 +853,8 @@ calibrations (the joint covariance is used when one multiple-group fit is both `
 
 **Returns**: [`LinkResult`](#linkresult)
 
-**Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (non-`FitResult` or
-multidimensional input, multiple-group input without selecting a group, no common items,
+**Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (non-`FitResult` input,
+different numbers of factors, bifactor or two-tier input, multiple-group input without selecting a group, no common items,
 mismatched item kernels/categories on common items, invalid options/nodes/weights).
 
 **Warns**: `ConvergenceWarning` if `max_iter` is reached before `grad_norm <= tol`.
@@ -860,18 +865,19 @@ Returned by `link()`. Immutable.
 
 | Attribute / method | Type | Description |
 |---|---|---|
-| `A`, `B` | float | Linear linking constants ($\theta^* = A\theta + B$, $A > 0$) |
-| `A_se`, `B_se` | float | Delta-method standard errors from the implicit function theorem (Ogasawara, 2001), or NaN when unavailable |
-| `vcov` | ndarray (2, 2) / None | Asymptotic covariance matrix of `(A, B)`, or `None` when `se=None` on a side with free common-item parameters, all common parameters are fixed, or $H_{cc}$ is not positive definite |
+| `A`, `B` | float / ndarray | Linear linking constants ($\theta^* = A\theta + B$, $A > 0$). For $D > 1$ factors, the `(D, D)` matrix $\mathbf A$ and the `(D,)` vector $\boldsymbol\beta$ |
+| `A_se`, `B_se` | float / ndarray | Delta-method standard errors from the implicit function theorem (Ogasawara, 2001), or NaN when unavailable; same shapes as `A`, `B` (0 for the structural zeros of a diagonal $\mathbf A$) |
+| `vcov` | ndarray / None | Asymptotic covariance matrix of `(A, B)`, `(2, 2)`; for $D > 1$ factors the `(D*D + D, D*D + D)` covariance of `(A.ravel(), B)`, of rank at most the number of free transformation parameters. `None` when `se=None` on a side with free common-item parameters, all common parameters are fixed, or $H_{cc}$ is not positive definite |
 | `criterion` | float | Minimized criterion value at `(A, B)` |
 | `method` | `"stocking_lord"` / `"haebara"` | Criterion used |
 | `symmetric` | bool | Whether the symmetric criterion was minimized |
+| `transformation` | `"diagonal"` / `"orthogonal"` / `"oblique"` | Family of $\mathbf A$ (always `"diagonal"` for one factor) |
 | `converged` | bool | Whether `grad_norm <= tol` was met |
 | `n_iter` | int | Number of Newton iterations taken |
 | `grad_norm` | float | $\|\nabla F(A, B)\|_\infty$ at `(A, B)` |
 | `common_items` | tuple[str, ...] | Source item names used as common items |
 | `items` | DataFrame | All source items transformed onto the target scale (`item`, `model`, `common`, internal slope–intercept parameters and display IRT thresholds `b` / `bk`); directly usable with `Model.fix_from()` |
-| `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | Transform source-scale ability scores via $\theta^* = A\theta + B$ (`theta` and all `pv1..` columns of a scoring DataFrame; `se` $\mapsto A\,\mathrm{se}$, excluding linking error) |
+| `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | Transform source-scale ability scores via $\theta^* = A\theta + B$ (`theta` and all `pv1..` columns of a scoring DataFrame; `se` $\mapsto A\,\mathrm{se}$, excluding linking error). For $D > 1$ factors: the `theta_<factor>` / `pv<m>_<factor>` columns or an array whose last axis has length $D$; `se_<factor>` is rescaled under a diagonal $\mathbf A$ and NaN otherwise |
 | `summary(*, digits=4)` | str | Readable plain-text summary (Jupyter displays HTML via `_repr_html_()`) |
 
 ## Correlations

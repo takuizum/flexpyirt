@@ -1083,7 +1083,7 @@ three or more primary factors raises `SpecificationError`.
 
 When two forms are calibrated separately on different samples and share common items,
 `flexpyirt.link(source, target)` estimates the linear transformation $\theta^* = A\theta + B$
-($A > 0$) that places the `source` (new) scale onto the `target` (base) scale using
+($A > 0$; for multidimensional models see [below](#multidimensional-models)) that places the `source` (new) scale onto the `target` (base) scale using
 characteristic-curve methods (Stocking & Lord, 1983, default; or Haebara, 1980, via
 `method="haebara"`, plus symmetric versions via `symmetric=True`, Kim & Lee, 2006). Derivatives
 for Newton optimization and Ogasawara (2001) delta-method standard errors come from JAX automatic
@@ -1110,9 +1110,14 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 ```
 
 - Common items must share the same kernel and category count on both sides. Linking is validated
-  against independent R implementations for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items; Rasch,
-  4PL and PCM items use the same kernels and are covered by unit tests only. Haebara sums over
-  all categories (Kim & Lee, 2006), so a dichotomous item counts twice Haebara's original term.
+  against independent R implementations for 2PL, 3PL, 4PL, GRM, GPCM, nominal, mixed 2PL + GPCM
+  and mixed 2PL + nominal common items; Rasch and PCM items use the same kernels and are covered
+  by unit tests only. Haebara sums over all categories (Kim & Lee, 2006), so a dichotomous item
+  counts twice Haebara's original term.
+- Under the transformation a 4PL item keeps both asymptotes and a nominal item keeps its scoring
+  coefficients `ak`; only slopes and intercepts change. Stocking–Lord scores a nominal item by
+  its category index (0, 1, ...), so the result depends on how unordered categories are coded;
+  Haebara does not use scores and is the natural choice for nominal items.
 - Standard errors assume independent calibrations. Passing the same multiple-group fit as
   `source` and `target` (with `source_group=` / `target_group=`) uses its joint covariance; no SEs
   are reported when the optimizer did not converge.
@@ -1123,6 +1128,55 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
   `Model.fix_from()`; Rasch/PCM items get slope $1/A$); `linked.transform_theta()` transforms
   scalars, arrays, Series, or scoring DataFrames (`theta`, `se`, and plausible values `pv1..`),
   treating $(A, B)$ as known (the transformed `se` excludes linking error).
+
+### Multidimensional models
+
+Two fits of confirmatory models with the same number of factors are linked by
+$\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta$ (Oshima, Davey & Lee, 2000):
+slopes become $\mathbf a^* = \mathbf A^{-\top}\mathbf a$ and intercepts
+$d^* = d - \mathbf a^{*\top}\boldsymbol\beta$. The same criteria are summed over the product
+quadrature grid. Factors are matched by position, and `transformation=` chooses the family of
+$\mathbf A$:
+
+| `transformation` | $\mathbf A$ | Use |
+|---|---|---|
+| `"diagonal"` (default) | $\operatorname{diag}(A_1, \dots, A_D)$, $A_m > 0$ | Two calibrations of the same confirmatory structure: each factor has its own unit and origin. Zero slopes stay zero |
+| `"orthogonal"` | $k\,\mathbf R$: one dilation $k > 0$ and a rotation $\mathbf R$ (Li & Lissitz, 2000) | Forms whose factor axes differ by a rotation |
+| `"oblique"` | any matrix with $\det\mathbf A > 0$ (Oshima, Davey & Lee, 2000) | The general linear transformation |
+
+Here the new sample comes from a population with factor means $(0.4, -0.3)$ and standard
+deviations $(1.2, 0.8)$, and both forms are calibrated with means 0 and variances 1:
+
+```python
+theta_new = rng.multivariate_normal([0.4, -0.3], [[1.44, 0.48], [0.48, 0.64]], size=1200)
+p_new = 1.0 / (1.0 + np.exp(-(theta_new @ a_mirt.T + d_mirt)))
+new_mirt_df = pd.DataFrame((rng.random(p_new.shape) < p_new).astype(float), columns=mirt_items)
+res_mirt_new = fit(
+    mirt_spec,
+    new_mirt_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(21, bounds=(-6, 6)),
+)
+
+linked_md = link(res_mirt_new, res_mirt, method="haebara")  # transformation="diagonal"
+print(linked_md.A.round(3))  # about diag(1.2, 0.8)
+print(linked_md.B.round(3), linked_md.B_se.round(3))  # about (0.4, -0.3)
+print(linked_md.items[["item", "a1", "a2", "d"]].head(3).round(3))
+print(linked_md.transform_theta(res_mirt_new.score(new_mirt_df.iloc[:3])).round(3))
+```
+
+- `linked.A` is a $D \times D$ array and `linked.B` a length-$D$ array; `A_se` and `B_se` have the
+  same shapes, and `vcov` is the covariance of `(A.ravel(), B)`. Entries of a diagonal
+  $\mathbf A$ that are zero by construction have standard error 0.
+- A rotation or an oblique transformation turns the zero slopes of the source items into non-zero
+  slopes, so `linked.items` no longer has the source model's structure; under `"diagonal"` it does.
+- `transform_theta()` maps the `theta_<factor>` columns (and plausible values `pv<m>_<factor>`)
+  or an array whose last axis has length $D$. `se_<factor>` columns are rescaled under a diagonal
+  $\mathbf A$ and set to NaN otherwise, because the standard error of a rotated score needs the
+  posterior covariance.
+- Reflections are not searched: `"orthogonal"` and `"oblique"` keep $\det\mathbf A > 0$. Bifactor
+  and two-tier fits are not supported. Validated against an independent R implementation for
+  two- and three-factor 2PL and two-factor GRM models.
 
 ## 16. Polychoric correlations
 

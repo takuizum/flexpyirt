@@ -164,8 +164,8 @@ one (DESIGN.md §16.18).
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
 | `fit` | function | Estimation; returns a `FitResult` |
 | `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
-| `link` | function | Differentiable IRT scale linking (Haebara / Stocking–Lord, non-symmetric & symmetric); returns a `LinkResult` |
-| `LinkResult` | class | Scale-linking result (`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `items`, `transform_theta`, `summary`) |
+| `link` | function | Differentiable IRT scale linking (Haebara / Stocking–Lord, non-symmetric & symmetric; `transformation=` for a diagonal, orthogonal or oblique $\mathbf A$ in multidimensional models); returns a `LinkResult` |
+| `LinkResult` | class | Scale-linking result (`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `transformation`, `items`, `transform_theta`, `summary`) |
 | `polychoric` | function | Polychoric / tetrachoric correlation matrix (two-step ML, smoothing); returns a `PolychoricResult` |
 | `parallel_analysis`, `velicer_map`, `empirical_kaiser` | function | Number-of-dimensions diagnostics; return `ParallelAnalysisResult`, `MAPResult`, `EmpiricalKaiserResult` (frozen dataclasses with `n_factors`) |
 | `comparison_data` | function | Comparison-data method (Ruscio & Roche, 2012); returns `ComparisonDataResult` |

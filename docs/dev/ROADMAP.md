@@ -94,7 +94,9 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 - [x] M2 and S-X2 for confirmatory multidimensional models (#77): `FitResult.m2()` and
   `FitResult.item_fit()` for single-group `with_factors()` models (2–3 factors, product grid;
   validated in V39). Bifactor / two-tier and multiple-group multidimensional models still raise.
-- [ ] Linking for 4PL, nominal and multidimensional models (#78).
+- [x] Linking for 4PL, nominal and multidimensional models (#78; `link(..., transformation=)` with a
+  diagonal, orthogonal or oblique $\mathbf A$ for confirmatory two- and three-factor models;
+  validated in V40).
 - [ ] Many groups: per-group latent distributions vmapped over groups (#79; DESIGN §12 open question 2).
 - **Acceptance**: each item validated against mirt (or an independent R implementation) within the
   VALIDATION.md tolerances.

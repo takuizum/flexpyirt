@@ -859,6 +859,14 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    - `GradedKernel`（GRM）: $d_k^* = d_k - aB/A$（$k = 1, \dots, K-1$。順序 $d_1 > \dots > d_{K-1}$ を保存）。
    - `GPCMKernel`（GPCM/PCM）: $d_k^* = d_k - k\,aB/A$（$k = 1, \dots, K-1$、$d_0 = 0$）。
      $k a^* \theta^* + d_k^* = k a\theta + d_k$ とステップ困難度 $b_k^* = A b_k + B$ を保存する。
+   - `NominalKernel`（名義反応モデル。V40）: スコアリング係数は不変で $\mathrm{ak}_k^* = \mathrm{ak}_k$
+     （$k = 1, \dots, K-2$。$\mathrm{ak}_0 = 0$ と $\mathrm{ak}_{K-1} = K-1$ は固定のまま）、切片は
+     $d_k^* = d_k - \mathrm{ak}_k\,aB/A$（$k = 1, \dots, K-1$、$d_0 = 0$）。
+     $\mathrm{ak}_k a^* \theta^* + d_k^* = \mathrm{ak}_k a\theta + d_k$ を保存する。GPCM の変換で $k$ を
+     $\mathrm{ak}_k$ に置き換えたもので、$1/A$ は $a$ だけが吸収するので mirt の識別制約
+     （$\mathrm{ak}_0 = 0$、$\mathrm{ak}_{K-1} = K-1$、$d_0 = 0$）の中に収まる。
+   4PL の上方漸近線 $u$ は $g$ と同じく不変である（どちらも確率であり $\theta$ 上の位置ではない）。変わるのは
+   $a$ と $d$ だけである（V40）。
    任意の 1 次元 `ItemKernel` で $P_j(y=k \mid \theta^*; \xi_j^*) = P_j(y=k \mid (\theta^* - B)/A; \xi_j)$ が成り立つため、
    目的関数は `kernel.log_prob` から直接計算し、手書きの導関数を持たない。
    - **Haebara 法**（Haebara, 1980; 多値拡張 Kim & Lee, 2006）:
@@ -869,6 +877,9 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    - **Stocking–Lord 法**（Stocking & Lord, 1983; 多値拡張 Kim & Lee, 2006）:
      $\mathrm{SL}_{\mathrm{fwd}}(A,B) = \sum_q w_q^{(t)} [\mathrm{TCC}^{\mathrm{tgt}}(\theta_q^{(t)}) - \mathrm{TCC}^{\mathrm{src}}((\theta_q^{(t)}-B)/A)]^2$。
      ただし $\mathrm{TCC}(\theta) = \sum_{j\in\mathcal{C}}\sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)$。
+     名義項目も他の項目と同じくカテゴリ番号 $k$ で採点する（mirt の `expected.item()` と同じ。$\mathrm{ak}_k$ では
+     ない）。変換が厳密に成り立てば曲線が一致するときに限り 0 になる損失である点は変わらないが、名義項目の得点は
+     カテゴリの符号化に依存するので、順序のないカテゴリでは得点を使わない Haebara 法が自然な選択である。
    - **対称版**（`symmetric=True`; Kim & Lee, 2006）: 逆方向（$P_{jk}^{\mathrm{src}}(\theta_q^{(s)})$ と
      $P_{jk}^{\mathrm{tgt}}(A\theta_q^{(s)} + B)$、$\mathrm{TCC}$ も同様）の二乗差を加える。既定では $(\theta^{(t)}, w^{(t)})$ は
      `target` 群の推定済み潜在分布の求積格子・重み、$(\theta^{(s)}, w^{(s)})$ は `source` 群のものを使うため、対称版は
@@ -883,7 +894,9 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    1-ULP 勾配仕上げを行う。収束判定は $\|\nabla F\|_\infty \le$ `tol`（絶対値、既定 $10^{-10}$。重みの和が 1 で
    $F$ は共通項目数とともに大きくなるが、スケール調整はしない）。`tol` に達する前に $F$ を減らすステップがなくなると
    `converged = False` で終了し `ConvergenceWarning` を出す。Mean/Mean は初期値にすぎず、傾きの絶対値を合計し、
-   全共通項目の表示用閾値をすべてまとめて平均するため、多値項目は項目単位の平均より重みが大きい。
+   全共通項目の表示用閾値をすべてまとめて平均するため、多値項目は項目単位の平均より重みが大きい。名義項目には
+   表示用閾値がないので、位置 $-d_{K-1}/((K-1)a)$（最初と最後のカテゴリ曲線の交点）1 つを $\bar b$ に入れる。
+   これは $Ab + B$ で変換される。
    **標準誤差（Ogasawara, 2001）**: 最適点 $\hat c = (\hat A, \hat B)$ の停留条件
    $g(c, \eta_s, \eta_t) = \nabla_c F(c, \eta_s, \eta_t) = 0$ に陰関数定理を適用し、共通項目に現れる一意な自由パラメタ
    （固定パラメタや共有 `free_id` をそのまま反映）に対して `jax.jacfwd(g, 0)` と `jax.jacrev(g, 1/2)` から
@@ -1827,6 +1840,67 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    **`FitResult` に新しく保存するものはない。** `schema_version` は変えない。
    **一致の実測値**は VALIDATION.md（V37）に記録する。
 
+## 19. 多次元尺度リンキング（M6）
+
+1. **確認的多次元モデルのリンキング（`link(..., transformation=)`、V40、#78）**:
+   `link()`（§16.5）は、`Model.with_factors` で宣言した同じ因子数 $D \in \{2, 3\}$ の 2 つの推定結果も受け付ける
+   （直積格子。双因子・two-tier は拒否する）。因子は位置で対応させ、`source` の第 $m$ 因子を `target` の第 $m$ 因子に写す。
+   **変換。** `source` の尺度を $\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta$
+   （$\mathbf A$ は正則な $D \times D$ 行列）で `target` の尺度へ写す（Oshima, Davey & Lee, 2000; Li & Lissitz, 2000）。
+   $\boldsymbol\theta = \mathbf A^{-1}(\boldsymbol\theta^* - \boldsymbol\beta)$ を線形予測子
+   $\mathbf a^\top\boldsymbol\theta + d$ に代入すると、どのカーネルでも
+   $$\mathbf a^* = \mathbf A^{-\top}\mathbf a, \qquad d_k^* = d_k - m_k\,\mathbf a^{*\top}\boldsymbol\beta$$
+   となる。$m_k$ はカテゴリ $k$ における線形予測子の係数で、1（2PL/Rasch、3PL/4PL、GRM）、$k$（GPCM/PCM）、
+   $\mathrm{ak}_k$（名義、$\mathrm{ak}_{K-1} = K-1$）。漸近線と名義モデルのスコアリング係数は不変で、
+   $P_{jk}(\boldsymbol\theta^*; \xi^*) = P_{jk}(\mathbf A^{-1}(\boldsymbol\theta^* - \boldsymbol\beta); \xi)$
+   が成り立つ。$D = 1$ では §16.5 に一致する。潜在分布 $N(\boldsymbol\mu, \boldsymbol\Sigma)$ は
+   $N(\mathbf A\boldsymbol\mu + \boldsymbol\beta, \mathbf A\boldsymbol\Sigma\mathbf A^\top)$ になる。
+   **$\mathbf A$ の 3 つの族**（`transformation`、静的引数。自由パラメタ $c$ は $p$ 個）:
+   - `"diagonal"`（既定。$p = 2D$）: $\mathbf A = \operatorname{diag}(A_1, \dots, A_D)$、$A_m > 0$、
+     $c = (A_1..A_D, \beta_1..\beta_D)$。因子ごとに尺度と原点を変える。*同じ*確認的構造（各推定で平均 0・分散 1）で
+     推定した 2 つの結果のあいだの変換はこれであり、0 に固定した傾きは 0 のまま、因子間相関も変わらない。
+     変換後の項目が `source` のモデル構造を保つのはこの族だけである。
+   - `"orthogonal"`（$p = 1 + D(D-1)/2 + D$; Li & Lissitz, 2000）: $\mathbf A = k\,\mathbf R$。$k > 0$ は中心拡大、
+     $\mathbf R = \exp(\mathbf S(\boldsymbol\phi))$ は回転で、$\mathbf S$ は $S_{ij} = -\phi_{ij}$、
+     $S_{ji} = \phi_{ij}$（$i < j$、辞書式順）の歪対称行列、$c = (k, \boldsymbol\phi, \boldsymbol\beta)$。$D = 2$ では
+     $\mathbf R = \begin{pmatrix}\cos\phi & -\sin\phi\\ \sin\phi & \cos\phi\end{pmatrix}$。到達するのは
+     $\det\mathbf R = +1$ の回転だけで、鏡映は含まない。
+   - `"oblique"`（$p = D^2 + D$; Oshima, Davey & Lee, 2000）: $\det\mathbf A > 0$ の任意の $\mathbf A$、
+     $c = (\operatorname{vec}(\mathbf A)$ 行優先$, \boldsymbol\beta)$。
+   回転と斜交変換は `source` 項目の構造的な 0 の傾きを 0 でない値にする。因子の識別のしかたが異なるフォームのための変換である。
+   **目的関数**は `target` の直積格子 $(\boldsymbol\theta_q^{(t)}, w_q^{(t)})$（§15.30 の推定済み多変量正規重み、または
+   形状 $(Q, D)$ の `nodes` と `weights`）の上で
+   $$H_{\mathrm{fwd}}(c) = \sum_q w_q^{(t)} \sum_{j\in\mathcal C}\sum_{k=0}^{K_j-1}\big[P_{jk}^{\mathrm{tgt}}(\boldsymbol\theta_q^{(t)}) - P_{jk}^{\mathrm{src}}(\mathbf A^{-1}(\boldsymbol\theta_q^{(t)} - \boldsymbol\beta))\big]^2,$$
+   $$\mathrm{SL}_{\mathrm{fwd}}(c) = \sum_q w_q^{(t)} \big[\mathrm{TCC}^{\mathrm{tgt}}(\boldsymbol\theta_q^{(t)}) - \mathrm{TCC}^{\mathrm{src}}(\mathbf A^{-1}(\boldsymbol\theta_q^{(t)} - \boldsymbol\beta))\big]^2$$
+   とする。Oshima, Davey & Lee (2000) の項目特性関数法・テスト特性関数法を Kim & Lee (2006) のカテゴリ形式で書いたもので、
+   $\mathrm{TCC}(\boldsymbol\theta) = \sum_j\sum_k k\,P_{jk}(\boldsymbol\theta)$。`symmetric=True` は `source` の格子上の
+   逆方向の項（$\boldsymbol\theta_q^{(s)}$ での `source` 曲線と $\mathbf A\boldsymbol\theta_q^{(s)} + \boldsymbol\beta$ での
+   `target` 曲線）を加える。Stocking–Lord 法は 1 つのスカラー曲面を合わせるので、$\mathbf A$ は共通項目の傾きの方向の
+   多様さを通じてしか識別されない。Haebara 法はすべての項目曲面を使う。目的関数の Hessian が正定値でなければ標準誤差は出さない。
+   **最適化。** `_linking.solve_multidim_linking` は §16.5 の Newton 反復を $p$ 次元にしたもの（Hessian が正定値なら
+   厳密なステップ、そうでなければ Levenberg–Marquardt、ステップのノルムは 1 で打ち切り、40 段階の並列ステップ幅、勾配仕上げ）。
+   有効領域の外（$A_m \le 0$、$k \le 0$、$\det\mathbf A \le 0$）では目的関数が NaN になりステップ幅探索で棄却されるので、
+   反復は初期値と同じ連結成分にとどまる。**初期値**: 共通項目の傾き行列（$J_c \times D$）を $X_s, X_t$ とすると
+   $\mathbf a_s = \mathbf A^\top\mathbf a_t$ から最小二乗解 $\mathbf A_0 = X_t^{+} X_s$ を得る（斜交。Oshima, Davey & Lee, 2000
+   の「直接法」）。直交の初期値はその極分解（$\mathbf A_0 = U\Sigma V^\top \Rightarrow \mathbf R_0 = UV^\top$、
+   $k_0 = \operatorname{mean}\Sigma$、$\boldsymbol\phi_0$ は行列対数から。$\det UV^\top < 0$ なら $\mathbf R_0 = I$）、
+   対角の初期値は $A_{m,0} = \sum_j |a^{\mathrm{src}}_{jm}| / \sum_j |a^{\mathrm{tgt}}_{jm}|$。$\mathbf A_0$ が無効なら対角の
+   初期値に戻す。$\boldsymbol\beta_0$ は共通項目の全切片についての
+   $d^{\mathrm{tgt}}_{jk} - d^{\mathrm{src}}_{jk} = -m_k\,\mathbf a_j^{\mathrm{tgt}\top}\boldsymbol\beta$ の最小二乗解。
+   **標準誤差。** §16.5 と同じく $J_s = -H_{cc}^{-1}H_{c,\eta_s}$、$J_t = -H_{cc}^{-1}H_{c,\eta_t}$、
+   $\operatorname{Cov}(\hat c) = J_s\Sigma_sJ_s^\top + J_t\Sigma_tJ_t^\top$（同じ推定の 2 群なら交差項を加える）。報告する定数
+   $\kappa(c) = (\operatorname{vec}(\mathbf A)$ 行優先$, \boldsymbol\beta)$ は $c$ の滑らかな関数なので、
+   $G = \partial\kappa/\partial c^\top$（`jax.jacfwd`）を使って
+   $\operatorname{Cov}(\hat\kappa) = G\operatorname{Cov}(\hat c)G^\top$ とする。この $(D^2 + D)$ 次の行列の階数は高々 $p$ で、
+   対角の $\mathbf A$ の構造的な 0 は分散 0、直交の $\mathbf A$ の要素は 1 次の範囲で線形従属である。
+   **結果。** $D > 1$ では `LinkResult.A` は $D \times D$ 配列 $\mathbf A$、`B` は長さ $D$ の配列 $\boldsymbol\beta$、
+   `A_se` / `B_se` は同じ形の配列、`vcov` は $(\operatorname{vec}(\mathbf A), \boldsymbol\beta)$ の $(D^2 + D)$ 次の共分散行列。
+   $D = 1$ では従来どおり float と $2 \times 2$ 行列。`LinkResult.transformation` に族を記録する（$D = 1$ では 3 つが一致するので
+   常に `"diagonal"`）。`items` は変換後の傾き `a1..aD` と切片を持つ。`transform_theta` は `theta_<因子>` 列、
+   `pv<m>_<因子>` 列、形状 $(\dots, D)$ の配列を $\mathbf A\boldsymbol\theta + \boldsymbol\beta$ で写す。`se_<因子>` 列は
+   対角の $\mathbf A$ では $A_m\,\mathrm{se}_m$、それ以外では NaN にする（回転後の標準誤差には事後共分散が必要だが、
+   得点表はそれを持たない）。
+
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -1874,6 +1948,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
+- Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24(2), 115–138.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -1895,6 +1970,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Olsson, U. (1979). Maximum likelihood estimation of the polychoric correlation coefficient. *Psychometrika*, 44(4), 443–460.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
+- Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37(4), 357–373.
 - Owen, D. B. (1956). Tables for computing bivariate normal probabilities. *The Annals of Mathematical Statistics*, 27(4), 1075–1090.
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.

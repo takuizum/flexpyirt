@@ -69,7 +69,7 @@ $10^{-8}$ 程度）。
 | 比較データ法 | EFAtools の `CD()`。同じ乱数から同じ母集団、同じ順位和検定、同じ提案 |
 | DIMTEST | 単独のプログラム DIMPACK 以外に実装がないので、シミュレーションで確認する。5% 水準での第 1 種の誤りは 0.5〜1%（保守的）、相関 0.7〜0.8 の 2 次元に対する検出力は 99〜100% |
 | DETECT（確認的・探索的） | 同じ分割での sirt の `conf.detect(use_sum_score = TRUE, smooth = FALSE)` と `expl.detect(use_sum_score = TRUE)`。条件付き共分散・指標・分割が $10^{-12}$ まで |
-| 尺度リンキング（Haebara、Stocking–Lord） | mirt の反応関数を使って規準を計算する R の独立な実装（mirt 自体に特性曲線法のリンキングはない） |
+| 尺度リンキング（Haebara、Stocking–Lord。1 次元と確認的多次元モデル） | mirt の反応関数を使って規準を計算する R の独立な実装（mirt 自体に特性曲線法のリンキングはない） |
 
 ポリコリック相関、平行分析、MAP、経験的カイザー基準、因子分析、Hull 法、比較データ法、DETECT、DIMTEST は、対になる
 パッケージ flexpyctt（NumPy / SciPy。JAX は使わない）の関数である。flexpyirt 自身の `polychoric()` は同じ推定量の

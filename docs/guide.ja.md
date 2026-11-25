@@ -994,8 +994,8 @@ print(res_tt.score(tt_df.iloc[:3]).round(3))  # theta_math, theta_reading, theta
 ## 15. 尺度リンキング
 
 共通項目を含む 2 つのフォームを別々の標本で推定したあと、`flexpyirt.link(source, target)` を使うと、
-`source`（新フォーム）の尺度を `target`（基準フォーム）の尺度に写す線形変換 $\theta^* = A\theta + B$（$A > 0$）の
-係数を特性曲線法で推定できる（既定は Stocking & Lord, 1983、`method="haebara"` で Haebara, 1980、`symmetric=True` で
+`source`（新フォーム）の尺度を `target`（基準フォーム）の尺度に写す線形変換 $\theta^* = A\theta + B$（$A > 0$。
+多次元モデルは[後述](#多次元モデル)）の係数を特性曲線法で推定できる（既定は Stocking & Lord, 1983、`method="haebara"` で Haebara, 1980、`symmetric=True` で
 Kim & Lee, 2006 の対称版）。Newton 最適化と Ogasawara (2001) のデルタ法標準誤差の微分はすべて JAX の自動微分で行う。
 
 ```python
@@ -1018,9 +1018,13 @@ print(linked_sl.items.head(4))
 print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 ```
 
-- 共通項目は両側で同じ項目カーネル・カテゴリ数でなければならない。リンキングは 2PL・3PL・GRM・GPCM と
-  2PL + GPCM 混在の共通項目について素の R 参照値（V20）と照合済みで、Rasch・4PL・PCM は同じカーネルを使い単体テストでのみ
-  確認している。Haebara 法は全カテゴリで和をとる（Kim & Lee, 2006）ため、2 値項目は Haebara の原式の 2 倍に数えられる。
+- 共通項目は両側で同じ項目カーネル・カテゴリ数でなければならない。リンキングは 2PL・3PL・4PL・GRM・GPCM・名義反応モデルと
+  2PL + GPCM 混在・2PL + 名義混在の共通項目について R の独立な実装（V20、V40）と照合済みで、Rasch・PCM は同じカーネルを使い
+  単体テストでのみ確認している。Haebara 法は全カテゴリで和をとる（Kim & Lee, 2006）ため、2 値項目は Haebara の原式の
+  2 倍に数えられる。
+- この変換で 4PL 項目の 2 つの漸近線と名義項目のスコアリング係数 `ak` は変わらない。変わるのは傾きと切片だけである。
+  Stocking–Lord 法は名義項目をカテゴリ番号（0, 1, ...）で採点するので、順序のないカテゴリでは符号化のしかたに結果が
+  依存する。Haebara 法は得点を使わないので、名義項目には Haebara 法が自然である。
 - 標準誤差は独立な推定を仮定する。同じ多母集団推定を `source` と `target` に渡す（`source_group=` / `target_group=`
   を指定）と同時共分散を使う。最適化が収束しなかったときは SE を報告しない。
 - 共通項目の名前がフォーム間で異なるときは `items={source_name: target_name}` の辞書を渡す。
@@ -1029,6 +1033,50 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 - `linked.items` は `source` の全項目を基準尺度へ変換した表で、そのまま `Model.fix_from()` に渡せる（Rasch・PCM の
   項目は傾きが $1/A$ になる）。`linked.transform_theta()` はスカラー・配列・Series・採点 DataFrame（`theta`、`se`、
   plausible values `pv1..`）を変換し、$(A, B)$ を既知として扱う（変換後の `se` はリンキング誤差を含まない）。
+
+### 多次元モデル
+
+因子数が同じ確認的モデルの 2 つの推定結果は、$\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta$ で
+結ぶ（Oshima, Davey & Lee, 2000）。傾きは $\mathbf a^* = \mathbf A^{-\top}\mathbf a$、切片は
+$d^* = d - \mathbf a^{*\top}\boldsymbol\beta$ になる。目的関数は同じもので、直積の求積格子の上で和をとる。因子は位置で
+対応させ、`transformation=` で $\mathbf A$ の族を選ぶ。
+
+| `transformation` | $\mathbf A$ | 使いどころ |
+|---|---|---|
+| `"diagonal"`（既定） | $\operatorname{diag}(A_1, \dots, A_D)$、$A_m > 0$ | 同じ確認的構造で推定した 2 つの結果。因子ごとに単位と原点が違う。0 の傾きは 0 のまま |
+| `"orthogonal"` | $k\,\mathbf R$: 1 つの拡大率 $k > 0$ と回転 $\mathbf R$（Li & Lissitz, 2000） | 因子軸が回転だけ違うフォーム |
+| `"oblique"` | $\det\mathbf A > 0$ の任意の行列（Oshima, Davey & Lee, 2000） | 一般の線形変換 |
+
+次の例では、新しい標本は因子の平均が $(0.4, -0.3)$、標準偏差が $(1.2, 0.8)$ の母集団から得ており、どちらのフォームも
+平均 0・分散 1 で推定している。
+
+```python
+theta_new = rng.multivariate_normal([0.4, -0.3], [[1.44, 0.48], [0.48, 0.64]], size=1200)
+p_new = 1.0 / (1.0 + np.exp(-(theta_new @ a_mirt.T + d_mirt)))
+new_mirt_df = pd.DataFrame((rng.random(p_new.shape) < p_new).astype(float), columns=mirt_items)
+res_mirt_new = fit(
+    mirt_spec,
+    new_mirt_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(21, bounds=(-6, 6)),
+)
+
+linked_md = link(res_mirt_new, res_mirt, method="haebara")  # transformation="diagonal"
+print(linked_md.A.round(3))  # about diag(1.2, 0.8)
+print(linked_md.B.round(3), linked_md.B_se.round(3))  # about (0.4, -0.3)
+print(linked_md.items[["item", "a1", "a2", "d"]].head(3).round(3))
+print(linked_md.transform_theta(res_mirt_new.score(new_mirt_df.iloc[:3])).round(3))
+```
+
+- `linked.A` は $D \times D$ 配列、`linked.B` は長さ $D$ の配列。`A_se`・`B_se` も同じ形で、`vcov` は
+  `(A.ravel(), B)` の共分散行列である。対角の $\mathbf A$ で構造的に 0 の要素は標準誤差が 0 になる。
+- 回転や斜交変換は `source` 項目の 0 の傾きを 0 でない値にするので、`linked.items` は `source` のモデルの構造を保たない。
+  `"diagonal"` なら保つ。
+- `transform_theta()` は `theta_<因子>` 列（と plausible values `pv<m>_<因子>`）、または最後の軸の長さが $D$ の配列を
+  変換する。`se_<因子>` 列は対角の $\mathbf A$ では定数倍し、それ以外では NaN にする。回転後の得点の標準誤差には
+  事後共分散が必要だからである。
+- 鏡映は探索しない。`"orthogonal"` と `"oblique"` は $\det\mathbf A > 0$ を保つ。双因子・two-tier の結果には対応していない。
+  2 因子・3 因子の 2PL と 2 因子の GRM について R の独立な実装と照合済み。
 
 ## 16. ポリコリック相関
 
