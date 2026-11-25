@@ -31,7 +31,6 @@ from flexpyirt.items import ItemKernel
 from flexpyirt.latent import (
     davidian_param_names,
     eh_moments,
-    latent_param_names,
     mixture_components,
     mixture_param_names,
 )
@@ -452,7 +451,7 @@ class FitResult:
         elif self._model.is_mixture:
             lat_cols = list(mixture_param_names(self._model.mixture_components))
         else:
-            lat_cols = list(latent_param_names(self._model.n_factors))
+            lat_cols = list(self._model.latent_parameter_names())
         est = p.pivot(index="group", columns="param", values="estimate")[lat_cols]
         se = p.pivot(index="group", columns="param", values="se")[lat_cols].add_suffix("_se")
         out = pd.concat([est, se], axis=1).loc[groups]
@@ -602,6 +601,11 @@ class FitResult:
         elif key is not None:
             raise SpecificationError(f"key= is only used with method='PV', not {method!r}.")
 
+        if self._model.is_reduced and method != "EAP":
+            raise SpecificationError(
+                f"method={method!r} is not supported for bifactor and two-tier models yet; use "
+                "method='EAP' (DESIGN.md §17.1, §17.2)."
+            )
         y = coerce_responses(data, self._model, item_names=item_names)
         codes, _ = coerce_groups(group, self._model, y.shape[0], require_all=False)
         compiled = compile_problem(
@@ -776,19 +780,30 @@ class FitResult:
                 "distribution only."
             )
 
-    def _traces(
+    def _group_traces(
         self, prob: _core.CompiledProblem, nodes: np.ndarray | None = None
     ) -> list[np.ndarray]:
-        """Per item, ``(Q, K_j)`` category probabilities of group 0 at ``nodes`` (default: grid)."""
+        """Per item, ``(G, Q, K_j)`` category probabilities at ``nodes`` (default: the grid).
+
+        ``nodes`` is ``(Q,)`` for one factor or ``(Q, D)``; the kernels only read
+        ``CompiledProblem.nodes``, so any set of points can stand in for the grid.
+        """
         if nodes is not None:
-            prob = replace(prob, nodes=jnp.asarray(nodes, dtype=jnp.float64).reshape(-1, 1))
+            n_factors = int(prob.nodes.shape[1])
+            prob = replace(prob, nodes=jnp.asarray(nodes, dtype=jnp.float64).reshape(-1, n_factors))
         log_probs = _core._item_log_probs(prob, jnp.asarray(self._eta))
         traces: list[np.ndarray] = [np.empty(0)] * len(self._model.items)
         for fam, lp in zip(prob.families, log_probs, strict=True):
             lp_np = np.exp(np.asarray(lp))
             for pos, col in enumerate(np.asarray(fam.columns)):
-                traces[int(col)] = lp_np[0, pos]
+                traces[int(col)] = lp_np[:, pos]
         return traces
+
+    def _traces(
+        self, prob: _core.CompiledProblem, nodes: np.ndarray | None = None
+    ) -> list[np.ndarray]:
+        """Per item, ``(Q, K_j)`` category probabilities of group 0 at ``nodes`` (default: grid)."""
+        return [trace[0] for trace in self._group_traces(prob, nodes)]
 
     def _compiled_for(self, y: np.ndarray) -> _core.CompiledProblem:
         codes, _ = coerce_groups(None, self._model, y.shape[0], require_all=False)
@@ -820,77 +835,120 @@ class FitResult:
         self,
         data: Any,
         *,
+        group: Any = None,
         item_names: list[str] | None = None,
     ) -> LocalDependenceResult:
         r"""Local-dependence statistics for every item pair (DESIGN.md §16.11).
 
         * **Q3** (Yen, 1984): the correlation over respondents of the residuals
-          :math:`d_{ij}=x_{ij}-E(X_j\mid\hat\theta_i)` with EAP :math:`\hat\theta_i`
-          (pairwise-complete), and **Q3\*** :math:`=Q3-\overline{Q3}` with
-          :math:`\overline{Q3}` the mean off-diagonal Q3 (Christensen, Makransky & Horton, 2017).
+          :math:`d_{ij}=x_{ij}-E(X_j\mid\hat{\boldsymbol\theta}_i)` with EAP
+          :math:`\hat{\boldsymbol\theta}_i` (pairwise-complete), and **Q3\***
+          :math:`=Q3-\overline{Q3}` with :math:`\overline{Q3}` the mean off-diagonal Q3
+          (Christensen, Makransky & Horton, 2017).
         * **LD** :math:`X^2` and :math:`G^2` (Chen & Thissen, 1997) comparing each pair's
-          table with :math:`E_{ab}=n_{ij}\sum_q P_{ia}(\theta_q)P_{jb}(\theta_q)w_q` on the
-          fitted grid, with :math:`df=(K_i-1)(K_j-1)`, :math:`p`-values and the signed
-          Cramér's :math:`V` (sign of :math:`\gamma_O-\gamma_E`), as mirt's
-          ``residuals(type = "LD" / "LDG2" / "Q3")``.
+          table with :math:`E_{ab}=n_{ij}\sum_q P_{ia}(\boldsymbol\theta_q)
+          P_{jb}(\boldsymbol\theta_q)w_q` on the fitted grid, with :math:`df=(K_i-1)(K_j-1)`,
+          :math:`p`-values and the signed Cramér's :math:`V` (sign of
+          :math:`\gamma_O-\gamma_E`), as mirt's ``residuals(type = "LD" / "LDG2" / "Q3")``.
+
+        The weights :math:`w_q` and the EAP prior are the fitted latent distribution on the
+        fitted grid: Normal, ``EmpiricalHistogram``, ``DavidianCurve`` or ``NormalMixture``,
+        and the multivariate Normal on the product grid for a model with 2 or 3 factors. In a
+        multiple-group model every statistic is computed within a group, from that group's
+        respondents, item parameters and latent distribution (as mirt does for
+        ``multipleGroup`` fits).
+
+        For ``dentype = "EH"`` and ``"Davidian-k"`` fits mirt uses a standard Normal prior by
+        default; the calls that use the fitted density, as here, are
+        ``residuals(m, type = "LD", use_dentype_estimate = TRUE)`` and
+        ``residuals(m, type = "Q3", Theta = fscores(m, use_dentype_estimate = TRUE))``.
 
         Parameters
         ----------
         data : DataFrame or array-like
             Responses on the fitted items (typically the fitting data); missing as NaN.
+        group : array-like, optional
+            Group labels (required for a multiple-group model).
         item_names : list of str, optional
             Column names when ``data`` is an array.
 
         Returns
         -------
         LocalDependenceResult
+            For a multiple-group model ``pairs`` has a leading ``group`` column, ``q3`` is
+            indexed by ``(group, item)`` and ``q3_mean`` is a Series indexed by group.
 
         Raises
         ------
         PrecisionError
             If JAX is not configured for 64-bit floating point.
         SpecificationError
-            For multiple-group, multidimensional or non-``Normal`` latent models, or invalid
-            data.
+            For invalid data or group labels.
         """
         from flexpyirt.dimensionality import LocalDependenceResult
 
         check_x64()
-        self._require_unidimensional_normal("local_dependence()")
-        y = coerce_responses(data, self._model, item_names=item_names)
-        names = [name for name, _ in self._model.items]
-        prob = self._compiled_for(y)
-        eap = self.score(pd.DataFrame(np.where(y >= 0, y, np.nan), columns=names))[
-            "theta"
-        ].to_numpy(dtype=np.float64)
-        expected = np.column_stack(
-            [t @ np.arange(t.shape[1], dtype=np.float64) for t in self._traces(prob, eap)]
+        model = self._model
+        y = coerce_responses(data, model, item_names=item_names)
+        codes, group_names = coerce_groups(group, model, y.shape[0], require_all=False)
+        names = [name for name, _ in model.items]
+        compiled = compile_problem(
+            model, y, codes, self.parameters, self._quadrature, eh_weights=self._eh_weights
         )
-        residuals = np.where(y >= 0, y - expected, np.nan)
-        q3 = _local_dependence.q3_matrix(residuals)
+        prob = compiled.problem
+        eta = jnp.asarray(self._eta)
+        eap = np.asarray(_eap(prob, eta)[0])[: compiled.n_patterns][compiled.inverse]
+        at_eap = self._group_traces(prob, eap)  # per item (G, N, K_j)
+        on_grid = self._group_traces(prob)  # per item (G, Q, K_j)
+        weights = np.exp(np.asarray(_core._latent_log_weights(prob, eta)))  # (G, Q)
         upper = np.triu_indices(len(names), k=1)
-        q3_mean = float(np.mean(q3[upper]))
-        weights = np.exp(np.asarray(_core._latent_log_weights(prob, jnp.asarray(self._eta))))[0]
-        ld = _local_dependence.ld_pairs(y, self._traces(prob), weights)
-        pairs = pd.DataFrame(
-            {
-                "item_i": [names[int(i)] for i in ld["i"]],
-                "item_j": [names[int(j)] for j in ld["j"]],
-                "n": ld["n"].astype(np.int64),
-                "q3": q3[upper],
-                "q3_star": q3[upper] - q3_mean,
-                "x2": ld["x2"],
-                "g2": ld["g2"],
-                "df": ld["df"].astype(np.int64),
-                "p_x2": ld["p_x2"],
-                "p_g2": ld["p_g2"],
-                "cramer_v": ld["cramer_v"],
-            }
-        )
+        pair_frames: list[pd.DataFrame] = []
+        q3_frames: list[pd.DataFrame] = []
+        q3_means: dict[str, float] = {}
+        for g, g_name in enumerate(group_names):
+            rows = codes == g
+            if not rows.any():
+                continue
+            y_g = y[rows]
+            expected = np.column_stack(
+                [t[g][rows] @ np.arange(t.shape[2], dtype=np.float64) for t in at_eap]
+            )
+            residuals = np.where(y_g >= 0, y_g - expected, np.nan)
+            q3 = _local_dependence.q3_matrix(residuals)
+            q3_mean = float(np.mean(q3[upper]))
+            ld = _local_dependence.ld_pairs(y_g, [t[g] for t in on_grid], weights[g])
+            pairs = pd.DataFrame(
+                {
+                    "item_i": [names[int(i)] for i in ld["i"]],
+                    "item_j": [names[int(j)] for j in ld["j"]],
+                    "n": ld["n"].astype(np.int64),
+                    "q3": q3[upper],
+                    "q3_star": q3[upper] - q3_mean,
+                    "x2": ld["x2"],
+                    "g2": ld["g2"],
+                    "df": ld["df"].astype(np.int64),
+                    "p_x2": ld["p_x2"],
+                    "p_g2": ld["p_g2"],
+                    "cramer_v": ld["cramer_v"],
+                }
+            )
+            q3_frame = pd.DataFrame(q3, index=names, columns=names)
+            if model.is_multigroup:
+                pairs.insert(0, "group", g_name)
+                q3_frame.index = pd.MultiIndex.from_product(
+                    [[g_name], names], names=["group", "item"]
+                )
+            pair_frames.append(pairs)
+            q3_frames.append(q3_frame)
+            q3_means[g_name] = q3_mean
+        if not model.is_multigroup:
+            return LocalDependenceResult(
+                pairs=pair_frames[0], q3=q3_frames[0], q3_mean=q3_means[group_names[0]]
+            )
         return LocalDependenceResult(
-            pairs=pairs,
-            q3=pd.DataFrame(q3, index=names, columns=names),
-            q3_mean=q3_mean,
+            pairs=pd.concat(pair_frames, ignore_index=True),
+            q3=pd.concat(q3_frames),
+            q3_mean=pd.Series(q3_means, name="q3_mean").rename_axis("group"),
         )
 
     def jsi(
@@ -1287,6 +1345,14 @@ class FitResult:
         """Concise description of the quadrature grid."""
         quad = self._quadrature
         d = self._model.n_factors
+        if self._model.is_reduced:
+            kind = "Gauss-Hermite" if quad.kind == "gauss_hermite" else "equispaced"
+            dim = self._model.quadrature_dimension
+            label = "bifactor" if self._model.bifactor else "two-tier"
+            return (
+                f"{quad.n_points}^{dim} = {quad.n_points**dim} {kind} nodes per specific factor "
+                f"on [{quad.lower:g}, {quad.upper:g}]^{dim} ({label} dimension reduction)"
+            )
         if d == 1:
             return f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
         total = quad.n_points**d
@@ -1298,6 +1364,14 @@ class FitResult:
     def _factors_label(self) -> str:
         """Concise description of latent factors for multidimensional models."""
         fnames = self._model.factor_names
+        if self._model.bifactor:
+            return f"bifactor: general {fnames[0]}; specific {', '.join(fnames[1:])}"
+        if self._model.n_primary_factors:
+            n_primary = self._model.n_primary_factors
+            return (
+                f"two-tier: primary {', '.join(fnames[:n_primary])}; "
+                f"specific {', '.join(fnames[n_primary:])}"
+            )
         return f"{len(fnames)} ({', '.join(fnames)})"
 
     def summary(self, *, digits: int = 4) -> str:

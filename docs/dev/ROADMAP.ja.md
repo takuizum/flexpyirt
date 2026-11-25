@@ -57,7 +57,7 @@
   - [x] D4 DETECT の確認的・探索的版（`detect()`、`exploratory_detect()`。総得点による条件付けで `sirt::conf.detect` / `expl.detect` と V27 で照合済み。カーネル平滑化による条件付けと遺伝的アルゴリズムによる分割の探索は未実装）。
   - [x] D5a flexpyirt に実装した ULS / ML の EFA（`efa()`。`factor_analyzer` は scikit-learn 1.8 以降で失敗する。DESIGN §16.8）と Hull 法（`hull()`）。V28 で EFAtools の `EFA` / `HULL` と `psych::fa` と照合済み。
   - [x] D5b 比較データ法（`comparison_data()`。V29 で EFAtools の `CD()` とその生成器と照合済み）。
-  - [x] D6 ブートストラップでバイアス補正する DIMTEST（`dimtest()`。V30 のシミュレーション研究で受け入れ済み: .05 での第 1 種の誤り 0.0〜2.0%（保守的）、検出力 0.99〜1.00）。
+  - [x] D6 ブートストラップでバイアス補正する DIMTEST（`dimtest()`。V30 のシミュレーション研究で受け入れ済み: .05 での第 1 種の誤り 0.5〜1.0%（保守的）、検出力 0.99〜1.00）。
 
 ## M6 単一群・1 次元の制限をなくす
 各項目は mirt（または独立な実装）との照合が通って完了とする。参照先は issue に書く。
@@ -69,8 +69,16 @@
 - **受け入れ基準**: 各項目が VALIDATION.md の許容誤差内で mirt（または R による独立な実装）と一致。
 
 ## M7 双因子・診断・情報関数・調査設計（この順に実装する）
-1. [ ] 次元縮約つきの双因子モデル・two-tier モデル（#80）。
+1. [x] 次元縮約つきの双因子モデル・two-tier モデル（#80）。
+   - [x] 双因子モデル（`Model.with_bifactor()`、単一群、特殊因子数に制限なし、Oakes/Hessian SE、EAP スコアリング。
+     V32 で mirt の `bfactor()` と照合済み）。
+   - [x] two-tier モデル（`Model.with_two_tier()`、相関してよい主因子 1〜2 個と特殊因子、単一群、Oakes/Hessian SE、
+     EAP スコアリング。V33 で mirt の `bfactor(model2 = )` と照合済み）。
 2. [ ] 局所依存（Q3, LD-X², JSI）を多母集団・正規以外の潜在分布・多次元 / 双因子モデルに広げる（#81）。
+   - [x] `FitResult.local_dependence()`（Q3、Q3\*、LD-X²、G²）を多母集団、`EmpiricalHistogram` /
+     `DavidianCurve` / `NormalMixture` の潜在分布、確認的な 2〜3 因子モデルに広げた（V26 で mirt の
+     `residuals()` と照合。混合分布は密度を与えたときの統計量のみ）。
+     未対応: 双因子 / two-tier モデルと、単一群・1 次元・正規分布以外の JSI。
 3. [ ] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
    カーネル（#83）の上に作る。
 4. [ ] 標本ウェイト（#84）。

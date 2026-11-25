@@ -10,11 +10,15 @@ JAX による Python の項目反応理論（IRT）推定ライブラリ。Bock�
 
 ## インストール
 
-Python 3.11 以上。
+Python 3.12 以上。
 
 ```bash
 pip install flexpyirt  # または uv add flexpyirt
 ```
+
+flexpyirt をインストールすると **flexpyctt** も入る。推定済みのモデルを使わない分析（ポリコリック相関、次元数、
+DETECT、DIMTEST）のための、対になるパッケージである。依存は NumPy、SciPy、pandas だけなので、JAX を入れたくない
+環境では `pip install flexpyctt` で単独でインストールできる。
 
 polars の DataFrame を使う場合は `flexpyirt[polars]`。GPU を使う場合は、先に CUDA 版の `jax` を入れる
 （[JAX のインストール手順](https://docs.jax.dev/en/latest/installation.html)）。

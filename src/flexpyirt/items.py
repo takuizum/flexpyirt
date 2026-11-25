@@ -19,7 +19,7 @@ import numpy as np
 from jax import Array
 
 from flexpyirt.errors import SpecificationError
-from flexpyirt.quadrature import MAX_FACTORS
+from flexpyirt.quadrature import MAX_KERNEL_FACTORS
 
 __all__ = [
     "GPCM",
@@ -41,9 +41,9 @@ __all__ = [
 
 
 def _validate_n_factors(n_factors: int) -> None:
-    if n_factors < 1 or n_factors > MAX_FACTORS:
+    if n_factors < 1 or n_factors > MAX_KERNEL_FACTORS:
         raise SpecificationError(
-            f"Item kernels support 1 to {MAX_FACTORS} factors, got {n_factors}."
+            f"Item kernels support 1 to {MAX_KERNEL_FACTORS} factors, got {n_factors}."
         )
 
 
@@ -69,7 +69,7 @@ class ItemKernel(Protocol):
 
     @property
     def n_factors(self) -> int:
-        """Number of latent factors (1 to 3)."""
+        """Number of latent factors (1 to ``MAX_KERNEL_FACTORS``)."""
         ...
 
     def with_factors(self, n_factors: int) -> ItemKernel:

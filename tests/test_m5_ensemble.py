@@ -1,8 +1,8 @@
 """The dimensionality() ensemble (DESIGN.md §16.8, §16.12).
 
-Each row reuses a validated method (V24-V26), so these tests check the assembly: the same keys
-and inputs reach each method, the two consensus lines are computed as documented, and missing
-methods are reported rather than dropped.
+Each row reuses a validated method (V24-V30), so these tests check the assembly: the same keys
+(as NumPy generators for the flexpyctt methods) and inputs reach each method, the two consensus
+lines are computed as documented, and missing methods are reported rather than dropped.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from flexpyctt import hull, polychoric
 from flexpyirt import (
     BAEM,
     DimensionalityResult,
@@ -32,11 +33,11 @@ from flexpyirt import (
     fit,
     model_parallel_analysis,
     parallel_analysis,
-    polychoric,
     velicer_map,
 )
+from flexpyirt.dimensionality import _rng_from_key
 from flexpyirt.errors import SpecificationError
-from tests._reference import REFERENCE_DIR
+from tests._reference import CTT_REFERENCE_DIR, REFERENCE_DIR
 
 
 @cache
@@ -61,13 +62,13 @@ def test_ensemble_reuses_the_individual_methods() -> None:
     res = _ensemble()
     data = _lsat7()
     key_a, key_b, key_c, _, key_e, key_f = jax.random.split(jax.random.key(7), 6)
-    pa = parallel_analysis(data, key=key_a, n_replications=20)
+    pa = parallel_analysis(data, rng=_rng_from_key(key_a), n_replications=20)
     pc = polychoric(data)
     assert list(res.number_of_dimensions["n_factors"]) == [
         pa.n_factors,
         velicer_map(pc).n_factors,
         empirical_kaiser(pc).n_factors,
-        comparison_data(data, key=key_e).n_factors,
+        comparison_data(data, rng=_rng_from_key(key_e)).n_factors,
     ]
     mpa = model_parallel_analysis(_fit(), data, key=key_b, n_replications=20)
     row = res.unidimensionality.set_index("method").loc["model-based parallel analysis"]
@@ -78,12 +79,12 @@ def test_ensemble_reuses_the_individual_methods() -> None:
     assert q3["statistic"] == pytest.approx(ld.max_q3_star)
     m2 = res.unidimensionality.set_index("method").loc["M2 RMSEA"]
     assert m2["statistic"] == pytest.approx(float(_fit().m2(data)["rmsea"].iloc[0]))
-    xd = exploratory_detect(data, key=key_c)
+    xd = exploratory_detect(data, rng=_rng_from_key(key_c))
     det = res.unidimensionality.set_index("method").loc["DETECT (exploratory, validation half)"]
     best = xd.table[xd.table["n_clusters"] == xd.n_clusters].to_dict("records")[0]
     assert det["statistic"] == pytest.approx(float(best["DETECT_validation"]))
     assert det["supports_unidimensionality"] == (float(best["DETECT_validation"]) < 0.2)
-    dt = dimtest(data, key=key_f)
+    dt = dimtest(data, rng=_rng_from_key(key_f))
     row_dt = res.unidimensionality.set_index("method").loc["DIMTEST"]
     assert row_dt["statistic"] == pytest.approx(dt.p_value)
     assert set(res.results) == {
@@ -99,6 +100,41 @@ def test_ensemble_reuses_the_individual_methods() -> None:
         "local_dependence",
         "m2",
     }
+
+
+def test_ensemble_includes_hull_with_six_or_more_items() -> None:
+    raw = json.loads((CTT_REFERENCE_DIR / "v27_detect.json").read_text(encoding="utf-8"))
+    case = raw["cases"][0]
+    data = pd.DataFrame(case["data"], columns=case["items"], dtype=float)
+    res = dimensionality(data, key=jax.random.key(4), n_replications=10)
+    row = res.number_of_dimensions.set_index("method").loc["Hull (CAF, ULS)"]
+    expected = hull(polychoric(data), rng=_rng_from_key(jax.random.split(jax.random.key(4), 6)[3]))
+    assert row["n_factors"] == expected.n_factors == 2
+    assert res.results["hull"] is not None
+
+
+def test_rng_from_key_is_deterministic_and_accepts_both_key_kinds() -> None:
+    first = _rng_from_key(jax.random.key(3)).integers(0, 10**9, size=4)
+    np.testing.assert_array_equal(
+        first, _rng_from_key(jax.random.key(3)).integers(0, 10**9, size=4)
+    )
+    assert not np.array_equal(first, _rng_from_key(jax.random.key(4)).integers(0, 10**9, size=4))
+    legacy = _rng_from_key(jax.random.PRNGKey(3)).integers(0, 10**9, size=4)
+    np.testing.assert_array_equal(first, legacy)
+
+
+def test_moved_tools_are_reexported_from_flexpyctt() -> None:
+    """flexpyirt re-exports flexpyctt's functions and classes; polychoric stays the JAX version."""
+    import flexpyctt
+    import flexpyirt
+
+    moved = [n for n in flexpyctt.__all__ if n not in ("__version__", "errors", "polychoric")]
+    for name in moved:
+        assert getattr(flexpyirt, name) is getattr(flexpyctt, name), name
+    assert flexpyirt.polychoric is not flexpyctt.polychoric
+    assert flexpyirt.errors.SpecificationError is flexpyctt.errors.SpecificationError
+    assert flexpyirt.errors.FlexpyirtWarning is flexpyctt.errors.FlexpycttWarning
+    assert issubclass(flexpyirt.errors.IdentificationError, flexpyctt.errors.FlexpycttError)
 
 
 def test_ensemble_consensus_lines() -> None:
