@@ -1301,6 +1301,48 @@ class ItemKernel(Protocol):
     ほかに、推定し直した値を項目を除いたデータへの `fit()` と、近似を 15 項目のデータで推定し直した値と（`"newton"`
     1 ステップ 0.03、2 ステップ 0.02、`"one_step"` 0.05）、vmap した勾配を 1 つずつの勾配と比べる。
 
+## 18. 合計得点分布のカーネル（M7）
+
+1. **Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰（`summed_score_distribution`、V36）**:
+   **計算するもの。** $\theta$ を与えると、項目得点 $X_j\in\{0,\dots,K_j-1\}$ はカテゴリ確率
+   $P_{jk}(\theta)$ をもつ独立な変数になる。カーネルは合計得点 $S=\sum_jX_j$ の分布
+   （$s=0,\dots,S_{\max}=\sum_j(K_j-1)$）を返す。2 値項目なら $S$ は独立で同一でない Bernoulli 変数の
+   和、つまり成功確率 $p_j(\theta)$ の **Poisson 二項分布**である（González, Wiberg & von Davier,
+   2016）。多値項目なら、独立なカテゴリ得点の和の分布になる。Lord–Wingersky (1984) の再帰（多値項目は
+   Thissen, Pommerich, Billeaud & Williams, 1995）は、この分布を直接たたみ込みで求める算法で、
+   Poisson 二項分布の文献でいう再帰式「RF」（Hong, 2013）と同じものである。
+   **API（決定、オーナー 2026-11-25）。** `summed_score_distribution(probs, *, method="recursion",
+   log=False)`。`probs` の形は `(..., J, K)`: $J$ 項目のカテゴリ確率で、各行の和は 1、カテゴリ数が
+   $K$ より少ない項目は 0 で埋める。先頭の軸（求積節点、受検者など）はバッチ軸。結果の形は
+   `(..., J(K-1)+1)` で、その項目集合の最大得点を超える得点の確率は 0 になる。関数は純粋な JAX の
+   カーネルで、どの方法でも `jit`・`vmap`・自動微分が通る。値の検査はしない（`jit` の中から呼ばれると
+   検査できないため）。検査するのは形と `method` だけ（`SpecificationError`）。
+   **方法。**
+   - `"recursion"`（既定、厳密）: $L_j(s)=\sum_kL_{j-1}(s-k)P_{jk}$、$L_0(0)=1$ を、固定長ベクトル上の
+     項目についての `lax.scan` で計算する。バッチ要素あたり $O(JKS_{\max})$。すべての項が非負なので
+     桁落ちがなく、各確率の相対誤差は裾も含めて数 ulp の $J$ 倍程度。`log=True` では対数空間で再帰する:
+     $\log L_j(s)=\operatorname{logsumexp}_k[\log L_{j-1}(s-k)+\log P_{jk}]$。通常の再帰では 0 に
+     アンダーフローする、倍精度の最小値（$\approx10^{-308}$）より小さい裾の確率も保てる（長いテスト、
+     極端な $\theta$）。
+   - `"fft"`（丸め誤差の範囲で厳密）: 特性関数の離散フーリエ変換（DFT-CF; Hong, 2013）。
+     $\omega_l=2\pi l/(S_{\max}+1)$ で $\varphi(\omega_l)=\prod_j\sum_kP_{jk}e^{i\omega_lk}$ を求め、
+     $P(S=s)=\frac1{S_{\max}+1}\sum_l\varphi(\omega_l)e^{-i\omega_ls}$ をバッチ化した FFT 1 回で計算する。
+     誤差は確率の大きさによらず**絶対誤差**で約 $10^{-16}$。$\sim10^{-15}$ より小さい確率には正しい桁が
+     ない（丸めで負になった値は 0 に切り上げる）。裾が効く用途（S-$X^2$、極端な得点の対数尤度）には
+     使ってはならない。`log=True` は結果の対数をとるだけ。
+   - `"normal"`・`"refined_normal"`・`"poisson"`（近似。2 値項目 $K=2$ のみ。それ以外の $K$ は
+     `SpecificationError`。R の参照があるのが 2 値の場合だけのため）: $\mu=\sum_jp_j$、
+     $\sigma^2=\sum_jp_j(1-p_j)$、$\gamma=\sigma^{-3}\sum_jp_j(1-p_j)(1-2p_j)$ として、連続修正つきの
+     正規近似は $P(S\le s)\approx\Phi(x)$、$x=(s+0.5-\mu)/\sigma$。精密化正規近似は
+     $P(S\le s)\approx G(x)$、$G(x)=\Phi(x)+\gamma(1-x^2)\phi(x)/6$ を $[0,1]$ に切り詰めたもの
+     （Volkova, 1996; Hong, 2013）。$s$ の確率は隣り合う値の差なので、和がちょうど 1 になるとは
+     限らない。Poisson 近似は $P(S=s)\approx e^{-\mu}\mu^s/s!$（Le Cam, 1960）で、全変動距離の誤差は
+     高々 $\sum_jp_j^2$。すべての $p_j$ が小さいときにだけ役に立つ。近似の計算量は $O(J+S_{\max})$ で、
+     任意で使える高速な経路という位置づけ。flexpyirt の内部では使わない。
+   **再利用。** `_itemfit.lord_wingersky`（S-$X^2$）は同じカーネルを呼ぶようにする。V15 の参照値は
+   変わらない。合計得点 EAP と IRT 観測得点等化もこれを使う（#82）。
+   **精度と速度の実測**は VALIDATION.md（V36）に記録する。
+
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -1328,10 +1370,12 @@ class ItemKernel(Protocol):
 - Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
 - Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
+- González, J., Wiberg, M., & von Davier, A. A. (2016). A note on the Poisson's binomial distribution in item response theory. *Applied Psychological Measurement*, 40(4), 302–310.
 - Goretzko, D., & Bühner, M. (2020). One model to rule them all? Using machine learning algorithms to determine the number of factors in exploratory factor analysis. *Psychological Methods*, 25(6), 776–786.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
+- Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
@@ -1339,6 +1383,7 @@ class ItemKernel(Protocol):
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
+- Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -1375,10 +1420,12 @@ class ItemKernel(Protocol):
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
+- Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Velicer, W. F. (1976). Determining the number of components from the matrix of partial correlations. *Psychometrika*, 41(3), 321–327.
 - Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
+- Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.

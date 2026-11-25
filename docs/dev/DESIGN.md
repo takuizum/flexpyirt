@@ -1837,6 +1837,55 @@ data-independent shapes (§15.21).
     item, the approximations against the refit on a 15-item data set (`"newton"` 1 step 0.03, 2
     steps 0.02, `"one_step"` 0.05) and the vmapped gradients against single ones.
 
+## 18. Summed-score distribution kernel (M7)
+
+1. **Lord–Wingersky recursion as a Poisson-binomial kernel (`summed_score_distribution`, V36)**:
+   **What it computes.** Given $\theta$, the item scores $X_j\in\{0,\dots,K_j-1\}$ are independent
+   with category probabilities $P_{jk}(\theta)$, and the kernel returns the distribution of the
+   summed score $S=\sum_jX_j$, $s=0,\dots,S_{\max}=\sum_j(K_j-1)$. For dichotomous items $S$ is a
+   sum of independent non-identical Bernoulli variables, i.e. the **Poisson-binomial
+   distribution** with success probabilities $p_j(\theta)$ (González, Wiberg & von Davier, 2016);
+   for polytomous items it is the distribution of a sum of independent categorical scores. The
+   Lord–Wingersky (1984) recursion (Thissen, Pommerich, Billeaud & Williams, 1995, for
+   polytomous items) is the direct convolution algorithm for this distribution, the same as the
+   "RF" recursion of the Poisson-binomial literature (Hong, 2013).
+   **API (Decision, owner 2026-11-25).** `summed_score_distribution(probs, *, method="recursion",
+   log=False)`. `probs` has shape `(..., J, K)`: category probabilities of $J$ items, rows summing
+   to 1, items with fewer than $K$ categories padded with zeros; leading axes (quadrature nodes,
+   persons, ...) are batch axes. The result has shape `(..., J(K-1)+1)`; scores above an item
+   set's own maximum have probability 0. The function is a pure JAX kernel: `jit`, `vmap` and
+   autodiff work through every method, and values are not checked (a caller inside `jit` could
+   not be checked). Only the shape and `method` are validated (`SpecificationError`).
+   **Methods.**
+   - `"recursion"` (default, exact): $L_j(s)=\sum_kL_{j-1}(s-k)P_{jk}$, $L_0(0)=1$, as a
+     `lax.scan` over items on a fixed-length vector, $O(JKS_{\max})$ per batch element. Every
+     term is non-negative, so there is no cancellation and the relative error of each
+     probability is a few ulp times $J$, tails included. With `log=True` the recursion runs in
+     log space, $\log L_j(s)=\operatorname{logsumexp}_k[\log L_{j-1}(s-k)+\log P_{jk}]$, which
+     keeps tail probabilities below the smallest double ($\approx10^{-308}$) that the linear
+     recursion underflows to 0 (long tests, extreme $\theta$).
+   - `"fft"` (exact up to round-off): the DFT of the characteristic function (DFT-CF; Hong,
+     2013), $\varphi(\omega_l)=\prod_j\sum_kP_{jk}e^{i\omega_lk}$ at
+     $\omega_l=2\pi l/(S_{\max}+1)$ and $P(S=s)=\frac1{S_{\max}+1}\sum_l\varphi(\omega_l)e^{-i\omega_ls}$,
+     one batched FFT. Its error is **absolute**, about $10^{-16}$, whatever the size of the
+     probability: probabilities below $\sim10^{-15}$ have no correct digits (negative round-off
+     is clipped at 0). It must not be used where tails matter (S-$X^2$, log-likelihoods of
+     extreme scores); `log=True` only takes the logarithm of the result.
+   - `"normal"`, `"refined_normal"`, `"poisson"` (approximations, dichotomous items only,
+     $K=2$; other $K$ raise `SpecificationError` because only the dichotomous case has an R
+     reference): with $\mu=\sum_jp_j$, $\sigma^2=\sum_jp_j(1-p_j)$ and
+     $\gamma=\sigma^{-3}\sum_jp_j(1-p_j)(1-2p_j)$, the normal approximation with continuity
+     correction is $P(S\le s)\approx\Phi(x)$, $x=(s+0.5-\mu)/\sigma$; the refined normal
+     approximation is $P(S\le s)\approx G(x)$, $G(x)=\Phi(x)+\gamma(1-x^2)\phi(x)/6$ clipped to
+     $[0,1]$ (Volkova, 1996; Hong, 2013); the probability of $s$ is the difference of
+     consecutive values, so the result need not sum to exactly 1. The Poisson approximation is
+     $P(S=s)\approx e^{-\mu}\mu^s/s!$ (Le Cam, 1960), with total-variation error at most
+     $\sum_jp_j^2$; it is useful only when every $p_j$ is small. The approximations cost
+     $O(J+S_{\max})$ and are meant as optional fast paths; nothing inside flexpyirt uses them.
+   **Reuse.** `_itemfit.lord_wingersky` (S-$X^2$) now calls the same kernel; the V15 references
+   are unchanged. Summed-score EAP and IRT observed-score equating will use it too (#82).
+   **Measured accuracy and speed** are recorded in VALIDATION.md (V36).
+
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -1864,10 +1913,12 @@ data-independent shapes (§15.21).
 - Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
 - Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
+- González, J., Wiberg, M., & von Davier, A. A. (2016). A note on the Poisson's binomial distribution in item response theory. *Applied Psychological Measurement*, 40(4), 302–310.
 - Goretzko, D., & Bühner, M. (2020). One model to rule them all? Using machine learning algorithms to determine the number of factors in exploratory factor analysis. *Psychological Methods*, 25(6), 776–786.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
+- Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
@@ -1875,6 +1926,7 @@ data-independent shapes (§15.21).
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
+- Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -1911,10 +1963,12 @@ data-independent shapes (§15.21).
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
+- Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Velicer, W. F. (1976). Determining the number of components from the matrix of partial correlations. *Psychometrika*, 41(3), 321–327.
 - Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
+- Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
