@@ -158,3 +158,53 @@ fit_d <- function(w) {
 write_case("v34_weights_fipc",
            "V34d: FIPC, 2PL, q01-q05 fixed at generating values, latent free, N=1000, lognormal weights",
            dat_d, "all", rep("all", N), w_d, fit_d, wide_quad, extra = list(bank = bank))
+
+# ---- V34e: bifactor 2PL (bfactor, Gibbons-Hedeker dimension reduction) with weights -------------
+# General factor plus three specific factors of three items; 21 points per dimension on [-6, 6].
+set.seed(20261205)
+J <- 9L; N <- 1000L
+a_e <- matrix(0, nrow = J, ncol = 4L)
+a_e[, 1] <- c(1.4, 1.2, 1.6, 1.0, 1.3, 1.5, 1.1, 1.4, 1.2)
+a_e[1:3, 2] <- c(0.9, 1.1, 0.7)
+a_e[4:6, 3] <- c(1.2, 0.8, 1.0)
+a_e[7:9, 4] <- c(0.8, 1.0, 1.1)
+dat_e <- as.data.frame(simdata(a_e, matrix(rnorm(J, 0, 0.8)), N, itemtype = "2PL",
+                               sigma = diag(4)))
+colnames(dat_e) <- sprintf("q%02d", 1:J)
+w_e <- rlnorm(N, 0, 0.6) * (0.7 + 0.1 * rowSums(dat_e))
+specific_e <- list(s1 = colnames(dat_e)[1:3], s2 = colnames(dat_e)[4:6], s3 = colnames(dat_e)[7:9])
+fit_e <- function(w) {
+  bfactor(dat_e, rep(1:3, each = 3), itemtype = "2PL", SE = TRUE, SE.type = "Oakes",
+          survey.weights = w, quadpts = 21, TOL = 1e-10, accelerate = "none", optimizer = "NR",
+          technical = list(NCYCLES = 20000L, theta_lim = c(-6, 6)), verbose = FALSE)
+}
+m_e <- fit_e(w_e)
+m_e0 <- fit_e(NULL)
+cf_e <- coef(m_e, printSE = TRUE)
+params_e <- lapply(colnames(dat_e), function(i) {
+  x <- cf_e[[i]]
+  keep <- c(paste0("a", 1:4), "d")
+  se <- x["SE", keep]; names(se) <- paste0(keep, "_se")
+  c(as.list(x["par", keep]), as.list(se))
+})
+names(params_e) <- colnames(dat_e)
+res_e <- list(
+  meta = list(case = "v34_weights_bifactor",
+              description = "V34e: bifactor 2PL, J=9, three specific factors, N=1000, lognormal weights (sum != N)",
+              r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+              TOL = 1e-10, quadpts = 21, theta_lim = c(-6, 6), grid_check = range(m_e@Model$Theta),
+              accelerate = "none", optimizer = "NR", se_type = "Oakes",
+              converged = extract.mirt(m_e, "converged"),
+              iterations = extract.mirt(m_e, "iterations"), n_free = extract.mirt(m_e, "nest")),
+  items = colnames(dat_e), specific = specific_e, general = "general",
+  data = unname(as.matrix(dat_e)), weights = w_e, n_rows = nrow(dat_e), sum_weights = sum(w_e),
+  loglik = extract.mirt(m_e, "logLik"), aic = extract.mirt(m_e, "AIC"),
+  bic = extract.mirt(m_e, "BIC"), loglik_unweighted = extract.mirt(m_e0, "logLik"),
+  params = params_e
+)
+stopifnot(isTRUE(res_e$meta$converged), all(res_e$meta$grid_check == c(-6, 6)),
+          nrow(m_e@Model$Theta) == 21^2, abs(res_e$loglik - res_e$loglik_unweighted) > 1e-3)
+write_json(res_e, file.path(out_dir, "v34_weights_bifactor.json"), auto_unbox = TRUE, digits = NA,
+           na = "null")
+cat("wrote v34_weights_bifactor.json  loglik =", res_e$loglik, " iter =", res_e$meta$iterations,
+    " nest =", res_e$meta$n_free, " sum(w) =", res_e$sum_weights, "\n")

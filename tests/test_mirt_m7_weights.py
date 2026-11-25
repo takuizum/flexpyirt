@@ -3,8 +3,9 @@
 Reference files come from validation/r/m7_weights_reference.R (mirt's ``survey.weights``, Oakes
 SEs): V34a a 2PL with non-integer weights that do not sum to N and five zero weights, V34b the
 Science graded model with weights normalized to N, V34c two groups with anchors, a free focal
-latent distribution and 5% missing responses, V34d FIPC with a free latent distribution. Each
-file stores the raw rows with one weight per row.
+latent distribution and 5% missing responses, V34d FIPC with a free latent distribution, V34e a
+bifactor 2PL (``bfactor()``, 21 points per dimension). Each file stores the raw rows with one
+weight per row.
 """
 
 from __future__ import annotations
@@ -194,3 +195,80 @@ def test_measured_differences(capsys: pytest.CaptureFixture[str]) -> None:
                     f"params {est:.1e}, SE oakes rel {se:.1e}, SE hessian rel {hess:.1e}, "
                     f"AIC {aic:.1e}, BIC {bic:.1e}"
                 )
+
+
+# ---- V34e: bifactor model (dimension reduction) with weights ------------------------------------
+
+BIFACTOR = "v34_weights_bifactor"
+
+
+@cache
+def _bifactor_raw() -> dict[str, Any]:
+    raw = dict(json.loads((REFERENCE_DIR / f"{BIFACTOR}.json").read_text()))
+    check_reference_meta(raw["meta"], require_grid_check=True)
+    return raw
+
+
+@cache
+def _bifactor_fit(se: str, squarem: bool = False) -> FitResult:
+    raw = _bifactor_raw()
+    spec = Model.uniform(TwoPL(), items=raw["items"]).with_bifactor(
+        specific={k: list(v) for k, v in raw["specific"].items()}, general=str(raw["general"])
+    )
+    lo, hi = raw["meta"]["theta_lim"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FlexpyirtWarning)
+        return fit(
+            spec,
+            pd.DataFrame(np.asarray(raw["data"], dtype=float), columns=raw["items"]),
+            weights=np.asarray(raw["weights"], dtype=float),
+            method=BAEM(tol=1e-9, max_iter=50000, squarem=squarem),
+            quadrature=Quadrature.equispaced(int(raw["meta"]["quadpts"]), bounds=(lo, hi)),
+            se=se,  # type: ignore[arg-type]
+        )
+
+
+def _bifactor_pairs(res: FitResult, column: str) -> list[tuple[str, float, float]]:
+    raw = _bifactor_raw()
+    suffix = "" if column == "estimate" else "_se"
+    params = res.parameters[res.parameters["free"]]
+    return [
+        (f"{item}.{param}", float(value), float(raw["params"][item][param + suffix]))
+        for item, param, value in zip(params["item"], params["param"], params[column], strict=True)
+    ]
+
+
+@pytest.mark.parametrize("squarem", SQUAREM)
+def test_bifactor_estimates_loglik_and_information_criteria(squarem: bool) -> None:
+    raw, res = _bifactor_raw(), _bifactor_fit("oakes", squarem)
+    assert res.converged
+    assert res.n_params == raw["meta"]["n_free"]
+    assert abs(raw["loglik"] - raw["loglik_unweighted"]) > 1e-3
+    assert abs(res.loglik - raw["loglik"]) <= TOL_LOGLIK_REL * abs(raw["loglik"])
+    for label, got, want in _bifactor_pairs(res, "estimate"):
+        assert abs(got - want) <= TOL_PARAM, label
+    assert abs(res.aic - raw["aic"]) <= TOL_IC
+    assert abs(res.bic - raw["bic"]) <= TOL_IC
+
+
+@pytest.mark.parametrize("se", ["oakes", "hessian"])
+def test_bifactor_standard_errors_match_mirt_oakes(se: str) -> None:
+    for label, got, want in _bifactor_pairs(_bifactor_fit(se), "se"):
+        assert abs(got - want) <= TOL_SE_REL * want, label
+
+
+def test_bifactor_measured_differences(capsys: pytest.CaptureFixture[str]) -> None:
+    """Print the measured differences recorded in VALIDATION.md (run with ``-s``)."""
+    raw = _bifactor_raw()
+    for squarem in SQUAREM:
+        res = _bifactor_fit("oakes", squarem)
+        est = max(abs(g - w) for _, g, w in _bifactor_pairs(res, "estimate"))
+        se = max(abs(g - w) / w for _, g, w in _bifactor_pairs(res, "se"))
+        hess = max(abs(g - w) / w for _, g, w in _bifactor_pairs(_bifactor_fit("hessian"), "se"))
+        loglik = abs(res.loglik - raw["loglik"]) / abs(raw["loglik"])
+        with capsys.disabled():
+            print(
+                f"\n{BIFACTOR} squarem={squarem}: loglik rel {loglik:.1e}, params {est:.1e}, "
+                f"SE oakes rel {se:.1e}, SE hessian rel {hess:.1e}, "
+                f"AIC {abs(res.aic - raw['aic']):.1e}, BIC {abs(res.bic - raw['bic']):.1e}"
+            )

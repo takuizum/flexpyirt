@@ -67,7 +67,7 @@
 | V31 | ジャックナイフ傾き指標（LSAT7 の 2PL、Science の GRM、依存するペア 2 組と 5% の MCAR を含むシミュレーションの 2PL、依存するペア 1 組を含むシミュレーションの GPCM）。Newton 法と 1 ステップの近似は推定し直した値と比べる | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | 次元縮約による双因子モデル（特殊因子 3 つと一般因子のみの項目 3 つを含む 2PL、テストレット 3 つの GRM $K=4$） | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | 次元縮約による two-tier モデル（相関する主因子 2 つと特殊因子 3 つ（1 つは両方の主因子にまたがる）の 2PL、交差負荷項目 1 つとテストレット 2 つの GRM $K=4$） | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
-| V34 | 標本ウェイト: 非整数ウェイト（合計 $\ne N$、ウェイト 0 が 5 行）の 2PL、合計を $N$ に正規化したウェイトの Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC。推定値、対数尤度、AIC、BIC、Oakes の SE | `mirt(..., survey.weights = w)`、`multipleGroup(..., survey.weights = w)`、`SE.type = "Oakes"` | M7 |
+| V34 | 標本ウェイト: 非整数ウェイト（合計 $\ne N$、ウェイト 0 が 5 行）の 2PL、合計を $N$ に正規化したウェイトの Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC、次元縮約による双因子 2PL。推定値、対数尤度、AIC、BIC、Oakes の SE | `mirt(..., survey.weights = w)`、`multipleGroup(..., survey.weights = w)`、`bfactor(..., survey.weights = w)`、`SE.type = "Oakes"` | M7 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -687,13 +687,16 @@
   ウェイト、正規化なし（$\sum w=1541.7$）、ウェイト 0 が 5 行。V34b: Science の GRM（$N=392$）、合計を $N$ に
   正規化した一様ウェイト。V34c: 各 800 人の 2 群、アンカー q01–q05、focal 群の平均と分散を推定、5% の MCAR 欠測、
   2 群で合計の異なるガンマウェイト（$[-8,8]$ の 81 点）。V34d: FIPC（q01–q05 を固定、潜在分布の平均と分散を推定、
-  81 点）、合計を $N$ に正規化した対数正規ウェイト。差の実測値（通常の EM・SQUAREM の最大）: 対数尤度
+  81 点）、合計を $N$ に正規化した対数正規ウェイト。V34e: 双因子 2PL（`bfactor()`、$J=9$、3 項目ずつの特殊因子 3 つ、
+  $N=1000$、$[-6,6]$ の各軸 21 点）、正規化しない対数正規ウェイト（$\sum w=1467.6$）: 対数尤度
+  $4.7\times10^{-16}$（相対）、パラメタ $9.5\times10^{-7}$、Oakes・Hessian の SE $2.2\times10^{-6}$（相対）、
+  AIC・BIC $3.8\times10^{-11}$。V34a–d の差の実測値（通常の EM・SQUAREM の最大）: 対数尤度
   $1.8\times10^{-15}$（相対）、パラメタ $7.6\times10^{-8}$、Oakes SE $1.1\times10^{-7}$（相対）、flexpyirt の
   Hessian SE と mirt の Oakes $1.1\times10^{-7}$（相対）、AIC・BIC $5.1\times10^{-11}$。いずれも共通の許容誤差内。
   mirt の BIC はウェイトの和を $N$ として使う（flexpyirt も同じ。DESIGN §17.4）。ウェイトの合計が行数と異なる
   V34a がこれを確かめる。どの参照値も同じデータのウェイトなしの推定とは異なる（対数尤度が $10^{-3}$ 超、
   パラメタが $10^{-3}$ 超の差）ので、ウェイトを無視すればテストは落ちる。**R と照合していないもの**: 整数ウェイトと
-  行の複製の一致（欠測のある 2PL、通常の EM と SQUAREM での 2 群 GRM、経験ヒストグラムの FIPC、MAP）、
+  行の複製の一致（欠測のある 2PL、通常の EM と SQUAREM での 2 群 GRM、経験ヒストグラムの FIPC、MAP、双因子モデルと two-tier モデル）、
   ウェイト 0 の行と行の削除の一致、ウェイトの定数倍は、恒等式として `tests/test_m7_weights.py` で確かめる。
   Oakes・Hessian の SE は mirt と一致するが、標本ウェイトのもとでは正しい分散推定量ではない（DESIGN §17.4）。
   項目適合度、M2、局所依存、JSI、DIF、モデルに基づく平行分析は、ウェイト付きの推定結果に対してエラーを出す。

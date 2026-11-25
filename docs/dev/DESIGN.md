@@ -2126,8 +2126,10 @@ data-independent shapes (§15.21).
    - **Validation (V34)**: `validation/r/m7_weights_reference.R` (mirt 1.48, `survey.weights`,
      TOL $=10^{-10}$, Oakes): a 2PL with non-integer weights that do not sum to $N$ and five zero
      weights, the Science GRM with weights normalized to $N$, two groups with anchors, a free
-     focal latent distribution and 5% missing responses, and FIPC with a free latent
-     distribution. Estimates, log-likelihood, AIC, BIC and Oakes SEs agree within the common
+     focal latent distribution and 5% missing responses, FIPC with a free latent
+     distribution, and a bifactor 2PL (`bfactor()`). Bifactor and two-tier models (§17.1, §17.2)
+     need nothing special: their dimension-reduced E-step also works on `counts`; the two-tier
+     case is checked against row replication only. Estimates, log-likelihood, AIC, BIC and Oakes SEs agree within the common
      tolerances (VALIDATION.md V34).
 
 ## References

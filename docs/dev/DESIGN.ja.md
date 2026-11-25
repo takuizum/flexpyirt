@@ -1543,7 +1543,8 @@ class ItemKernel(Protocol):
      これまでどおり読める。ウェイトそのものは保存しない（データと同じ）。
    - **照合（V34）**: `validation/r/m7_weights_reference.R`（mirt 1.48、`survey.weights`、TOL $=10^{-10}$、
      Oakes）。合計が $N$ でない非整数ウェイトと 5 つのウェイト 0 を持つ 2PL、合計を $N$ に正規化したウェイトの
-     Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC。推定値、
+     Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC、双因子 2PL（`bfactor()`）。双因子モデルと two-tier モデル（§17.1、§17.2）に
+     特別な扱いは要らない。次元縮約した E-step も `counts` で動く。two-tier は行の複製との一致だけで確かめる。推定値、
      対数尤度、AIC、BIC、Oakes の SE が共通の許容誤差内で一致する（VALIDATION.ja.md V34）。
 
 ## 参考文献

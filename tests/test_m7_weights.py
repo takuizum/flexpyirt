@@ -28,6 +28,8 @@ from flexpyirt import (
 from flexpyirt._compile import compress_patterns, prepare
 from flexpyirt._json import SCHEMA_VERSION
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
+from tests.test_m7_two_tier import _sim as two_tier_sim
+from tests.test_m7_two_tier import _spec as two_tier_spec
 
 TIGHT = BAEM(tol=1e-10, max_iter=20000)
 
@@ -256,6 +258,43 @@ def test_integer_weights_empirical_histogram_fipc_and_map() -> None:
         _free(weighted_map, "estimate"), _free(replicated_map, "estimate"), atol=1e-6
     )
     np.testing.assert_allclose(_free(weighted_map, "se"), _free(replicated_map, "se"), rtol=1e-5)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("structure", ["bifactor", "two_tier"])
+def test_integer_weights_with_dimension_reduction(structure: str) -> None:
+    """Weighted bifactor / two-tier fits (dimension reduction) equal row replication."""
+    rng = np.random.default_rng(21)
+    n, items = 500, [f"i{k}" for k in range(8)]
+    general, other, specific = rng.normal(size=(3, n, 1)) * np.array([1.0, 1.0, 0.8])[:, None, None]
+    slope = rng.uniform(0.9, 1.5, size=8)
+    primary = np.where(np.arange(8) < 4, general, 0.6 * general + 0.8 * other)
+    testlet = np.where(np.isin(np.arange(8), [0, 1, 4, 5]), specific, 0.0)
+    logit = slope * primary + 0.7 * testlet + rng.normal(0.0, 0.6, size=8)
+    data = pd.DataFrame(
+        (rng.random((n, 8)) < 1 / (1 + np.exp(-logit))).astype(float), columns=items
+    )
+    if structure == "bifactor":
+        spec = Model.uniform(TwoPL(), items=items).with_bifactor(
+            specific={"s1": items[:4], "s2": items[4:]}
+        )
+    else:
+        # Two correlated primary factors, two specific factors, a GRM item and 6% missing.
+        data, spec = two_tier_sim(n=n), two_tier_spec()
+    weights = rng.integers(1, 4, size=n)
+    quad = Quadrature.equispaced(11, bounds=(-5, 5))
+    method = BAEM(tol=1e-9, max_iter=20000, squarem=True)
+    weighted = _fit(spec, data, weights=weights, quadrature=quad, method=method)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FlexpyirtWarning)  # weak identification of a small model
+        replicated = fit(
+            spec,
+            data.loc[data.index.repeat(weights)].reset_index(drop=True),
+            quadrature=quad,
+            method=method,
+        )
+    assert weighted.converged and replicated.converged
+    _assert_same_fit(weighted, replicated, tol=1e-5)
 
 
 # ---- standard-error warning, result layer, JSON ------------------------------------------------

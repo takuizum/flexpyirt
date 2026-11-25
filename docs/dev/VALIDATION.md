@@ -72,7 +72,7 @@ English | [日本語](VALIDATION.ja.md)
 | V31 | Jackknife slope index (LSAT7 2PL, Science GRM, simulated 2PL with two dependent pairs and 5% MCAR, simulated GPCM with a dependent pair); the Newton and one-step approximations against the refit | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | Bifactor models with dimension reduction (2PL with three specific factors and three general-only items; GRM $K=4$ with three testlets) | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | Two-tier models with dimension reduction (2PL with two correlated primary factors and three specific factors, one spanning both; GRM $K=4$ with a cross-loading item and two testlets) | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
-| V34 | Sampling weights: 2PL with non-integer weights (sum $\ne N$, five zero weights), Science GRM with weights normalized to $N$, two groups with anchors, free focal latent and 5% missing, FIPC with a free latent; estimates, log-likelihood, AIC, BIC, Oakes SEs | `mirt(..., survey.weights = w)`, `multipleGroup(..., survey.weights = w)`, `SE.type = "Oakes"` | M7 |
+| V34 | Sampling weights: 2PL with non-integer weights (sum $\ne N$, five zero weights), Science GRM with weights normalized to $N$, two groups with anchors, free focal latent and 5% missing, FIPC with a free latent, a bifactor 2PL with dimension reduction; estimates, log-likelihood, AIC, BIC, Oakes SEs | `mirt(..., survey.weights = w)`, `multipleGroup(..., survey.weights = w)`, `bfactor(..., survey.weights = w)`, `SE.type = "Oakes"` | M7 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -642,7 +642,11 @@ English | [日本語](VALIDATION.ja.md)
   normalized to sum to $N$. V34c: two groups of 800, anchors q01–q05, focal mean and variance
   free, 5% MCAR missing, gamma weights with different totals in the two groups (81 points on
   $[-8,8]$). V34d: FIPC (q01–q05 fixed, latent mean and variance free, 81 points), log-normal
-  weights normalized to $N$. Measured differences (plain EM / SQUAREM, at most): log-likelihood
+  weights normalized to $N$. V34e: bifactor 2PL (`bfactor()`, $J=9$, three specific factors of
+  three items, $N=1000$, 21 points per dimension on $[-6,6]$), log-normal weights not normalized
+  ($\sum w=1467.6$): log-likelihood $4.7\times10^{-16}$ (relative), parameters
+  $9.5\times10^{-7}$, Oakes and Hessian SEs $2.2\times10^{-6}$ (relative), AIC and BIC
+  $3.8\times10^{-11}$. Measured differences of V34a–d (plain EM / SQUAREM, at most): log-likelihood
   $1.8\times10^{-15}$ (relative), parameters $7.6\times10^{-8}$, Oakes SEs $1.1\times10^{-7}$
   (relative), flexpyirt Hessian SEs vs mirt Oakes $1.1\times10^{-7}$ (relative), AIC and BIC
   $5.1\times10^{-11}$; all within the common tolerances. mirt's BIC uses the sum of the weights as
@@ -651,7 +655,7 @@ English | [日本語](VALIDATION.ja.md)
   (log-likelihoods differ by more than $10^{-3}$ and parameters by more than $10^{-3}$), so
   ignoring the weights would fail the tests. **Not validated against R**: integer weights against
   row replication (2PL with missing data; two-group GRM with plain EM and SQUAREM; FIPC with an
-  empirical histogram; MAP), zero-weight rows against dropped rows, and rescaled weights are
+  empirical histogram; MAP; a bifactor and a two-tier model), zero-weight rows against dropped rows, and rescaled weights are
   checked as identities in `tests/test_m7_weights.py`. The Oakes / Hessian SEs agree with mirt's
   but are not valid variance estimates under sampling weights (DESIGN §17.4); item fit, M2,
   local dependence, JSI, DIF and model-based parallel analysis raise an error for a weighted fit.

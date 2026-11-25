@@ -46,7 +46,7 @@ The largest differences allowed by the tests. In practice most cases agree far m
 |---|---|
 | 2PL, Rasch, 3PL, 4PL, GRM, GPCM, PCM, Nominal | `mirt(..., itemtype = ...)`: estimates, log-likelihood, Oakes SEs |
 | Missing responses (MAR) | `mirt()` on data with `NA` |
-| Sampling weights | `mirt(..., survey.weights = w)` and `multipleGroup(..., survey.weights = w)`: estimates, log-likelihood, AIC, BIC and Oakes SEs (2PL, graded, two groups with missing responses, fixed item parameter calibration) |
+| Sampling weights | `mirt(..., survey.weights = w)` and `multipleGroup(..., survey.weights = w)`: estimates, log-likelihood, AIC, BIC and Oakes SEs (2PL, graded, two groups with missing responses, fixed item parameter calibration), and `bfactor(..., survey.weights = w)` for a bifactor model |
 | Multiple groups with anchor items | `multipleGroup(..., invariance = c(<anchors>, "free_means", "free_var"))` |
 | Equality constraints across items | `mirt.model(... CONSTRAIN = ...)` |
 | Fixed item parameter calibration | `mirt()` with fixed parameters (`pars = "values"`, `est = FALSE`) |
