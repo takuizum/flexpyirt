@@ -2,7 +2,7 @@
 
 [English](DESIGN.md) | 日本語
 
-> 状態: ドラフト v0.1（2026-11-25）。マイルストーン E1〜E3 は実装し、R と照合済み（§7）。E4 以降は計画。
+> 状態: ドラフト v0.2（2026-11-25）。マイルストーン E1〜E4 は実装し、R と照合済み（§7）。E5 以降は計画。
 > 決めたことは「決定」と書く。
 
 ## 1. 目的と対象外
@@ -34,7 +34,7 @@
 | 等価群（EG） | 標本 1 から X、独立な標本 2 から Y | `ScoreDistribution` を 2 つ |
 | 単一群（SG） | 同じ受検者から X と Y | `BivariateScoreDistribution` を 1 つ |
 | カウンターバランス（CB） | 版の順序を入れ替えた 2 つの SG 標本 | `BivariateScoreDistribution` を 2 つ（E6） |
-| アンカーテストつき非等価群（NEAT） | 母集団 P から (X, A)、母集団 Q から (Y, A) | `BivariateScoreDistribution` を 2 つ（E4〜E6） |
+| アンカーテストつき非等価群（NEAT） | 母集団 P から (X, A)、母集団 Q から (Y, A) | `BivariateScoreDistribution` を 2 つ。アンカーは 2 番目の変数（線形手法は E4。E5〜E6 は計画） |
 
 NEAT には 2 系統の手法があり、どちらも実装する計画である。**連鎖**等化（P 上で X → A、Q 上で A → Y）と、
 **事後層化**（合成母集団 $T = wP + (1 - w)Q$。Tucker、Levine、Braun–Holland、頻度推定、カーネル等化の PSE）。
@@ -183,12 +183,53 @@ $$\mathrm{SEE}_Y(x) = \sqrt{\tfrac1N \bigl\lVert \tfrac{\partial e_Y}{\partial r
 **SEED**（E6）: 2 つの等化関数（たとえばカーネルと線形）の差の標準誤差
 $\lVert (J_{e_1} - J_{e_2}) J_{DF} C \rVert$（5 章）。
 
-### 4.6 NEAT の線形手法（E4、計画）
+### 4.6 NEAT の線形手法（E4）
 
-合成母集団 $T = w_1 P + w_2 Q$。Tucker 法と Levine 観測得点法は、$\gamma_1, \gamma_2$ を通じて合成母集団の
-平均と分散を与える（Kolen & Brennan, 2014, 4 章。$\gamma$ は、Tucker ではアンカーへの合計得点の回帰から、
-Levine では古典的な同族（congeneric）の仮定から求める。内部アンカー・外部アンカーの両方）。ほかに
-Levine 真値法、Braun–Holland 法（頻度推定の合成分布に対する線形等化）、連鎖線形等化。
+母集団 1 が X とアンカー V を、母集団 2 が Y と V を受ける（Kolen & Brennan, 2014, 4 章）。各母集団を
+1 つの `BivariateScoreDistribution` で表し、アンカーを 2 番目の変数にする。
+
+**合成母集団** $T = w_1 P_1 + w_2 P_2$、$w_1 + w_2 = 1$。Tucker 法と Levine 観測得点法は $T$ の上で
+線形等化を行う。$l_Y(x) = \dfrac{\sigma_s(Y)}{\sigma_s(X)}[x - \mu_s(X)] + \mu_s(Y)$ で、
+
+$$\mu_s(X) = \mu_1(X) - w_2 \gamma_1 [\mu_1(V) - \mu_2(V)], \qquad
+\mu_s(Y) = \mu_2(Y) + w_1 \gamma_2 [\mu_1(V) - \mu_2(V)],$$
+
+$$\sigma_s^2(X) = \sigma_1^2(X) - w_2 \gamma_1^2 [\sigma_1^2(V) - \sigma_2^2(V)] + w_1 w_2 \gamma_1^2 [\mu_1(V) - \mu_2(V)]^2,$$
+
+$$\sigma_s^2(Y) = \sigma_2^2(Y) + w_1 \gamma_2^2 [\sigma_1^2(V) - \sigma_2^2(V)] + w_1 w_2 \gamma_2^2 [\mu_1(V) - \mu_2(V)]^2 .$$
+
+| 手法 | $\gamma_1$（$\gamma_2$ は母集団 2 の Y と V から同様に求める） |
+|---|---|
+| Tucker（X の V への回帰が線形で、両母集団で同じ） | $\sigma_1(X, V) / \sigma_1^2(V)$ |
+| Levine、内部アンカー（古典的な同族モデル） | $\sigma_1^2(X) / \sigma_1(X, V)$ |
+| Levine、外部アンカー | $[\sigma_1^2(X) + \sigma_1(X, V)] / [\sigma_1^2(V) + \sigma_1(X, V)]$ |
+
+観測得点に適用する **Levine 真値**等化と、**連鎖線形**等化は合成母集団を使わない。
+
+$$l_Y(x) = \frac{\gamma_2}{\gamma_1}[x - \mu_1(X)] + \mu_2(Y) + \gamma_2[\mu_1(V) - \mu_2(V)],$$
+
+$$l_Y(x) = \mu_2(Y) + \frac{\sigma_2(Y)}{\sigma_2(V)}\Bigl[\mu_1(V) + \frac{\sigma_1(V)}{\sigma_1(X)}(x - \mu_1(X)) - \mu_2(V)\Bigr].$$
+
+**Braun–Holland**: 頻度推定（事後層化）の分布の平均と標準偏差を使う線形等化（Kolen & Brennan, 2014,
+5 章）。
+
+$$f_s(x) = w_1 f_1(x) + w_2 \sum_v f_1(x \mid v)\, h_2(v), \qquad
+g_s(y) = w_1 \sum_v g_2(y \mid v)\, h_1(v) + w_2\, g_2(y),$$
+
+$h_1, h_2$ はアンカーの分布。同じ合成分布を E5 の頻度推定でも使う。
+
+**決定**: 重みの既定は標本サイズに比例させる。$w_1 = N_1/(N_1 + N_2)$（`synthetic_weight=None`）。
+
+**決定**: Levine の手法では `anchor="internal"` または `"external"` を明示させる。既定値は置かない。
+選択を誤ると、警告なしに誤った答えになるためである。
+
+**決定**: アンカー得点が片方の母集団にしか現れないとき、$f_1(x \mid v)$（または $g_2(y \mid v)$）は
+推定できない。もう一方の母集団のその部分を除いて合成分布を正規化し直し、除いた確率を
+`SparseDataWarning` で知らせる。同時分布を事前平滑化すればこの状況は起きない。
+
+**決定**: `ddof` は Tucker 法と Levine 観測得点法の分散・共分散に効く。$\gamma$、Levine 真値等化、連鎖線形
+等化では打ち消し合う（1 つの母集団のモーメントの比であるため）。Braun–Holland 法は合成分布のモーメントを
+使い、合成分布には固有の標本サイズがない。
 
 ### 4.7 NEAT の等パーセンタイル手法（E5、計画）
 
@@ -225,18 +266,25 @@ ke.continuized  # DataFrame: form, score, probability, cdf, density
 ke.bandwidth_x, ke.bandwidth_y
 ke.percent_relative_error
 fe.penalty_bandwidth(smooth_x, penalty_weight=1.0)
+
+# 非等価群: X 版とアンカー、Y 版とアンカー
+xa = fe.BivariateScoreDistribution.from_scores(x_scores, x_anchor, x_range=(0, 36), y_range=(0, 12))
+ya = fe.BivariateScoreDistribution.from_scores(y_scores, y_anchor, x_range=(0, 36), y_range=(0, 12))
+tucker = fe.equate(xa, ya, method="tucker")  # w1 = N1 / (N1 + N2)
+levine = fe.equate(xa, ya, method="levine_observed", anchor="internal", synthetic_weight=1.0)
+tucker.gamma, tucker.synthetic_moments, tucker.synthetic_weight
 ```
 
 - データより後ろの引数はすべて keyword-only。選択肢は小文字 snake_case の `Literal` 文字列:
-  `method="identity" | "mean" | "linear" | "equipercentile"`。
+  `method="identity" | "mean" | "linear" | "equipercentile"`（EG・SG）と
+  `"tucker" | "levine_observed" | "levine_true" | "braun_holland" | "chained_linear"`（NEAT）。
 - 結果は frozen dataclass（`EquatingResult`、`LoglinearResult`、`KernelEquatingResult`）。NumPy 配列
   （読み取り専用）を持ち、DataFrame はプロパティで返す。
 - エラーは `flexpyequate.errors` のクラス: `ScoreDistributionError`（得点や度数が不正）、
-  `SpecificationError`（引数が矛盾）、`ConvergenceWarning`。
+  `SpecificationError`（引数が矛盾）、`ConvergenceWarning`、`SparseDataWarning`。
 - 名前は Python の名前にする。役に立つところでは R の名前を docstring に書く（`ddof=1` ↔ R `equate` の
   分散、`penalty_weight` ↔ `kequate` の `KPEN`）。
-- 計画（E4〜E6）: `equate(xa, ya, method="tucker" | "levine_observed" | "levine_true" |
-  "braun_holland" | "chained_linear" | "frequency_estimation" | "chained_equipercentile",
+- 計画（E5〜E6）: `equate(xa, ya, method="frequency_estimation" | "chained_equipercentile",
   synthetic_weight=...)`、`kernel_equate(..., design="single_group" | "counterbalanced" |
   "chained" | "post_stratification")`、`KernelEquatingResult.seed(other)`。
 
@@ -250,6 +298,7 @@ packages/flexpyequate/
   src/flexpyequate/
     distributions.py    ScoreDistribution, BivariateScoreDistribution
     equating.py         equate(), EquatingResult
+    _neat.py            アンカーテストつき非等価群の式
     presmoothing.py     presmooth(), LoglinearResult
     kernel.py           kernel_equate(), KernelEquatingResult
     errors.py
@@ -266,6 +315,7 @@ validation/r/equate_*.R 参照値の生成スクリプト（リポジトリル�
 Rscript validation/r/equate_e1_reference.R
 Rscript validation/r/equate_e2_reference.R
 Rscript validation/r/equate_e3_reference.R
+Rscript validation/r/equate_e4_reference.R
 ```
 
 ### ケース
@@ -277,7 +327,7 @@ Rscript validation/r/equate_e3_reference.R
 | Q3 | 対数線形モデルによる事前平滑化。1 変量（2〜8 次）、交差項あり・なしの 2 変量。平滑化後の分布の等パーセンタイル等化 | 厳しい収束判定の `stats::glm(family = poisson)`、`equate::presmoothing(smoothmethod = "loglinear")`、`equate(..., smoothmethod = "loglinear")` | E2 |
 | Q4 | カーネル等化（EG）。バンド幅を与えたときの連続化 CDF、等化後得点、SEE、PRE。事前平滑化あり（3 データ）・なし（1 データ） | `kequate::kequate("EG", ...)`、`SNSequate::ker.eq`、厳しい求根精度と有限差分 SEE による独立 R 実装 | E3 |
 | Q5 | ペナルティ関数の値と、ペナルティによるバンド幅（$K = 0$ と $K = 1$） | `kequate`（`KPEN = 0`）、`SNSequate::bandwidth`、独立 R 実装 | E3 |
-| Q6 | Tucker、Levine、Braun–Holland、連鎖線形（`KBneat`） | `equate::equate(method = ...)` | E4 |
+| Q6 | Tucker、Levine 観測得点、Braun–Holland（それぞれ合成母集団の重み 4 通り）、Levine 真値、連鎖線形。内部アンカー（`KBneat`）と外部アンカー（シミュレーション。標本サイズと版の長さが異なる） | `equate::equate(type = "linear", method = "tucker" / "levine" / "braun/holland" / "chained", lts = )`、母集団モーメントで Kolen & Brennan の式を書き下した R 実装 | E4 |
 | Q7 | 頻度推定、連鎖等パーセンタイル | `equate::equate(method = ...)` | E5 |
 | Q8 | SG・CB・NEAT CE・NEAT PSE のカーネル等化、SEED | `kequate`、`SNSequate` | E6 |
 
@@ -289,6 +339,8 @@ Rscript validation/r/equate_e3_reference.R
 | パーセンタイル順位 | `equate::px` | 1e-12 |
 | 等パーセンタイル等化の等化後得点 | 独立 R 実装 | 1e-10 |
 | 等パーセンタイル等化の等化後得点（順位が 0 と 1 の間にあるもの） | `equate` | 1e-7 |
+| NEAT の線形手法: 傾き、切片、$\gamma$、合成母集団の平均と標準偏差 | `equate`（`ddof=1`）、独立 R 実装（`ddof=0`） | 1e-10 |
+| 頻度推定の合成確率 | 独立 R 実装 | 1e-13 |
 | 事前平滑化後の度数（相対） | `glm`（`epsilon = 1e-13`） | 1e-8 |
 | 事前平滑化後の度数（相対） | `equate::presmoothing`（`glm` の既定の収束判定） | 1e-5 |
 | $G^2$、Pearson・Freeman–Tukey の $\chi^2$、対数尤度、AIC（相対） | `glm` | 1e-7 |
@@ -316,6 +368,12 @@ Rscript validation/r/equate_e3_reference.R
 - **`equate` の `type = "mean"`** は傾きが（Y の得点範囲）/（X の得点範囲）で、2 つの版の得点範囲が同じ
   ときだけ 1 になる。flexpyequate の平均等化は傾き 1（Kolen & Brennan の 2 章）。参照値は `sx = 1, sy = 1`
   を指定して生成している。
+- **`equate` の Braun–Holland（および頻度推定）の合成分布**は、2 つの母集団を度数のまま混ぜる
+  （$w\,n_1(x, v) + (1 - w)\,n_1(x, v)\,n_2(v)/n_1(v)$）。そのため母集団 1 の実質的な重みは $w$ でなく
+  $wN_1/(wN_1 + (1 - w)N_2)$ になる（既定の $w$ では $N_1^2/(N_1^2 + N_2^2)$）。flexpyequate は Kolen &
+  Brennan と同じく確率を混ぜる。実質的な重みを `synthetic_weight` に渡せば `equate` を再現できる
+  （$N_1 = 1200$、$N_2 = 2000$ の例で切片の差は 0.02）。また `equate` の合成分布の標準偏差は総度数 − 1 で
+  割るが、傾きでは打ち消し合う。
 - **`equate` は丸める**。等パーセンタイルの処理の中で、パーセンタイル順位と累積割合を小数 10 桁に丸める。
   丸め誤差（最大 5e-11）が相対度数で割られるので、一致は 1e-8 程度までになる。そのため、厳しい照合には
   丸めをしない独立 R 実装を使う。
