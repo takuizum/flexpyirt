@@ -874,9 +874,10 @@ def test_errors_and_validation(
             quadrature=Quadrature.equispaced(7, bounds=(-3, 3)),
             se=None,
         )
-    with pytest.raises(SpecificationError, match="unidimensional"):
+    # A multidimensional fit links only with a fit of the same number of factors (DESIGN §19).
+    with pytest.raises(SpecificationError, match="same number of factors"):
         link(res_md, res_tgt)
-    with pytest.raises(SpecificationError, match="unidimensional"):
+    with pytest.raises(SpecificationError, match="same number of factors"):
         link(res_src, res_md)
 
     # transform_theta errors & summary digits validation.

@@ -728,25 +728,29 @@ Gauss–Hermite 格子に対応する。成分は交換可能（ラベルスイ�
 
 ```text
 link(source, target, *, items=None, method="stocking_lord", symmetric=False,
-     nodes=None, weights=None, source_group=None, target_group=None,
-     tol=1e-10, max_iter=200) -> LinkResult
+     transformation="diagonal", nodes=None, weights=None, source_group=None,
+     target_group=None, tol=1e-10, max_iter=200) -> LinkResult
 ```
 
-別々に推定した 1 次元の `source`（新フォーム）尺度を、共通項目を通じて `target`（基準フォーム）尺度へ結ぶ
+別々に推定した `source`（新フォーム）尺度を、共通項目を通じて `target`（基準フォーム）尺度へ結ぶ
 線形変換 $\theta^* = A\theta + B$（$A > 0$）の係数 $(A, B)$ を推定する（[ガイド 15 節](guide.ja.md#15-尺度リンキング)、
-[理論](theory.ja.md)）。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目について R の独立な実装と照合済みで、
-Rasch・4PL・PCM は同じカーネルを共有し単体テストでのみ確認している。Newton 最適化と Ogasawara (2001) のデルタ法
+[理論](theory.ja.md)）。2PL・3PL・4PL・GRM・GPCM・名義反応モデルと 2PL + GPCM 混在・2PL + 名義混在の共通項目について
+R の独立な実装と照合済みで、Rasch・PCM は同じカーネルを共有し単体テストでのみ確認している。因子数 $D > 1$ が同じ
+確認的モデル（`Model.with_factors`。因子は位置で対応させる）は
+$\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta$ で結び、同じ目的関数を直積格子の上で使う
+（2 因子・3 因子の 2PL と 2 因子の GRM について R と照合済み）。Newton 最適化と Ogasawara (2001) のデルタ法
 標準誤差の微分は JAX の自動微分で計算する。SE は独立な推定を仮定し（1 つの多母集団推定を `source` と `target` の
 両方に使うときは同時共分散を使う）、求積重みを固定し、収束しないときは報告しない。
 
 | 引数 | 型 | 説明 |
 |---|---|---|
-| `source` | `FitResult` | 新フォーム側の 1 次元推定結果 |
-| `target` | `FitResult` | 基準フォーム側の 1 次元推定結果 |
+| `source` | `FitResult` | 新フォーム側の推定結果 |
+| `target` | `FitResult` | 基準フォーム側の推定結果（因子数は `source` と同じ） |
 | `items` | iterable[str] / Mapping[str, str], 任意 | 共通項目（既定 `None`: 名前が一致する全項目）。項目名が異なるときは `{source_item: target_item}` の辞書。共通ペアは同じ項目カーネル・カテゴリ数でなければならない |
 | `method` | `"stocking_lord"` / `"haebara"` | 目的関数: Stocking & Lord (1983) の TCC 二乗差（既定）または Haebara (1980) のカテゴリ曲線二乗差（多値拡張: Kim & Lee, 2006） |
 | `symmetric` | bool | `True` で逆方向の二乗差を加えた対称版（Kim & Lee, 2006）。既定 `False` |
-| `nodes` | 1 次元配列, 任意 | 求積節点 $\theta_q$（既定: `target` 群の推定格子、`symmetric=True` の逆方向は `source` 群の格子） |
+| `transformation` | `"diagonal"` / `"orthogonal"` / `"oblique"` | 因子数 $D > 1$ のときの $\mathbf A$ の族（1 因子では効果がない）。`"diagonal"`（既定）は $\operatorname{diag}(A_m)$、$A_m > 0$ で、同じ確認的構造で推定した 2 つの結果のあいだの変換。`"orthogonal"` は拡大と回転の積 $k\,\mathbf R$（Li & Lissitz, 2000）。`"oblique"` は $\det\mathbf A > 0$ の任意の行列（Oshima, Davey & Lee, 2000）。鏡映は含まない |
+| `nodes` | 配列, 任意 | 求積節点 $\theta_q$。1 次元、または因子数 $D > 1$ では形状 `(Q, D)`（既定: `target` 群の推定格子、`symmetric=True` の逆方向は `source` 群の格子） |
 | `weights` | 1 次元配列, 任意 | 非負の重み（和が 1 になるよう正規化。既定: 推定済み潜在分布の重み、`nodes` のみ指定時は一様重み） |
 | `source_group`, `target_group` | str, 任意 | 多母集団 `FitResult` から結ぶ群を選ぶための群名 |
 | `tol` | float | $\|\nabla F(A, B)\|_\infty$ の収束許容誤差（既定 `1e-10`） |
@@ -754,7 +758,7 @@ Rasch・4PL・PCM は同じカーネルを共有し単体テストでのみ確�
 
 **戻り値**: [`LinkResult`](#linkresult)
 
-**例外**: `PrecisionError`（JAX 64 ビット無効）、`SpecificationError`（`FitResult` 以外や多次元結果、群指定のない
+**例外**: `PrecisionError`（JAX 64 ビット無効）、`SpecificationError`（`FitResult` 以外、因子数の不一致、双因子・two-tier の結果、群指定のない
 多母集団結果、共通項目なし、共通項目でのカーネル・カテゴリ数不一致、不正な引数・格子・重み）。
 
 **警告**: `grad_norm <= tol` に達する前に `max_iter` に到達したとき `ConvergenceWarning`。
@@ -765,18 +769,19 @@ Rasch・4PL・PCM は同じカーネルを共有し単体テストでのみ確�
 
 | 属性・メソッド | 型 | 説明 |
 |---|---|---|
-| `A`, `B` | float | 線形リンキング係数（$\theta^* = A\theta + B$, $A > 0$） |
-| `A_se`, `B_se` | float | 陰関数定理によるデルタ法標準誤差（Ogasawara, 2001）。計算できない場合は NaN |
-| `vcov` | ndarray (2, 2) / None | `(A, B)` の漸近共分散行列。自由な共通項目がある側で `se=None`、全共通パラメタが固定、または $H_{cc}$ が正定値でない場合は `None` |
+| `A`, `B` | float / ndarray | 線形リンキング係数（$\theta^* = A\theta + B$, $A > 0$）。因子数 $D > 1$ では `(D, D)` 行列 $\mathbf A$ と `(D,)` ベクトル $\boldsymbol\beta$ |
+| `A_se`, `B_se` | float / ndarray | 陰関数定理によるデルタ法標準誤差（Ogasawara, 2001）。計算できない場合は NaN。形は `A`・`B` と同じ（対角の $\mathbf A$ の構造的な 0 では 0） |
+| `vcov` | ndarray / None | `(A, B)` の漸近共分散行列 `(2, 2)`。因子数 $D > 1$ では `(A.ravel(), B)` の `(D*D + D, D*D + D)` 共分散行列で、階数は高々変換の自由パラメタ数。自由な共通項目がある側で `se=None`、全共通パラメタが固定、または $H_{cc}$ が正定値でない場合は `None` |
 | `criterion` | float | `(A, B)` での最小化された目的関数値 |
 | `method` | `"stocking_lord"` / `"haebara"` | 使用した基準 |
 | `symmetric` | bool | 対称版かどうか |
+| `transformation` | `"diagonal"` / `"orthogonal"` / `"oblique"` | $\mathbf A$ の族（1 因子では常に `"diagonal"`） |
 | `converged` | bool | `grad_norm <= tol` を満たしたか |
 | `n_iter` | int | 実行した Newton 反復回数 |
 | `grad_norm` | float | `(A, B)` での $\|\nabla F(A, B)\|_\infty$ |
 | `common_items` | tuple[str, ...] | 共通項目として使用した `source` 側の項目名 |
 | `items` | DataFrame | `source` の全項目を基準尺度へ変換した表（`item`, `model`, `common`、内部の傾き–切片パラメタと表示用 IRT 閾値 `b` / `bk`）。そのまま `Model.fix_from()` に渡せる |
-| `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | 能力値を $\theta^* = A\theta + B$ で変換（採点 DataFrame の `theta` と全 `pv1..` 列。`se` は $A\,\mathrm{se}$ でリンキング誤差を含まない） |
+| `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | 能力値を $\theta^* = A\theta + B$ で変換（採点 DataFrame の `theta` と全 `pv1..` 列。`se` は $A\,\mathrm{se}$ でリンキング誤差を含まない）。因子数 $D > 1$ では `theta_<因子>`・`pv<m>_<因子>` 列、または最後の軸の長さが $D$ の配列。`se_<因子>` は対角の $\mathbf A$ では定数倍、それ以外では NaN |
 | `summary(*, digits=4)` | str | 読みやすいテキスト要約（Jupyter では `_repr_html_()` で HTML 表示） |
 
 ## 相関

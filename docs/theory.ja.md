@@ -270,7 +270,9 @@ $$M_2=N\,\mathbf e_2^\top C_2\,\mathbf e_2,\qquad C_2=\Xi_2^{-1}-\Xi_2^{-1}\Delt
 
 2 つのテストフォームを別々に（それぞれの $N(0,1)$ の尺度で）推定すると、パラメタは線形変換
 $\theta^*=A\theta+B$ だけ異なる尺度に載る（3 節）。共通項目から $A$ と $B$ を推定できる。この変換のもとで、
-元（source）フォームの傾き–切片パラメタは $a^*=a/A$、$d^*=d-aB/A$ になる（GPCM では $d_k^*=d_k-k\,aB/A$）。
+元（source）フォームの傾き–切片パラメタは $a^*=a/A$、$d^*=d-aB/A$ になる（GPCM では $d_k^*=d_k-k\,aB/A$。
+名義反応モデルでは $d_k^*=d_k-\mathrm{ak}_k\,aB/A$ で、スコアリング係数 $\mathrm{ak}_k$ は変わらない）。
+3PL・4PL の漸近線は変わらない。
 
 **特性曲線法**は、変換した source の項目が基準（target）母集団上で target の項目の反応曲線を再現するように $(A,B)$ を
 選ぶ:
@@ -286,6 +288,15 @@ $\theta^*=A\theta+B$ だけ異なる尺度に載る（3 節）。共通項目か
 特性曲線法は一般にモーメント法（mean/mean、mean/sigma）より安定で、flexpyirt はモーメント法を初期値にだけ使う。
 $(A,B)$ の標準誤差は、規準の勾配が 0 という条件にデルタ法を適用して得る（Ogasawara, 2001）。両方の推定の
 標本誤差が反映される。リンキングの質は共通項目で決まるので、まず 2 つのフォーム間で共通項目の DIF を確かめる。
+
+**多次元モデル。** 因子が $D$ 個あるとき、尺度の違いは
+$\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ で、$\mathbf a^*=\mathbf A^{-\top}\mathbf a$、
+$d^*=d-\mathbf a^{*\top}\boldsymbol\beta$ になる（Oshima, Davey & Lee, 2000）。同じ 2 つの規準を $D$ 次元の格子の上で
+和をとり、source の曲線は $\mathbf A^{-1}(\boldsymbol\theta_q-\boldsymbol\beta)$ で評価する。$\mathbf A$ がどんな行列で
+ありうるかは、2 つの推定をどう識別したかで決まる。0 に固定した傾きの構造が同じで因子の分散を 1 にした確認的モデルどうし
+なら、違いは因子ごとの単位と原点だけなので $\mathbf A$ は対角行列になる。因子軸そのものが違いうるなら、$\mathbf A$ は
+回転と拡大の積（Li & Lissitz, 2000）か一般の正則行列（Oshima, Davey & Lee, 2000）になり、変換後の項目は source で 0 だった
+傾きが 0 でなくなる。
 
 ガイド: [15 節](guide.ja.md#15-尺度リンキング)。
 
@@ -305,6 +316,7 @@ $(A,B)$ の標準誤差は、規準の勾配が 0 という条件にデルタ法
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43, 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking* (3rd ed.). Springer.
+- Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24, 115–138.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings". *Applied Psychological Measurement*, 8, 453–461.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
@@ -316,6 +328,7 @@ $(A,B)$ の標準誤差は、規準の勾配が 0 という条件にデルタ法
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25, 53–67.
+- Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37, 357–373.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24, 50–64.
 - Rasch, G. (1960). *Probabilistic Models for Some Intelligence and Attainment Tests*. Danish Institute for Educational Research.
 - Rubin, D. B. (1976). Inference and missing data. *Biometrika*, 63, 581–592.

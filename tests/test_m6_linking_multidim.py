@@ -374,7 +374,7 @@ def test_delta_method_jacobian_matches_resolving_the_linking(
         np.testing.assert_array_equal(np.asarray(cov)[[1, 2], :], 0.0)
 
 
-# ---- link() ---------------------------------------------------------------------------------------
+# ---- link() --------------------------------------------------------------------------------------
 
 _ITEMS: dict[str, ItemModel] = {
     "c1": TwoPL(),
