@@ -1301,7 +1301,7 @@ class ItemKernel(Protocol):
     ほかに、推定し直した値を項目を除いたデータへの `fit()` と、近似を 15 項目のデータで推定し直した値と（`"newton"`
     1 ステップ 0.03、2 ステップ 0.02、`"one_step"` 0.05）、vmap した勾配を 1 つずつの勾配と比べる。
 
-## 18. 合計得点分布のカーネル（M7）
+## 18. 合計得点分布のカーネル、情報関数と信頼性（M7）
 
 1. **Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰（`summed_score_distribution`、V36）**:
    **計算するもの。** $\theta$ を与えると、項目得点 $X_j\in\{0,\dots,K_j-1\}$ はカテゴリ確率
@@ -1343,6 +1343,81 @@ class ItemKernel(Protocol):
    変わらない。合計得点 EAP と IRT 観測得点等化もこれを使う（#82）。
    **精度と速度の実測**は VALIDATION.md（V36）に記録する。
 
+2. **情報関数・期待得点・信頼性・合計得点 EAP（#82、V37）**:
+   **範囲。** 1 次元モデル（単一群・多母集団）。多次元モデルではどの関数も `SpecificationError`
+   （情報行列と方向別の情報量は別の変更で扱う）。
+   **API（決定、オーナー 2026-11-25）。** `link()` や `dimensionality()` と同じく、推定結果を第 1 引数に
+   とるモジュール関数にする: `item_information(res, theta, *, group=None)`、
+   `test_information(res, theta, *, group=None)`、`expected_score(res, theta, *, group=None)`、
+   `reliability(res, data=None, *, group=None, item_names=None)`、`summed_score_table(res)`、および
+   `FitResult.score(data, method="EAPsum")`。$\theta$ の関数 3 つは `theta` をインデックスにした
+   DataFrame を返す（`.plot()` でそのまま曲線になる）。多母集団モデルでは `group=`（群名）が必須
+   （項目が群で異なりうるため）。`reliability()` と `summed_score_table()` は、多母集団モデルでは
+   `item_fit()` と同じく先頭に `group` 列を付けて群ごとの行（ブロック）を返す。`reliability()` の
+   `group=` は `score()` と同じく `data` の各行の群ラベル。
+   **項目情報量・テスト情報量。** すべての項目族について、項目カーネルのカテゴリ対数確率を JAX で
+   自動微分して求める（導関数は手書きしない。§15.24 の WLE と同じ式）:
+   $$I_j(\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\theta)\Big(\frac{\partial\log P_{jk}(\theta)}{\partial\theta}\Big)^2,\qquad
+   I(\theta)=\sum_jI_j(\theta),\qquad \mathrm{SE}(\theta)=I(\theta)^{-1/2}$$
+   （Birnbaum, 1968; Samejima, 1969）。mirt の `iteminfo()` は、代数的に等しい
+   $\sum_k[(P'_{jk})^2/P_{jk}-P''_{jk}]$（$\sum_kP''_{jk}=0$）を手書きの導関数で計算する。
+   `item_information` は項目ごとに 1 列、`test_information` は `information` と `se`（$\theta$ の
+   有効推定量の条件付き測定標準誤差）の 2 列。
+   **期待得点。** 項目ごとの $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ と、テスト特性曲線
+   $T(\theta)=\sum_jE_j(\theta)$（列 `total`。`total` という名前の項目があれば
+   `SpecificationError`）。カテゴリの得点はデータのコードと同じ $0,\dots,K_j-1$ で、観測された最小
+   カテゴリが 0 のときの mirt の `expected.item()` / `expected.test()` に一致する。
+   **周辺信頼性。** 潜在分布が $N(\mu_g,\sigma_g^2)$、テスト情報量が $I_g$ の群 $g$ について
+   $$\bar\rho_g=\int\frac{\sigma_g^2I_g(\theta)}{\sigma_g^2I_g(\theta)+1}\,\phi(\theta;\mu_g,\sigma_g^2)\,d\theta .$$
+   誤差分散 $1/I(\theta)$ の得点の条件付き信頼性 $\sigma^2/(\sigma^2+I(\theta)^{-1})$ を潜在分布で
+   平均したもの（Green, Bock, Humphreys, Linn & Reckase, 1984; Thissen & Wainer, 2001）。mirt の
+   `marginal_rxx()` が計算するのは $\int\frac{I(\theta)}{I(\theta)+\sigma^2}\phi(\theta;0,1)\,d\theta$
+   で、$\mu=0$、$\sigma^2=1$（既定の識別をした単一群モデルはすべて）なら同じ値になるが、それ以外の
+   $(\mu,\sigma^2)$ では推定された密度で積分しておらず、潜在尺度の線形変換に対して不変でもない。
+   flexpyirt の定義は不変である: $\theta^*=(\theta-\mu)/\sigma$ とすると情報量は
+   $I^*(\theta^*)=\sigma^2I(\theta)$ で、$\bar\rho$ は $\int I^*/(I^*+1)\,\phi(\theta^*)\,d\theta^*$ になる。
+   そこで $\sigma^2\ne1$ や $\mu\ne0$（標準でない固定の `Normal`、多母集団モデルの焦点群）の参照値は、
+   **標準化した等価モデル**（$a^*=a\sigma$、$d^*=d+a\mu$、潜在分布 $N(0,1)$）に対する mirt の
+   `marginal_rxx()` と、mirt の `testinfo()` を使って上の式を直接 `integrate()` した値にする。
+   積分は推定に使った求積ではなく専用の格子で評価する: $\mu_g\pm8\sigma_g$ 上の等間隔 801 点、重みは
+   $\propto\phi$（矩形則）。被積分関数は解析的で、正規の重みは両端で消えるので、この則は幾何級数的に
+   収束する（打ち切り $2\Phi(-8)\approx10^{-15}$）。結果はモデルの推定に使った求積に依存しない。mirt は
+   R の既定の許容誤差（`rel.tol` $\approx1.2\times10^{-4}$）で `integrate()` を呼ぶので、参照値には
+   `rel.tol = 1e-12` での再計算も保存する。
+   **経験的信頼性。** `data` の受検者の EAP 得点 $\hat\theta_i$ と事後 SD $\mathrm{SE}_i$
+   （`score(method="EAP")`、推定に使った格子上）から
+   $$\hat\rho=\frac{s^2_{\hat\theta}}{s^2_{\hat\theta}+\overline{\mathrm{SE}^2}},\qquad
+   s^2_{\hat\theta}=\frac1{N-1}\sum_i(\hat\theta_i-\bar{\hat\theta})^2,\quad
+   \overline{\mathrm{SE}^2}=\frac1N\sum_i\mathrm{SE}_i^2 .$$
+   mirt の `empirical_rxx()`（既定の `T_as_X = FALSE`）と同じ。EAP 得点の分散が真の得点の分散を、
+   事後分散の平均が誤差分散を推定し、その和が $\sigma^2$ を推定する（Thissen & Wainer, 2001）。
+   多母集団モデルでは群ごとに、その群の受検者から計算する（mirt は `multipleGroup` の全受検者を
+   まとめて計算する。群ごとの値は、その群の行に対する `empirical_rxx()` に等しい）。欠測のある行も
+   通常どおり採点して含める（mirt と同じ）。受検者が 2 人未満の群は NaN。`reliability(res)` は列
+   `marginal` を返し、`data` を渡すと `empirical` が加わる。
+   **合計得点 EAP**（Thissen, Pommerich, Billeaud & Williams, 1995）。推定に使った求積節点 $\theta_q$ と
+   潜在重み $w_{gq}$（EM が積分に使う重み）、および `summed_score_distribution`（項目 1、厳密な再帰）で
+   求めた $L_g(s\mid\theta_q)$ から
+   $$P_g(s)=\sum_qL_g(s\mid\theta_q)w_{gq},\qquad
+   \hat\theta_g(s)=\frac{\sum_q\theta_qL_g(s\mid\theta_q)w_{gq}}{P_g(s)},\qquad
+   \mathrm{SD}_g(s)=\Big(\frac{\sum_q(\theta_q-\hat\theta_g(s))^2L_g(s\mid\theta_q)w_{gq}}{P_g(s)}\Big)^{1/2}.$$
+   `summed_score_table(res)` は $s=0,\dots,\sum_j(K_j-1)$ について `score`・`theta`・`se`・
+   `probability`（$P_g(s)$、モデルが含意する合計得点分布）を返す。mirt の
+   `fscores(method = "EAPsum", full.scores = FALSE)` は同じ表で、`expected` $=N\,P(s)$。観測度数と
+   $X^2$ はデータが必要なので再現しない。$P_g(s)$ が 0 にアンダーフローした得点の `theta` と `se` は
+   NaN。`score(data, method="EAPsum")` は、各受検者の合計得点をその受検者の群の表で引く。
+   **欠測のあるパターン**: 1 つでも欠測のある受検者の `theta` と `se` は NaN にする。観測された項目だけの
+   合計得点は表の尺度に乗らないため。mirt の `fscores(method = "EAPsum", full.scores = TRUE)` も
+   同じ（`NA`）。観測された項目だけの部分テストで採点する方式（欠測パターンごとに表を作る）は
+   入れていない。
+   **潜在分布。** 情報量と期待得点は潜在分布を使わないので、1 次元モデルならどれでも使える。信頼性・
+   合計得点の表・EAPsum 採点は、`Normal` の潜在分布（平均・分散は任意、単一群と多母集団）でのみ照合
+   している。`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` は `SpecificationError`
+   （推定された非正規の密度に対応するものが mirt の `marginal_rxx()` になく、mirt の EAPsum は既定で
+   正規の事前分布を使うため）。
+   **`FitResult` に新しく保存するものはない。** `schema_version` は変えない。
+   **一致の実測値**は VALIDATION.md（V37）に記録する。
+
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -1372,6 +1447,7 @@ class ItemKernel(Protocol):
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
 - González, J., Wiberg, M., & von Davier, A. A. (2016). A note on the Poisson's binomial distribution in item response theory. *Applied Psychological Measurement*, 40(4), 302–310.
 - Goretzko, D., & Bühner, M. (2020). One model to rule them all? Using machine learning algorithms to determine the number of factors in exploratory factor analysis. *Psychological Methods*, 25(6), 776–786.
+- Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
@@ -1422,6 +1498,7 @@ class ItemKernel(Protocol):
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
+- Thissen, D., & Wainer, H. (Eds.). (2001). *Test Scoring*. Lawrence Erlbaum Associates.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Velicer, W. F. (1976). Determining the number of components from the matrix of partial correlations. *Psychometrika*, 41(3), 321–327.
 - Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
