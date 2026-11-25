@@ -115,7 +115,7 @@ flexpyctt を検査する。flexpyequate の mypy は最後の行で実行する
 
 | 層 | 内容 | 実行するタイミング |
 |---|---|---|
-| fast | `-m "not slow"`：単体テスト、ドキュメント、M1 の mirt スモークテスト（CI で数分） | すべての PR、`develop`/`main` へのすべての push |
+| fast | `-m "not slow"`：単体テスト、ドキュメント、M1 の mirt スモークテスト。Python ごとに 3 シャードに分割（CI で数分） | すべての PR、`develop`/`main` へのすべての push |
 | full | mirt 参照値との照合をすべて含む全テスト。Python ごとに 4 シャードに分割 | `develop` の夜間実行、リリース PR（`develop` → `main`）、手動実行（*Run workflow*） |
 
 mirt 参照値との照合は、full 層（夜間実行またはリリース PR）が通って初めて完了とする。ROADMAP の項目にチェックを付ける前に夜間実行の結果を確認する。
@@ -125,10 +125,11 @@ mirt 参照値との照合は、full 層（夜間実行またはリリース PR�
 - `tests/test_mirt_*.py` はモジュールごと slow にする（`pytestmark = pytest.mark.slow`）。`test_mirt_m1.py` だけは例外。
 - 1 モジュールは 1 ワーカーで走るので、数分かかるフィッティングは専用のモジュールに分ける（`tests/_mirt_multigroup.py` と `tests/test_mirt_m4_multigroup_*.py` を参照）。
 - CI は JAX の永続コンパイルキャッシュ（`JAX_COMPILATION_CACHE_DIR`）を実行間で引き継ぐ。
-- full 層のシャードは、`tests/durations.json` に記録したモジュールごとの秒数で均等に分ける。重いモジュールを足したり分けたりしたら、全テストを走らせて更新する：
-  `uv run pytest --write-durations tests/durations.json`（または full 層の CI 実行が残す `durations-*` アーティファクトをまとめる）。ファイルにないモジュールは 1 テスト 1 秒として扱う。
+- full 層のシャードは `tests/durations.json`、fast 層のシャードは `tests/durations-fast.json`（`--durations-file`）に記録したモジュールごとの秒数で均等に分ける。重いモジュールを足したり分けたりしたら更新する：
+  `uv run pytest --write-durations tests/durations.json` と `uv run pytest -m "not slow" -n 4 --write-durations tests/durations-fast.json`（または CI 実行が残す `durations-*` アーティファクトをまとめる）。ファイルにないモジュールは 1 テスト 1 秒として扱う。
+- CI の required check `test (3.12)` と `test (3.13)` は、`checks` ジョブ（ruff・mypy・flexpyctt と flexpyequate のテスト）と `fast` の全シャードが通ったときに通る。
 
-手元で素早く確かめるなら `uv run pytest -m "not slow"`。CI と同じ 1 シャードだけ走らせるなら `uv run pytest --shard 2/4`。
+手元で素早く確かめるなら `uv run pytest -m "not slow"`。CI と同じ full 層の 1 シャードだけ走らせるなら `uv run pytest --shard 2/4`（fast 層なら `uv run pytest -m "not slow" --shard 2/3 --durations-file tests/durations-fast.json`）。
 
 mirt の参照値を作り直すとき（R 4.4+ と mirt が必要）:
 

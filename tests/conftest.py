@@ -8,9 +8,10 @@ Scheduling (CONTRIBUTING.md, "Tests"):
   ``functools.cache``-d fits of a module are reused. A heavy test that needs its own fit belongs in
   a module of its own, so it runs on another worker.
 - ``--shard K/N`` runs only the modules of shard K (1-based) of N. Modules are packed into shards
-  by the seconds in ``tests/durations.json`` (longest first, each into the least loaded shard).
-- ``--write-durations PATH`` writes the measured seconds per module, the input for
-  ``tests/durations.json``.
+  by the seconds per module in a durations file (longest first, each into the least loaded shard):
+  ``tests/durations.json`` (the whole suite) by default, ``tests/durations-fast.json`` (the fast
+  tier) with ``--durations-file``.
+- ``--write-durations PATH`` writes the measured seconds per module, the input for those files.
 - The terminal summary lists tests that are not marked ``slow`` but took longer than
   ``SLOW_SECONDS``.
 """
@@ -29,6 +30,7 @@ import pytest
 jax.config.update("jax_enable_x64", True)  # type: ignore[no-untyped-call]
 
 DURATIONS = Path(__file__).parent / "durations.json"
+DURATIONS_FAST = Path(__file__).parent / "durations-fast.json"
 SLOW_SECONDS = 5.0
 """A test (with its share of a cached fit) slower than this must be marked ``slow``."""
 
@@ -42,7 +44,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--shard",
         default=None,
         metavar="K/N",
-        help="Run only shard K (1-based) of N; modules are balanced by tests/durations.json.",
+        help="Run only shard K (1-based) of N; modules are balanced by --durations-file.",
+    )
+    group.addoption(
+        "--durations-file",
+        default=str(DURATIONS),
+        metavar="PATH",
+        help="Seconds per test module (JSON) that balance --shard (default: tests/durations.json).",
     )
     group.addoption(
         "--write-durations",
@@ -91,18 +99,19 @@ def assign_shards(seconds: dict[str, float], n_shards: int) -> dict[str, int]:
 class _ShardPlugin:
     """Deselects the modules of other shards (after ``-m``/``-k`` selection)."""
 
-    def __init__(self, k: int, n: int) -> None:
-        self.k, self.n = k, n
+    def __init__(self, k: int, n: int, durations: Path) -> None:
+        self.k, self.n, self.durations = k, n, durations
 
     @pytest.hookimpl(trylast=True)
     def pytest_collection_modifyitems(
         self, config: pytest.Config, items: list[pytest.Item]
     ) -> None:
-        known = json.loads(DURATIONS.read_text(encoding="utf-8")) if DURATIONS.exists() else {}
+        path = self.durations
+        known = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
         counts: defaultdict[str, int] = defaultdict(int)
         for item in items:
             counts[_module(item)] += 1
-        # A module missing from durations.json is weighted as 1 s per test.
+        # A module missing from the durations file is weighted as 1 s per test.
         seconds = {g: float(known.get(g, c)) for g, c in counts.items()}
         shard_of = assign_shards(seconds, self.n)
         keep = [item for item in items if shard_of[_module(item)] == self.k - 1]
@@ -115,7 +124,8 @@ class _ShardPlugin:
 def pytest_configure(config: pytest.Config) -> None:
     shard = config.getoption("--shard")
     if shard:
-        config.pluginmanager.register(_ShardPlugin(*_parse_shard(shard)), "flexpyirt-shard")
+        plugin = _ShardPlugin(*_parse_shard(shard), Path(config.getoption("--durations-file")))
+        config.pluginmanager.register(plugin, "flexpyirt-shard")
 
 
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
