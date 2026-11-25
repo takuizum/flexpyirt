@@ -67,8 +67,8 @@ TOL_CROSS_PRODUCT = 1e-9
 """Entries of the cross-product covariance at mirt's solution, relative to sqrt(v_ii v_jj)."""
 TOL_SANDWICH = 1e-6
 """The same for the sandwich, whose bread in mirt is a finite-difference Oakes Hessian."""
-TOL_PARAM = 1e-4
-TOL_SE_REL = 1e-3
+TOL_PARAM = 1e-6
+TOL_SE_REL = 1e-5
 
 _information_oakes = jax.jit(_core.information_oakes)
 _information_cross_product = jax.jit(_robust_se.information_cross_product)

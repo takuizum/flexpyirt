@@ -62,9 +62,10 @@ def _fold_pattern_scores(
     :math:`s_p=\nabla_\eta\log L_p(\eta)` and ``counts`` the ``(B,)`` pattern counts (zero on
     padding rows). The node tables :math:`\log P_{gjqk}(\eta)` and :math:`\log w_{gq}(\eta)` are
     evaluated and linearized once (``jax.vjp``); each chunk differentiates its pattern
-    log-likelihoods with respect to the tables by reverse mode (``jax.jacrev``) and pulls the
-    result back to :math:`\eta`, so neither ``(P, n_free)`` nor ``(P, G, J, Q, K)`` is
-    materialized. Chunks that contain only zero-count padding rows are skipped.
+    log-likelihoods with respect to the tables by reverse mode (``vmap`` of ``jax.grad`` over
+    the patterns) and pulls the result back to :math:`\eta`, so neither ``(P, n_free)`` nor
+    ``(P, G, J, Q, K)`` is materialized. Chunks that contain only zero-count padding rows are
+    skipped.
     """
 
     def node_tables(e: Array) -> tuple[tuple[Array, ...], Array]:
@@ -72,18 +73,20 @@ def _fold_pattern_scores(
 
     tables, pullback = jax.vjp(node_tables, eta)
 
-    def chunk_logliks(
+    def pattern_loglik(
         tabs: tuple[tuple[Array, ...], Array], one_hots: tuple[Array, ...], group: Array
     ) -> Array:
+        """Return one pattern's log-likelihood; ``one_hots`` is ``(J_f, K_f)`` per family."""
         log_probs, log_weights = tabs
-        ell = jnp.zeros((group.shape[0], prob.n_groups, prob.nodes.shape[0]), dtype=eta.dtype)
+        ell = log_weights[group]
         for one_hot, log_prob in zip(one_hots, log_probs, strict=True):
-            ell = ell + jnp.einsum("pjk,gjqk->pgq", one_hot, log_prob)
-        own = jnp.take_along_axis(ell, group[:, None, None], axis=1)[:, 0, :]
-        return jax.scipy.special.logsumexp(own + log_weights[group], axis=1)
+            ell = ell + jnp.einsum("jk,jqk->q", one_hot, log_prob[group])
+        return jax.scipy.special.logsumexp(ell)
 
-    chunk = _chunk_size(prob)
+    table_scores = jax.vmap(jax.grad(pattern_loglik), in_axes=(None, 0, 0))
+
     n_patterns = prob.y.shape[0]
+    chunk = min(_chunk_size(prob), n_patterns)
     n_chunks = (n_patterns + chunk - 1) // chunk
     pad = n_chunks * chunk - n_patterns
 
@@ -101,8 +104,7 @@ def _fold_pattern_scores(
         one_hots, group, counts = x
 
         def with_scores(c: Carry) -> Carry:
-            cotangents = jax.jacrev(chunk_logliks)(tables, one_hots, group)
-            (scores,) = jax.vmap(pullback)(cotangents)
+            (scores,) = jax.vmap(pullback)(table_scores(tables, one_hots, group))
             return accumulate(c, scores, counts)
 
         return jax.lax.cond(jnp.any(counts > 0), with_scores, lambda c: c, carry), None

@@ -1339,8 +1339,8 @@ class ItemKernel(Protocol):
    合計する）は標本ウェイト（#84）のあと。
    **計算**（`_robust_se.py`。`_core.py` を変更しないよう Core の別モジュールにした）。
    `_fold_pattern_scores` はノード上の表 $\log P_{gjqk}(\eta)$ と $\log w_{gq}(\eta)$ を 1 回だけ評価し、
-   `jax.vjp` で線形化する。パターンは `lax.scan` でチャンクごとに処理する。チャンクのパターン対数尤度を
-   `jax.jacrev` で表について微分し、保存した pullback で各余接ベクトルを $\eta$ に戻して `(B, n_free)` の
+   `jax.vjp` で線形化する。パターンは `lax.scan` でチャンクごとに処理する。チャンクの各パターンの対数尤度を
+   `vmap(jax.grad)` で表について微分し、保存した pullback で各余接ベクトルを $\eta$ に戻して `(B, n_free)` の
    スコアを得て、$\sum c_p s_p s_p^\top$ に足し込む。`(P, n_free)` も `(P, G, J, Q, K)` も作らない。
    チャンクサイズは `chunk × G × Q × (1 + Σ_f J_f K_f (P_f + 1))` が $8\times10^6$ 要素（約 64 MB）以下に
    なる最大値（上限 1024）で、度数 0 のパディング行だけのチャンクは `lax.cond` で飛ばす。微分はすべて

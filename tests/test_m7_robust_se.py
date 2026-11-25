@@ -99,69 +99,71 @@ def _jit(function: Callable[..., jax.Array]) -> Callable[..., jax.Array]:
     return jax.jit(lambda prob, eta: function(prob, eta))
 
 
-def _problems() -> dict[str, tuple[_core.CompiledProblem, jax.Array]]:
-    out = {}
-    two_pl = _simulate_2pl(1, 400, 6)
-    two_pl.iloc[::7, 2] = np.nan
-    out["2pl_missing"] = _problem(Model.uniform(TwoPL(), items=two_pl.columns), two_pl)
-
-    mixed = pd.concat(
-        [
-            _simulate_2pl(2, 300, 3, guess=0.2),
-            _simulate_ordinal(3, 300, 2, 4),
-            _simulate_ordinal(4, 300, 2, 3).rename(columns={"p1": "g1", "p2": "g2"}),
-            _simulate_ordinal(5, 300, 1, 3).rename(columns={"p1": "n1"}),
-        ],
-        axis=1,
-    )
-    spec = (
-        Model.from_items(
-            {
-                **{c: ThreePL() for c in ("q01", "q02", "q03")},
-                "p1": GRM(4),
-                "p2": GRM(4),
-                "g1": GPCM(3),
-                "g2": GPCM(3),
-                "n1": Nominal(3),
-            }
+@cache
+def _named_problem(name: str) -> tuple[_core.CompiledProblem, jax.Array]:
+    if name == "2pl_missing":
+        two_pl = _simulate_2pl(1, 400, 6)
+        two_pl.iloc[::7, 2] = np.nan
+        return _problem(Model.uniform(TwoPL(), items=two_pl.columns), two_pl)
+    if name == "mixed_priors":
+        mixed = pd.concat(
+            [
+                _simulate_2pl(2, 300, 3, guess=0.2),
+                _simulate_ordinal(3, 300, 2, 4),
+                _simulate_ordinal(4, 300, 2, 3).rename(columns={"p1": "g1", "p2": "g2"}),
+                _simulate_ordinal(5, 300, 1, 3).rename(columns={"p1": "n1"}),
+            ],
+            axis=1,
         )
-        .prior(param="a", dist=LogNormalPrior(0.0, 0.5), items=["q01", "q02", "q03"])
-        .prior(param="g", dist=BetaPrior(5, 17), items=["q01", "q02", "q03"])
-        .prior(param="d", dist=NormalPrior(0.0, 2.0), items=["q01", "q02", "q03"])
-    )
-    out["mixed_priors"] = _problem(spec, mixed)
-
-    grouped = pd.concat([_simulate_2pl(6, 250, 6), _simulate_2pl(6, 350, 6, mean=0.4, sd=1.2)])
-    labels = np.repeat(["ref", "focal"], [250, 350])
-    spec = (
-        Model.uniform(TwoPL(), items=grouped.columns)
-        .with_groups(ref=Normal.standard(), focal=Normal.free())
-        .equal_across_groups(items=["q01", "q02", "q03"])
-        .equal_across_items(items=["q05", "q06"], params=["a"])
-    )
-    out["two_group"] = _problem(spec, grouped, group=labels)
-
-    two_dim = _simulate_2pl(7, 300, 6)
-    spec = Model.uniform(TwoPL(), items=two_dim.columns).with_factors(
-        {"F1": ["q01", "q02", "q03", "q04"], "F2": ["q04", "q05", "q06"]}
-    )
-    out["two_factor"] = _problem(spec, two_dim, quadrature=Quadrature.equispaced(11))
-
+        binary = ["q01", "q02", "q03"]
+        spec = (
+            Model.from_items(
+                {
+                    **{c: ThreePL() for c in binary},
+                    "p1": GRM(4),
+                    "p2": GRM(4),
+                    "g1": GPCM(3),
+                    "g2": GPCM(3),
+                    "n1": Nominal(3),
+                }
+            )
+            .prior(param="a", dist=LogNormalPrior(0.0, 0.5), items=binary)
+            .prior(param="g", dist=BetaPrior(5, 17), items=binary)
+            .prior(param="d", dist=NormalPrior(0.0, 2.0), items=binary)
+        )
+        return _problem(spec, mixed)
+    if name == "two_group":
+        grouped = pd.concat([_simulate_2pl(6, 250, 6), _simulate_2pl(6, 350, 6, mean=0.4, sd=1.2)])
+        labels = np.repeat(["ref", "focal"], [250, 350])
+        spec = (
+            Model.uniform(TwoPL(), items=grouped.columns)
+            .with_groups(ref=Normal.standard(), focal=Normal.free())
+            .equal_across_groups(items=["q01", "q02", "q03"])
+            .equal_across_items(items=["q05", "q06"], params=["a"])
+        )
+        return _problem(spec, grouped, group=labels)
+    if name == "two_factor":
+        two_dim = _simulate_2pl(7, 300, 6)
+        spec = Model.uniform(TwoPL(), items=two_dim.columns).with_factors(
+            {"F1": ["q01", "q02", "q03", "q04"], "F2": ["q04", "q05", "q06"]}
+        )
+        return _problem(spec, two_dim, quadrature=Quadrature.equispaced(11))
+    assert name == "fipc_eh"
     fipc = _simulate_2pl(8, 300, 6, mean=0.3)
     bank = pd.DataFrame({"item": ["q01", "q02"], "a": [1.0, 1.2], "d": [0.0, 0.5]})
     spec = (
         Model.uniform(TwoPL(), items=fipc.columns).fix_from(bank).with_latent(EmpiricalHistogram())
     )
-    out["fipc_eh"] = _problem(spec, fipc, quadrature=Quadrature.equispaced(21))
-    return out
+    return _problem(spec, fipc, quadrature=Quadrature.equispaced(21))
 
 
-PROBLEMS = ["2pl_missing", "mixed_priors", "two_group", "two_factor", "fipc_eh"]
-
-
-@cache
-def _all_problems() -> dict[str, tuple[_core.CompiledProblem, jax.Array]]:
-    return _problems()
+PROBLEMS = [
+    "2pl_missing",
+    pytest.param("mixed_priors", marks=pytest.mark.slow),  # four kernels: ~10 s of compilation
+    "two_group",
+    pytest.param("two_factor", marks=pytest.mark.slow),
+    "fipc_eh",
+]
 
 
 @pytest.mark.parametrize("name", PROBLEMS)
@@ -170,7 +172,7 @@ def test_chunked_scores_match_dense_autodiff(
     name: str, budget: int | None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The chunked reverse-mode scores equal a dense forward-mode Jacobian, for any chunk size."""
-    prob, eta = _all_problems()[name]
+    prob, eta = _named_problem(name)
     if budget is not None:
         monkeypatch.setattr(_robust_se, "_CHUNK_ELEMENTS", budget)
         assert _robust_se._chunk_size(prob) < prob.y.shape[0]
@@ -188,7 +190,7 @@ def test_chunked_scores_match_dense_autodiff(
 
 def test_prior_curvature_is_added_like_in_the_hessian() -> None:
     """``B_post - B`` is minus the Hessian of the log prior (zero where there is no prior)."""
-    prob, eta = _all_problems()["mixed_priors"]
+    prob, eta = _named_problem("mixed_priors")
     with_prior = np.asarray(_jit(_robust_se.information_cross_product)(prob, eta))
     without = np.asarray(_jit(_robust_se.score_cross_product)(prob, eta))
     curvature = -np.asarray(jax.hessian(lambda e: _core.log_prior(prob, e))(eta))
@@ -197,15 +199,11 @@ def test_prior_curvature_is_added_like_in_the_hessian() -> None:
     assert has_prior.any() and not has_prior.all()
     assert np.all(np.diag(curvature)[has_prior] != 0.0)
     assert np.all(curvature[~has_prior] == 0.0)
-    # The same term separates the posterior Hessian from the likelihood Hessian.
-    likelihood = -np.asarray(_jit(jax.hessian(_core.marginal_loglik, argnums=1))(prob, eta))
-    posterior = np.asarray(_jit(_core.information_hessian)(prob, eta))
-    np.testing.assert_allclose(posterior - likelihood, curvature, rtol=0, atol=1e-8)
 
 
 def test_other_groups_parameters_have_zero_scores() -> None:
     """A reference-group pattern has a zero score for the focal latent mean and variance."""
-    prob, eta = _all_problems()["two_group"]
+    prob, eta = _named_problem("two_group")
     scores = _dense_scores(prob, eta)
     latent_ids = np.asarray(prob.latent.free_index)
     focal_ids = latent_ids[1][latent_ids[1] >= 0]

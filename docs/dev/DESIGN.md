@@ -1883,7 +1883,7 @@ data-independent shapes (§15.21).
    **Computation** (`_robust_se.py`, a separate Core module so that `_core.py` is untouched).
    `_fold_pattern_scores` evaluates the node tables $\log P_{gjqk}(\eta)$ and $\log w_{gq}(\eta)$
    once and linearizes them with `jax.vjp`. Patterns are processed in chunks by `lax.scan`: for a
-   chunk, `jax.jacrev` differentiates the chunk's pattern log-likelihoods with respect to the
+   chunk, `vmap(jax.grad)` differentiates each pattern's log-likelihood with respect to the
    tables and the stored pullback maps each cotangent to $\eta$, giving a `(B, n_free)` block of
    scores from which $\sum c_p s_p s_p^\top$ is accumulated. Neither `(P, n_free)` nor
    `(P, G, J, Q, K)` is materialized; the chunk size is the largest (at most 1024) that keeps
