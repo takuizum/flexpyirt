@@ -317,6 +317,42 @@ approximations for dichotomous items. `log=True` returns log probabilities and k
 would underflow. The results are checked against R's `poibin` and mirt's summed-score tables. See
 the [reference](reference.md#summed_score_distribution) for details.
 
+### Information, expected score and reliability
+
+`item_information(res, theta)` and `test_information(res, theta)` give the Fisher information of
+each item and of the whole test at the values `theta`, and `expected_score(res, theta)` gives the
+expected item scores and their sum, the test characteristic curve. They work for every item
+model of a unidimensional fit. Each returns a DataFrame indexed by `theta`, so `.plot()` draws the
+curves. `test_information` also has the conditional standard error `se` $=1/\sqrt{I(\theta)}$.
+
+`reliability(res)` returns the marginal reliability: the reliability
+$\sigma^2/(\sigma^2+1/I(\theta))$ of a score with error variance $1/I(\theta)$, averaged over the
+fitted latent distribution. With response data, `reliability(res, data)` adds the empirical
+reliability of the EAP scores of those respondents: the variance of the scores divided by that
+variance plus the mean squared standard error.
+
+```python
+from flexpyirt import expected_score, item_information, reliability, test_information
+
+theta_values = np.linspace(-3.0, 3.0, 13)
+item_info = item_information(res, theta_values)  # index theta, one column per item
+test_info = test_information(res, theta_values)  # columns information, se
+tcc = expected_score(res, theta_values)  # one column per item, and total
+print(item_info.iloc[:3, :3].round(3))
+print(test_info.head(3).round(3))
+print(tcc["total"].head(3).round(2))
+
+print(reliability(res))  # column marginal
+print(reliability(res, df))  # with data: columns marginal, empirical
+```
+
+- For a multiple-group model the three functions of `theta` need `group="<group name>"`, and
+  `reliability()` returns one row per group (pass `group=labels` together with `data`).
+- The marginal reliability equals mirt's `marginal_rxx()` when the latent distribution is
+  $N(0, 1)$. For another mean or variance mirt's function does not use the fitted distribution;
+  flexpyirt's value does, and it does not change when the latent scale is transformed linearly.
+- `reliability()` needs `Normal` latent distributions.
+
 ### Limited-information fit (M2)
 
 `m2(data)` computes the Maydeu-Olivares & Joe (2005, 2006) limited-information goodness-of-fit
@@ -365,7 +401,7 @@ entering a threshold is fixed.
 
 ## 7. Scoring
 
-`FitResult.score()` estimates each respondent's latent ability $\theta$ with five methods:
+`FitResult.score()` estimates each respondent's latent ability $\theta$ with six methods:
 
 | `method` | Definition | Extreme patterns (all lowest / highest) | All-missing row | When to use |
 |---|---|---|---|---|
@@ -375,10 +411,12 @@ entering a threshold is fixed.
 | `"WLE"` | Weighted likelihood $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta))=0$ & observed curvature SE (Warm, 1989; Firth, 1993) | Finite | NaN, SE NaN | Prior-free score with reduced finite-test bias and finite extreme scores |
 | `"PV"` | `n_draws` independent draws per respondent from the posterior (Mislevy, 1991), columns `pv1..pvM` | Finite | Drawn from the prior | Downstream population / regression analyses that must propagate measurement error |
 
-- Bayesian methods (`"EAP"`, `"MAP"`, `"PV"`) use the respondent's group's estimated latent
+| `"EAPsum"` | Posterior mean & SD given the summed score instead of the response pattern (Thissen et al., 1995) | Finite | NaN, SE NaN | Scores that depend on the summed score only (score conversion tables) |
+
+- Bayesian methods (`"EAP"`, `"MAP"`, `"PV"`, `"EAPsum"`) use the respondent's group's estimated latent
   distribution as the prior; `"ML"` and `"WLE"` use the item likelihood only.
 - Missing responses are dropped from the likelihood (and from $I(\theta)$ in `"WLE"`) for every
-  method. In 3PL/4PL models, low-score patterns whose likelihood increases monotonically toward
+  method except `"EAPsum"`, which returns NaN for a row with any missing response (see below). In 3PL/4PL models, low-score patterns whose likelihood increases monotonically toward
   $-\infty$ due to guessing also return $-\infty$ with SE NaN under `"ML"`. For `Nominal` items,
   "lowest" / "highest" means the category with the smallest / largest category slope
   $a\,\mathrm{ak}_c$, which need not be category 0 / $K-1$ (e.g. with $\mathrm{ak}_1<0$ the all-0
@@ -407,6 +445,29 @@ print(res.score(new, method="MAP"))
 ```
 
 The scored data need not be the data used for fitting (the columns must be the same items).
+
+### Summed-score EAP
+
+`summed_score_table(res)` lists, for every possible summed score, the posterior mean (`theta`) and
+standard deviation (`se`) of $\theta$ among respondents with that score, and the probability of
+the score under the fitted model (`probability`). It is a conversion table from summed scores to
+the $\theta$ scale. `score(data, method="EAPsum")` looks each respondent up in it.
+
+```python
+from flexpyirt import summed_score_table
+
+score_table = summed_score_table(res)  # score, theta, se, probability
+print(score_table.head(4).round(3))
+scores_sum = res.score(df, method="EAPsum")  # theta, se of each row's summed score
+print(scores_sum.head(3))
+```
+
+- A respondent with a missing response gets NaN: a summed score over fewer items is not
+  comparable with the table (mirt returns `NA` as well). Use `"EAP"` for incomplete data.
+- The table uses the quadrature grid and latent distribution of the fit, like `"EAP"`. For a
+  multiple-group model it has a `group` column, and each respondent is scored with the table of
+  their group.
+- Unidimensional models with `Normal` latent distributions only.
 
 ## 8. Latent distributions and identification
 

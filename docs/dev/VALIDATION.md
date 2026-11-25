@@ -73,6 +73,7 @@ English | [日本語](VALIDATION.ja.md)
 | V32 | Bifactor models with dimension reduction (2PL with three specific factors and three general-only items; GRM $K=4$ with three testlets) | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | Two-tier models with dimension reduction (2PL with two correlated primary factors and three specific factors, one spanning both; GRM $K=4$ with a cross-loading item and two testlets) | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
 | V36 | Summed-score distribution kernel (Poisson-binomial: five probability vectors, $J$ 10–300; polytomous: GRM $K=4$ and mixed 2PL + GRM) | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`, `poibin::dpoibin()`, `stats::dpois()`; mirt `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
+| V37 | Information, expected score, reliability and summed-score EAP at mirt's estimates (2PL $J=12$; the same with 8% missing; 3PL $J=12$; GRM and GPCM $K=4$, $J=8$; nominal $K=4$, $J=6$; mixed 2PL + 3PL + GRM + GPCM + nominal, $J=14$; two groups, 2PL + GRM, focal mean and variance free) | `iteminfo()`, `testinfo()`, `expected.item()`, `expected.test()`, `marginal_rxx()`, `empirical_rxx()`, `fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -666,6 +667,56 @@ English | [日本語](VALIDATION.ja.md)
     correct digits there. In this implementation the recursion is both the more accurate and the
     faster exact method (the characteristic function itself costs $O(JS_{\max})$), so it stays
     the default and the FFT is offered for comparison.
+- **Information, expected score, reliability and summed-score EAP (V37, M7)**: DESIGN §18.2 in
+  `tests/test_mirt_m7_information.py` (slow tier, about 30 s; generator
+  `validation/r/m7_information_reference.R` → `tests/reference/v37_information.json`, mirt 1.48,
+  61 points on $[-6, 6]$). mirt fits every model (`TOL = 1e-8`, converged); its estimates go into
+  a flexpyirt `FitResult` with every parameter fixed (`table=`, `free = False`), so only the
+  statistics are compared. Cases: `twopl` ($J=12$, $N=2000$), `twopl_missing` ($N=800$, 8% MCAR),
+  `threepl` ($J=12$, $N=5000$), `grm` and `gpcm` ($K=4$, $J=8$, $N=2000$), `nominal` ($K=4$,
+  $J=6$, $N=3000$), `mixed` (4 2PL, 3 3PL, 3 GRM $K=4$, 2 GPCM $K=3$, 2 nominal $K=3$; $N=5000$)
+  and `twogroup` (6 2PL + 4 GRM $K=4$, all items invariant, $N=1500$ per group; focal
+  $\hat\mu=0.480$, $\hat\sigma^2=1.590$). Largest differences over all cases:
+  - **`iteminfo()` / `testinfo()`** on $\theta\in\{-6,-4,-3.5,\dots,4,6\}$: item information
+    `1.4e-14` absolute (relative `4.5e-9`, at nominal items where the information is about
+    $10^{-6}$; mirt evaluates $\sum_k[(P'_k)^2/P_k-P''_k]$, which cancels there); test
+    information `8.3e-13` relative. Tolerance $10^{-9}$ relative plus $10^{-12}$ absolute.
+  - **`expected.item()` / `expected.test()`**: `7.5e-15` absolute / `2.1e-14` relative (same
+    tolerance).
+  - **Marginal reliability**: against `marginal_rxx()` recomputed with
+    `integrate(rel.tol = 1e-12)` `1.4e-15`; against `marginal_rxx()` itself (R's default
+    tolerance, about $1.2\times10^{-4}$ relative) `4.5e-11` (tolerances $10^{-10}$ and $10^{-8}$
+    absolute). For the two-group model the reference is `marginal_rxx()` of the standardized
+    equivalent single-group model ($a^*=a\sigma$, $d^*=d+a\mu$, $N(0,1)$): `1.0e-15` (tight) and
+    `1.4e-11` (default) over both groups; the direct `integrate()` of
+    $\sigma^2I/(\sigma^2I+1)\,\phi(\theta;\mu,\sigma^2)$ with mirt's `testinfo()` agrees to
+    `1.0e-15` as well. mirt's own formula applied to the focal group
+    (`marginal_rxx(extract.group(mg, "focal"))`) gives 0.7288 where the invariant definition
+    gives 0.8337; this is the documented difference of definition (DESIGN §18.2), not an
+    accuracy difference, and the test asserts that the two differ.
+  - **`empirical_rxx()`** of `fscores(method = "EAP", full.scores.SE = TRUE)`, including the case
+    with missing responses and each group of the two-group model: `4.4e-16` (tolerance
+    $10^{-9}$).
+  - **`fscores(method = "EAPsum", full.scores = FALSE)`**: EAP `6.2e-15`, posterior SD `9.4e-16`
+    (tolerance $10^{-9}$ absolute); `probability` $\times N$ against `expected` `7.8e-15`
+    relative (tolerance $10^{-9}$).
+  - **`fscores(method = "EAPsum", full.scores = TRUE)`** for every unique response pattern: EAP
+    `6.2e-15`, SD `9.4e-16`. In `twopl_missing`, 453 of the 660 unique patterns are incomplete:
+    mirt returns `NA` for exactly those and flexpyirt NaN (mirt refuses the
+    `full.scores = FALSE` table for data with missing responses, so that case has no table
+    reference).
+  - **Not validated, raises `SpecificationError`**: multidimensional models (all functions);
+    reliability, the summed-score table and EAPsum with `EmpiricalHistogram`, `DavidianCurve`
+    or `NormalMixture`. The pooled `empirical_rxx()` of a `multipleGroup` fit (stored as
+    `empirical_rxx_pooled`) has no flexpyirt counterpart; flexpyirt reports it per group.
+  - **Unit tests** (`tests/test_m7_information.py`, fast tier): closed forms for 2PL
+    ($a^2PQ$) and 3PL (Birnbaum) at $10^{-12}$, central finite differences of the category
+    probabilities for 2PL / 3PL / 4PL / GRM / GPCM / nominal at $10^{-8}$, expected scores from
+    the category probabilities, the summed-score table against enumeration of all 288 response
+    patterns of a six-item mixed test at $10^{-12}$, the law of total expectation, invariance of
+    the marginal reliability under a linear change of the latent scale ($10^{-13}$),
+    reliability bounds and closeness of the marginal and empirical values on simulated data,
+    and the error paths.
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)
