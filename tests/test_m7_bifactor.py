@@ -230,7 +230,11 @@ def test_expected_counts_match_full_grid() -> None:
         expected = jnp.einsum("p,pjk,pq->jk", prob.counts, oh, h)
         np.testing.assert_allclose(jnp.sum(r[0], axis=-1), expected, rtol=1e-12, atol=1e-9)
     n_total = float(jnp.sum(prob.counts))
-    np.testing.assert_allclose(jnp.sum(counts.n, axis=-1), n_total, rtol=1e-13)
+    # ``n`` is flat: the general marginal, then each block's specific marginal (§17.2).
+    n_pts = quad.n_points
+    np.testing.assert_allclose(jnp.sum(counts.n[:, :n_pts], axis=-1), n_total, rtol=1e-13)
+    blocks = counts.n[:, n_pts:].reshape(counts.n.shape[0], -1, n_pts)
+    np.testing.assert_allclose(jnp.sum(blocks, axis=-1), n_total, rtol=1e-13)
 
 
 @pytest.mark.slow
