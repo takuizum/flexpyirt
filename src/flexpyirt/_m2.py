@@ -2,7 +2,9 @@
 
 Model-implied item-score moments and their Jacobian come from the fitted Core problem on its
 quadrature grid (the Jacobian by JAX forward-mode autodiff); the asymptotic covariance, SVD
-orthogonal complement, and fit indices run in NumPy / SciPy outside ``jit``.
+orthogonal complement, and fit indices run in NumPy / SciPy outside ``jit``. Nothing here depends
+on the number of factors: for a confirmatory multidimensional model the ``Q`` nodes are the
+product grid and the weights are multivariate normal (DESIGN.md §16.19).
 """
 
 from __future__ import annotations

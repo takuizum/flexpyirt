@@ -639,8 +639,9 @@ class ItemKernel(Protocol):
     計算した行のフラグを後で使う点も含め、統計量と自由度が一致するようにヒューリスティックをそのまま再現する）。
     $df_j$ = 残ったセル数 − 行数 − 項目 $j$ の自由パラメタ数 − 潜在分布の自由パラメタ数で、mirt と同じ（mirt はすべての項目から
     潜在分布のパラメタ数を引く）。RMSEA と $\chi^2$ の p 値も mirt に合わせる。表の計算は推定後の NumPy 処理（形がデータに依存
-    するので `jit` の外）で、カテゴリ確率は JAX の項目カーネルから得る。多次元・EH・欠測データは照合するまで
-    `SpecificationError`（mirt は S-X2 で欠測を補完し、EH の重みを無視する）。多母集団は §15.45。
+    するので `jit` の外）で、カテゴリ確率は JAX の項目カーネルから得る。EH・欠測データは照合するまで
+    `SpecificationError`（mirt は S-X2 で欠測を補完し、EH の重みを無視する）。多母集団は §15.45、確認的多次元モデル
+    （直積格子）は §16.19。
 41. **多次元モデルの ML・WLE スコアリング（M4, §8）**: $D \in \{2, 3\}$ で、`"ML"` は $\log L(\boldsymbol\theta\mid y)$ を、
     `"WLE"` は Jeffreys/Firth の罰則つき $\log L(\boldsymbol\theta\mid y)+\tfrac12\log\det\mathbf I(\boldsymbol\theta)$
     （`mirt:::WLE.mirt`; Warm, 1989; Wang, 2015。$\mathbf I$ は観測項目の期待テスト情報行列で自動微分から求める）を、
@@ -743,8 +744,9 @@ class ItemKernel(Protocol):
    `FitResult.m2(data, *, item_names=None, ci=0.90)` は、Maydeu-Olivares & Joe (2005, 2006) に基づく
    項目得点の 1 次・2 次モーメント — $J$ 個の項目平均 $E[y_j]$ と $\binom{J}{2}$ 個の交差積 $E[y_iy_j]$
    （$i < j$、列優先のペア順で mirt の既定 `M2(type = "M2*")` と同じ。2 値項目では厳密に $M_2$）— による
-   限定情報の適合度統計量を計算する。対象は単一母集団・1 次元・欠測なし・`Normal` 潜在分布の MLE 推定のみ
-   （多次元・多母集団・`EmpiricalHistogram`・欠測データ・MAP 推定は `SpecificationError`）。
+   限定情報の適合度統計量を計算する。対象は単一母集団・欠測なし・`Normal` 潜在分布の MLE 推定のみ
+   （多母集団・双因子 / two-tier・`EmpiricalHistogram`・欠測データ・MAP 推定は `SpecificationError`。直積格子上の
+   確認的多次元モデルは §16.19）。
    標本周辺モーメント $\hat p_2$、推定時の求積格子と正規化した正規重みの上で積分したモデル周辺モーメント
    $\pi_2(\hat\eta)$、局所独立のもとでの $\sqrt{N}(\hat p_2-\pi_2)$ の漸近共分散 $\Xi_2$
    （条件付き 1 次・2 次モーメント $m_{1,jq}=\sum_k kP_{jk}(\theta_q)$、$m_{2,jq}=\sum_k k^2P_{jk}(\theta_q)$ から構成）、
@@ -1407,6 +1409,53 @@ class ItemKernel(Protocol):
     `v27`、`v28`、`v29` は `packages/flexpyctt/tests/`（JAX なし）、それらの R スクリプトと DIMTEST のシミュレーションは
     `packages/flexpyctt/validation/` に置く。flexpyirt のテストには、JAX 版ポリコリックのテスト（`v24` は flexpyctt の
     ディレクトリから読む）、2 つの版の一致テスト、V26、アンサンブルのテストが残る。
+
+19. **確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（M6、#77、V39）**:
+    `FitResult.m2()`（§16.3）と `FitResult.item_fit()`（§15.40）は、`Model.with_factors()` で宣言した単一母集団のモデル
+    （$D\in\{2,3\}$、直積格子、§15.29–§15.30）を受け付ける。どちらの統計量も、項目カテゴリ確率の積を潜在分布で積分した
+    ものなので、定義は $D$ に依存しない。ノードの添字 $q$ は推定時の直積格子の $Q=n^D$ 個のノード $\boldsymbol\theta_q$ を
+    動き、重みは推定時と同じ正規化した多変量正規の重み
+    $w_q(\boldsymbol\rho)=\phi_D(\boldsymbol\theta_q;\mathbf 0,\mathbf R)/\sum_{q'}\phi_D(\boldsymbol\theta_{q'};\mathbf 0,\mathbf R)$
+    （§15.30）、$P_{jk}(\boldsymbol\theta)$ は同じ項目カーネル（線形予測子に $\boldsymbol a_j^\top\boldsymbol\theta$。負荷しない
+    因子の識別力は 0 に固定）から得る。
+    **$M_2^*$。** $m_{1,jq}=\sum_k kP_{jk}(\boldsymbol\theta_q)$、$m_{2,jq}=\sum_k k^2P_{jk}(\boldsymbol\theta_q)$ として
+    $$\pi_j=\sum_q m_{1,jq}w_q,\qquad \pi_{ij}=\sum_q m_{1,iq}m_{1,jq}w_q\quad(i<j)$$
+    であり、$\Xi_2$ は §16.3 と同じ和から作る（局所独立はベクトル $\boldsymbol\theta$ 全体を与えたもとで成り立つので、
+    2 つの項目が同じ因子に負荷するかどうかによらず、$i\ne j$ で $E[y_iy_j\mid\boldsymbol\theta]=m_{1,i}m_{1,j}$）。
+    ヤコビアン $\Delta_2=\partial\pi_2/\partial\eta^\top$ には、項目の列
+    $$\frac{\partial\pi_j}{\partial\xi_j}=\sum_q\frac{\partial m_{1,jq}}{\partial\xi_j}w_q,\qquad
+      \frac{\partial\pi_{ij}}{\partial\xi_i}=\sum_q\frac{\partial m_{1,iq}}{\partial\xi_i}m_{1,jq}w_q$$
+    に加えて、自由な因子間相関 $\rho_{ab}$（$a<b$）ごとに 1 列がある:
+    $$\frac{\partial\pi_{ij}}{\partial\rho_{ab}}=\sum_q m_{1,iq}m_{1,jq}\frac{\partial w_q}{\partial\rho_{ab}},\qquad
+      \frac{\partial w_q}{\partial\rho_{ab}}=w_q\Big(g_{ab,q}-\sum_{q'}w_{q'}g_{ab,q'}\Big),\qquad
+      g_{ab,q}=\big[\mathbf R^{-1}\boldsymbol\theta_q\boldsymbol\theta_q^\top\mathbf R^{-1}-\mathbf R^{-1}\big]_{ab}$$
+    （$\pi_j$ も同様）。コードでは、すべての列を周辺モーメントの $\eta$ についての `jax.jacfwd` 1 回で得る（潜在分布の
+    パラメタは `_latent_log_weights` を通じて入る）ので、パラメタの種類ごとの式は書かない。上の式は、R の参照値が独立に
+    計算し直しているものである。$df=J+\binom J2-q$ で、$q$ = `n_params` は自由な相関を含む。RMSEA とその区間、SRMSR、
+    （2 値モデルの）独立モデルに対する TLI / CFI は変わらない（帰無モデルに潜在構造はない）。**mirt との違い**: 自由な
+    平均・分散の場合（§16.3）と同じく、mirt の `M2()` は $\Delta_2$ を作るときに `GroupPars` の推定フラグを `FALSE` に
+    するので、自由な相関は $df$ では引かれるのに $\Delta_2$ に列を持たない。flexpyirt はすべての自由パラメタを $\Delta_2$
+    に入れる（Maydeu-Olivares & Joe, 2005, 2006）ため、自由な相関のあるモデルでは $M_2$ が mirt よりわずかに小さい
+    （V39 では相対 $3\times10^{-7}$ 〜 $7\times10^{-4}$）。非公開の `_latent_in_delta=False` で mirt の値を再現できる。
+    **周辺モーメントからの識別**はこれまでどおり調べる（$\Delta_2$ の階数、$df>0$）。たとえば、小さいテストでは
+    3 カテゴリの GRM 項目の自由パラメタ数がその項目を含む行数を超えることがあり、1 項目だけで測る因子は識別されない。
+    **S-X2。** 合計得点は mirt と同じく全項目の合計（因子ごとではない）。Lord–Wingersky 漸化式を直積格子のすべての
+    ノードで回し、
+    $$L_j(s\mid\boldsymbol\theta_q)=\sum_{k=0}^{K_j-1}L_{j-1}(s-k\mid\boldsymbol\theta_q)P_{jk}(\boldsymbol\theta_q),$$
+    期待割合はすべての因子について積分する:
+    $$E_j[s,k]=\frac{\sum_qP_{jk}(\boldsymbol\theta_q)L_{-j}(s-k\mid\boldsymbol\theta_q)w_q}{\sum_qL(s\mid\boldsymbol\theta_q)w_q}.$$
+    `_itemfit.lord_wingersky` と `s_x2_expected_tables` は `(Q, K_j)` の配列のリストと重みベクトルを受け取り、ノードの
+    座標は見ないので、平らにした格子でそのまま使う（計算量は $O(J^2SQ)$、$Q=15^3$ でも 1 秒未満）。セルの併合
+    （`mirt:::collapseCells`）と $df_j$ = 残ったセル数 − 行数 − 項目 $j$ の自由パラメタ数 − 潜在分布の自由パラメタ数
+    （自由な相関。交差負荷のある項目は自由な識別力が 1 つ多い）は §15.40 と同じ。mirt の
+    `itemfit(fit_stats = "S_X2")` は `thetaComb(seq(-6, 6, length.out = quadpts), nfact)` の上で `mirt_dmvnorm` の重みを
+    使って同じ計算をする。既定の `quadpts`（`select_quadpts(nfact)`: 2 因子で 31、3 因子で 15）と範囲は `mirt()` と
+    `Quadrature.default()` の既定と同じだが、mirt の `itemfit()` と `M2()` は推定時の格子を読まないので、別の
+    `quadpts` や `theta_lim` で推定したときは R 側で改めて渡す必要がある（flexpyirt は常に推定時の格子を使う）。
+    **未対応**（いずれも `SpecificationError`）: 双因子モデルと two-tier モデル（次元縮約した E-step には同時格子がなく、
+    §17 のブロック構造に沿った計算が必要）、多母集団の多次元モデル（未照合。多母集団の $M_2$ は #76）。
+    1 次元の結果はビット単位で変わらない（$D=1$ の同じコードパス）。
+    **照合（V39）**: V14 の 4 モデルで mirt 1.48 と照合した。VALIDATION.md を参照。
 
 ## 17. 実装上の決定（M7）
 

@@ -1,8 +1,9 @@
-"""Item fit: Orlando & Thissen's S-X2 (Result layer, DESIGN.md §15.40).
+"""Item fit: Orlando & Thissen's S-X2 (Result layer, DESIGN.md §15.40, §16.19).
 
 Post-fit bookkeeping on NumPy arrays (summed-score tables and cell collapsing are data dependent,
 so they run outside ``jit``); the item category probabilities on the quadrature grid come from
-the JAX item kernels.
+the JAX item kernels. The functions only see a list of ``Q`` nodes and their weights, so for a
+multidimensional model ``Q`` is the flattened product grid.
 """
 
 from __future__ import annotations
@@ -76,7 +77,9 @@ def s_x2_expected_tables(traces: list[np.ndarray], weights: np.ndarray) -> list[
 
     (Orlando & Thissen, 2000, 2003), where :math:`L_{-j}` leaves item :math:`j` out and
     :math:`w_q` are the latent quadrature weights. Impossible cells (:math:`s-k` outside the
-    range of :math:`L_{-j}`) are NaN. Rows are summed scores ``1 .. S - 1``.
+    range of :math:`L_{-j}`) are NaN. Rows are summed scores ``1 .. S - 1``. With
+    :math:`\theta_q` the nodes of a product grid and :math:`w_q` the multivariate weights, the
+    sums integrate over all factors (multidimensional S-X2, as mirt's ``itemfit()``).
     """
     lik_all = lord_wingersky(traces)
     denom = lik_all @ weights  # (S + 1,)

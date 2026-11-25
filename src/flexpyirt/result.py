@@ -677,6 +677,13 @@ class FitResult:
         :math:`df_j = \#\text{cells} - \#\text{rows} - p_j - p_{\text{latent}}`
         (free parameters of item :math:`j` and of the latent distribution, mirt's convention).
 
+        For a confirmatory multidimensional model (:meth:`Model.with_factors`, DESIGN.md
+        §16.19) the nodes :math:`\boldsymbol\theta_q` run over the fitted product grid and
+        :math:`w_q` are the normalized multivariate-normal weights, so the recursion is carried
+        at every node of the grid and the sum over :math:`q` integrates over all factors; the
+        summed score is still the total over all items, and :math:`p_{\text{latent}}` counts the
+        free factor correlations.
+
         Parameters
         ----------
         data : DataFrame or array-like
@@ -703,16 +710,16 @@ class FitResult:
         PrecisionError
             If JAX is not configured for 64-bit floating point.
         SpecificationError
-            For multidimensional, ``EmpiricalHistogram``, ``DavidianCurve`` or ``NormalMixture``
-            models (not yet supported), data with missing responses, or an item with an unobserved
-            category (within a group).
+            For bifactor, two-tier, multiple-group multidimensional, ``EmpiricalHistogram``,
+            ``DavidianCurve`` or ``NormalMixture`` models (not yet supported), data with missing
+            responses, or an item with an unobserved category (within a group).
         """
         check_x64()
         model = self._model
         if model.is_reduced or (model.is_multidimensional and model.is_multigroup):
             raise SpecificationError(
                 "item_fit() does not support bifactor, two-tier or multiple-group "
-                "multidimensional models yet."
+                "multidimensional models yet (single-group with_factors() models are supported)."
             )
         if model.is_empirical_histogram or model.is_davidian or model.is_mixture:
             raise SpecificationError(
@@ -1154,6 +1161,13 @@ class FitResult:
         model (polytomous models return ``NaN`` for ``tli`` and ``cfi`` because the null
         :math:`\Delta_2` is rank-deficient under item-score moments; see DESIGN.md §16.3).
 
+        For a confirmatory multidimensional model (:meth:`Model.with_factors`, DESIGN.md
+        §16.19) the margins, :math:`\Xi_2` and :math:`\Delta_2` are integrated over the fitted
+        product grid with the normalized multivariate-normal weights, and :math:`\Delta_2` has
+        one column per free factor correlation. (mirt's ``M2()`` leaves the latent columns out
+        of :math:`\Delta_2` while counting them in ``df``, so its value is slightly larger for
+        models with free correlations.)
+
         Parameters
         ----------
         data : DataFrame or array-like
@@ -1178,14 +1192,17 @@ class FitResult:
         PrecisionError
             If JAX is not configured for 64-bit floating point.
         SpecificationError
-            For multidimensional, multiple-group, ``EmpiricalHistogram``, ``NormalMixture``, or MAP
-            (with priors) models, missing responses, invalid ``ci``, or fewer than 2 items or
+            For bifactor, two-tier, multiple-group, ``EmpiricalHistogram``, ``NormalMixture``, or
+            MAP (with priors) models, missing responses, invalid ``ci``, or fewer than 2 items or
             respondents.
         """
         check_x64()
         model = self._model
         if model.is_reduced:
-            raise SpecificationError("m2() does not support bifactor or two-tier models yet.")
+            raise SpecificationError(
+                "m2() does not support bifactor or two-tier models yet (with_factors() models "
+                "are supported)."
+            )
         if model.is_multigroup or model.is_empirical_histogram or model.is_mixture:
             raise SpecificationError(
                 "m2() supports single-group models with a Normal latent distribution only."
