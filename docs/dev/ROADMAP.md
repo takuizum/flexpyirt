@@ -135,6 +135,10 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
      against mirt's `survey.weights` (2PL, GRM, two groups, FIPC, bifactor). Design-consistent SEs come with
      #85; item fit, M2, local dependence, JSI and DIF raise an error for weighted fits.
 5. [ ] Robust standard errors: sandwich and cross-product (#85).
+   - [x] Without sampling weights: `fit(se="sandwich" | "crossprod")` for single and multiple groups,
+     FIPC, EH, 2–3 factors and priors (not with Davidian curves, normal mixtures, bifactor or two-tier models); validated in V35
+     against mirt `SE.type = "sandwich"` / `"crossprod"`. Weighted and cluster-robust versions still
+     open.
 - **Acceptance**: V-numbered comparisons with mirt `bfactor()`, `residuals()`, `iteminfo()` /
   `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and
   `SE.type = "sandwich"` / `"crossprod"`.

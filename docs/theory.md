@@ -260,6 +260,18 @@ $-\partial^2\log\pi/\partial\eta\,\partial\eta^\top$ under MAP).
 Both are only meaningful at a converged interior solution. If the matrix is not positive definite
 (an estimate on a boundary, weak identification), flexpyirt reports NaN.
 
+**Cross-product and sandwich.** Let $s_i=\partial\log L_i/\partial\eta$ be the score of
+respondent $i$ at the estimate and $B=\sum_i s_is_i^\top$ their cross-product. When the model is
+correct, $B$ and $I$ estimate the same matrix (the information equality), so $B^{-1}$ is another
+covariance estimate (`se="crossprod"`). When the model is not correct the two differ, the
+estimator converges to the parameter that best approximates the truth, and its covariance is the
+**sandwich** (Huber, 1967; White, 1982; `se="sandwich"`)
+$$\operatorname{Var}(\hat\eta)\approx I(\hat\eta)^{-1}\,B\,I(\hat\eta)^{-1},$$
+which reduces to $I^{-1}$ under the information equality. Under MAP the prior's curvature
+$-\partial^2\log\pi/\partial\eta\,\partial\eta^\top$ is added to $B$ as it is to $I$, so the three
+estimates still coincide for a correct model. The scores are exact (automatic differentiation of
+each response pattern's marginal likelihood). Respondents are assumed to be independent.
+
 **Delta method.** For a function $b=h(\eta)$ such as $b=-d/a$,
 $\operatorname{Var}(\hat b)\approx\nabla h^\top\,\operatorname{Var}(\hat\eta)\,\nabla h$. flexpyirt uses
 this for the displayed IRT thresholds and for the standardized mixture components.
@@ -363,6 +375,7 @@ Guide: [section 15](guide.md#15-scale-linking).
 - Dempster, A. P., Laird, N. M., & Rubin, D. B. (1977). Maximum likelihood from incomplete data via the EM algorithm. *JRSS B*, 39, 1–38.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80, 27–38.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22, 144–149.
+- Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43, 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking* (3rd ed.). Springer.
@@ -385,6 +398,7 @@ Guide: [section 15](guide.md#15-scale-linking).
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scandinavian Journal of Statistics*, 35, 335–353.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54, 427–450.
+- White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.

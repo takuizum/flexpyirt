@@ -98,6 +98,9 @@
      mirt の `survey.weights` と V34 で照合（2PL、GRM、2 群、FIPC、双因子）。標本設計に整合する SE は #85 で扱う。
      項目適合度、M2、局所依存、JSI、DIF はウェイト付きの推定結果に対してエラーを出す。
 5. [ ] ロバスト標準誤差: sandwich と cross-product（#85）。
+   - [x] 標本ウェイトなし: `fit(se="sandwich" | "crossprod")`。単一群・多母集団、FIPC、EH、2〜3 因子、事前分布
+     （Davidian 曲線・正規混合・双因子・two-tier モデルでは不可）。V35 で mirt の `SE.type = "sandwich"` / `"crossprod"` と照合済み。
+     ウェイト付き・クラスタロバスト版は未実装。
 - **受け入れ基準**: mirt の `bfactor()`、`residuals()`、`iteminfo()` / `testinfo()` / `marginal_rxx()` /
   `fscores(method = "EAPsum")`、`survey.weights`、`SE.type = "sandwich"` / `"crossprod"` との V 番号つき照合。
 

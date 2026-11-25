@@ -89,7 +89,7 @@ _SPECIAL_FLOATS: dict[str, float] = {
     "Infinity": math.inf,
     "-Infinity": -math.inf,
 }
-_VALID_SE_METHODS: tuple[str | None, ...] = (None, "oakes", "hessian")
+_VALID_SE_METHODS: tuple[str | None, ...] = (None, "oakes", "hessian", "sandwich", "crossprod")
 _PARAM_COLUMNS: tuple[str, ...] = (*TABLE_COLUMNS, "estimate", "se")
 _HISTORY_COLUMNS: tuple[str, ...] = (
     "iter",
