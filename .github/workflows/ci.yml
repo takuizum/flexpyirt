@@ -59,10 +59,11 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "full tier: $full; ref: ${ref:-(event default)}"
 
-  # Lint, types and the fast tier of every package (flexpyirt at the root, flexpyctt and
-  # flexpyequate under packages/). The job name ("test (3.x)") is a required status check.
-  test:
+  # Lint, types, flexpyctt's and flexpyequate's suites and the install smoke test; runs alongside
+  # the fast-tier shards below.
+  checks:
     needs: plan
+    name: checks (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -90,35 +91,88 @@ jobs:
       - name: Mypy (flexpyequate)
         working-directory: packages/flexpyequate
         run: uv run --no-sync mypy
-      - name: Restore JAX compilation cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .jax-cache
-          key: jax-fast-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-${{ github.run_id }}
-          restore-keys: |
-            jax-fast-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-
-            jax-fast-py${{ matrix.python-version }}-
-      # Parallelism (pytest-xdist, -n auto) is set in pyproject.toml.
-      - name: Pytest (fast tier)
-        run: uv run pytest --durations=15 -m "not slow"
       # flexpyctt has its own pytest configuration (packages/flexpyctt/pyproject.toml).
       - name: Pytest (flexpyctt)
         run: uv run pytest packages/flexpyctt --durations=10
       # So has flexpyequate (packages/flexpyequate/pyproject.toml).
       - name: Pytest (flexpyequate)
         run: uv run pytest packages/flexpyequate --durations=10
-      - name: Save JAX compilation cache
-        if: always() && github.event_name != 'pull_request'
-        uses: actions/cache/save@v4
-        with:
-          path: .jax-cache
-          key: jax-fast-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-${{ github.run_id }}
       - name: Editable install smoke test (isolated env)
         run: |
           uv run --isolated --no-project --with-editable ./packages/flexpyctt --with-editable . \
             python -c "import flexpyctt, flexpyirt; print(flexpyctt.__version__, flexpyirt.__version__)"
           uv run --isolated --no-project --with-editable ./packages/flexpyequate \
             python -c "import flexpyequate; print(flexpyequate.__version__)"
+
+  # flexpyirt's fast tier, split into 3 shards of about equal duration (tests/durations-fast.json).
+  fast:
+    needs: plan
+    name: fast (${{ matrix.python-version }}, ${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+          fetch-depth: 0  # hatch-vcs derives the version from tags
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked --all-extras --dev
+      - name: Restore JAX compilation cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .jax-cache
+          key: jax-fast${{ matrix.shard }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            jax-fast${{ matrix.shard }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-
+            jax-fast${{ matrix.shard }}-py${{ matrix.python-version }}-
+            jax-fast-py${{ matrix.python-version }}-
+      # Parallelism (pytest-xdist, -n auto) is set in pyproject.toml.
+      - name: Pytest (fast tier, shard ${{ matrix.shard }}/3)
+        run: |
+          uv run pytest --durations=15 -m "not slow" --shard "${{ matrix.shard }}/3" \
+            --durations-file tests/durations-fast.json \
+            --write-durations "durations-fast-${{ matrix.shard }}.json"
+      - name: Save JAX compilation cache
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: .jax-cache
+          key: jax-fast${{ matrix.shard }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-${{ github.run_id }}
+      # Measured seconds per module, to refresh tests/durations-fast.json (CONTRIBUTING.md, "Tests").
+      - name: Upload module durations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: durations-fast-py${{ matrix.python-version }}-shard${{ matrix.shard }}
+          path: durations-fast-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+
+  # The required status checks ("test (3.12)", "test (3.13)") of the develop and main rulesets:
+  # pass when the checks and every fast-tier shard passed.
+  test:
+    needs: [checks, fast]
+    if: always()
+    name: test (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - name: Checks and fast-tier shards passed
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          FAST: ${{ needs.fast.result }}
+        run: |
+          echo "checks: $CHECKS, fast: $FAST"
+          test "$CHECKS" = success && test "$FAST" = success
 
   # flexpyctt installed on its own: JAX must be absent, and the whole flexpyctt suite must pass
   # without it (DESIGN.md §16.18).

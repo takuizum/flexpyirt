@@ -131,7 +131,7 @@ serially. They come in two tiers:
 
 | Tier | What | Where it runs |
 |---|---|---|
-| fast | `-m "not slow"`: unit tests, docs, the M1 mirt smoke test (a few minutes on CI) | every PR, every push to `develop`/`main` |
+| fast | `-m "not slow"`: unit tests, docs, the M1 mirt smoke test, split into 3 shards per Python (a few minutes on CI) | every PR, every push to `develop`/`main` |
 | full | everything, including all mirt reference comparisons, split into 4 shards per Python | nightly on `develop`, release PRs (`develop` → `main`), manual runs (*Run workflow*) |
 
 A mirt reference comparison is complete only when the full tier passes (nightly or on the
@@ -145,13 +145,18 @@ release PR); check the nightly run before ticking a ROADMAP item.
 - A module runs on one worker, so a fit that takes minutes goes in a module of its own (see
   `tests/_mirt_multigroup.py` and `tests/test_mirt_m4_multigroup_*.py`).
 - CI keeps a persistent JAX compilation cache between runs (`JAX_COMPILATION_CACHE_DIR`).
-- Full-tier shards are balanced by the seconds per module in `tests/durations.json`. After adding
-  or splitting heavy modules, refresh it from a full run:
-  `uv run pytest --write-durations tests/durations.json` (or merge the `durations-*` artifacts of
-  a full CI run). A module missing from the file counts as 1 s per test.
+- Full-tier shards are balanced by the seconds per module in `tests/durations.json`, fast-tier
+  shards by those in `tests/durations-fast.json` (`--durations-file`). After adding or splitting
+  heavy modules, refresh them: `uv run pytest --write-durations tests/durations.json` and
+  `uv run pytest -m "not slow" -n 4 --write-durations tests/durations-fast.json` (or merge the
+  `durations-*` artifacts of a CI run). A module missing from a file counts as 1 s per test.
+- On CI the required checks `test (3.12)` and `test (3.13)` pass when the `checks` job (ruff,
+  mypy, flexpyctt's and flexpyequate's suites) and every `fast` shard passed.
 
 Run `uv run pytest -m "not slow"` locally for a quick check, and `uv run pytest --shard 2/4` to
-run one shard as CI does.
+run one full-tier shard as CI does
+(`uv run pytest -m "not slow" --shard 2/3 --durations-file tests/durations-fast.json` for a fast-tier
+one).
 
 To regenerate the mirt reference values (needs R 4.4+ and mirt):
 

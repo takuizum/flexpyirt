@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from tests.conftest import DURATIONS, _parse_shard, assign_shards
+from tests.conftest import DURATIONS, DURATIONS_FAST, _parse_shard, assign_shards
 
 
 def test_longest_first_into_least_loaded_shard() -> None:
@@ -20,13 +21,15 @@ def test_assignment_is_deterministic_under_ties() -> None:
     assert assign_shards(seconds, 2) == {"a": 0, "b": 1, "c": 0, "d": 1, "e": 0}
 
 
-def test_committed_durations_split_into_four_balanced_shards() -> None:
-    seconds = json.loads(DURATIONS.read_text(encoding="utf-8"))
-    shard_of = assign_shards(seconds, 4)
+# The full tier runs in 4 shards per Python, the fast tier in 3 (.github/workflows/ci.yml).
+@pytest.mark.parametrize(("path", "n_shards"), [(DURATIONS, 4), (DURATIONS_FAST, 3)])
+def test_committed_durations_split_into_balanced_shards(path: Path, n_shards: int) -> None:
+    seconds = json.loads(path.read_text(encoding="utf-8"))
+    shard_of = assign_shards(seconds, n_shards)
     assert set(shard_of) == set(seconds)
-    load = [sum(s for g, s in seconds.items() if shard_of[g] == k) for k in range(4)]
+    load = [sum(s for g, s in seconds.items() if shard_of[g] == k) for k in range(n_shards)]
     # Greedy packing is within the largest module of the ideal split.
-    assert max(load) - sum(load) / 4 <= max(seconds.values())
+    assert max(load) - sum(load) / n_shards <= max(seconds.values())
 
 
 @pytest.mark.parametrize("value", ["3", "0/4", "5/4", "a/b"])
