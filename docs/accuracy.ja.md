@@ -41,6 +41,7 @@ $10^{-8}$ 程度）。
 |---|---|
 | 2PL、Rasch、3PL、4PL、GRM、GPCM、PCM、Nominal | `mirt(..., itemtype = ...)`: 推定値、対数尤度、Oakes の SE |
 | 欠測（MAR） | `NA` を含むデータでの `mirt()` |
+| 標本ウェイト | `mirt(..., survey.weights = w)` と `multipleGroup(..., survey.weights = w)`: 推定値、対数尤度、AIC、BIC、Oakes の SE（2PL、graded、欠測を含む 2 群、固定項目パラメタ推定）。双因子モデルは `bfactor(..., survey.weights = w)` |
 | アンカー項目つき多母集団 | `multipleGroup(..., invariance = c(<アンカー>, "free_means", "free_var"))` |
 | 項目間の等値制約 | `mirt.model(... CONSTRAIN = ...)` |
 | 固定項目パラメタ推定 | パラメタを固定した `mirt()`（`pars = "values"`、`est = FALSE`） |

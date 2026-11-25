@@ -67,6 +67,7 @@
 | V31 | ジャックナイフ傾き指標（LSAT7 の 2PL、Science の GRM、依存するペア 2 組と 5% の MCAR を含むシミュレーションの 2PL、依存するペア 1 組を含むシミュレーションの GPCM）。Newton 法と 1 ステップの近似は推定し直した値と比べる | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | 次元縮約による双因子モデル（特殊因子 3 つと一般因子のみの項目 3 つを含む 2PL、テストレット 3 つの GRM $K=4$） | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | 次元縮約による two-tier モデル（相関する主因子 2 つと特殊因子 3 つ（1 つは両方の主因子にまたがる）の 2PL、交差負荷項目 1 つとテストレット 2 つの GRM $K=4$） | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
+| V34 | 標本ウェイト: 非整数ウェイト（合計 $\ne N$、ウェイト 0 が 5 行）の 2PL、合計を $N$ に正規化したウェイトの Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC、次元縮約による双因子 2PL。推定値、対数尤度、AIC、BIC、Oakes の SE | `mirt(..., survey.weights = w)`、`multipleGroup(..., survey.weights = w)`、`bfactor(..., survey.weights = w)`、`SE.type = "Oakes"` | M7 |
 | V36 | 合計得点分布のカーネル（Poisson 二項分布: 確率ベクトル 5 例、$J$ 10〜300。多値: GRM $K=4$ と 2PL + GRM の混合） | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`、`poibin::dpoibin()`、`stats::dpois()`。mirt の `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 | V37 | mirt の推定値での情報関数・期待得点・信頼性・合計得点 EAP（2PL $J=12$。同じモデルで欠測 8%。3PL $J=12$。GRM と GPCM $K=4$、$J=8$。名義 $K=4$、$J=6$。2PL + 3PL + GRM + GPCM + 名義の混合 $J=14$。2 群の 2PL + GRM で焦点群の平均・分散を推定） | `iteminfo()`、`testinfo()`、`expected.item()`、`expected.test()`、`marginal_rxx()`、`empirical_rxx()`、`fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
 
@@ -682,9 +683,7 @@
     総当たり積分と比べる（$10^{-12}$ 以内。欠測、GRM 項目、交差負荷項目、特殊因子のない項目を含む）。主因子 1 つの
     two-tier モデルは双因子の経路と、特殊因子 1 つのモデルは照合済みの 3 次元の経路（`with_factors()` で特殊因子の
     相関を 0 に固定。対数尤度が $10^{-12}$ で一致）と比べる。
-  .05 での第 1 種の誤りは 0.0〜2.0%（保守的。ブートストラップは偏りを除くが、帰無仮説の下での $T$ の SD は 0.75 程度）、
-  検出力は 0.99〜1.00。`uv run python validation/simulation/dimtest_study.py`（約 4 分）で再実行できる。テストは帰無
-  20 反復と対立 10 反復を実行する。- **合計得点分布のカーネル（V36、M7）**: `summed_score_distribution()`（DESIGN §18.1）を
+- **合計得点分布のカーネル（V36、M7）**: `summed_score_distribution()`（DESIGN §18.1）を
   `tests/test_r_m7_sumscore.py` で照合する（fast tier。生成スクリプト `validation/r/m7_sumscore_reference.R` →
   `tests/reference/v36_sumscore.json`、poibin 1.6、mirt 1.48）。
   - **2 値項目（Poisson 二項分布）**: 確率ベクトル 5 例（`uniform_10`: $J=10$、$p\sim U(0.05, 0.95)$。
@@ -749,6 +748,26 @@
     求めた期待得点、6 項目の混合テストの全 288 反応パターンの総当たりによる合計得点の表（$10^{-12}$）、
     全期待値の法則、潜在尺度の線形変換に対する周辺信頼性の不変性（$10^{-13}$）、信頼性の範囲と、
     シミュレーションデータでの周辺・経験的信頼性の近さ、エラーの経路。
+- **標本ウェイト（V34、M7）**: mirt の `survey.weights`（mirt 1.48、`optimizer = "NR"`、`TOL = 1e-10`、
+  `SE.type = "Oakes"`）。参照ファイルは行ごとのウェイトとともに元の行を保存するので、ウェイトを足し合わせる
+  パターン圧縮も比較の対象になる。V34a: シミュレーションの 2PL（$J=10$、$N=1000$）、合計点と関係する対数正規
+  ウェイト、正規化なし（$\sum w=1541.7$）、ウェイト 0 が 5 行。V34b: Science の GRM（$N=392$）、合計を $N$ に
+  正規化した一様ウェイト。V34c: 各 800 人の 2 群、アンカー q01–q05、focal 群の平均と分散を推定、5% の MCAR 欠測、
+  2 群で合計の異なるガンマウェイト（$[-8,8]$ の 81 点）。V34d: FIPC（q01–q05 を固定、潜在分布の平均と分散を推定、
+  81 点）、合計を $N$ に正規化した対数正規ウェイト。V34e: 双因子 2PL（`bfactor()`、$J=9$、3 項目ずつの特殊因子 3 つ、
+  $N=1000$、$[-6,6]$ の各軸 21 点）、正規化しない対数正規ウェイト（$\sum w=1467.6$）: 対数尤度
+  $4.7\times10^{-16}$（相対）、パラメタ $9.5\times10^{-7}$、Oakes・Hessian の SE $2.2\times10^{-6}$（相対）、
+  AIC・BIC $3.8\times10^{-11}$。V34a–d の差の実測値（通常の EM・SQUAREM の最大）: 対数尤度
+  $1.8\times10^{-15}$（相対）、パラメタ $7.6\times10^{-8}$、Oakes SE $1.1\times10^{-7}$（相対）、flexpyirt の
+  Hessian SE と mirt の Oakes $1.1\times10^{-7}$（相対）、AIC・BIC $5.1\times10^{-11}$。いずれも共通の許容誤差内。
+  mirt の BIC はウェイトの和を $N$ として使う（flexpyirt も同じ。DESIGN §17.4）。ウェイトの合計が行数と異なる
+  V34a がこれを確かめる。どの参照値も同じデータのウェイトなしの推定とは異なる（対数尤度が $10^{-3}$ 超、
+  パラメタが $10^{-3}$ 超の差）ので、ウェイトを無視すればテストは落ちる。**R と照合していないもの**: 整数ウェイトと
+  行の複製の一致（欠測のある 2PL、通常の EM と SQUAREM での 2 群 GRM、経験ヒストグラムの FIPC、MAP、双因子モデルと two-tier モデル）、
+  ウェイト 0 の行と行の削除の一致、ウェイトの定数倍は、恒等式として `tests/test_m7_weights.py` で確かめる。
+  Oakes・Hessian の SE は mirt と一致するが、標本ウェイトのもとでは正しい分散推定量ではない（DESIGN §17.4）。
+  項目適合度、M2、局所依存、JSI、DIF、モデルに基づく平行分析は、ウェイト付きの推定結果に対してエラーを出す。
+  テスト: `tests/test_mirt_m7_weights.py`。参照値生成: `validation/r/m7_weights_reference.R`。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

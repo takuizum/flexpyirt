@@ -204,6 +204,29 @@ print(res_sq.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeg
 
 初回の推定には JAX のコンパイル時間がかかる。同じ形のデータを続けて推定すると 2 回目以降は速い。
 
+### 標本ウェイト
+
+複雑な標本設計のデータ（抽出確率が等しくない調査、大規模学力調査）では、`weights=` に行ごとのウェイトを渡す。
+推定値は重み付き対数尤度 $\sum_i w_i \log L_i$ を最大化する（mirt の `survey.weights`）。
+
+```python
+sampling_weights = np.random.default_rng(7).uniform(0.5, 2.0, len(df))
+# 任意: 合計が行数になるように調整する。
+sampling_weights *= len(df) / sampling_weights.sum()
+res_w = fit(spec, df, weights=sampling_weights, se=None)
+print(res_w.loglik, res_w.bic)
+```
+
+- `weights` は行ごとに 1 つの有限で非負の数を持つ配列（`group=`、欠測、固定パラメタ、事前分布、どの潜在分布とも
+  併用できる）。ウェイト 0 の行は無視する。整数ウェイトは、行をその回数だけ繰り返した結果と同じになる。
+- ウェイトは与えられたまま使う。`loglik`・`aic`・`bic` はウェイトの尺度に従い、`bic` は $\log N$ の代わりに
+  ウェイトの和の対数を使う。ウェイトなしの推定と比べたい場合は、合計が行数になるようにウェイトを調整する。
+- **標準誤差**: `se="oakes"` と `se="hessian"` は重み付き対数尤度の情報行列の逆行列を返す。度数ウェイト
+  （行の繰り返し）では正しいが、**標本ウェイトのもとでは正しい分散推定量ではない**。`weights` とともに
+  どちらかを使うと `fit()` は警告（`FlexpyirtWarning`）を出す。ウェイトが度数でなければ `se=None` を渡す。
+- スコアリング（`res_w.score(...)`）はふだんどおり使える。`item_fit()`、`m2()`、`local_dependence()`、
+  `jsi()`、`dif()`、`model_parallel_analysis()` はウェイト付きの推定結果には使えず、`SpecificationError` を出す。
+
 ## 5. 結果を読む
 
 `fit()` は `FitResult` を返す。`res.summary()` で読みやすいテキスト要約が得られる（Jupyter

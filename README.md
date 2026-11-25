@@ -29,6 +29,7 @@ calibration and fixed item parameter calibration (FIPC).
 | Equality across items | Common parameters across items and item models (`Model.equal_across_items()`, e.g. one common slope), combined with across-group equalities | ✓ |
 | FIPC | Fix some items at item-bank values; estimate the other items and the latent distribution | ✓ |
 | Missing data | Responses missing at random (MAR) | ✓ |
+| Sampling weights | Survey weights `fit(..., weights=...)`: weighted marginal likelihood for every model, multiple groups and FIPC (mirt's `survey.weights`). Oakes / Hessian SEs equal mirt's but are valid for frequency weights only; item fit, M2, local dependence and DIF are not available for weighted fits | ✓ |
 | Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior, plus delta-method SEs for display IRT thresholds (`b_se` / `bk_se`) | ✓ |
 | Scoring | EAP, MAP, ML and WLE (1–3 factors, with standard errors) and plausible values (`PV`, 1–3 factors, explicit JAX PRNG `key`), using each group's latent distribution as the prior where applicable | ✓ |
 | Multidimensional models | Confirmatory 2–3 factor MIRT (`Model.with_factors()`, also with multiple groups) with cross-loadings, correlated or orthogonal MVN factors, product quadrature grids, Oakes/Hessian SEs, and EAP / MAP / ML / WLE scoring; bifactor models with any number of specific factors by dimension reduction (`Model.with_bifactor()`, single group, EAP scoring); two-tier models with one or two correlated primary factors (`Model.with_two_tier()`) | ✓ |

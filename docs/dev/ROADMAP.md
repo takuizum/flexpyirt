@@ -124,6 +124,11 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
      mixed-format test and a two-group model.
    - [ ] Multidimensional models: information matrix and directional information.
 4. [ ] Sampling (survey) weights (#84).
+   - [x] `fit(..., weights=...)`: weighted marginal likelihood with weighted pattern compression
+     for EM, SQUAREM, multiple groups, missing data and FIPC; BIC with the sum of the weights;
+     Oakes / Hessian SEs with a warning (valid for frequency weights only); validated in V34
+     against mirt's `survey.weights` (2PL, GRM, two groups, FIPC, bifactor). Design-consistent SEs come with
+     #85; item fit, M2, local dependence, JSI and DIF raise an error for weighted fits.
 5. [ ] Robust standard errors: sandwich and cross-product (#85).
 - **Acceptance**: V-numbered comparisons with mirt `bfactor()`, `residuals()`, `iteminfo()` /
   `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and

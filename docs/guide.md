@@ -213,6 +213,34 @@ print(res_sq.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeg
 
 The first fit includes JAX compilation time. Later fits of data with the same shape are faster.
 
+### Sampling weights
+
+For data from a complex sample (a survey with unequal selection probabilities, large-scale
+assessments), pass one weight per row with `weights=`. The estimates then maximize the weighted
+log-likelihood $\sum_i w_i \log L_i$ (mirt's `survey.weights`).
+
+```python
+sampling_weights = np.random.default_rng(7).uniform(0.5, 2.0, len(df))
+# Optional: rescale so that the weights sum to the number of rows.
+sampling_weights *= len(df) / sampling_weights.sum()
+res_w = fit(spec, df, weights=sampling_weights, se=None)
+print(res_w.loglik, res_w.bic)
+```
+
+- `weights` is an array with one finite, non-negative number per row (it works with `group=`,
+  missing data, fixed parameters, priors and every latent distribution). Rows with weight 0 are
+  ignored. Integer weights give the same result as repeating the rows.
+- The weights are used as given. `loglik`, `aic` and `bic` are on the scale of the weights, and
+  `bic` uses the logarithm of the sum of the weights in place of $\log N$. Rescale the weights to
+  sum to the number of rows if you want values comparable with an unweighted fit.
+- **Standard errors**: `se="oakes"` and `se="hessian"` invert the information of the weighted
+  log-likelihood. That is correct for frequency weights (repeated rows) but **not a valid variance
+  estimate under sampling weights**; `fit()` warns (`FlexpyirtWarning`) when `weights` is used
+  with either. Pass `se=None` unless your weights are frequencies.
+- Scoring (`res_w.score(...)`) works as usual. `item_fit()`, `m2()`, `local_dependence()`,
+  `jsi()`, `dif()` and `model_parallel_analysis()` are not available for a weighted fit and raise
+  `SpecificationError`.
+
 ## 5. Reading the results
 
 `fit()` returns a `FitResult`. Call `res.summary()` for a readable plain-text report (in Jupyter
