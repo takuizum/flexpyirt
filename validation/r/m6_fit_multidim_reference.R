@@ -13,10 +13,10 @@
 # correlations have no column in Delta although they are subtracted in df (the same convention as
 # V18's rasch_free_var). This script therefore records
 #   - mirt's raw M2() output,
-#   - `exact`: M2* recomputed in R with central-difference derivatives of expected.item(), mirt's
-#     own buildXi2els and no latent column (must reproduce the raw output: asserted), and
-#   - `exact_with_latent`: the same with one Delta column per free correlation (Maydeu-Olivares &
-#     Joe, 2005, 2006), which is flexpyirt's default.
+#   - `exact`: M2* recomputed in R from mirt's analytic dP (checked against central differences),
+#     mirt's own buildXi2els and no latent column (must reproduce the raw output: asserted), and
+#   - `exact_with_latent`: the same with one analytic Delta column per free correlation
+#     (Maydeu-Olivares & Joe, 2005, 2006), which is flexpyirt's default.
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -80,26 +80,56 @@ exact_m2_star <- function(m, quad, include_latent, ci = 0.90) {
     EIs2[, i] <- as.vector(mirt:::ProbTrace(x, Theta) %*% (scs^2))
   }
   e <- margins(EIs, Prior)
+  # Item columns: mirt's analytic dP (correct for 2PL and graded items; checked here against
+  # central differences). Central differences alone are not accurate enough for the graded
+  # case, whose Delta is ill-conditioned under item-score margins (the error of the difference
+  # quotient, ~1e-10, is amplified to ~4e-6 relative in M2).
   for (i in seq_len(nitems)) {
     x <- extract.item(m, i)
+    dp <- mirt:::dP(x, Theta)
     for (k in which(x@est)) {
       xp <- x; xm <- x
       xp@par[k] <- xp@par[k] + eps
       xm@par[k] <- xm@par[k] - eps
-      Ep <- EIs; Em <- EIs
-      Ep[, i] <- expected.item(xp, Theta, min = 0L)
-      Em[, i] <- expected.item(xm, Theta, min = 0L)
-      cols[[length(cols) + 1L]] <- (margins(Ep, Prior) - margins(Em, Prior)) / (2 * eps)
+      num <- (expected.item(xp, Theta, min = 0L) - expected.item(xm, Theta, min = 0L)) / (2 * eps)
+      stopifnot(max(abs(num - dp[, k])) < 1e-8)
+      col <- numeric(length(p))
+      col[i] <- sum(dp[, k] * Prior)
+      ind <- nitems + 1L
+      for (b in seq_len(nitems)) for (a in seq_len(nitems)) if (a > b) {
+        if (b == i) col[ind] <- sum(dp[, k] * EIs[, a] * Prior)
+        if (a == i) col[ind] <- sum(dp[, k] * EIs[, b] * Prior)
+        ind <- ind + 1L
+      }
+      cols[[length(cols) + 1L]] <- col
     }
   }
   if (include_latent) {
-    for (k in which(grid$gp_obj@est)) {
+    # Latent columns, analytic: with unit variances and Sigma = R, for a < b
+    #   d log phi / d rho_ab = [R^-1 theta theta' R^-1 - R^-1]_ab,
+    # and for the normalized weights w = phi / sum(phi): dw = w * (g - sum(w * g)).
+    gp <- mirt:::ExtractGroupPars(grid$gp_obj)
+    stopifnot(all(gp$gmeans == 0), all(diag(gp$gcov) == 1))
+    Rinv <- solve(gp$gcov)
+    Z <- Theta %*% Rinv
+    nfact <- ncol(Theta)
+    n_lat <- 0L
+    for (a in seq_len(nfact - 1L)) for (b in seq(a + 1L, nfact)) {
+      g <- Z[, a] * Z[, b] - Rinv[a, b]
+      dPrior <- Prior * (g - sum(Prior * g))
+      # check against a central difference of the normalized prior
+      k <- which(names(grid$gp_obj@est) == sprintf("COV_%d%d", b, a))
+      if (!length(k)) k <- which(grid$gp_obj@parnames == sprintf("COV_%d%d", b, a))
+      stopifnot(length(k) == 1L, grid$gp_obj@est[k])
       gp_p <- grid$gp_obj; gp_m <- grid$gp_obj
       gp_p@par[k] <- gp_p@par[k] + eps
       gp_m@par[k] <- gp_m@par[k] - eps
-      cols[[length(cols) + 1L]] <-
-        (margins(EIs, grid$prior_of(gp_p)) - margins(EIs, grid$prior_of(gp_m))) / (2 * eps)
+      num <- (grid$prior_of(gp_p) - grid$prior_of(gp_m)) / (2 * eps)
+      stopifnot(max(abs(num - dPrior)) < 1e-8)
+      cols[[length(cols) + 1L]] <- margins(EIs, dPrior)
+      n_lat <- n_lat + 1L
     }
+    stopifnot(n_lat == sum(grid$gp_obj@est))
   }
   delta <- do.call(cbind, cols)
 
@@ -164,9 +194,8 @@ run_case <- function(name, mincells = 1) {
   raw <- M2(m, quadpts = quad$quadpts, theta_lim = quad$theta_lim)
   ex_no <- exact_m2_star(m, quad, include_latent = FALSE)
   ex_lat <- exact_m2_star(m, quad, include_latent = TRUE)
-  # mirt's analytic dP agrees with central differences for these item types (2PL, graded), so the
-  # only difference between mirt's raw M2 and the exact statistic is the missing latent column.
-  stopifnot(abs(ex_no$M2 - raw$M2) < 1e-7 * raw$M2, ex_no$df == raw$df)
+  # The only difference between mirt's raw M2 and the exact statistic is the missing latent column.
+  stopifnot(abs(ex_no$M2 - raw$M2) < 1e-10 * raw$M2, ex_no$df == raw$df)
   cat(sprintf("%-20s M2 raw = %.6f  exact(no latent) = %.6f  exact(latent) = %.6f  df = %d\n",
               name, raw$M2, ex_no$M2, ex_lat$M2, raw$df))
   sx2 <- lapply(mincells, function(mc) sx2_of(m, quad, mc))
