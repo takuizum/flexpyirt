@@ -1523,7 +1523,8 @@ data-independent shapes (§15.21).
    (DETECT 0.2 / 0.4 / 1, Q3* 0.2, RMSEA) are arguments with their sources in docstrings. The
    polychoric matrix is computed once and shared; simulations use a JAX PRNG key. The ensemble
    itself is checked by a simulation study (unidimensional, two-dimensional and bifactor data).
-9. **Polychoric / tetrachoric correlations (`polychoric()`, D1 of §16.8, V24)**:
+9. **Polychoric / tetrachoric correlations (`polychoric()`, D1 of §16.8, V24; the JAX version,
+   see §16.18 for the NumPy one)**:
    `flexpyirt.polychoric(data, *, smooth=True, zero_cell_correction=0.5, tol=1e-10, max_iter=100)`
    in `correlation.py` (shell) and `_polychoric.py` (jit kernels) returns a frozen
    `PolychoricResult`. **Data**: any numeric codes; each item is recoded to $0..K_j-1$ over its
@@ -1560,7 +1561,7 @@ data-independent shapes (§15.21).
    rescaled to sum to $p$, rebuilt, rescaled to unit diagonal), `NotPositiveDefiniteWarning`
    (new in `errors`). Not reported: standard errors of $\hat\rho$ (not validated; the
    dimensionality methods do not use them).
-   **Validation (V24)**: `validation/r/m5_polychoric_reference.R` (lavaan 0.7-3, psych 2.6.9):
+   **Validation (V24)**: `packages/flexpyctt/validation/r/m5_polychoric_reference.R` (lavaan 0.7-3, psych 2.6.9):
    simulated tetrachoric (8 items), mixed 2–5 categories with two factors, the same with 10% MCAR
    (pairwise), extreme binary items with one-empty-cell 2 x 2 tables, LSAT7 and Science. lavaan
    agrees to $\le 3.1\times10^{-8}$ (its `nlminb` tolerance; flexpyirt's pair gradients vanish to
@@ -1568,7 +1569,8 @@ data-independent shapes (§15.21).
    corrected pairs (its `optimize()` tolerance); `cor.smooth` to $10^{-12}$.
 10. **Parallel analysis, MAP and EKC (`parallel_analysis()`, `velicer_map()`,
     `empirical_kaiser()`, D2 of §16.8, V25)**: in `dimensionality.py` (shell; NumPy for the
-    $p\times p$ linear algebra, JAX `vmap` for normal reference data). All three answer question
+    $p\times p$ linear algebra, JAX `vmap` for normal reference data; now in flexpyctt with NumPy
+    random numbers and `rng` instead of `key`, §16.18). All three answer question
     (A) and return frozen results with `n_factors`. Matrix inputs (DataFrame, array or
     `PolychoricResult`) must be square, finite, symmetric, unit-diagonal, $p\ge3$.
     **Counting**: leading eigenvalues strictly above the reference, stopping at the first miss
@@ -1592,7 +1594,7 @@ data-independent shapes (§15.21).
     followed). **EKC**: Braeken & van Assen (2017) as in EFAtools (observed eigenvalues in the
     remaining-variance term); with a `PolychoricResult` and no `n_obs`, the smallest pairwise
     $n$ is used (conservative under missing data).
-    **Validation (V25)**: `validation/r/m5_dimensionality_reference.R` feeds the six lavaan
+    **Validation (V25)**: `packages/flexpyctt/validation/r/m5_dimensionality_reference.R` feeds the six lavaan
     polychoric matrices of V24 to EFAtools 1.1.0 (`EKC`), psych 2.6.9 (`vss()$map`),
     EFA.dimensions 0.1.9.3 (`MAP`) and an independent R implementation of both MAP powers, plus
     `eigen()` for PCA / SMC eigenvalues: all agree to $10^{-11}$, including the selected numbers of
@@ -1650,7 +1652,8 @@ data-independent shapes (§15.21).
     the name `dimensionality` (as `fit`), so `flexpyirt.dimensionality` is the function; tests
     reach the module with `importlib.import_module`. Checked in `tests/test_m5_ensemble.py` by
     recomputing each row with the individual functions and the same keys.
-13. **DETECT (`detect()`, `exploratory_detect()`, D4 of §16.8, V27)**: `_detect.py` (NumPy).
+13. **DETECT (`detect()`, `exploratory_detect()`, D4 of §16.8, V27)**: `_detect.py` (NumPy; now
+    in flexpyctt, §16.18).
     **Conditional covariances**: Zhang & Stout (1999): for each pair the ML covariance within
     groups of equal total score $S$ and within groups of equal rest score $S-X_i-X_j$, each
     averaged with the group proportions, then the two averaged (the total-score estimate is biased
@@ -1674,7 +1677,7 @@ data-independent shapes (§15.21).
     corrected here). **Ensemble**: `dimensionality()` adds the validation-half DETECT of the selected
     partition as a question-(B) row (supports when $<$ `detect_threshold` $=0.2$), available
     without `fit`; the key is split three ways (parallel analysis, model-based PA, DETECT).
-    **Validation (V27)**: `validation/r/m5_detect_reference.R` (sirt 4.2.133): simulated
+    **Validation (V27)**: `packages/flexpyctt/validation/r/m5_detect_reference.R` (sirt 4.2.133): simulated
     two-dimensional (true and wrong partitions), unidimensional and Science (polytomous) data with
     `conf.detect(use_sum_score = TRUE, bias_corr = TRUE, smooth = FALSE)`, and a three-cluster data
     set with `expl.detect(use_sum_score = TRUE, estsample = )`: conditional covariances,
@@ -1683,7 +1686,8 @@ data-independent shapes (§15.21).
     `smooth = TRUE`, sirt's `conf.detect(use_sum_score = TRUE)` standardizes the total score and then
     subtracts raw item scores for the rest score, so its rest-score groups are wrong (DETECT 6.73
     instead of 1.60 for `sim_2d`); recorded on the accuracy page, not followed.
-14. **EFA and the Hull method (`efa()`, `hull()`, D5 of §16.8, V28)**: `_efa.py` (NumPy / SciPy).
+14. **EFA and the Hull method (`efa()`, `hull()`, D5 of §16.8, V28)**: `_efa.py` (NumPy / SciPy;
+    now in flexpyctt, §16.18).
     **Estimation**: unrotated solutions from the uniquenesses $\Psi$, minimized by SciPy L-BFGS-B
     (`ftol=1e-15`, `gtol=1e-11`) from $\psi_i=1-\mathrm{SMC}_i$ within $[0.005,\max(1,\mathrm{SMC})]$
     (psych / EFAtools' bounds). ULS: $F=\tfrac12\lVert R-\Psi-\Lambda\Lambda^\top\rVert_F^2$, with
@@ -1710,7 +1714,7 @@ data-independent shapes (§15.21).
     `converged` per solution, and a `HeywoodWarning` is emitted when the selected one is
     inadmissible (as EFAtools). **Ensemble**: `dimensionality()` adds Hull (CAF, ULS, default $J$ from a
     fourth split of the key) to question (A) when there are at least 6 items.
-    **Validation (V28)**: `validation/r/m5_efa_hull_reference.R` (EFAtools 1.1.0, psych 2.6.9) on the
+    **Validation (V28)**: `packages/flexpyctt/validation/r/m5_efa_hull_reference.R` (EFAtools 1.1.0, psych 2.6.9) on the
     V24 polychoric matrices with $\ge6$ variables and two simulated Pearson matrices (3 factors,
     $N=500$; 2 weak factors, $N=300$): every $k\le J$ with ULS and ML — implied
     $\Lambda\Lambda^\top$ and communalities to $10^{-4}$ (observed $\le7\times10^{-5}$, the largest at
@@ -1719,7 +1723,8 @@ data-independent shapes (§15.21).
     fit index with EFAtools' recorded $J$: the selected $k$ and the hull membership identical, the
     fit values to $10^{-5}$ (observed $\le1.4\times10^{-6}$), $st$ to 1% relative (a ratio of small
     differences; observed $\le3.5\times10^{-3}$ absolute). Comparison data is §16.15.
-15. **Comparison data (`comparison_data()`, D5b of §16.8, V29)**: `_comparison_data.py` (NumPy;
+15. **Comparison data (`comparison_data()`, D5b of §16.8, V29; now in flexpyctt with `rng`
+    instead of `key`, §16.18)**: `_comparison_data.py` (NumPy;
     random draws from a JAX key are passed in, so the generator is deterministic given them).
     For $k=1..K$ ($K$ = largest $k$ with positive $df$, or `max_factors`): resample each variable's
     observed values `n_population` times and sort them; draw $F$ $(N,k)$ and $E$ $(N,p)$ standard
@@ -1740,14 +1745,14 @@ data-independent shapes (§15.21).
     and EFAtools); complete data. PAF loadings are signed to non-negative column sums: EFAtools
     takes LAPACK's signs, which only matter for $k\ge2$ and do not change the population's
     distribution. **Ensemble**: `dimensionality()` adds CD to question (A) with complete data
-    (fifth split of the key). **Validation (V29)**: `validation/r/m5_comparison_data_reference.R`
+    (fifth split of the key). **Validation (V29)**: `packages/flexpyctt/validation/r/m5_comparison_data_reference.R`
     (EFAtools 1.1.0): PAF loadings for $k=1..3$ to $10^{-12}$ in $\Lambda\Lambda^\top$; the one-factor
     population from EFAtools' own random draws (reproduced with the same seed and exported)
     identical; the rank-sum $p$-values on EFAtools' RMSE columns to $10^{-10}$ relative; `CD()` on a
     3-factor, a 2-factor ordinal and a 1-factor binary data set: the same suggestion for two keys
     each and mean RMSEs within 15% (different random populations).
-16. **DIMTEST (`dimtest()`, D6 of §16.8, V30)**: `_dimtest.py` (NumPy; random draws from a JAX key
-    are arguments). Binary complete data, at least 4 items. **Statistic** (Nandakumar & Stout,
+16. **DIMTEST (`dimtest()`, D6 of §16.8, V30)**: `_dimtest.py` (NumPy; random draws are
+    arguments; now in flexpyctt with `rng` instead of `key`, §16.18). Binary complete data, at least 4 items. **Statistic** (Nandakumar & Stout,
     1993): respondents grouped by the PT score; groups smaller than `min_group` (20) or with
     $S_k\le0$ dropped; $T_L=K^{-1/2}\sum_k(\hat\sigma_k^2-\hat\sigma_{U,k}^2)/S_k$ with
     $\hat\sigma_k^2$ the (divide-by-$J_k$) variance of the AT score, $\hat\sigma_{U,k}^2=\sum_i\hat
@@ -1766,26 +1771,29 @@ data-independent shapes (§15.21).
     their exact ATFIND, and is documented as such. **Ensemble**: `dimensionality()` adds DIMTEST
     ($p\ge\alpha$) to question (B) for complete binary data (sixth split of the key), otherwise an
     unavailable row. **Validation (V30)**: no implementation outside the stand-alone DIMPACK, so the
-    test is accepted on `validation/simulation/dimtest_study.py` (results in
+    test is accepted on `packages/flexpyctt/validation/simulation/dimtest_study.py` (results in
     `dimtest_study.json`): 2PL data, slopes $U(0.8,1.8)$, intercepts $N(0,0.8)$, items in two halves
     on dimensions correlated $\rho$, 200 replications per condition, defaults throughout:
 
     | Data | $N$ | $J$ | $\rho$ | mean $T$ | SD $T$ | reject at .05 | reject at .10 |
     |---|---|---|---|---|---|---|---|
-    | unidimensional | 1000 | 20 | 1 | -0.07 | 0.79 | 0.020 | 0.050 |
-    | unidimensional | 2000 | 20 | 1 | -0.10 | 0.73 | 0.005 | 0.015 |
-    | unidimensional | 2000 | 30 | 1 | -0.15 | 0.74 | 0.000 | 0.025 |
-    | two-dimensional | 1000 | 20 | 0.7 | 4.83 | 1.00 | 0.990 | 0.995 |
-    | two-dimensional | 2000 | 20 | 0.7 | 6.91 | 0.92 | 1.000 | 1.000 |
-    | two-dimensional | 2000 | 30 | 0.8 | 6.44 | 0.87 | 1.000 | 1.000 |
+    | unidimensional | 1000 | 20 | 1 | -0.07 | 0.72 | 0.005 | 0.020 |
+    | unidimensional | 2000 | 20 | 1 | -0.12 | 0.71 | 0.010 | 0.030 |
+    | unidimensional | 2000 | 30 | 1 | -0.03 | 0.73 | 0.010 | 0.025 |
+    | two-dimensional | 1000 | 20 | 0.7 | 4.85 | 0.97 | 0.990 | 0.995 |
+    | two-dimensional | 2000 | 20 | 0.7 | 6.94 | 0.88 | 1.000 | 1.000 |
+    | two-dimensional | 2000 | 30 | 0.8 | 6.50 | 0.86 | 1.000 | 1.000 |
+
+    (Rerun on 2026-11-25 with flexpyctt's NumPy generator, §16.18. With the JAX keys used before
+    the move the rejection rates at .05 were 0.020, 0.005, 0.000 and 0.990, 1.000, 1.000.)
 
     The test is conservative: $\bar T_G$ removes the bias of $T_L$ (mean $T$ near 0) but $T_L$'s
-    standard deviation under the null is about 0.75 rather than 1, so the type I error is below the
+    standard deviation under the null is about 0.72 rather than 1, so the type I error is below the
     nominal level; power against two dimensions correlated 0.7–0.8 is 0.99–1. A small $p$ is
     therefore strong evidence of multidimensionality, a large $p$ weak evidence for unidimensionality
     (stated in the docstring and the guide). Standardizing by the bootstrap SD of $T_G$ instead would
     recalibrate it but departs from the published statistic; not done. The pieces are unit-tested
-    against direct computations, and `tests/test_m5_dimtest.py` reruns a small version of the
+    against direct computations, and `packages/flexpyctt/tests/test_dimtest.py` reruns a small version of the
     study (20 null and 10 alternative replications).
 17. **Jackknife slope index (`FitResult.jsi()`, V31)**: `_jsi.py`. **Definition** (Edwards, Houts
     & Cai, 2018, as mirt's `residuals(type = "JSI")`): the jackknife is over items, not

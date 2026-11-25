@@ -1056,7 +1056,7 @@ class ItemKernel(Protocol):
    （DETECT の 0.2 / 0.4 / 1、Q3* の 0.2、RMSEA）は引数にし、出典を docstring に書く。ポリコリック行列は 1 回だけ計算して
    共有し、シミュレーションは JAX の PRNG キーを使う。アンサンブル自体はシミュレーション研究（1 次元・2 次元・
    バイファクター構造のデータ）で確かめる。
-9. **ポリコリック・テトラコリック相関（`polychoric()`、§16.8 の D1、V24）**:
+9. **ポリコリック・テトラコリック相関（`polychoric()`、§16.8 の D1、V24。以下は JAX 版。NumPy 版は §16.18）**:
    `flexpyirt.polychoric(data, *, smooth=True, zero_cell_correction=0.5, tol=1e-10, max_iter=100)` を
    `correlation.py`（シェル）と `_polychoric.py`（jit カーネル）に置き、変更不可の `PolychoricResult` を返す。
    **データ**: 任意の数値符号でよい。各項目を観測された値の昇順で $0..K_j-1$ に符号化し直すので、観測されない符号は
@@ -1085,13 +1085,14 @@ class ItemKernel(Protocol):
    同じ（最小固有値がマシンイプシロン未満なら、$10^{-12}$ 未満の固有値を $10^{-10}$ にし、和を $p$ にそろえ、行列を
    組み直し、対角を 1 にそろえる）。`errors` に新設した `NotPositiveDefiniteWarning` を出す。$\hat\rho$ の標準誤差は
    返さない（照合しておらず、次元性の手法も使わない）。
-   **照合（V24）**: `validation/r/m5_polychoric_reference.R`（lavaan 0.7-3、psych 2.6.9）。シミュレーションの
+   **照合（V24）**: `packages/flexpyctt/validation/r/m5_polychoric_reference.R`（lavaan 0.7-3、psych 2.6.9）。シミュレーションの
    テトラコリック（8 項目）、2 因子で 2〜5 カテゴリの混在、その 10% MCAR（pairwise）、空のセルが 1 つの 2 x 2 表を
    含む極端な 2 値項目、LSAT7、Science。lavaan と $3.1\times10^{-8}$ 以内（その `nlminb` の許容誤差。flexpyirt の
    ペアごとの勾配は $10^{-7}n$ まで 0）、閾値は $10^{-12}$ 以内、psych とは補正したペアを除く欠測のないデータで
    $2\times10^{-5}$ 以内（その `optimize()` の許容誤差）、`cor.smooth` とは $10^{-12}$ 以内で一致する。
 10. **平行分析・MAP・EKC（`parallel_analysis()`、`velicer_map()`、`empirical_kaiser()`、§16.8 の D2、V25）**:
-    `dimensionality.py`（シェル。$p\times p$ の線形代数は NumPy、正規の参照データは JAX の `vmap`）に置く。3 つとも
+    `dimensionality.py`（シェル。$p\times p$ の線形代数は NumPy、正規の参照データは JAX の `vmap`。現在は
+    flexpyctt にあり、乱数は NumPy、`key` の代わりに `rng` を取る。§16.18）に置く。3 つとも
     問い (A) に答え、`n_factors` をもつ変更不可の結果を返す。行列の入力（DataFrame、配列、`PolychoricResult`）は
     正方・有限・対称・対角 1・$p\ge3$ であること。**数え方**: 参照を厳密に上回る固有値を先頭から数え、最初に下回った
     ところで止める（psych・EFAtools と同じ逐次の規則）。**SMC の固有値**: 対角を $h_j=1-1/(R^{-1})_{jj}$ にした $R$
@@ -1108,7 +1109,7 @@ class ItemKernel(Protocol):
     統計量は行列のべき乗である（記録するが従わない）。**EKC**: EFAtools と同じ Braeken & van Assen (2017)（残りの
     分散の項に観測固有値を使う）。`PolychoricResult` を渡して `n_obs` を省くと、ペアごとの $n$ の最小値を使う
     （欠測があるときに保守的）。
-    **照合（V25）**: `validation/r/m5_dimensionality_reference.R` は V24 の lavaan のポリコリック行列 6 つを EFAtools
+    **照合（V25）**: `packages/flexpyctt/validation/r/m5_dimensionality_reference.R` は V24 の lavaan のポリコリック行列 6 つを EFAtools
     1.1.0（`EKC`）、psych 2.6.9（`vss()$map`）、EFA.dimensions 0.1.9.3（`MAP`）、両方の MAP のべきの R による独立な
     実装、PCA・SMC の固有値には `eigen()` に与える。選ばれる因子数も含めすべて $10^{-11}$ 以内で一致する。正規の
     参照固有値（3 つの大きさ x PCA・SMC、各 20000 データセット）は EFAtools の `PARALLEL` と Monte Carlo 誤差の範囲で
@@ -1153,7 +1154,8 @@ class ItemKernel(Protocol):
     表示する。モジュールと関数が同じ名前 `dimensionality` を持つ（`fit` と同じ）ので、`flexpyirt.dimensionality` は
     関数を指す。テストではモジュールを `importlib.import_module` で取得する。`tests/test_m5_ensemble.py` で、各行を
     個々の関数と同じキーで計算し直して確かめる。
-13. **DETECT（`detect()`、`exploratory_detect()`、§16.8 の D4、V27）**: `_detect.py`（NumPy）。
+13. **DETECT（`detect()`、`exploratory_detect()`、§16.8 の D4、V27）**: `_detect.py`（NumPy。現在は flexpyctt に
+    ある。§16.18）。
     **条件付き共分散**: Zhang & Stout (1999)。各ペアについて、総得点 $S$ が等しい群と残りの得点 $S-X_i-X_j$ が等しい
     群のそれぞれで最尤の共分散を求め、群の割合で平均し、さらに 2 つを平均する（総得点による推定は負に、残りの得点に
     よる推定は正に偏る）。群は `np.unique` と `np.bincount` でペアごとに 1 回で作る。生の項目得点を使い（多値項目も
@@ -1171,14 +1173,15 @@ class ItemKernel(Protocol):
     （Jang & Roussos, 2007; Zhang, 2007。§16.8 の 0.1 / 0.5 / 1 はここで訂正した）。**アンサンブル**:
     `dimensionality()` は選んだ分割の検証用の半分での DETECT を問い (B) の行として加える（`detect_threshold` $=0.2$
     未満なら支持）。`fit` がなくても使える。キーは 3 つ（平行分析、モデルに基づく平行分析、DETECT）に分ける。
-    **照合（V27）**: `validation/r/m5_detect_reference.R`（sirt 4.2.133）。シミュレーションの 2 次元（正しい分割と
+    **照合（V27）**: `packages/flexpyctt/validation/r/m5_detect_reference.R`（sirt 4.2.133）。シミュレーションの 2 次元（正しい分割と
     誤った分割）、1 次元、Science（多値）のデータで `conf.detect(use_sum_score = TRUE, bias_corr = TRUE, smooth = FALSE)`、
     3 クラスタのデータで `expl.detect(use_sum_score = TRUE, estsample = )`。条件付き共分散、5 つの指標（両方の
     重み付け）、分割、両方の半分での指標は $10^{-12}$（実測 $10^{-14}$）で、Ward の併合の高さは $10^{-12}$ で一致する。
     既定の `smooth = TRUE` のままだと、sirt の `conf.detect(use_sum_score = TRUE)` は総得点を標準化してから生の項目得点を
     引いて残りの得点とするので、残りの得点の群が誤る（`sim_2d` で DETECT 1.60 が 6.73 になる）。精度のページに記録し、
     従わない。
-14. **EFA と Hull 法（`efa()`、`hull()`、§16.8 の D5、V28）**: `_efa.py`（NumPy / SciPy）。
+14. **EFA と Hull 法（`efa()`、`hull()`、§16.8 の D5、V28）**: `_efa.py`（NumPy / SciPy。現在は flexpyctt に
+    ある。§16.18）。
     **推定**: 独自性 $\Psi$ から回転しない解を求め、SciPy の L-BFGS-B（`ftol=1e-15`、`gtol=1e-11`）で
     $\psi_i=1-\mathrm{SMC}_i$ から $[0.005,\max(1,\mathrm{SMC})]$ の範囲（psych・EFAtools と同じ境界）で最小化する。
     ULS: $F=\tfrac12\lVert R-\Psi-\Lambda\Lambda^\top\rVert_F^2$。$\Lambda$ は $R-\Psi$ の先頭の固有ベクトルを
@@ -1200,15 +1203,15 @@ class ItemKernel(Protocol):
     `heywood` と `converged` を記録し、選ばれた解が不適切なら EFAtools と同じく `HeywoodWarning` を出す。
     **アンサンブル**: 項目が 6 つ以上なら、`dimensionality()` は問い (A) に Hull（CAF、ULS、キーの 4 つ目の分割による
     既定の $J$）を加える。
-    **照合（V28）**: `validation/r/m5_efa_hull_reference.R`（EFAtools 1.1.0、psych 2.6.9）。V24 のポリコリック行列のうち
+    **照合（V28）**: `packages/flexpyctt/validation/r/m5_efa_hull_reference.R`（EFAtools 1.1.0、psych 2.6.9）。V24 のポリコリック行列のうち
     変数が 6 つ以上のものと、シミュレーションの Pearson 行列 2 つ（3 因子、$N=500$。弱い 2 因子、$N=300$）。
     $k\le J$ のすべてで ULS と ML について、含意する $\Lambda\Lambda^\top$ と共通性は $10^{-4}$（実測 $7\times10^{-5}$
     以下で、最大は Heywood の解）、CAF / CFI / RMSEA は $2\times10^{-4}$、$\chi^2$ は相対 $10^{-4}$、$df$ は厳密に一致。
     3 因子の行列での psych の `fa()` とも $10^{-4}$ で一致する。Hull は行列 x 推定法 x 適合度のすべてで EFAtools が
     記録した $J$ を使い、選ばれる $k$ と凸包上の点は同じ、適合度は $10^{-5}$（実測 $1.4\times10^{-6}$ 以下）、$st$ は
     相対 1%（小さな差の比なので。実測は絶対 $3.5\times10^{-3}$ 以下）で一致する。比較データ法は §16.15。
-15. **比較データ法（`comparison_data()`、§16.8 の D5b、V29）**: `_comparison_data.py`（NumPy。JAX のキーから
-    引いた乱数を引数で渡すので、それを与えれば生成は決定的）。$k=1..K$（$K$ は $df$ が正になる最大の $k$、または
+15. **比較データ法（`comparison_data()`、§16.8 の D5b、V29。現在は flexpyctt にあり、`key` の代わりに `rng` を
+    取る。§16.18）**: `_comparison_data.py`（NumPy。乱数を引数で渡すので、それを与えれば生成は決定的）。$k=1..K$（$K$ は $df$ が正になる最大の $k$、または
     `max_factors`）について、各変数の観測値を `n_population` 回復元抽出して並べ、標準正規の $F$ $(N,k)$ と
     $E$ $(N,p)$ を引き、母集団を生成する（Ruscio & Kaczetow, 2008。EFAtools の `.simulate_cfm_empirical` と同じ）。
     中間の $R^*$ を主因子法（EFAtools の `.paf_iter`。共通性の初期値は 1、固有値は絶対値、最大の変化に対する
@@ -1222,12 +1225,13 @@ class ItemKernel(Protocol):
     残し、最後に残した $k$ を結果とする。Pearson 相関のみ（Ruscio & Roche、EFAtools と同じ）、欠測のないデータ。
     主因子法の負荷量は列の和が非負になるよう符号をそろえる。EFAtools は LAPACK の符号をそのまま使うが、効くのは
     $k\ge2$ のときだけで、母集団の分布は変わらない。**アンサンブル**: 欠測がなければ `dimensionality()` は問い (A) に
-    CD を加える（キーの 5 つ目の分割）。**照合（V29）**: `validation/r/m5_comparison_data_reference.R`（EFAtools 1.1.0）。
+    CD を加える（キーの 5 つ目の分割）。**照合（V29）**: `packages/flexpyctt/validation/r/m5_comparison_data_reference.R`（EFAtools 1.1.0）。
     $k=1..3$ の主因子法の負荷量は $\Lambda\Lambda^\top$ で $10^{-12}$、EFAtools 自身の乱数（同じシードで再現して
     書き出す）による 1 因子の母集団は完全に同じ、EFAtools の RMSE の列に対する順位和の $p$ 値は相対 $10^{-10}$ で
     一致する。3 因子、2 因子の順序、1 因子の 2 値のデータでの `CD()` とは、それぞれ 2 つのキーで同じ提案、平均 RMSE は
     15% 以内（母集団の乱数が違うため）で一致する。
-16. **DIMTEST（`dimtest()`、§16.8 の D6、V30）**: `_dimtest.py`（NumPy。JAX のキーから引いた乱数を引数で渡す）。
+16. **DIMTEST（`dimtest()`、§16.8 の D6、V30）**: `_dimtest.py`（NumPy。乱数は引数で渡す。現在は flexpyctt に
+    あり、`key` の代わりに `rng` を取る。§16.18）。
     欠測のない 2 値データ、項目は 4 つ以上。**統計量**（Nandakumar & Stout, 1993）: 回答者を PT の得点で群に分け、
     `min_group`（20）未満の群と $S_k\le0$ の群を除く。$T_L=K^{-1/2}\sum_k(\hat\sigma_k^2-\hat\sigma_{U,k}^2)/S_k$。
     $\hat\sigma_k^2$ は AT の得点の（$J_k$ で割る）分散、$\hat\sigma_{U,k}^2=\sum_i\hat p_{ik}(1-\hat p_{ik})$、
@@ -1242,24 +1246,27 @@ class ItemKernel(Protocol):
     最大のもの。Froelich & Habing の条件付き共分散による AT の選択の考え方に沿うが、彼らの ATFIND そのものではなく、
     そう明記する。**アンサンブル**: 欠測のない 2 値データなら `dimensionality()` は問い (B) に DIMTEST（$p\ge\alpha$）を
     加える（キーの 6 つ目の分割）。そうでなければ使えない行とする。**照合（V30）**: 単独のプログラム DIMPACK 以外に
-    実装がないので、`validation/simulation/dimtest_study.py`（結果は `dimtest_study.json`）のシミュレーション研究で
+    実装がないので、`packages/flexpyctt/validation/simulation/dimtest_study.py`（結果は `dimtest_study.json`）のシミュレーション研究で
     受け入れる。2PL のデータ（傾き $U(0.8,1.8)$、切片 $N(0,0.8)$、項目を半分ずつ相関 $\rho$ の次元に置く）、各条件
     200 反復、すべて既定値:
 
     | データ | $N$ | $J$ | $\rho$ | $T$ の平均 | $T$ の SD | .05 で棄却 | .10 で棄却 |
     |---|---|---|---|---|---|---|---|
-    | 1 次元 | 1000 | 20 | 1 | -0.07 | 0.79 | 0.020 | 0.050 |
-    | 1 次元 | 2000 | 20 | 1 | -0.10 | 0.73 | 0.005 | 0.015 |
-    | 1 次元 | 2000 | 30 | 1 | -0.15 | 0.74 | 0.000 | 0.025 |
-    | 2 次元 | 1000 | 20 | 0.7 | 4.83 | 1.00 | 0.990 | 0.995 |
-    | 2 次元 | 2000 | 20 | 0.7 | 6.91 | 0.92 | 1.000 | 1.000 |
-    | 2 次元 | 2000 | 30 | 0.8 | 6.44 | 0.87 | 1.000 | 1.000 |
+    | 1 次元 | 1000 | 20 | 1 | -0.07 | 0.72 | 0.005 | 0.020 |
+    | 1 次元 | 2000 | 20 | 1 | -0.12 | 0.71 | 0.010 | 0.030 |
+    | 1 次元 | 2000 | 30 | 1 | -0.03 | 0.73 | 0.010 | 0.025 |
+    | 2 次元 | 1000 | 20 | 0.7 | 4.85 | 0.97 | 0.990 | 0.995 |
+    | 2 次元 | 2000 | 20 | 0.7 | 6.94 | 0.88 | 1.000 | 1.000 |
+    | 2 次元 | 2000 | 30 | 0.8 | 6.50 | 0.86 | 1.000 | 1.000 |
+
+    （2026-11-25 に flexpyctt の NumPy の生成器で再実行した値。§16.18。移す前の JAX のキーでは、.05 での棄却率は
+    0.020、0.005、0.000 と 0.990、1.000、1.000 だった。）
 
     検定は保守的である。$\bar T_G$ は $T_L$ の偏りを除く（$T$ の平均は 0 に近い）が、帰無仮説の下での $T_L$ の標準
-    偏差は 1 ではなく 0.75 程度なので、第 1 種の誤りは名目水準を下回る。相関 0.7〜0.8 の 2 次元に対する検出力は 0.99〜1。
+    偏差は 1 ではなく 0.72 程度なので、第 1 種の誤りは名目水準を下回る。相関 0.7〜0.8 の 2 次元に対する検出力は 0.99〜1。
     したがって小さい $p$ は多次元性の強い証拠であり、大きい $p$ は一次元性の弱い証拠にとどまる（docstring とガイドに
     書く）。$T_G$ のブートストラップ SD で標準化し直せば較正できるが、公表された統計量から離れるので行わない。各部分は
-    直接の計算と単体テストで比べ、`tests/test_m5_dimtest.py` で研究の小さい版（帰無 20 反復、対立 10 反復）を実行する。
+    直接の計算と単体テストで比べ、`packages/flexpyctt/tests/test_dimtest.py` で研究の小さい版（帰無 20 反復、対立 10 反復）を実行する。
 17. **ジャックナイフ傾き指標（`FitResult.jsi()`、V31）**: `_jsi.py`。**定義**（Edwards, Houts & Cai, 2018。mirt の
     `residuals(type = "JSI")` と同じ）: ジャックナイフは回答者ではなく項目について行う（11 項の以前の版は「部分群」と
     書いていたので直した）。各項目 $j$ について項目 $j$ を除いてモデルを推定し直し、他のすべての項目 $i$ について
