@@ -24,7 +24,7 @@
 | アンカーテストを使う線形等化 | `equate(xa, ya, method=...)`。`"tucker"`、`"levine_observed"`、`"levine_true"`（内部・外部アンカー）、`"braun_holland"`、`"chained_linear"`。合成母集団の重みを指定可能 | R `equate`、教科書の式の独立 R 実装 |
 | アンカーテストを使う等パーセンタイル等化 | `equate(xa, ya, method="frequency_estimation")`（事後層化。合成母集団の重みを指定可能）と `method="chained_equipercentile"`。事前平滑化した同時分布も渡せる | R `equate`、教科書の式の独立 R 実装 |
 | 対数線形モデルによる事前平滑化 | `presmooth()`: 1 つの得点、または 2 つの得点の同時分布（交差項つき）に対する多項式対数線形モデル。尤度比・Pearson・Freeman–Tukey のカイ二乗、AIC | R `glm`、`equate` |
-| カーネル等化 | `kernel_equate()`（等価群）: ガウスカーネル、von Davier, Holland & Thayer (2004) のペナルティによるバンド幅選択または指定、等化の標準誤差（事前平滑化あり・なし）、相対誤差（PRE） | R `kequate`、`SNSequate`、独立 R 実装 |
+| カーネル等化 | `kernel_equate()`。等価群、単一群、カウンターバランス、アンカーテストつきデザイン（連鎖・事後層化）。ガウスカーネル、von Davier, Holland & Thayer (2004) のペナルティによるバンド幅選択または指定、等化の標準誤差（事前平滑化あり・なし）、線形版、2 つの等化関数の差の標準誤差（`seed()`）、相対誤差（PRE） | R `kequate`、`SNSequate`、独立 R 実装 |
 
 ## インストール
 
@@ -103,6 +103,16 @@ kernel = fe.kernel_equate(smooth_x, smooth_y)  # ガウスカーネル、ペナ�
 kernel.table  # score, equated, see（等化の標準誤差）
 kernel.bandwidth_x, kernel.bandwidth_y
 kernel.percent_relative_error  # 1〜10 次のモーメント
+
+# 他のデザインでは、事前平滑化した同時分布を渡す。
+xa_fit = fe.presmooth(xa, degree=(4, 3), cross_terms=[(1, 1)])
+ya_fit = fe.presmooth(ya, degree=(4, 3), cross_terms=[(1, 1)])
+chained = fe.kernel_equate(xa_fit, ya_fit, design="chained")
+post = fe.kernel_equate(xa_fit, ya_fit, design="post_stratification")
+linear = fe.kernel_equate(xa_fit, ya_fit, design="post_stratification", linear=True)
+post.seed(linear)  # カーネル等化と線形等化の差と、その標準誤差
+chained.seed(post)
+fe.kernel_equate(fe.presmooth(xy, degree=(4, 4)))  # 単一群
 ```
 
 ## R との一致についての注意
@@ -121,6 +131,9 @@ kernel.percent_relative_error  # 1〜10 次のモーメント
 - R `kequate` は連続化に使う分散に N / (N − 1) を掛けます。flexpyequate は von Davier, Holland &
   Thayer (2004) および `SNSequate` と同じく、得点分布そのものの分散を使います。等化後得点の差は標本が
   大きいほど小さくなります（照合に使った例では 600 人で 1e-3 程度、数千人で 1e-5 以下）。
+- カウンターバランスデザインで、R `kequate` の重みは 1 つです。その標準誤差が等化関数と対応するのは
+  重みが 1/2 のときだけです。flexpyequate は重みを 2 つ持ち（`counterbalance_weights`）、標準誤差は
+  どの重みでも成り立ちます。
 - `kernel_equate()` は同書のペナルティの 2 つの項を両方使ってバンド幅を選びます（`penalty_weight=1`）。
   `kequate` の既定は第 1 項のみです（`penalty_weight=0` で再現できます）。
 
