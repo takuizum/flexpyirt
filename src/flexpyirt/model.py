@@ -410,6 +410,11 @@ class Model:
             any factor is empty or lists unknown/duplicated items, any model item loads on no
             factor, or ``with_groups()`` / ``with_latent()`` is already set.
         """
+        if self.bifactor:
+            raise SpecificationError(
+                "This model is a bifactor model; with_factors() and with_bifactor() cannot be "
+                "combined."
+            )
         if self.groups is not None and any(
             isinstance(dist, EmpiricalHistogram) for _, dist in self.groups
         ):

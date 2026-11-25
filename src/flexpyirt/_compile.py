@@ -1013,6 +1013,11 @@ def eh_param_count(t: pd.DataFrame, model: Model, quad: Quadrature) -> int:
 
 def _check_identification(t: pd.DataFrame, model: Model) -> None:
     """Scale identification rules of DESIGN.md §4.5, §14.5, and §15.31 (necessary conditions)."""
+    if model.bifactor and bool(t.loc[t["item"] == LATENT_ITEM, "free"].any()):
+        raise SpecificationError(
+            "Bifactor models do not support free latent parameters yet; keep every mean_m and "
+            "var_m fixed (DESIGN.md §17.1)."
+        )
     if model.is_multidimensional:
         _check_identification_mirt(t, model)
         return
