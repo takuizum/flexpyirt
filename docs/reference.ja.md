@@ -2,16 +2,23 @@
 
 [English](reference.md) | 日本語
 
-flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）の一覧。使い方の流れは
-[ユーザーガイド](guide.ja.md)、数式とアルゴリズムは [理論](theory.ja.md) を参照。
+flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）と、対になるパッケージ flexpyctt の公開 API の一覧。
+使い方の流れは[ユーザーガイド](guide.ja.md)、数式とアルゴリズムは [理論](theory.ja.md) を参照。
 各関数の docstring にも同じ内容と対応する式・出典がある（`help(flexpyirt.fit)` など）。
+
+**flexpyctt** は、推定済みのモデルを使わない道具をまとめたパッケージである。[相関](#相関)と、[次元数](#次元数)のうち
+モデルを使わないものが入る（どちらのパッケージのものかは各項目に書く）。依存は NumPy、SciPy、pandas だけなので、
+JAX なしでインストールでき（`pip install flexpyctt`）、64 ビットの設定も要らない。flexpyirt をインストールすると
+一緒に入る。関数は `from flexpyctt import ...` で使う。flexpyirt も同じ名前で再公開しているが、`polychoric` だけは
+別で、`flexpyirt.polychoric` は同じ推定量の JAX による実装である。乱数を使う関数は、flexpyctt では `rng`（整数の
+シードまたは `numpy.random.Generator`）、flexpyirt では JAX の PRNG `key` を受け取る。
 
 公開関数の引数は、最初の 1〜2 個を除いてキーワード専用（`*` の後ろ）。
 
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
-- 相関: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- 次元数: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) とその結果
+- 相関（flexpyctt）: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
+- 次元数（`model_parallel_analysis` と `dimensionality` 以外は flexpyctt）: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) とその結果
 - 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - モデル: [`Model`](#model)
@@ -180,19 +187,35 @@ MAP モデル、欠測を含むデータ、不正な `ci`、項目数または�
 #### `FitResult.local_dependence`
 
 ```text
-local_dependence(data, *, item_names=None) -> LocalDependenceResult
+local_dependence(data, *, group=None, item_names=None) -> LocalDependenceResult
 ```
 
-単一群・1 次元・`Normal` 潜在分布のモデルについて、すべての項目ペアの局所依存の統計量を求める
+すべての項目ペアの局所依存の統計量を求める
 （[ガイド 18 節](guide.ja.md#18-局所依存と次元性のレポート)）。Yen (1984) の Q3（EAP の $\hat\theta$ による残差
 $x_{ij} - E(X_j \mid \hat\theta_i)$ の相関）、Q3\* $=$ Q3 $-$ Q3 の平均（Christensen, Makransky & Horton, 2017）、
 推定した格子でモデルが含意する分割表と比べる Chen & Thissen (1997) の LD $X^2$ / $G^2$（$df = (K_i-1)(K_j-1)$、
 $p$ 値、符号付きの Cramér の $V$）。mirt の `residuals(type = "Q3" / "LD" / "LDG2")` と同じ。欠測はペアごとに扱う。
 
+期待度数の表と EAP には、推定した格子の上の推定した潜在分布を使う。`Normal`、`EmpiricalHistogram`、
+`DavidianCurve`、`NormalMixture` と、2〜3 因子のモデルでは直積格子の上の多変量正規分布（EAP はベクトル）。
+多母集団モデルでは `group` が必要で、すべての統計量を群ごとに、その群の受験者・項目パラメタ・潜在分布で求める。
+bifactor モデルは対象外。
+
+mirt の既定との違いが 2 つある。`dentype = "EH"` / `"Davidian-k"` の推定では、mirt は
+`residuals(m, type = "LD", use_dentype_estimate = TRUE)` や
+`residuals(m, type = "Q3", Theta = fscores(m, use_dentype_estimate = TRUE))` と呼ばないかぎり標準正規の
+事前分布を使う。また、mirt の Q3 は `fscores()` 独自の格子（1 / 2 / 3 因子で各次元 121 / 61 / 31 点）で
+スコアを求めるが、flexpyirt は推定した格子を使う。
+
+| 引数 | 型 | 既定値 | 説明 |
+|---|---|---|---|
+| `data` | DataFrame または配列 | | 推定した項目への回答。欠測は NaN |
+| `group` | 配列 | `None` | 群のラベル（多母集団モデルでは必須） |
+| `item_names` | list of str | `None` | `data` が配列のときの列名 |
+
 **戻り値**: [`LocalDependenceResult`](#localdependenceresult)
 
-**例外**: `PrecisionError`。多母集団・多次元・`Normal` 以外の潜在分布のモデル、不正なデータは
-`SpecificationError`。
+**例外**: `PrecisionError`。不正なデータや群のラベルは `SpecificationError`。
 
 #### `FitResult.jsi`
 
@@ -356,6 +379,36 @@ model.with_factors(factors, *, correlated=True) -> Model
 組み合わせると、各群の `Normal` がすべての因子に適用される（[ガイド 14 節](guide.ja.md#14-確認的多次元モデル)）。多次元モデルでの
 `with_latent()` と `EmpiricalHistogram` は未対応（`SpecificationError`）。
 
+#### `Model.with_bifactor`
+
+```text
+model.with_bifactor(*, specific, general="general") -> Model
+```
+
+双因子モデルを宣言する（[ガイド 14 節](guide.ja.md#双因子モデル)）。全項目が負荷する一般因子（名前は `general`）と、
+`specific`（因子名から項目への辞書、順序つき）の特殊因子からなる。各項目が負荷する特殊因子は高々 1 つで、どこにも
+挙げない項目は一般因子のみに負荷し、各特殊因子は 2 項目以上が必要。項目パラメタは `a1`（一般因子）、`a2`…`aD`
+（特殊因子。他の特殊因子への傾きは `0` に固定）、`d`（または `d1`…）で、mirt の `bfactor()` と一致する。因子は直交し、
+潜在パラメタの行は `mean_1`…`mean_D`（`0` 固定）と `var_1`…`var_D`（`1` 固定）。E ステップは Gibbons–Hedeker の
+次元縮約（特殊因子ごとに 2 次元格子 1 つ。既定は $[-6, 6]$ 上の 31 点）。群、`with_latent()`、`with_factors()` との
+併用、Rasch / PCM 項目、編集したテーブルでの潜在パラメタの自由推定は `SpecificationError`。スコアリングは `"EAP"` のみ。
+
+#### `Model.with_two_tier`
+
+```text
+model.with_two_tier(*, primary, specific, correlated=True) -> Model
+```
+
+two-tier モデルを宣言する（[ガイド 14 節](guide.ja.md#two-tier-モデル)）。`primary` の主因子と `specific` の特殊因子
+（どちらも因子名から項目への辞書、順序つき。主因子は 1〜2 個）からなる。各項目は主因子の少なくとも 1 つに負荷し、
+特殊因子には高々 1 つに負荷する。各特殊因子は 2 項目以上が必要。項目パラメタは `a1`…`aP`（主因子）、`a(P+1)`…`aD`
+（特殊因子。負荷しない因子への傾きは `0` に固定）、`d`（または `d1`…）で、mirt の `bfactor(data, model, model2 = )` と
+一致する。潜在パラメタの行は `mean_1`…`mean_D`（`0` 固定）、`var_1`…`var_D`（`1` 固定）と、主因子が 2 つのときの
+`cor_12`（`correlated=True` なら自由）。特殊因子は他のすべての因子と直交する。E ステップは、主因子の直積格子と
+特殊因子 1 つずつについて積分する（既定は、主因子 2 つで $[-6, 6]$ 上の次元あたり 15 点、1 つで 31 点）。主因子が
+3 つ以上、主因子に負荷しない項目、群、`with_latent()`、`with_factors()` / `with_bifactor()` との併用、Rasch / PCM 項目、
+編集したテーブルでの潜在平均・分散の自由推定は `SpecificationError`。スコアリングは `"EAP"` のみ。
+
 #### `Model.with_latent`
 
 ```text
@@ -426,8 +479,12 @@ model.parameter_table(data, *, group=None, item_names=None) -> DataFrame
 |---|---|
 | `item_names` | 項目名のタプル |
 | `is_multigroup` | `with_groups()` で群を宣言したか |
-| `is_multidimensional` | `with_factors()` で確認的因子を宣言したか |
-| `n_factors` | 潜在因子数（`1`, `2`, または `3`） |
+| `is_multidimensional` | `with_factors()`・`with_bifactor()`・`with_two_tier()` のいずれかで因子を宣言したか |
+| `n_factors` | 潜在因子数（`1`, `2`, または `3`。双因子モデルでは `1 + S`、two-tier モデルでは `P + S`） |
+| `bifactor` | `with_bifactor()` で宣言したか |
+| `n_primary_factors` | `with_two_tier()` で宣言したモデルの主因子数（それ以外は `0`） |
+| `quadrature_dimension` | E ステップが積分する格子の次元（双因子モデルでは `2`、two-tier モデルでは `P + 1`） |
+| `latent_parameter_names()` | 各群の Normal 潜在パラメタ名 |
 | `factor_names` | 因子名のタプル（1 次元モデルでは空タプル） |
 | `resolved_latent()` | 単一群モデルの潜在分布（既定則を適用したもの） |
 | `resolved_groups()` | `(群名, Normal)` のタプル。単一群なら `(("all", ...),)` |
@@ -724,6 +781,8 @@ Rasch・4PL・PCM は同じカーネルを共有し単体テストでのみ確�
 
 ## 相関
 
+パッケージ: flexpyctt（`from flexpyctt import polychoric`）。
+
 ### `polychoric`
 
 ```text
@@ -733,8 +792,11 @@ polychoric(data, *, smooth=True, zero_cell_correction=0.5, tol=1e-10,
 
 順序反応のポリコリック相関行列（2 値項目ではテトラコリック相関）を two-step の最尤法で求める
 （[ガイド 16 節](guide.ja.md#16-ポリコリック相関)）。各項目の閾値を周辺比率から求め、そのうえで各ペアの相関を、離散化した
-2 変量正規分布のもとでのペアの分割表の尤度を最大にする値とする（Olsson, 1979）。2 変量正規分布の確率は Genz (2004) の
-方法で計算する。順序変数に対する lavaan の `lavCor` と一致する。
+2 変量正規分布のもとでのペアの分割表の尤度を最大にする値とする（Olsson, 1979）。2 変量正規分布の確率は Owen (1956) の
+$T$ 関数で計算する。順序変数に対する lavaan の `lavCor` と一致する。
+
+`flexpyirt.polychoric` は引数と結果が同じで、同じ推定量を JAX で計算する（2 変量正規分布の確率は Genz, 2004 の方法）。
+JAX の 64 ビットが無効なときは `PrecisionError` を出す。2 つは $10^{-9}$ 程度で一致する。
 
 | 引数 | 型 | 説明 |
 |---|---|---|
@@ -748,7 +810,7 @@ polychoric(data, *, smooth=True, zero_cell_correction=0.5, tol=1e-10,
 
 **戻り値**: [`PolychoricResult`](#polychoricresult)
 
-**例外**: `PrecisionError`（JAX の 64 ビットが無効）、`SpecificationError`（数値でないデータ、項目が 2 つ未満、観測された
+**例外**: `SpecificationError`（数値でないデータ、項目が 2 つ未満、観測された
 カテゴリが 1 つだけの項目、両方に回答した回答者がいないペア、またはその回答者の中で一方の項目が一定）。
 
 **警告**: `HeywoodWarning`（ペアの尤度が $|\rho| \to 1$ で最大）、`ConvergenceWarning`（収束しないペアがある）、
@@ -774,10 +836,13 @@ polychoric(data, *, smooth=True, zero_cell_correction=0.5, tol=1e-10,
 いずれも「次元はいくつか」を診断として答える。1 つの手法だけを信頼せず、いくつかを組み合わせて判断する
 （[ガイド 17 節](guide.ja.md#17-次元数)）。
 
+パッケージ: flexpyctt。ただし [`model_parallel_analysis`](#model_parallel_analysis)、
+[`dimensionality`](#dimensionality)、`LocalDependenceResult`、`JSIResult` は推定済みのモデルを使うので flexpyirt のもの。
+
 ### `parallel_analysis`
 
 ```text
-parallel_analysis(data, *, key, correlation="polychoric", eigen_type="pca",
+parallel_analysis(data, *, rng, correlation="polychoric", eigen_type="pca",
                   reference="permutation", n_replications=100, quantile=0.95,
                   zero_cell_correction=0.5) -> ParallelAnalysisResult
 ```
@@ -788,7 +853,7 @@ Horn (1965) の平行分析。観測された相関行列の固有値のうち�
 | 引数 | 型 | 説明 |
 |---|---|---|
 | `data` | DataFrame / 2 次元配列 | 回答者 x 項目（順序のある符号。`correlation="pearson"` なら連続量でもよい）。欠測は NaN |
-| `key` | JAX の PRNG キー | 参照データの乱数キー（例 `jax.random.key(0)`） |
+| `rng` | int / `numpy.random.Generator` | 参照データのシードまたは生成器（例 `rng=0`） |
 | `correlation` | `"polychoric"` / `"pearson"` | データと並べ替えの反復で使う相関（正定値でなければどちらも平滑化） |
 | `eigen_type` | `"pca"` / `"smc"` | 相関行列の固有値、または対角を重相関係数の 2 乗にした縮約行列の固有値 |
 | `reference` | `"permutation"` / `"normal"` | 項目ごとに独立に並べ替える（周辺分布を保つ。Garrido, Abad & Ponsoda, 2013）、または同じ大きさの独立な正規データ（Pearson） |
@@ -798,7 +863,7 @@ Horn (1965) の平行分析。観測された相関行列の固有値のうち�
 
 **戻り値**: [`ParallelAnalysisResult`](#parallelanalysisresult)
 
-**例外**: `PrecisionError`、`SpecificationError`（不正な指定やデータ、項目が 3 つ未満）。
+**例外**: `SpecificationError`（不正な指定やデータ、項目が 3 つ未満）。
 
 **警告**: 並べ替えの反復を飛ばしたとき（欠測のため、並べ替えたペアに使える回答がない）に `FlexpyirtWarning`。
 
@@ -873,14 +938,14 @@ ML（Jöreskog, 1967）で、独自性を $1 - \mathrm{SMC}$ から $[0.005, \ma
 ### `hull`
 
 ```text
-hull(correlation, *, n_obs=None, max_factors=None, key=None, method="uls",
+hull(correlation, *, n_obs=None, max_factors=None, rng=None, method="uls",
      fit_index="caf", n_replications=1000) -> HullResult
 ```
 
 Hull 法（Lorenzo-Seva, Timmerman & Kiers, 2011）。EFAtools の `HULL()` と同じ。$k = 0, \dots, J$ 因子の解を適合度
 （CAF、CFI、$1-$RMSEA）と自由度で並べ、上側の凸包の上で scree 比
 $st_k = \frac{(f_k - f_{k-1})/(df_k - df_{k-1})}{(f_{k+1} - f_k)/(df_{k+1} - df_k)}$ を最大にする $k$ を選ぶ。既定の $J$ は
-平行分析の結果に 1 を足したもの（`key` と `n_obs` が要る）で、自由度が正になる範囲に抑える。変数は 6 つ以上。
+平行分析の結果に 1 を足したもの（`rng` と `n_obs` が要る）で、自由度が正になる範囲に抑える。変数は 6 つ以上。
 
 ### `HullResult`
 
@@ -893,7 +958,7 @@ $st_k = \frac{(f_k - f_{k-1})/(df_k - df_{k-1})}{(f_{k+1} - f_k)/(df_{k+1} - df_
 ### `comparison_data`
 
 ```text
-comparison_data(data, *, key, max_factors=None, n_population=10000, n_samples=500,
+comparison_data(data, *, rng, max_factors=None, n_population=10000, n_samples=500,
                 alpha=0.30, max_iter=50) -> ComparisonDataResult
 ```
 
@@ -940,10 +1005,10 @@ $p = (1 + \#\{T_b \ge T\})/(B + 1)$。`eigen_type="max"` は ltm の `unidimTest
 
 | 属性 | 型 | 説明 |
 |---|---|---|
-| `pairs` | DataFrame | ペアごとに 1 行: `item_i`, `item_j`, `n`, `q3`, `q3_star`, `x2`, `g2`, `df`, `p_x2`, `p_g2`, `cramer_v` |
-| `q3` | DataFrame | 項目 x 項目の Q3 行列 |
-| `q3_mean` | float | 非対角の Q3 の平均 |
-| `max_q3_star` | float | 最大の Q3\* |
+| `pairs` | DataFrame | ペアごとに 1 行: `item_i`, `item_j`, `n`, `q3`, `q3_star`, `x2`, `g2`, `df`, `p_x2`, `p_g2`, `cramer_v`。多母集団モデルでは先頭に `group` 列が付き、群とペアごとに 1 行 |
+| `q3` | DataFrame | 項目 x 項目の Q3 行列。多母集団モデルでは群ごとの行列を `(group, item)` の行インデックスで並べる |
+| `q3_mean` | float または Series | 非対角の Q3 の平均。多母集団モデルでは群をインデックスにした Series（各群の Q3\* はその群の平均を使う） |
+| `max_q3_star` | float | 最大の Q3\*（全群で） |
 
 ### `JSIResult`
 
@@ -982,11 +1047,11 @@ RATIO $> 0.36$ でその分割について一次元性からの本質的なず�
 ### `exploratory_detect`
 
 ```text
-exploratory_detect(data, *, max_clusters=4, key=None,
+exploratory_detect(data, *, max_clusters=4, rng=None,
                    estimation_rows=None) -> ExploratoryDetectResult
 ```
 
-行を推定用と検証用の半分に分け（`key` で無作為に、または `estimation_rows` で指定）、推定用の半分で
+行を推定用と検証用の半分に分け（`rng` で無作為に、または `estimation_rows` で指定）、推定用の半分で
 $\max(\mathrm{ccov}) - \mathrm{ccov}$ に Ward 法を当てて項目をクラスタに分け、$2, \dots,$ `max_clusters` 個への各分割の
 DETECT・ASSI・RATIO を両方の半分で報告する。
 
@@ -1002,7 +1067,7 @@ DETECT・ASSI・RATIO を両方の半分で報告する。
 ### `dimtest`
 
 ```text
-dimtest(data, *, key, assessment_items=None, training_fraction=1/3, n_bootstrap=100,
+dimtest(data, *, rng, assessment_items=None, training_fraction=1/3, n_bootstrap=100,
         min_group=20, max_assessment_size=None) -> DimtestResult
 ```
 
@@ -1221,6 +1286,10 @@ mirt の既定と同じく、1 因子で 61 点、2 因子で各軸 31 点（$31
 #### `FlexpyirtError`
 
 flexpyirt が意図して出すすべての例外の基底クラス。
+
+`SpecificationError` と警告のクラスは flexpyctt と共通で（`flexpyctt.errors` で定義し、ここで再公開している）、
+`FlexpyirtError` と `FlexpyirtWarning` は flexpyctt の基底クラス `FlexpycttError`、`FlexpycttWarning` と同じクラス
+である。したがって、flexpyirt のクラスで捕まえれば flexpyctt の関数が出したものも捕まえられる。
 
 #### `SpecificationError`
 

@@ -139,6 +139,11 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 
 ## 7. 主なクラス・関数の一覧
 
+推定済みのモデルを使わない道具（下の表の `polychoric` から `detect` まで。`model_parallel_analysis` と
+`dimensionality` を除く）は flexpyctt で定義し、flexpyirt が再公開する。これらは JAX の `key` の代わりに `rng`
+（シードまたは `numpy.random.Generator`）を取る。`flexpyirt.polychoric` は JAX 版、`flexpyctt.polychoric` は
+NumPy / SciPy 版（DESIGN.md §16.18）。
+
 | 名前 | 種類 | 役割 |
 |---|---|---|
 | `Model` | frozen dataclass | 仕様全体。`uniform`, `from_items` で生成、`.fix`, `.fix_from`, `.prior`, `.equal_across_groups`, `.equal_across_items`, `.with_groups`, `.with_latent`, `.parameter_table` |

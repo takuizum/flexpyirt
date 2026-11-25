@@ -2,17 +2,26 @@
 
 English | [日本語](reference.ja.md)
 
-The public API of flexpyirt (everything importable with `from flexpyirt import ...`). For the
-workflow see the [user guide](guide.md); for the formulas and algorithms see [Theory](theory.md).
-The docstrings carry the same information plus the formulas and sources
-(`help(flexpyirt.fit)` and so on).
+The public API of flexpyirt (everything importable with `from flexpyirt import ...`) and of its
+companion package flexpyctt. For the workflow see the [user guide](guide.md); for the formulas and
+algorithms see [Theory](theory.md). The docstrings carry the same information plus the formulas
+and sources (`help(flexpyirt.fit)` and so on).
+
+**flexpyctt** holds the tools that need no fitted model: [correlations](#correlations) and the
+model-free part of [number of dimensions](#number-of-dimensions) (each entry below says which
+package it belongs to). It depends on NumPy, SciPy and pandas only, so it can be installed without
+JAX (`pip install flexpyctt`) and needs no 64-bit setting; installing flexpyirt installs it too.
+Import its functions with `from flexpyctt import ...`. flexpyirt re-exports them under the same
+names, except `polychoric`: `flexpyirt.polychoric` is a JAX implementation of the same estimator.
+flexpyctt's functions take `rng` (an integer seed or a `numpy.random.Generator`) where they draw
+random numbers; flexpyirt's take a JAX PRNG `key`.
 
 Apart from the first one or two, arguments of public functions are keyword-only (after `*`).
 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
-- Correlations: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
+- Correlations (flexpyctt): [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
+- Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
 - Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - Model: [`Model`](#model)
@@ -199,21 +208,38 @@ multiple-group, `EmpiricalHistogram`, `NormalMixture`, or MAP (with priors) mode
 #### `FitResult.local_dependence`
 
 ```text
-local_dependence(data, *, item_names=None) -> LocalDependenceResult
+local_dependence(data, *, group=None, item_names=None) -> LocalDependenceResult
 ```
 
-Local-dependence statistics for every item pair of a single-group unidimensional model with a
-`Normal` latent distribution ([guide section 18](guide.md#18-local-dependence-and-the-dimensionality-report)):
+Local-dependence statistics for every item pair
+([guide section 18](guide.md#18-local-dependence-and-the-dimensionality-report)):
 Yen's (1984) Q3 (correlation of residuals $x_{ij} - E(X_j \mid \hat\theta_i)$ with EAP
 $\hat\theta$), Q3\* $=$ Q3 $-$ mean Q3 (Christensen, Makransky & Horton, 2017), and Chen &
 Thissen's (1997) LD $X^2$ / $G^2$ against the model-implied table on the fitted grid, with
 $df = (K_i-1)(K_j-1)$, $p$-values and a signed Cramér's $V$, as mirt's
 `residuals(type = "Q3" / "LD" / "LDG2")`. Missing responses are allowed (pairwise).
 
+The expected tables and the EAP use the fitted latent distribution on the fitted grid: `Normal`,
+`EmpiricalHistogram`, `DavidianCurve` or `NormalMixture`, and the multivariate Normal on the
+product grid (with the vector EAP) for models with 2 or 3 factors. In a multiple-group model
+`group` is required and every statistic is computed within a group, from that group's
+respondents, item parameters and latent distribution. Bifactor models are not covered.
+
+Two differences from mirt's defaults: for `dentype = "EH"` / `"Davidian-k"` fits mirt takes a
+standard Normal prior unless called as `residuals(m, type = "LD", use_dentype_estimate = TRUE)`
+and `residuals(m, type = "Q3", Theta = fscores(m, use_dentype_estimate = TRUE))`; and mirt's Q3
+scores on `fscores()`'s own grid (121 / 61 / 31 points per dimension for 1 / 2 / 3 factors),
+flexpyirt on the fitted grid.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `data` | DataFrame or array-like | | Responses on the fitted items; missing as NaN |
+| `group` | array-like | `None` | Group labels (required for a multiple-group model) |
+| `item_names` | list of str | `None` | Column names when `data` is an array |
+
 **Returns**: [`LocalDependenceResult`](#localdependenceresult)
 
-**Raises**: `PrecisionError`; `SpecificationError` for multiple-group, multidimensional or
-non-`Normal` latent models, or invalid data.
+**Raises**: `PrecisionError`; `SpecificationError` for invalid data or group labels.
 
 #### `FitResult.jsi`
 
@@ -394,6 +420,43 @@ group's `Normal` applies to every factor ([guide section 14](guide.md#14-confirm
 `with_latent()` and `EmpiricalHistogram` are not supported for multidimensional models
 (`SpecificationError`).
 
+#### `Model.with_bifactor`
+
+```text
+model.with_bifactor(*, specific, general="general") -> Model
+```
+
+Declare a bifactor model ([guide section 14](guide.md#bifactor-models)): a general factor named
+`general` on which every item loads, and the specific factors of `specific` (a mapping from factor
+name to items, in order). Each item loads on at most one specific factor, items under none load on
+the general factor only, and each specific factor needs at least two items. Item parameters are
+`a1` (general), `a2`…`aD` (specific; slopes on other specific factors fixed at `0`) and `d` (or
+`d1`…), matching mirt's `bfactor()`. The factors are orthogonal: the latent rows are `mean_1`…`mean_D`
+(fixed `0`) and `var_1`…`var_D` (fixed `1`). The E-step uses Gibbons–Hedeker dimension reduction
+(one two-dimensional grid per specific factor; default 31 points on $[-6, 6]$). Raises
+`SpecificationError` for groups, `with_latent()`, combining with `with_factors()`, Rasch / PCM
+items, or free latent parameters in an edited table. Scoring supports `"EAP"` only.
+
+#### `Model.with_two_tier`
+
+```text
+model.with_two_tier(*, primary, specific, correlated=True) -> Model
+```
+
+Declare a two-tier model ([guide section 14](guide.md#two-tier-models)): the primary factors of
+`primary` and the specific factors of `specific` (both mappings from factor name to items, in
+order; one or two primary factors). Every item loads on at least one primary factor and on at most
+one specific factor, and each specific factor needs at least two items. Item parameters are
+`a1`…`aP` (primary), `a(P+1)`…`aD` (specific; slopes an item does not load on are fixed at `0`)
+and `d` (or `d1`…), matching mirt's `bfactor(data, model, model2 = )`. The latent rows are
+`mean_1`…`mean_D` (fixed `0`), `var_1`…`var_D` (fixed `1`) and, for two primary factors, `cor_12`
+(free when `correlated=True`); specific factors are orthogonal to every other factor. The E-step
+integrates over the primary factors' product grid and one specific factor at a time (default 15
+points per dimension on $[-6, 6]$ for two primary factors, 31 for one). Raises
+`SpecificationError` for more than two primary factors, an item on no primary factor, groups,
+`with_latent()`, combining with `with_factors()` or `with_bifactor()`, Rasch / PCM items, or free
+latent means or variances in an edited table. Scoring supports `"EAP"` only.
+
 #### `Model.with_latent`
 
 ```text
@@ -471,8 +534,12 @@ The default ParameterTable for `data`, with columns `group`, `item`, `model`, `p
 |---|---|
 | `item_names` | Tuple of item names |
 | `is_multigroup` | Whether groups were declared with `with_groups()` |
-| `is_multidimensional` | Whether confirmatory factors were declared with `with_factors()` |
-| `n_factors` | Number of latent factors (`1`, `2`, or `3`) |
+| `is_multidimensional` | Whether factors were declared with `with_factors()`, `with_bifactor()` or `with_two_tier()` |
+| `n_factors` | Number of latent factors (`1`, `2`, or `3`; `1 + S` for a bifactor model, `P + S` for a two-tier model) |
+| `bifactor` | Whether the model was declared with `with_bifactor()` |
+| `n_primary_factors` | Number of primary factors of a model declared with `with_two_tier()` (`0` otherwise) |
+| `quadrature_dimension` | Dimension of the grid the E-step integrates over (`2` for bifactor models, `P + 1` for two-tier models) |
+| `latent_parameter_names()` | Names of the Normal latent parameters of each group |
 | `factor_names` | Tuple of factor names (empty for a unidimensional model) |
 | `resolved_latent()` | The single-group latent distribution, with the default rule applied |
 | `resolved_groups()` | Tuple of `(group name, Normal)`; `(("all", ...),)` for a single group |
@@ -791,6 +858,8 @@ Returned by `link()`. Immutable.
 
 ## Correlations
 
+Package: flexpyctt (`from flexpyctt import polychoric`).
+
 ### `polychoric`
 
 ```text
@@ -802,8 +871,12 @@ Polychoric correlation matrix (tetrachoric for binary items) of ordinal response
 maximum likelihood ([guide section 16](guide.md#16-polychoric-correlations)): each item's
 thresholds come from its marginal proportions, then each pair's correlation maximizes the
 likelihood of the pair's table under a discretized bivariate normal (Olsson, 1979). The
-bivariate normal probabilities use Genz's (2004) algorithm. Agrees with lavaan's `lavCor` on
+bivariate normal probabilities use Owen's (1956) $T$ function. Agrees with lavaan's `lavCor` on
 ordered variables.
+
+`flexpyirt.polychoric` has the same arguments and result and computes the same estimator with JAX
+(bivariate normal probabilities by Genz's, 2004, algorithm); it also raises `PrecisionError` when
+JAX's 64-bit mode is disabled. The two agree to about $10^{-9}$.
 
 | Argument | Type | Description |
 |---|---|---|
@@ -818,7 +891,7 @@ pair's table uses respondents who answered both items.
 
 **Returns**: [`PolychoricResult`](#polychoricresult)
 
-**Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (non-numeric data, fewer
+**Raises**: `SpecificationError` (non-numeric data, fewer
 than two items, an item with one observed category, a pair with no respondent answering both, or
 one item constant among those who did).
 
@@ -846,10 +919,14 @@ Returned by `polychoric()`. Immutable.
 These answer "how many dimensions?" as diagnostics; combine several rather than trusting one
 ([guide section 17](guide.md#17-number-of-dimensions)).
 
+Package: flexpyctt, except [`model_parallel_analysis`](#model_parallel_analysis),
+[`dimensionality`](#dimensionality), `LocalDependenceResult` and `JSIResult`, which use a fitted
+model and belong to flexpyirt.
+
 ### `parallel_analysis`
 
 ```text
-parallel_analysis(data, *, key, correlation="polychoric", eigen_type="pca",
+parallel_analysis(data, *, rng, correlation="polychoric", eigen_type="pca",
                   reference="permutation", n_replications=100, quantile=0.95,
                   zero_cell_correction=0.5) -> ParallelAnalysisResult
 ```
@@ -861,7 +938,7 @@ are counted.
 | Argument | Type | Description |
 |---|---|---|
 | `data` | DataFrame / 2-D array | Respondents x items (ordered codes, or continuous scores for `correlation="pearson"`); NaN is missing |
-| `key` | JAX PRNG key | Random key for the reference data, e.g. `jax.random.key(0)` |
+| `rng` | int / `numpy.random.Generator` | Seed or generator for the reference data, e.g. `rng=0` |
 | `correlation` | `"polychoric"` / `"pearson"` | Correlation of the data and of permutation replications (both smoothed when not positive definite) |
 | `eigen_type` | `"pca"` / `"smc"` | Eigenvalues of the correlation matrix, or of the reduced matrix with squared multiple correlations on the diagonal |
 | `reference` | `"permutation"` / `"normal"` | Permute each item independently (keeps the marginals; Garrido, Abad & Ponsoda, 2013), or i.i.d. normal data of the same size (Pearson) |
@@ -871,7 +948,7 @@ are counted.
 
 **Returns**: [`ParallelAnalysisResult`](#parallelanalysisresult)
 
-**Raises**: `PrecisionError`, `SpecificationError` (invalid options or data, fewer than 3 items).
+**Raises**: `SpecificationError` (invalid options or data, fewer than 3 items).
 
 **Warns**: `FlexpyirtWarning` when permutation replications had to be skipped (missing data
 leaving a permuted pair without usable responses).
@@ -951,7 +1028,7 @@ uniqueness reaches its bound and `ConvergenceWarning` when the optimizer stops e
 ### `hull`
 
 ```text
-hull(correlation, *, n_obs=None, max_factors=None, key=None, method="uls",
+hull(correlation, *, n_obs=None, max_factors=None, rng=None, method="uls",
      fit_index="caf", n_replications=1000) -> HullResult
 ```
 
@@ -959,7 +1036,7 @@ Hull method (Lorenzo-Seva, Timmerman & Kiers, 2011), as EFAtools' `HULL()`: solu
 $k = 0, \dots, J$ factors are placed by fit (CAF, CFI or $1-$RMSEA) and degrees of freedom; on the
 upper convex boundary the selected $k$ maximizes the scree ratio
 $st_k = \frac{(f_k - f_{k-1})/(df_k - df_{k-1})}{(f_{k+1} - f_k)/(df_{k+1} - df_k)}$. By default
-$J$ is one more than parallel analysis (needs `key` and `n_obs`), capped for positive degrees of
+$J$ is one more than parallel analysis (needs `rng` and `n_obs`), capped for positive degrees of
 freedom. At least 6 variables.
 
 ### `HullResult`
@@ -973,7 +1050,7 @@ freedom. At least 6 variables.
 ### `comparison_data`
 
 ```text
-comparison_data(data, *, key, max_factors=None, n_population=10000, n_samples=500,
+comparison_data(data, *, rng, max_factors=None, n_population=10000, n_samples=500,
                 alpha=0.30, max_iter=50) -> ComparisonDataResult
 ```
 
@@ -1023,10 +1100,10 @@ Returned by `FitResult.local_dependence()`.
 
 | Attribute | Type | Description |
 |---|---|---|
-| `pairs` | DataFrame | One row per pair: `item_i`, `item_j`, `n`, `q3`, `q3_star`, `x2`, `g2`, `df`, `p_x2`, `p_g2`, `cramer_v` |
-| `q3` | DataFrame | Item x item Q3 matrix |
-| `q3_mean` | float | Mean off-diagonal Q3 |
-| `max_q3_star` | float | Largest Q3\* |
+| `pairs` | DataFrame | One row per pair: `item_i`, `item_j`, `n`, `q3`, `q3_star`, `x2`, `g2`, `df`, `p_x2`, `p_g2`, `cramer_v`; with a leading `group` column and one row per group and pair in a multiple-group model |
+| `q3` | DataFrame | Item x item Q3 matrix; one matrix per group on a `(group, item)` row index in a multiple-group model |
+| `q3_mean` | float or Series | Mean off-diagonal Q3; a Series indexed by group in a multiple-group model (each group's Q3\* uses its own mean) |
+| `max_q3_star` | float | Largest Q3\* (over all groups) |
 
 ### `JSIResult`
 
@@ -1067,11 +1144,11 @@ deviation for the partition.
 ### `exploratory_detect`
 
 ```text
-exploratory_detect(data, *, max_clusters=4, key=None,
+exploratory_detect(data, *, max_clusters=4, rng=None,
                    estimation_rows=None) -> ExploratoryDetectResult
 ```
 
-Splits the rows into an estimation half and a validation half (`key` for a random split, or
+Splits the rows into an estimation half and a validation half (`rng` for a random split, or
 `estimation_rows`), clusters the items on the estimation half by Ward's method on
 $\max(\mathrm{ccov}) - \mathrm{ccov}$, and reports DETECT, ASSI and RATIO of every partition
 into $2, \dots,$ `max_clusters` clusters on both halves.
@@ -1088,7 +1165,7 @@ into $2, \dots,$ `max_clusters` clusters on both halves.
 ### `dimtest`
 
 ```text
-dimtest(data, *, key, assessment_items=None, training_fraction=1/3, n_bootstrap=100,
+dimtest(data, *, rng, assessment_items=None, training_fraction=1/3, n_bootstrap=100,
         min_group=20, max_assessment_size=None) -> DimtestResult
 ```
 
@@ -1334,6 +1411,11 @@ Import with `from flexpyirt.errors import ...`.
 #### `FlexpyirtError`
 
 Base class of every exception flexpyirt raises on purpose.
+
+`SpecificationError` and the warning classes are shared with flexpyctt (defined in
+`flexpyctt.errors` and re-exported here), and `FlexpyirtError` / `FlexpyirtWarning` are the same
+classes as flexpyctt's bases `FlexpycttError` / `FlexpycttWarning`. Catching flexpyirt's classes
+therefore also catches what a flexpyctt function raises.
 
 #### `SpecificationError`
 

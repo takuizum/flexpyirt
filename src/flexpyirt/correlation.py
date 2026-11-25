@@ -3,12 +3,15 @@
 Public entry point :func:`polychoric` and result object :class:`PolychoricResult`. The jit kernels
 (bivariate normal distribution function, per-pair maximum likelihood) are in
 :mod:`flexpyirt._polychoric`.
+
+flexpyctt has a NumPy / SciPy implementation of the same estimator (``flexpyctt.polychoric``,
+used by the dimensionality tools); both return flexpyctt's :class:`PolychoricResult`
+(DESIGN.md §16.18).
 """
 
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
@@ -16,6 +19,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import ndtri
 
+from flexpyctt.correlation import PolychoricResult
 from flexpyirt._polychoric import fit_pairs
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import (
@@ -32,49 +36,6 @@ _Z_MAX = 8.0
 _SMOOTH_EIGEN_TOL = 1e-12
 
 _fit_pairs = jax.jit(fit_pairs, static_argnames=("z_max", "tol", "max_iter"))
-
-
-@dataclass(frozen=True)
-class PolychoricResult:
-    r"""Polychoric / tetrachoric correlation matrix and per-pair diagnostics.
-
-    Attributes
-    ----------
-    correlation : pandas.DataFrame
-        Item-by-item correlation matrix, smoothed if it was not positive definite and
-        ``smooth=True``.
-    unsmoothed_correlation : pandas.DataFrame
-        The pairwise estimates before smoothing.
-    thresholds : dict of str to numpy.ndarray
-        Per item, the ``K - 1`` thresholds :math:`\tau_k=\Phi^{-1}(P(Y\le k))` of its observed
-        categories (``K`` observed categories), estimated from all observed responses of the item.
-    categories : dict of str to numpy.ndarray
-        Per item, the observed response values in the order used (ascending).
-    n_obs : pandas.DataFrame
-        Number of respondents with both responses observed (diagonal: responses to the item).
-    converged : pandas.DataFrame
-        Whether the per-pair maximization met its convergence criterion (diagonal ``True``).
-    at_boundary : pandas.DataFrame
-        Whether the per-pair likelihood is largest at :math:`|\rho|\to 1`; the estimate is then
-        the bound :math:`\pm\tanh 8\approx\pm(1-2.25\times10^{-7})`.
-    zero_cell_corrected : pandas.DataFrame
-        Whether ``zero_cell_correction`` was applied to the pair's 2 x 2 table.
-    smoothed : bool
-        Whether ``correlation`` differs from ``unsmoothed_correlation`` by smoothing.
-    min_eigenvalue : float
-        Smallest eigenvalue of ``unsmoothed_correlation``.
-    """
-
-    correlation: pd.DataFrame
-    unsmoothed_correlation: pd.DataFrame
-    thresholds: dict[str, np.ndarray]
-    categories: dict[str, np.ndarray]
-    n_obs: pd.DataFrame
-    converged: pd.DataFrame
-    at_boundary: pd.DataFrame
-    zero_cell_corrected: pd.DataFrame
-    smoothed: bool
-    min_eigenvalue: float
 
 
 def smooth_correlation(correlation: np.ndarray) -> tuple[np.ndarray, bool]:

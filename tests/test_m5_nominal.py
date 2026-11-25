@@ -135,8 +135,8 @@ def test_nominal_n_cat_and_n_factors_validation() -> None:
             NominalKernel(bad)
         with pytest.raises(SpecificationError, match="at least 2"):
             Nominal(bad)
-    for bad_f in (0, 4):
-        with pytest.raises(SpecificationError, match="1 to 3 factors"):
+    for bad_f in (0, 33):
+        with pytest.raises(SpecificationError, match="1 to 32 factors"):
             NominalKernel(3, n_factors=bad_f)
 
 

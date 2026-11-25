@@ -31,7 +31,7 @@ calibration and fixed item parameter calibration (FIPC).
 | Missing data | Responses missing at random (MAR) | ✓ |
 | Standard errors | Oakes' identity (default) or the Hessian of the marginal log-likelihood / log posterior, plus delta-method SEs for display IRT thresholds (`b_se` / `bk_se`) | ✓ |
 | Scoring | EAP, MAP, ML and WLE (1–3 factors, with standard errors) and plausible values (`PV`, 1–3 factors, explicit JAX PRNG `key`), using each group's latent distribution as the prior where applicable | ✓ |
-| Multidimensional models | Confirmatory 2–3 factor MIRT (`Model.with_factors()`, also with multiple groups) with cross-loadings, correlated or orthogonal MVN factors, product quadrature grids, Oakes/Hessian SEs, and EAP / MAP / ML / WLE scoring | ✓ |
+| Multidimensional models | Confirmatory 2–3 factor MIRT (`Model.with_factors()`, also with multiple groups) with cross-loadings, correlated or orthogonal MVN factors, product quadrature grids, Oakes/Hessian SEs, and EAP / MAP / ML / WLE scoring; bifactor models with any number of specific factors by dimension reduction (`Model.with_bifactor()`, single group, EAP scoring); two-tier models with one or two correlated primary factors (`Model.with_two_tier()`) | ✓ |
 | Empirical histogram | `EmpiricalHistogram()` latent distributions (Woods, 2007) for skewed or multimodal traits; reference group standardized to mean 0 / variance 1 by an exact constrained M-step, free under FIPC; weights reported with moments up to the 4th | ✓ |
 | Davidian curves | `DavidianCurve(degree)` seminonparametric latent distributions (Zhang & Davidian, 2001; Woods & Lin, 2009) for single-group unidimensional models; analytically standardized to exact continuous `mean`/`var` (optional `free_mean`/`free_var` for Rasch, PCM, FIPC) with joint Oakes/Hessian SEs and EAP/PV scoring | ✓ |
 | Normal mixtures | `NormalMixture(n_components)` latent densities (Mislevy, 1984) with one common set of items for single-group unidimensional models; mirt's `dentype = "mixture-k"` class parameterization analytically standardized to exact continuous `mean`/`var`, standardized components (`pi_c`, `mean_c`, `var_c`) with delta-method SEs, joint Oakes/Hessian SEs, EAP/PV scoring, degenerate-solution warnings | ✓ |
@@ -43,18 +43,22 @@ calibration and fixed item parameter calibration (FIPC).
 | Limited-information fit | Maydeu-Olivares & Joe M2 / M2* (`FitResult.m2()`) with df, p-value, RMSEA + CI, SRMSR and dichotomous TLI / CFI | ✓ |
 | DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | ✓ |
 | Scale linking | Differentiable characteristic-curve linking (`link()`, `LinkResult`: Haebara and Stocking–Lord, non-symmetric and symmetric, Ogasawara delta-method SEs, transformed items and $\theta$ scores; checked against independent R implementations for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items) | ✓ |
-| Polychoric correlations | Polychoric / tetrachoric correlation matrices (`polychoric()`: two-step ML, available-case missing data, lavaan's 2 x 2 zero-cell correction, smoothing of non-positive-definite matrices; checked against lavaan's `lavCor`) | ✓ |
-| Number of dimensions | Parallel analysis (`parallel_analysis()`: polychoric or Pearson, PCA or SMC eigenvalues, permutation or normal reference data, quantile or mean rule), Velicer's MAP (`velicer_map()`, original and revised) the empirical Kaiser criterion (`empirical_kaiser()`), unrotated ULS / ML factor analysis (`efa()`), the Hull method (`hull()`) and comparison data (`comparison_data()`); checked against EFAtools, psych and EFA.dimensions | ✓ |
-| Local dependence and unidimensionality | Q3, Q3\* and Chen & Thissen LD $X^2$ / $G^2$ (`FitResult.local_dependence()`, as mirt's `residuals()`), the jackknife slope index (`FitResult.jsi()`, as mirt, with faster approximations), model-based parallel analysis (`model_parallel_analysis()`, as ltm's `unidimTest`), confirmatory and exploratory DETECT (`detect()`, `exploratory_detect()`, as sirt), DIMTEST with bootstrap bias correction (`dimtest()`, checked by simulation), and a `dimensionality()` report that runs several methods with separate consensus lines | ✓ |
+| Polychoric correlations | Polychoric / tetrachoric correlation matrices (`polychoric()`: two-step ML, available-case missing data, lavaan's 2 x 2 zero-cell correction, smoothing of non-positive-definite matrices; checked against lavaan's `lavCor`). Provided by the companion package [flexpyctt](https://pypi.org/project/flexpyctt/) (no JAX), which is installed with flexpyirt | ✓ |
+| Number of dimensions | Parallel analysis (`parallel_analysis()`: polychoric or Pearson, PCA or SMC eigenvalues, permutation or normal reference data, quantile or mean rule), Velicer's MAP (`velicer_map()`, original and revised) the empirical Kaiser criterion (`empirical_kaiser()`), unrotated ULS / ML factor analysis (`efa()`), the Hull method (`hull()`) and comparison data (`comparison_data()`); checked against EFAtools, psych and EFA.dimensions. Provided by flexpyctt | ✓ |
+| Local dependence and unidimensionality | Q3, Q3\* and Chen & Thissen LD $X^2$ / $G^2$ (`FitResult.local_dependence()`, as mirt's `residuals()`), the jackknife slope index (`FitResult.jsi()`, as mirt, with faster approximations), model-based parallel analysis (`model_parallel_analysis()`, as ltm's `unidimTest`), confirmatory and exploratory DETECT (`detect()`, `exploratory_detect()`, as sirt), DIMTEST with bootstrap bias correction (`dimtest()`, checked by simulation), and a `dimensionality()` report that runs several methods with separate consensus lines. DETECT and DIMTEST are provided by flexpyctt | ✓ |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
 
 ## Installation
 
-Python 3.11 or later.
+Python 3.12 or later.
 
 ```bash
 pip install flexpyirt  # or: uv add flexpyirt
 ```
+
+This also installs [flexpyctt](https://pypi.org/project/flexpyctt/), the companion package for
+analyses that need no fitted model. It depends on NumPy, SciPy and pandas only; where JAX is not
+wanted, install it alone with `pip install flexpyctt`.
 
 For polars input, install `flexpyirt[polars]`. For GPUs, install a CUDA build of `jax` first
 (see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)).
