@@ -232,7 +232,7 @@ def test_specification_errors() -> None:
     with pytest.raises(SpecificationError, match="bivariate"):
         kernel_equate(presmooth(joint, degree=(1, 1)), y)
     with pytest.raises(SpecificationError, match="must be a ScoreDistribution"):
-        kernel_equate(joint, y)  # type: ignore[arg-type]
+        kernel_equate(joint, y)
     constant = ScoreDistribution.from_frequencies(scores=[0, 1, 2], frequencies=[0, 9, 0])
     with pytest.raises(SpecificationError, match="no variance"):
         kernel_equate(constant, y)

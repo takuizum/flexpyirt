@@ -1,7 +1,9 @@
 """Kernel equating with a Gaussian kernel (von Davier, Holland & Thayer, 2004).
 
-Implemented for the equivalent-groups design: continuization, penalty bandwidth selection,
-the equating function, its standard error (SEE) and the percent relative error.
+Continuization, penalty bandwidth selection, the equating function, its standard error (SEE), the
+standard error of the difference between two equating functions (SEED) and the percent relative
+error, for the equivalent-groups, single-group, counterbalanced and anchor-test (chained and
+post-stratification) designs.
 """
 
 from __future__ import annotations
@@ -15,7 +17,12 @@ from numpy.typing import ArrayLike
 from scipy.optimize import minimize_scalar
 from scipy.special import ndtr, ndtri
 
-from flexpyequate.distributions import FloatArray, ScoreDistribution, _freeze
+from flexpyequate.distributions import (
+    BivariateScoreDistribution,
+    FloatArray,
+    ScoreDistribution,
+    _freeze,
+)
 from flexpyequate.errors import SpecificationError
 from flexpyequate.presmoothing import LoglinearResult, loglinear_c_matrix, saturated_c_matrix
 
@@ -222,6 +229,23 @@ def penalty_bandwidth(
     return _penalty_bandwidth(scores, probabilities, float(penalty_weight))
 
 
+KernelDesign = Literal[
+    "equivalent_groups", "single_group", "counterbalanced", "chained", "post_stratification"
+]
+_TWO_SAMPLE_BIVARIATE = ("counterbalanced", "chained", "post_stratification")
+# Bandwidth of the "linear" kernel equating function, in standard deviations (as kequate).
+_LINEAR_BANDWIDTH_SDS = 1000.0
+
+
+def _percent_relative_error(
+    weights: FloatArray, equated: FloatArray, target: ScoreDistribution
+) -> FloatArray:
+    orders = np.arange(1, 11)
+    equated_moments = np.array([weights @ equated**p for p in orders])
+    target_moments = np.array([target.probabilities @ target.scores**p for p in orders])
+    return np.asarray(100.0 * (equated_moments - target_moments) / target_moments, dtype=np.float64)
+
+
 @dataclass(frozen=True, eq=False)
 class KernelEquatingResult:
     r"""A kernel equating function from form X to the scale of form Y.
@@ -229,41 +253,70 @@ class KernelEquatingResult:
     Attributes
     ----------
     design : str
-        ``"equivalent_groups"``.
+        ``"equivalent_groups"``, ``"single_group"``, ``"counterbalanced"``, ``"chained"`` or
+        ``"post_stratification"``.
     x, y : ScoreDistribution
-        The (possibly presmoothed) score distributions that were continuized.
+        The score distributions that were continuized: the score probabilities :math:`r` and
+        :math:`s` given by the design (margins, weighted margins, or the synthetic population;
+        for chained equating, X in the population that took it and Y in the population that took
+        it).
     scores : numpy.ndarray
         The possible scores of form X.
     equated : numpy.ndarray
-        Form-Y equivalents :math:`e_Y(x_j) = G_{h_Y}^{-1}(F_{h_X}(x_j))`.
+        Form-Y equivalents :math:`e_Y(x_j)`.
     see : numpy.ndarray
         Standard error of equating at each possible score.
+    see_vectors : numpy.ndarray of shape (n_scores, n_columns)
+        The vectors whose Euclidean norms are ``see``. Two equating functions computed from the
+        same data in the same design family share their columns, which is what :meth:`seed` uses.
     bandwidth_x, bandwidth_y : float
         Bandwidths :math:`h_X` and :math:`h_Y` of the Gaussian kernel.
     penalty_weight : float
         The weight :math:`K` used when a bandwidth was selected by the penalty.
     x_presmoothed, y_presmoothed : bool
-        Whether the score probabilities came from a log-linear model (which determines the
-        covariance used for the standard errors).
+        Whether the first and the second input came from a log-linear model (which determines
+        the covariance used for the standard errors). Equal for a single group.
+    anchor_distributions : tuple of ScoreDistribution or None
+        Chained equating: the anchor distributions in the populations that took X and Y.
+    anchor_bandwidths : tuple of float or None
+        Chained equating: the bandwidths of the two anchor distributions.
+    synthetic_weight : float or None
+        Post-stratification: weight of the population that took X in the synthetic population.
+    counterbalance_weights : tuple of float or None
+        Counterbalanced design: the weights of the first sample in :math:`r` and in :math:`s`.
     """
 
-    design: Literal["equivalent_groups"]
+    design: KernelDesign
     x: ScoreDistribution
     y: ScoreDistribution
     scores: FloatArray
     equated: FloatArray
     see: FloatArray
+    see_vectors: FloatArray
     bandwidth_x: float
     bandwidth_y: float
     penalty_weight: float
     x_presmoothed: bool
     y_presmoothed: bool
+    anchor_distributions: tuple[ScoreDistribution, ScoreDistribution] | None = None
+    anchor_bandwidths: tuple[float, float] | None = None
+    synthetic_weight: float | None = None
+    counterbalance_weights: tuple[float, float] | None = None
 
-    def _continuized(self) -> tuple[_Continuized, _Continuized]:
-        return (
-            _Continuized.build(self.x.scores, self.x.probabilities, self.bandwidth_x),
-            _Continuized.build(self.y.scores, self.y.probabilities, self.bandwidth_y),
-        )
+    def _continuized(self) -> dict[str, _Continuized]:
+        forms = {
+            "x": _Continuized.build(self.x.scores, self.x.probabilities, self.bandwidth_x),
+            "y": _Continuized.build(self.y.scores, self.y.probabilities, self.bandwidth_y),
+        }
+        if self.anchor_distributions is not None and self.anchor_bandwidths is not None:
+            for name, anchor, bandwidth in zip(
+                ("anchor_x", "anchor_y"),
+                self.anchor_distributions,
+                self.anchor_bandwidths,
+                strict=True,
+            ):
+                forms[name] = _Continuized.build(anchor.scores, anchor.probabilities, bandwidth)
+        return forms
 
     def transform(self, values: ArrayLike) -> FloatArray:
         """Equate arbitrary form-X scores to the form-Y scale.
@@ -279,9 +332,12 @@ class KernelEquatingResult:
             Form-Y equivalents, same shape as ``values``.
         """
         points = np.asarray(values, dtype=np.float64)
-        x_continuized, y_continuized = self._continuized()
+        forms = self._continuized()
         flat = np.atleast_1d(points).ravel()
-        equated = y_continuized.quantile(x_continuized.cdf(flat))
+        proportions = forms["x"].cdf(flat)
+        if "anchor_x" in forms:
+            proportions = forms["anchor_y"].cdf(forms["anchor_x"].quantile(proportions))
+        equated = forms["y"].quantile(proportions)
         return np.asarray(equated.reshape(points.shape), dtype=np.float64)
 
     @property
@@ -296,11 +352,12 @@ class KernelEquatingResult:
         Returns
         -------
         pandas.DataFrame
-            Columns ``form`` (``"x"`` or ``"y"``), ``score``, ``probability`` (discrete),
-            ``cdf`` (:math:`F_h` or :math:`G_h`) and ``density``.
+            Columns ``form``, ``score``, ``probability`` (discrete), ``cdf`` and ``density``.
+            ``form`` is ``"x"`` or ``"y"``, and for chained equating also ``"anchor_x"`` and
+            ``"anchor_y"`` (the anchor in the populations that took X and Y).
         """
         frames = []
-        for form, continuized in zip(("x", "y"), self._continuized(), strict=True):
+        for form, continuized in self._continuized().items():
             frames.append(
                 pd.DataFrame(
                     {
@@ -329,14 +386,107 @@ class KernelEquatingResult:
         -------
         pandas.Series
             Indexed by the moment order 1..10.
+
+        Raises
+        ------
+        SpecificationError
+            For chained equating, where X and Y are observed in different populations; use
+            :attr:`chain_percent_relative_error`.
         """
-        orders = np.arange(1, 11)
-        equated_moments = np.array([self.x.probabilities @ self.equated**p for p in orders])
-        target_moments = np.array([self.y.probabilities @ self.y.scores**p for p in orders])
+        if self.design == "chained":
+            raise SpecificationError(
+                "For chained equating the percent relative error is defined for each link; use "
+                "chain_percent_relative_error."
+            )
         return pd.Series(
-            100.0 * (equated_moments - target_moments) / target_moments,
-            index=pd.Index(orders, name="moment"),
+            _percent_relative_error(self.x.probabilities, self.equated, self.y),
+            index=pd.Index(np.arange(1, 11), name="moment"),
             name="percent_relative_error",
+        )
+
+    @property
+    def chain_percent_relative_error(self) -> pd.DataFrame:
+        """Percent relative error of the two links of chained equating.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Indexed by the moment order 1..10, with columns ``x_to_anchor`` (X equated to the
+            anchor in the population that took X) and ``anchor_to_y`` (the anchor equated to Y in
+            the population that took Y).
+
+        Raises
+        ------
+        SpecificationError
+            If the design is not chained equating.
+        """
+        if self.anchor_distributions is None:
+            raise SpecificationError("chain_percent_relative_error needs chained equating.")
+        forms = self._continuized()
+        anchor_1, anchor_2 = self.anchor_distributions
+        on_anchor = forms["anchor_x"].quantile(forms["x"].cdf(self.x.scores))
+        on_y = forms["y"].quantile(forms["anchor_y"].cdf(anchor_2.scores))
+        return pd.DataFrame(
+            {
+                "x_to_anchor": _percent_relative_error(self.x.probabilities, on_anchor, anchor_1),
+                "anchor_to_y": _percent_relative_error(anchor_2.probabilities, on_y, self.y),
+            },
+            index=pd.Index(np.arange(1, 11), name="moment"),
+        )
+
+    def seed(self, other: KernelEquatingResult) -> pd.DataFrame:
+        r"""Return the standard error of the difference between two equating functions (SEED).
+
+        For two equating functions :math:`e_1` and :math:`e_2` estimated from the same data,
+
+        .. math::
+
+            \mathrm{SEED}(x) = \sqrt{\operatorname{Var}\bigl(e_1(x) - e_2(x)\bigr)}
+                             = \bigl\lVert v_1(x) - v_2(x) \bigr\rVert,
+
+        with :math:`v(x)` the vector whose norm is the SEE (von Davier et al., 2004, ch. 5).
+        Typical uses: kernel against linear equating (``linear=True``), two sets of bandwidths,
+        or chained against post-stratification equating.
+
+        Parameters
+        ----------
+        other : KernelEquatingResult
+            An equating function computed **from the same inputs**: the same distributions or
+            presmoothing results, in the same design or in the other anchor-test design. This
+            cannot be checked beyond the shapes; with different data the result is meaningless.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns ``score``, ``difference`` (this function minus ``other``) and ``seed``.
+
+        Raises
+        ------
+        SpecificationError
+            If the two results do not have the same X scores and the same sources of sampling
+            variation.
+        """
+        anchor_designs = ("chained", "post_stratification")
+        same_family = self.design == other.design or (
+            self.design in anchor_designs and other.design in anchor_designs
+        )
+        if (
+            not same_family
+            or self.scores.shape != other.scores.shape
+            or not np.allclose(self.scores, other.scores)
+            or self.see_vectors.shape != other.see_vectors.shape
+        ):
+            raise SpecificationError(
+                "seed() needs two equating functions estimated from the same data: the same "
+                "design (or chained and post-stratification), X scores and presmoothing models."
+            )
+        difference = self.see_vectors - other.see_vectors
+        return pd.DataFrame(
+            {
+                "score": self.scores,
+                "difference": self.equated - other.equated,
+                "seed": np.sqrt((difference**2).sum(axis=1)),
+            }
         )
 
     def __repr__(self) -> str:
@@ -373,9 +523,68 @@ def _unpack(
     return distribution.scores, probabilities, c_matrix, distribution
 
 
+@dataclass(frozen=True)
+class _Joint:
+    """One sample with two scores: probabilities and their scaled C-matrix.
+
+    ``c`` has shape ``(n_first, n_second, n_columns)`` and already carries the factor
+    :math:`N^{-1/2}`, so that the covariance of the estimated joint probabilities is ``c c'``.
+    """
+
+    distribution: BivariateScoreDistribution
+    probabilities: FloatArray
+    c: FloatArray
+    presmoothed: bool
+
+    @property
+    def n(self) -> float:
+        return self.distribution.n
+
+
+def _unpack_joint(source: object, name: str) -> _Joint:
+    if isinstance(source, LoglinearResult):
+        distribution = source.distribution
+        if not isinstance(distribution, BivariateScoreDistribution):
+            raise SpecificationError(
+                f"{name} is the presmoothing result of one score; this design needs a joint "
+                "distribution of two scores."
+            )
+        flat = np.ravel(distribution.probabilities)
+        c_matrix = loglinear_c_matrix(flat, source.design_matrix)
+        presmoothed = True
+    elif isinstance(source, BivariateScoreDistribution):
+        distribution = source
+        flat = np.ravel(distribution.probabilities)
+        c_matrix = saturated_c_matrix(flat)
+        presmoothed = False
+    else:
+        raise SpecificationError(
+            f"{name} must be a BivariateScoreDistribution or its LoglinearResult from presmooth()."
+        )
+    if not (distribution.x.variance() > 0 and distribution.y.variance() > 0):
+        raise SpecificationError(f"Both scores of {name} need positive variance.")
+    shape = distribution.frequencies.shape
+    return _Joint(
+        distribution=distribution,
+        probabilities=distribution.probabilities,
+        c=np.asarray(c_matrix.reshape(*shape, -1) / np.sqrt(distribution.n), dtype=np.float64),
+        presmoothed=presmoothed,
+    )
+
+
 def _resolve_bandwidth(
-    bandwidth: float | None, scores: FloatArray, probabilities: FloatArray, weight: float, name: str
+    bandwidth: float | None,
+    scores: FloatArray,
+    probabilities: FloatArray,
+    weight: float,
+    linear: bool,
+    name: str,
 ) -> float:
+    if linear:
+        if bandwidth is not None:
+            raise SpecificationError(f"Give either linear=True or {name}, not both.")
+        mean = float(probabilities @ scores)
+        return _LINEAR_BANDWIDTH_SDS * float(np.sqrt(probabilities @ (scores - mean) ** 2))
     if bandwidth is None:
         return _penalty_bandwidth(scores, probabilities, weight)
     if not (np.isfinite(bandwidth) and bandwidth > 0):
@@ -383,15 +592,36 @@ def _resolve_bandwidth(
     return float(bandwidth)
 
 
+def _pad(left: FloatArray, right: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """Put two blocks from independent samples side by side: ``[left, 0]`` and ``[0, right]``."""
+    return (
+        np.hstack([left, np.zeros((left.shape[0], right.shape[1]))]),
+        np.hstack([np.zeros((right.shape[0], left.shape[1])), right]),
+    )
+
+
+def _as_distribution(scores: FloatArray, probabilities: FloatArray, n: float) -> ScoreDistribution:
+    return ScoreDistribution(scores=scores, frequencies=probabilities * n)
+
+
+def _same_scores(first: FloatArray, second: FloatArray) -> bool:
+    return first.shape == second.shape and bool(np.allclose(first, second))
+
+
 def kernel_equate(
-    x: ScoreDistribution | LoglinearResult,
-    y: ScoreDistribution | LoglinearResult,
+    x: ScoreDistribution | BivariateScoreDistribution | LoglinearResult,
+    y: ScoreDistribution | BivariateScoreDistribution | LoglinearResult | None = None,
     *,
+    design: KernelDesign | None = None,
     bandwidth_x: float | None = None,
     bandwidth_y: float | None = None,
+    anchor_bandwidths: tuple[float | None, float | None] | None = None,
     penalty_weight: float = 1.0,
+    linear: bool = False,
+    synthetic_weight: float | None = None,
+    counterbalance_weights: tuple[float, float] = (0.5, 0.5),
 ) -> KernelEquatingResult:
-    r"""Kernel equating of form X to form Y for equivalent groups (Gaussian kernel).
+    r"""Kernel equating of form X to form Y with a Gaussian kernel.
 
     The discrete distributions with score probabilities :math:`r_j` (X) and :math:`s_k` (Y) are
     continuized (von Davier et al., 2004, ch. 4),
@@ -407,33 +637,86 @@ def kernel_equate(
 
         e_Y(x) = G_{h_Y}^{-1}\bigl(F_{h_X}(x)\bigr) .
 
-    The standard error of equating follows from the delta method (ch. 5):
+    **Designs.** The design function gives :math:`r` and :math:`s` from the estimated
+    (presmoothed or observed) probabilities (ch. 2 and 3 of the book):
+
+    - ``"equivalent_groups"``: ``x`` and ``y`` are the distributions of X and Y in two
+      independent samples; :math:`r` and :math:`s` are their probabilities.
+    - ``"single_group"``: ``x`` is the joint distribution :math:`P` of (X, Y) in one sample;
+      :math:`r_j = \sum_k p_{jk}`, :math:`s_k = \sum_j p_{jk}`.
+    - ``"counterbalanced"``: ``x`` and ``y`` are the joint distributions of (X, Y) in the sample
+      that took X first and in the sample that took Y first, with margins
+      :math:`r_1, s_1` and :math:`r_2, s_2`; :math:`r = w_X r_1 + (1 - w_X) r_2` and
+      :math:`s = w_Y s_1 + (1 - w_Y) s_2`.
+    - ``"post_stratification"``: ``x`` is the joint distribution :math:`P` of (X, A) in
+      population P and ``y`` that of (Y, A), :math:`Q`, in population Q, with anchor margins
+      :math:`t_P`, :math:`t_Q`. For the synthetic population :math:`T = wP + (1 - w)Q`,
+
+      .. math::
+
+          r_j = \sum_l \Bigl[w + (1 - w)\frac{t_{Ql}}{t_{Pl}}\Bigr] p_{jl}, \qquad
+          s_k = \sum_l \Bigl[(1 - w) + w\frac{t_{Pl}}{t_{Ql}}\Bigr] q_{kl} .
+
+    - ``"chained"``: the same inputs; X is equated to the anchor in P and the anchor to Y in Q,
+
+      .. math::
+
+          e_Y(x) = G_Q^{-1}\Bigl(H_Q\bigl(H_P^{-1}(F_P(x))\bigr)\Bigr),
+
+      with four continuized distributions: X and A in P, A and Y in Q.
+
+    **Standard error of equating** (delta method, ch. 5):
 
     .. math::
 
-        \mathrm{SEE}_Y(x) = \frac{1}{G_{h_Y}'(e_Y(x))}
-        \sqrt{\tfrac{1}{N}\Bigl\lVert \tfrac{\partial F_{h_X}(x)}{\partial r}^{\!\top} C_r
-                \Bigr\rVert^2
-              + \tfrac{1}{M}\Bigl\lVert \tfrac{\partial G_{h_Y}(e_Y(x))}{\partial s}^{\!\top} C_s
-                \Bigr\rVert^2},
+        \mathrm{SEE}_Y(x) = \bigl\lVert J_{e_Y}(x)\, J_{DF}\, C \bigr\rVert, \qquad
+        J_{e_Y}(x) = \frac{1}{G'(e_Y(x))}
+        \Bigl(\frac{\partial F(x)}{\partial r},\; -\frac{\partial G(e_Y(x))}{\partial s}\Bigr),
 
-    where :math:`N` and :math:`M` are the sample sizes and :math:`C_r C_r^\top / N` is the
-    covariance of the estimated score probabilities: that of the log-linear model for a
-    presmoothed distribution (:attr:`LoglinearResult.c_matrix`), the multinomial covariance
-    otherwise.
+    where :math:`C C^\top` is the covariance of the estimated probabilities of each sample
+    (:attr:`LoglinearResult.c_matrix` divided by :math:`\sqrt N` for a presmoothed distribution,
+    the multinomial covariance otherwise) and :math:`J_{DF}` the Jacobian of the design function.
+    For chained equating the chain rule gives, with :math:`a = H_P^{-1}(F_P(x))`,
+
+    .. math::
+
+        \mathrm{SEE}_Y(x)^2 =
+        \Bigl\lVert \frac{H_Q'(a)}{G_Q'(e_Y(x))} \frac{1}{H_P'(a)}
+        \Bigl(\frac{\partial F_P(x)}{\partial r_P} J_{r}
+        - \frac{\partial H_P(a)}{\partial t_P} J_{t}\Bigr) C_P \Bigr\rVert^2
+        + \Bigl\lVert \frac{1}{G_Q'(e_Y(x))}
+        \Bigl(\frac{\partial H_Q(a)}{\partial t_Q} J_{t} - \frac{\partial G_Q(e_Y(x))}{\partial s_Q}
+        J_{s}\Bigr) C_Q \Bigr\rVert^2 .
 
     Parameters
     ----------
-    x, y : ScoreDistribution or LoglinearResult
-        Score distributions of forms X and Y from independent, equivalent groups. Pass the result
-        of :func:`presmooth` to equate presmoothed distributions, as recommended by von Davier et
-        al.; a plain ``ScoreDistribution`` is used as observed.
+    x : ScoreDistribution, BivariateScoreDistribution or LoglinearResult
+        First input of the design (see above). Pass the result of :func:`presmooth` to equate
+        presmoothed distributions, as recommended by von Davier et al.; a plain distribution is
+        used as observed.
+    y : ScoreDistribution, BivariateScoreDistribution or LoglinearResult, optional
+        Second input of the design; omit it for a single group.
+    design : str, optional
+        ``"equivalent_groups"`` and ``"single_group"`` follow from the inputs. With two joint
+        distributions it is required: ``"counterbalanced"``, ``"chained"`` or
+        ``"post_stratification"``.
     bandwidth_x, bandwidth_y : float, optional
         Bandwidths :math:`h_X` and :math:`h_Y`. By default each is chosen by
-        :func:`penalty_bandwidth`. Large bandwidths (e.g. 1000 standard deviations) give the
-        linear equating function.
+        :func:`penalty_bandwidth`.
+    anchor_bandwidths : tuple of float, optional
+        Chained equating: bandwidths of the anchor in the population that took X and in the
+        population that took Y. ``None`` entries are chosen by the penalty.
     penalty_weight : float, default 1.0
         Weight :math:`K` of the second penalty term in the bandwidth selection.
+    linear : bool, default False
+        Use bandwidths of 1000 standard deviations, which gives the linear equating function of
+        the design (and its standard error). Not together with explicit bandwidths.
+    synthetic_weight : float, optional
+        Post-stratification: weight :math:`w` of the population that took X, between 0 and 1.
+        Default :math:`N_P / (N_P + N_Q)`.
+    counterbalance_weights : tuple of float, default (0.5, 0.5)
+        Counterbalanced design: :math:`(w_X, w_Y)`, the weights of the sample that took X first
+        in :math:`r` and in :math:`s`.
 
     Returns
     -------
@@ -443,8 +726,9 @@ def kernel_equate(
     Raises
     ------
     SpecificationError
-        If an input is not a univariate distribution, has no variance, or a bandwidth is not
-        positive.
+        If the inputs do not fit the design, a distribution has no variance, a weight or a
+        bandwidth is out of range, or (post-stratification) an anchor score has probability zero
+        in one population but not in the other.
 
     References
     ----------
@@ -453,34 +737,227 @@ def kernel_equate(
     """
     if not penalty_weight >= 0:
         raise SpecificationError(f"penalty_weight must be non-negative, got {penalty_weight}.")
-    x_scores, r, c_r, x_distribution = _unpack(x, "x")
-    y_scores, s, c_s, y_distribution = _unpack(y, "y")
     weight = float(penalty_weight)
-    h_x = _resolve_bandwidth(bandwidth_x, x_scores, r, weight, "bandwidth_x")
-    h_y = _resolve_bandwidth(bandwidth_y, y_scores, s, weight, "bandwidth_y")
 
+    def is_univariate(source: object) -> bool:
+        return isinstance(source, ScoreDistribution) or (
+            isinstance(source, LoglinearResult)
+            and isinstance(source.distribution, ScoreDistribution)
+        )
+
+    def is_bivariate(source: object) -> bool:
+        return isinstance(source, BivariateScoreDistribution) or (
+            isinstance(source, LoglinearResult)
+            and isinstance(source.distribution, BivariateScoreDistribution)
+        )
+
+    if is_bivariate(x) and y is None:
+        inferred: KernelDesign | None = "single_group"
+    elif is_bivariate(x) and is_bivariate(y):
+        inferred = None
+    elif y is not None and (is_univariate(x) or is_univariate(y) or design is None):
+        inferred = "equivalent_groups"
+    else:
+        inferred = None
+    if inferred is None:
+        if design not in _TWO_SAMPLE_BIVARIATE or not (is_bivariate(x) and is_bivariate(y)):
+            raise SpecificationError(
+                "With two joint distributions, design must be 'counterbalanced', 'chained' or "
+                "'post_stratification'; with one, omit y (single group); for equivalent groups "
+                "pass the distributions of X and Y."
+            )
+    elif design is not None and design != inferred:
+        raise SpecificationError(
+            f"design={design!r} does not fit the inputs, which are those of {inferred!r}."
+        )
+    else:
+        design = inferred
+    assert design is not None
+    if anchor_bandwidths is not None and design != "chained":
+        raise SpecificationError("anchor_bandwidths applies to chained equating only.")
+
+    anchors: tuple[ScoreDistribution, ScoreDistribution] | None = None
+    anchor_h: tuple[float, float] | None = None
+    used_weight: float | None = None
+    used_cb: tuple[float, float] | None = None
+
+    if design == "equivalent_groups":
+        assert y is not None
+        x_scores, r, c_r, x_distribution = _unpack(x, "x")  # type: ignore[arg-type]
+        y_scores, s, c_s, y_distribution = _unpack(y, "y")  # type: ignore[arg-type]
+        u_r, u_s = _pad(c_r / np.sqrt(x_distribution.n), c_s / np.sqrt(y_distribution.n))
+        presmoothed = (isinstance(x, LoglinearResult), isinstance(y, LoglinearResult))
+    elif design == "single_group":
+        joint = _unpack_joint(x, "x")
+        x_scores, y_scores = joint.distribution.x_scores, joint.distribution.y_scores
+        r, s = joint.probabilities.sum(axis=1), joint.probabilities.sum(axis=0)
+        u_r, u_s = joint.c.sum(axis=1), joint.c.sum(axis=0)
+        x_distribution = _as_distribution(x_scores, r, joint.n)
+        y_distribution = _as_distribution(y_scores, s, joint.n)
+        presmoothed = (joint.presmoothed, joint.presmoothed)
+    else:
+        first, second = _unpack_joint(x, "x"), _unpack_joint(y, "y")
+        presmoothed = (first.presmoothed, second.presmoothed)
+        if design == "counterbalanced":
+            if not (
+                _same_scores(first.distribution.x_scores, second.distribution.x_scores)
+                and _same_scores(first.distribution.y_scores, second.distribution.y_scores)
+            ):
+                raise SpecificationError(
+                    "Counterbalanced design: both samples need the same possible X scores "
+                    "(first variable) and Y scores (second variable)."
+                )
+            w_x, w_y = (float(value) for value in counterbalance_weights)
+            if not (0.0 <= w_x <= 1.0 and 0.0 <= w_y <= 1.0):
+                raise SpecificationError("counterbalance_weights must lie in [0, 1].")
+            used_cb = (w_x, w_y)
+            x_scores, y_scores = first.distribution.x_scores, first.distribution.y_scores
+            r = w_x * first.probabilities.sum(axis=1) + (1 - w_x) * second.probabilities.sum(axis=1)
+            s = w_y * first.probabilities.sum(axis=0) + (1 - w_y) * second.probabilities.sum(axis=0)
+            u_r = np.hstack([w_x * first.c.sum(axis=1), (1 - w_x) * second.c.sum(axis=1)])
+            u_s = np.hstack([w_y * first.c.sum(axis=0), (1 - w_y) * second.c.sum(axis=0)])
+            total = first.n + second.n
+            x_distribution = _as_distribution(x_scores, r, total)
+            y_distribution = _as_distribution(y_scores, s, total)
+        else:
+            if not _same_scores(first.distribution.y_scores, second.distribution.y_scores):
+                raise SpecificationError(
+                    "The anchor must be the same test in both populations: x and y need the "
+                    "same possible anchor scores (their second variable)."
+                )
+            x_scores, y_scores = first.distribution.x_scores, second.distribution.x_scores
+            anchor_scores = first.distribution.y_scores
+            t_p, t_q = first.probabilities.sum(axis=0), second.probabilities.sum(axis=0)
+            if design == "post_stratification":
+                used_weight = (
+                    first.n / (first.n + second.n)
+                    if synthetic_weight is None
+                    else float(synthetic_weight)
+                )
+                if not 0.0 <= used_weight <= 1.0:
+                    raise SpecificationError(
+                        f"synthetic_weight must lie in [0, 1], got {used_weight}."
+                    )
+                r, s, u_r, u_s = _post_stratification(first, second, t_p, t_q, used_weight)
+                total = first.n + second.n
+                x_distribution = _as_distribution(x_scores, r, total)
+                y_distribution = _as_distribution(y_scores, s, total)
+            else:
+                r, s = first.probabilities.sum(axis=1), second.probabilities.sum(axis=1)
+                x_distribution = _as_distribution(x_scores, r, first.n)
+                y_distribution = _as_distribution(y_scores, s, second.n)
+                anchors = (
+                    _as_distribution(anchor_scores, t_p, first.n),
+                    _as_distribution(anchor_scores, t_q, second.n),
+                )
+
+    if not (x_distribution.variance() > 0 and y_distribution.variance() > 0):
+        raise SpecificationError("X and Y need positive variance for kernel equating.")
+    h_x = _resolve_bandwidth(bandwidth_x, x_scores, r, weight, linear, "bandwidth_x")
+    h_y = _resolve_bandwidth(bandwidth_y, y_scores, s, weight, linear, "bandwidth_y")
     F = _Continuized.build(x_scores, r, h_x)
     G = _Continuized.build(y_scores, s, h_y)
-    equated = G.quantile(F.cdf(x_scores))
 
-    # Delta method: rows are the possible X scores.
-    gradient_r = F.cdf_gradient(x_scores) @ c_r
-    gradient_s = G.cdf_gradient(equated) @ c_s
-    variance = (gradient_r**2).sum(axis=1) / x_distribution.n + (gradient_s**2).sum(
-        axis=1
-    ) / y_distribution.n
-    see = np.sqrt(variance) / G.density(equated)
+    if design == "chained":
+        assert anchors is not None
+        given = anchor_bandwidths if anchor_bandwidths is not None else (None, None)
+        if len(given) != 2:
+            raise SpecificationError("anchor_bandwidths must hold two values.")
+        h_ap = _resolve_bandwidth(
+            given[0], anchor_scores, t_p, weight, linear, "anchor_bandwidths[0]"
+        )
+        h_aq = _resolve_bandwidth(
+            given[1], anchor_scores, t_q, weight, linear, "anchor_bandwidths[1]"
+        )
+        anchor_h = (h_ap, h_aq)
+        H_P = _Continuized.build(anchor_scores, t_p, h_ap)
+        H_Q = _Continuized.build(anchor_scores, t_q, h_aq)
+        on_anchor = H_P.quantile(F.cdf(x_scores))
+        equated = G.quantile(H_Q.cdf(on_anchor))
+        density_y = G.density(equated)
+        # Population P: X to the anchor, carried to the Y scale by the slope of the second link.
+        link_p = F.cdf_gradient(x_scores) @ first.c.sum(axis=1) - H_P.cdf_gradient(
+            on_anchor
+        ) @ first.c.sum(axis=0)
+        slope = H_Q.density(on_anchor) / density_y / H_P.density(on_anchor)
+        # Population Q: the anchor to Y, evaluated at the anchor equivalents.
+        link_q = H_Q.cdf_gradient(on_anchor) @ second.c.sum(axis=0) - G.cdf_gradient(
+            equated
+        ) @ second.c.sum(axis=1)
+        see_vectors = np.hstack([slope[:, None] * link_p, link_q / density_y[:, None]])
+    else:
+        equated = G.quantile(F.cdf(x_scores))
+        see_vectors = (F.cdf_gradient(x_scores) @ u_r - G.cdf_gradient(equated) @ u_s) / G.density(
+            equated
+        )[:, None]
 
     return KernelEquatingResult(
-        design="equivalent_groups",
+        design=design,
         x=x_distribution,
         y=y_distribution,
         scores=x_scores,
         equated=_freeze(equated),
-        see=_freeze(see),
+        see=_freeze(np.sqrt((see_vectors**2).sum(axis=1))),
+        see_vectors=_freeze(see_vectors),
         bandwidth_x=h_x,
         bandwidth_y=h_y,
         penalty_weight=weight,
-        x_presmoothed=isinstance(x, LoglinearResult),
-        y_presmoothed=isinstance(y, LoglinearResult),
+        x_presmoothed=presmoothed[0],
+        y_presmoothed=presmoothed[1],
+        anchor_distributions=anchors,
+        anchor_bandwidths=anchor_h,
+        synthetic_weight=used_weight,
+        counterbalance_weights=used_cb,
+    )
+
+
+def _post_stratification(
+    first: _Joint, second: _Joint, t_p: FloatArray, t_q: FloatArray, weight: float
+) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
+    r"""Design function of post-stratification equating and its Jacobian times C.
+
+    .. math::
+
+        r_j = \sum_l \Bigl[w + (1 - w)\frac{t_{Ql}}{t_{Pl}}\Bigr] p_{jl}, \qquad
+        s_k = \sum_l \Bigl[(1 - w) + w\frac{t_{Pl}}{t_{Ql}}\Bigr] q_{kl}
+
+    (von Davier et al., 2004, ch. 2), with :math:`t_{Pl} = \sum_j p_{jl}` and
+    :math:`t_{Ql} = \sum_k q_{kl}`. Differentiating,
+
+    .. math::
+
+        dr_j = \sum_l \Bigl[w + (1 - w)\frac{t_{Ql}}{t_{Pl}}\Bigr] dp_{jl}
+               - (1 - w) \sum_l \frac{p_{jl}\, t_{Ql}}{t_{Pl}^2}\, dt_{Pl}
+               + (1 - w) \sum_l \frac{p_{jl}}{t_{Pl}}\, dt_{Ql},
+
+    and symmetrically for :math:`s`. Returns :math:`r`, :math:`s` and the matrices
+    :math:`J_{DF,r} C`, :math:`J_{DF,s} C` with columns ordered as [sample P, sample Q].
+    """
+    used = (t_p > 0) | (t_q > 0)
+    if np.any(used & ((t_p <= 0) | (t_q <= 0))):
+        raise SpecificationError(
+            "Post-stratification needs every observed anchor score in both populations; "
+            "presmooth the joint distributions (presmooth) first."
+        )
+    p, q = first.probabilities[:, used], second.probabilities[:, used]
+    c_p, c_q = first.c[:, used, :], second.c[:, used, :]
+    t_p, t_q = t_p[used], t_q[used]
+    ratio_qp, ratio_pq = t_q / t_p, t_p / t_q
+    r = p @ (weight + (1 - weight) * ratio_qp)
+    s = q @ ((1 - weight) + weight * ratio_pq)
+    anchor_c_p, anchor_c_q = c_p.sum(axis=0), c_q.sum(axis=0)  # d t_P, d t_Q
+
+    u_r_p = np.einsum("l,jlc->jc", weight + (1 - weight) * ratio_qp, c_p) - (1 - weight) * (
+        (p * (t_q / t_p**2)) @ anchor_c_p
+    )
+    u_r_q = (1 - weight) * ((p / t_p) @ anchor_c_q)
+    u_s_q = np.einsum("l,klc->kc", (1 - weight) + weight * ratio_pq, c_q) - weight * (
+        (q * (t_p / t_q**2)) @ anchor_c_q
+    )
+    u_s_p = weight * ((q / t_q) @ anchor_c_p)
+    return (
+        np.asarray(r, dtype=np.float64),
+        np.asarray(s, dtype=np.float64),
+        np.hstack([u_r_p, u_r_q]),
+        np.hstack([u_s_p, u_s_q]),
     )
