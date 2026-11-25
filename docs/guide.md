@@ -306,7 +306,9 @@ np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_nump
 `item_fit(data)` computes Orlando and Thissen's S-X2 for every item: observed versus model-implied
 counts of each response category at each summed score, with sparse cells collapsed exactly as
 mirt's `itemfit()` does (`min_cell=1` by default). It needs complete data, every response category
-observed, and a unidimensional model with `Normal` latent distributions. For a multiple-group
+observed, and `Normal` latent distributions. A confirmatory model with two or three factors
+(`with_factors()`, single group) works too: the summed score is still the total over all items, and
+the expected counts integrate over the product grid of the fit. For a multiple-group
 model pass `group=`: S-X2 is computed within each group (as mirt does), with a leading `group`
 column.
 
@@ -389,7 +391,11 @@ identically $M_2$ for dichotomous items), together with RMSEA and its confidence
 (`ci=0.90` by default), SRMSR, and — for dichotomous models — TLI and CFI against the independence
 null model (polytomous models report `NaN` for `tli` and `cfi`, because the independence null
 model is defined for dichotomous items only).
-It requires complete data and a single-group, unidimensional, `Normal` MLE fit (no priors).
+It requires complete data and a single-group `Normal` MLE fit (no priors), unidimensional or
+confirmatory with two or three factors (`with_factors()`). With free factor correlations the value
+is slightly smaller than mirt's `M2()`, which leaves the correlations out of the derivative matrix
+while counting them in the degrees of freedom. Bifactor and two-tier models are not supported yet
+by `m2()` or `item_fit()`.
 
 ```python
 m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi

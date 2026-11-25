@@ -969,8 +969,9 @@ data-independent shapes (§15.21).
     free latent parameters, as in mirt (which subtracts the latent parameters from every item).
     RMSEA and the $\chi^2$ p-value follow mirt. Tables are post-fit NumPy bookkeeping (data
     dependent shapes, outside `jit`); category probabilities come from the JAX item kernels.
-    Multidimensional, EH and missing-data cases raise `SpecificationError` until they are
-    validated (mirt imputes missing data and ignores EH weights for S-X2); multiple groups: §15.45.
+    EH and missing-data cases raise `SpecificationError` until they are
+    validated (mirt imputes missing data and ignores EH weights for S-X2); multiple groups:
+    §15.45; confirmatory multidimensional models (product grid): §16.19.
 41. **ML and WLE scoring for multidimensional models (M4, §8)**: for $D \in \{2, 3\}$, `"ML"`
     maximizes $\log L(\boldsymbol\theta\mid y)$ and `"WLE"` maximizes the Jeffreys/Firth penalized
     $\log L(\boldsymbol\theta\mid y)+\tfrac12\log\det\mathbf I(\boldsymbol\theta)$ (`mirt:::WLE.mirt`;
@@ -1116,9 +1117,10 @@ data-independent shapes (§15.21).
    goodness-of-fit statistic of Maydeu-Olivares & Joe (2005, 2006) on the first- and second-order
    item-score moments — the $J$ item means $E[y_j]$ and $\binom{J}{2}$ cross-products
    $E[y_iy_j]$ ($i < j$, in column-major pair order, matching mirt's default `M2(type = "M2*")`;
-   for dichotomous items this is exactly $M_2$) — for single-group, unidimensional, complete-data
-   MLE fits with a `Normal` latent distribution (multidimensional, multiple-group,
-   `EmpiricalHistogram`, missing-data, or MAP fits raise `SpecificationError`).
+   for dichotomous items this is exactly $M_2$) — for single-group, complete-data
+   MLE fits with a `Normal` latent distribution (multiple-group, bifactor / two-tier,
+   `EmpiricalHistogram`, missing-data, or MAP fits raise `SpecificationError`; confirmatory
+   multidimensional models on a product grid are covered by §16.19).
    With sample margins $\hat p_2$, model-implied margins $\pi_2(\hat\eta)$ integrated on the fitted
    quadrature grid with the normalized normal weights, asymptotic covariance $\Xi_2$ of
    $\sqrt{N}(\hat p_2-\pi_2)$ under local independence (using conditional first and second moments
@@ -1989,6 +1991,66 @@ data-independent shapes (§15.21).
     scripts and the DIMTEST study in `packages/flexpyctt/validation/`. flexpyirt's tests keep
     the JAX polychoric tests (reading `v24` from the flexpyctt directory), the two-version
     agreement test, V26 and the ensemble tests.
+
+19. **$M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (M6, #77, V39)**:
+    `FitResult.m2()` (§16.3) and `FitResult.item_fit()` (§15.40) accept single-group models
+    declared with `Model.with_factors()` ($D\in\{2,3\}$, product grid, §15.29–§15.30). Both
+    statistics are integrals of products of item category probabilities over the latent density,
+    so nothing in their definition depends on $D$: the node index $q$ runs over the
+    $Q=n^D$ nodes $\boldsymbol\theta_q$ of the fitted product grid and the weights are the
+    normalized multivariate-normal weights
+    $w_q(\boldsymbol\rho)=\phi_D(\boldsymbol\theta_q;\mathbf 0,\mathbf R)/\sum_{q'}\phi_D(\boldsymbol\theta_{q'};\mathbf 0,\mathbf R)$
+    of the fit (§15.30), with $P_{jk}(\boldsymbol\theta)$ from the same item kernels
+    ($\boldsymbol a_j^\top\boldsymbol\theta$ in the linear predictor; unloaded slopes fixed at 0).
+    **$M_2^*$.** With $m_{1,jq}=\sum_k kP_{jk}(\boldsymbol\theta_q)$ and
+    $m_{2,jq}=\sum_k k^2P_{jk}(\boldsymbol\theta_q)$,
+    $$\pi_j=\sum_q m_{1,jq}w_q,\qquad \pi_{ij}=\sum_q m_{1,iq}m_{1,jq}w_q\quad(i<j),$$
+    and $\Xi_2$ is built from the same sums as in §16.3 (local independence holds given the
+    whole vector $\boldsymbol\theta$, so $E[y_iy_j\mid\boldsymbol\theta]=m_{1,i}m_{1,j}$ for
+    $i\ne j$ whether or not the two items load on the same factor). The Jacobian
+    $\Delta_2=\partial\pi_2/\partial\eta^\top$ has, besides the item columns
+    $$\frac{\partial\pi_j}{\partial\xi_j}=\sum_q\frac{\partial m_{1,jq}}{\partial\xi_j}w_q,\qquad
+      \frac{\partial\pi_{ij}}{\partial\xi_i}=\sum_q\frac{\partial m_{1,iq}}{\partial\xi_i}m_{1,jq}w_q,$$
+    one column per free factor correlation $\rho_{ab}$ ($a<b$):
+    $$\frac{\partial\pi_{ij}}{\partial\rho_{ab}}=\sum_q m_{1,iq}m_{1,jq}\frac{\partial w_q}{\partial\rho_{ab}},\qquad
+      \frac{\partial w_q}{\partial\rho_{ab}}=w_q\Big(g_{ab,q}-\sum_{q'}w_{q'}g_{ab,q'}\Big),\qquad
+      g_{ab,q}=\big[\mathbf R^{-1}\boldsymbol\theta_q\boldsymbol\theta_q^\top\mathbf R^{-1}-\mathbf R^{-1}\big]_{ab}$$
+    (and likewise for $\pi_j$). In the code all columns come from one `jax.jacfwd` of the
+    margins with respect to $\eta$ (the latent parameters enter through `_latent_log_weights`),
+    so no formula is written per parameter type; the expressions above are what the R reference
+    recomputes independently. $df=J+\binom J2-q$ with $q$ = `n_params`, which includes the free
+    correlations; RMSEA, its interval, SRMSR, and (dichotomous models) TLI / CFI against the
+    independence model are unchanged, the null model having no latent structure. **Difference
+    from mirt**: as for a free mean or variance (§16.3), mirt's `M2()` sets the `GroupPars`
+    estimation flags to `FALSE` when it builds $\Delta_2$, so a free correlation has no column
+    there although it is subtracted in $df$. flexpyirt keeps every free parameter in $\Delta_2$
+    (Maydeu-Olivares & Joe, 2005, 2006); its $M_2$ is therefore slightly smaller than mirt's for
+    a model with free correlations ($3\times10^{-7}$ to $7\times10^{-4}$ relative in V39). The
+    private `_latent_in_delta=False` reproduces mirt's value. **Identification from the
+    margins** is checked as before (rank of $\Delta_2$, $df>0$): for example a three-category
+    GRM item has more free parameters than a small test has rows involving it, and a factor
+    measured by a single item is not identified.
+    **S-X2.** The summed score is the total over all items (not per factor), as in mirt. The
+    Lord–Wingersky recursion is run at every node of the product grid,
+    $$L_j(s\mid\boldsymbol\theta_q)=\sum_{k=0}^{K_j-1}L_{j-1}(s-k\mid\boldsymbol\theta_q)P_{jk}(\boldsymbol\theta_q),$$
+    and the expected proportions integrate over all factors,
+    $$E_j[s,k]=\frac{\sum_qP_{jk}(\boldsymbol\theta_q)L_{-j}(s-k\mid\boldsymbol\theta_q)w_q}{\sum_qL(s\mid\boldsymbol\theta_q)w_q}.$$
+    `_itemfit.lord_wingersky` and `s_x2_expected_tables` take a list of `(Q, K_j)` arrays and a
+    weight vector and never look at the node coordinates, so they are used unchanged with the
+    flattened grid ($O(J^2SQ)$ work, about a second for $Q=15^3$ and nine items). Collapsing
+    (`mirt:::collapseCells`) and $df_j$ = kept cells − rows − free parameters of item $j$ − free
+    latent parameters (the free correlations; an item with a cross-loading has one more free
+    slope) are as in §15.40. mirt's `itemfit(fit_stats = "S_X2")` does the same on
+    `thetaComb(seq(-6, 6, length.out = quadpts), nfact)` with `mirt_dmvnorm` weights; its default
+    `quadpts` (`select_quadpts(nfact)`: 31 for two factors, 15 for three) and limits are those of
+    `mirt()` and of `Quadrature.default()`, but mirt's `itemfit()` and `M2()` do not read the
+    grid of the fit, so a fit made with another `quadpts` or `theta_lim` must pass them again in
+    R (flexpyirt always uses the grid of the fit).
+    **Not supported** (each `SpecificationError`): bifactor and two-tier models (their
+    reduced E-step has no joint grid; the statistics need the block structure of §17), and
+    multiple-group multidimensional models (not validated; $M_2$ for multiple groups is #76).
+    Unidimensional results are unchanged bit for bit (the same code path with $D=1$).
+    **Validation (V39)**: mirt 1.48 on the four V14 models, see VALIDATION.md.
 
 ## 17. Implementation decisions (M7)
 

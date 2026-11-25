@@ -162,7 +162,9 @@ observed and model-implied counts of each category at summed scores $1,\dots,S-1
 the expected counts use the Lord–Wingersky recursion with the item left out and the fitted latent
 weights on the fitted quadrature grid. Sparse cells are collapsed exactly as mirt's `itemfit()`
 (`min_cell` is mirt's `mincell`), and $df_j$ = kept cells − rows − free parameters of the item −
-free latent parameters (mirt's convention).
+free latent parameters (mirt's convention). For a confirmatory multidimensional model
+(`with_factors()`, single group) the recursion runs at every node of the fitted product grid with
+the multivariate-normal weights, and the free factor correlations count as latent parameters.
 
 | Argument | Description |
 |---|---|
@@ -176,8 +178,8 @@ free latent parameters (mirt's convention).
 `df = 0` and NaN statistics. A multiple-group model adds a leading `group` column (one row per
 group and item).
 
-**Raises**: `SpecificationError` for multidimensional, `EmpiricalHistogram`, `DavidianCurve`, or
-`NormalMixture` models, missing responses, an item with an unobserved category (within a group),
+**Raises**: `SpecificationError` for bifactor, two-tier, multiple-group multidimensional,
+`EmpiricalHistogram`, `DavidianCurve`, or `NormalMixture` models, missing responses, an item with an unobserved category (within a group),
 or a non-positive `min_cell`.
 
 #### `FitResult.m2`
@@ -190,7 +192,10 @@ Limited-information goodness-of-fit statistic $M_2$ / $M_2^*$ of Maydeu-Olivares
 ([guide section 5](guide.md#limited-information-fit-m2)), computed on the $J$ item-score means and
 $\binom{J}{2}$ pairwise cross-products (matching mirt's default `M2(type = "M2*")`; identically
 $M_2$ for dichotomous items). The Jacobian $\Delta_2 = \partial\pi_2/\partial\eta^\top$ includes
-every free item and latent parameter (shared parameters once) via JAX autodiff.
+every free item and latent parameter (shared parameters once) via JAX autodiff. Confirmatory
+multidimensional models (`with_factors()`) are integrated over the fitted product grid, and
+$\Delta_2$ has a column for every free factor correlation (mirt's `M2()` omits the latent columns,
+so its value is slightly larger).
 
 | Argument | Description |
 |---|---|
@@ -206,7 +211,7 @@ CI, `tli` and `cfi` are `NaN` (`df` and `srmsr` remain finite). Polytomous model
 `tli` and `cfi` (the independence null model is dichotomous only); if the dichotomous null $M_2$ is not greater than the fitted $M_2$,
 a `FlexpyirtWarning` is emitted and `tli`/`cfi` are `NaN`.
 
-**Raises**: `PrecisionError` if JAX 64-bit is disabled; `SpecificationError` for multidimensional,
+**Raises**: `PrecisionError` if JAX 64-bit is disabled; `SpecificationError` for bifactor, two-tier,
 multiple-group, `EmpiricalHistogram`, `NormalMixture`, or MAP (with priors) models, missing responses, invalid
 `ci`, or fewer than 2 items or respondents.
 

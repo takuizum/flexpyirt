@@ -76,6 +76,7 @@ English | [日本語](VALIDATION.ja.md)
 | V36 | Summed-score distribution kernel (Poisson-binomial: five probability vectors, $J$ 10–300; polytomous: GRM $K=4$ and mixed 2PL + GRM) | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`, `poibin::dpoibin()`, `stats::dpois()`; mirt `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 | V37 | Information, expected score, reliability and summed-score EAP at mirt's estimates (2PL $J=12$; the same with 8% missing; 3PL $J=12$; GRM and GPCM $K=4$, $J=8$; nominal $K=4$, $J=6$; mixed 2PL + 3PL + GRM + GPCM + nominal, $J=14$; two groups, 2PL + GRM, focal mean and variance free) | `iteminfo()`, `testinfo()`, `expected.item()`, `expected.test()`, `marginal_rxx()`, `empirical_rxx()`, `fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
 | V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
+| V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -356,6 +357,46 @@ English | [日本語](VALIDATION.ja.md)
   flexpyirt is evaluated at mirt's estimates there. Degrees of freedom are identical and S-X2
   agrees within `1e-6` (relative) in both groups of both cases. Tests:
   `tests/test_mirt_m5_itemfit_multigroup.py`.
+- **$M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (V39, M6; DESIGN §16.19)**:
+  the four V14 models (2D 2PL simple structure, 2D 2PL with the cross-loading `q07`, 2D GRM
+  $K=4$, 3D 2PL; one free correlation in 2D, three in 3D) are rebuilt in mirt 1.48 at the V14
+  estimates with every `est` flag kept and `TOL = NaN`, and `M2()` and
+  `itemfit(fit_stats = "S_X2")` are evaluated on the product grid of the fit ($31^2$ and $15^3$
+  nodes on $[-6,6]$, passed explicitly because neither function reads the grid of the fit)
+  (`validation/r/m6_fit_multidim_reference.R` → `tests/reference/v39_fit_multidim.json`). This is
+  a new ID rather than an extension of V15 / V18 because the cases, the R script and the
+  reference file are separate. Tests: `tests/test_mirt_m6_fit_multidim.py` (slow tier, except the
+  S-X2 comparison of the 2D simple-structure case and the rejected model structures, which run in
+  the fast tier) and the unit tests
+  `tests/test_m6_fit_multidim.py` (expected S-X2 tables, $\pi_2$ and $\Xi_2$ on a product grid
+  against enumeration of every response pattern; the correlation column of $\Delta_2$ against a
+  central difference).
+  - **S-X2**: degrees of freedom identical for every item in all four models (and for the GRM
+    with `mincell = 3`); at mirt's estimates S-X2 agrees to `2.7e-14` (relative) and p-values to
+    `1.2e-14`; refitted from default starting values, S-X2 to `1.2e-7` and p-values to `5.0e-8`
+    (the level at which the estimates agree, largest in the 3D case). mirt's `collapseCells`
+    port is used unchanged; no difference in collapsing or in the quadrature was found.
+  - **$M_2$, mirt's convention**: mirt's `M2()` sets the `GroupPars` `est` flags to `FALSE` when
+    it builds $\Delta_2$, so the free correlations have no column there although $df$ subtracts
+    them (as for `rasch_free_var` in V18). With `_latent_in_delta=False`, flexpyirt reproduces
+    mirt's raw $M_2$ to `7.4e-13` (relative) at mirt's estimates and `1.9e-8` refitted; $df$ is
+    identical, SRMSR agrees to `1.5e-14` / `3.4e-8`, and TLI / CFI (three dichotomous cases) to
+    `4.5e-9`. The R script also recomputes mirt's value from its own pieces (`dP`,
+    `buildXi2els`) and asserts agreement to `1e-10`.
+  - **$M_2$, flexpyirt's default** (every free parameter in $\Delta_2$): compared with an exact R
+    computation that adds one analytic column per free correlation (checked in R against a
+    central difference of the normalized prior): `2.5e-13` at mirt's estimates, `5.3e-9`
+    refitted. The default is smaller than mirt's raw value by `4.7e-5` (2D simple), `2.8e-7` (2D
+    cross-loading), `2.5e-4` (2D GRM) and `6.9e-4` (3D), relative.
+  - **A numerical note**: for the GRM, $\Delta_2$ under item-score margins is ill-conditioned;
+    central-difference item derivatives (step $10^{-6}$, error $\sim10^{-10}$) shift $M_2$ by
+    `4e-6` relative, so the R reference uses mirt's analytic `dP` for the item columns (correct
+    for 2PL and graded items) and flexpyirt uses autodiff.
+  - **Not validated**: multiple-group multidimensional models (the V21 configurations; they
+    raise `SpecificationError`, as do bifactor and two-tier models), 3PL / GPCM / nominal items
+    in a multidimensional model (the item kernels are those validated in V18 / V15 and the unit
+    tests cover a mixed 2PL + GRM model, but there is no mirt comparison), and grids other than
+    mirt's defaults.
 - **Confirmatory 2–3 dimensional MIRT (V14, M4)**: four simulated cases are validated in
   `tests/test_mirt_m4_mirt.py` (with both plain EM and SQUAREM; reference generator
   `validation/r/m4_mirt_reference.R` → `tests/reference/v14_mirt2d.json`, `accelerate = "none"`,

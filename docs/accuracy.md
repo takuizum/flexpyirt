@@ -118,7 +118,8 @@ small or absent in typical use, but you may see them when comparing the two prog
   flexpyirt decides by the category slopes $a\,\mathrm{ak}_c$, so a pattern such as all-0 with
   $\mathrm{ak}_1<0$ gets a finite estimate.
 - **$M_2$.** flexpyirt includes free latent parameters in the derivative matrix $\Delta_2$ (mirt
-  leaves them out, for example the Rasch variance) and uses exact derivatives for 3PL/4PL and GPCM
+  leaves them out, for example the Rasch variance or the factor correlations of a confirmatory
+  multidimensional model, where flexpyirt's $M_2$ is smaller by up to 0.07% in the tested cases) and uses exact derivatives for 3PL/4PL and GPCM
   items, where mirt 1.46's are inaccurate. For these models flexpyirt is compared with an exact R
   computation, and its $M_2$ differs from mirt's (by 5–11% in the tested 3PL and GPCM cases). TLI and
   CFI are reported for dichotomous models only, because the independence null model is
