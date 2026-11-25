@@ -20,7 +20,6 @@ from flexpyirt import (
     Model,
     Normal,
     NormalPrior,
-    Quadrature,
     Rasch,
     ThreePL,
     TwoPL,
@@ -89,26 +88,14 @@ def test_m2_rejects_unsupported_models_and_inputs() -> None:
         .equal_across_groups(items=items[:3])
     )
     res_mg = fit(spec_mg, df, group=grp, method=BAEM(tol=1e-4, squarem=True), se=None)
-    with pytest.raises(SpecificationError, match="single-group unidimensional"):
+    with pytest.raises(SpecificationError, match="single-group models"):
         res_mg.m2(df)
 
     # EmpiricalHistogram latent distribution.
     spec_eh = Model.uniform(TwoPL(), items=items).with_latent(EmpiricalHistogram())
     res_eh = fit(spec_eh, df, method=BAEM(tol=1e-3, max_iter=50, squarem=True), se=None)
-    with pytest.raises(SpecificationError, match="single-group unidimensional"):
+    with pytest.raises(SpecificationError, match="single-group models"):
         res_eh.m2(df)
-
-    # 2-factor multidimensional model.
-    spec_2d = Model.uniform(TwoPL(), items=items).with_factors({"F1": items[:3], "F2": items[3:]})
-    res_2d = fit(
-        spec_2d,
-        df,
-        method=BAEM(tol=1e-4, squarem=True),
-        quadrature=Quadrature.equispaced(11, bounds=(-4, 4)),
-        se=None,
-    )
-    with pytest.raises(SpecificationError, match="single-group unidimensional"):
-        res_2d.m2(df)
 
     # MAP fit (with priors).
     spec_map = Model.uniform(TwoPL(), items=items).prior(param="d", dist=NormalPrior(0.0, 2.0))

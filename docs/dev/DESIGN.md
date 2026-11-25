@@ -244,7 +244,11 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   co-occurrences for the cross term while reusing a single E-step (§15.20).
 - Alternatives: the observed (posterior) information $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$ by
   chunked forward-over-reverse autodiff (`jax.linearize(jax.grad(...))` over basis batches; also
-  used to check Oakes), cross-product ($\sum_p c_p s_p s_p^\top$), sandwich.
+  used to check Oakes).
+- **Decision (M7, §17.5)**: `se="crossprod"` inverts the cross-product of the per-pattern scores,
+  $B_{\mathrm{post}}=\sum_p c_p s_p s_p^\top-\nabla^2_\eta\log\pi(\hat\eta)$, and `se="sandwich"` is
+  the robust covariance $H^{-1}B_{\mathrm{post}}H^{-1}$ with $H$ the observed (posterior)
+  information above (Huber, 1967; White, 1982).
 - With MAP, both `oakes` and `hessian` add $-\nabla^2_\eta\log\pi(\hat\eta)$ to the information
   matrix and remain mathematically identical. Fixed parameters are not in $\eta$ and are excluded
   automatically.
@@ -969,8 +973,9 @@ data-independent shapes (§15.21).
     free latent parameters, as in mirt (which subtracts the latent parameters from every item).
     RMSEA and the $\chi^2$ p-value follow mirt. Tables are post-fit NumPy bookkeeping (data
     dependent shapes, outside `jit`); category probabilities come from the JAX item kernels.
-    Multidimensional, EH and missing-data cases raise `SpecificationError` until they are
-    validated (mirt imputes missing data and ignores EH weights for S-X2); multiple groups: §15.45.
+    EH and missing-data cases raise `SpecificationError` until they are
+    validated (mirt imputes missing data and ignores EH weights for S-X2); multiple groups:
+    §15.45; confirmatory multidimensional models (product grid): §16.19.
 41. **ML and WLE scoring for multidimensional models (M4, §8)**: for $D \in \{2, 3\}$, `"ML"`
     maximizes $\log L(\boldsymbol\theta\mid y)$ and `"WLE"` maximizes the Jeffreys/Firth penalized
     $\log L(\boldsymbol\theta\mid y)+\tfrac12\log\det\mathbf I(\boldsymbol\theta)$ (`mirt:::WLE.mirt`;
@@ -1116,9 +1121,10 @@ data-independent shapes (§15.21).
    goodness-of-fit statistic of Maydeu-Olivares & Joe (2005, 2006) on the first- and second-order
    item-score moments — the $J$ item means $E[y_j]$ and $\binom{J}{2}$ cross-products
    $E[y_iy_j]$ ($i < j$, in column-major pair order, matching mirt's default `M2(type = "M2*")`;
-   for dichotomous items this is exactly $M_2$) — for single-group, unidimensional, complete-data
-   MLE fits with a `Normal` latent distribution (multidimensional, multiple-group,
-   `EmpiricalHistogram`, missing-data, or MAP fits raise `SpecificationError`).
+   for dichotomous items this is exactly $M_2$) — for single-group, complete-data
+   MLE fits with a `Normal` latent distribution (multiple-group, bifactor / two-tier,
+   `EmpiricalHistogram`, missing-data, or MAP fits raise `SpecificationError`; confirmatory
+   multidimensional models on a product grid are covered by §16.19).
    With sample margins $\hat p_2$, model-implied margins $\pi_2(\hat\eta)$ integrated on the fitted
    quadrature grid with the normalized normal weights, asymptotic covariance $\Xi_2$ of
    $\sqrt{N}(\hat p_2-\pi_2)$ under local independence (using conditional first and second moments
@@ -2006,6 +2012,66 @@ data-independent shapes (§15.21).
     the JAX polychoric tests (reading `v24` from the flexpyctt directory), the two-version
     agreement test, V26 and the ensemble tests.
 
+19. **$M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (M6, #77, V39)**:
+    `FitResult.m2()` (§16.3) and `FitResult.item_fit()` (§15.40) accept single-group models
+    declared with `Model.with_factors()` ($D\in\{2,3\}$, product grid, §15.29–§15.30). Both
+    statistics are integrals of products of item category probabilities over the latent density,
+    so nothing in their definition depends on $D$: the node index $q$ runs over the
+    $Q=n^D$ nodes $\boldsymbol\theta_q$ of the fitted product grid and the weights are the
+    normalized multivariate-normal weights
+    $w_q(\boldsymbol\rho)=\phi_D(\boldsymbol\theta_q;\mathbf 0,\mathbf R)/\sum_{q'}\phi_D(\boldsymbol\theta_{q'};\mathbf 0,\mathbf R)$
+    of the fit (§15.30), with $P_{jk}(\boldsymbol\theta)$ from the same item kernels
+    ($\boldsymbol a_j^\top\boldsymbol\theta$ in the linear predictor; unloaded slopes fixed at 0).
+    **$M_2^*$.** With $m_{1,jq}=\sum_k kP_{jk}(\boldsymbol\theta_q)$ and
+    $m_{2,jq}=\sum_k k^2P_{jk}(\boldsymbol\theta_q)$,
+    $$\pi_j=\sum_q m_{1,jq}w_q,\qquad \pi_{ij}=\sum_q m_{1,iq}m_{1,jq}w_q\quad(i<j),$$
+    and $\Xi_2$ is built from the same sums as in §16.3 (local independence holds given the
+    whole vector $\boldsymbol\theta$, so $E[y_iy_j\mid\boldsymbol\theta]=m_{1,i}m_{1,j}$ for
+    $i\ne j$ whether or not the two items load on the same factor). The Jacobian
+    $\Delta_2=\partial\pi_2/\partial\eta^\top$ has, besides the item columns
+    $$\frac{\partial\pi_j}{\partial\xi_j}=\sum_q\frac{\partial m_{1,jq}}{\partial\xi_j}w_q,\qquad
+      \frac{\partial\pi_{ij}}{\partial\xi_i}=\sum_q\frac{\partial m_{1,iq}}{\partial\xi_i}m_{1,jq}w_q,$$
+    one column per free factor correlation $\rho_{ab}$ ($a<b$):
+    $$\frac{\partial\pi_{ij}}{\partial\rho_{ab}}=\sum_q m_{1,iq}m_{1,jq}\frac{\partial w_q}{\partial\rho_{ab}},\qquad
+      \frac{\partial w_q}{\partial\rho_{ab}}=w_q\Big(g_{ab,q}-\sum_{q'}w_{q'}g_{ab,q'}\Big),\qquad
+      g_{ab,q}=\big[\mathbf R^{-1}\boldsymbol\theta_q\boldsymbol\theta_q^\top\mathbf R^{-1}-\mathbf R^{-1}\big]_{ab}$$
+    (and likewise for $\pi_j$). In the code all columns come from one `jax.jacfwd` of the
+    margins with respect to $\eta$ (the latent parameters enter through `_latent_log_weights`),
+    so no formula is written per parameter type; the expressions above are what the R reference
+    recomputes independently. $df=J+\binom J2-q$ with $q$ = `n_params`, which includes the free
+    correlations; RMSEA, its interval, SRMSR, and (dichotomous models) TLI / CFI against the
+    independence model are unchanged, the null model having no latent structure. **Difference
+    from mirt**: as for a free mean or variance (§16.3), mirt's `M2()` sets the `GroupPars`
+    estimation flags to `FALSE` when it builds $\Delta_2$, so a free correlation has no column
+    there although it is subtracted in $df$. flexpyirt keeps every free parameter in $\Delta_2$
+    (Maydeu-Olivares & Joe, 2005, 2006); its $M_2$ is therefore slightly smaller than mirt's for
+    a model with free correlations ($3\times10^{-7}$ to $7\times10^{-4}$ relative in V39). The
+    private `_latent_in_delta=False` reproduces mirt's value. **Identification from the
+    margins** is checked as before (rank of $\Delta_2$, $df>0$): for example a three-category
+    GRM item has more free parameters than a small test has rows involving it, and a factor
+    measured by a single item is not identified.
+    **S-X2.** The summed score is the total over all items (not per factor), as in mirt. The
+    Lord–Wingersky recursion is run at every node of the product grid,
+    $$L_j(s\mid\boldsymbol\theta_q)=\sum_{k=0}^{K_j-1}L_{j-1}(s-k\mid\boldsymbol\theta_q)P_{jk}(\boldsymbol\theta_q),$$
+    and the expected proportions integrate over all factors,
+    $$E_j[s,k]=\frac{\sum_qP_{jk}(\boldsymbol\theta_q)L_{-j}(s-k\mid\boldsymbol\theta_q)w_q}{\sum_qL(s\mid\boldsymbol\theta_q)w_q}.$$
+    `_itemfit.lord_wingersky` and `s_x2_expected_tables` take a list of `(Q, K_j)` arrays and a
+    weight vector and never look at the node coordinates, so they are used unchanged with the
+    flattened grid ($O(J^2SQ)$ work, about a second for $Q=15^3$ and nine items). Collapsing
+    (`mirt:::collapseCells`) and $df_j$ = kept cells − rows − free parameters of item $j$ − free
+    latent parameters (the free correlations; an item with a cross-loading has one more free
+    slope) are as in §15.40. mirt's `itemfit(fit_stats = "S_X2")` does the same on
+    `thetaComb(seq(-6, 6, length.out = quadpts), nfact)` with `mirt_dmvnorm` weights; its default
+    `quadpts` (`select_quadpts(nfact)`: 31 for two factors, 15 for three) and limits are those of
+    `mirt()` and of `Quadrature.default()`, but mirt's `itemfit()` and `M2()` do not read the
+    grid of the fit, so a fit made with another `quadpts` or `theta_lim` must pass them again in
+    R (flexpyirt always uses the grid of the fit).
+    **Not supported** (each `SpecificationError`): bifactor and two-tier models (their
+    reduced E-step has no joint grid; the statistics need the block structure of §17), and
+    multiple-group multidimensional models (not validated; $M_2$ for multiple groups is #76).
+    Unidimensional results are unchanged bit for bit (the same code path with $D=1$).
+    **Validation (V39)**: mirt 1.48 on the four V14 models, see VALIDATION.md.
+
 ## 17. Implementation decisions (M7)
 
 1. **Bifactor models with Gibbons–Hedeker dimension reduction (`Model.with_bifactor`, V32)**:
@@ -2209,6 +2275,78 @@ data-independent shapes (§15.21).
      need nothing special: their dimension-reduced E-step also works on `counts`; the two-tier
      case is checked against row replication only. Estimates, log-likelihood, AIC, BIC and Oakes SEs agree within the common
      tolerances (VALIDATION.md V34).
+5. **Robust standard errors: cross-product and sandwich (`fit(se="crossprod" | "sandwich")`, V35, #85)**:
+   **Definitions.** With $L_p(\eta)=\sum_q w_{g(p)q}(\eta)\prod_j P_j(y_{pj}\mid\theta_q;\eta)$ the
+   marginal likelihood of response pattern $p$ (count $c_p$) and $s_p=\nabla_\eta\log L_p(\hat\eta)$
+   its score,
+   $$B=\sum_p c_p\,s_p s_p^\top,\qquad B_{\mathrm{post}}=B-\nabla^2_\eta\log\pi(\hat\eta),$$
+   $$V_{\mathrm{crossprod}}=B_{\mathrm{post}}^{-1},\qquad
+     V_{\mathrm{sandwich}}=H^{-1}B_{\mathrm{post}}H^{-1},$$
+   where $H=-\nabla^2_\eta[\ell(\hat\eta)+\log\pi(\hat\eta)]$ is the observed (posterior)
+   information of §4.8, computed by Oakes' identity (`information_oakes`; identical to
+   `information_hessian`). $B$ is the outer-product-of-gradients estimate of the Fisher information
+   (Berndt, Hall, Hall & Hausman, 1974); the sandwich is Huber's (1967) and White's (1982)
+   covariance of a maximum-likelihood estimator under misspecification. The unit of independence
+   is the person: a pattern observed $c_p$ times contributes $c_p$ identical terms, so compressed
+   and row-replicated data give the same $B$. The scores are not centred ($\sum_p c_p s_p=0$ at
+   the ML estimate, and mirt does not centre them either).
+   **Priors.** The prior curvature is added to the cross-product, exactly as it is added to $H$
+   (§15.17): both `oakes`/`hessian` and `crossprod` then estimate the same posterior information,
+   and when the information equality $B=-\nabla^2\ell$ holds the sandwich reduces to
+   $H^{-1}$, the existing MAP covariance. This is mirt's convention (`SE.simple`:
+   `info <- Igrad + Iprior` for `"crossprod"`, the same matrix as the middle of `"sandwich"`), so
+   it can be validated. The alternative $H^{-1}BH^{-1}$ with the likelihood scores only (the
+   repeated-sampling variance of a penalized estimator, which for a log-concave prior is smaller than $H^{-1}$ even under
+   a correct model) is not offered. A fixed parameter is not in $\eta$; a parameter shared across
+   groups or items (one `free_id`) has one score coordinate that sums its occurrences.
+   **Multiple groups and latent parameters.** $\eta$ holds every group's item and latent
+   parameters; a pattern of group $g$ has a zero score for the parameters that enter only other
+   groups, so $B$ is the sum of the groups' cross-products without any special handling.
+   **Empirical histogram.** As for `oakes`/`hessian` (§15.35), the histogram weights are held at
+   their estimates: $s_p$ and $H$ are derivatives with respect to the free item parameters only,
+   and `vcov` keeps its `n_free_items × n_free_items` shape. The sandwich is therefore robust for
+   the item parameters given the estimated histogram, not for the estimation of the histogram.
+   **Not covered.** `DavidianCurve` and `NormalMixture` latent distributions raise
+   `SpecificationError` for both options: mirt computes neither for them ("No standard error
+   method currently supported for Davidian curves"; "Only Oakes and complete SE.types current
+   supported for mixture models"), so there is no reference to validate against (principle 1).
+   Bifactor and two-tier models (§17.1, §17.2) also raise `SpecificationError`: their likelihood
+   is evaluated by dimension reduction (`CompiledProblem.reduction`), while the score kernel
+   below works on the node tables of the full grid. mirt does compute both types for `bfactor()`,
+   so this is an implementation gap that can be validated later, not a missing reference.
+   With sampling weights (item 4) both options raise `SpecificationError`: $B$ built from the
+   weighted pattern counts is not the design-based estimator ($\sum_i w_i^2 s_i s_i^\top$), and
+   that version and the cluster-robust one (scores summed within clusters) are not implemented
+   yet (#85).
+   **Computation** (`_robust_se.py`, a separate Core module so that `_core.py` is untouched).
+   `_fold_pattern_scores` evaluates the node tables $\log P_{gjqk}(\eta)$ and $\log w_{gq}(\eta)$
+   once and linearizes them with `jax.vjp`. Patterns are processed in chunks by `lax.scan`: for a
+   chunk, `vmap(jax.grad)` differentiates each pattern's log-likelihood with respect to the
+   tables and the stored pullback maps each cotangent to $\eta$, giving a `(B, n_free)` block of
+   scores from which $\sum c_p s_p s_p^\top$ is accumulated. Neither `(P, n_free)` nor
+   `(P, G, J, Q, K)` is materialized; the chunk size is the largest (at most 1024) that keeps
+   `chunk × G × Q × (1 + Σ_f J_f K_f (P_f + 1))` under $8\times10^6$ elements (about 64 MB), and
+   chunks of zero-count padding rows are skipped with `lax.cond`. Every derivative is autodiff;
+   `score_sum` ($\sum_p c_p s_p$) is checked against `jax.grad(marginal_loglik)` and the
+   cross-product against a dense `jax.jacfwd` of the pattern log-likelihoods in the unit tests.
+   `fit()` builds the sandwich in NumPy from the inverse of $H$ (the existing positive-definiteness
+   check: `FlexpyirtWarning` and NaN standard errors if $H$ is not positive definite; for
+   `crossprod` the same check applies to $B_{\mathrm{post}}$, which is singular when there are
+   fewer distinct patterns than free parameters).
+   **Consumers of `vcov`.** `FitResult.vcov`, the `se` column, the delta-method display SEs
+   (`b_se`, `bk_se`, latent `sd`/`cor` SEs; §15.18) and `link()` (§16.5) read `vcov` and so use the
+   chosen covariance without change. `FitResult.jsi(method="one_step")` uses `vcov` as the inverse
+   observed information of a Newton step, which $V_{\mathrm{sandwich}}$ and
+   $V_{\mathrm{crossprod}}$ are not; it raises `SpecificationError` unless the fit used `oakes` or
+   `hessian`.
+   **Option names and JSON.** `se` takes `"sandwich"` and `"crossprod"` (mirt's `SE.type`
+   spellings; `"cross_product"` would be the spelling of the naming rule of §15.46 and is left to
+   the owner). `se_method` in the JSON file stores the same strings; the two values are additions,
+   no stored name changes, and `schema_version` stays as it is (as when new latent kinds were
+   added in §16.4 and §16.7). mirt's `"sandwich.Louis"` is the same estimator with $H$ computed by
+   Louis' (1982) formula instead of Oakes'; both formulas give the observed information, so it is
+   not a separate option here.
+
 ## 18. Summed-score distribution kernel, information and reliability (M7)
 
 1. **Lord–Wingersky recursion as a Poisson-binomial kernel (`summed_score_distribution`, V36)**:
@@ -2432,6 +2570,7 @@ data-independent shapes (§15.21).
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
+- Berndt, E. R., Hall, B. H., Hall, R. E., & Hausman, J. A. (1974). Estimation and inference in nonlinear structural models. *Annals of Economic and Social Measurement*, 3(4), 653–665.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
 - Binder, D. A. (1983). On the variances of asymptotically normal estimators from complex surveys. *International Statistical Review*, 51(3), 279–292.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
@@ -2466,6 +2605,7 @@ data-independent shapes (§15.21).
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
+- Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
@@ -2522,6 +2662,7 @@ data-independent shapes (§15.21).
 - Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
+- White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.

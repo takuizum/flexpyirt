@@ -194,7 +194,8 @@ res = fit(
   EM の評価回数が大きく減る。既定は通常の EM（`squarem=False`）。
 - **`quadrature`**: 潜在変数の求積格子。既定は等間隔 61 点・$[-6, 6]$（mirt の既定と同じ）。
   広げるべき場合は [13 節](#13-求積格子の選び方)。
-- **`se`**: `"oakes"`（既定）、`"hessian"`、`None`（計算しない）。
+- **`se`**: `"oakes"`（既定）、`"hessian"`、`"sandwich"`、`"crossprod"`、`None`（計算しない）。
+  [6 節](#6-標準誤差)を参照。
 
 ```python
 res_sq = fit(spec, df, method=BAEM(tol=1e-6, squarem=True), se=None)
@@ -289,7 +290,8 @@ np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_nump
 
 `item_fit(data)` は各項目の Orlando と Thissen の S-X2 を計算する。合計得点ごとの各反応カテゴリの観測度数とモデルによる
 期待度数を比べ、度数の少ないセルは mirt の `itemfit()` と同じ方法でまとめる（既定 `min_cell=1`）。欠測のないデータ、
-すべての反応カテゴリが観測されていること、`Normal` 潜在分布の 1 次元モデルが必要。多母集団モデルでは `group=` を
+すべての反応カテゴリが観測されていること、`Normal` 潜在分布が必要。2〜3 因子の確認的モデル（`with_factors()`、
+単一群）でも使える。合計得点は全項目の合計のままで、期待度数は推定時の直積格子の上で積分する。多母集団モデルでは `group=` を
 渡すと、（mirt と同じく）群ごとに S-X2 を計算し、先頭に `group` 列がつく。
 
 ```python
@@ -364,8 +366,10 @@ print(reliability(res, df))  # データを渡すと列 marginal, empirical
 `m2(data)` は Maydeu-Olivares & Joe (2005, 2006) の限定情報の適合度統計量を、項目得点の平均とペアごとの交差積
 （mirt の既定 `M2(type = "M2*")`。2 値項目では厳密に $M_2$）から計算する。あわせて RMSEA とその信頼区間（既定
 `ci=0.90`）、SRMSR、および 2 値モデルでは独立帰無モデルに対する TLI と CFI を返す（多値モデルでは `tli`・`cfi` は
-`NaN`。独立帰無モデルは 2 値項目でのみ定義されるため）。欠測のないデータと、`Normal` 潜在分布の単一群 1 次元 MLE 推定
-（事前分布なし）が必要。
+`NaN`。独立帰無モデルは 2 値項目でのみ定義されるため）。欠測のないデータと、`Normal` 潜在分布の単一群の MLE 推定
+（事前分布なし）が必要で、1 次元モデルと 2〜3 因子の確認的モデル（`with_factors()`）に対応する。因子間相関を推定する
+モデルでは、値は mirt の `M2()` よりわずかに小さい（mirt は相関を自由度では数えるが、微分の行列には入れない）。
+双因子モデルと two-tier モデルは、`m2()` も `item_fit()` もまだ対応していない。
 
 ```python
 m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi
@@ -378,8 +382,11 @@ print(m2_table.round(3))
   2 階微分を JAX の自動微分で計算する。
 - **`se="hessian"`**: 周辺対数尤度を直接 2 回微分する。
 
-両者は数学的に同じ量で、数値的にも丸め誤差の範囲で一致する。`vcov` の行と列は自由パラメタの番号
-（ParameterTable の `free_id`）の順。
+- **`se="crossprod"`**: 受検者ごとのスコア（各受検者の対数尤度の勾配）のクロス積の逆行列。
+- **`se="sandwich"`**: ロバスト（Huber–White）共分散。情報行列の逆行列でクロス積を両側から挟む。
+
+`"oakes"` と `"hessian"` は数学的に同じ量で、数値的にも丸め誤差の範囲で一致する。`vcov` の行と列は
+自由パラメタの番号（ParameterTable の `free_id`）の順。
 
 ```python
 res_h = fit(spec, df, se="hessian")
@@ -394,6 +401,27 @@ vcov = pd.DataFrame(
 )
 print(vcov.iloc[:2, :2])
 ```
+
+**ロバスト標準誤差。** `"oakes"` と `"hessian"` はモデルが正しいことを仮定している。モデルが正しくない
+（局所依存、項目モデルの誤り、仮定から大きく外れた潜在分布）ときも推定値は最もよく当てはまるパラメタに
+収束するが、これらの標準誤差は妥当でなくなる。`se="sandwich"` はその場合も妥当である。`se="crossprod"` は
+3 つ目の推定で、モデルが正しければ大標本でほかの 2 つと一致する。サンドイッチの SE が Oakes の SE と
+はっきり違うこと自体が、当てはまりの悪さを示す。
+
+```python
+res_sw = fit(spec, df, se="sandwich")
+print((res_sw.parameters["se"] / res.parameters["se"]).describe())  # モデルが合っていれば 1 に近い
+```
+
+- `vcov` から計算するものはすべて、選んだ共分散を使う: `se` 列、`b_se` / `bk_se`、潜在分布の
+  `sd` / `cor` の SE、`link()`。
+- 事前分布があるときは、情報行列と同じように事前分布の曲率をクロス積にも加える。
+- `EmpiricalHistogram` では、ほかの方法と同じくヒストグラムを推定値に固定する。
+- `DavidianCurve`・`NormalMixture`、双因子・two-tier モデルでは使えない（`SpecificationError`）。
+- 受検者は互いに独立として扱う。標本ウェイトやクラスタ抽出には対応しておらず、`weights=` と併用すると
+  どちらも `SpecificationError` になる。
+- `"sandwich"` と `"crossprod"` には、自由パラメタ数より多い異なる応答パターンが必要。小標本では
+  `"oakes"` よりばらつきが大きい。
 
 情報行列が正定値でない（推定値が境界にある、識別が弱いなど）と警告を出し、SE は NaN になる。
 `FitResult.items` には、表示用の IRT 閾値（`b = -d/a`、GRM の `bk = -dk/a`、GPCM/PCM のステップ困難度
@@ -722,7 +750,8 @@ assert (map_res.history["log_posterior"].diff().dropna() >= -1e-8).all()
   （事前分布がないときは `loglik` と同値）。
 - 通常の EM・SQUAREM とも `history["log_posterior"]` が単調非減少になる。
 - 標準誤差（`se="oakes"`・`se="hessian"`）はどちらも観測情報行列に事前分布の負の Hessian
-  $-\nabla^2_\eta\log\pi(\hat\eta)$ を加え、互いに一致する。
+  $-\nabla^2_\eta\log\pi(\hat\eta)$ を加え、互いに一致する。`se="crossprod"`・`se="sandwich"` も
+  同じようにクロス積に加える。
 - 事前分布が有効なとき、`res.aic` と `res.bic` は MLE ではなく MAP 推定値での尤度を使うため `FlexpyirtWarning` を出す。
 
 ## 12. ParameterTable を編集する
@@ -1208,6 +1237,7 @@ except SpecificationError as e:
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
+- Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
@@ -1224,6 +1254,7 @@ except SpecificationError as e:
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
+- White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.

@@ -63,7 +63,7 @@
 各項目は mirt（または独立な実装）との照合が通って完了とする。参照先は issue に書く。
 - [ ] Davidian 曲線・混合正規の潜在分布を多母集団モデルで使えるようにする（#75）。
 - [ ] M2 を多母集団・欠測ありのデータ・MAP 推定に広げる（#76）。
-- [ ] 確認的多次元モデルでの M2 と S-X2（#77）。
+- [x] 確認的多次元モデルでの M2 と S-X2（#77）: 単一群の `with_factors()` モデル（2〜3 因子、直積格子）で `FitResult.m2()` と `FitResult.item_fit()` が使える（V39 で照合済み）。双因子 / two-tier と多母集団の多次元モデルは引き続きエラー。
 - [x] 4PL・名義反応モデル・多次元モデルのリンキング（#78。確認的 2・3 因子モデルでは `link(..., transformation=)` で対角・直交・斜交の $\mathbf A$ を選ぶ。V40 で照合済み）。
 - [ ] 群の数が多い場合: 群ごとの潜在分布を群について vmap する（#79、DESIGN §12 の未決事項 2）。
 - **受け入れ基準**: 各項目が VALIDATION.md の許容誤差内で mirt（または R による独立な実装）と一致。
@@ -98,6 +98,9 @@
      mirt の `survey.weights` と V34 で照合（2PL、GRM、2 群、FIPC、双因子）。標本設計に整合する SE は #85 で扱う。
      項目適合度、M2、局所依存、JSI、DIF はウェイト付きの推定結果に対してエラーを出す。
 5. [ ] ロバスト標準誤差: sandwich と cross-product（#85）。
+   - [x] 標本ウェイトなし: `fit(se="sandwich" | "crossprod")`。単一群・多母集団、FIPC、EH、2〜3 因子、事前分布
+     （Davidian 曲線・正規混合・双因子・two-tier モデルでは不可）。V35 で mirt の `SE.type = "sandwich"` / `"crossprod"` と照合済み。
+     ウェイト付き・クラスタロバスト版は未実装。
 - **受け入れ基準**: mirt の `bfactor()`、`residuals()`、`iteminfo()` / `testinfo()` / `marginal_rxx()` /
   `fscores(method = "EAPsum")`、`survey.weights`、`SE.type = "sandwich"` / `"crossprod"` との V 番号つき照合。
 

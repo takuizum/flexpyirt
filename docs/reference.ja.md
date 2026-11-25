@@ -50,7 +50,7 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 | `item_names` | list[str], 任意 | `data` が配列のときの列名 |
 | `method` | `BAEM`, 任意 | EM の設定（既定 `BAEM()`） |
 | `quadrature` | `Quadrature`, 任意 | 求積格子（既定: 1 因子は 61 点、2 因子は各軸 31 点、3 因子は各軸 15 点、いずれも $[-6, 6]$） |
-| `se` | `"oakes"` / `"hessian"` / `None` | 標準誤差の計算方法（MAP 時は事前分布の Hessian を含む）。`None` なら計算しない |
+| `se` | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / `None` | 標準誤差の計算方法: 観測情報行列の逆行列（`"oakes"`・`"hessian"`）、パターンごとのスコアのクロス積の逆行列（`"crossprod"`。mirt の `SE.type = "crossprod"`）、ロバストなサンドイッチ共分散（`"sandwich"`。mirt の `SE.type = "sandwich"`）。どれも MAP 時は事前分布の Hessian を含む。`"sandwich"`・`"crossprod"` は `DavidianCurve`・`NormalMixture`、双因子・two-tier モデル、`weights` との併用では `SpecificationError`。`None` なら計算しない |
 | `weights` | 配列（長さ = 行数）, 任意 | 標本ウェイト。有限で非負の数（mirt の `survey.weights`）。推定値は $\sum_i w_i\log L_i$ を最大化する。ウェイトは与えられたまま使う（再スケールしない）。ウェイト 0 の行は無視する。整数ウェイトは行の繰り返しと同じ。このとき `se="oakes"` / `"hessian"` は重み付き情報行列の逆行列で、度数ウェイトでのみ正しく、標本ウェイトでは正しくない（`FlexpyirtWarning` で知らせる） |
 
 **戻り値**: [`FitResult`](#fitresult)
@@ -81,7 +81,7 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 | `n_safeguards` | int | SQUAREM の単調性・実行可能性の安全装置が介入した反復数（通常 EM では 0） |
 | `history` | DataFrame | `iter`, `loglik`, `log_posterior`（その反復に入るときの値。反復ごとに単調非減少）, `max_change`, `em_evaluations`（累積 EM 写像評価回数）, `safeguard`（SQUAREM 安全装置が発動したか） |
 | `vcov` | ndarray / None | 自由パラメタの共分散行列（`free_id` 順）。`se=None` なら None |
-| `se_method` | str / None | `"oakes"` / `"hessian"` / None |
+| `se_method` | str / None | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / None |
 
 `weights` を付けて推定した結果は、`summary()` にウェイトの和を表示する。その `item_fit()`、`m2()`、
 `local_dependence()`、`jsi()`、`dif()` は `SpecificationError` を出す（これらの統計量はウェイトなしのデータに
@@ -146,7 +146,8 @@ Orlando–Thissen の S-X2 項目適合度（[ガイド 5 節](guide.ja.md#項�
 $1,\dots,S-1$ ごとの各カテゴリの観測度数とモデルによる期待度数を比べる。期待度数は、その項目を除いた
 Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在分布の重みで計算する。度数の少ないセルは mirt の
 `itemfit()` と同じ方法でまとめ（`min_cell` は mirt の `mincell`）、$df_j$ = 残ったセル数 − 行数 − その項目の自由パラメタ数 −
-潜在分布の自由パラメタ数（mirt の約束）。
+潜在分布の自由パラメタ数（mirt の約束）。確認的多次元モデル（`with_factors()`、単一群）では、推定時の直積格子の
+すべてのノードで再帰を回して多変量正規の重みで積分し、自由な因子間相関を潜在分布のパラメタとして数える。
 
 | 引数 | 説明 |
 |---|---|
@@ -158,7 +159,7 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 **戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
 `df <= 0` になる項目は `df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
 
-**例外**: 多次元・`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
+**例外**: 双因子・two-tier・多母集団の多次元・`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
 項目、正でない `min_cell` の場合に `SpecificationError`。
 
 #### `FitResult.m2`
@@ -171,7 +172,8 @@ Maydeu-Olivares & Joe (2005, 2006) による限定情報の適合度統計量 $M
 （[ガイド 5 節](guide.ja.md#限定情報の適合度m2)）。$J$ 個の項目得点平均と $\binom{J}{2}$ 個の交差積から計算する
 （mirt の既定 `M2(type = "M2*")` に対応。2 値項目では厳密に $M_2$）。ヤコビ行列
 $\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、すべての自由な項目・潜在分布パラメタを含む
-（共有パラメタは 1 回）。
+（共有パラメタは 1 回）。確認的多次元モデル（`with_factors()`）では推定時の直積格子の上で積分し、$\Delta_2$ は自由な
+因子間相関ごとに 1 列を持つ（mirt の `M2()` は潜在分布の列を入れないので、値がわずかに大きい）。
 
 | 引数 | 説明 |
 |---|---|
@@ -186,7 +188,7 @@ $\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、す
 多値モデルでは `tli` と `cfi` を `NaN` とする（独立帰無モデルは 2 値項目でのみ定義されるため）。2 値モデルで帰無モデルの $M_2$ が当てはめモデルの $M_2$
 以下のときは `FlexpyirtWarning` を出し `tli`・`cfi` を `NaN` とする。
 
-**例外**: JAX 64 ビットが無効なとき `PrecisionError`。多次元・多母集団・`EmpiricalHistogram`・`NormalMixture`・事前分布つきの
+**例外**: JAX 64 ビットが無効なとき `PrecisionError`。双因子・two-tier・多母集団・`EmpiricalHistogram`・`NormalMixture`・事前分布つきの
 MAP モデル、欠測を含むデータ、不正な `ci`、項目数または回答者数が 2 未満のとき `SpecificationError`。
 
 #### `FitResult.local_dependence`

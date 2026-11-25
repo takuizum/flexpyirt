@@ -29,6 +29,7 @@
 | EFA の含意する $\Lambda\Lambda^\top$ / 共通性、CAF・CFI・RMSEA、$\chi^2$、Hull の適合度 / $st$ | 1e-4、2e-4、1e-4（相対）、1e-5 / 1e-2（相対） |
 | CD: 主因子法の $\Lambda\Lambda^\top$、同じ乱数による 1 因子の母集団、順位和の $p$、平均 RMSE（採用された $k$ / 棄却された追加の $k$） | 1e-12、厳密、1e-10（相対）、15% / 60%（相対） |
 | DIMTEST（シミュレーション研究。テストではその小さい版）: .05 での第 1 種の誤り / 検出力 | 20 回中 $\le 0.15$ / 10 回中 $\ge 8$ |
+| mirt の推定値でのクロス積／サンドイッチの共分散（各要素を $\sqrt{v_{ii}v_{jj}}$ で割った差）。通しで当てはめたときのパラメタ／SE | 1e-9 / 1e-6、1e-6 / 1e-5（相対） |
 
 ## ケース一覧（マイルストーンと対応）
 | ID | 内容 | mirt 側の呼び出し | MS |
@@ -42,7 +43,7 @@
 | V7 | 3PL + 事前分布（MAP） | `mirt.model` の `PRIOR = (1-30, g, expbeta, ...)` 相当 | M3 |
 | V8 | GPCM・PCM（Science + シミュレーション） | `mirt(..., "gpcm")` / `mirt(..., "Rasch")`（多値） | M3 |
 | V9 | 欠測あり（MAR） | NA を含むデータ | M2 |
-| V10 | SE（Oakes / crossprod / sandwich） | `SE.type=` | M1–M3 |
+| V10 | SE（Oakes。crossprod / sandwich は V35） | `SE.type=` | M1–M3 |
 | V11 | 3PL・4PL 単一群（シミュレーション） | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 | V12 | 表示用 IRT 閾値とデルタ法 SE（2PL・Rasch・GRM・GPCM・PCM・2 群 2PL） | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | 能力値スコアリング: MAP・ML・WLE（2PL・GRM・GPCM・3PL・2 群・欠測） | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
@@ -68,9 +69,11 @@
 | V32 | 次元縮約による双因子モデル（特殊因子 3 つと一般因子のみの項目 3 つを含む 2PL、テストレット 3 つの GRM $K=4$） | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | 次元縮約による two-tier モデル（相関する主因子 2 つと特殊因子 3 つ（1 つは両方の主因子にまたがる）の 2PL、交差負荷項目 1 つとテストレット 2 つの GRM $K=4$） | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
 | V34 | 標本ウェイト: 非整数ウェイト（合計 $\ne N$、ウェイト 0 が 5 行）の 2PL、合計を $N$ に正規化したウェイトの Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC、次元縮約による双因子 2PL。推定値、対数尤度、AIC、BIC、Oakes の SE | `mirt(..., survey.weights = w)`、`multipleGroup(..., survey.weights = w)`、`bfactor(..., survey.weights = w)`、`SE.type = "Oakes"` | M7 |
+| V35 | ロバスト標準誤差: クロス積・サンドイッチの共分散行列（誤特定のもとでの 2PL と 5% の MCAR、3PL + GRM + GPCM + 名義、正規事前分布の MAP、focal の平均・分散が自由な 2 群、項目間の等値制約付き FIPC、相関のある 2 因子・3 因子、FIPC の EH） | `mirt(..., SE.type = "crossprod")` / `SE.type = "sandwich"`（EH のパンには `"Richardson"`） | M7 |
 | V36 | 合計得点分布のカーネル（Poisson 二項分布: 確率ベクトル 5 例、$J$ 10〜300。多値: GRM $K=4$ と 2PL + GRM の混合） | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`、`poibin::dpoibin()`、`stats::dpois()`。mirt の `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 | V37 | mirt の推定値での情報関数・期待得点・信頼性・合計得点 EAP（2PL $J=12$。同じモデルで欠測 8%。3PL $J=12$。GRM と GPCM $K=4$、$J=8$。名義 $K=4$、$J=6$。2PL + 3PL + GRM + GPCM + 名義の混合 $J=14$。2 群の 2PL + GRM で焦点群の平均・分散を推定） | `iteminfo()`、`testinfo()`、`expected.item()`、`expected.test()`、`marginal_rxx()`、`empirical_rxx()`、`fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
+| V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -300,6 +303,34 @@
   `tests/reference/v15_sx2_multigroup.json`）。Science では mirt の項目パラメタが約 2e-4 収束しきらない（flexpyirt の
   対数尤度のほうが高い）ので、flexpyirt を mirt の推定値で評価する。両ケースの両群で自由度は一致し、S-X2 は相対 `1e-6`
   以内。テスト: `tests/test_mirt_m5_itemfit_multigroup.py`。
+- **確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V39、M6。DESIGN §16.19）**: V14 の 4 モデル（2D 2PL 単純構造、
+  `q07` が交差負荷する 2D 2PL、2D GRM $K=4$、3D 2PL。自由な相関は 2D で 1 つ、3D で 3 つ）を、mirt 1.48 で V14 の
+  推定値に置き、すべての `est` フラグを保ったまま `TOL = NaN` で作り直し、`M2()` と `itemfit(fit_stats = "S_X2")` を
+  推定時の直積格子（$[-6,6]$ 上の $31^2$ と $15^3$ ノード。どちらの関数も推定時の格子を読まないので明示的に渡す）で
+  評価した（`validation/r/m6_fit_multidim_reference.R` → `tests/reference/v39_fit_multidim.json`）。ケース、R スクリプト、
+  参照ファイルが別なので、V15 / V18 の拡張ではなく新しい ID とした。テスト: `tests/test_mirt_m6_fit_multidim.py`
+  （slow tier。2D 単純構造の S-X2 の比較と、拒否するモデル構造のテストだけ fast tier）と、単体テスト `tests/test_m6_fit_multidim.py`（直積格子上の
+  S-X2 の期待表・$\pi_2$・$\Xi_2$ を全反応パターンの列挙と比較、$\Delta_2$ の相関の列を中心差分と比較）。
+  - **S-X2**: 4 モデルのすべての項目（および `mincell = 3` の GRM）で自由度が一致。mirt の推定値では S-X2 が相対
+    `2.7e-14`、p 値が `1.2e-14` で一致。既定の初期値から再推定すると S-X2 が `1.2e-7`、p 値が `5.0e-8`（推定値どうしが
+    一致する水準で、3D のケースが最大）。`collapseCells` の移植はそのまま使っており、セルの併合と求積に違いは
+    見つからなかった。
+  - **$M_2$（mirt の流儀）**: mirt の `M2()` は $\Delta_2$ を作るときに `GroupPars` の `est` フラグを `FALSE` にする
+    ので、自由な相関は $df$ では引かれるのに $\Delta_2$ に列を持たない（V18 の `rasch_free_var` と同じ）。
+    `_latent_in_delta=False` にすると、flexpyirt は mirt の生の $M_2$ を、mirt の推定値で相対 `7.4e-13`、再推定で
+    `1.9e-8` で再現する。$df$ は一致し、SRMSR は `1.5e-14` / `3.4e-8`、TLI / CFI（2 値の 3 ケース）は `4.5e-9` で
+    一致する。R スクリプトでも mirt の部品（`dP`、`buildXi2els`）から mirt の値を計算し直し、`1e-10` で一致することを
+    確認している。
+  - **$M_2$（flexpyirt の既定）**（すべての自由パラメタを $\Delta_2$ に入れる）: 自由な相関ごとに解析的な列を 1 つ
+    加えた R の厳密な計算（R の中で、正規化した事前分布の中心差分と照合）と比較し、mirt の推定値で `2.5e-13`、再推定で
+    `5.3e-9`。既定の値は mirt の生の値より、相対で `4.7e-5`（2D 単純構造）、`2.8e-7`（2D 交差負荷）、`2.5e-4`
+    （2D GRM）、`6.9e-4`（3D）だけ小さい。
+  - **数値計算上の注意**: GRM では、項目得点の周辺モーメントのもとでの $\Delta_2$ は条件が悪い。項目の微分を中心差分
+    （刻み $10^{-6}$、誤差 $\sim10^{-10}$）で求めると $M_2$ が相対 `4e-6` ずれるので、R の参照値では項目の列に mirt の
+    解析的な `dP`（2PL と graded では正しい）を使い、flexpyirt は自動微分を使う。
+  - **照合していない範囲**: 多母集団の多次元モデル（V21 の構成。`SpecificationError` のまま。双因子・two-tier も
+    同じ）、多次元モデルでの 3PL / GPCM / 名義項目（項目カーネルは V18 / V15 で照合済みで、単体テストは 2PL + GRM の
+    混合モデルを扱うが、mirt との比較はない）、mirt の既定以外の格子。
 - **確認的 2–3 次元 MIRT（V14, M4）**: 4 つのシミュレーションケースを `tests/test_mirt_m4_mirt.py` で照合した
   （通常 EM・SQUAREM の双方で通過。参照値生成: `validation/r/m4_mirt_reference.R` →
   `tests/reference/v14_mirt2d.json`、`accelerate = "none"`, `TOL = 1e-10`, `SE.type = "Oakes"`、
@@ -850,6 +881,62 @@
   Oakes・Hessian の SE は mirt と一致するが、標本ウェイトのもとでは正しい分散推定量ではない（DESIGN §17.4）。
   項目適合度、M2、局所依存、JSI、DIF、モデルに基づく平行分析は、ウェイト付きの推定結果に対してエラーを出す。
   テスト: `tests/test_mirt_m7_weights.py`。参照値生成: `validation/r/m7_weights_reference.R`。
+- **ロバスト標準誤差（V35、M7）**: `fit(se="crossprod" | "sandwich")`（DESIGN §17.5）を mirt 1.48 の
+  `SE.type = "crossprod"` / `"sandwich"` と照合する。生成スクリプトは mirt のパラメタ表（`mod2values`）と
+  `vcov` の行列全体を書き出し、各行にそのパラメタの最初の `parnum` を付けるので、テストは mirt の解を再現して
+  行列全体を比べる。
+  **ケース**（`validation/r/m7_robust_se_reference.R`、`tests/reference/v35_*.json`）: 歪んだ特性と 5% の
+  MCAR を持つ 3PL のデータに当てはめた 2PL（$J=12$、$N=2000$。わざと誤ったモデルで、サンドイッチは下の
+  尺度で Oakes の共分散と最大 0.49 違う）、3PL 4 項目 + GRM(4) 3 項目 + GPCM(3) 3 項目 + 名義(3) 2 項目
+  （$N=5000$）、$a\sim N(1.2, 0.5)$・$d\sim N(0, 2)$ の事前分布を付けた 2PL の MAP（$N=300$）、アンカー
+  6 項目で focal の平均・分散が自由な 2 群（$[-8,8]$ に 81 点）、5 項目を固定し潜在分布の平均・分散を
+  自由にして 4 項目の傾きを等値にした FIPC、交差負荷のある相関 2 因子（$31^2$ 点）、相関 3 因子（$15^3$ 点）、
+  FIPC の EH。
+  **mirt の解での比較**（flexpyirt の問題を mirt の推定値で組み立てる。尺度は行列全体の
+  $\max_{ij}\lvert v_{ij}-v^{\text{mirt}}_{ij}\rvert/\sqrt{v^{\text{mirt}}_{ii}v^{\text{mirt}}_{jj}}$）:
+  対数尤度は相対 $\le3.6\times10^{-15}$ で一致し、パラメタの対応が正しいことが確かめられる。クロス積の
+  共分散は $\le1.3\times10^{-11}$（2PL $8.9\times10^{-15}$、混合 $4.9\times10^{-13}$、MAP
+  $2.6\times10^{-15}$、2 群 $1.3\times10^{-11}$、FIPC $9.9\times10^{-15}$、2 因子 $6.2\times10^{-15}$、
+  3 因子 $2.0\times10^{-14}$）、サンドイッチは mirt が NR の M-step を使う 6 ケースで $\le2.7\times10^{-8}$
+  （$2.3\times10^{-10}$、$1.4\times10^{-9}$、$1.1\times10^{-10}$、$2.7\times10^{-8}$、
+  $1.1\times10^{-8}$、$1.6\times10^{-9}$）、3 因子で $1.4\times10^{-5}$。サンドイッチの差は mirt の
+  Oakes の Hessian（差分近似）による。許容誤差は $10^{-9}$ と $10^{-6}$（3 因子のサンドイッチは $10^{-4}$。後述）。
+  **通しの比較**（flexpyirt 自身の初期値からの `fit()`、`BAEM(tol=1e-9)`）: mirt が NR の M-step を使う
+  6 ケースで、どちらの種類でも自由パラメタは mirt と $4.1\times10^{-8}$ 以内、標準誤差は相対
+  $4.6\times10^{-8}$ 以内。3 因子では $5.0\times10^{-7}$ と $6.6\times10^{-6}$。許容誤差は $10^{-6}$ と $10^{-5}$。
+  3 因子のケースでは mirt は BFGS を使い（V14 と同じ。$15^3$ の格子では NR が非常に遅い）、推定値でのスコアが
+  $5.6\times10^{-6}$ のところで止まる（NR では $\le2.9\times10^{-7}$）。そのためこのケースだけ許容誤差を
+  100 倍に広げる（mirt の解でのサンドイッチとパラメタは $10^{-4}$、標準誤差は $10^{-3}$）。
+  **下方漸近線。** mirt の `vcov` は $\operatorname{logit}g$ についてのものなので、テストは mirt の行列を
+  ヤコビアン $g(1-g)$ で変換する。
+  **事前分布。** mirt は flexpyirt と同じく $-\nabla^2\log\pi$ をクロス積に加える（`SE.simple` の
+  `Igrad + Iprior`）。照合するのは正規事前分布だけである。mirt の `lnorm`・`expbeta` の事前分布の Hessian は
+  誤っている（V7）ので、これらは単体テストで確かめる（事前分布の有無による行列の差が、対数事前分布の
+  自動微分の Hessian に一致する）。
+  **経験ヒストグラム。** mirt のクロス積は flexpyirt と同じくヒストグラムを固定するので、mirt の項目推定値と
+  ヒストグラムで直接比べる: $6.2\times10^{-15}$。mirt の `"sandwich"` は Oakes の Hessian を使うが、EH ではこれは
+  ヒストグラムを固定した Hessian ではない（V6）。その行列は flexpyirt と 0.049（標準誤差で最大 2.4%） 違う。そこでサンドイッチは、
+  mirt の Richardson の共分散 $V_R$（ヒストグラムを固定した Hessian。DESIGN §15.35 の定義）と mirt の
+  クロス積の共分散 $V_C$ から組み立てた $V_R V_C^{-1} V_R$ と比べる: $1.4\times10^{-8}$（Richardson は差分近似の
+  Hessian。flexpyirt の Oakes の共分散と $V_R$ の差は $7.1\times10^{-9}$）。許容誤差は $10^{-6}$。EH の参照値は mirt で `TOL = 1e-7` を使う
+  （約 11,000 サイクル。$10^{-9}$ には 100,000 サイクルでも届かなかった）。mirt 自身の推定値とヒストグラムでの
+  比較なので影響はない。EH の通しの比較は、V6 に書いた理由で行わない。
+  **`"sandwich.Louis"`。** パンを Louis の式で計算した同じ推定量である。潜在分布のパラメタが自由でない
+  ケース（2PL、混合、MAP）では mirt の行列は `"sandwich"` と一致する（flexpyirt はどちらとも
+  $\le8.8\times10^{-10}$ で一致）。潜在分布の平均・分散・相関が自由なケース（2 群、FIPC、2 因子）では mirt の
+  Louis のパンが誤っており（`SE.type = "Louis"` 自体が行列を返さない）、`"sandwich.Louis"` は上の尺度で
+  1.0〜7.0 ずれる。別の推定量ではないので提供しない。
+  **対象外。** `DavidianCurve`・`NormalMixture`: mirt はどちらの種類も計算しないので、flexpyirt は
+  `SpecificationError` を出す。双因子・two-tier モデルも `SpecificationError`（mirt は対応している。スコアのカーネルが
+  次元縮約にまだ対応していない）。多母集団の多次元モデルと 4PL・PCM・Rasch の項目は同じコードを通るが、V35 に
+  専用のケースはない。標本ウェイトつきの版とクラスタロバスト版は未実装で、`weights=` と併用すると
+  `SpecificationError` を出す。
+  テスト: `tests/test_mirt_m7_robust_se.py`。単体テスト（`tests/test_m7_robust_se.py`）: チャンク分割した
+  スコアと密な前向き自動微分のヤコビアンの一致（任意のチャンクサイズ。欠測、事前分布付きの混合形式、
+  共有パラメタのある 2 群、2 因子、EH）、$\sum_p c_ps_p$ と勾配の一致、正しいモデルで $N=20{,}000$ のとき
+  標本誤差の範囲で $B=H$（標準誤差は 3% 以内）、$B=H$ を強制するとサンドイッチが Oakes の共分散に
+  一致すること、行を 2 倍にすると共分散が半分になること、`b_se` と `link()` が選んだ共分散を読むこと、
+  JSON の往復、拒否するケース。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

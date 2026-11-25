@@ -91,7 +91,9 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 Each item is accepted when its mirt (or independent) comparison passes; the issue lists the reference.
 - [ ] Davidian curve and normal-mixture latent distributions in multiple-group models (#75).
 - [ ] M2 for multiple groups, missing data and MAP fits (#76).
-- [ ] M2 and S-X2 for confirmatory multidimensional models (#77).
+- [x] M2 and S-X2 for confirmatory multidimensional models (#77): `FitResult.m2()` and
+  `FitResult.item_fit()` for single-group `with_factors()` models (2–3 factors, product grid;
+  validated in V39). Bifactor / two-tier and multiple-group multidimensional models still raise.
 - [x] Linking for 4PL, nominal and multidimensional models (#78; `link(..., transformation=)` with a
   diagonal, orthogonal or oblique $\mathbf A$ for confirmatory two- and three-factor models;
   validated in V40).
@@ -135,6 +137,10 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
      against mirt's `survey.weights` (2PL, GRM, two groups, FIPC, bifactor). Design-consistent SEs come with
      #85; item fit, M2, local dependence, JSI and DIF raise an error for weighted fits.
 5. [ ] Robust standard errors: sandwich and cross-product (#85).
+   - [x] Without sampling weights: `fit(se="sandwich" | "crossprod")` for single and multiple groups,
+     FIPC, EH, 2–3 factors and priors (not with Davidian curves, normal mixtures, bifactor or two-tier models); validated in V35
+     against mirt `SE.type = "sandwich"` / `"crossprod"`. Weighted and cluster-robust versions still
+     open.
 - **Acceptance**: V-numbered comparisons with mirt `bfactor()`, `residuals()`, `iteminfo()` /
   `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and
   `SE.type = "sandwich"` / `"crossprod"`.

@@ -203,7 +203,8 @@ res = fit(
 - **`quadrature`**: the latent-variable grid. The default is 61 equally spaced points on
   $[-6, 6]$ (mirt's default). See [section 13](#13-choosing-the-quadrature-grid) for when to
   widen it.
-- **`se`**: `"oakes"` (default), `"hessian"`, or `None` (skip).
+- **`se`**: `"oakes"` (default), `"hessian"`, `"sandwich"`, `"crossprod"`, or `None` (skip); see
+  [section 6](#6-standard-errors).
 
 ```python
 res_sq = fit(spec, df, method=BAEM(tol=1e-6, squarem=True), se=None)
@@ -306,7 +307,9 @@ np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_nump
 `item_fit(data)` computes Orlando and Thissen's S-X2 for every item: observed versus model-implied
 counts of each response category at each summed score, with sparse cells collapsed exactly as
 mirt's `itemfit()` does (`min_cell=1` by default). It needs complete data, every response category
-observed, and a unidimensional model with `Normal` latent distributions. For a multiple-group
+observed, and `Normal` latent distributions. A confirmatory model with two or three factors
+(`with_factors()`, single group) works too: the summed score is still the total over all items, and
+the expected counts integrate over the product grid of the fit. For a multiple-group
 model pass `group=`: S-X2 is computed within each group (as mirt does), with a leading `group`
 column.
 
@@ -389,7 +392,11 @@ identically $M_2$ for dichotomous items), together with RMSEA and its confidence
 (`ci=0.90` by default), SRMSR, and — for dichotomous models — TLI and CFI against the independence
 null model (polytomous models report `NaN` for `tli` and `cfi`, because the independence null
 model is defined for dichotomous items only).
-It requires complete data and a single-group, unidimensional, `Normal` MLE fit (no priors).
+It requires complete data and a single-group `Normal` MLE fit (no priors), unidimensional or
+confirmatory with two or three factors (`with_factors()`). With free factor correlations the value
+is slightly smaller than mirt's `M2()`, which leaves the correlations out of the derivative matrix
+while counting them in the degrees of freedom. Bifactor and two-tier models are not supported yet
+by `m2()` or `item_fit()`.
 
 ```python
 m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi
@@ -402,8 +409,14 @@ print(m2_table.round(3))
   derivatives through the E-step expected counts come from JAX autodiff.
 - **`se="hessian"`**: the second derivative of the marginal log-likelihood, taken directly.
 
-The two are the same quantity mathematically and agree numerically up to rounding. Rows and
-columns of `vcov` follow the free-parameter numbers (`free_id` in the ParameterTable).
+- **`se="crossprod"`**: the inverse of the cross-product of the per-respondent scores (the
+  gradients of each respondent's log-likelihood).
+- **`se="sandwich"`**: the robust (Huber–White) covariance, the inverse information multiplied on
+  both sides of the cross-product.
+
+`"oakes"` and `"hessian"` are the same quantity mathematically and agree numerically up to
+rounding. Rows and columns of `vcov` follow the free-parameter numbers (`free_id` in the
+ParameterTable).
 
 ```python
 res_h = fit(spec, df, se="hessian")
@@ -418,6 +431,29 @@ vcov = pd.DataFrame(
 )
 print(vcov.iloc[:2, :2])
 ```
+
+**Robust standard errors.** `"oakes"` and `"hessian"` assume that the model is correct. When it
+is not (local dependence, a wrong item model, a latent distribution far from the one assumed),
+the estimates still converge to the best-fitting parameters, but those standard errors are no
+longer valid; `se="sandwich"` remains valid. `se="crossprod"` is a third estimate that equals the
+other two in large samples when the model is correct. A sandwich SE that is clearly different from
+the Oakes SE is itself a sign of misfit.
+
+```python
+res_sw = fit(spec, df, se="sandwich")
+print((res_sw.parameters["se"] / res.parameters["se"]).describe())  # near 1 if the model fits
+```
+
+- Everything computed from `vcov` uses the covariance you chose: the `se` column, `b_se` /
+  `bk_se`, the latent `sd` / `cor` SEs, and `link()`.
+- With priors, the prior's curvature is added to the cross-product as it is to the information.
+- With `EmpiricalHistogram`, the histogram is held at its estimate, as for the other methods.
+- Not available with `DavidianCurve` or `NormalMixture`, or for bifactor and two-tier models
+  (`SpecificationError`).
+- Respondents are treated as independent; sampling weights and clustered samples are not handled,
+  and a fit with `weights=` raises `SpecificationError` for both options.
+- `"sandwich"` and `"crossprod"` need more distinct response patterns than free parameters, and
+  are noisier than `"oakes"` in small samples.
 
 If the information matrix is not positive definite (estimates on a boundary, weak
 identification), flexpyirt warns and the SEs are NaN. `FitResult.items` also includes delta-method
@@ -784,7 +820,7 @@ assert (map_res.history["log_posterior"].diff().dropna() >= -1e-8).all()
 - Both plain EM and SQUAREM are monotone in `history["log_posterior"]`.
 - Standard errors (`se="oakes"` and `se="hessian"`) add the prior's negative Hessian
   $-\nabla^2_\eta\log\pi(\hat\eta)$ to the observed information matrix and remain identical to
-  each other.
+  each other; `se="crossprod"` and `se="sandwich"` add it to the cross-product in the same way.
 - `res.aic` and `res.bic` emit a `FlexpyirtWarning` when priors are active because they evaluate
   the likelihood at the MAP estimate rather than the MLE.
 
@@ -1329,6 +1365,7 @@ except SpecificationError as e:
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
+- Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
@@ -1345,6 +1382,7 @@ except SpecificationError as e:
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
+- White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.

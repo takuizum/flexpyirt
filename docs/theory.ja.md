@@ -212,6 +212,16 @@ $$\ell(\eta)+\log\pi(\eta)$$
 どちらも、収束した内点解でのみ意味がある。行列が正定値でない場合（推定値が境界上にある、識別が弱い）、flexpyirt は
 NaN を報告する。
 
+**クロス積とサンドイッチ。** 推定値における受検者 $i$ のスコアを $s_i=\partial\log L_i/\partial\eta$、その
+クロス積を $B=\sum_i s_is_i^\top$ とする。モデルが正しければ $B$ と $I$ は同じ行列を推定する（情報等式）ので、
+$B^{-1}$ も共分散の推定になる（`se="crossprod"`）。モデルが正しくないと両者は一致せず、推定量は真の分布を
+最もよく近似するパラメタに収束し、その共分散は**サンドイッチ**（Huber, 1967; White, 1982; `se="sandwich"`）
+$$\operatorname{Var}(\hat\eta)\approx I(\hat\eta)^{-1}\,B\,I(\hat\eta)^{-1}$$
+になる。情報等式のもとでは $I^{-1}$ に一致する。MAP では、事前分布の曲率
+$-\partial^2\log\pi/\partial\eta\,\partial\eta^\top$ を $I$ と同じように $B$ にも加えるので、モデルが正しければ
+3 つの推定はやはり一致する。スコアは厳密である（各応答パターンの周辺尤度の自動微分）。受検者は互いに独立と
+仮定する。
+
 **デルタ法.** $b=-d/a$ のような関数 $b=h(\eta)$ について
 $\operatorname{Var}(\hat b)\approx\nabla h^\top\,\operatorname{Var}(\hat\eta)\,\nabla h$。flexpyirt は表示用の IRT 閾値と、
 標準化した混合成分にこれを使う。
@@ -313,6 +323,7 @@ $d^*=d-\mathbf a^{*\top}\boldsymbol\beta$ になる（Oshima, Davey & Lee, 2000�
 - Dempster, A. P., Laird, N. M., & Rubin, D. B. (1977). Maximum likelihood from incomplete data via the EM algorithm. *JRSS B*, 39, 1–38.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80, 27–38.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22, 144–149.
+- Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43, 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking* (3rd ed.). Springer.
@@ -337,6 +348,7 @@ $d^*=d-\mathbf a^{*\top}\boldsymbol\beta$ になる（Oshima, Davey & Lee, 2000�
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scandinavian Journal of Statistics*, 35, 335–353.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54, 427–450.
+- White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.

@@ -63,6 +63,7 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | Summed-score EAP | `fscores(m, method = "EAPsum")`, the table and the scores of each respondent, including `NA` for incomplete response patterns: to $10^{-9}$ |
 | $M_2$ / $M_2^*$ | `M2(m)`, plus an exact R computation where mirt differs (see below) |
 | DIF tests | `DIF(mg, scheme = "add" / "drop")` |
+| Robust standard errors | `mirt(..., SE.type = "crossprod")` and `SE.type = "sandwich"`: whole covariance matrices at mirt's estimates, and standard errors from a full fit |
 | SQUAREM | every comparison above is repeated with `BAEM(squarem=True)` |
 | Polychoric correlations | lavaan's `lavCor()` on ordered variables to $10^{-6}$, psych's `polychoric()` to $10^{-3}$ (its optimizer's tolerance) and psych's `cor.smooth()` for smoothing |
 | Parallel analysis, MAP, empirical Kaiser criterion | EFAtools' `EKC()` and `PARALLEL()`, psych's `vss()`, EFA.dimensions' `MAP()` and an independent R implementation of the fourth-power MAP, on the same correlation matrices to $10^{-11}$; reference eigenvalues of normal data within Monte Carlo error |
@@ -118,7 +119,8 @@ small or absent in typical use, but you may see them when comparing the two prog
   flexpyirt decides by the category slopes $a\,\mathrm{ak}_c$, so a pattern such as all-0 with
   $\mathrm{ak}_1<0$ gets a finite estimate.
 - **$M_2$.** flexpyirt includes free latent parameters in the derivative matrix $\Delta_2$ (mirt
-  leaves them out, for example the Rasch variance) and uses exact derivatives for 3PL/4PL and GPCM
+  leaves them out, for example the Rasch variance or the factor correlations of a confirmatory
+  multidimensional model, where flexpyirt's $M_2$ is smaller by up to 0.07% in the tested cases) and uses exact derivatives for 3PL/4PL and GPCM
   items, where mirt 1.46's are inaccurate. For these models flexpyirt is compared with an exact R
   computation, and its $M_2$ differs from mirt's (by 5–11% in the tested 3PL and GPCM cases). TLI and
   CFI are reported for dichotomous models only, because the independence null model is

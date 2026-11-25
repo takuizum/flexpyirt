@@ -26,7 +26,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | FIPC | 項目バンクの値で一部の項目を固定し、残りの項目と潜在分布を推定 | ✓ |
 | 欠測 | 欠測（MAR）を含むデータ | ✓ |
 | 標本ウェイト | 調査ウェイト `fit(..., weights=...)`: すべてのモデル・多母集団・FIPC での重み付き周辺尤度（mirt の `survey.weights`）。Oakes / Hessian の SE は mirt と一致するが、度数ウェイトでのみ正しい。項目適合度・M2・局所依存・DIF はウェイト付きの推定結果には使えない | ✓ |
-| 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度（MAP 時は対数事後）の Hessian、表示用 IRT 閾値のデルタ法 SE（`b_se` / `bk_se`） | ✓ |
+| 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度（MAP 時は対数事後）の Hessian、表示用 IRT 閾値のデルタ法 SE（`b_se` / `bk_se`）、ロバストなサンドイッチ・クロス積の SE（`se="sandwich"` / `"crossprod"`。Davidian 曲線・正規混合・双因子・two-tier モデルでは不可） | ✓ |
 | スコアリング | EAP・MAP・ML・WLE（1–3 因子、標準誤差つき）および plausible values（`PV`、1–3 因子、明示的な JAX PRNG `key`）。ベイズ手法は群ごとの潜在分布を事前分布に使う | ✓ |
 | 多次元モデル | 確認的 2–3 因子 MIRT（`Model.with_factors()`、多母集団も可）。交差負荷、相関／直交の多変量正規因子、直積求積格子、Oakes/Hessian SE、EAP・MAP・ML・WLE スコアリング。次元縮約による特殊因子数に制限のない双因子モデル（`Model.with_bifactor()`、単一群、EAP スコアリング）。相関してよい主因子 1〜2 個の two-tier モデル（`Model.with_two_tier()`） | ✓ |
 | 経験ヒストグラム | 歪んだ・多峰の潜在分布のための `EmpiricalHistogram()`（Woods, 2007）。参照群は厳密な制約付き M-step で平均 0・分散 1 に標準化、FIPC では自由。重みと 4 次までのモーメントを報告 | ✓ |
@@ -34,10 +34,10 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 混合正規 | 単一群 1 次元モデル向けの、項目を共通とする有限混合正規潜在密度 `NormalMixture(n_components)`（Mislevy, 1984）。mirt の `dentype = "mixture-k"` のクラスのパラメタ化を厳密な連続 `mean`/`var` へ解析的に標準化、標準化した成分（`pi_c`・`mean_c`・`var_c`）とデルタ法 SE、項目・潜在パラメタの同時 Oakes/Hessian SE、EAP/PV 採点、退化解の警告 | ✓ |
 | 結果の保存 | `FitResult.to_json()` / `FitResult.from_json()`（厳密なスキーマ、pickle 不使用） | — |
 | EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | ✓ |
-| 項目適合度 | Orlando–Thissen の S-X2（`FitResult.item_fit()`、多母集団は群ごと）。mirt と同じセルのまとめ方・自由度・RMSEA・p 値 | ✓ |
+| 項目適合度 | Orlando–Thissen の S-X2（`FitResult.item_fit()`、多母集団は群ごと。単一群の確認的 2〜3 因子モデルにも対応）。mirt と同じセルのまとめ方・自由度・RMSEA・p 値 | ✓ |
 | 合計得点 | 項目のカテゴリ確率を与えたときの合計得点の分布（`summed_score_distribution()`）。Lord–Wingersky 再帰（2 値項目では Poisson 二項分布）、その対数空間版、FFT による方法、正規・精密化正規・Poisson 近似。`jit`・`vmap`・自動微分に対応 | ✓ |
 | 情報関数と信頼性 | 自動微分によるすべての項目モデルの項目・テスト情報量（`item_information()`、条件付き標準誤差つきの `test_information()`）、期待得点とテスト特性曲線（`expected_score()`）、周辺信頼性・経験的信頼性（`reliability()`）、合計得点 EAP の表（`summed_score_table()`）と `score(method="EAPsum")`。1 次元モデル（単一群・多母集団） | ✓ |
-| 限定情報の適合度 | Maydeu-Olivares & Joe の M2 / M2*（`FitResult.m2()`）。自由度・p 値・RMSEA と信頼区間・SRMSR・2 値の TLI / CFI | ✓ |
+| 限定情報の適合度 | Maydeu-Olivares & Joe の M2 / M2*（`FitResult.m2()`。単一群の 1 次元モデルと確認的 2〜3 因子モデル）。自由度・p 値・RMSEA と信頼区間・SRMSR・2 値の TLI / CFI | ✓ |
 | DIF | 多母集団の尤度比検定による DIF（`FitResult.dif()`。mirt の `DIF()` の `add` / `drop` 方式、AIC・SABIC・HQ・BIC の差、Holm または BH で補正した p 値） | ✓ |
 | 尺度リンキング | 微分可能な特性曲線法リンキング（`link()`, `LinkResult`: Haebara・Stocking–Lord の非対称・対称版、Ogasawara デルタ法 SE、項目・$\theta$ の変換。2PL・3PL・4PL・GRM・GPCM・名義反応モデルと混在形式の共通項目、および確認的 2・3 因子モデルの対角・直交・斜交変換 $\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta$ について R の独立な実装と照合済み） | ✓ |
 | ポリコリック相関 | ポリコリック・テトラコリック相関行列（`polychoric()`: two-step の最尤法、欠測は利用可能なケース、lavaan と同じ 2 x 2 表の空セル補正、正定値でない行列の平滑化。lavaan の `lavCor` と照合済み）。対になるパッケージ [flexpyctt](https://pypi.org/project/flexpyctt/)（JAX 不要。flexpyirt と一緒に入る）が提供する | ✓ |

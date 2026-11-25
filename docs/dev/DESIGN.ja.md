@@ -190,8 +190,11 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   パターン分割カテゴリ共起構造を活用する（§15.20）。
 - 代替: 基底ベクトルをチャンク分割した前向き×後ろ向き自動微分
   （`jax.linearize(jax.grad(...))`）による観測（事後）情報行列
-  $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$（Oakes の検証にも使う）、
-  cross-product（$\sum_p c_p s_p s_p^\top$）、sandwich。
+  $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$（Oakes の検証にも使う）。
+- **決定（M7, §17.5）**: `se="crossprod"` はパターンごとのスコアのクロス積
+  $B_{\mathrm{post}}=\sum_p c_p s_p s_p^\top-\nabla^2_\eta\log\pi(\hat\eta)$ の逆行列、`se="sandwich"` は
+  上の観測（事後）情報行列 $H$ を使ったロバスト共分散 $H^{-1}B_{\mathrm{post}}H^{-1}$
+  （Huber, 1967; White, 1982）。
 - MAP 時は `oakes`・`hessian` とも情報行列に $-\nabla^2_\eta\log\pi(\hat\eta)$ を加え、数学的恒等性を保つ。
   固定パラメタは $\eta$ に含まれないので自動的に除外される。
 
@@ -641,8 +644,9 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     計算した行のフラグを後で使う点も含め、統計量と自由度が一致するようにヒューリスティックをそのまま再現する）。
     $df_j$ = 残ったセル数 − 行数 − 項目 $j$ の自由パラメタ数 − 潜在分布の自由パラメタ数で、mirt と同じ（mirt はすべての項目から
     潜在分布のパラメタ数を引く）。RMSEA と $\chi^2$ の p 値も mirt に合わせる。表の計算は推定後の NumPy 処理（形がデータに依存
-    するので `jit` の外）で、カテゴリ確率は JAX の項目カーネルから得る。多次元・EH・欠測データは照合するまで
-    `SpecificationError`（mirt は S-X2 で欠測を補完し、EH の重みを無視する）。多母集団は §15.45。
+    するので `jit` の外）で、カテゴリ確率は JAX の項目カーネルから得る。EH・欠測データは照合するまで
+    `SpecificationError`（mirt は S-X2 で欠測を補完し、EH の重みを無視する）。多母集団は §15.45、確認的多次元モデル
+    （直積格子）は §16.19。
 41. **多次元モデルの ML・WLE スコアリング（M4, §8）**: $D \in \{2, 3\}$ で、`"ML"` は $\log L(\boldsymbol\theta\mid y)$ を、
     `"WLE"` は Jeffreys/Firth の罰則つき $\log L(\boldsymbol\theta\mid y)+\tfrac12\log\det\mathbf I(\boldsymbol\theta)$
     （`mirt:::WLE.mirt`; Warm, 1989; Wang, 2015。$\mathbf I$ は観測項目の期待テスト情報行列で自動微分から求める）を、
@@ -745,8 +749,9 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    `FitResult.m2(data, *, item_names=None, ci=0.90)` は、Maydeu-Olivares & Joe (2005, 2006) に基づく
    項目得点の 1 次・2 次モーメント — $J$ 個の項目平均 $E[y_j]$ と $\binom{J}{2}$ 個の交差積 $E[y_iy_j]$
    （$i < j$、列優先のペア順で mirt の既定 `M2(type = "M2*")` と同じ。2 値項目では厳密に $M_2$）— による
-   限定情報の適合度統計量を計算する。対象は単一母集団・1 次元・欠測なし・`Normal` 潜在分布の MLE 推定のみ
-   （多次元・多母集団・`EmpiricalHistogram`・欠測データ・MAP 推定は `SpecificationError`）。
+   限定情報の適合度統計量を計算する。対象は単一母集団・欠測なし・`Normal` 潜在分布の MLE 推定のみ
+   （多母集団・双因子 / two-tier・`EmpiricalHistogram`・欠測データ・MAP 推定は `SpecificationError`。直積格子上の
+   確認的多次元モデルは §16.19）。
    標本周辺モーメント $\hat p_2$、推定時の求積格子と正規化した正規重みの上で積分したモデル周辺モーメント
    $\pi_2(\hat\eta)$、局所独立のもとでの $\sqrt{N}(\hat p_2-\pi_2)$ の漸近共分散 $\Xi_2$
    （条件付き 1 次・2 次モーメント $m_{1,jq}=\sum_k kP_{jk}(\theta_q)$、$m_{2,jq}=\sum_k k^2P_{jk}(\theta_q)$ から構成）、
@@ -1436,6 +1441,53 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     `packages/flexpyctt/validation/` に置く。flexpyirt のテストには、JAX 版ポリコリックのテスト（`v24` は flexpyctt の
     ディレクトリから読む）、2 つの版の一致テスト、V26、アンサンブルのテストが残る。
 
+19. **確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（M6、#77、V39）**:
+    `FitResult.m2()`（§16.3）と `FitResult.item_fit()`（§15.40）は、`Model.with_factors()` で宣言した単一母集団のモデル
+    （$D\in\{2,3\}$、直積格子、§15.29–§15.30）を受け付ける。どちらの統計量も、項目カテゴリ確率の積を潜在分布で積分した
+    ものなので、定義は $D$ に依存しない。ノードの添字 $q$ は推定時の直積格子の $Q=n^D$ 個のノード $\boldsymbol\theta_q$ を
+    動き、重みは推定時と同じ正規化した多変量正規の重み
+    $w_q(\boldsymbol\rho)=\phi_D(\boldsymbol\theta_q;\mathbf 0,\mathbf R)/\sum_{q'}\phi_D(\boldsymbol\theta_{q'};\mathbf 0,\mathbf R)$
+    （§15.30）、$P_{jk}(\boldsymbol\theta)$ は同じ項目カーネル（線形予測子に $\boldsymbol a_j^\top\boldsymbol\theta$。負荷しない
+    因子の識別力は 0 に固定）から得る。
+    **$M_2^*$。** $m_{1,jq}=\sum_k kP_{jk}(\boldsymbol\theta_q)$、$m_{2,jq}=\sum_k k^2P_{jk}(\boldsymbol\theta_q)$ として
+    $$\pi_j=\sum_q m_{1,jq}w_q,\qquad \pi_{ij}=\sum_q m_{1,iq}m_{1,jq}w_q\quad(i<j)$$
+    であり、$\Xi_2$ は §16.3 と同じ和から作る（局所独立はベクトル $\boldsymbol\theta$ 全体を与えたもとで成り立つので、
+    2 つの項目が同じ因子に負荷するかどうかによらず、$i\ne j$ で $E[y_iy_j\mid\boldsymbol\theta]=m_{1,i}m_{1,j}$）。
+    ヤコビアン $\Delta_2=\partial\pi_2/\partial\eta^\top$ には、項目の列
+    $$\frac{\partial\pi_j}{\partial\xi_j}=\sum_q\frac{\partial m_{1,jq}}{\partial\xi_j}w_q,\qquad
+      \frac{\partial\pi_{ij}}{\partial\xi_i}=\sum_q\frac{\partial m_{1,iq}}{\partial\xi_i}m_{1,jq}w_q$$
+    に加えて、自由な因子間相関 $\rho_{ab}$（$a<b$）ごとに 1 列がある:
+    $$\frac{\partial\pi_{ij}}{\partial\rho_{ab}}=\sum_q m_{1,iq}m_{1,jq}\frac{\partial w_q}{\partial\rho_{ab}},\qquad
+      \frac{\partial w_q}{\partial\rho_{ab}}=w_q\Big(g_{ab,q}-\sum_{q'}w_{q'}g_{ab,q'}\Big),\qquad
+      g_{ab,q}=\big[\mathbf R^{-1}\boldsymbol\theta_q\boldsymbol\theta_q^\top\mathbf R^{-1}-\mathbf R^{-1}\big]_{ab}$$
+    （$\pi_j$ も同様）。コードでは、すべての列を周辺モーメントの $\eta$ についての `jax.jacfwd` 1 回で得る（潜在分布の
+    パラメタは `_latent_log_weights` を通じて入る）ので、パラメタの種類ごとの式は書かない。上の式は、R の参照値が独立に
+    計算し直しているものである。$df=J+\binom J2-q$ で、$q$ = `n_params` は自由な相関を含む。RMSEA とその区間、SRMSR、
+    （2 値モデルの）独立モデルに対する TLI / CFI は変わらない（帰無モデルに潜在構造はない）。**mirt との違い**: 自由な
+    平均・分散の場合（§16.3）と同じく、mirt の `M2()` は $\Delta_2$ を作るときに `GroupPars` の推定フラグを `FALSE` に
+    するので、自由な相関は $df$ では引かれるのに $\Delta_2$ に列を持たない。flexpyirt はすべての自由パラメタを $\Delta_2$
+    に入れる（Maydeu-Olivares & Joe, 2005, 2006）ため、自由な相関のあるモデルでは $M_2$ が mirt よりわずかに小さい
+    （V39 では相対 $3\times10^{-7}$ 〜 $7\times10^{-4}$）。非公開の `_latent_in_delta=False` で mirt の値を再現できる。
+    **周辺モーメントからの識別**はこれまでどおり調べる（$\Delta_2$ の階数、$df>0$）。たとえば、小さいテストでは
+    3 カテゴリの GRM 項目の自由パラメタ数がその項目を含む行数を超えることがあり、1 項目だけで測る因子は識別されない。
+    **S-X2。** 合計得点は mirt と同じく全項目の合計（因子ごとではない）。Lord–Wingersky 漸化式を直積格子のすべての
+    ノードで回し、
+    $$L_j(s\mid\boldsymbol\theta_q)=\sum_{k=0}^{K_j-1}L_{j-1}(s-k\mid\boldsymbol\theta_q)P_{jk}(\boldsymbol\theta_q),$$
+    期待割合はすべての因子について積分する:
+    $$E_j[s,k]=\frac{\sum_qP_{jk}(\boldsymbol\theta_q)L_{-j}(s-k\mid\boldsymbol\theta_q)w_q}{\sum_qL(s\mid\boldsymbol\theta_q)w_q}.$$
+    `_itemfit.lord_wingersky` と `s_x2_expected_tables` は `(Q, K_j)` の配列のリストと重みベクトルを受け取り、ノードの
+    座標は見ないので、平らにした格子でそのまま使う（計算量は $O(J^2SQ)$、$Q=15^3$・9 項目で約 1 秒）。セルの併合
+    （`mirt:::collapseCells`）と $df_j$ = 残ったセル数 − 行数 − 項目 $j$ の自由パラメタ数 − 潜在分布の自由パラメタ数
+    （自由な相関。交差負荷のある項目は自由な識別力が 1 つ多い）は §15.40 と同じ。mirt の
+    `itemfit(fit_stats = "S_X2")` は `thetaComb(seq(-6, 6, length.out = quadpts), nfact)` の上で `mirt_dmvnorm` の重みを
+    使って同じ計算をする。既定の `quadpts`（`select_quadpts(nfact)`: 2 因子で 31、3 因子で 15）と範囲は `mirt()` と
+    `Quadrature.default()` の既定と同じだが、mirt の `itemfit()` と `M2()` は推定時の格子を読まないので、別の
+    `quadpts` や `theta_lim` で推定したときは R 側で改めて渡す必要がある（flexpyirt は常に推定時の格子を使う）。
+    **未対応**（いずれも `SpecificationError`）: 双因子モデルと two-tier モデル（次元縮約した E-step には同時格子がなく、
+    §17 のブロック構造に沿った計算が必要）、多母集団の多次元モデル（未照合。多母集団の $M_2$ は #76）。
+    1 次元の結果はビット単位で変わらない（$D=1$ の同じコードパス）。
+    **照合（V39）**: V14 の 4 モデルで mirt 1.48 と照合した。VALIDATION.md を参照。
+
 ## 17. 実装上の決定（M7）
 
 1. **Gibbons–Hedeker の次元縮約による双因子モデル（`Model.with_bifactor`、V32）**:
@@ -1611,6 +1663,66 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
      Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC、双因子 2PL（`bfactor()`）。双因子モデルと two-tier モデル（§17.1、§17.2）に
      特別な扱いは要らない。次元縮約した E-step も `counts` で動く。two-tier は行の複製との一致だけで確かめる。推定値、
      対数尤度、AIC、BIC、Oakes の SE が共通の許容誤差内で一致する（VALIDATION.ja.md V34）。
+5. **ロバスト標準誤差: クロス積とサンドイッチ（`fit(se="crossprod" | "sandwich")`, V35, #85）**:
+   **定義。** 応答パターン $p$（度数 $c_p$）の周辺尤度を
+   $L_p(\eta)=\sum_q w_{g(p)q}(\eta)\prod_j P_j(y_{pj}\mid\theta_q;\eta)$、そのスコアを
+   $s_p=\nabla_\eta\log L_p(\hat\eta)$ として
+   $$B=\sum_p c_p\,s_p s_p^\top,\qquad B_{\mathrm{post}}=B-\nabla^2_\eta\log\pi(\hat\eta),$$
+   $$V_{\mathrm{crossprod}}=B_{\mathrm{post}}^{-1},\qquad
+     V_{\mathrm{sandwich}}=H^{-1}B_{\mathrm{post}}H^{-1}$$
+   とする。$H=-\nabla^2_\eta[\ell(\hat\eta)+\log\pi(\hat\eta)]$ は §4.8 の観測（事後）情報行列で、
+   Oakes の恒等式（`information_oakes`、`information_hessian` と同一）で計算する。$B$ は Fisher 情報量の
+   勾配外積推定（Berndt, Hall, Hall & Hausman, 1974）、サンドイッチはモデル誤特定のもとでの最尤推定量の
+   共分散（Huber, 1967; White, 1982）。独立な単位は受検者で、$c_p$ 回観測されたパターンは同じ項を
+   $c_p$ 個寄与するので、圧縮したデータと行を複製したデータで $B$ は一致する。スコアは中心化しない
+   （最尤推定値では $\sum_p c_p s_p=0$。mirt も中心化しない）。
+   **事前分布。** 事前分布の曲率は、$H$ に加えるのと同じように（§15.17）クロス積にも加える。これで
+   `oakes`/`hessian` と `crossprod` は同じ事後情報量の推定になり、情報等式 $B=-\nabla^2\ell$ が成り立てば
+   サンドイッチは既存の MAP の共分散 $H^{-1}$ に一致する。mirt と同じ規約（`SE.simple` の
+   `info <- Igrad + Iprior` が `"crossprod"`、同じ行列が `"sandwich"` の中央）なので照合できる。尤度の
+   スコアだけを使う $H^{-1}BH^{-1}$（罰則付き推定量の反復標本分散。対数凹の事前分布では正しいモデルでも $H^{-1}$ より小さい）は
+   提供しない。固定パラメタは $\eta$ に含まれない。群や項目をまたいで共有されるパラメタ（同じ
+   `free_id`）のスコアは 1 成分で、出現箇所の和になる。
+   **多母集団と潜在分布のパラメタ。** $\eta$ は全群の項目・潜在分布パラメタを持つ。群 $g$ のパターンは
+   他の群にしか現れないパラメタについてスコアが 0 なので、特別な処理なしで $B$ は各群のクロス積の和になる。
+   **経験ヒストグラム。** `oakes`/`hessian` と同じく（§15.35）、ヒストグラムの重みは推定値に固定する。
+   $s_p$ と $H$ は自由な項目パラメタだけの微分で、`vcov` の形は `n_free_items × n_free_items` のまま。
+   したがってサンドイッチは、推定されたヒストグラムを与えたときの項目パラメタについてロバストであり、
+   ヒストグラムの推定に対してロバストなわけではない。
+   **対象外。** 潜在分布が `DavidianCurve`・`NormalMixture` のとき、どちらのオプションも
+   `SpecificationError` を出す。mirt はこれらを計算しないので（"No standard error method currently
+   supported for Davidian curves"、"Only Oakes and complete SE.types current supported for mixture
+   models"）、照合する参照値がない（原則 1）。双因子・two-tier モデル（§17.1、§17.2）も
+   `SpecificationError` を出す。これらの尤度は次元縮約（`CompiledProblem.reduction`）で評価するが、下の
+   スコアのカーネルは全体のグリッド上の表を使うためである。mirt は `bfactor()` でどちらの種類も計算する
+   ので、これは参照値がないのではなく実装が未対応なだけで、あとで照合できる。
+   標本ウェイト（項目 4）つきの推定では、どちらの選択肢も `SpecificationError` を出す。ウェイトを足した
+   パターン度数から作る $B$ は標本設計に基づく推定量（$\sum_i w_i^2 s_i s_i^\top$）ではなく、その版と
+   クラスタロバスト版（スコアをクラスタ内で合計する）は未実装である（#85）。
+   **計算**（`_robust_se.py`。`_core.py` を変更しないよう Core の別モジュールにした）。
+   `_fold_pattern_scores` はノード上の表 $\log P_{gjqk}(\eta)$ と $\log w_{gq}(\eta)$ を 1 回だけ評価し、
+   `jax.vjp` で線形化する。パターンは `lax.scan` でチャンクごとに処理する。チャンクの各パターンの対数尤度を
+   `vmap(jax.grad)` で表について微分し、保存した pullback で各余接ベクトルを $\eta$ に戻して `(B, n_free)` の
+   スコアを得て、$\sum c_p s_p s_p^\top$ に足し込む。`(P, n_free)` も `(P, G, J, Q, K)` も作らない。
+   チャンクサイズは `chunk × G × Q × (1 + Σ_f J_f K_f (P_f + 1))` が $8\times10^6$ 要素（約 64 MB）以下に
+   なる最大値（上限 1024）で、度数 0 のパディング行だけのチャンクは `lax.cond` で飛ばす。微分はすべて
+   自動微分。単体テストで `score_sum`（$\sum_p c_p s_p$）を `jax.grad(marginal_loglik)` と、クロス積を
+   パターン対数尤度の密な `jax.jacfwd` と照合する。`fit()` はサンドイッチを $H$ の逆行列から NumPy で
+   組み立てる（既存の正定値チェックを使う。$H$ が正定値でなければ `FlexpyirtWarning` を出して標準誤差は
+   NaN。`crossprod` では同じチェックを $B_{\mathrm{post}}$ に行う。異なるパターン数が自由パラメタ数より
+   少ないと特異になる）。
+   **`vcov` を使う箇所。** `FitResult.vcov`、`se` 列、デルタ法の表示用 SE（`b_se`・`bk_se`、潜在分布の
+   `sd`/`cor` の SE。§15.18）、`link()`（§16.5）は `vcov` を読むので、変更なしで選んだ共分散を使う。
+   `FitResult.jsi(method="one_step")` は `vcov` を Newton ステップの観測情報行列の逆行列として使うが、
+   $V_{\mathrm{sandwich}}$・$V_{\mathrm{crossprod}}$ はそれに当たらないので、`oakes`・`hessian` 以外の当てはめでは
+   `SpecificationError` を出す。
+   **オプション名と JSON。** `se` に `"sandwich"`・`"crossprod"` を追加する（mirt の `SE.type` の綴り。
+   §15.46 の命名規則に従えば `"cross_product"` で、どちらにするかはオーナーが決める）。JSON の
+   `se_method` には同じ文字列を保存する。値の追加だけで保存名は変わらないので `schema_version` は
+   上げない（§16.4・§16.7 で潜在分布の種類を追加したときと同じ）。mirt の `"sandwich.Louis"` は $H$ を
+   Oakes ではなく Louis (1982) の式で計算するだけの同じ推定量で、どちらの式も観測情報行列を与えるので、
+   別のオプションにはしない。
+
 ## 18. 合計得点分布のカーネル、情報関数と信頼性（M7）
 
 1. **Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰（`summed_score_distribution`、V36）**:
@@ -1793,6 +1905,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
+- Berndt, E. R., Hall, B. H., Hall, R. E., & Hausman, J. A. (1974). Estimation and inference in nonlinear structural models. *Annals of Economic and Social Measurement*, 3(4), 653–665.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
 - Binder, D. A. (1983). On the variances of asymptotically normal estimators from complex surveys. *International Statistical Review*, 51(3), 279–292.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
@@ -1827,6 +1940,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
+- Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
@@ -1883,6 +1997,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
+- White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
