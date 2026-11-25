@@ -709,14 +709,14 @@ class FitResult:
         """
         check_x64()
         model = self._model
-        if (
-            model.is_multidimensional
-            or model.is_empirical_histogram
-            or model.is_davidian
-            or model.is_mixture
-        ):
+        if model.is_reduced or (model.is_multidimensional and model.is_multigroup):
             raise SpecificationError(
-                "item_fit() supports unidimensional models with Normal latent distributions only."
+                "item_fit() does not support bifactor, two-tier or multiple-group "
+                "multidimensional models yet."
+            )
+        if model.is_empirical_histogram or model.is_davidian or model.is_mixture:
+            raise SpecificationError(
+                "item_fit() supports models with Normal latent distributions only."
             )
         if isinstance(min_cell, bool) or not (isinstance(min_cell, (int, float)) and min_cell > 0):
             raise SpecificationError(f"min_cell must be a positive number, got {min_cell!r}.")
@@ -1184,15 +1184,11 @@ class FitResult:
         """
         check_x64()
         model = self._model
-        if (
-            model.is_multidimensional
-            or model.is_multigroup
-            or model.is_empirical_histogram
-            or model.is_mixture
-        ):
+        if model.is_reduced:
+            raise SpecificationError("m2() does not support bifactor or two-tier models yet.")
+        if model.is_multigroup or model.is_empirical_histogram or model.is_mixture:
             raise SpecificationError(
-                "m2() supports single-group unidimensional models with a Normal latent "
-                "distribution only."
+                "m2() supports single-group models with a Normal latent distribution only."
             )
         if self._has_priors:
             raise SpecificationError(
