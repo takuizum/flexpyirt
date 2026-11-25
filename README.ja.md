@@ -28,7 +28,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 標本ウェイト | 調査ウェイト `fit(..., weights=...)`: すべてのモデル・多母集団・FIPC での重み付き周辺尤度（mirt の `survey.weights`）。Oakes / Hessian の SE は mirt と一致するが、度数ウェイトでのみ正しい。項目適合度・M2・局所依存・DIF はウェイト付きの推定結果には使えない | ✓ |
 | 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度（MAP 時は対数事後）の Hessian、表示用 IRT 閾値のデルタ法 SE（`b_se` / `bk_se`） | ✓ |
 | スコアリング | EAP・MAP・ML・WLE（1–3 因子、標準誤差つき）および plausible values（`PV`、1–3 因子、明示的な JAX PRNG `key`）。ベイズ手法は群ごとの潜在分布を事前分布に使う | ✓ |
-| 多次元モデル | 確認的 2–3 因子 MIRT（`Model.with_factors()`、多母集団も可）。交差負荷、相関／直交の多変量正規因子、直積求積格子、Oakes/Hessian SE、EAP・MAP・ML・WLE スコアリング | ✓ |
+| 多次元モデル | 確認的 2–3 因子 MIRT（`Model.with_factors()`、多母集団も可）。交差負荷、相関／直交の多変量正規因子、直積求積格子、Oakes/Hessian SE、EAP・MAP・ML・WLE スコアリング。次元縮約による特殊因子数に制限のない双因子モデル（`Model.with_bifactor()`、単一群、EAP スコアリング）。相関してよい主因子 1〜2 個の two-tier モデル（`Model.with_two_tier()`） | ✓ |
 | 経験ヒストグラム | 歪んだ・多峰の潜在分布のための `EmpiricalHistogram()`（Woods, 2007）。参照群は厳密な制約付き M-step で平均 0・分散 1 に標準化、FIPC では自由。重みと 4 次までのモーメントを報告 | ✓ |
 | Davidian 曲線 | 単一群 1 次元モデル向けの半ノンパラメトリック潜在分布 `DavidianCurve(degree)`（Zhang & Davidian, 2001; Woods & Lin, 2009）。厳密な連続 `mean`/`var` へ解析的に標準化（Rasch・PCM・FIPC で `free_mean`/`free_var` 可）、項目・潜在パラメタの同時 Oakes/Hessian SE と EAP/PV 採点に対応 | ✓ |
 | 混合正規 | 単一群 1 次元モデル向けの、項目を共通とする有限混合正規潜在密度 `NormalMixture(n_components)`（Mislevy, 1984）。mirt の `dentype = "mixture-k"` のクラスのパラメタ化を厳密な連続 `mean`/`var` へ解析的に標準化、標準化した成分（`pi_c`・`mean_c`・`var_c`）とデルタ法 SE、項目・潜在パラメタの同時 Oakes/Hessian SE、EAP/PV 採点、退化解の警告 | ✓ |
@@ -38,18 +38,22 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 限定情報の適合度 | Maydeu-Olivares & Joe の M2 / M2*（`FitResult.m2()`）。自由度・p 値・RMSEA と信頼区間・SRMSR・2 値の TLI / CFI | ✓ |
 | DIF | 多母集団の尤度比検定による DIF（`FitResult.dif()`。mirt の `DIF()` の `add` / `drop` 方式、AIC・SABIC・HQ・BIC の差、Holm または BH で補正した p 値） | ✓ |
 | 尺度リンキング | 微分可能な特性曲線法リンキング（`link()`, `LinkResult`: Haebara・Stocking–Lord の非対称・対称版、Ogasawara デルタ法 SE、項目・$\theta$ の変換。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目で R の独立な実装と照合済み） | ✓ |
-| ポリコリック相関 | ポリコリック・テトラコリック相関行列（`polychoric()`: two-step の最尤法、欠測は利用可能なケース、lavaan と同じ 2 x 2 表の空セル補正、正定値でない行列の平滑化。lavaan の `lavCor` と照合済み） | ✓ |
-| 次元数 | 平行分析（`parallel_analysis()`: ポリコリックまたは Pearson 相関、PCA または SMC の固有値、並べ替えまたは正規の参照データ、分位点または平均の基準）、Velicer の MAP（`velicer_map()`、元の版と改訂版）、経験的カイザー基準（`empirical_kaiser()`）、回転しない ULS / ML の因子分析（`efa()`）、Hull 法（`hull()`）、比較データ法（`comparison_data()`）。EFAtools・psych・EFA.dimensions と照合済み） | ✓ |
-| 局所依存と一次元性 | Q3、Q3\*、Chen & Thissen の LD $X^2$ / $G^2$（`FitResult.local_dependence()`、mirt の `residuals()` と同じ）、ジャックナイフ傾き指標（`FitResult.jsi()`、mirt と同じ。速い近似もある）、モデルに基づく平行分析（`model_parallel_analysis()`、ltm の `unidimTest` と同じ）、確認的・探索的 DETECT（`detect()`、`exploratory_detect()`、sirt と同じ）、ブートストラップでバイアス補正する DIMTEST（`dimtest()`、シミュレーションで確認）、複数の手法を実行して合意を別々に示す `dimensionality()` のレポート | ✓ |
+| ポリコリック相関 | ポリコリック・テトラコリック相関行列（`polychoric()`: two-step の最尤法、欠測は利用可能なケース、lavaan と同じ 2 x 2 表の空セル補正、正定値でない行列の平滑化。lavaan の `lavCor` と照合済み）。対になるパッケージ [flexpyctt](https://pypi.org/project/flexpyctt/)（JAX 不要。flexpyirt と一緒に入る）が提供する | ✓ |
+| 次元数 | 平行分析（`parallel_analysis()`: ポリコリックまたは Pearson 相関、PCA または SMC の固有値、並べ替えまたは正規の参照データ、分位点または平均の基準）、Velicer の MAP（`velicer_map()`、元の版と改訂版）、経験的カイザー基準（`empirical_kaiser()`）、回転しない ULS / ML の因子分析（`efa()`）、Hull 法（`hull()`）、比較データ法（`comparison_data()`）。EFAtools・psych・EFA.dimensions と照合済み）。flexpyctt が提供する | ✓ |
+| 局所依存と一次元性 | Q3、Q3\*、Chen & Thissen の LD $X^2$ / $G^2$（`FitResult.local_dependence()`、mirt の `residuals()` と同じ）、ジャックナイフ傾き指標（`FitResult.jsi()`、mirt と同じ。速い近似もある）、モデルに基づく平行分析（`model_parallel_analysis()`、ltm の `unidimTest` と同じ）、確認的・探索的 DETECT（`detect()`、`exploratory_detect()`、sirt と同じ）、ブートストラップでバイアス補正する DIMTEST（`dimtest()`、シミュレーションで確認）、複数の手法を実行して合意を別々に示す `dimensionality()` のレポート。DETECT と DIMTEST は flexpyctt が提供する | ✓ |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
 
 ## インストール
 
-Python 3.11 以上。
+Python 3.12 以上。
 
 ```bash
 pip install flexpyirt  # または uv add flexpyirt
 ```
+
+同時に [flexpyctt](https://pypi.org/project/flexpyctt/) も入る。推定済みのモデルを使わない分析のための、対になる
+パッケージである。依存は NumPy、SciPy、pandas だけなので、JAX を入れたくない環境では `pip install flexpyctt` で
+単独でインストールできる。
 
 polars の DataFrame を使う場合は `flexpyirt[polars]`。GPU を使う場合は、先に CUDA 版の `jax` を入れる
 （[JAX のインストール手順](https://docs.jax.dev/en/latest/installation.html)）。

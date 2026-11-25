@@ -9,6 +9,7 @@ Notation (DESIGN.md §3): ``P`` patterns, ``J`` items, ``Q`` nodes, ``G`` groups
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
@@ -28,6 +29,7 @@ from flexpyirt.latent import (
 from flexpyirt.priors import PRIOR_NONE, eval_log_prior
 
 __all__ = [
+    "BifactorBlock",
     "CompiledProblem",
     "CoupledBlock",
     "CoupledMember",
@@ -182,6 +184,47 @@ class CoupledBlock:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
+class BifactorBlock:
+    r"""Dimension reduction of a bifactor or two-tier model (DESIGN.md §17.1, §17.2).
+
+    The first ``P`` factors are primary (``P = 1``, the general factor, for a bifactor model;
+    Gibbons & Hedeker, 1992; Cai, 2010) and are integrated on their product grid of
+    :math:`Q_p = n^P` nodes. Block :math:`b = 0..S-1` holds the items of specific factor
+    :math:`b+1`; block :math:`S` holds the items without a specific factor, integrated with
+    uniform "specific" weights (their log-probabilities do not depend on the specific node, so
+    the inner sum is exact).
+
+    Attributes
+    ----------
+    block_nodes : (B, Q_p n, D) float
+        Nodes of each block (``B = S + 1``): columns ``0..P-1`` the primary node, column
+        ``P + b`` the specific node, other columns 0; the primary index is major.
+    primary_nodes : (Q_p, P) float
+        Product grid of the primary factors.
+    primary_base : (Q_p,) float
+        Fixed log base weights of the primary nodes (§15.44).
+    nodes_1d, base_1d : (n,) float
+        One-dimensional nodes and their fixed log base weights (§15.44).
+    family_block : tuple of (J_f,) int
+        Block of each item, per family.
+    n_specific : int
+        Static number of specific factors ``S``.
+    n_primary : int
+        Static number of primary factors ``P``.
+    """
+
+    block_nodes: Array
+    primary_nodes: Array
+    primary_base: Array
+    nodes_1d: Array
+    base_1d: Array
+    family_block: tuple[Array, ...]
+    n_specific: int = field(metadata={"static": True})
+    n_primary: int = field(default=1, metadata={"static": True})
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
 class CompiledProblem:
     r"""Everything the Core needs (DESIGN.md §5.2).
 
@@ -208,6 +251,11 @@ class CompiledProblem:
     coupled : tuple[CoupledBlock, ...]
         Components of items connected by equality constraints across items (DESIGN.md §16.1);
         empty when every ``free_id`` stays within one item.
+    reduction : BifactorBlock or None
+        Bifactor / two-tier dimension reduction (DESIGN.md §17.1, §17.2). When set, ``nodes``
+        is the primary grid embedded in ``D`` columns, item expected counts live on each item's
+        block grid ``(Q_p n)``, and ``ExpectedCounts.n`` has shape ``(G, Q_p + B n)`` (primary
+        marginal, then each block's specific marginal, flattened).
     """
 
     y: Array
@@ -220,6 +268,7 @@ class CompiledProblem:
     node_log_base: Array
     n_groups: int = field(metadata={"static": True})
     coupled: tuple[CoupledBlock, ...] = ()
+    reduction: BifactorBlock | None = None
 
 
 def _expand(eta: Array, fixed: Array, free_index: Array) -> Array:
@@ -235,16 +284,29 @@ def _scatter(eta: Array, values: Array, free_index: Array) -> Array:
     return eta.at[idx.ravel()].set(values.ravel(), mode="drop")
 
 
+def _family_nodes(prob: CompiledProblem, f: int) -> tuple[Array, int | None]:
+    """Nodes of family ``f``'s items and their ``vmap`` axis over items.
+
+    The shared ``(Q, D)`` grid (axis ``None``), or each item's bifactor block grid
+    ``(J_f, n^2, D)`` (axis 0; DESIGN.md §17.1).
+    """
+    if prob.reduction is None:
+        return prob.nodes, None
+    return prob.reduction.block_nodes[prob.reduction.family_block[f]], 0
+
+
 def _item_log_probs(prob: CompiledProblem, eta: Array) -> list[Array]:
-    """Per family, ``(G, J_f, Q, K_f)`` log-probabilities on the nodes."""
+    """Per family, ``(G, J_f, Q, K_f)`` log-probabilities on each item's nodes."""
     out = []
-    for fam in prob.families:
+    for f, fam in enumerate(prob.families):
         xi = _expand(eta, fam.fixed_values, fam.free_index)  # (G, J_f, P_f)
+        nodes, axis = _family_nodes(prob, f)
 
-        def per_item(p: Array, k: ItemKernel = fam.kernel) -> Array:
-            return k.log_prob(prob.nodes, p)
+        def per_item(p: Array, x: Array, k: ItemKernel = fam.kernel) -> Array:
+            return k.log_prob(x, p)
 
-        out.append(jax.vmap(jax.vmap(per_item))(xi))
+        per_group = jax.vmap(per_item, in_axes=(0, axis))
+        out.append(jax.vmap(per_group, in_axes=(0, None))(xi, nodes))
     return out
 
 
@@ -294,12 +356,95 @@ def _latent_log_weights(prob: CompiledProblem, eta: Array) -> Array:
     )
 
 
+def _reduced_log_weights_group(red: BifactorBlock, params: Array) -> tuple[Array, Array]:
+    r"""Primary ``(Q_p,)`` and block ``(B, n)`` log weights of one group (§17.1, §17.2).
+
+    ``params`` is ``(mean_1..D, var_1..D, cor_ij...)`` with correlations among the primary
+    factors only. The primary factors have the normalized multivariate-normal weights
+    :math:`\log w^{(0)}=\log\mathrm{softmax}(b+\log\phi_P(\cdot;\boldsymbol\mu,\boldsymbol\Sigma))`
+    on their product grid; each specific factor :math:`m` has the one-dimensional weights
+    :math:`\log w^{(m)}=\log\mathrm{softmax}(b+\log\phi(\cdot;\mu_m,\sigma^2_m))`; the block of
+    items without a specific factor uses uniform weights.
+    """
+    n_primary = red.n_primary
+    n_factors = n_primary + red.n_specific
+    means = params[:n_factors]
+    variances = params[n_factors : 2 * n_factors]
+    primary_params = jnp.concatenate(
+        [means[:n_primary], variances[:n_primary], params[2 * n_factors :]]
+    )
+    log_wp = _normal_logw(red.primary_nodes, red.primary_base, primary_params)
+    pairs = jnp.stack([means[n_primary:], variances[n_primary:]], axis=-1)  # (S, 2)
+    log_ws = jax.vmap(lambda pair: _normal_logw(red.nodes_1d, red.base_1d, pair))(pairs)
+    n_pts = red.nodes_1d.shape[0]
+    uniform = jnp.full((1, n_pts), -jnp.log(n_pts), dtype=log_ws.dtype)
+    return log_wp, jnp.concatenate([log_ws, uniform], axis=0)
+
+
+def _bifactor_log_weights(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
+    """Primary ``(G, Q_p)`` and block ``(G, B, n)`` log weights of a reduced model (§17.1)."""
+    red = prob.reduction
+    assert red is not None
+    lat = _expand(eta, prob.latent.fixed_values, prob.latent.free_index)  # (G, L)
+    log_wp, log_wb = jax.vmap(lambda params: _reduced_log_weights_group(red, params))(lat)
+    return log_wp, log_wb
+
+
+def _reduced_latent_q(red: BifactorBlock, n: Array, params: Array) -> Array:
+    r"""Latent part of Q of a reduced model for one group (DESIGN.md §17.2).
+
+    .. math::
+        Q^{\mathrm{lat}}=\sum_g\bar n^{(0)}_g\log w^{(0)}_g+\sum_{b,t}\bar n^{(b)}_t\log w^{(b)}_t
+
+    with ``n`` the flat ``(Q_p + B n,)`` expected counts.
+    """
+    log_wp, log_wb = _reduced_log_weights_group(red, params)
+    return jnp.sum(n * jnp.concatenate([log_wp, log_wb.ravel()]))
+
+
+def _bifactor_parts(prob: CompiledProblem, eta: Array) -> tuple[Array, Array, Array]:
+    r"""Factorized log joint of a bifactor model (Gibbons & Hedeker, 1992; DESIGN.md §17.1).
+
+    With :math:`\ell^{(b)}_{pgt}=\sum_{j\in b}\log P_j(y_{pj}\mid\theta_g,\theta_t)`,
+
+    .. math::
+        u_{pbgt}=\ell^{(b)}_{pgt}+\log w^{(b)}_t,\qquad
+        L^{(b)}_{pg}=\operatorname{logsumexp}_t u_{pbgt},\qquad
+        \lambda_{pg}=\log w^{(0)}_g+\sum_b L^{(b)}_{pg}.
+
+    For a two-tier model :math:`g` runs over the :math:`Q_p` nodes of the primary product grid
+    (Cai, 2010; §17.2). Returns ``(lambda (P, Q_p), u (P, B, Q_p, n), L (P, B, Q_p))``.
+    """
+    red = prob.reduction
+    assert red is not None
+    n_blocks = red.n_specific + 1
+    n_pts = red.nodes_1d.shape[0]
+    n_prim = red.primary_nodes.shape[0]
+    n_pat = prob.y.shape[0]
+    ell = jnp.zeros((n_pat, prob.n_groups, n_blocks, n_prim * n_pts), dtype=prob.nodes.dtype)
+    for f, (oh, logp) in enumerate(zip(_one_hots(prob), _item_log_probs(prob, eta), strict=True)):
+        blk = jax.nn.one_hot(red.family_block[f], n_blocks, dtype=oh.dtype)  # (J_f, B)
+        # Mask the small (G, B, J_f, K, Q) table first so the pattern contraction is one matmul
+        # per (group, block) without a (P, J_f, B, Q) intermediate.
+        masked = jnp.einsum("gjqk,jb->gbjkq", logp, blk)
+        ell = ell + jnp.einsum("pjk,gbjkq->pgbq", oh, masked)
+    own = jnp.take_along_axis(ell, prob.group[:, None, None, None], axis=1)[:, 0]
+    log_wg, log_wb = _bifactor_log_weights(prob, eta)
+    inner = own.reshape(n_pat, n_blocks, n_prim, n_pts) + log_wb[prob.group][:, :, None, :]
+    block_ll = jax.scipy.special.logsumexp(inner, axis=3)  # (P, B, Q_p)
+    lam = log_wg[prob.group] + jnp.sum(block_ll, axis=1)
+    return lam, inner, block_ll
+
+
 def _log_joint(prob: CompiledProblem, eta: Array) -> Array:
     r"""``(P, Q)`` :math:`\ell_{pq}+\log w_{g(p)q}` (DESIGN.md §4.2, §14.3).
 
     The item part is computed for every group, ``(P, G, Q)``, and each pattern's own group is
-    then selected, avoiding a ``(P, J, Q, K)`` intermediate.
+    then selected, avoiding a ``(P, J, Q, K)`` intermediate. For a bifactor model this is the
+    general-factor log joint :math:`\lambda_{pg}` of :func:`_bifactor_parts` (§17.1).
     """
+    if prob.reduction is not None:
+        return _bifactor_parts(prob, eta)[0]
     n_pat, n_nodes = prob.y.shape[0], prob.nodes.shape[0]
     ell = jnp.zeros((n_pat, prob.n_groups, n_nodes), dtype=prob.nodes.dtype)
     for oh, logp in zip(_one_hots(prob), _item_log_probs(prob, eta), strict=True):
@@ -346,8 +491,59 @@ class ExpectedCounts(NamedTuple):
     n: Array
 
 
+def _bifactor_posterior(prob: CompiledProblem, eta: Array) -> tuple[Array, Array, Array]:
+    r"""Posterior of a bifactor model (DESIGN.md §17.1).
+
+    .. math::
+        h_{pg}=\mathrm{softmax}_g\lambda_{pg},\qquad
+        h^{(b)}_{pgt}=h_{pg}\exp(u_{pbgt}-L^{(b)}_{pg})
+
+    Returns ``(h (P, Q_p), h_block (P, B, Q_p, n), log L_p (P,))``.
+    """
+    lam, inner, block_ll = _bifactor_parts(prob, eta)
+    lse = jax.scipy.special.logsumexp(lam, axis=1)
+    h = jnp.exp(lam - lse[:, None])
+    h_block = h[:, None, :, None] * jnp.exp(inner - block_ll[..., None])
+    return h, h_block, lse
+
+
+def _bifactor_e_step(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, Array, Array]:
+    r"""E-step of a bifactor model on the block grids (DESIGN.md §17.1).
+
+    .. math::
+        \bar r_{gjkq}=\sum_{p\in g}c_p h^{(b(j))}_{pq}\mathbf 1[y_{pj}=k],\qquad
+        q=(g', t)
+
+    ``n`` is the primary marginal followed by each block's specific marginal, flattened to
+    ``(G, Q_p + B n)`` (§17.2).
+    """
+    red = prob.reduction
+    assert red is not None
+    n_blocks = red.n_specific + 1
+    h, h_block, lse = _bifactor_posterior(prob, eta)
+    n_pat = h.shape[0]
+    group_one_hot = jax.nn.one_hot(prob.group, prob.n_groups, dtype=h.dtype)
+    cg = prob.counts[:, None] * group_one_hot  # (P, G)
+    weighted = h_block.reshape(n_pat, n_blocks, -1)
+    r_list = []
+    for f, oh in enumerate(_one_hots(prob)):
+        blk = jax.nn.one_hot(red.family_block[f], n_blocks, dtype=h.dtype)  # (J_f, B)
+        coh = jnp.einsum("pa,pjk->pajk", cg, oh)
+        # One (A J_f K) x P x Q matmul per block, then keep each item's own block.
+        per_block = jnp.einsum("pajk,pbq->bajkq", coh, weighted)
+        r_list.append(jnp.einsum("bajkq,jb->ajkq", per_block, blk))
+    r_bar = tuple(r_list)
+    n_general = jnp.einsum("pa,pg->ag", cg, h)
+    n_specific = jnp.einsum("pa,pbgt->abt", cg, h_block)
+    n_bar = jnp.concatenate([n_general, n_specific.reshape(prob.n_groups, -1)], axis=1)
+    loglik = jnp.sum(prob.counts * lse)
+    return ExpectedCounts(r_bar, n_bar), loglik, h
+
+
 def _e_step_details(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, Array, Array]:
     """Run one E-step and return ``(counts, loglik, h)`` with ``h`` of shape ``(P, Q)``."""
+    if prob.reduction is not None:
+        return _bifactor_e_step(prob, eta)
     log_joint = _log_joint(prob, eta)
     lse = jax.scipy.special.logsumexp(log_joint, axis=1, keepdims=True)
     h = jnp.exp(log_joint - lse)  # softmax_q(log_joint), (P, Q)
@@ -414,13 +610,20 @@ def _local_to_xi(u: Array, local: Array, fixed: Array) -> Array:
 def expected_complete_loglik(prob: CompiledProblem, eta: Array, counts: ExpectedCounts) -> Array:
     r""":math:`Q(\eta\mid\eta')` with the expected counts computed at :math:`\eta'`."""
     total = jnp.zeros((), dtype=prob.nodes.dtype)
-    for fam, r in zip(prob.families, counts.r, strict=True):
+    for f, (fam, r) in enumerate(zip(prob.families, counts.r, strict=True)):
         xi = _expand(eta, fam.fixed_values, fam.free_index)  # (G, J_f, P_f)
+        nodes, axis = _family_nodes(prob, f)
 
-        def per_item(rj: Array, p: Array, k: ItemKernel = fam.kernel) -> Array:
-            return _item_q(k, prob.nodes, rj, p)
+        def per_item(rj: Array, p: Array, x: Array, k: ItemKernel = fam.kernel) -> Array:
+            return _item_q(k, x, rj, p)
 
-        total = total + jnp.sum(jax.vmap(jax.vmap(per_item))(r, xi))
+        per_group = jax.vmap(per_item, in_axes=(0, 0, axis))
+        total = total + jnp.sum(jax.vmap(per_group, in_axes=(0, 0, None))(r, xi, nodes))
+    if prob.reduction is not None:
+        # Primary factors jointly, each specific factor on its own (§17.1, §17.2).
+        log_wp, log_wb = _bifactor_log_weights(prob, eta)
+        log_w = jnp.concatenate([log_wp, log_wb.reshape(prob.n_groups, -1)], axis=1)
+        return total + jnp.sum(counts.n * log_w)
     if prob.latent.is_eh:
         return total + jnp.sum(counts.n * jnp.log(prob.latent.eh_weights))
     lat = _expand(eta, prob.latent.fixed_values, prob.latent.free_index)
@@ -471,11 +674,15 @@ def _m_step_coupled(
                 r_m = counts.r[mem.family][:, mem.positions]  # (G, n, K, Q)
                 fix_m = fam.fixed_values[:, mem.positions]  # (G, n, P_f)
                 xi = _local_to_xi(v, mem.local_index, fix_m)  # (G, n, P_f)
+                nodes, axis = _family_nodes(prob, mem.family)
+                if axis is not None:
+                    nodes = nodes[mem.positions]
 
-                def per_item(rj: Array, pj: Array, k: ItemKernel = fam.kernel) -> Array:
-                    return _item_q(k, prob.nodes, rj, pj)
+                def per_item(rj: Array, pj: Array, x: Array, k: ItemKernel = fam.kernel) -> Array:
+                    return _item_q(k, x, rj, pj)
 
-                total = total + jnp.sum(jax.vmap(jax.vmap(per_item))(r_m, xi))
+                per_group = jax.vmap(per_item, in_axes=(0, 0, axis))
+                total = total + jnp.sum(jax.vmap(per_group, in_axes=(0, 0, None))(r_m, xi, nodes))
             return total
 
         mask = jnp.ones(fids.shape, dtype=jnp.bool_)
@@ -492,7 +699,8 @@ def _m_step_items(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_s
     """
     new_eta = eta
     coupled_masks = _coupled_masks(prob)
-    for fam, r, cmask in zip(prob.families, counts.r, coupled_masks, strict=True):
+    for f, (fam, r, cmask) in enumerate(zip(prob.families, counts.r, coupled_masks, strict=True)):
+        nodes, axis = _family_nodes(prob, f)
         u0 = _expand(eta, jnp.zeros(fam.slot_free_index.shape, eta.dtype), fam.slot_free_index)
         slot_free = fam.slot_free_index >= 0
         if eta.shape[0] == 0:
@@ -519,16 +727,17 @@ def _m_step_items(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_s
             sk: Array,
             sp1: Array,
             sp2: Array,
+            x: Array,
             k: ItemKernel = fam.kernel,
         ) -> Array:
             def q_item(v: Array) -> Array:
                 xi = _local_to_xi(v, loc, fix)  # (G, P_f)
-                q_lik = jnp.sum(jax.vmap(lambda rg, pg: _item_q(k, prob.nodes, rg, pg))(rj, xi))
+                q_lik = jnp.sum(jax.vmap(lambda rg, pg: _item_q(k, x, rg, pg))(rj, xi))
                 return q_lik + jnp.sum(eval_log_prior(v, sk, sp1, sp2))
 
             return newton_ascent(q_item, u, free, lo, hi, n_steps)
 
-        u_new = jax.vmap(solve_item)(
+        u_new = jax.vmap(solve_item, in_axes=(0,) * 10 + (axis,))(
             r_items,
             local,
             fixed,
@@ -539,6 +748,7 @@ def _m_step_items(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_s
             slot_kind,
             slot_p1,
             slot_p2,
+            nodes,
         )
         new_eta = _scatter(new_eta, u_new, fam.slot_free_index)
     return _m_step_coupled(prob, eta, new_eta, counts, n_steps) if prob.coupled else new_eta
@@ -585,11 +795,22 @@ def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: i
     shared parameter's prior is counted once.
     """
     new_eta = _m_step_items(prob, eta, counts, n_steps)
-    if prob.latent.is_eh:
+    red = prob.reduction
+    if prob.latent.is_eh or (red is not None and red.n_primary < 2):
+        # Bifactor latent parameters are all fixed (compile_problem checks; DESIGN.md §17.1).
         return new_eta
 
     lat_block = prob.latent
     lat = _expand(eta, lat_block.fixed_values, lat_block.free_index)
+    if red is not None:
+        # Two-tier: only the correlations among primary factors can be free (§17.2).
+        def solve_reduced(n: Array, x: Array, free: Array, lo: Array, hi: Array) -> Array:
+            return newton_ascent(lambda p: _reduced_latent_q(red, n, p), x, free, lo, hi, n_steps)
+
+        lat_reduced = jax.vmap(solve_reduced)(
+            counts.n, lat, lat_block.free_index >= 0, lat_block.lower, lat_block.upper
+        )
+        return _scatter(new_eta, lat_reduced, lat_block.free_index)
     deg = _latent_kind(lat_block)
 
     def solve_group(n: Array, x: Array, free: Array, lo: Array, hi: Array) -> Array:
@@ -1100,10 +1321,20 @@ def information_hessian(prob: CompiledProblem, eta: Array) -> Array:
     problems (DESIGN.md §15.20). Reduces to :math:`-\nabla^2_\eta\ell(\eta)` when no priors are
     present.
     """
-    n_free = eta.shape[0]
-    if n_free == 0:
+    if eta.shape[0] == 0:
         return jnp.zeros((0, 0), dtype=eta.dtype)
-    _, hvp = jax.linearize(jax.grad(lambda e: log_posterior(prob, e)), eta)
+    return -_chunked_jacobian(jax.grad(lambda e: log_posterior(prob, e)), eta)
+
+
+def _chunked_jacobian(fn: Callable[[Array], Array], eta: Array) -> Array:
+    """Jacobian of ``fn: R^n -> R^n`` at ``eta`` by batched forward-mode JVPs (§15.20).
+
+    ``jax.linearize`` is applied once and the standard basis is pushed through in fixed-size
+    batches with ``lax.scan``, so peak memory stays bounded. Row ``i`` is the derivative along
+    the ``i``-th basis vector (symmetric for the Hessian-like uses here).
+    """
+    n_free = eta.shape[0]
+    _, hvp = jax.linearize(fn, eta)
     chunk = min(_HESSIAN_CHUNK_SIZE, n_free)
     n_chunks = (n_free + chunk - 1) // chunk
     pad = n_chunks * chunk - n_free
@@ -1116,8 +1347,8 @@ def information_hessian(prob: CompiledProblem, eta: Array) -> Array:
         return None, jax.vmap(hvp)(basis)
 
     _, cols = jax.lax.scan(_batch, None, chunks)
-    info: Array = -cols.reshape(n_chunks * chunk, n_free)[:n_free]
-    return info
+    jac: Array = cols.reshape(n_chunks * chunk, n_free)[:n_free]
+    return jac
 
 
 def _oakes_own_hessian(prob: CompiledProblem, eta: Array, counts: ExpectedCounts) -> Array:
@@ -1362,11 +1593,63 @@ def information_oakes(prob: CompiledProblem, eta: Array) -> Array:
     """
     if eta.shape[0] == 0:
         return jnp.zeros((0, 0), dtype=eta.dtype)
+    if prob.reduction is not None:
+        return _information_oakes_total(prob, eta)
     counts, _, h = _e_step_details(prob, eta)
     h_own = _oakes_own_hessian(prob, eta, counts)
     h_cross = _oakes_cross_hessian(prob, eta, counts, h)
     info: Array = -(h_own + h_cross)
     return info
+
+
+def _information_oakes_total(prob: CompiledProblem, eta: Array) -> Array:
+    r"""Oakes' identity as a total derivative through the E-step (DESIGN.md §17.1).
+
+    With :math:`F(\eta)=\nabla_\eta Q_{\mathrm{post}}(\eta\mid\eta')|_{\eta'=\eta}` (the
+    complete-data gradient with the E-step weights computed at the same point),
+
+    .. math::
+        \frac{\mathrm dF}{\mathrm d\eta}
+        =\frac{\partial^2Q_{\mathrm{post}}}{\partial\eta\,\partial\eta^\top}
+        +\frac{\partial^2Q_{\mathrm{post}}}{\partial\eta\,\partial\eta'^\top}
+        =-I(\hat\eta)
+
+    (Oakes, 1999), evaluated by chunked forward-mode autodiff. Used for bifactor models, whose
+    posterior is factorized over block grids rather than one joint grid, so the structured
+    cross term of :func:`_oakes_cross_hessian` does not apply.
+    """
+
+    def complete_grad(e: Array) -> Array:
+        counts, _, _ = _e_step_details(prob, e)
+        out: Array = jax.grad(
+            lambda x: expected_complete_loglik(prob, x, counts) + log_prior(prob, x)
+        )(e)
+        return out
+
+    jac = _chunked_jacobian(complete_grad, eta)
+    info: Array = -0.5 * (jac + jac.T)
+    return info
+
+
+def _bifactor_eap(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
+    r"""EAP and posterior SD of every factor of a bifactor model (DESIGN.md §17.1).
+
+    .. math::
+        \hat\theta_{p0}=\sum_g\theta_g h_{pg},\qquad
+        \hat\theta_{ps}=\sum_{g,t}\theta_t h^{(s)}_{pgt}
+    """
+    red = prob.reduction
+    assert red is not None
+    h, h_block, _ = _bifactor_posterior(prob, eta)
+    x = red.nodes_1d
+    spec = jnp.sum(h_block[:, : red.n_specific], axis=2)  # (P, S, n) specific marginals
+    mean_p = h @ red.primary_nodes  # (P, n_primary); the primary grid for two-tier (§17.2)
+    var_p = h @ (red.primary_nodes**2) - mean_p**2
+    mean_s = spec @ x
+    var_s = spec @ (x**2) - mean_s**2
+    mean = jnp.concatenate([mean_p, mean_s], axis=1)
+    var = jnp.concatenate([var_p, var_s], axis=1)
+    return mean, jnp.sqrt(jnp.maximum(var, 0.0))
 
 
 def eap(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
@@ -1376,8 +1659,11 @@ def eap(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
         \hat{\boldsymbol\theta}_p=\sum_q\boldsymbol\theta_q h_{pq},\qquad
         \mathrm{SD}_{pm}=\Big(\sum_q\theta_{qm}^2 h_{pq}-\hat\theta_{pm}^2\Big)^{1/2}
 
-    Returns arrays of shape ``(P,)`` when ``D = 1`` and ``(P, D)`` when ``D > 1``.
+    Returns arrays of shape ``(P,)`` when ``D = 1`` and ``(P, D)`` when ``D > 1``. Bifactor
+    models use the factorized posterior (:func:`_bifactor_eap`).
     """
+    if prob.reduction is not None:
+        return _bifactor_eap(prob, eta)
     h = jax.nn.softmax(_log_joint(prob, eta), axis=1)
     mean = h @ prob.nodes
     var = h @ (prob.nodes**2) - mean**2

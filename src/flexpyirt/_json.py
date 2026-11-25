@@ -2,10 +2,11 @@
 
 Implements the versioned plain-JSON format specified in DESIGN.md §15.26–§15.28:
 
-- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 5`` (versions 1
+- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 7`` (versions 1
   and 2, written before multidimensional models and across-item equalities were stored,
-  version 3, written before the naming refactor of §15.46, and version 4, written before
-  sampling weights, are still read), and
+  version 3, written before the naming refactor of §15.46, version 4, written before bifactor
+  models (§17.1), version 5, written before two-tier models (§17.2), and version 6, written
+  before sampling weights (§17.4), are still read), and
   ``"flexpyirt_version"``.
 - Strict RFC 8259 JSON (``allow_nan=False`` on write; rejecting ``parse_constant`` on read).
   Finite IEEE-754 float64 values use standard ``repr``-exact JSON numbers; non-finite values in
@@ -60,16 +61,17 @@ __all__ = [
 ]
 
 FORMAT_TAG = "flexpyirt.FitResult"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
 """Schema version written by :func:`dump_fit_result`.
 
-2 adds the confirmatory factor structure, 3 across-item equalities, and 4 renames the item-model
+2 adds the confirmatory factor structure, 3 across-item equalities, 4 renames the item-model
 key ``n_cat`` to ``n_categories`` and the priors ``LogNormal(meanlog, sdlog)`` / ``Beta`` to
-``LogNormalPrior(mean_log, sd_log)`` / ``BetaPrior`` (DESIGN.md §15.46). 5 adds the optional
-top-level key ``sum_weights`` (the sum of the sampling weights; present only for a fit with
-``weights=``, DESIGN.md §17.4).
+``LogNormalPrior(mean_log, sd_log)`` / ``BetaPrior`` (DESIGN.md §15.46), 5 adds the model key
+``bifactor`` (DESIGN.md §17.1), 6 the model key ``n_primary_factors`` (DESIGN.md §17.2), and 7
+the optional top-level key ``sum_weights`` (the sum of the sampling weights; present only for a
+fit with ``weights=``, DESIGN.md §17.4).
 """
-SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5})
+SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7})
 """Schema versions accepted by :func:`load_fit_result`; version 1 has no factor keys."""
 
 _LEGACY_PRIOR_TYPES = {"LogNormal": "LogNormalPrior", "Beta": "BetaPrior"}
@@ -796,6 +798,8 @@ def _serialize_model(model: Model) -> dict[str, Any]:
             else [{"name": name, "items": list(items)} for name, items in model.factors]
         ),
         "correlated_factors": bool(model.correlated_factors),
+        "bifactor": bool(model.bifactor),
+        "n_primary_factors": int(model.n_primary_factors),
         "equal_items": [
             {"items": list(eq_items), "params": list(eq_params)}
             for eq_items, eq_params in model.equal_items
@@ -808,8 +812,12 @@ def _deserialize_model(raw: Any, *, schema_version: int = SCHEMA_VERSION) -> Mod
 
     Schema version 2 adds ``factors`` and ``correlated_factors``; version 1 payloads have neither
     and are unidimensional. Schema version 3 adds ``equal_items`` (equalities across items,
-    DESIGN.md §16.1), rebuilt through :meth:`Model.equal_across_items`. A factor structure is
-    rebuilt through :meth:`Model.with_factors`, so the same validation applies as when it was
+    DESIGN.md §16.1), rebuilt through :meth:`Model.equal_across_items`. Schema version 5 adds
+    ``bifactor`` (DESIGN.md §17.1) and version 6 ``n_primary_factors`` (DESIGN.md §17.2); older
+    versions load as ``False`` and 0. A factor structure is rebuilt through
+    :meth:`Model.with_factors` (or :meth:`Model.with_bifactor`, whose first factor is the general
+    factor loading on every item, or :meth:`Model.with_two_tier`, whose first
+    ``n_primary_factors`` factors are primary), so the same validation applies as when it was
     first declared, and the fixed values, equalities and priors are checked against the
     multidimensional parameter names (``a1``..``aD``).
     """
@@ -819,7 +827,22 @@ def _deserialize_model(raw: Any, *, schema_version: int = SCHEMA_VERSION) -> Mod
         required |= {"factors", "correlated_factors"}
     if schema_version >= 3:
         required |= {"equal_items"}
+    if schema_version >= 5:
+        required |= {"bifactor"}
+    if schema_version >= 6:
+        required |= {"n_primary_factors"}
     _check_keys(obj, required=required, field_name="model")
+    n_primary = 0
+    if schema_version >= 6:
+        raw_primary = obj["n_primary_factors"]
+        if isinstance(raw_primary, bool) or not isinstance(raw_primary, int) or raw_primary < 0:
+            raise SpecificationError("model.n_primary_factors must be a non-negative integer.")
+        n_primary = raw_primary
+    bifactor = (
+        _require_bool(obj["bifactor"], field_name="model.bifactor")
+        if schema_version >= 5
+        else False
+    )
 
     items_raw = _require_list(obj["items"], field_name="model.items")
     items_list: list[tuple[str, ItemModel]] = []
@@ -854,9 +877,42 @@ def _deserialize_model(raw: Any, *, schema_version: int = SCHEMA_VERSION) -> Mod
                     f"model.factors[{idx}] references unknown items {unknown_f}."
                 )
             factor_map[f_name] = f_items
-        base = base.with_factors(factor_map, correlated=correlated)
+        if bifactor:
+            names = list(factor_map)
+            if not names or factor_map[names[0]] != list(base.item_names):
+                raise SpecificationError(
+                    "model.factors of a bifactor model must start with the general factor "
+                    "listing every item in order."
+                )
+            if correlated:
+                raise SpecificationError("A bifactor model must have correlated_factors=false.")
+            if n_primary:
+                raise SpecificationError(
+                    "A bifactor model must have n_primary_factors = 0 (it is set for two-tier "
+                    "models only)."
+                )
+            base = base.with_bifactor(
+                specific={n: factor_map[n] for n in names[1:]}, general=names[0]
+            )
+        elif n_primary:
+            names = list(factor_map)
+            if n_primary >= len(names):
+                raise SpecificationError(
+                    "model.n_primary_factors must be smaller than the number of factors."
+                )
+            base = base.with_two_tier(
+                primary={n: factor_map[n] for n in names[:n_primary]},
+                specific={n: factor_map[n] for n in names[n_primary:]},
+                correlated=correlated,
+            )
+        else:
+            base = base.with_factors(factor_map, correlated=correlated)
     elif schema_version >= 2:
         _require_bool(obj["correlated_factors"], field_name="model.correlated_factors")
+        if bifactor or n_primary:
+            raise SpecificationError(
+                "model.bifactor / model.n_primary_factors is set but model.factors is null."
+            )
 
     def _param_names(item: str) -> tuple[str, ...]:
         return base.item_kernel(lookup[item]).param_names
@@ -1452,7 +1508,7 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
             f"supported versions are {sorted(SUPPORTED_SCHEMA_VERSIONS)}."
         )
     allowed_keys = _TOP_LEVEL_KEYS | {"latent_weights"}
-    if schema_version >= 5:
+    if schema_version >= 7:
         allowed_keys = allowed_keys | {"sum_weights"}
     keys = set(obj.keys())
     missing_top = sorted(_TOP_LEVEL_KEYS - keys)

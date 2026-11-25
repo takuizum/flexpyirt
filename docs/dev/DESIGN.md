@@ -257,7 +257,8 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   product of the 1-D equispaced grid (`Quadrature.grid(n_factors)` → `(Q, D)`). Default points per
   dimension match mirt's `select_quadpts` via `Quadrature.default(n_factors)`: 61 for 1D, 31 per
   dimension ($31^2 = 961$) for 2D, and 15 per dimension ($15^3 = 3{,}375$) for 3D on $[-6, 6]$.
-  More than 3 dimensions is out of scope (non-goal).
+  More than 3 dimensions is out of scope (non-goal) for product grids; bifactor models reduce
+  any number of specific factors to $(1+1)$-dimensional grids (§17.1).
 
 ### 4.10 Starting values
 - $d_j$: logit of the proportion correct; $a_j$: converted from the item–total point-biserial
@@ -762,7 +763,7 @@ data-independent shapes (§15.21).
     string and also writes UTF-8 text to `path` (`str` or `os.PathLike`) when given;
     `FitResult.from_json(source) -> FitResult` loads from a file path or JSON string without
     refitting. Plain JSON is used (no `pickle` and never `eval`). The top-level object carries
-    `"format": "flexpyirt.FitResult"`, `"schema_version"` (4 since the naming refactor of §15.46, 5 since sampling weights, §17.4; older versions are still read), and
+    `"format": "flexpyirt.FitResult"`, `"schema_version"` (4 since the naming refactor of §15.46, 5 since bifactor models, §17.1, 6 since two-tier models, §17.2, 7 since sampling weights, §17.4; older versions are still read), and
     `"flexpyirt_version": flexpyirt.__version__`. `FitResult` stores `_method: BAEM` alongside
     `_model` and `_quadrature` so estimation settings round-trip as well. `from_json` calls
     `check_x64()` at entry (raising `PrecisionError` when 64-bit floating point is disabled, since
@@ -1524,7 +1525,8 @@ data-independent shapes (§15.21).
    (DETECT 0.2 / 0.4 / 1, Q3* 0.2, RMSEA) are arguments with their sources in docstrings. The
    polychoric matrix is computed once and shared; simulations use a JAX PRNG key. The ensemble
    itself is checked by a simulation study (unidimensional, two-dimensional and bifactor data).
-9. **Polychoric / tetrachoric correlations (`polychoric()`, D1 of §16.8, V24)**:
+9. **Polychoric / tetrachoric correlations (`polychoric()`, D1 of §16.8, V24; the JAX version,
+   see §16.18 for the NumPy one)**:
    `flexpyirt.polychoric(data, *, smooth=True, zero_cell_correction=0.5, tol=1e-10, max_iter=100)`
    in `correlation.py` (shell) and `_polychoric.py` (jit kernels) returns a frozen
    `PolychoricResult`. **Data**: any numeric codes; each item is recoded to $0..K_j-1$ over its
@@ -1561,7 +1563,7 @@ data-independent shapes (§15.21).
    rescaled to sum to $p$, rebuilt, rescaled to unit diagonal), `NotPositiveDefiniteWarning`
    (new in `errors`). Not reported: standard errors of $\hat\rho$ (not validated; the
    dimensionality methods do not use them).
-   **Validation (V24)**: `validation/r/m5_polychoric_reference.R` (lavaan 0.7-3, psych 2.6.9):
+   **Validation (V24)**: `packages/flexpyctt/validation/r/m5_polychoric_reference.R` (lavaan 0.7-3, psych 2.6.9):
    simulated tetrachoric (8 items), mixed 2–5 categories with two factors, the same with 10% MCAR
    (pairwise), extreme binary items with one-empty-cell 2 x 2 tables, LSAT7 and Science. lavaan
    agrees to $\le 3.1\times10^{-8}$ (its `nlminb` tolerance; flexpyirt's pair gradients vanish to
@@ -1569,7 +1571,8 @@ data-independent shapes (§15.21).
    corrected pairs (its `optimize()` tolerance); `cor.smooth` to $10^{-12}$.
 10. **Parallel analysis, MAP and EKC (`parallel_analysis()`, `velicer_map()`,
     `empirical_kaiser()`, D2 of §16.8, V25)**: in `dimensionality.py` (shell; NumPy for the
-    $p\times p$ linear algebra, JAX `vmap` for normal reference data). All three answer question
+    $p\times p$ linear algebra, JAX `vmap` for normal reference data; now in flexpyctt with NumPy
+    random numbers and `rng` instead of `key`, §16.18). All three answer question
     (A) and return frozen results with `n_factors`. Matrix inputs (DataFrame, array or
     `PolychoricResult`) must be square, finite, symmetric, unit-diagonal, $p\ge3$.
     **Counting**: leading eigenvalues strictly above the reference, stopping at the first miss
@@ -1593,7 +1596,7 @@ data-independent shapes (§15.21).
     followed). **EKC**: Braeken & van Assen (2017) as in EFAtools (observed eigenvalues in the
     remaining-variance term); with a `PolychoricResult` and no `n_obs`, the smallest pairwise
     $n$ is used (conservative under missing data).
-    **Validation (V25)**: `validation/r/m5_dimensionality_reference.R` feeds the six lavaan
+    **Validation (V25)**: `packages/flexpyctt/validation/r/m5_dimensionality_reference.R` feeds the six lavaan
     polychoric matrices of V24 to EFAtools 1.1.0 (`EKC`), psych 2.6.9 (`vss()$map`),
     EFA.dimensions 0.1.9.3 (`MAP`) and an independent R implementation of both MAP powers, plus
     `eigen()` for PCA / SMC eigenvalues: all agree to $10^{-11}$, including the selected numbers of
@@ -1637,6 +1640,46 @@ data-independent shapes (§15.21).
     $B=4000$): observed eigenvalues to $2\times10^{-4}$ (polycor's `optimise()` tolerance; observed
     $2.4\times10^{-5}$), the simulated second-eigenvalue mean within $|z|\le4.5$ (observed
     $|z|<1$ with 2000 replications on two keys) and its 95th percentile to 0.02.
+    **Extension beyond single-group unidimensional Normal models (M7, issue #81, V26)**:
+    `local_dependence()` takes `group=` (as `item_fit()`) and works on the compiled problem of
+    the fitted model, so one code path serves every latent distribution and grid: the weights
+    are `_latent_log_weights` (`(G, Q)`; the EH weights when the model has them), the traces
+    `_item_log_probs` (`(G, J_f, Q, K)`), and the EAP `_core.eap` with each respondent's own
+    group as the prior. (a) **Multiple groups**: every statistic is computed within a group,
+    from that group's respondents, item parameters and latent weights, as mirt's
+    `residuals()` does for a `multipleGroup` fit (it loops over the groups' single-group
+    objects); `pairs` gets a leading `group` column, `q3` a `(group, item)` row index, `q3_mean`
+    is a Series indexed by group, Q3\* subtracts the group's own mean and `max_q3_star` is the
+    largest over all groups. Groups without respondents in `data` are skipped. The tables are
+    always $K_i\times K_j$, also when a category is not observed in a group (mirt's
+    `table()` drops it and fails there). (b) **`EmpiricalHistogram`, `DavidianCurve`,
+    `NormalMixture`**: $E_{ab}$ uses the fitted grid weights and Q3 the EAP under the fitted
+    distribution. mirt's default for `dentype = "EH"` / `"Davidian-k"` fits is different: it
+    takes a $N(0,1)$ prior in both; the fitted density is used with
+    `residuals(type = "LD", use_dentype_estimate = TRUE)` and, for Q3, with
+    `Theta = fscores(m, use_dentype_estimate = TRUE)` (`type = "Q3", use_dentype_estimate =
+    TRUE` evaluates the residuals at the grid nodes instead of the scores in mirt 1.48 and is
+    not usable). flexpyirt follows the fitted density because the Normal prior contradicts the
+    fitted model; the docstring states the mirt calls that agree. (c) **Confirmatory 2–3
+    dimensional models**: $E_{ab}=n\sum_qP_{ia}(\boldsymbol\theta_q)P_{jb}(\boldsymbol\theta_q)
+    w_q$ on the product grid with the fitted multivariate Normal weights, and
+    $d_{ij}=x_{ij}-E(X_j\mid\hat{\boldsymbol\theta}_i)$ at the vector EAP; `_traces` evaluates
+    the kernels at `(N, D)` nodes. The EAP uses the fitted grid, where mirt's `fscores()` uses
+    its own default grid whatever the fit used (121 / 61 / 31 points per dimension for 1 / 2 /
+    3 factors), so the two agree when the grids are the same. $df$ stays $(K_i-1)(K_j-1)$ in every case (mirt's), which
+    ignores estimated parameters; the statistics are diagnostic (Chen & Thissen, 1997).
+    **Not extended**: bifactor / two-tier models (after the bifactor PR), `jsi()`,
+    `model_parallel_analysis()` and `dimensionality(fit=...)`, which keep
+    `_require_unidimensional_normal`. mirt's JSI needs one factor, has no SE for Davidian
+    curves (`"No standard error method currently supported"`), does not support mixtures, and
+    for `multipleGroup` refits each group alone as a single-group $N(0,1)$ model while taking
+    the slopes from the multiple-group fit, which is not the refit of the fitted model; there
+    is no reference to validate an extension against. **Validation (V26, M7)**:
+    `validation/r/m7_local_dependence_reference.R` (mirt 1.48), nine cases (two groups with one
+    and two factors, EH, Davidian, mixture, two and three factors), with mirt's estimates put
+    into a `FitResult` with every parameter fixed: $X^2$ / $G^2$ to $10^{-7}$ relative
+    (observed $\le8\times10^{-9}$), $V$ / Q3 to $10^{-8}$ (observed $\le3\times10^{-15}$);
+    details and mirt's differing defaults in VALIDATION.md.
 12. **The `dimensionality()` ensemble (§16.8)**: one polychoric matrix (with `fit`, the data are
     first coerced to the fitted items) feeds question (A): `parallel_analysis()` (defaults),
     `velicer_map()` (power 4) and `empirical_kaiser()`; the key is split into one key for each
@@ -1651,7 +1694,8 @@ data-independent shapes (§15.21).
     the name `dimensionality` (as `fit`), so `flexpyirt.dimensionality` is the function; tests
     reach the module with `importlib.import_module`. Checked in `tests/test_m5_ensemble.py` by
     recomputing each row with the individual functions and the same keys.
-13. **DETECT (`detect()`, `exploratory_detect()`, D4 of §16.8, V27)**: `_detect.py` (NumPy).
+13. **DETECT (`detect()`, `exploratory_detect()`, D4 of §16.8, V27)**: `_detect.py` (NumPy; now
+    in flexpyctt, §16.18).
     **Conditional covariances**: Zhang & Stout (1999): for each pair the ML covariance within
     groups of equal total score $S$ and within groups of equal rest score $S-X_i-X_j$, each
     averaged with the group proportions, then the two averaged (the total-score estimate is biased
@@ -1675,7 +1719,7 @@ data-independent shapes (§15.21).
     corrected here). **Ensemble**: `dimensionality()` adds the validation-half DETECT of the selected
     partition as a question-(B) row (supports when $<$ `detect_threshold` $=0.2$), available
     without `fit`; the key is split three ways (parallel analysis, model-based PA, DETECT).
-    **Validation (V27)**: `validation/r/m5_detect_reference.R` (sirt 4.2.133): simulated
+    **Validation (V27)**: `packages/flexpyctt/validation/r/m5_detect_reference.R` (sirt 4.2.133): simulated
     two-dimensional (true and wrong partitions), unidimensional and Science (polytomous) data with
     `conf.detect(use_sum_score = TRUE, bias_corr = TRUE, smooth = FALSE)`, and a three-cluster data
     set with `expl.detect(use_sum_score = TRUE, estsample = )`: conditional covariances,
@@ -1684,7 +1728,8 @@ data-independent shapes (§15.21).
     `smooth = TRUE`, sirt's `conf.detect(use_sum_score = TRUE)` standardizes the total score and then
     subtracts raw item scores for the rest score, so its rest-score groups are wrong (DETECT 6.73
     instead of 1.60 for `sim_2d`); recorded on the accuracy page, not followed.
-14. **EFA and the Hull method (`efa()`, `hull()`, D5 of §16.8, V28)**: `_efa.py` (NumPy / SciPy).
+14. **EFA and the Hull method (`efa()`, `hull()`, D5 of §16.8, V28)**: `_efa.py` (NumPy / SciPy;
+    now in flexpyctt, §16.18).
     **Estimation**: unrotated solutions from the uniquenesses $\Psi$, minimized by SciPy L-BFGS-B
     (`ftol=1e-15`, `gtol=1e-11`) from $\psi_i=1-\mathrm{SMC}_i$ within $[0.005,\max(1,\mathrm{SMC})]$
     (psych / EFAtools' bounds). ULS: $F=\tfrac12\lVert R-\Psi-\Lambda\Lambda^\top\rVert_F^2$, with
@@ -1711,7 +1756,7 @@ data-independent shapes (§15.21).
     `converged` per solution, and a `HeywoodWarning` is emitted when the selected one is
     inadmissible (as EFAtools). **Ensemble**: `dimensionality()` adds Hull (CAF, ULS, default $J$ from a
     fourth split of the key) to question (A) when there are at least 6 items.
-    **Validation (V28)**: `validation/r/m5_efa_hull_reference.R` (EFAtools 1.1.0, psych 2.6.9) on the
+    **Validation (V28)**: `packages/flexpyctt/validation/r/m5_efa_hull_reference.R` (EFAtools 1.1.0, psych 2.6.9) on the
     V24 polychoric matrices with $\ge6$ variables and two simulated Pearson matrices (3 factors,
     $N=500$; 2 weak factors, $N=300$): every $k\le J$ with ULS and ML — implied
     $\Lambda\Lambda^\top$ and communalities to $10^{-4}$ (observed $\le7\times10^{-5}$, the largest at
@@ -1720,7 +1765,8 @@ data-independent shapes (§15.21).
     fit index with EFAtools' recorded $J$: the selected $k$ and the hull membership identical, the
     fit values to $10^{-5}$ (observed $\le1.4\times10^{-6}$), $st$ to 1% relative (a ratio of small
     differences; observed $\le3.5\times10^{-3}$ absolute). Comparison data is §16.15.
-15. **Comparison data (`comparison_data()`, D5b of §16.8, V29)**: `_comparison_data.py` (NumPy;
+15. **Comparison data (`comparison_data()`, D5b of §16.8, V29; now in flexpyctt with `rng`
+    instead of `key`, §16.18)**: `_comparison_data.py` (NumPy;
     random draws from a JAX key are passed in, so the generator is deterministic given them).
     For $k=1..K$ ($K$ = largest $k$ with positive $df$, or `max_factors`): resample each variable's
     observed values `n_population` times and sort them; draw $F$ $(N,k)$ and $E$ $(N,p)$ standard
@@ -1741,14 +1787,14 @@ data-independent shapes (§15.21).
     and EFAtools); complete data. PAF loadings are signed to non-negative column sums: EFAtools
     takes LAPACK's signs, which only matter for $k\ge2$ and do not change the population's
     distribution. **Ensemble**: `dimensionality()` adds CD to question (A) with complete data
-    (fifth split of the key). **Validation (V29)**: `validation/r/m5_comparison_data_reference.R`
+    (fifth split of the key). **Validation (V29)**: `packages/flexpyctt/validation/r/m5_comparison_data_reference.R`
     (EFAtools 1.1.0): PAF loadings for $k=1..3$ to $10^{-12}$ in $\Lambda\Lambda^\top$; the one-factor
     population from EFAtools' own random draws (reproduced with the same seed and exported)
     identical; the rank-sum $p$-values on EFAtools' RMSE columns to $10^{-10}$ relative; `CD()` on a
     3-factor, a 2-factor ordinal and a 1-factor binary data set: the same suggestion for two keys
     each and mean RMSEs within 15% (different random populations).
-16. **DIMTEST (`dimtest()`, D6 of §16.8, V30)**: `_dimtest.py` (NumPy; random draws from a JAX key
-    are arguments). Binary complete data, at least 4 items. **Statistic** (Nandakumar & Stout,
+16. **DIMTEST (`dimtest()`, D6 of §16.8, V30)**: `_dimtest.py` (NumPy; random draws are
+    arguments; now in flexpyctt with `rng` instead of `key`, §16.18). Binary complete data, at least 4 items. **Statistic** (Nandakumar & Stout,
     1993): respondents grouped by the PT score; groups smaller than `min_group` (20) or with
     $S_k\le0$ dropped; $T_L=K^{-1/2}\sum_k(\hat\sigma_k^2-\hat\sigma_{U,k}^2)/S_k$ with
     $\hat\sigma_k^2$ the (divide-by-$J_k$) variance of the AT score, $\hat\sigma_{U,k}^2=\sum_i\hat
@@ -1767,26 +1813,29 @@ data-independent shapes (§15.21).
     their exact ATFIND, and is documented as such. **Ensemble**: `dimensionality()` adds DIMTEST
     ($p\ge\alpha$) to question (B) for complete binary data (sixth split of the key), otherwise an
     unavailable row. **Validation (V30)**: no implementation outside the stand-alone DIMPACK, so the
-    test is accepted on `validation/simulation/dimtest_study.py` (results in
+    test is accepted on `packages/flexpyctt/validation/simulation/dimtest_study.py` (results in
     `dimtest_study.json`): 2PL data, slopes $U(0.8,1.8)$, intercepts $N(0,0.8)$, items in two halves
     on dimensions correlated $\rho$, 200 replications per condition, defaults throughout:
 
     | Data | $N$ | $J$ | $\rho$ | mean $T$ | SD $T$ | reject at .05 | reject at .10 |
     |---|---|---|---|---|---|---|---|
-    | unidimensional | 1000 | 20 | 1 | -0.07 | 0.79 | 0.020 | 0.050 |
-    | unidimensional | 2000 | 20 | 1 | -0.10 | 0.73 | 0.005 | 0.015 |
-    | unidimensional | 2000 | 30 | 1 | -0.15 | 0.74 | 0.000 | 0.025 |
-    | two-dimensional | 1000 | 20 | 0.7 | 4.83 | 1.00 | 0.990 | 0.995 |
-    | two-dimensional | 2000 | 20 | 0.7 | 6.91 | 0.92 | 1.000 | 1.000 |
-    | two-dimensional | 2000 | 30 | 0.8 | 6.44 | 0.87 | 1.000 | 1.000 |
+    | unidimensional | 1000 | 20 | 1 | -0.07 | 0.72 | 0.005 | 0.020 |
+    | unidimensional | 2000 | 20 | 1 | -0.12 | 0.71 | 0.010 | 0.030 |
+    | unidimensional | 2000 | 30 | 1 | -0.03 | 0.73 | 0.010 | 0.025 |
+    | two-dimensional | 1000 | 20 | 0.7 | 4.85 | 0.97 | 0.990 | 0.995 |
+    | two-dimensional | 2000 | 20 | 0.7 | 6.94 | 0.88 | 1.000 | 1.000 |
+    | two-dimensional | 2000 | 30 | 0.8 | 6.50 | 0.86 | 1.000 | 1.000 |
+
+    (Rerun on 2026-11-25 with flexpyctt's NumPy generator, §16.18. With the JAX keys used before
+    the move the rejection rates at .05 were 0.020, 0.005, 0.000 and 0.990, 1.000, 1.000.)
 
     The test is conservative: $\bar T_G$ removes the bias of $T_L$ (mean $T$ near 0) but $T_L$'s
-    standard deviation under the null is about 0.75 rather than 1, so the type I error is below the
+    standard deviation under the null is about 0.72 rather than 1, so the type I error is below the
     nominal level; power against two dimensions correlated 0.7–0.8 is 0.99–1. A small $p$ is
     therefore strong evidence of multidimensionality, a large $p$ weak evidence for unidimensionality
     (stated in the docstring and the guide). Standardizing by the bootstrap SD of $T_G$ instead would
     recalibrate it but departs from the published statistic; not done. The pieces are unit-tested
-    against direct computations, and `tests/test_m5_dimtest.py` reruns a small version of the
+    against direct computations, and `packages/flexpyctt/tests/test_dimtest.py` reruns a small version of the
     study (20 null and 10 alternative replications).
 17. **Jackknife slope index (`FitResult.jsi()`, V31)**: `_jsi.py`. **Definition** (Edwards, Houts
     & Cai, 2018, as mirt's `residuals(type = "JSI")`): the jackknife is over items, not
@@ -1837,8 +1886,193 @@ data-independent shapes (§15.21).
     $\le1.2\times10^{-7}$). The tests also check the refit against `fit()` on the data without the
     item, the approximations against the refit on a 15-item data set (`"newton"` 1 step 0.03, 2
     steps 0.02, `"one_step"` 0.05) and the vmapped gradients against single ones.
+18. **Package split: `flexpyctt` (decided 2026-11-25, issue #87)**: tools that need no fitted IRT
+    model are released as separate, JAX-free distributions from this repository. flexpyirt keeps
+    BA-EM estimation and everything that uses its result.
+
+    | Distribution | Scope | Depends on |
+    |---|---|---|
+    | `flexpyirt` | estimation; tools that take a `FitResult` (`local_dependence()`, `jsi()`, `model_parallel_analysis()`, `link()`, IRT equating); the `dimensionality()` report | JAX, `flexpyctt` |
+    | `flexpyctt` | model-free item and test analysis: `polychoric()`, `parallel_analysis()`, `velicer_map()`, `empirical_kaiser()`, `efa()`, `hull()`, `comparison_data()`, `detect()`, `exploratory_detect()`, `dimtest()`; later classical item analysis and Mantel–Haenszel DIF | NumPy, SciPy, pandas |
+    | `flexpyequate` (later) | equating of score distributions only | NumPy, SciPy, pandas |
+
+    **Layout**: a uv workspace. flexpyirt stays at the repository root (`pyproject.toml`,
+    `src/flexpyirt/`, `tests/`); the issue's `packages/flexpyirt/` is postponed, because moving
+    the directory would conflict with every open branch. Members are `packages/*`:
+    `packages/flexpyctt/` has its own `pyproject.toml`, `README.md` (the PyPI page, absolute
+    links), `LICENSE`, `src/flexpyctt/`, `tests/` (with `tests/reference/`) and `validation/`.
+    flexpyirt depends on flexpyctt (`[tool.uv.sources] flexpyctt = { workspace = true }`), so
+    `pip install flexpyirt` still provides every tool. **One version**: both read the same
+    `vX.Y.Z` tag through hatch-vcs (`raw-options.root = "../.."` in the member). The release
+    workflow builds each with `uv build --package` and publishes flexpyctt before flexpyirt.
+    flexpyirt imports a few private helpers of flexpyctt (below), so the two are meant to be
+    installed at the same version; the dependency carries no version bound yet (open point: pin
+    `flexpyctt==<same version>` with a build hook).
+
+    **flexpyctt never imports JAX**, and has no 64-bit requirement (NumPy is float64). A CI job
+    installs it alone, asserts that `jax` is absent and runs its tests.
+
+    **Two polychoric implementations.** `flexpyctt.polychoric()` is a new NumPy / SciPy
+    implementation of the estimator of §16.9 (same definition, options, defaults, warnings and
+    `PolychoricResult`):
+    - $\Phi_2$ by Owen's (1956) $T$ function (`scipy.special.owens_t`):
+      $\Phi_2(h,k;\rho)=\tfrac12\Phi(h)+\tfrac12\Phi(k)-T(h,a_h)-T(k,a_k)-\beta$ with
+      $a_h=(k-\rho h)/(h\sqrt{1-\rho^2})$, $a_k=(h-\rho k)/(k\sqrt{1-\rho^2})$, $\beta=0$ if
+      $hk>0$ or ($hk=0$ and $h+k\ge0$), else $\tfrac12$; $\Phi_2(0,0;\rho)=\tfrac14+
+      \arcsin\rho/(2\pi)$; infinite limits are exact. This is independent of the JAX kernel's
+      Genz (2004) quadrature, so the agreement of the two is a real check.
+    - Newton's method in $z=\operatorname{atanh}\rho$ for all pairs at once (array operations,
+      no Python loop over pairs), with the analytic derivatives
+      $\partial_\rho\pi_{ab}=\Delta\phi_2$ (Plackett, 1954) and
+      $\partial_\rho\phi_2=\phi_2\,[\rho/s+(hk(1+\rho^2)-\rho(h^2+k^2))/s^2]$, $s=1-\rho^2$; the
+      same step rule (Newton when concave, else a half step along the gradient; steps clipped to
+      $\pm2$; step halving), bound $|z|\le8$, convergence criterion and boundary check as §16.9.
+
+    `flexpyirt.polychoric()` stays the JAX version (`_polychoric.py`, `correlation.py`), public
+    and unchanged in behaviour; it returns the same `PolychoricResult` class (defined in
+    flexpyctt), so either result can be passed to `velicer_map()`, `efa()` etc. Every moved tool
+    uses the NumPy version, as do `model_parallel_analysis()` and `dimensionality()`.
+    **Validation**: the NumPy version passes V24 with the same tolerances (lavaan $10^{-6}$,
+    thresholds $10^{-12}$, psych $10^{-3}$), its $\Phi_2$ agrees with Plackett's integral to
+    $10^{-14}$, and a test in flexpyirt requires the two versions to agree to $10^{-9}$ on every
+    V24 case, with equal flags.
+
+    **Random numbers.** flexpyctt functions take `rng` (a `numpy.random.Generator` or an integer
+    seed) where the JAX versions took `key`; `rng` is required where `key` was. The streams
+    differ from the JAX ones, so results with reference data change within Monte Carlo error;
+    the deterministic reference values (V24, V25, V27–V29) are unchanged. The functions that stay
+    in flexpyirt keep `key`: `model_parallel_analysis()` simulates with it, and `dimensionality()`
+    splits it into six keys as before and turns each into a generator for the flexpyctt call
+    (`dimensionality._rng_from_key`: `numpy.random.default_rng` seeded with the key's data).
+
+    **Errors and warnings.** flexpyctt defines `FlexpycttError`, `SpecificationError`,
+    `FlexpycttWarning`, `ConvergenceWarning`, `HeywoodWarning` and `NotPositiveDefiniteWarning`
+    (`flexpyctt.errors`). `flexpyirt.errors` re-exports the same class objects, and
+    `FlexpyirtError` / `FlexpyirtWarning` are aliases of the flexpyctt base classes, so
+    `except flexpyirt.errors.SpecificationError` (or `FlexpyirtError`) also catches what a
+    flexpyctt function raises. `IdentificationError` and `PrecisionError` stay in flexpyirt.
+
+    **Re-exports (decided: yes).** `flexpyirt` re-exports every moved function and result class
+    (`flexpyirt.parallel_analysis is flexpyctt.parallel_analysis`), so code written against
+    `develop` keeps its imports; the only API change is `key=` → `rng=`. The exception is
+    `polychoric`: `flexpyirt.polychoric` is the JAX version. Documentation presents the moved
+    tools under flexpyctt.
+
+    **Where things are.** `flexpyctt.correlation` (`polychoric`, `PolychoricResult`,
+    `smooth_correlation`), `flexpyctt._polychoric` (kernels), `flexpyctt.dimensionality` (the
+    nine functions and their result classes), `flexpyctt._efa`, `_detect`, `_dimtest`,
+    `_comparison_data` (moved unchanged). `flexpyirt.dimensionality` keeps `dimensionality()`,
+    `model_parallel_analysis()`, `LocalDependenceResult`, `JSIResult`,
+    `ModelParallelAnalysisResult`, `DimensionalityResult` and imports flexpyctt's private
+    helpers `_coerce_ordinal`, `_observed_correlation`, `_eigenvalues` and
+    `_descending_eigenvalues`. **Tests and references**: the tests of the moved tools and
+    `v24`, `v25`, `v27`, `v28`, `v29` are in `packages/flexpyctt/tests/` (no JAX), their R
+    scripts and the DIMTEST study in `packages/flexpyctt/validation/`. flexpyirt's tests keep
+    the JAX polychoric tests (reading `v24` from the flexpyctt directory), the two-version
+    agreement test, V26 and the ensemble tests.
 
 ## 17. Implementation decisions (M7)
+
+1. **Bifactor models with Gibbons–Hedeker dimension reduction (`Model.with_bifactor`, V32)**:
+   **Specification.** `Model.with_bifactor(*, specific, general="general")` declares one general
+   factor on which every item loads and $S\ge1$ specific factors (`specific: Mapping[str,
+   ItemSelector]`); each item loads on at most one specific factor, items listed under none load
+   on the general factor only, and every specific factor needs at least two items (a one-item
+   specific slope is not identified). The model reuses the confirmatory representation of §15.29:
+   `factors = ((general, all items), (s_1, items), …)`, $D=1+S$ slopes `a1..aD` with `a1` general
+   and unloaded slopes fixed at 0, matching the column order of mirt's `bfactor()`; a new field
+   `Model.bifactor = True` selects the reduced E-step. Factors are orthogonal: the latent rows are
+   `mean_1..D` (fixed 0) and `var_1..D` (fixed 1) with no `cor_ij` rows
+   (`Model.latent_parameter_names()`). Item kernels accept up to `MAX_KERNEL_FACTORS = 32`
+   dimensions (product grids stay limited to 3 by `with_factors()` and `Quadrature.grid()`).
+   Not supported yet, each with `SpecificationError`: multiple groups, `with_latent()`, combining
+   with `with_factors()`, Rasch / PCM items (the general and specific variances would have to be
+   free) and free latent parameters in an edited table. Two-tier models (correlated primary
+   factors) are item 2 below.
+   **Likelihood** (Gibbons & Hedeker, 1992; Cai, 2010). Item $j$ depends on
+   $(\theta_0,\theta_{s(j)})$ only, and the factors are independent, so with one-dimensional
+   grids $\{\theta_g\}_{g=1}^{n}$ (general) and $\{\theta_t\}_{t=1}^{n}$ (each specific),
+   $$L_p=\sum_g w^{(0)}_g\,\prod_{s=1}^{S}\Big[\sum_t w^{(s)}_t\prod_{j\in s}P_j(y_{pj}\mid\theta_g,\theta_t)\Big]
+   \prod_{j\in s_\varnothing}P_j(y_{pj}\mid\theta_g),$$
+   where $s_\varnothing$ is the set of general-only items and
+   $w^{(m)}=\mathrm{softmax}(b+\log\phi(\cdot;\mu_m,\sigma^2_m))$ is the factor's normalized
+   one-dimensional weight (§4.4, §15.44). The cost is $O(S\,n^2)$ per pattern instead of
+   $O(n^{1+S})$. **Implementation.** General-only items are put in an extra block
+   $s_\varnothing$ whose "specific" weights are uniform, so every block is handled alike (their
+   log-probabilities do not depend on $\theta_t$, so the inner sum is exact). Block $s$ has an
+   embedded node set of shape $(n^2, D)$ — column 0 is $\theta_g$, column $s$ is $\theta_t$, the
+   rest 0 — so the existing kernels evaluate $P_j$ unchanged (the slopes on other specific factors
+   are fixed at 0). With $\ell^{(s)}_{pgt}=\sum_{j\in s}\log P_j$,
+   $L^{(s)}_{pg}=\operatorname{logsumexp}_t(\ell^{(s)}_{pgt}+\log w^{(s)}_t)$ and
+   $\lambda_{pg}=\log w^{(0)}_g+\sum_s L^{(s)}_{pg}$, the marginal log-likelihood is
+   $\sum_pc_p\operatorname{logsumexp}_g\lambda_{pg}$ and the posterior of block $s$ is
+   $h^{(s)}_{pgt}=\exp(\lambda_{pg}-\log L_p)\exp(\ell^{(s)}_{pgt}+\log w^{(s)}_t-L^{(s)}_{pg})$.
+   The expected counts of item $j$ are on its block's $(n^2)$ grid,
+   $\bar r_{jkgt}=\sum_pc_ph^{(s(j))}_{pgt}\mathbf 1[y_{pj}=k]$, so the per-item Newton M-step
+   (§4.3), across-item equalities (§16.1) and priors are unchanged apart from taking the item's
+   block nodes; $\bar n$ stores the general marginal and each block's specific marginal
+   $(G, 1+B, n)$ for a later latent M-step. `CompiledProblem.reduction` (a `BifactorBlock`:
+   block nodes, the 1-D nodes and base weights, and each family's block index) switches the
+   Core functions; `CompiledProblem.nodes` holds the general grid embedded in $D$ columns.
+   **Standard errors.** `"hessian"` differentiates the reduced marginal log-likelihood
+   (chunked forward-over-reverse, §15.20). `"oakes"` uses Oakes' identity in the form
+   $I(\hat\eta)=-\,\mathrm d F(\eta)/\mathrm d\eta$ with
+   $F(\eta)=\nabla_\eta Q_{\mathrm{post}}(\eta\mid\eta')\big|_{\eta'=\eta}$ (the complete-data
+   gradient with the E-step weights computed at the same point; differentiating it in both
+   arguments gives exactly the two Oakes terms), by chunked forward-mode autodiff through the
+   reduced E-step. The structured cross term of §15.20 assumes one joint posterior over all
+   nodes and is not used. **Scoring.** EAP is exact on the factorized posterior:
+   $\hat\theta_{p0}=\sum_g\theta_g h_{pg}$ and
+   $\hat\theta_{ps}=\sum_{g,t}\theta_t h^{(s)}_{pgt}$ (posterior SDs likewise). MAP, ML, WLE and
+   PV, item fit, $M_2$, local dependence, JSI, DIF and linking raise `SpecificationError` for
+   bifactor models (they are multidimensional). **Quadrature.** One `Quadrature` gives the
+   one-dimensional grid for every factor; the default is mirt's
+   `select_quadpts(2) = 31` points on $[-6, 6]$ (mirt's `bfactor()` uses
+   `select_quadpts(nfact - nspec + 1)`). **JSON** (schema version 5): the model stores
+   `"bifactor": true|false`; versions 1–4 must not contain it and load as `false`. On load a
+   bifactor structure is rebuilt through `with_bifactor()`.
+
+2. **Two-tier models (`Model.with_two_tier`, V33)** (Cai, 2010):
+   **Specification.** `Model.with_two_tier(*, primary, specific, correlated=True)` declares
+   $P\in\{1,2\}$ primary factors and $S\ge1$ specific factors (both `Mapping[str, ItemSelector]`).
+   Every item loads on at least one primary factor (cross-loadings among primary factors are
+   allowed) and on at most one specific factor; every specific factor needs at least two items.
+   Factors are ordered primary first: slopes `a1..aP` are primary and `a(P+1)..aD` specific
+   ($D=P+S$), the column order of mirt's `bfactor(data, model, model2 = )`. Primary factors may
+   correlate with each other (`correlated=True` frees `cor_ij`, $i<j\le P$); specific factors are
+   orthogonal to everything. The latent rows are `mean_1..D` (fixed 0), `var_1..D` (fixed 1) and
+   `cor_ij` for primary pairs only. `Model.n_primary_factors = P` marks the structure (0 for every
+   other model); a bifactor model is the case $P=1$ with the primary factor on every item, and
+   both share the reduced Core path (`Model.is_reduced`, `Model.n_primary`). $P=3$ would need a
+   four-dimensional grid per block and is rejected, in line with the three-dimension limit of
+   product grids (§4.9). Not supported, each with `SpecificationError`: as for bifactor models
+   (multiple groups, `with_latent()`, Rasch / PCM items, free means or variances), and combining
+   with `with_factors()` / `with_bifactor()`.
+   **Likelihood.** With the primary product grid $\{\boldsymbol\theta_g\}_{g=1}^{n^P}$ and its
+   normalized multivariate-normal weights $w^{(0)}_g(\boldsymbol\rho)$ (§15.30),
+   $$L_p=\sum_g w^{(0)}_g\,\prod_{s=1}^{S}\Big[\sum_t w^{(s)}_t\prod_{j\in s}P_j(y_{pj}\mid\boldsymbol\theta_g,\theta_t)\Big]
+   \prod_{j\in s_\varnothing}P_j(y_{pj}\mid\boldsymbol\theta_g),$$
+   which is §17.1 with the general node replaced by the primary node: cost $O(S\,n^{P+1})$ per
+   pattern instead of $O(n^{P+S})$. **Implementation.** `BifactorBlock` is generalized: it holds
+   the primary grid `(Q_p, P)` ($Q_p=n^P$) with its base weights, block nodes of shape
+   $(B, Q_p n, D)$ (columns $0..P-1$ the primary node, column $P+b$ the specific node, primary
+   index major) and the static `n_primary`. All formulas of §17.1 hold with $g$ running over the
+   $Q_p$ primary nodes. $\bar n$ is stored flat, `(G, Q_p + B n)`: the primary marginal followed
+   by each block's specific marginal. **Latent M-step.** The latent part of $Q$ is
+   $Q^{\text{lat}}=\sum_g\bar n^{(0)}_g\log w^{(0)}_g(\boldsymbol\rho)+\sum_{s,t}\bar n^{(s)}_t\log w^{(s)}_t$;
+   only the first term depends on the free correlations, and it is maximized by the masked Newton
+   of §4.4 over the primary multivariate-normal parameters (exact for the discretized likelihood,
+   so EM stays monotone; a non-positive-definite candidate gives NaN and is rejected by the line
+   search). Bifactor models have no free latent parameter and skip it as before.
+   **Identification.** The rules of §15.31 apply to the primary factors (a free correlation needs
+   fixed slopes; the zero slopes of the factor structure count). **Standard errors, scoring.**
+   As §17.1: Hessian of the reduced log-likelihood, Oakes as the total derivative through the
+   E-step (now including the correlation), EAP from the factorized posterior with the primary
+   means taken on the primary grid. **Quadrature.** `Quadrature.default(P+1)` points per
+   dimension: 31 for $P=1$, 15 for $P=2$ (mirt's `select_quadpts(nfact - nspec + 1)`).
+   **JSON** (schema version 6): the model stores `"n_primary_factors"` (0 unless two-tier);
+   versions 1–5 must not contain it. On load a two-tier structure is rebuilt through
+   `with_two_tier()`.
 
 4. **Sampling (survey) weights (`fit(..., weights=...)`, V34)**: with a weight $w_i\ge0$ for every
    respondent, `fit()` maximizes the weighted marginal log-likelihood (pseudo-likelihood; Skinner,
@@ -1886,8 +2120,8 @@ data-independent shapes (§15.21).
      assume unweighted counts), so `item_fit()`, `m2()`, `local_dependence()`, `jsi()`, `dif()`,
      `model_parallel_analysis()` and `dimensionality(fit=...)` raise `SpecificationError` for a
      weighted fit (`FitResult._require_unweighted`).
-   - **JSON**: `schema_version` 5 adds the optional top-level key `sum_weights` (present only
-     for a weighted fit; a positive finite number); it is rejected in files of version $\le4$,
+   - **JSON**: `schema_version` 7 adds the optional top-level key `sum_weights` (present only
+     for a weighted fit; a positive finite number); it is rejected in files of version $\le6$,
      which still load. The weights themselves are not stored (like the data).
    - **Validation (V34)**: `validation/r/m7_weights_reference.R` (mirt 1.48, `survey.weights`,
      TOL $=10^{-10}$, Oakes): a 2PL with non-integer weights that do not sum to $N$ and five zero
@@ -1910,6 +2144,7 @@ data-independent shapes (§15.21).
 - Bollen, K. A. (1989). *Structural Equations with Latent Variables*. Wiley.
 - Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
+- Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
@@ -1921,6 +2156,7 @@ data-independent shapes (§15.21).
 - Froelich, A. G., & Habing, B. (2008). Conditional covariance-based subtest selection for DIMTEST. *Applied Psychological Measurement*, 32(2), 138–155.
 - Garrido, L. E., Abad, F. J., & Ponsoda, V. (2013). A new look at Horn's parallel analysis with ordinal variables. *Psychological Methods*, 18(4), 454–474.
 - Genz, A. (2004). Numerical computation of rectangular bivariate and trivariate normal and t probabilities. *Statistics and Computing*, 14(3), 251–260.
+- Gibbons, R. D., & Hedeker, D. R. (1992). Full-information item bi-factor analysis. *Psychometrika*, 57(3), 423–436.
 - Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
 - Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
@@ -1956,6 +2192,7 @@ data-independent shapes (§15.21).
 - Olsson, U. (1979). Maximum likelihood estimation of the polychoric correlation coefficient. *Psychometrika*, 44(4), 443–460.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
+- Owen, D. B. (1956). Tables for computing bivariate normal probabilities. *The Annals of Mathematical Statistics*, 27(4), 1075–1090.
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.

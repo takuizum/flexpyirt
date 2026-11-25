@@ -149,6 +149,12 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 
 ## 7. Main classes and functions
 
+The tools that need no fitted model (`polychoric` to `detect` in the table below, except
+`model_parallel_analysis` and `dimensionality`) are defined in the flexpyctt distribution and
+re-exported by flexpyirt; they take `rng` (a seed or `numpy.random.Generator`) instead of a JAX
+`key`. `flexpyirt.polychoric` is the JAX implementation; `flexpyctt.polychoric` the NumPy / SciPy
+one (DESIGN.md §16.18).
+
 | Name | Kind | Role |
 |---|---|---|
 | `Model` | frozen dataclass | The whole specification. Built with `uniform`, `from_items`; `.fix`, `.fix_from`, `.prior`, `.equal_across_groups`, `.equal_across_items`, `.with_groups`, `.with_latent`, `.parameter_table` |

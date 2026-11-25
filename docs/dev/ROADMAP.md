@@ -85,7 +85,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
   - [x] D5b comparison data (`comparison_data()`; validated in V29 against EFAtools `CD()` and
     its generator).
   - [x] D6 DIMTEST with bootstrap bias correction (`dimtest()`; accepted in V30 on a simulation study:
-    type I error 0.0–2.0% at .05, conservative; power 0.99–1.00).
+    type I error 0.5–1.0% at .05, conservative; power 0.99–1.00).
 
 ## M6 Lifting the single-group / unidimensional restrictions
 Each item is accepted when its mirt (or independent) comparison passes; the issue lists the reference.
@@ -98,9 +98,18 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   VALIDATION.md tolerances.
 
 ## M7 Bifactor, diagnostics, information and survey designs (in this order)
-1. [ ] Bifactor and two-tier models with dimension reduction (#80).
+1. [x] Bifactor and two-tier models with dimension reduction (#80).
+   - [x] Bifactor models (`Model.with_bifactor()`, single group, any number of specific factors,
+     Oakes/Hessian SEs, EAP scoring; validated in V32 against mirt `bfactor()`).
+   - [x] Two-tier models (`Model.with_two_tier()`, one or two correlated primary factors plus
+     specific factors, single group, Oakes/Hessian SEs, EAP scoring; validated in V33 against mirt
+     `bfactor(model2 = )`).
 2. [ ] Local dependence (Q3, LD-X², JSI) for multiple groups, non-Normal latent and
    multidimensional / bifactor models (#81).
+   - [x] `FitResult.local_dependence()` (Q3, Q3\*, LD-X², G²) for multiple groups, `EmpiricalHistogram` /
+     `DavidianCurve` / `NormalMixture` latent distributions and confirmatory 2–3 factor models
+     (validated in V26 against mirt `residuals()`; the mixture case given the density only).
+     Still open: bifactor / two-tier models and JSI beyond single-group unidimensional Normal models.
 3. [ ] Item / test information, reliability and summed-score EAP (#82), on a public Lord–Wingersky /
    Poisson-binomial kernel (#83).
 4. [ ] Sampling (survey) weights (#84).

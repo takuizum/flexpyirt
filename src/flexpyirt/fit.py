@@ -121,7 +121,8 @@ def fit(
     if se not in (None, "oakes", "hessian"):
         raise SpecificationError(f"Unknown se={se!r}; use 'oakes', 'hessian' or None.")
     method = BAEM() if method is None else method
-    quadrature = Quadrature.default(spec.n_factors) if quadrature is None else quadrature
+    if quadrature is None:
+        quadrature = Quadrature.default(spec.quadrature_dimension)
 
     prep = prepare(spec, data, group=group, item_names=item_names, table=table, weights=weights)
     final_table = prep.table

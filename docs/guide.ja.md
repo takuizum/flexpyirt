@@ -792,6 +792,90 @@ res_mg = fit(
 print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
 ```
 
+### 双因子モデル
+
+`.with_bifactor(specific={...}, general="general")` で、全項目が負荷する一般因子と、各項目が高々 1 つに負荷する
+特殊因子を宣言する（どの特殊因子にも挙げない項目は一般因子のみに負荷する。各特殊因子は 2 項目以上が必要）。
+項目パラメタは `a1`（一般因子）、`a2`…（特殊因子、宣言順）、`d` で、mirt の `bfactor()` の列と一致する。
+因子は直交する標準正規分布。
+
+各項目は一般因子と自分の特殊因子にしか依存しないので、尤度は Gibbons and Hedeker (1992) の次元縮約で積分する。
+$(1+S)$ 次元の直積格子ではなく特殊因子ごとに 2 次元格子 1 つで済むため、特殊因子がいくつあっても計算は軽い。
+1 つの `Quadrature` が全因子の格子を与え、既定は $[-6, 6]$ 上の 31 点（mirt の `bfactor()` の既定）。
+mirt の `bfactor()` との照合は V32。
+
+```python
+a_bif = np.zeros((9, 4))
+a_bif[:, 0] = [1.4, 1.2, 1.5, 1.1, 1.3, 1.6, 1.0, 1.2, 1.4]  # general
+a_bif[0:3, 1] = [0.9, 1.0, 0.8]  # specific s1
+a_bif[3:6, 2] = [1.1, 0.7, 0.9]  # specific s2
+a_bif[6:9, 3] = [0.8, 1.0, 0.9]  # specific s3
+theta_bif = rng.standard_normal((1500, 4))
+p_bif = 1.0 / (1.0 + np.exp(-(theta_bif @ a_bif.T + np.linspace(-1.0, 1.0, 9))))
+bif_items = [f"b{j}" for j in range(1, 10)]
+bif_df = pd.DataFrame((rng.random(p_bif.shape) < p_bif).astype(float), columns=bif_items)
+
+bif_spec = Model.uniform(TwoPL(), items=bif_items).with_bifactor(
+    specific={"s1": bif_items[0:3], "s2": bif_items[3:6], "s3": bif_items[6:9]},
+    general="G",
+)
+res_bif = fit(
+    bif_spec,
+    bif_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(21, bounds=(-6, 6)),  # 21^2 nodes per specific factor
+)
+print(res_bif.items[["item", "a1", "a2", "a3", "a4", "d", "a1_se"]].round(3))
+print(res_bif.score(bif_df.iloc[:3]).round(3))  # theta_G, theta_s1, ..., se_G, se_s1, ...
+```
+
+- **対応**: 傾きが自由な全項目モデル（2PL・3PL・4PL・GRM・GPCM・名義）、Oakes / Hessian SE、`"EAP"`
+  スコアリング（因子ごとの列）、等値制約、事前分布、JSON。
+- **未対応**（`SpecificationError`）: 多母集団、Rasch / PCM 項目（因子分散を自由にする必要がある）、潜在平均・分散の
+  自由推定、MAP / ML / WLE / PV スコアリング、項目適合度、$M_2$、局所依存。
+
+### two-tier モデル
+
+`.with_two_tier(primary={...}, specific={...}, correlated=True)` は双因子モデルを一般化したもの（Cai, 2010）。
+互いに相関してよい 1〜2 個の**主因子**（primary）と、他のすべてと直交する特殊因子からなる。各項目は主因子の
+少なくとも 1 つに負荷し（主因子どうしの交差負荷は可）、特殊因子には高々 1 つに負荷する。項目パラメタは `a1`…
+（主因子、宣言順）、続いて特殊因子の傾き、`d` で、mirt の `bfactor(data, model, model2 = ...)` の列と一致する。
+`correlated=True` なら 2 つの主因子の相関（`cor_12`）を推定し、`correlated=False` なら 0 に固定する。
+
+尤度は、主因子の直積格子に特殊因子 1 つ分の次元を足した格子で積分する。主因子が 2 つなら、特殊因子がいくつあっても
+特殊因子ごとに 3 次元格子 1 つで済む。既定は、主因子 2 つで $[-6, 6]$ 上の次元あたり 15 点（1 つなら 31 点）で、
+mirt と同じ。結果は mirt の `bfactor()` と照合している。
+
+```python
+a_tt = np.zeros((10, 4))
+a_tt[0:5, 0] = [1.4, 1.2, 1.5, 1.1, 1.3]  # primary math
+a_tt[5:10, 1] = [1.6, 1.0, 1.2, 1.4, 1.3]  # primary reading
+a_tt[0:3, 2] = [0.9, 1.0, 0.8]  # specific t1 (a testlet within math)
+a_tt[5:8, 3] = [1.1, 0.7, 0.9]  # specific t2 (a testlet within reading)
+cov_tt = np.eye(4)
+cov_tt[0, 1] = cov_tt[1, 0] = 0.5
+theta_tt = rng.multivariate_normal(np.zeros(4), cov_tt, size=1500)
+p_tt = 1.0 / (1.0 + np.exp(-(theta_tt @ a_tt.T + np.linspace(-1.0, 1.0, 10))))
+tt_items = [f"t{j}" for j in range(1, 11)]
+tt_df = pd.DataFrame((rng.random(p_tt.shape) < p_tt).astype(float), columns=tt_items)
+
+tt_spec = Model.uniform(TwoPL(), items=tt_items).with_two_tier(
+    primary={"math": tt_items[0:5], "reading": tt_items[5:10]},
+    specific={"t1": tt_items[0:3], "t2": tt_items[5:8]},
+)
+res_tt = fit(
+    tt_spec,
+    tt_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(11, bounds=(-6, 6)),  # 11^3 nodes per specific factor
+)
+print(res_tt.items[["item", "a1", "a2", "a3", "a4", "d"]].round(3))
+print(res_tt.latent[["cor_12", "cor_12_se"]].round(3))  # correlation of math and reading
+print(res_tt.score(tt_df.iloc[:3]).round(3))  # theta_math, theta_reading, theta_t1, ...
+```
+
+対応している機能・していない機能は双因子モデルと同じ。主因子が 3 つ以上のモデルは `SpecificationError`。
+
 ## 15. 尺度リンキング
 
 共通項目を含む 2 つのフォームを別々の標本で推定したあと、`flexpyirt.link(source, target)` を使うと、
@@ -833,12 +917,17 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 
 ## 16. ポリコリック相関
 
-`flexpyirt.polychoric(data)` は順序反応のポリコリック相関行列（2 値項目ではテトラコリック相関）を推定する。固有値に
+16、17、19 節では **flexpyctt** を使う。推定済みのモデルを使わない分析のための、flexpyirt と対になるパッケージで
+ある。flexpyirt と一緒にインストールされる。JAX を入れたくない環境では単独でインストールできる
+（`pip install flexpyctt`）。依存は NumPy、SciPy、pandas だけで、64 ビットの設定も要らない。乱数を使う関数は
+`rng`（整数のシードまたは `numpy.random.Generator`）を受け取る。
+
+`flexpyctt.polychoric(data)` は順序反応のポリコリック相関行列（2 値項目ではテトラコリック相関）を推定する。固有値に
 基づく次元性の確認で入力として使うのが一般的である。two-step の最尤法（Olsson, 1979）で、各項目の周辺比率から閾値を
 求め、そのうえで項目のペアごとに相関を 1 つずつ求める。
 
 ```python
-from flexpyirt import polychoric
+from flexpyctt import polychoric
 
 pc = polychoric(df)
 print(pc.correlation.iloc[:4, :4].round(3))
@@ -853,6 +942,7 @@ print(pc.n_obs.iloc[:2, :2])
   ペアは `HeywoodWarning` を出し、`pc.at_boundary` に示す。
 - ペアごとの推定値を並べた行列は正定値とは限らない。その場合は平滑化し（psych の `cor.smooth` と同じ規則）、
   `NotPositiveDefiniteWarning` を出す。`pc.unsmoothed_correlation` にはペアごとの推定値がそのまま残る。
+- `flexpyirt.polychoric()` は同じ推定量の JAX による実装で、引数と結果は同じである。2 つは $10^{-9}$ 程度で一致する。
 
 ## 17. 次元数
 
@@ -860,20 +950,18 @@ print(pc.n_obs.iloc[:2, :2])
 偏りが知られた診断なので、いくつかを合わせて見る。
 
 ```python
-import jax
+from flexpyctt import efa, empirical_kaiser, hull, parallel_analysis, velicer_map
 
-from flexpyirt import efa, empirical_kaiser, hull, parallel_analysis, velicer_map
-
-pa = parallel_analysis(df, key=jax.random.key(0), n_replications=20)
+pa = parallel_analysis(df, rng=0, n_replications=20)
 print(pa.n_factors, pa.observed[:3].round(3), pa.reference[:3].round(3))
 print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
-print(hull(pc, key=jax.random.key(4)).n_factors)
+print(hull(pc, rng=4).n_factors)
 print(efa(pc, n_factors=1).loadings.head(3).round(3))
 ```
 
 - `parallel_analysis()`（Horn, 1965）は、ポリコリック相関行列の固有値のうち、共通因子をもたない参照データの固有値の
   95 パーセンタイルを上回るものを先頭から数える。既定の参照データは各項目の回答を独立に並べ替えたもので、項目の
-  周辺分布を保つ。`reference="normal"` で正規データ、`eigen_type="smc"` で縮約行列を使う。結果は `key` によって
+  周辺分布を保つ。`reference="normal"` で正規データ、`eigen_type="smc"` で縮約行列を使う。結果は `rng` によって
   変わるので、最終的な分析では反復を増やす（既定は 100）。
 - `velicer_map()` は $m$ 個の主成分を除いたあとの平均偏相関を最小にする。既定は 4 乗を使う改訂版
   （`power=2` で元の版）。
@@ -888,8 +976,11 @@ print(efa(pc, n_factors=1).loadings.head(3).round(3))
 ## 18. 局所依存と次元性のレポート
 
 17 節の数え方はデータだけを使う。1 次元モデルを推定していれば、項目間の依存をモデルが説明しきれているかも調べられる。
+これらは flexpyirt の道具で、JAX の PRNG `key` を受け取る。
 
 ```python
+import jax
+
 from flexpyirt import dimensionality, model_parallel_analysis
 
 ld = res.local_dependence(df)
@@ -906,6 +997,10 @@ print(report)
 - `FitResult.local_dependence()` は、すべてのペアについて Yen の Q3（EAP スコアによる残差の相関）、Q3\*（Q3 から
   ペア全体の平均を引いたもの）、Chen & Thissen の LD $X^2$ / $G^2$ を mirt の `residuals()` と同じく求める。Q3\* や
   $X^2$ が大きいペアは、$\theta$ 以外の何か（共通の問題文、テストレット、第 2 の次元）を共有している可能性がある。
+  多母集団モデル（`group=` を渡す。統計量は群ごとに求め、`pairs` に `group` 列が付く）、`EmpiricalHistogram`・
+  `DavidianCurve`・`NormalMixture` の潜在分布（推定した分布を使う）、2〜3 因子のモデル（すべての因子を与えても
+  なお依存するペア）にも使える。`jsi()`、`model_parallel_analysis()`、`dimensionality(fit=...)` は、単一群・
+  1 次元・`Normal` 潜在分布のモデルが必要。
 - `FitResult.jsi()` は Edwards, Houts & Cai (2018) のジャックナイフ傾き指標である。項目を 1 つずつ除いてモデルを
   推定し直し、他の各項目の傾きの変化をその標準誤差で割る。2 つの項目が依存し合っていると、片方を除くともう片方の
   傾きが下がるので、そのペアは両方向に大きな値を持つ（`folded` は両方を足したもの）。決まったカットオフはないので、
@@ -924,13 +1019,13 @@ DETECT（Zhang & Stout, 1999）は、総得点（または残りの得点）が�
 一次元なら、この条件付き共分散は 0 に近い。複数の次元があると、項目のクラスタ内では正、クラスタ間では負になる。
 
 ```python
-from flexpyirt import detect, dimtest, exploratory_detect
+from flexpyctt import detect, dimtest, exploratory_detect
 
 halves = {item: ("A" if i < len(items) // 2 else "B") for i, item in enumerate(items)}
 print(detect(df, halves).indices.round(3))
-explore = exploratory_detect(df, max_clusters=3, key=jax.random.key(3))
+explore = exploratory_detect(df, max_clusters=3, rng=3)
 print(explore.table.round(3))
-test = dimtest(df, key=jax.random.key(5))
+test = dimtest(df, rng=5)
 print(test.assessment_items, round(test.statistic, 3), round(test.p_value, 3))
 ```
 

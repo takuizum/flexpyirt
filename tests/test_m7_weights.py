@@ -324,7 +324,7 @@ def test_json_round_trip_keeps_sum_of_weights(
 ) -> None:
     res, data, weights = weighted_result
     payload = json.loads(res.to_json())
-    assert payload["schema_version"] == SCHEMA_VERSION == 5
+    assert payload["schema_version"] == SCHEMA_VERSION == 7
     assert payload["sum_weights"] == float(weights.sum())
     loaded = FitResult.from_json(json.dumps(payload))
     assert loaded._sum_weights == res._sum_weights
@@ -337,10 +337,10 @@ def test_json_round_trip_keeps_sum_of_weights(
         with pytest.raises(SpecificationError, match="sum_weights"):
             FitResult.from_json(json.dumps(broken))
 
-    # Version 4 has no sum_weights: such a file loads without it and rejects the key.
+    # Version 6 has no sum_weights: such a file loads without it and rejects the key.
     with pytest.raises(SpecificationError, match=r"Unexpected keys.*sum_weights"):
-        FitResult.from_json(json.dumps({**payload, "schema_version": 4}))
-    old = {k: v for k, v in payload.items() if k != "sum_weights"} | {"schema_version": 4}
+        FitResult.from_json(json.dumps({**payload, "schema_version": 6}))
+    old = {k: v for k, v in payload.items() if k != "sum_weights"} | {"schema_version": 6}
     assert FitResult.from_json(json.dumps(old))._sum_weights is None
 
     unweighted = json.loads(fit(res._model, data, method=BAEM(tol=1e-4), se=None).to_json())

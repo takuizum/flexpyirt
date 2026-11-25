@@ -1,4 +1,4 @@
-r"""Local-dependence statistics of a fitted unidimensional model (DESIGN.md §16.11).
+r"""Local-dependence statistics of a fitted model (DESIGN.md §16.11).
 
 Pure NumPy helpers used by :meth:`flexpyirt.FitResult.local_dependence`: Yen's (1984) Q3 from
 expected-score residuals, Chen & Thissen's (1997) LD :math:`X^2` / :math:`G^2` from model-implied
@@ -71,7 +71,8 @@ def ld_pairs(y: np.ndarray, traces: list[np.ndarray], weights: np.ndarray) -> di
     y : numpy.ndarray
         ``(N, J)`` responses ``0..K_j-1``, ``-1`` for missing.
     traces : list of numpy.ndarray
-        Per item, ``(Q, K_j)`` category probabilities on the quadrature nodes.
+        Per item, ``(Q, K_j)`` category probabilities on the quadrature nodes (the product grid for
+        several factors).
     weights : numpy.ndarray
         ``(Q,)`` latent weights summing to 1.
 

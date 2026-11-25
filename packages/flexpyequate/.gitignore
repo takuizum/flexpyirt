@@ -1,0 +1,11 @@
+# The repository-level workspace lock is the one that is committed.
+uv.lock
+
+# Repeated from the repository root: hatchling reads only this file when it builds the sdist.
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+dist/
