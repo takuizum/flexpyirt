@@ -4,20 +4,29 @@
 
 ## パッケージ
 
-このリポジトリは uv ワークスペースで、2 つの配布物を同じバージョンで公開する（DESIGN.md §16.18）。
+このリポジトリは uv ワークスペースで、3 つの配布物を同じバージョンで公開する（DESIGN.md §16.18）。
 
 | 配布物 | 場所 | 内容 |
 |---|---|---|
 | `flexpyirt` | リポジトリのルート（`pyproject.toml`、`src/flexpyirt/`、`tests/`、`validation/`） | 推定と、推定済みのモデルを使うものすべて。JAX と flexpyctt に依存する |
 | `flexpyctt` | `packages/flexpyctt/`（自分の `pyproject.toml`、`README.md`、`src/`、`tests/`、`validation/` を持つ） | 推定済みのモデルを使わない項目・テスト分析。依存は NumPy、SciPy、pandas だけ |
+| `flexpyequate` | `packages/flexpyequate/`（自分の `pyproject.toml`、`README.md`、`docs/DESIGN.md`、`src/`、`tests/` を持つ。参照値のスクリプトは `validation/r/equate_*.R`） | 得点分布の等化。依存は NumPy、SciPy、pandas だけで、他の 2 つとは独立 |
 
 - **flexpyctt は JAX も flexpyirt も import しない。** CI のジョブが flexpyctt だけをインストールし、JAX なしで
   テストを実行する。関数は JAX のキーではなく `rng`（シードまたは `numpy.random.Generator`）を取る。
 - `FitResult` が要る道具は flexpyirt に、データだけで済む道具は flexpyctt に置く。flexpyirt は flexpyctt の公開名を
   再公開する。
-- `packages/flexpyctt/README.md` は flexpyctt の PyPI のページになる。リンクは絶対 URL にし、開発関連の情報は置かない。
-- lint と型チェックの設定はルートの `pyproject.toml` に 1 つだけあり、両方のパッケージを対象にする。pytest の設定と
-  テストのディレクトリはパッケージごとに持つ。
+- **flexpyequate は JAX も flexpyirt も flexpyctt も import しない。**その 2 つも flexpyequate に依存しない
+  （`uv sync` でインストールされるように、ルートの開発用の依存にだけ入れている）。CI のジョブが flexpyequate だけを
+  インストールしてテストを実行する。項目パラメータを使う等化は flexpyirt に置く。flexpyequate の設計は
+  [packages/flexpyequate/docs/DESIGN.ja.md](packages/flexpyequate/docs/DESIGN.ja.md) にある。
+- `packages/flexpyctt/README.md` と `packages/flexpyequate/README.md` は、それぞれのパッケージの PyPI のページに
+  なる。リンクは絶対 URL にし、開発関連の情報は置かない。ドキュメントサイトは flexpyequate の README を
+  「得点の等化」のページに表示する（`docs/equating.md`、`scripts/mkdocs_hooks.py`）。
+- flexpyirt と flexpyctt の lint と型チェックの設定は、ルートの `pyproject.toml` に 1 つだけある。flexpyequate は
+  自分の `[tool.ruff]` と `[tool.mypy]` を持つ（規則は同じ）。ルートで `ruff check .` を実行するとそのディレクトリには
+  その設定が使われ、mypy は `packages/flexpyequate/` で実行する。pytest の設定とテストのディレクトリはパッケージごとに
+  持つ。
 
 ## ブランチ
 
@@ -36,14 +45,15 @@
 ## PR とレビュー
 
 - すべての変更は PR で入れる。`main` と `develop` はルールセットで保護され、CI（`test (3.12/3.13)`）と
-  `pr-rules` が通らないとマージできない。CI では `flexpyctt without JAX (3.12/3.13)` も走る。
+  `pr-rules` が通らないとマージできない。CI では `flexpyctt without JAX (3.12/3.13)` と
+  `flexpyequate without JAX (3.12/3.13)` も走る。
 - PR はリポジトリのオーナーがレビューしてからマージする（自動マージしない）。
 - 数値計算に関わる変更は、R mirt との照合テスト（[docs/dev/VALIDATION.ja.md](docs/dev/VALIDATION.ja.md)）が通ることが前提。
 
 ## リリース
 
 バージョンは **git タグ**（`vX.Y.Z`）から決まる（hatch-vcs）。どの `pyproject.toml` にもバージョンを書かず、
-リリースはタグを打つことで行う。flexpyirt と flexpyctt はいつも同じバージョンになる。タグのない開発中のコミットは `0.0.2.dev3+g1a2b3c4` のような開発版になる。
+リリースはタグを打つことで行う。flexpyirt、flexpyctt、flexpyequate はいつも同じバージョンになる。タグのない開発中のコミットは `0.0.2.dev3+g1a2b3c4` のような開発版になる。
 
 1. `develop` → `main` の PR を作る。**タイトルでバージョンの上げ方を決める**:
    - `release(major): ...` / `release(minor): ...` / `release(patch): ...`
@@ -51,14 +61,15 @@
 2. マージされると `.github/workflows/release.yml` が動く:
    1. `plan` ジョブ: PR タイトルと最新の `vX.Y.Z` タグから次のバージョンを決める。
    2. `publish` ジョブ: **`release` 環境の承認待ちになる**。オーナーが Actions 画面で承認すると、
-      `main` にタグ `vX.Y.Z` を打って 2 つの配布物をビルドし（`uv build --package flexpyctt`、
-      `uv build --package flexpyirt`）、GitHub Release を作成する（wheel / sdist 添付、リリースノート自動生成）。このリリースに含まれる fix PR が `Closes` していた issue を閉じる。
-   3. `pypi-flexpyctt` ジョブ、続いて `pypi` ジョブ: 同じ wheel / sdist を **PyPI に公開する**（`pypi` 環境、
-      Trusted Publishing。API トークンは使わない）。PyPI のプロジェクトごとに 1 ジョブ。flexpyirt が flexpyctt に
-      依存するので、flexpyctt を先に公開する。
+      `main` にタグ `vX.Y.Z` を打って 3 つの配布物をビルドし（`uv build --package flexpyctt`、
+      `uv build --package flexpyequate`、`uv build --package flexpyirt`）、GitHub Release を作成する（wheel / sdist 添付、リリースノート自動生成）。このリリースに含まれる fix PR が `Closes` していた issue を閉じる。
+   3. `pypi-flexpyctt` ジョブ、続いて `pypi` ジョブ。それと並んで `pypi-flexpyequate` ジョブ: 同じ wheel / sdist を
+      **PyPI に公開する**（`pypi` 環境、Trusted Publishing。API トークンは使わない）。PyPI のプロジェクトごとに
+      1 ジョブ。flexpyirt が flexpyctt に依存するので、flexpyctt を先に公開する。flexpyequate はどちらにも依存しない
+      ので、そのジョブは `publish` ジョブだけを待ち、失敗しても他の 2 つを止めない（失敗したジョブを再実行する）。
    4. 同じ `main` への push で `.github/workflows/docs.yml` がドキュメントサイトを GitHub Pages に公開する。
 3. **最初のリリース**（`v*` タグがまだない）は、タイトルの上げ方に関係なく **v0.0.1**。
-4. 手動実行（`workflow_dispatch`）は dry run 専用で、次のバージョンの計算とビルドだけを行う。
+4. 手動実行（`workflow_dispatch`）は dry run 専用で、次のバージョンの計算と 3 つの配布物のビルドだけを行う。
 
 `main` へのマージコミットは `develop` に戻さない（`develop` は保護されていて、ボットは push できない）。
 このため `develop` 上の開発版の番号は直前のリリースタグを参照しないことがあるが、リリースには影響しない。
@@ -72,7 +83,7 @@
   マージできる管理者だけ。
 - **`publish` ジョブは `release` 環境で動き、指定レビュアー（オーナー）の承認が必要**。環境は `main` からしか
   デプロイできないので、他のブランチやフォークからはタグも Release も作れない。
-- **PyPI への公開は Trusted Publishing**（OIDC）。PyPI のプロジェクト（`flexpyirt`、`flexpyctt`）ごとに
+- **PyPI への公開は Trusted Publishing**（OIDC）。PyPI のプロジェクト（`flexpyirt`、`flexpyctt`、`flexpyequate`）ごとに
   「リポジトリ `takuizum/flexpyirt`、ワークフロー `release.yml`、環境 `pypi`」だけを信頼する publisher を登録するので、
   API トークンはリポジトリに置かない。新しいプロジェクトは、最初のリリースの前に PyPI で pending publisher を登録する。`pypi` 環境もデプロイ元を `main` に限定しておく。PyPI に一度上げた番号は
   削除しても再利用できない。
@@ -88,10 +99,14 @@ Python 環境は `uv` だけで管理する（pip は使わない）。
 uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 uv run pytest packages/flexpyctt
+uv run pytest packages/flexpyequate
+(cd packages/flexpyequate && uv run mypy)
 ```
 
-`uv sync` は両方のパッケージを編集可能な形でインストールする。ruff と mypy はルートから両方を検査する。
-`uv run pytest` は flexpyirt のテスト、`uv run pytest packages/flexpyctt` は flexpyctt のテストを実行する。
+`uv sync` は 3 つのパッケージを編集可能な形でインストールする。ruff はルートから 3 つすべてを、mypy は flexpyirt と
+flexpyctt を検査する。flexpyequate の mypy は最後の行で実行する。`uv run pytest` は flexpyirt のテスト、
+`uv run pytest packages/flexpyctt` は flexpyctt のテスト、`uv run pytest packages/flexpyequate` は flexpyequate の
+テストを実行する。
 
 ### テスト
 
@@ -123,7 +138,8 @@ Rscript validation/r/m2_reference.R
 ```
 
 flexpyctt の参照値のスクリプトは `packages/flexpyctt/validation/r/` にあり、`packages/flexpyctt/tests/reference/` に
-書き出す。これらもリポジトリのルートから実行する。
+書き出す。これらもリポジトリのルートから実行する。flexpyequate のスクリプトは `validation/r/equate_*.R` で、
+`packages/flexpyequate/tests/reference/` に書き出す。
 
 R `mirt` との wall time ベンチマークを再実行するとき（詳細と `--quick` モードは
 [benchmarks/README.ja.md](benchmarks/README.ja.md) を参照）:

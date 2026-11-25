@@ -2,13 +2,14 @@
 
 Identity, mean, linear and equipercentile equating for equivalent groups and a single group, and
 the methods for non-equivalent groups with an anchor test: linear (Tucker, Levine, Braun-Holland,
-chained) and equipercentile (frequency estimation, chained).
+chained) and equipercentile (frequency estimation, chained). Standard errors of equating by the
+delta method (where a formula exists) and by the bootstrap.
 """
 
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, get_args
 
 import numpy as np
@@ -25,6 +26,15 @@ from flexpyequate._neat import (
     synthetic_moments,
     tucker_gamma,
 )
+from flexpyequate._standard_errors import (
+    anchor_linear_gradients,
+    braun_holland_se,
+    lord_equipercentile_se,
+    mean_linear_gradients,
+    moment_covariance,
+    quadratic_form_se,
+    univariate_moment_covariance,
+)
 from flexpyequate.distributions import (
     BivariateScoreDistribution,
     FloatArray,
@@ -33,9 +43,9 @@ from flexpyequate.distributions import (
     percentile_from_proportion,
     percentile_rank_proportion,
 )
-from flexpyequate.errors import SparseDataWarning, SpecificationError
+from flexpyequate.errors import ScoreDistributionError, SparseDataWarning, SpecificationError
 
-__all__ = ["EquatingMethod", "EquatingResult", "equate"]
+__all__ = ["EquatingMethod", "EquatingResult", "StandardError", "equate"]
 
 EquatingMethod = Literal[
     "identity",
@@ -51,6 +61,7 @@ EquatingMethod = Literal[
     "chained_equipercentile",
 ]
 Design = Literal["equivalent_groups", "single_group", "nonequivalent_groups"]
+StandardError = Literal["analytic", "analytic_normal", "bootstrap"]
 
 _ANCHOR_METHODS = (
     "tucker",
@@ -104,6 +115,17 @@ class EquatingResult:
     anchor_distributions : tuple of ScoreDistribution or None
         Chained equipercentile equating: the anchor distributions in the population that took X
         and in the population that took Y; ``None`` otherwise.
+    see : numpy.ndarray or None
+        Standard error of equating at each possible score of form X, if ``standard_error`` was
+        asked for; ``None`` otherwise.
+    standard_error : str or None
+        How ``see`` was obtained: ``"analytic"``, ``"analytic_normal"`` or ``"bootstrap"``.
+    n_replications : int or None
+        Bootstrap: the number of bootstrap samples that ``see`` is based on (samples that could
+        not be equated are left out).
+    bootstrap_mean : numpy.ndarray or None
+        Bootstrap: mean of the equated scores over the bootstrap samples. Its difference from
+        ``equated`` estimates the bias of the equating function.
     """
 
     method: EquatingMethod
@@ -120,6 +142,10 @@ class EquatingResult:
     gamma: tuple[float, float] | None = None
     synthetic_moments: pd.DataFrame | None = None
     anchor_distributions: tuple[ScoreDistribution, ScoreDistribution] | None = None
+    see: FloatArray | None = None
+    standard_error: StandardError | None = None
+    n_replications: int | None = None
+    bootstrap_mean: FloatArray | None = None
 
     def transform(self, values: ArrayLike) -> FloatArray:
         """Equate arbitrary form-X scores (also between possible scores) to the form-Y scale.
@@ -144,8 +170,14 @@ class EquatingResult:
 
     @property
     def table(self) -> pd.DataFrame:
-        """Conversion table: columns ``score`` (form X) and ``equated`` (form-Y equivalent)."""
-        return pd.DataFrame({"score": self.scores, "equated": self.equated})
+        """Conversion table: columns ``score`` (form X) and ``equated`` (form-Y equivalent).
+
+        A column ``see`` (standard error of equating) follows when standard errors were computed.
+        """
+        table = pd.DataFrame({"score": self.scores, "equated": self.equated})
+        if self.see is not None:
+            table["see"] = self.see
+        return table
 
     @property
     def moments(self) -> pd.DataFrame:
@@ -234,7 +266,7 @@ def _post_stratify(
             f"population (probability up to {dropped:.4g}) is left out of the synthetic "
             "distributions. Presmoothing the joint distributions avoids this.",
             SparseDataWarning,
-            stacklevel=4,
+            stacklevel=5,
         )
     return synthetic_x, synthetic_y
 
@@ -368,6 +400,9 @@ def equate(
     ddof: int = 0,
     synthetic_weight: float | None = None,
     anchor: Anchor | None = None,
+    standard_error: StandardError | None = None,
+    n_replications: int = 1000,
+    rng: np.random.Generator | int | None = None,
 ) -> EquatingResult:
     r"""Equate form X to the scale of form Y from their score distributions.
 
@@ -444,6 +479,70 @@ def equate(
     population 1 (:math:`P_1`, :math:`H_1`) and the anchor to Y in population 2 (:math:`H_2`,
     :math:`Q_2`). Pass presmoothed joint distributions (:func:`presmooth`) to smooth either.
 
+    **Standard errors of equating** (``standard_error``; Kolen & Brennan, 2014, ch. 7).
+
+    ``"analytic"`` is the delta method without a distributional assumption. The linear methods
+    are functions :math:`e_Y(x) = c(\theta) + b(\theta)x` of the means, variances and covariances
+    :math:`\theta` of the samples, and
+
+    .. math::
+
+        \mathrm{SE}[\hat e_Y(x)]^2 = g(x)^\top \Omega\, g(x), \qquad
+        g(x) = \nabla c + x \nabla b, \qquad \Omega = \operatorname{Cov}(\hat\theta),
+
+    where :math:`N\operatorname{Cov}(\bar A, \bar B) = \sigma_{AB}`,
+    :math:`N\operatorname{Cov}(\bar A, s_{BC}) = \mu_{ABC}` and
+    :math:`N\operatorname{Cov}(s_{AB}, s_{CD}) = \mu_{ABCD} - \sigma_{AB}\sigma_{CD}` with the
+    central moments :math:`\mu` of the observed distributions (Kolen, 1985; Zu & Yuan, 2012).
+    For linear equating of equivalent groups this is the formula of Braun & Holland (1982),
+
+    .. math::
+
+        \mathrm{SE}^2 = \sigma_Y^2 \Bigl\{ \frac{1}{N_X} + \frac{1}{N_Y}
+        + \Bigl[\frac{\mathrm{sk}(X)}{N_X} + \frac{\mathrm{sk}(Y)}{N_Y}\Bigr] z
+        + \Bigl[\frac{\mathrm{ku}(X) - 1}{4 N_X} + \frac{\mathrm{ku}(Y) - 1}{4 N_Y}\Bigr] z^2
+        \Bigr\}, \qquad z = \frac{x - \mu_X}{\sigma_X} .
+
+    The Braun-Holland method is differentiated with respect to the cell probabilities of the two
+    joint distributions instead. For equipercentile equating of equivalent groups the formula of
+    Lord (1982) is used: with :math:`p = P(x)`, :math:`y^*_U = \min\{y_k : G(y_k) > p\}`,
+    :math:`G_0 = G(y^*_U - \delta_Y)` and :math:`g = G(y^*_U) - G_0`,
+
+    .. math::
+
+        \mathrm{SE}^2 = \frac{\delta_Y^2}{g^2} \Bigl\{ \frac{p(1 - p)}{N_X}
+        + \frac{1}{N_Y}\Bigl[G_0 - p^2 + \frac{(p - G_0)^2}{g}\Bigr] \Bigr\} .
+
+    ``"analytic_normal"`` replaces :math:`\Omega` by its value under (bivariate) normality: third
+    moments zero and :math:`\mu_{ABCD} - \sigma_{AB}\sigma_{CD} = \sigma_{AC}\sigma_{BD} +
+    \sigma_{AD}\sigma_{BC}`. It exists for the methods that depend on moments only.
+
+    ``"bootstrap"`` resamples :math:`N` examinees with replacement from each sample
+    (multinomial counts with the observed relative frequencies; the cells of a joint
+    distribution, so that the dependence between its two scores is kept), equates each of the
+    ``n_replications`` samples and takes the standard deviation (divisor :math:`B - 1`) of the
+    equated scores. It works for every method.
+
+    ===================================== ============ =================== =============
+    Method (design)                       ``analytic`` ``analytic_normal`` ``bootstrap``
+    ===================================== ============ =================== =============
+    identity                              0            0                   0
+    mean, linear (equivalent groups)      yes          yes                 yes
+    mean, linear (single group)           yes          yes                 yes
+    equipercentile (equivalent groups)    yes (Lord)   no                  yes
+    equipercentile (single group)         no           no                  yes
+    tucker, levine_observed, levine_true  yes          yes                 yes
+    chained_linear                        yes          yes                 yes
+    braun_holland                         yes          no                  yes
+    frequency_estimation                  no           no                  yes
+    chained_equipercentile                no           no                  yes
+    ===================================== ============ =================== =============
+
+    All of them treat the frequencies as observed. For a presmoothed distribution the analytic
+    standard errors and the bootstrap ignore that a model was fitted (the bootstrap then draws
+    from the smoothed distribution without refitting it), and the total frequency is taken as
+    the sample size.
+
     Parameters
     ----------
     x : ScoreDistribution or BivariateScoreDistribution
@@ -470,29 +569,56 @@ def equate(
     anchor : {"internal", "external"}, optional
         Required by the Levine methods: ``"internal"`` if the anchor items count towards the
         total scores, ``"external"`` if the anchor is scored separately. Other methods ignore it.
+    standard_error : {"analytic", "analytic_normal", "bootstrap"}, optional
+        Compute standard errors of equating at the possible scores of form X (see above). By
+        default none are computed. The variances and covariances plugged into the analytic
+        formulas follow ``ddof``; third and fourth moments always divide by :math:`N`
+        (``ddof=1`` reproduces R ``equate``'s standard error of linear equating for equivalent
+        groups).
+    n_replications : int, default 1000
+        Number of bootstrap samples :math:`B` (R ``equate::bootstrap``'s ``reps``).
+    rng : numpy.random.Generator or int, optional
+        Random number generator or non-negative integer seed. Required for the bootstrap, so
+        that a result can be reproduced; ignored otherwise.
 
     Returns
     -------
     EquatingResult
-        The conversion table and, for the linear methods, slope and intercept.
+        The conversion table and, for the linear methods, slope and intercept; with
+        ``standard_error``, also ``see``.
 
     Raises
     ------
     SpecificationError
         If the inputs do not match a supported design, the method does not belong to the design,
-        a required argument is missing, or a variance or covariance the method divides by is not
-        positive.
+        a required argument is missing, a variance or covariance the method divides by is not
+        positive, the requested analytic standard error does not exist for the method, or the
+        bootstrap is asked for without ``rng``.
 
     Warns
     -----
     SparseDataWarning
         Braun-Holland and frequency-estimation methods: an anchor score was observed in one
-        population only.
+        population only. Bootstrap: some bootstrap samples could not be equated and were left
+        out.
 
     References
     ----------
+    Braun, H. I., & Holland, P. W. (1982). Observed-score test equating: A mathematical analysis
+    of some ETS equating procedures. In P. W. Holland & D. B. Rubin (Eds.), *Test equating*
+    (pp. 9-49). Academic Press.
+
+    Kolen, M. J. (1985). Standard errors of Tucker equating. *Applied Psychological Measurement,
+    9*, 209-223.
+
     Kolen, M. J., & Brennan, R. L. (2014). *Test equating, scaling, and linking* (3rd ed.).
     Springer.
+
+    Lord, F. M. (1982). The standard error of equipercentile equating. *Journal of Educational
+    Statistics, 7*, 165-174.
+
+    Zu, J., & Yuan, K.-H. (2012). Standard error of linear observed-score equating for the NEAT
+    design with nonnormally distributed data. *Journal of Educational Measurement, 49*, 190-213.
 
     Examples
     --------
@@ -502,6 +628,260 @@ def equate(
     >>> round(fe.equate(x, y, method="mean").intercept, 2)
     0.65
     """
+    point = _equate_point(x, y, method, ddof, synthetic_weight, anchor)
+    if standard_error is None:
+        return point
+    if standard_error not in get_args(StandardError):
+        raise SpecificationError(
+            f"Unknown standard_error {standard_error!r}; choose one of "
+            f"{', '.join(get_args(StandardError))}, or None."
+        )
+    if standard_error == "bootstrap":
+        generator = _as_generator(rng)
+        if not (
+            isinstance(n_replications, (int, np.integer))
+            and not isinstance(n_replications, bool)
+            and n_replications >= 2
+        ):
+            raise SpecificationError(
+                f"n_replications must be an integer of at least 2, got {n_replications!r}."
+            )
+        see, mean, n_used = _bootstrap(
+            x, y, point, method, ddof, anchor, int(n_replications), generator
+        )
+        return replace(
+            point,
+            see=_freeze(see),
+            standard_error=standard_error,
+            n_replications=n_used,
+            bootstrap_mean=_freeze(mean),
+        )
+    see = _analytic_see(
+        x, y, point, method, ddof, anchor, normal=standard_error == "analytic_normal"
+    )
+    return replace(point, see=_freeze(see), standard_error=standard_error)
+
+
+def _as_generator(rng: np.random.Generator | int | None) -> np.random.Generator:
+    """Return ``rng`` itself, or a new generator seeded with the integer ``rng``."""
+    if isinstance(rng, np.random.Generator):
+        return rng
+    if isinstance(rng, (int, np.integer)) and not isinstance(rng, bool) and rng >= 0:
+        return np.random.default_rng(int(rng))
+    raise SpecificationError(
+        'standard_error="bootstrap" needs rng: a numpy.random.Generator or a non-negative '
+        f"integer seed, got {rng!r}."
+    )
+
+
+def _resample(
+    distribution: ScoreDistribution | BivariateScoreDistribution, generator: np.random.Generator
+) -> ScoreDistribution | BivariateScoreDistribution:
+    """Draw one bootstrap sample: multinomial counts with the observed relative frequencies."""
+    size = round(distribution.n)
+    cells = np.ravel(distribution.frequencies)
+    counts = generator.multinomial(size, cells / cells.sum()).astype(np.float64)
+    if isinstance(distribution, BivariateScoreDistribution):
+        return BivariateScoreDistribution(
+            x_scores=distribution.x_scores,
+            y_scores=distribution.y_scores,
+            frequencies=counts.reshape(distribution.frequencies.shape),
+        )
+    return ScoreDistribution(scores=distribution.scores, frequencies=counts)
+
+
+def _bootstrap(
+    x: ScoreDistribution | BivariateScoreDistribution,
+    y: ScoreDistribution | BivariateScoreDistribution | None,
+    point: EquatingResult,
+    method: EquatingMethod,
+    ddof: int,
+    anchor: Anchor | None,
+    n_replications: int,
+    generator: np.random.Generator,
+) -> tuple[FloatArray, FloatArray, int]:
+    r"""Bootstrap standard errors of equating (Kolen & Brennan, 2014, ch. 7).
+
+    Each replication draws :math:`N` examinees with replacement from every sample (that is,
+    multinomial counts with the observed relative frequencies; for a joint distribution the
+    cells are resampled, which keeps the dependence between the two scores), form X's sample
+    first and form Y's second, and equates them with the same method. With
+    :math:`\hat e_b(x)` the equated scores of replication :math:`b`,
+
+    .. math::
+
+        \mathrm{SE}_{boot}(x) = \sqrt{\frac{1}{B - 1} \sum_b
+        \bigl[\hat e_b(x) - \bar e(x)\bigr]^2} .
+
+    Returns the standard errors, the bootstrap means and the number of replications used.
+    """
+    for name, source in (("x", x), ("y", y)):
+        if source is not None and round(source.n) < 2:
+            raise SpecificationError(f"The bootstrap needs at least two examinees in {name}.")
+    equated = np.full((n_replications, point.scores.size), np.nan)
+    n_sparse = 0
+    for replication in range(n_replications):
+        x_sample = _resample(x, generator)
+        y_sample = None if y is None else _resample(y, generator)
+        try:
+            with warnings.catch_warnings(record=True) as caught, np.errstate(all="ignore"):
+                warnings.simplefilter("always")
+                result = _equate_point(
+                    x_sample, y_sample, method, ddof, point.synthetic_weight, anchor
+                )
+        except (SpecificationError, ScoreDistributionError):
+            continue
+        n_sparse += any(issubclass(item.category, SparseDataWarning) for item in caught)
+        equated[replication] = result.equated
+    valid = np.all(np.isfinite(equated), axis=1)
+    n_used = int(valid.sum())
+    if n_used < 2:
+        raise SpecificationError(
+            "Fewer than two bootstrap samples could be equated; the data are too sparse for "
+            f"method={method!r}."
+        )
+    if n_used < n_replications:
+        warnings.warn(
+            f"{n_replications - n_used} of {n_replications} bootstrap samples could not be "
+            "equated (a score without variance, or a non-positive covariance) and were left out.",
+            SparseDataWarning,
+            stacklevel=3,
+        )
+    if n_sparse:
+        warnings.warn(
+            f"In {n_sparse} of {n_replications} bootstrap samples some anchor scores were "
+            "observed in one population only; that part of the other population was left out of "
+            "the synthetic distributions.",
+            SparseDataWarning,
+            stacklevel=3,
+        )
+    used = equated[valid]
+    return (
+        np.asarray(used.std(axis=0, ddof=1), dtype=np.float64),
+        np.asarray(used.mean(axis=0), dtype=np.float64),
+        n_used,
+    )
+
+
+def _block_diagonal(first: FloatArray, second: FloatArray) -> FloatArray:
+    size = first.shape[0] + second.shape[0]
+    block = np.zeros((size, size))
+    block[: first.shape[0], : first.shape[0]] = first
+    block[first.shape[0] :, first.shape[0] :] = second
+    return block
+
+
+def _analytic_see(
+    x: ScoreDistribution | BivariateScoreDistribution,
+    y: ScoreDistribution | BivariateScoreDistribution | None,
+    point: EquatingResult,
+    method: EquatingMethod,
+    ddof: int,
+    anchor: Anchor | None,
+    *,
+    normal: bool,
+) -> FloatArray:
+    """Delta-method standard errors of equating; see :func:`equate` for what is available."""
+    scores = point.scores
+    name = "analytic_normal" if normal else "analytic"
+
+    def unavailable(reason: str) -> SpecificationError:
+        return SpecificationError(
+            f'standard_error="{name}" is not available for method={method!r} with '
+            f'{point.design.replace("_", " ")}: {reason} Use standard_error="bootstrap".'
+        )
+
+    if method == "identity":
+        return np.zeros_like(scores)
+    if point.design == "nonequivalent_groups":
+        assert isinstance(x, BivariateScoreDistribution)
+        assert isinstance(y, BivariateScoreDistribution)
+        if method in ("frequency_estimation", "chained_equipercentile"):
+            raise unavailable("no formula is implemented for the equipercentile anchor methods.")
+        if method == "braun_holland":
+            if normal:
+                raise unavailable(
+                    "the method depends on the whole joint distributions, not on their moments."
+                )
+            assert point.synthetic_weight is not None
+            see = braun_holland_se(
+                x.x_scores,
+                y.x_scores,
+                x.probabilities,
+                y.probabilities,
+                x.n,
+                y.n,
+                point.synthetic_weight,
+            )
+            if see is None:
+                raise unavailable("an anchor score was observed in one population only.")
+            return see
+        assert method in ("tucker", "levine_observed", "levine_true", "chained_linear")
+        slope_gradient, intercept_gradient = anchor_linear_gradients(
+            method,
+            GroupMoments.of(x, ddof),
+            GroupMoments.of(y, ddof),
+            point.synthetic_weight,
+            anchor,
+        )
+        omega = _block_diagonal(
+            moment_covariance(
+                x.x_scores, x.y_scores, x.probabilities, x.n, ddof=ddof, normal=normal
+            ),
+            moment_covariance(
+                y.x_scores, y.y_scores, y.probabilities, y.n, ddof=ddof, normal=normal
+            ),
+        )
+        return quadratic_form_se(scores, slope_gradient, intercept_gradient, omega)
+
+    single_group = point.design == "single_group"
+    if method == "equipercentile":
+        if single_group:
+            raise unavailable("Lord's (1982) formula assumes two independent samples.")
+        if normal:
+            raise unavailable("the formula does not depend on a distributional assumption.")
+        return lord_equipercentile_se(
+            point.x.scores,
+            point.x.cumulative,
+            point.x.n,
+            point.y.scores,
+            point.y.cumulative,
+            point.y.n,
+        )
+    assert method in ("mean", "linear")
+    slope_gradient, intercept_gradient = mean_linear_gradients(
+        method,
+        point.x.mean,
+        point.x.variance(ddof=ddof),
+        point.y.variance(ddof=ddof),
+        single_group=single_group,
+    )
+    if single_group:
+        assert isinstance(x, BivariateScoreDistribution)
+        omega = moment_covariance(
+            x.x_scores, x.y_scores, x.probabilities, x.n, ddof=ddof, normal=normal
+        )
+    else:
+        omega = _block_diagonal(
+            univariate_moment_covariance(
+                point.x.scores, point.x.probabilities, point.x.n, ddof=ddof, normal=normal
+            ),
+            univariate_moment_covariance(
+                point.y.scores, point.y.probabilities, point.y.n, ddof=ddof, normal=normal
+            ),
+        )
+    return quadratic_form_se(scores, slope_gradient, intercept_gradient, omega)
+
+
+def _equate_point(
+    x: ScoreDistribution | BivariateScoreDistribution,
+    y: ScoreDistribution | BivariateScoreDistribution | None,
+    method: EquatingMethod,
+    ddof: int,
+    synthetic_weight: float | None,
+    anchor: Anchor | None,
+) -> EquatingResult:
+    """Validate the inputs and compute the equating function (no standard errors)."""
     if method not in get_args(EquatingMethod):
         raise SpecificationError(
             f"Unknown method {method!r}; choose one of {', '.join(get_args(EquatingMethod))}."

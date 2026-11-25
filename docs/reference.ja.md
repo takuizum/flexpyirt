@@ -19,6 +19,8 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - 相関（flexpyctt）: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - 次元数（`model_parallel_analysis` と `dimensionality` 以外は flexpyctt）: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) とその結果
+- 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
+- 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -115,20 +117,20 @@ Jupyter ノートブックでは `FitResult._repr_html_()` が同じ内容を外
 score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -> DataFrame
 ```
 
-推定済みモデルで回答者を採点する（[ユーザーガイド 7 節](guide.ja.md#7-スコアリング)）。すべての手法で欠測反応は
-尤度（WLE では $I(\theta)$ も）から除く。
+推定済みモデルで回答者を採点する（[ユーザーガイド 7 節](guide.ja.md#7-スコアリング)）。`"EAPsum"` 以外の手法では
+欠測反応を尤度（WLE では $I(\theta)$ も）から除く。
 
 | 引数 | 型 | 説明 |
 |---|---|---|
 | `data` | DataFrame / polars DataFrame / 2 次元配列 | 推定と同じ項目の反応データ（推定に使ったものでなくてよい） |
-| `method` | `"EAP"` / `"MAP"` / `"ML"` / `"WLE"` / `"PV"` | 採点手法（既定 `"EAP"`）: EAP（推定時の求積格子上の事後平均・事後 SD; Bock & Mislevy, 1982）、MAP（連続正規事前分布 $N(\mu_g,\sigma_g^2)$ による事後最頻値と観測曲率 SE）、ML（最尤推定と観測情報量 SE。有限最大値のないパターンは $-\infty$/$+\infty$・SE NaN、全欠測は NaN）、WLE（Warm, 1989; Firth, 1993: $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta))=0$ を解く。極端パターンでも有限、全欠測は NaN、SE は WLE 目的関数の観測曲率）、PV（501 点格子上の区分線形逆 CDF 補間による回答者ごと独立な `n_draws` 個の事後標本; Mislevy, 1991） |
+| `method` | `"EAP"` / `"MAP"` / `"ML"` / `"WLE"` / `"PV"` / `"EAPsum"` | 採点手法（既定 `"EAP"`）: EAP（推定時の求積格子上の事後平均・事後 SD; Bock & Mislevy, 1982）、MAP（連続正規事前分布 $N(\mu_g,\sigma_g^2)$ による事後最頻値と観測曲率 SE）、ML（最尤推定と観測情報量 SE。有限最大値のないパターンは $-\infty$/$+\infty$・SE NaN、全欠測は NaN）、WLE（Warm, 1989; Firth, 1993: $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta))=0$ を解く。極端パターンでも有限、全欠測は NaN、SE は WLE 目的関数の観測曲率）、PV（501 点格子上の区分線形逆 CDF 補間による回答者ごと独立な `n_draws` 個の事後標本; Mislevy, 1991）、EAPsum（合計得点を与えたときの事後平均と事後 SD。回答者の群の [`summed_score_table`](#summed_score_table) を引く。欠測が 1 つでもある行は NaN。1 次元で潜在分布が `Normal` のモデルのみ） |
 | `group` | 配列（任意） | 多母集団モデルでは必須。行ごとの群ラベル |
 | `item_names` | list[str]（任意） | `data` が配列のときの列名 |
 | `key` | `jax.Array`（任意） | 明示的な JAX PRNG キー（`jax.random.key()` または `jax.random.PRNGKey()`）。`method="PV"` では必須、他の手法では `None` |
 | `n_draws` | int | `method="PV"` で回答者ごとに抽出する plausible values の個数（既定 `5`、1 以上の整数） |
 
 **戻り値**: 回答者 1 行ずつの `DataFrame`（`data` が DataFrame ならその index を引き継ぐ）。1 次元モデルでは
-`"EAP"`, `"MAP"`, `"ML"`, `"WLE"` が `theta`, `se` 列、`"PV"` が `pv1`…`pv{n_draws}` 列。多次元モデルでは
+`"EAP"`, `"MAP"`, `"ML"`, `"WLE"`, `"EAPsum"` が `theta`, `se` 列、`"PV"` が `pv1`…`pv{n_draws}` 列。多次元モデルでは
 宣言した因子順に `theta_<factor>`, `se_<factor>` 列（`"PV"` は `pv<m>_<factor>`）。
 
 **例外**: 不正な `method`、`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` で `method="MAP"` を指定した場合、`"PV"` で
@@ -1120,6 +1122,129 @@ dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=
 | `n_supporting`, `n_unidimensionality_methods` | int | 本質的一次元性についての合意 |
 | `results` | dict | 個々の結果 |
 | `summary()` | str | テキストのレポート（`str(result)` も同じ） |
+
+---
+
+## 情報関数と信頼性
+
+推定済みの 1 次元モデルに対する関数（[ガイド 5 節](guide.ja.md#情報関数期待得点信頼性)）。多次元モデルでは
+どれも `SpecificationError`。
+
+### `item_information`
+
+```text
+item_information(res, theta, *, group=None) -> DataFrame
+```
+
+潜在特性の値 `theta` での各項目の Fisher 情報量
+$I_j(\theta)=\sum_kP_{jk}(\theta)\,(\partial\log P_{jk}(\theta)/\partial\theta)^2$（Birnbaum, 1968;
+Samejima, 1969）。どの項目モデルでも自動微分で計算する。mirt の `iteminfo()` が返す値と同じ。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みの 1 次元モデル |
+| `theta` | float / 1 次元配列 | 潜在特性の値（有限） |
+| `group` | str（任意） | 群名。多母集団モデルでは必須 |
+
+**戻り値**: `theta` の値ごとに 1 行（インデックス。名前は `theta`）、項目ごとに 1 列の `DataFrame`。
+
+### `test_information`
+
+```text
+test_information(res, theta, *, group=None) -> DataFrame
+```
+
+テスト情報量 $I(\theta)=\sum_jI_j(\theta)$ と条件付き標準誤差 $1/\sqrt{I(\theta)}$（mirt の `testinfo()`）。
+引数は [`item_information`](#item_information) と同じ。
+
+**戻り値**: `theta` をインデックスとし、列 `information` と `se` をもつ `DataFrame`。
+
+### `expected_score`
+
+```text
+expected_score(res, theta, *, group=None) -> DataFrame
+```
+
+項目の期待得点 $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ とテスト特性曲線 $T(\theta)=\sum_jE_j(\theta)$。
+カテゴリの得点はデータと同じ $0,\dots,K_j-1$（mirt の `expected.item()` と `expected.test()`）。引数は
+[`item_information`](#item_information) と同じ。
+
+**戻り値**: `theta` をインデックスとし、項目ごとの列と列 `total` をもつ `DataFrame`。`total` という名前の
+項目があると `SpecificationError`。
+
+### `reliability`
+
+```text
+reliability(res, data=None, *, group=None, item_names=None) -> DataFrame
+```
+
+周辺信頼性と、`data` を渡した場合は EAP 得点の経験的信頼性。
+
+- **周辺信頼性**: 潜在分布 $N(\mu,\sigma^2)$、テスト情報量 $I(\theta)$ に対して
+  $\bar\rho=\int\frac{\sigma^2I(\theta)}{\sigma^2I(\theta)+1}\,\phi(\theta;\mu,\sigma^2)\,d\theta$
+  （Green et al., 1984; Thissen & Wainer, 2001）。$N(0,1)$ では mirt の `marginal_rxx()` と一致し、潜在尺度を
+  線形変換しても変わらない。積分は、推定に使った求積によらず、$\mu\pm8\sigma$ 上の等間隔 801 点で評価する。
+- **経験的信頼性**: `data` の受検者の EAP 得点と標準誤差（`score(data, method="EAP")`）から
+  $\hat\rho=s^2_{\hat\theta}/(s^2_{\hat\theta}+\overline{\mathrm{SE}^2})$。$s^2_{\hat\theta}$ は標本分散
+  （分母 $N-1$）。mirt の `empirical_rxx()` と同じ。欠測のある行も採点して含める。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 潜在分布が `Normal` の、推定済みの 1 次元モデル |
+| `data` | DataFrame / 2 次元配列（任意） | 推定と同じ項目の反応データ。渡すと経験的信頼性が加わる |
+| `group` | 配列（任意） | `data` の行ごとの群ラベル（多母集団モデルで `data` を渡すときは必須） |
+| `item_names` | list[str]（任意） | `data` が配列のときの列名 |
+
+**戻り値**: 群ごとに 1 行の `DataFrame`（多母集団モデルでは先頭に `group` 列）。列は `marginal` と、`data` を
+渡した場合は `empirical`（`data` の中の受検者が 2 人未満の群は NaN）。
+
+**例外**: 多次元モデル、潜在分布が `EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` の場合、`data` なしで
+`group` / `item_names` を渡した場合は `SpecificationError`。
+
+---
+
+## 合計得点
+
+### `summed_score_table`
+
+```text
+summed_score_table(res) -> DataFrame
+```
+
+推定済みモデルの合計得点 EAP の表（Thissen, Pommerich, Billeaud & Williams, 1995。
+[ガイド 7 節](guide.ja.md#合計得点による-eap)）。合計得点 $s$ ごとに、推定に使った求積節点 $\theta_q$ と潜在重み
+$w_q$、[`summed_score_distribution`](#summed_score_distribution) で求めた得点の確率 $L(s\mid\theta_q)$ から、
+$P(s)=\sum_qL(s\mid\theta_q)w_q$、事後平均 $\sum_q\theta_qL(s\mid\theta_q)w_q/P(s)$、事後標準偏差を求める。
+mirt の `fscores(method = "EAPsum", full.scores = FALSE)` の表と同じで、その `expected` 列は $N\,P(s)$。
+
+**戻り値**: 合計得点 $0,\dots,\sum_j(K_j-1)$ ごとに 1 行の `DataFrame`（多母集団モデルでは群と得点ごとに 1 行で、
+先頭に `group` 列）。列は `score`、`theta`、`se`、`probability`。
+
+**例外**: 多次元モデル、潜在分布が `EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` の場合は
+`SpecificationError`。
+
+### `summed_score_distribution`
+
+```text
+summed_score_distribution(probs, *, method="recursion", log=False) -> Array
+```
+
+独立な項目得点の合計得点の分布（[ガイド 5 節](guide.ja.md#合計得点の分布)）。`probs` の形は `(..., J, K)` で、
+`J` 項目のカテゴリ確率（各行の和は 1。カテゴリ数が `K` より少ない項目は 0 で埋める）。たとえば、ある $\theta$ での
+IRT モデルのカテゴリ確率。先頭の軸はバッチ軸。結果の形は `(..., J * (K - 1) + 1)` で、合計得点 $0, \dots, J(K-1)$ の
+確率が入る。2 値項目なら Poisson 二項分布になる。`jax.jit`・`jax.vmap` の中で使え、微分もできる。値の検査はしない。
+
+| `method` | 内容 | 精度 |
+|---|---|---|
+| `"recursion"`（既定） | Lord–Wingersky 再帰 | 厳密。裾も含めて、どの確率も相対誤差が小さい |
+| `"fft"` | 特性関数の離散フーリエ変換 | 絶対誤差が約 `1e-16` の範囲で厳密。約 `1e-15` より小さい確率は信頼できない |
+| `"normal"` | 連続修正つきの正規近似 | 2 値項目のみ。和がちょうど 1 になるとは限らない |
+| `"refined_normal"` | 歪度を補正した正規近似 | 2 値項目のみ。和がちょうど 1 になるとは限らない |
+| `"poisson"` | Poisson 近似 | 2 値項目のみ。すべての確率が小さいときに使える |
+
+`log=True` は対数確率を返す。`"recursion"` では再帰そのものを対数空間で行い、0 にアンダーフローするはずの裾の確率も
+保つ（そのぶん遅い）。他の方法では結果の対数をとる。形が合わない、`method` が未知、`K != 2` で近似を指定した、の
+いずれかで `SpecificationError`。
 
 ---
 

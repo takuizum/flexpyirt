@@ -284,14 +284,15 @@ class ItemKernel(Protocol):
 （`b_se` / `bk_se`）は JAX の前向き自動微分によるヤコビアンを用いたデルタ法で求める（§15.18）。
 
 ## 8. スコアリング
-`FitResult.score(data, *, method="EAP"|"MAP"|"ML"|"WLE"|"PV", group=None, item_names=None, key=None, n_draws=5)`:
+`FitResult.score(data, *, method="EAP"|"MAP"|"ML"|"WLE"|"PV"|"EAPsum", group=None, item_names=None, key=None, n_draws=5)`:
 - **EAP**（Bock & Mislevy, 1982）: 推定済みモデルと同じ求積格子上で、回答者の群の推定済み潜在分布を事前分布とする事後平均と事後 SD。
 - **MAP**: 群の推定済み正規潜在分布を連続事前分布として $\log L(\theta\mid y) + \log\phi(\theta;\mu_g,\sigma_g^2)$ を最大化するベイズ最頻値推定。SE は最頻値における観測事後情報量 $(-\partial^2/\partial\theta^2)^{-1/2}$（§15.22）。
 - **ML**: $\log L(\theta\mid y)$ を最大化する最尤推定。SE は観測情報量 $(-\partial^2\log L/\partial\theta^2)^{-1/2}$。有限の最大値を持たないパターンは $-\infty$ / $+\infty$（全欠測は NaN）、SE は NaN（§15.23）。
 - **WLE**（Warm, 1989; Firth, 1993）: 観測項目にわたる Fisher テスト情報量 $I(\theta)$ と JAX 自動微分による $J(\theta) = \partial I/\partial\theta$ を用いて $\partial\log L/\partial\theta + J(\theta)/(2I(\theta)) = 0$（等価に $\log L(\theta\mid y) + \tfrac{1}{2}\log I(\theta)$ の最大化）を解く重み付き最尤推定。極端パターンでも有限。SE は mirt の既定に合わせて WLE 目的関数の観測曲率から計算（§15.24）。
 - **PV**（Mislevy, 1991）: 細かい等間隔格子上の事後分布から区分線形逆 CDF 補間により回答者ごとに独立に `n_draws` 個を抽出し、`pv1..pvM` 列の DataFrame を返す。明示的な `key: jax.Array` が必須（未指定は `SpecificationError`）で、`key` に対して決定的（§15.25）。
+- **EAPsum**（Thissen, Pommerich, Billeaud & Williams, 1995）: 合計得点を与えたときの事後平均と事後 SD。回答者の群の合計得点の表を引く。欠測が 1 つでもある回答者は NaN。1 次元で潜在分布が `Normal` のモデルのみ（§18.2）。
 
-すべての手法で欠測反応は尤度（および WLE の $I(\theta)$）から除く。すべての手法がユニークパターン圧縮と 2 のべき乗パディングを用いてデータ値に依存しない形状で `jit` 実行される（§15.21）。
+EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)$）から除く。EAPsum 以外のすべての手法がユニークパターン圧縮と 2 のべき乗パディングを用いてデータ値に依存しない形状で `jit` 実行される（§15.21）。
 
 ## 9. 性能方針
 - パターン圧縮 + バケットパディングで再コンパイルを抑える。
@@ -1338,28 +1339,41 @@ class ItemKernel(Protocol):
     含むシミュレーションの GPCM。推定し直した値は $10^{-5}$ で一致する（観測値 $\le1.2\times10^{-7}$）。テストでは
     ほかに、推定し直した値を項目を除いたデータへの `fit()` と、近似を 15 項目のデータで推定し直した値と（`"newton"`
     1 ステップ 0.03、2 ステップ 0.02、`"one_step"` 0.05）、vmap した勾配を 1 つずつの勾配と比べる。
-18. **パッケージの分割: `flexpyctt`（2026-11-25 決定、issue #87）**: 推定済みの IRT モデルを使わない道具を、JAX に依存
+18. **パッケージの分割: `flexpyctt` と `flexpyequate`（2026-11-25 決定、issue #87）**: 推定済みの IRT モデルを使わない道具を、JAX に依存
     しない別の配布物としてこのリポジトリから公開する。flexpyirt は BA-EM による推定と、その結果を使う道具に絞る。
 
     | 配布物 | 範囲 | 依存 |
     |---|---|---|
     | `flexpyirt` | 推定。`FitResult` を使う道具（`local_dependence()`、`jsi()`、`model_parallel_analysis()`、`link()`、IRT の等化）。`dimensionality()` のレポート | JAX、`flexpyctt` |
     | `flexpyctt` | モデルを使わない項目・テスト分析: `polychoric()`、`parallel_analysis()`、`velicer_map()`、`empirical_kaiser()`、`efa()`、`hull()`、`comparison_data()`、`detect()`、`exploratory_detect()`、`dimtest()`。今後、古典的項目分析と Mantel–Haenszel DIF | NumPy、SciPy、pandas |
-    | `flexpyequate`（今後） | 得点分布の等化のみ | NumPy、SciPy、pandas |
+    | `flexpyequate` | 得点分布の等化のみ: 平均等化、線形等化、等パーセンタイル等化、アンカーテストを使う方法、対数線形モデルによる事前平滑化、カーネル等化（設計文書は別にある: `packages/flexpyequate/docs/DESIGN.ja.md`） | NumPy、SciPy、pandas |
 
     **配置**: uv ワークスペース。flexpyirt はリポジトリのルートに置いたままにする（`pyproject.toml`、`src/flexpyirt/`、
     `tests/`）。issue の `packages/flexpyirt/` への移動は見送る（ディレクトリを動かすと、開いているすべてのブランチと
     衝突するため）。メンバーは `packages/*`。`packages/flexpyctt/` は自分の `pyproject.toml`、`README.md`（PyPI の
     ページ。リンクは絶対 URL）、`LICENSE`、`src/flexpyctt/`、`tests/`（`tests/reference/` を含む）、`validation/` を持つ。
     flexpyirt は flexpyctt に依存する（`[tool.uv.sources] flexpyctt = { workspace = true }`）ので、
-    `pip install flexpyirt` だけですべての道具が入る。**バージョンは 1 つ**: どちらも同じタグ `vX.Y.Z` を hatch-vcs で
+    `pip install flexpyirt` だけでこの 2 つの道具はすべて入る。`packages/flexpyequate/` も同じ構成である
+    （`docs/DESIGN.md` が加わる。R スクリプトはルートの `validation/r/equate_*.R`）。**flexpyequate は独立している**:
+    JAX も flexpyirt も flexpyctt も import せず、その 2 つも flexpyequate に依存せず、再公開もしない
+    （`pip install flexpyirt` では入らない）。ルートでは `dev` の依存グループにだけ入れてあり、`uv sync` でテスト用に
+    インストールされる。flexpyirt の sdist には含めない。項目パラメータを使う等化は flexpyirt に残す。
+    **バージョンは 1 つ**: 3 つとも同じタグ `vX.Y.Z` を hatch-vcs で
     読む（メンバー側は `raw-options.root = "../.."`）。リリースのワークフローは `uv build --package` でそれぞれをビルド
-    し、flexpyctt を flexpyirt より先に公開する。flexpyirt は flexpyctt の非公開ヘルパーをいくつか使う（後述）ので、
+    し、flexpyctt を flexpyirt より先に公開する。flexpyequate は自分の PyPI のジョブを持ち、どちらも待たない。flexpyirt は flexpyctt の非公開ヘルパーをいくつか使う（後述）ので、
     2 つは同じバージョンで使う前提。依存にはまだバージョンの範囲を付けていない（未決: ビルドフックで
     `flexpyctt==<同じバージョン>` に固定する）。
 
     **flexpyctt は JAX を import しない**。64 ビットの設定も要らない（NumPy は float64）。CI のジョブが flexpyctt
-    だけをインストールし、`jax` が無いことを確かめたうえでテストを実行する。
+    だけをインストールし、`jax` が無いことを確かめたうえでテストを実行する。別のジョブが flexpyequate について同じことを
+    行う（`jax`、`flexpyirt`、`flexpyctt` が無いことを確かめる）。
+    **ツールの設定**: flexpyirt と flexpyctt の ruff と mypy は、ルートの `pyproject.toml` で設定する。flexpyequate は
+    同じ規則の `[tool.ruff]` と `[tool.mypy]` を自分で持つ（ruff はルートから実行してもそのディレクトリにはその設定を
+    使う。mypy は `packages/flexpyequate/` で実行する）。flexpyequate のテストはルートと同じ `tests` という名前の
+    パッケージで、同じ名前のパッケージ 2 つを 1 回の mypy では扱えないためである。**ドキュメントサイト**: flexpyctt の
+    道具はユーザーガイドと API リファレンスで説明する（flexpyirt が再公開している）。flexpyequate は 1 ページ
+    （`docs/equating.md`）で、`scripts/mkdocs_hooks.py` がそこにパッケージの README（PyPI のページ）を入れる。文章は
+    1 か所にしかない。
 
     **ポリコリック相関の 2 つの実装。** `flexpyctt.polychoric()` は §16.9 の推定量を NumPy / SciPy で新しく実装した
     もの（定義、引数、既定値、警告、`PolychoricResult` は同じ）:
@@ -1546,6 +1560,122 @@ class ItemKernel(Protocol):
      Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC、双因子 2PL（`bfactor()`）。双因子モデルと two-tier モデル（§17.1、§17.2）に
      特別な扱いは要らない。次元縮約した E-step も `counts` で動く。two-tier は行の複製との一致だけで確かめる。推定値、
      対数尤度、AIC、BIC、Oakes の SE が共通の許容誤差内で一致する（VALIDATION.ja.md V34）。
+## 18. 合計得点分布のカーネル、情報関数と信頼性（M7）
+
+1. **Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰（`summed_score_distribution`、V36）**:
+   **計算するもの。** $\theta$ を与えると、項目得点 $X_j\in\{0,\dots,K_j-1\}$ はカテゴリ確率
+   $P_{jk}(\theta)$ をもつ独立な変数になる。カーネルは合計得点 $S=\sum_jX_j$ の分布
+   （$s=0,\dots,S_{\max}=\sum_j(K_j-1)$）を返す。2 値項目なら $S$ は独立で同一でない Bernoulli 変数の
+   和、つまり成功確率 $p_j(\theta)$ の **Poisson 二項分布**である（González, Wiberg & von Davier,
+   2016）。多値項目なら、独立なカテゴリ得点の和の分布になる。Lord–Wingersky (1984) の再帰（多値項目は
+   Thissen, Pommerich, Billeaud & Williams, 1995）は、この分布を直接たたみ込みで求める算法で、
+   Poisson 二項分布の文献でいう再帰式「RF」（Hong, 2013）と同じものである。
+   **API（決定、オーナー 2026-11-25）。** `summed_score_distribution(probs, *, method="recursion",
+   log=False)`。`probs` の形は `(..., J, K)`: $J$ 項目のカテゴリ確率で、各行の和は 1、カテゴリ数が
+   $K$ より少ない項目は 0 で埋める。先頭の軸（求積節点、受検者など）はバッチ軸。結果の形は
+   `(..., J(K-1)+1)` で、その項目集合の最大得点を超える得点の確率は 0 になる。関数は純粋な JAX の
+   カーネルで、どの方法でも `jit`・`vmap`・自動微分が通る。値の検査はしない（`jit` の中から呼ばれると
+   検査できないため）。検査するのは形と `method` だけ（`SpecificationError`）。
+   **方法。**
+   - `"recursion"`（既定、厳密）: $L_j(s)=\sum_kL_{j-1}(s-k)P_{jk}$、$L_0(0)=1$ を、固定長ベクトル上の
+     項目についての `lax.scan` で計算する。バッチ要素あたり $O(JKS_{\max})$。すべての項が非負なので
+     桁落ちがなく、各確率の相対誤差は裾も含めて数 ulp の $J$ 倍程度。`log=True` では対数空間で再帰する:
+     $\log L_j(s)=\operatorname{logsumexp}_k[\log L_{j-1}(s-k)+\log P_{jk}]$。通常の再帰では 0 に
+     アンダーフローする、倍精度の最小値（$\approx10^{-308}$）より小さい裾の確率も保てる（長いテスト、
+     極端な $\theta$）。
+   - `"fft"`（丸め誤差の範囲で厳密）: 特性関数の離散フーリエ変換（DFT-CF; Hong, 2013）。
+     $\omega_l=2\pi l/(S_{\max}+1)$ で $\varphi(\omega_l)=\prod_j\sum_kP_{jk}e^{i\omega_lk}$ を求め、
+     $P(S=s)=\frac1{S_{\max}+1}\sum_l\varphi(\omega_l)e^{-i\omega_ls}$ をバッチ化した FFT 1 回で計算する。
+     誤差は確率の大きさによらず**絶対誤差**で約 $10^{-16}$。$\sim10^{-15}$ より小さい確率には正しい桁が
+     ない（丸めで負になった値は 0 に切り上げる）。裾が効く用途（S-$X^2$、極端な得点の対数尤度）には
+     使ってはならない。`log=True` は結果の対数をとるだけ。
+   - `"normal"`・`"refined_normal"`・`"poisson"`（近似。2 値項目 $K=2$ のみ。それ以外の $K$ は
+     `SpecificationError`。R の参照があるのが 2 値の場合だけのため）: $\mu=\sum_jp_j$、
+     $\sigma^2=\sum_jp_j(1-p_j)$、$\gamma=\sigma^{-3}\sum_jp_j(1-p_j)(1-2p_j)$ として、連続修正つきの
+     正規近似は $P(S\le s)\approx\Phi(x)$、$x=(s+0.5-\mu)/\sigma$。精密化正規近似は
+     $P(S\le s)\approx G(x)$、$G(x)=\Phi(x)+\gamma(1-x^2)\phi(x)/6$ を $[0,1]$ に切り詰めたもの
+     （Volkova, 1996; Hong, 2013）。$s$ の確率は隣り合う値の差なので、和がちょうど 1 になるとは
+     限らない。Poisson 近似は $P(S=s)\approx e^{-\mu}\mu^s/s!$（Le Cam, 1960）で、全変動距離の誤差は
+     高々 $\sum_jp_j^2$。すべての $p_j$ が小さいときにだけ役に立つ。近似の計算量は $O(J+S_{\max})$ で、
+     任意で使える高速な経路という位置づけ。flexpyirt の内部では使わない。
+   **再利用。** `_itemfit.lord_wingersky`（S-$X^2$）は同じカーネルを呼ぶようにする。V15 の参照値は
+   変わらない。合計得点 EAP と IRT 観測得点等化もこれを使う（#82）。
+   **精度と速度の実測**は VALIDATION.md（V36）に記録する。
+
+2. **情報関数・期待得点・信頼性・合計得点 EAP（#82、V37）**:
+   **範囲。** 1 次元モデル（単一群・多母集団）。多次元モデルではどの関数も `SpecificationError`
+   （情報行列と方向別の情報量は別の変更で扱う）。
+   **API（決定、オーナー 2026-11-25）。** `link()` や `dimensionality()` と同じく、推定結果を第 1 引数に
+   とるモジュール関数にする: `item_information(res, theta, *, group=None)`、
+   `test_information(res, theta, *, group=None)`、`expected_score(res, theta, *, group=None)`、
+   `reliability(res, data=None, *, group=None, item_names=None)`、`summed_score_table(res)`、および
+   `FitResult.score(data, method="EAPsum")`。$\theta$ の関数 3 つは `theta` をインデックスにした
+   DataFrame を返す（`.plot()` でそのまま曲線になる）。多母集団モデルでは `group=`（群名）が必須
+   （項目が群で異なりうるため）。`reliability()` と `summed_score_table()` は、多母集団モデルでは
+   `item_fit()` と同じく先頭に `group` 列を付けて群ごとの行（ブロック）を返す。`reliability()` の
+   `group=` は `score()` と同じく `data` の各行の群ラベル。
+   **項目情報量・テスト情報量。** すべての項目族について、項目カーネルのカテゴリ対数確率を JAX で
+   自動微分して求める（導関数は手書きしない。§15.24 の WLE と同じ式）:
+   $$I_j(\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\theta)\Big(\frac{\partial\log P_{jk}(\theta)}{\partial\theta}\Big)^2,\qquad
+   I(\theta)=\sum_jI_j(\theta),\qquad \mathrm{SE}(\theta)=I(\theta)^{-1/2}$$
+   （Birnbaum, 1968; Samejima, 1969）。mirt の `iteminfo()` は、代数的に等しい
+   $\sum_k[(P'_{jk})^2/P_{jk}-P''_{jk}]$（$\sum_kP''_{jk}=0$）を手書きの導関数で計算する。
+   `item_information` は項目ごとに 1 列、`test_information` は `information` と `se`（$\theta$ の
+   有効推定量の条件付き測定標準誤差）の 2 列。
+   **期待得点。** 項目ごとの $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ と、テスト特性曲線
+   $T(\theta)=\sum_jE_j(\theta)$（列 `total`。`total` という名前の項目があれば
+   `SpecificationError`）。カテゴリの得点はデータのコードと同じ $0,\dots,K_j-1$ で、観測された最小
+   カテゴリが 0 のときの mirt の `expected.item()` / `expected.test()` に一致する。
+   **周辺信頼性。** 潜在分布が $N(\mu_g,\sigma_g^2)$、テスト情報量が $I_g$ の群 $g$ について
+   $$\bar\rho_g=\int\frac{\sigma_g^2I_g(\theta)}{\sigma_g^2I_g(\theta)+1}\,\phi(\theta;\mu_g,\sigma_g^2)\,d\theta .$$
+   誤差分散 $1/I(\theta)$ の得点の条件付き信頼性 $\sigma^2/(\sigma^2+I(\theta)^{-1})$ を潜在分布で
+   平均したもの（Green, Bock, Humphreys, Linn & Reckase, 1984; Thissen & Wainer, 2001）。mirt の
+   `marginal_rxx()` が計算するのは $\int\frac{I(\theta)}{I(\theta)+\sigma^2}\phi(\theta;0,1)\,d\theta$
+   で、$\mu=0$、$\sigma^2=1$（既定の識別をした単一群モデルはすべて）なら同じ値になるが、それ以外の
+   $(\mu,\sigma^2)$ では推定された密度で積分しておらず、潜在尺度の線形変換に対して不変でもない。
+   flexpyirt の定義は不変である: $\theta^*=(\theta-\mu)/\sigma$ とすると情報量は
+   $I^*(\theta^*)=\sigma^2I(\theta)$ で、$\bar\rho$ は $\int I^*/(I^*+1)\,\phi(\theta^*)\,d\theta^*$ になる。
+   そこで $\sigma^2\ne1$ や $\mu\ne0$（標準でない固定の `Normal`、多母集団モデルの焦点群）の参照値は、
+   **標準化した等価モデル**（$a^*=a\sigma$、$d^*=d+a\mu$、潜在分布 $N(0,1)$）に対する mirt の
+   `marginal_rxx()` と、mirt の `testinfo()` を使って上の式を直接 `integrate()` した値にする。
+   積分は推定に使った求積ではなく専用の格子で評価する: $\mu_g\pm8\sigma_g$ 上の等間隔 801 点、重みは
+   $\propto\phi$（矩形則）。被積分関数は解析的で、正規の重みは両端で消えるので、この則は幾何級数的に
+   収束する（打ち切り $2\Phi(-8)\approx10^{-15}$）。結果はモデルの推定に使った求積に依存しない。mirt は
+   R の既定の許容誤差（`rel.tol` $\approx1.2\times10^{-4}$）で `integrate()` を呼ぶので、参照値には
+   `rel.tol = 1e-12` での再計算も保存する。
+   **経験的信頼性。** `data` の受検者の EAP 得点 $\hat\theta_i$ と事後 SD $\mathrm{SE}_i$
+   （`score(method="EAP")`、推定に使った格子上）から
+   $$\hat\rho=\frac{s^2_{\hat\theta}}{s^2_{\hat\theta}+\overline{\mathrm{SE}^2}},\qquad
+   s^2_{\hat\theta}=\frac1{N-1}\sum_i(\hat\theta_i-\bar{\hat\theta})^2,\quad
+   \overline{\mathrm{SE}^2}=\frac1N\sum_i\mathrm{SE}_i^2 .$$
+   mirt の `empirical_rxx()`（既定の `T_as_X = FALSE`）と同じ。EAP 得点の分散が真の得点の分散を、
+   事後分散の平均が誤差分散を推定し、その和が $\sigma^2$ を推定する（Thissen & Wainer, 2001）。
+   多母集団モデルでは群ごとに、その群の受検者から計算する（mirt は `multipleGroup` の全受検者を
+   まとめて計算する。群ごとの値は、その群の行に対する `empirical_rxx()` に等しい）。欠測のある行も
+   通常どおり採点して含める（mirt と同じ）。受検者が 2 人未満の群は NaN。`reliability(res)` は列
+   `marginal` を返し、`data` を渡すと `empirical` が加わる。
+   **合計得点 EAP**（Thissen, Pommerich, Billeaud & Williams, 1995）。推定に使った求積節点 $\theta_q$ と
+   潜在重み $w_{gq}$（EM が積分に使う重み）、および `summed_score_distribution`（項目 1、厳密な再帰）で
+   求めた $L_g(s\mid\theta_q)$ から
+   $$P_g(s)=\sum_qL_g(s\mid\theta_q)w_{gq},\qquad
+   \hat\theta_g(s)=\frac{\sum_q\theta_qL_g(s\mid\theta_q)w_{gq}}{P_g(s)},\qquad
+   \mathrm{SD}_g(s)=\Big(\frac{\sum_q(\theta_q-\hat\theta_g(s))^2L_g(s\mid\theta_q)w_{gq}}{P_g(s)}\Big)^{1/2}.$$
+   `summed_score_table(res)` は $s=0,\dots,\sum_j(K_j-1)$ について `score`・`theta`・`se`・
+   `probability`（$P_g(s)$、モデルが含意する合計得点分布）を返す。mirt の
+   `fscores(method = "EAPsum", full.scores = FALSE)` は同じ表で、`expected` $=N\,P(s)$。観測度数と
+   $X^2$ はデータが必要なので再現しない。$P_g(s)$ が 0 にアンダーフローした得点の `theta` と `se` は
+   NaN。`score(data, method="EAPsum")` は、各受検者の合計得点をその受検者の群の表で引く。
+   **欠測のあるパターン**: 1 つでも欠測のある受検者の `theta` と `se` は NaN にする。観測された項目だけの
+   合計得点は表の尺度に乗らないため。mirt の `fscores(method = "EAPsum", full.scores = TRUE)` も
+   同じ（`NA`）。観測された項目だけの部分テストで採点する方式（欠測パターンごとに表を作る）は
+   入れていない。
+   **潜在分布。** 情報量と期待得点は潜在分布を使わないので、1 次元モデルならどれでも使える。信頼性・
+   合計得点の表・EAPsum 採点は、`Normal` の潜在分布（平均・分散は任意、単一群と多母集団）でのみ照合
+   している。`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` は `SpecificationError`
+   （推定された非正規の密度に対応するものが mirt の `marginal_rxx()` になく、mirt の EAPsum は既定で
+   正規の事前分布を使うため）。
+   **`FitResult` に新しく保存するものはない。** `schema_version` は変えない。
+   **一致の実測値**は VALIDATION.md（V37）に記録する。
 
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1577,10 +1707,13 @@ class ItemKernel(Protocol):
 - Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
 - Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
+- González, J., Wiberg, M., & von Davier, A. A. (2016). A note on the Poisson's binomial distribution in item response theory. *Applied Psychological Measurement*, 40(4), 302–310.
 - Goretzko, D., & Bühner, M. (2020). One model to rule them all? Using machine learning algorithms to determine the number of factors in exploratory factor analysis. *Psychological Methods*, 25(6), 776–786.
+- Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
+- Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
@@ -1588,6 +1721,7 @@ class ItemKernel(Protocol):
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
+- Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -1626,10 +1760,13 @@ class ItemKernel(Protocol):
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
+- Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
+- Thissen, D., & Wainer, H. (Eds.). (2001). *Test Scoring*. Lawrence Erlbaum Associates.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Velicer, W. F. (1976). Determining the number of components from the matrix of partial correlations. *Psychometrika*, 41(3), 321–327.
 - Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
+- Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.

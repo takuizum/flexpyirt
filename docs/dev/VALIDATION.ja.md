@@ -68,6 +68,8 @@
 | V32 | 次元縮約による双因子モデル（特殊因子 3 つと一般因子のみの項目 3 つを含む 2PL、テストレット 3 つの GRM $K=4$） | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | 次元縮約による two-tier モデル（相関する主因子 2 つと特殊因子 3 つ（1 つは両方の主因子にまたがる）の 2PL、交差負荷項目 1 つとテストレット 2 つの GRM $K=4$） | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
 | V34 | 標本ウェイト: 非整数ウェイト（合計 $\ne N$、ウェイト 0 が 5 行）の 2PL、合計を $N$ に正規化したウェイトの Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC、次元縮約による双因子 2PL。推定値、対数尤度、AIC、BIC、Oakes の SE | `mirt(..., survey.weights = w)`、`multipleGroup(..., survey.weights = w)`、`bfactor(..., survey.weights = w)`、`SE.type = "Oakes"` | M7 |
+| V36 | 合計得点分布のカーネル（Poisson 二項分布: 確率ベクトル 5 例、$J$ 10〜300。多値: GRM $K=4$ と 2PL + GRM の混合） | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`、`poibin::dpoibin()`、`stats::dpois()`。mirt の `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
+| V37 | mirt の推定値での情報関数・期待得点・信頼性・合計得点 EAP（2PL $J=12$。同じモデルで欠測 8%。3PL $J=12$。GRM と GPCM $K=4$、$J=8$。名義 $K=4$、$J=6$。2PL + 3PL + GRM + GPCM + 名義の混合 $J=14$。2 群の 2PL + GRM で焦点群の平均・分散を推定） | `iteminfo()`、`testinfo()`、`expected.item()`、`expected.test()`、`marginal_rxx()`、`empirical_rxx()`、`fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -681,6 +683,71 @@
     総当たり積分と比べる（$10^{-12}$ 以内。欠測、GRM 項目、交差負荷項目、特殊因子のない項目を含む）。主因子 1 つの
     two-tier モデルは双因子の経路と、特殊因子 1 つのモデルは照合済みの 3 次元の経路（`with_factors()` で特殊因子の
     相関を 0 に固定。対数尤度が $10^{-12}$ で一致）と比べる。
+- **合計得点分布のカーネル（V36、M7）**: `summed_score_distribution()`（DESIGN §18.1）を
+  `tests/test_r_m7_sumscore.py` で照合する（fast tier。生成スクリプト `validation/r/m7_sumscore_reference.R` →
+  `tests/reference/v36_sumscore.json`、poibin 1.6、mirt 1.48）。
+  - **2 値項目（Poisson 二項分布）**: 確率ベクトル 5 例（`uniform_10`: $J=10$、$p\sim U(0.05, 0.95)$。
+    `twopl_50`: $\theta=0.4$ での 2PL。`extreme_200`: $\theta=-3$ での 2PL。`rare_300`: $p\sim U(0.001, 0.02)$。
+    `equal_40`: $p=0.3$）。絶対差の最大値: `"recursion"` と poibin の再帰式（累積分布）で `2.9e-15`、DFT-CF の
+    確率関数で `5.8e-16`。`"fft"` と DFT-CF の確率関数で `6.1e-16`。`"normal"` と `method = "NA"` で `1.2e-15`。
+    `"refined_normal"` と `"RNA"` で `1.3e-15`。`"poisson"` と `dpois` で `8.5e-16`（許容誤差は絶対 $10^{-13}$、
+    `"poisson"` は相対 $10^{-11}$）。poibin の厳密値は累積分布か DFT-CF から来るので、確かめられるのは絶対精度だけ。
+    裾の相対精度は、単体テストの総当たり列挙と二項分布の特別な場合で確かめる。
+  - **多値項目**: GRM（$K=4$、$J=10$、$N=1500$）と、2PL 5 項目 + GRM 5 項目についての mirt の合計得点の表。
+    参照値には mirt の 61 節点上のカテゴリ確率（`probtrace`）と重みを保存してあるので、試されるのはカーネルだけ。
+    $N\sum_qw_qL(s\mid\theta_q)$ は mirt の `expected` 列と `3.1e-15`（相対）で一致し、カーネルから作った合計得点
+    ごとの $\theta$ の EAP と事後 SD は mirt の値と `5.3e-15` / `3.1e-15` で一致する。
+  - **S-$X^2$（V15）**: `_itemfit.lord_wingersky` はこのカーネルを呼ぶようになった。V15 の照合テストは、参照値と
+    許容誤差を変えずに通る。
+  - **単体テスト**（`tests/test_m7_sumscore.py`）: $K\in\{2,3,4\}$ が混在する場合の全反応パターンの列挙（相対
+    $10^{-13}$、厳密な 2 方法とも絶対 $5\times10^{-16}$）、二項分布の特別な場合、$P=10^{-4000}$（2000 項目）での
+    対数空間の再帰、全方法の `jit` / `vmap` / `grad`、勾配の恒等式
+    $\partial P(S=s)/\partial p_j=P_{-j}(s-1)-P_{-j}(s)$。
+  - **厳密な 2 方法の精度と速度**（61 節点、jit 済み、この検証用マシンの CPU、1 回あたりミリ秒）: $J=50, K=2$ で
+    再帰 0.10、対数空間の再帰 2.7、FFT 0.51。$J=200, K=2$ で 1.0 / 49 / 6.8。$J=1000, K=2$ で 57 / 1200 / 174。
+    $J=100, K=5$ で 2.9 / 178 / 9.7。FFT と再帰の絶対差の最大値はどの場合も $3\times10^{-16}$〜$1.1\times10^{-15}$
+    だが、最小の確率は $10^{-31}$〜$10^{-308}$ なので、FFT はそこでは 1 桁も合わない。この実装では、厳密な方法の
+    うち再帰のほうが精度も速度も上なので（特性関数の計算自体に $O(JS_{\max})$ かかる）、既定は再帰のままとし、
+    FFT は比較用に提供する。
+- **情報関数・期待得点・信頼性・合計得点 EAP（V37、M7）**: DESIGN §18.2 を `tests/test_mirt_m7_information.py` で
+  照合する（slow tier、約 30 秒。生成スクリプト `validation/r/m7_information_reference.R` →
+  `tests/reference/v37_information.json`、mirt 1.48、$[-6, 6]$ 上の 61 点）。どのモデルも mirt で推定し
+  （`TOL = 1e-8`、収束）、その推定値を全パラメタ固定（`table=`、`free = False`）の flexpyirt の `FitResult` に
+  入れるので、比べるのは統計量だけ。ケース: `twopl`（$J=12$、$N=2000$）、`twopl_missing`（$N=800$、8% MCAR）、
+  `threepl`（$J=12$、$N=5000$）、`grm` と `gpcm`（$K=4$、$J=8$、$N=2000$）、`nominal`（$K=4$、$J=6$、$N=3000$）、
+  `mixed`（2PL 4、3PL 3、GRM $K=4$ 3、GPCM $K=3$ 2、名義 $K=3$ 2。$N=5000$）、`twogroup`（2PL 6 + GRM $K=4$ 4、
+  全項目不変、各群 $N=1500$。焦点群は $\hat\mu=0.480$、$\hat\sigma^2=1.590$）。全ケースでの差の最大値:
+  - **`iteminfo()` / `testinfo()`**（$\theta\in\{-6,-4,-3.5,\dots,4,6\}$）: 項目情報量は絶対 `1.4e-14`
+    （相対では `4.5e-9`。情報量が $10^{-6}$ 程度になる名義項目で生じる。mirt は
+    $\sum_k[(P'_k)^2/P_k-P''_k]$ を計算しており、そこで桁落ちする）。テスト情報量は相対 `8.3e-13`。許容誤差は
+    相対 $10^{-9}$ + 絶対 $10^{-12}$。
+  - **`expected.item()` / `expected.test()`**: 絶対 `7.5e-15` / 相対 `2.1e-14`（許容誤差は同じ）。
+  - **周辺信頼性**: `integrate(rel.tol = 1e-12)` で再計算した `marginal_rxx()` に対して `1.4e-15`、
+    `marginal_rxx()` そのもの（R の既定の許容誤差、相対で約 $1.2\times10^{-4}$）に対して `4.5e-11`
+    （許容誤差は絶対 $10^{-10}$ と $10^{-8}$）。2 群モデルの参照値は、標準化した等価な単一群モデル
+    （$a^*=a\sigma$、$d^*=d+a\mu$、$N(0,1)$）の `marginal_rxx()` で、両群を通じて `1.0e-15`（厳しい許容誤差）と
+    `1.4e-11`（既定）。mirt の `testinfo()` を使って
+    $\sigma^2I/(\sigma^2I+1)\,\phi(\theta;\mu,\sigma^2)$ を直接 `integrate()` した値とも `1.0e-15` で一致する。
+    mirt 自身の式を焦点群に当てはめた値（`marginal_rxx(extract.group(mg, "focal"))`）は 0.7288 で、不変な定義の
+    値は 0.8337。これは定義の違い（DESIGN §18.2）であって精度の違いではない。テストでは両者が異なることを
+    確かめている。
+  - **`empirical_rxx()`**（`fscores(method = "EAP", full.scores.SE = TRUE)` に対して。欠測のあるケースと、
+    2 群モデルの各群を含む）: `4.4e-16`（許容誤差 $10^{-9}$）。
+  - **`fscores(method = "EAPsum", full.scores = FALSE)`**: EAP は `6.2e-15`、事後 SD は `9.4e-16`
+    （許容誤差は絶対 $10^{-9}$）。`probability` $\times N$ と `expected` は相対 `7.8e-15`（許容誤差 $10^{-9}$）。
+  - **`fscores(method = "EAPsum", full.scores = TRUE)`**（一意な反応パターンごと）: EAP は `6.2e-15`、SD は
+    `9.4e-16`。`twopl_missing` では一意なパターン 660 個のうち 453 個に欠測があり、mirt はちょうどそれらに `NA` を
+    返し、flexpyirt は NaN を返す（mirt は欠測のあるデータに対して `full.scores = FALSE` の表を作らないので、
+    このケースに表の参照値はない）。
+  - **照合しておらず `SpecificationError` になるもの**: 多次元モデル（全関数）。`EmpiricalHistogram`・
+    `DavidianCurve`・`NormalMixture` での信頼性・合計得点の表・EAPsum。`multipleGroup` の全受検者をまとめた
+    `empirical_rxx()`（`empirical_rxx_pooled` として保存）に対応するものは flexpyirt にない。flexpyirt は群ごとに
+    報告する。
+  - **単体テスト**（`tests/test_m7_information.py`、fast tier）: 2PL（$a^2PQ$）と 3PL（Birnbaum）の閉形式
+    （$10^{-12}$）、2PL / 3PL / 4PL / GRM / GPCM / 名義のカテゴリ確率の中心差分（$10^{-8}$）、カテゴリ確率から
+    求めた期待得点、6 項目の混合テストの全 288 反応パターンの総当たりによる合計得点の表（$10^{-12}$）、
+    全期待値の法則、潜在尺度の線形変換に対する周辺信頼性の不変性（$10^{-13}$）、信頼性の範囲と、
+    シミュレーションデータでの周辺・経験的信頼性の近さ、エラーの経路。
 - **標本ウェイト（V34、M7）**: mirt の `survey.weights`（mirt 1.48、`optimizer = "NR"`、`TOL = 1e-10`、
   `SE.type = "Oakes"`）。参照ファイルは行ごとのウェイトとともに元の行を保存するので、ウェイトを足し合わせる
   パターン圧縮も比較の対象になる。V34a: シミュレーションの 2PL（$J=10$、$N=1000$）、合計点と関係する対数正規

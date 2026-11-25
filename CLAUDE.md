@@ -2,7 +2,7 @@
 
 このリポジトリは、JAX ベースの Bock–Aitkin EM (BA-EM) による IRT 推定ライブラリ **flexpyirt**の
 リポジトリです（M2 まで実装済み）。推定済みのモデルを使わない道具は、JAX に依存しない別の配布物 **flexpyctt**
-（`packages/flexpyctt/`）として同じリポジトリから公開します（下の「パッケージ構成」）。以下のドキュメントを読んでから作業を始めてください（各文書は英語版 `*.md` と日本語版 `*.ja.md` があり、内容は同じ。更新するときは両方を直す）。
+（`packages/flexpyctt/`）として、得点分布の等化は同じく JAX に依存しない **flexpyequate**（`packages/flexpyequate/`）として、同じリポジトリから公開します（下の「パッケージ構成」）。以下のドキュメントを読んでから作業を始めてください（各文書は英語版 `*.md` と日本語版 `*.ja.md` があり、内容は同じ。更新するときは両方を直す）。
 
 | ファイル | 内容 |
 |---|---|
@@ -25,12 +25,13 @@
 
 ## パッケージ構成（DESIGN.md §16.18、CONTRIBUTING.md「パッケージ」）
 
-uv ワークスペース。配布物は 2 つで、同じタグから同じバージョンで公開する。
+uv ワークスペース。配布物は 3 つで、同じタグから同じバージョンで公開する。
 
 | 配布物 | 場所 | 内容 |
 |---|---|---|
 | `flexpyirt` | ルート（`pyproject.toml`、`src/flexpyirt/`、`tests/`） | 推定と、`FitResult` を使うものすべて。JAX と flexpyctt に依存 |
 | `flexpyctt` | `packages/flexpyctt/` | モデルを使わない項目・テスト分析（ポリコリック相関、次元性の診断）。NumPy・SciPy・pandas のみ |
+| `flexpyequate` | `packages/flexpyequate/` | 得点分布の等化（線形、等パーセンタイル、カーネル等化）。NumPy・SciPy・pandas のみ。他の 2 つとは独立 |
 
 - **flexpyctt は JAX も flexpyirt も import しない。**乱数は `rng`（`numpy.random.Generator` または整数のシード）で受け取る。
   float64 の確認（原則 4）は JAX を使う flexpyirt だけの話。
@@ -38,7 +39,13 @@ uv ワークスペース。配布物は 2 つで、同じタグから同じバ�
   （`polychoric` だけは別で、flexpyirt のものは JAX 版）。
 - flexpyctt の照合先は mirt ではなく lavaan・psych・EFAtools・sirt など。参照値は `packages/flexpyctt/tests/reference/`、
   R スクリプトは `packages/flexpyctt/validation/r/`。
-- テストは `uv run pytest`（flexpyirt）と `uv run pytest packages/flexpyctt`（flexpyctt）。ruff と mypy はルートから両方を検査する。
+- **flexpyequate は JAX も flexpyirt も flexpyctt も import しない。**flexpyirt も flexpyequate に依存しない（ルートの
+  開発用の依存にだけ入れている）。項目パラメータを使う等化（IRT 真値等化・観測得点等化、`link()`）は flexpyirt に置く。
+  設計は `packages/flexpyequate/docs/DESIGN.md`、照合先は R の equate・kequate・SNSequate。参照値は
+  `packages/flexpyequate/tests/reference/`、R スクリプトは `validation/r/equate_*.R`。
+- テストは `uv run pytest`（flexpyirt）、`uv run pytest packages/flexpyctt`（flexpyctt）、
+  `uv run pytest packages/flexpyequate`（flexpyequate）。ruff はルートから 3 つすべてを、mypy は flexpyirt と flexpyctt を
+  検査する。flexpyequate は自分の `[tool.ruff]`・`[tool.mypy]` を持ち、mypy は `packages/flexpyequate/` で実行する。
 
 ## 開発環境
 
@@ -67,8 +74,8 @@ uv ワークスペース。配布物は 2 つで、同じタグから同じバ�
 
 - `feature/<slug>` と `fix/<issue番号>-<slug>` を `develop` から切り、`develop` へ PR。fix は issue 必須（`Closes #N`）。
 - リリースは `develop` → `main` の PR。タイトル `release(major|minor|patch): ...` で上げ方を決め、マージ後にオーナーが `release` 環境を承認するとタグ `vX.Y.Z` と GitHub Release ができる。バージョンは git タグから（hatch-vcs、`pyproject.toml` に書かない）。
-  同じワークフローの `pypi-flexpyctt` ジョブと `pypi` ジョブが、flexpyctt、flexpyirt の順に PyPI に公開し（Trusted Publishing）、`docs.yml` がドキュメントサイト（`docs/` から MkDocs、英日）を GitHub Pages に公開する。
-- `README*.md`（ルートと `packages/flexpyctt/`）は PyPI にも表示されるのでリンクは絶対 URL。**README には開発関連の情報（開発手順・テスト/CI・ブランチ運用・マイルストーン・CONTRIBUTING や docs/dev へのリンク）を置かない。**`docs/` 内は相対リンク。
+  同じワークフローの `pypi-flexpyctt` ジョブと `pypi` ジョブが flexpyctt、flexpyirt の順に、`pypi-flexpyequate` ジョブがそれと並んで flexpyequate を PyPI に公開し（Trusted Publishing）、`docs.yml` がドキュメントサイト（`docs/` から MkDocs、英日）を GitHub Pages に公開する。
+- `README*.md`（ルート、`packages/flexpyctt/`、`packages/flexpyequate/`）は PyPI にも表示されるのでリンクは絶対 URL。**README には開発関連の情報（開発手順・テスト/CI・ブランチ運用・マイルストーン・CONTRIBUTING や docs/dev へのリンク）を置かない。**`docs/` 内は相対リンク。
   サイト（`docs/*.md`）は利用者向け（使い方・理論・精度）。開発者向け文書は `docs/dev/`（サイトから除外）。
   利用者向けページにマイルストーン・DESIGN の節番号・照合ケース ID・開発手順を書かない。`uv run --group docs mkdocs build --strict` が CI と同じ検査。
 - **PR はオーナーがレビューしてマージする。Claude は PR を作るまでで、マージしない。**

@@ -38,6 +38,13 @@ from flexpyirt.dimensionality import (
     velicer_map,
 )
 from flexpyirt.fit import fit
+from flexpyirt.information import (
+    expected_score,
+    item_information,
+    reliability,
+    summed_score_table,
+    test_information,
+)
 from flexpyirt.items import GPCM, GRM, PCM, FourPL, Nominal, Rasch, ThreePL, TwoPL
 from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, Normal, NormalMixture
 from flexpyirt.linking import LinkResult, link
@@ -46,6 +53,7 @@ from flexpyirt.model import Model
 from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
+from flexpyirt.sumscore import summed_score_distribution
 
 try:
     __version__ = version("flexpyirt")
@@ -95,12 +103,18 @@ __all__ = [
     "efa",
     "empirical_kaiser",
     "errors",
+    "expected_score",
     "exploratory_detect",
     "fit",
     "hull",
+    "item_information",
     "link",
     "model_parallel_analysis",
     "parallel_analysis",
     "polychoric",
+    "reliability",
+    "summed_score_distribution",
+    "summed_score_table",
+    "test_information",
     "velicer_map",
 ]

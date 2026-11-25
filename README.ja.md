@@ -35,6 +35,8 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 結果の保存 | `FitResult.to_json()` / `FitResult.from_json()`（厳密なスキーマ、pickle 不使用） | — |
 | EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | ✓ |
 | 項目適合度 | Orlando–Thissen の S-X2（`FitResult.item_fit()`、多母集団は群ごと）。mirt と同じセルのまとめ方・自由度・RMSEA・p 値 | ✓ |
+| 合計得点 | 項目のカテゴリ確率を与えたときの合計得点の分布（`summed_score_distribution()`）。Lord–Wingersky 再帰（2 値項目では Poisson 二項分布）、その対数空間版、FFT による方法、正規・精密化正規・Poisson 近似。`jit`・`vmap`・自動微分に対応 | ✓ |
+| 情報関数と信頼性 | 自動微分によるすべての項目モデルの項目・テスト情報量（`item_information()`、条件付き標準誤差つきの `test_information()`）、期待得点とテスト特性曲線（`expected_score()`）、周辺信頼性・経験的信頼性（`reliability()`）、合計得点 EAP の表（`summed_score_table()`）と `score(method="EAPsum")`。1 次元モデル（単一群・多母集団） | ✓ |
 | 限定情報の適合度 | Maydeu-Olivares & Joe の M2 / M2*（`FitResult.m2()`）。自由度・p 値・RMSEA と信頼区間・SRMSR・2 値の TLI / CFI | ✓ |
 | DIF | 多母集団の尤度比検定による DIF（`FitResult.dif()`。mirt の `DIF()` の `add` / `drop` 方式、AIC・SABIC・HQ・BIC の差、Holm または BH で補正した p 値） | ✓ |
 | 尺度リンキング | 微分可能な特性曲線法リンキング（`link()`, `LinkResult`: Haebara・Stocking–Lord の非対称・対称版、Ogasawara デルタ法 SE、項目・$\theta$ の変換。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目で R の独立な実装と照合済み） | ✓ |
@@ -54,6 +56,11 @@ pip install flexpyirt  # または uv add flexpyirt
 同時に [flexpyctt](https://pypi.org/project/flexpyctt/) も入る。推定済みのモデルを使わない分析のための、対になる
 パッケージである。依存は NumPy、SciPy、pandas だけなので、JAX を入れたくない環境では `pip install flexpyctt` で
 単独でインストールできる。
+
+同じリポジトリから公開している 3 つめのパッケージ [flexpyequate](https://pypi.org/project/flexpyequate/) は、
+得点分布の等化（線形等化、等パーセンタイル等化、カーネル等化）を行う。flexpyirt とは独立で、flexpyirt を
+インストールしても入らない（`pip install flexpyequate`。
+[ドキュメント](https://takuizum.github.io/flexpyirt/ja/equating/)）。
 
 polars の DataFrame を使う場合は `flexpyirt[polars]`。GPU を使う場合は、先に CUDA 版の `jax` を入れる
 （[JAX のインストール手順](https://docs.jax.dev/en/latest/installation.html)）。
