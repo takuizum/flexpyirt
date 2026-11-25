@@ -86,3 +86,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
     its generator).
   - [x] D6 DIMTEST with bootstrap bias correction (`dimtest()`; accepted in V30 on a simulation study:
     type I error 0.0–2.0% at .05, conservative; power 0.99–1.00).
+- [x] Summed-score distribution kernel (`summed_score_distribution()`: the Lord–Wingersky recursion
+  as a Poisson-binomial kernel, in linear and log space, the DFT-CF method, and normal / refined
+  normal / Poisson approximations for dichotomous items; `jit` / `vmap` / autodiff; validated in V36
+  against `poibin`, `dpois` and mirt's EAPsum tables; M7 item 3, #83).

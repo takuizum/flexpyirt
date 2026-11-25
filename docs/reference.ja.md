@@ -1053,6 +1053,33 @@ dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=
 
 ---
 
+## 合計得点
+
+### `summed_score_distribution`
+
+```text
+summed_score_distribution(probs, *, method="recursion", log=False) -> Array
+```
+
+独立な項目得点の合計得点の分布（[ガイド 5 節](guide.ja.md#合計得点の分布)）。`probs` の形は `(..., J, K)` で、
+`J` 項目のカテゴリ確率（各行の和は 1。カテゴリ数が `K` より少ない項目は 0 で埋める）。たとえば、ある $\theta$ での
+IRT モデルのカテゴリ確率。先頭の軸はバッチ軸。結果の形は `(..., J * (K - 1) + 1)` で、合計得点 $0, \dots, J(K-1)$ の
+確率が入る。2 値項目なら Poisson 二項分布になる。`jax.jit`・`jax.vmap` の中で使え、微分もできる。値の検査はしない。
+
+| `method` | 内容 | 精度 |
+|---|---|---|
+| `"recursion"`（既定） | Lord–Wingersky 再帰 | 厳密。裾も含めて、どの確率も相対誤差が小さい |
+| `"fft"` | 特性関数の離散フーリエ変換 | 絶対誤差が約 `1e-16` の範囲で厳密。約 `1e-15` より小さい確率は信頼できない |
+| `"normal"` | 連続修正つきの正規近似 | 2 値項目のみ。和がちょうど 1 になるとは限らない |
+| `"refined_normal"` | 歪度を補正した正規近似 | 2 値項目のみ。和がちょうど 1 になるとは限らない |
+| `"poisson"` | Poisson 近似 | 2 値項目のみ。すべての確率が小さいときに使える |
+
+`log=True` は対数確率を返す。`"recursion"` では再帰そのものを対数空間で行い、0 にアンダーフローするはずの裾の確率も
+保つ（そのぶん遅い）。他の方法では結果の対数をとる。形が合わない、`method` が未知、`K != 2` で近似を指定した、の
+いずれかで `SpecificationError`。
+
+---
+
 ## 設定
 
 ### `BAEM`

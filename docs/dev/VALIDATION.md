@@ -68,6 +68,7 @@ English | [日本語](VALIDATION.ja.md)
 | V29 | Comparison data: PAF, the one-factor population generator from exported draws, rank-sum tests, `CD()` on 3-factor continuous, 2-factor ordinal and 1-factor binary data | EFAtools `.paf_iter`, `.simulate_cfm_empirical`, `CD()`; `wilcox.test(x, y, "less")` | M5 |
 | V30 | DIMTEST: type I error and power (2PL; $N$ 1000–2000, $J$ 20–30; unidimensional and two dimensions correlated 0.7–0.8; 200 replications each) | none (no implementation outside DIMPACK): `validation/simulation/dimtest_study.py` | M5 |
 | V31 | Jackknife slope index (LSAT7 2PL, Science GRM, simulated 2PL with two dependent pairs and 5% MCAR, simulated GPCM with a dependent pair); the Newton and one-step approximations against the refit | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
+| V36 | Summed-score distribution kernel (Poisson-binomial: five probability vectors, $J$ 10–300; polytomous: GRM $K=4$ and mixed 2PL + GRM) | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`, `poibin::dpoibin()`, `stats::dpois()`; mirt `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -577,6 +578,39 @@ English | [日本語](VALIDATION.ja.md)
   checks vs finite differences and a Monte Carlo linearization check that re-solves the linking
   for parameter draws from $N(\hat\eta, \Sigma)$ with fixed weights — not a bootstrap of the
   calibrations): `tests/test_m5_linking.py`.
+- **Summed-score distribution kernel (V36, M7)**: `summed_score_distribution()` (DESIGN §18.1) in
+  `tests/test_r_m7_sumscore.py` (fast tier; generator `validation/r/m7_sumscore_reference.R` →
+  `tests/reference/v36_sumscore.json`, poibin 1.6, mirt 1.48).
+  - **Dichotomous items (Poisson-binomial)**: five probability vectors (`uniform_10`: $J=10$,
+    $p\sim U(0.05, 0.95)$; `twopl_50`: 2PL at $\theta=0.4$; `extreme_200`: 2PL at $\theta=-3$;
+    `rare_300`: $p\sim U(0.001, 0.02)$; `equal_40`: $p=0.3$). Largest absolute differences:
+    `"recursion"` vs poibin's recursive formula (cdf) `2.9e-15` and vs its DFT-CF pmf `5.8e-16`;
+    `"fft"` vs the DFT-CF pmf `6.1e-16`; `"normal"` vs `method = "NA"` `1.2e-15`;
+    `"refined_normal"` vs `"RNA"` `1.3e-15`; `"poisson"` vs `dpois` `8.5e-16` (tolerance
+    $10^{-13}$ absolute; `"poisson"` $10^{-11}$ relative). poibin's own exact values come from a
+    cdf or from DFT-CF, so they check absolute accuracy only; relative accuracy in the tails is
+    checked by enumeration and the binomial special case in the unit tests.
+  - **Polytomous items**: mirt's summed-score table for a GRM ($K=4$, $J=10$, $N=1500$) and for
+    five 2PL plus five GRM items. The reference stores mirt's category probabilities on the 61
+    nodes (`probtrace`) and the weights, so only the kernel is under test:
+    $N\sum_qw_qL(s\mid\theta_q)$ equals mirt's `expected` column to `3.1e-15` (relative), and the
+    EAP and posterior SD of $\theta$ given the summed score built from the kernel equal mirt's to
+    `5.3e-15` / `3.1e-15`.
+  - **S-$X^2$ (V15)**: `_itemfit.lord_wingersky` now calls the kernel; the V15 agreement tests
+    pass with unchanged references and tolerances.
+  - **Unit tests** (`tests/test_m7_sumscore.py`): enumeration of all response patterns for mixed
+    $K\in\{2,3,4\}$ (relative $10^{-13}$, both exact methods at $5\times10^{-16}$ absolute), the
+    binomial special case, the log-space recursion at $P=10^{-4000}$ (2000 items), `jit` / `vmap`
+    / `grad` for every method, and the gradient identity
+    $\partial P(S=s)/\partial p_j=P_{-j}(s-1)-P_{-j}(s)$.
+  - **Accuracy and speed of the two exact methods** (61 nodes, jitted, this validation machine's
+    CPU, milliseconds per call): $J=50, K=2$: recursion 0.10, log-space recursion 2.7, FFT 0.51;
+    $J=200, K=2$: 1.0 / 49 / 6.8; $J=1000, K=2$: 57 / 1200 / 174; $J=100, K=5$: 2.9 / 178 / 9.7.
+    The FFT's largest absolute error against the recursion is $3\times10^{-16}$–$1.1\times10^{-15}$
+    in every case, while the smallest probabilities are $10^{-31}$–$10^{-308}$: the FFT has no
+    correct digits there. In this implementation the recursion is both the more accurate and the
+    faster exact method (the characteristic function itself costs $O(JS_{\max})$), so it stays
+    the default and the FFT is offered for comparison.
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)

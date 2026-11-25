@@ -58,3 +58,4 @@
   - [x] D5a flexpyirt に実装した ULS / ML の EFA（`efa()`。`factor_analyzer` は scikit-learn 1.8 以降で失敗する。DESIGN §16.8）と Hull 法（`hull()`）。V28 で EFAtools の `EFA` / `HULL` と `psych::fa` と照合済み。
   - [x] D5b 比較データ法（`comparison_data()`。V29 で EFAtools の `CD()` とその生成器と照合済み）。
   - [x] D6 ブートストラップでバイアス補正する DIMTEST（`dimtest()`。V30 のシミュレーション研究で受け入れ済み: .05 での第 1 種の誤り 0.0〜2.0%（保守的）、検出力 0.99〜1.00）。
+- [x] 合計得点分布のカーネル（`summed_score_distribution()`: Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰（通常と対数空間）、DFT-CF 法、2 値項目用の正規・精密化正規・Poisson 近似。`jit` / `vmap` / 自動微分に対応。V36 で `poibin`・`dpois`・mirt の EAPsum の表と照合済み。M7 項目 3、#83）。
