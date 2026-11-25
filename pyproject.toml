@@ -28,6 +28,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "flexpyctt",
     "jax>=0.4.30",
     "numpy>=1.26",
     "scipy>=1.11",
@@ -58,6 +59,14 @@ docs = [
     "mkdocs-static-i18n>=1.2",
 ]
 
+# uv workspace: flexpyirt (this file, src/flexpyirt) and the JAX-free distributions under
+# packages/ (flexpyctt) share one lockfile and one version tag (DESIGN.md §16.18).
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+flexpyctt = { workspace = true }
+
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
@@ -80,7 +89,7 @@ exclude = ["/.github", "/.python-version", "/CLAUDE.md", "/uv.lock", "/site"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+src = ["src", "tests", "packages/flexpyctt/src", "packages/flexpyctt/tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF", "D"]
@@ -94,11 +103,18 @@ convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
+"packages/*/tests/**" = ["D"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src/flexpyirt", "tests", "scripts"]
+files = [
+    "src/flexpyirt",
+    "tests",
+    "scripts",
+    "packages/flexpyctt/src/flexpyctt",
+    "packages/flexpyctt/tests",
+]
 
 [[tool.mypy.overrides]]
 module = ["scipy.*"]
