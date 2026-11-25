@@ -2,8 +2,8 @@
 
 English | [日本語](DESIGN.ja.md)
 
-> Status: draft v0.3 (2026-11-25). Milestones E1–E5 are implemented and validated against R
-> (§7); E6 and later are plans. Decisions are marked "Decision".
+> Status: draft v0.4 (2026-11-25). Milestones E1–E6 are implemented and validated against R
+> (§7); E7 is planned. Decisions are marked "Decision".
 
 ## 1. Purpose and non-goals
 
@@ -36,8 +36,8 @@ English | [日本語](DESIGN.ja.md)
 |---|---|---|
 | Equivalent groups (EG) | X from sample 1, Y from an independent sample 2 | two `ScoreDistribution` |
 | Single group (SG) | X and Y from the same examinees | one `BivariateScoreDistribution` |
-| Counterbalanced (CB) | two SG samples taking the forms in opposite orders | two `BivariateScoreDistribution` (E6) |
-| Non-equivalent groups with anchor test (NEAT) | (X, A) from population P and (Y, A) from population Q | two `BivariateScoreDistribution`, anchor as the second variable (E4, E5; kernel equating in E6) |
+| Counterbalanced (CB) | two SG samples taking the forms in opposite orders | two `BivariateScoreDistribution` of (X, Y): the sample that took X first, then the one that took Y first (kernel equating, E6) |
+| Non-equivalent groups with anchor test (NEAT) | (X, A) from population P and (Y, A) from population Q | two `BivariateScoreDistribution`, anchor as the second variable (E4, E5; kernel equating E6) |
 
 For NEAT, two families of methods exist and both are planned: **chained** equating (X → A on P,
 then A → Y on Q) and **post-stratification** (a synthetic population
@@ -142,7 +142,7 @@ $$C = D_{\sqrt r}\, Q, \qquad \operatorname{Cov}(\hat r) = \tfrac1N\, C C^\top .
 Without presmoothing (saturated model) $C = D_{\sqrt r} - r \sqrt r^\top$, which gives the
 multinomial covariance $D_r - r r^\top$.
 
-### 4.5 Kernel equating (E3 for EG; E6 for the other designs)
+### 4.5 Kernel equating (E3 for EG; E6 for the other designs and SEED)
 
 Five steps (von Davier, Holland & Thayer, 2004): presmoothing (§4.4), estimation of the score
 probabilities $r, s$ through the design function, continuization, equating, and the standard error
@@ -200,8 +200,62 @@ against a parametric bootstrap. Without presmoothing the multinomial covariance 
 for the $p$-th raw moments, $p = 1..10$, with $e_Y(X)$ taking the value $e_Y(x_j)$ with
 probability $r_j$.
 
-**SEED** (E6): the standard error of the difference between two equating functions, e.g. kernel
-versus linear, $\lVert (J_{e_1} - J_{e_2}) J_{DF} C \rVert$ (ch. 5).
+**Design functions** (E6; ch. 2 and 3 of the book). Every design gives $r$ and $s$ as functions
+of the estimated joint probabilities, and the SEE is $\lVert J_{e_Y} J_{DF}\, C \rVert$ with
+$J_{DF}$ the Jacobian of the design function and $C C^\top$ the covariance of the estimated
+probabilities of each independent sample (blocks side by side).
+
+| Design | $r$, $s$ |
+|---|---|
+| EG | the two sets of score probabilities |
+| SG, joint $P$ of (X, Y) | $r_j = \sum_k p_{jk}$, $s_k = \sum_j p_{jk}$ |
+| CB, joints $P_{12}$ (X first) and $P_{21}$ (Y first) with margins $r_1, s_1$, $r_2, s_2$ | $r = w_X r_1 + (1 - w_X) r_2$, $s = w_Y s_1 + (1 - w_Y) s_2$ |
+| NEAT PSE, $P$ of (X, A) and $Q$ of (Y, A), anchor margins $t_P$, $t_Q$, $T = wP + (1 - w)Q$ | $r_j = \sum_l \bigl[w + (1 - w)\tfrac{t_{Ql}}{t_{Pl}}\bigr] p_{jl}$, $s_k = \sum_l \bigl[(1 - w) + w\tfrac{t_{Pl}}{t_{Ql}}\bigr] q_{kl}$ |
+
+For PSE,
+
+$$dr_j = \sum_l \Bigl[w + (1 - w)\frac{t_{Ql}}{t_{Pl}}\Bigr] dp_{jl}
+- (1 - w)\sum_l \frac{p_{jl}\, t_{Ql}}{t_{Pl}^2}\, dt_{Pl} + (1 - w)\sum_l \frac{p_{jl}}{t_{Pl}}\, dt_{Ql},$$
+
+and symmetrically for $s$.
+
+**Chained equating (NEAT CE)** continuizes four distributions, X and A in P ($F_P$, $H_P$) and A
+and Y in Q ($H_Q$, $G_Q$), each with its own bandwidth:
+
+$$e_Y(x) = G_Q^{-1}\Bigl(H_Q\bigl(H_P^{-1}(F_P(x))\bigr)\Bigr).$$
+
+With $a = H_P^{-1}(F_P(x))$, the chain rule gives two independent parts,
+
+$$\mathrm{SEE}_Y(x)^2 =
+\Bigl\lVert \frac{H_Q'(a)}{G_Q'(e_Y(x))}\,\frac{1}{H_P'(a)}
+\Bigl(\frac{\partial F_P(x)}{\partial r_P} J_r - \frac{\partial H_P(a)}{\partial t_P} J_t\Bigr) C_P \Bigr\rVert^2
++ \Bigl\lVert \frac{1}{G_Q'(e_Y(x))}
+\Bigl(\frac{\partial H_Q(a)}{\partial t_Q} J_t - \frac{\partial G_Q(e_Y(x))}{\partial s_Q} J_s\Bigr) C_Q \Bigr\rVert^2 ,$$
+
+where $J_r$ and $J_t$ sum the cell probabilities over the anchor and over the total score. The
+percent relative error is reported for each link (X to A in P, A to Y in Q).
+
+**SEED** (E6): the standard error of the difference between two equating functions estimated
+from the same data is $\lVert v_1(x) - v_2(x) \rVert$, where $v(x) = J_{e}(x) J_{DF} C$ is the
+vector whose norm is the SEE (ch. 5). `KernelEquatingResult` keeps these vectors
+(`see_vectors`) and `seed(other)` takes the difference: kernel against linear (`linear=True`,
+bandwidths of 1000 standard deviations as in `kequate`), two sets of bandwidths, or chained
+against post-stratification equating.
+
+**Decision**: with two joint distributions the design must be named (`design="counterbalanced"`,
+`"chained"` or `"post_stratification"`); the three cannot be told apart from the data.
+Equivalent groups and single group are inferred.
+
+**Decision**: the default PSE weight is $w = N_P/(N_P + N_Q)$, as for the methods of §4.6
+(`kequate` defaults to 0.5). The CB weights default to $(1/2, 1/2)$.
+
+**Decision**: kernel PSE raises an error when an anchor score has probability zero in one
+population only, instead of dropping it as §4.6 does: the Jacobian of the design function is not
+defined there, and the kernel method presupposes presmoothing.
+
+**Decision**: `seed()` checks only what it can (same design family, X scores and number of
+columns of `see_vectors`). The columns depend on the QR factorization behind each C-matrix, so
+both results must come from the same presmoothing results; this is documented, not enforced.
 
 ### 4.6 NEAT, linear methods (E4)
 
@@ -319,6 +373,14 @@ ke.bandwidth_x, ke.bandwidth_y
 ke.percent_relative_error
 fe.penalty_bandwidth(smooth_x, penalty_weight=1.0)
 
+sg = fe.kernel_equate(smooth_xy)  # single group: one joint distribution
+cb = fe.kernel_equate(smooth_12, smooth_21, design="counterbalanced")
+pse = fe.kernel_equate(smooth_xa, smooth_ya, design="post_stratification", synthetic_weight=0.5)
+ce = fe.kernel_equate(smooth_xa, smooth_ya, design="chained")
+ce.anchor_bandwidths, ce.chain_percent_relative_error
+pse.seed(fe.kernel_equate(smooth_xa, smooth_ya, design="post_stratification", linear=True))
+ce.seed(pse)  # DataFrame: score, difference, seed
+
 # Non-equivalent groups: form X with the anchor, form Y with the anchor.
 xa = fe.BivariateScoreDistribution.from_scores(x_scores, x_anchor, x_range=(0, 36), y_range=(0, 12))
 ya = fe.BivariateScoreDistribution.from_scores(y_scores, y_anchor, x_range=(0, 36), y_range=(0, 12))
@@ -340,8 +402,7 @@ fe.equate(xa, ya, method="chained_equipercentile")
   `SparseDataWarning`.
 - Names are Python names; the R name is given in the docstring where it helps (`ddof=1` ↔ R
   `equate`'s variance, `penalty_weight` ↔ `kequate`'s `KPEN`).
-- Planned (E6): `kernel_equate(..., design="single_group" | "counterbalanced" |
-  "chained" | "post_stratification")`, `KernelEquatingResult.seed(other)`.
+- Planned (E7): standard errors for `equate()` (analytic and bootstrap), further kernels.
 
 ## 6. Layout
 
@@ -372,6 +433,7 @@ Rscript validation/r/equate_e2_reference.R
 Rscript validation/r/equate_e3_reference.R
 Rscript validation/r/equate_e4_reference.R
 Rscript validation/r/equate_e5_reference.R
+Rscript validation/r/equate_e6_reference.R
 ```
 
 ### Cases
@@ -385,7 +447,7 @@ Rscript validation/r/equate_e5_reference.R
 | Q5 | Penalty function values and penalty bandwidths ($K = 0$ and $K = 1$) | `kequate` (`KPEN = 0`), `SNSequate::bandwidth`, independent R implementation | E3 |
 | Q6 | Tucker, Levine observed score, Braun–Holland (four synthetic weights each), Levine true score, chained linear; internal anchor (`KBneat`) and external anchor (simulated, unequal sample sizes and form lengths) | `equate::equate(type = "linear", method = "tucker" / "levine" / "braun/holland" / "chained", lts = )`; the Kolen & Brennan formulas written out in R with population moments | E4 |
 | Q7 | Frequency estimation (four synthetic weights) and chained equipercentile equating on `KBneat` and the simulated external-anchor data; both methods on `KBneat` presmoothed with a bivariate log-linear model | `equate::equate(type = "equipercentile", method = "frequency estimation" / "chained", smoothmethod = )`; Kolen & Brennan written out in R without rounding | E5 |
-| Q8 | Kernel equating SG / CB / NEAT CE / NEAT PSE, SEED | `kequate`, `SNSequate` | E6 |
+| Q8 | Kernel equating for SG (presmoothed and observed), CB (three pairs of weights), NEAT PSE (three weights) and NEAT CE: equated scores, SEE, linear version and SEED between kernel and linear, PRE, penalty bandwidths | `kequate::kequate("SG" / "CB" / "NEAT_PSE" / "NEAT_CE", ...)`; the design functions written out in R with a finite-difference SEE over all cell probabilities | E6 |
 
 ### Tolerances (maximum absolute difference unless stated)
 
@@ -415,6 +477,9 @@ Rscript validation/r/equate_e5_reference.R
 | Bandwidth, $K = 0$ and $K = 1$ | independent R implementation | 1e-6 |
 | Bandwidth, $K = 0$ and $K = 1$ | `SNSequate` | 1e-3 |
 | Kernel equated scores / SEE (relative) | `SNSequate::ker.eq` | 1e-4 / 1e-4 |
+| SG, CB, PSE, CE: kernel equated scores; SEE (relative) | independent R implementation | 1e-9; 1e-6 |
+| SG, CB, PSE, CE: kernel equated scores; SEE (relative); PRE; bandwidths ($K = 0$) | `kequate` without its variance factor | 1e-6; 1e-6; 1e-5; 1e-6 |
+| SG, CB, PSE, CE: linear equated scores; linear SEE and SEED kernel vs linear (relative) | `kequate` without its variance factor | 1e-6; 1e-5 |
 | Kernel equated scores / SEE (relative) / bandwidth | ordinary `kequate` call | 5e-3 / 1e-3 / 1e-4 |
 
 Observed differences are well inside these: about 1e-8 for the SEE and 2e-7 for the equated
@@ -451,6 +516,12 @@ scores against `kequate` (the latter is `kequate`'s root tolerance).
   by $10^{4}$ (the SEE is exactly proportional to $N^{-1/2}$). A second comparison uses the
   ordinary `kequate` call with tolerances that cover the factor (it moved the equated scores by
   up to 1.2e-3 with $N \approx 600$ and a bandwidth of 2).
+- **`kequate`'s counterbalanced design** has one weight `wcb` and forms
+  $r = w r_1 + (1 - w) r_2$, $s = w s_1 + (1 - w) s_2$, but its SEE weights the Y margins the
+  other way round ($1 - w$ for the first sample). The SEE therefore belongs to the equating
+  function only for $w = 1/2$: with `wcb = 0.3` it differs from the finite-difference SEE by up
+  to 29% in the reference data, while flexpyequate's agrees to 1e-6. flexpyequate has two
+  weights, $(w_X, w_Y)$; `kequate` is compared at $(1/2, 1/2)$.
 - **`kequate` solves $G_h(y) = F_h(x)$ with `uniroot(tol = 1e-6)`**, which limits agreement of the
   equated scores to about 1e-6.
 - **`kequate`'s second penalty term** also counts scores at which the density has a local maximum

@@ -25,7 +25,7 @@ flexpyequate finds the function that puts scores of form X on the scale of form 
 | Linear equating with an anchor test | `equate(xa, ya, method=...)` with `"tucker"`, `"levine_observed"`, `"levine_true"` (internal or external anchor), `"braun_holland"` and `"chained_linear"`; synthetic population weights | R `equate`; independent R implementation of the textbook formulas |
 | Equipercentile equating with an anchor test | `equate(xa, ya, method="frequency_estimation")` (post-stratification, synthetic population weights) and `method="chained_equipercentile"`; presmoothed joint distributions can be passed | R `equate`; independent R implementation of the textbook formulas |
 | Log-linear presmoothing | `presmooth()`: polynomial log-linear models for one score or for the joint distribution of two scores (with cross terms); likelihood-ratio, Pearson and Freeman–Tukey chi-squares, AIC | R `glm`, `equate` |
-| Kernel equating | `kernel_equate()` for equivalent groups: Gaussian kernel, bandwidths chosen by the penalty of von Davier, Holland & Thayer (2004) or given, standard error of equating (with or without presmoothing), percent relative error | R `kequate`, `SNSequate`; independent R implementation |
+| Kernel equating | `kernel_equate()` for equivalent groups, single group, counterbalanced and anchor-test designs (chained and post-stratification): Gaussian kernel, bandwidths chosen by the penalty of von Davier, Holland & Thayer (2004) or given, standard error of equating (with or without presmoothing), linear version, standard error of the difference between two equating functions (`seed()`), percent relative error | R `kequate`, `SNSequate`; independent R implementation |
 
 ## Installation
 
@@ -104,6 +104,16 @@ kernel = fe.kernel_equate(smooth_x, smooth_y)  # Gaussian kernel, penalty bandwi
 kernel.table  # score, equated, see (standard error of equating)
 kernel.bandwidth_x, kernel.bandwidth_y
 kernel.percent_relative_error  # first ten moments
+
+# Other designs take presmoothed joint distributions.
+xa_fit = fe.presmooth(xa, degree=(4, 3), cross_terms=[(1, 1)])
+ya_fit = fe.presmooth(ya, degree=(4, 3), cross_terms=[(1, 1)])
+chained = fe.kernel_equate(xa_fit, ya_fit, design="chained")
+post = fe.kernel_equate(xa_fit, ya_fit, design="post_stratification")
+linear = fe.kernel_equate(xa_fit, ya_fit, design="post_stratification", linear=True)
+post.seed(linear)  # difference between kernel and linear equating, with its standard error
+chained.seed(post)
+fe.kernel_equate(fe.presmooth(xy, degree=(4, 4)))  # single group
 ```
 
 ## Notes on agreement with R
@@ -124,6 +134,9 @@ kernel.percent_relative_error  # first ten moments
   uses the variance of the score distribution itself, as in von Davier, Holland & Thayer (2004)
   and `SNSequate`. The difference in equated scores shrinks with the sample size (about 1e-3 with
   600 examinees and 1e-5 or less with several thousand in our comparisons).
+- In the counterbalanced design R `kequate` has a single weight; its standard errors are
+  consistent with its equating function only when that weight is 1/2. flexpyequate has two
+  weights (`counterbalance_weights`) and its standard errors hold for any of them.
 - `kernel_equate()` selects bandwidths with both penalty terms of the book (`penalty_weight=1`);
   `kequate` uses the first term only by default (`penalty_weight=0` reproduces it).
 
