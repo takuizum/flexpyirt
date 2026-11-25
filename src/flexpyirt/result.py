@@ -293,7 +293,14 @@ class FitResult:
     se_method : str or None
         How ``vcov`` was computed.
     n_obs : int
-        Number of respondents.
+        Number of respondents (with ``weights=``, the rows with a positive weight).
+
+    Notes
+    -----
+    A fit with sampling weights (``fit(..., weights=...)``) keeps the sum of the weights
+    :math:`W=\sum_i w_i`; BIC then uses :math:`\log W` in place of :math:`\log N` (as mirt does
+    with ``survey.weights``; DESIGN.md §17.4), and the data-based diagnostics (``item_fit``,
+    ``m2``, ``local_dependence``, ``jsi``, ``dif``) raise ``SpecificationError``.
     """
 
     parameters: pd.DataFrame
@@ -312,6 +319,7 @@ class FitResult:
     _quadrature: Quadrature = field(repr=False)
     _method: BAEM = field(default_factory=BAEM, repr=False)
     _eh_weights: np.ndarray | None = field(default=None, repr=False)
+    _sum_weights: float | None = field(default=None, repr=False)
 
     # ---- summaries ---------------------------------------------------------------------------
 
@@ -332,7 +340,31 @@ class FitResult:
         return -2.0 * self.loglik + 2.0 * self.n_params
 
     def _bic_value(self) -> float:
-        return -2.0 * self.loglik + self.n_params * float(np.log(self.n_obs))
+        size = self.n_obs if self._sum_weights is None else self._sum_weights
+        return -2.0 * self.loglik + self.n_params * float(np.log(size))
+
+    @property
+    def _is_weighted(self) -> bool:
+        """Whether the model was fitted with sampling weights (DESIGN.md §17.4)."""
+        return self._sum_weights is not None
+
+    def _require_unweighted(self, what: str) -> None:
+        """Raise for a fit with sampling weights (statistics not validated under weights)."""
+        if self._is_weighted:
+            raise SpecificationError(
+                f"{what} is not available for a model fitted with sampling weights (weights=): "
+                "the statistic and its reference distribution are defined for unweighted data."
+            )
+
+    def _data_label(self) -> str:
+        n_items = len(self._model.item_names)
+        weighted = (
+            "" if self._sum_weights is None else f" (weighted, sum of weights {self._sum_weights:.6g})"
+        )
+        return (
+            f"{self.n_obs} observations{weighted}, {n_items} items, "
+            f"{self.n_params} free parameters"
+        )
 
     @property
     def aic(self) -> float:
@@ -348,7 +380,10 @@ class FitResult:
 
     @property
     def bic(self) -> float:
-        r""":math:`-2\ell+k\log N` (warns with ``FlexpyirtWarning`` under MAP)."""
+        r""":math:`-2\ell+k\log N` (warns with ``FlexpyirtWarning`` under MAP).
+
+        For a fit with sampling weights, :math:`N` is the sum of the weights.
+        """
         if self._has_priors:
             warnings.warn(
                 "BIC uses the marginal log-likelihood evaluated at the MAP estimate rather than "
@@ -704,6 +739,7 @@ class FitResult:
             category (within a group).
         """
         check_x64()
+        self._require_unweighted("item_fit()")
         model = self._model
         if (
             model.is_multidimensional
@@ -856,6 +892,7 @@ class FitResult:
         from flexpyirt.dimensionality import LocalDependenceResult
 
         check_x64()
+        self._require_unweighted("local_dependence()")
         self._require_unidimensional_normal("local_dependence()")
         y = coerce_responses(data, self._model, item_names=item_names)
         names = [name for name, _ in self._model.items]
@@ -970,6 +1007,7 @@ class FitResult:
         from flexpyirt.errors import ConvergenceWarning
 
         check_x64()
+        self._require_unweighted("jsi()")
         self._require_unidimensional_normal("jsi()")
         if method not in ("refit", "newton", "one_step"):
             raise SpecificationError(
@@ -1125,6 +1163,7 @@ class FitResult:
             respondents.
         """
         check_x64()
+        self._require_unweighted("m2()")
         model = self._model
         if (
             model.is_multidimensional
@@ -1331,8 +1370,7 @@ class FitResult:
             "flexpyirt FitResult",
             "===================",
             f"Model:          {self._model_label()} ({est_kind})",
-            f"Data:           {self.n_obs} observations, {n_items} items, "
-            f"{self.n_params} free parameters",
+            f"Data:           {self._data_label()}",
             *(
                 [f"Factors:        {self._factors_label()}"]
                 if self._model.is_multidimensional
@@ -1405,10 +1443,7 @@ class FitResult:
 
         meta_rows = [
             ("Model", f"{self._model_label()} ({est_kind})"),
-            (
-                "Data",
-                f"{self.n_obs} observations, {n_items} items, {self.n_params} free parameters",
-            ),
+            ("Data", self._data_label()),
             *([("Factors", self._factors_label())] if self._model.is_multidimensional else []),
             ("Groups", self._groups_label()),
             ("Convergence", self._convergence_label()),

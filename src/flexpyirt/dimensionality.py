@@ -699,6 +699,7 @@ def model_parallel_analysis(
         If some simulated data sets had to be skipped.
     """
     check_x64()
+    fit._require_unweighted("model_parallel_analysis()")
     fit._require_unidimensional_normal("model_parallel_analysis()")
     if eigen_type not in _MODEL_EIGEN_TYPES:
         raise SpecificationError(
@@ -913,6 +914,7 @@ def dimensionality(
     results: dict[str, object] = {}
 
     if fit is not None:
+        fit._require_unweighted("dimensionality(fit=...)")
         fit._require_unidimensional_normal("dimensionality(fit=...)")
         y = coerce_responses(data, fit._model, item_names=item_names)
         names = [name for name, _ in fit._model.items]
