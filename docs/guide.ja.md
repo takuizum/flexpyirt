@@ -266,7 +266,8 @@ np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_nump
 
 `item_fit(data)` は各項目の Orlando と Thissen の S-X2 を計算する。合計得点ごとの各反応カテゴリの観測度数とモデルによる
 期待度数を比べ、度数の少ないセルは mirt の `itemfit()` と同じ方法でまとめる（既定 `min_cell=1`）。欠測のないデータ、
-すべての反応カテゴリが観測されていること、`Normal` 潜在分布の 1 次元モデルが必要。多母集団モデルでは `group=` を
+すべての反応カテゴリが観測されていること、`Normal` 潜在分布が必要。2〜3 因子の確認的モデル（`with_factors()`、
+単一群）でも使える。合計得点は全項目の合計のままで、期待度数は推定時の直積格子の上で積分する。多母集団モデルでは `group=` を
 渡すと、（mirt と同じく）群ごとに S-X2 を計算し、先頭に `group` 列がつく。
 
 ```python
@@ -341,8 +342,10 @@ print(reliability(res, df))  # データを渡すと列 marginal, empirical
 `m2(data)` は Maydeu-Olivares & Joe (2005, 2006) の限定情報の適合度統計量を、項目得点の平均とペアごとの交差積
 （mirt の既定 `M2(type = "M2*")`。2 値項目では厳密に $M_2$）から計算する。あわせて RMSEA とその信頼区間（既定
 `ci=0.90`）、SRMSR、および 2 値モデルでは独立帰無モデルに対する TLI と CFI を返す（多値モデルでは `tli`・`cfi` は
-`NaN`。独立帰無モデルは 2 値項目でのみ定義されるため）。欠測のないデータと、`Normal` 潜在分布の単一群 1 次元 MLE 推定
-（事前分布なし）が必要。
+`NaN`。独立帰無モデルは 2 値項目でのみ定義されるため）。欠測のないデータと、`Normal` 潜在分布の単一群の MLE 推定
+（事前分布なし）が必要で、1 次元モデルと 2〜3 因子の確認的モデル（`with_factors()`）に対応する。因子間相関を推定する
+モデルでは、値は mirt の `M2()` よりわずかに小さい（mirt は相関を自由度では数えるが、微分の行列には入れない）。
+双因子モデルと two-tier モデルは、`m2()` も `item_fit()` もまだ対応していない。
 
 ```python
 m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi

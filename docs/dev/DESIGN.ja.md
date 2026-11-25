@@ -1459,7 +1459,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     期待割合はすべての因子について積分する:
     $$E_j[s,k]=\frac{\sum_qP_{jk}(\boldsymbol\theta_q)L_{-j}(s-k\mid\boldsymbol\theta_q)w_q}{\sum_qL(s\mid\boldsymbol\theta_q)w_q}.$$
     `_itemfit.lord_wingersky` と `s_x2_expected_tables` は `(Q, K_j)` の配列のリストと重みベクトルを受け取り、ノードの
-    座標は見ないので、平らにした格子でそのまま使う（計算量は $O(J^2SQ)$、$Q=15^3$ でも 1 秒未満）。セルの併合
+    座標は見ないので、平らにした格子でそのまま使う（計算量は $O(J^2SQ)$、$Q=15^3$・9 項目で約 1 秒）。セルの併合
     （`mirt:::collapseCells`）と $df_j$ = 残ったセル数 − 行数 − 項目 $j$ の自由パラメタ数 − 潜在分布の自由パラメタ数
     （自由な相関。交差負荷のある項目は自由な識別力が 1 つ多い）は §15.40 と同じ。mirt の
     `itemfit(fit_stats = "S_X2")` は `thetaComb(seq(-6, 6, length.out = quadpts), nfact)` の上で `mirt_dmvnorm` の重みを

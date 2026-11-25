@@ -12,8 +12,9 @@ grid.
   free parameter in :math:`\\Delta_2`) is compared with ``exact_with_latent``, recomputed in R
   from mirt's own pieces plus the analytic correlation columns.
 
-The tests at mirt's estimates need no converged fit and run in the fast tier; the refits from
-default starting values are slow.
+Like every mirt comparison the module is in the slow tier, except the S-X2 comparison of the
+smallest case and the test of the rejected model structures, which share one cheap fit and run in
+the fast tier.
 """
 
 from __future__ import annotations
@@ -29,14 +30,19 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from flexpyirt import BAEM, GRM, FitResult, Model, Quadrature, TwoPL, _m2, fit
+from flexpyirt import BAEM, GRM, FitResult, Model, Normal, Quadrature, TwoPL, _m2, fit
 from flexpyirt._compile import LATENT_ITEM, coerce_groups, coerce_responses, compile_problem
+from flexpyirt.errors import SpecificationError
 from tests._reference import check_reference_meta
 
 REFERENCE_DIR = Path(__file__).parent / "reference"
 CASES = ("mirt2d_2pl_simple", "mirt2d_2pl_cross", "mirt2d_grm", "mirt3d_2pl")
 M2_COLUMNS = ["m2", "df", "p", "rmsea", "rmsea_5", "rmsea_95", "srmsr", "tli", "cfi"]
-SX2_CASES = [(name, "mincell_1") for name in CASES] + [("mirt2d_grm", "mincell_3")]
+FAST_CASE = "mirt2d_2pl_simple"
+SX2_CASES = [
+    pytest.param(name, "mincell_1", marks=() if name == FAST_CASE else pytest.mark.slow)
+    for name in CASES
+] + [pytest.param("mirt2d_grm", "mincell_3", marks=pytest.mark.slow)]
 
 
 @cache
@@ -113,6 +119,7 @@ def _m2_no_latent(res: FitResult, name: str) -> _m2.M2Result:
     )
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", CASES)
 def test_parameter_counts(name: str) -> None:
     ref = _bundle()[name]
@@ -135,6 +142,7 @@ def test_s_x2_at_mirt_estimates(name: str, key: str) -> None:
     np.testing.assert_allclose(out["p"], ref["p"], rtol=1e-8, atol=1e-12)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", CASES)
 def test_m2_at_mirt_estimates_matches_mirt_without_latent_columns(name: str) -> None:
     ref = _bundle()[name]["m2"]["mirt"]
@@ -153,6 +161,7 @@ def test_m2_at_mirt_estimates_matches_mirt_without_latent_columns(name: str) -> 
         np.testing.assert_allclose(got.cfi, ref["CFI"], rtol=1e-7)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", CASES)
 def test_m2_at_mirt_estimates_matches_exact_with_latent(name: str) -> None:
     """The public ``m2()`` (free correlations in Delta) against the exact R statistic."""
@@ -201,3 +210,30 @@ def test_refit_matches_reference(name: str) -> None:
         np.testing.assert_array_equal(out["df"].to_numpy(), np.asarray(sx2["df"]))
         np.testing.assert_allclose(out["s_x2"], sx2["S_X2"], rtol=1e-5)
         np.testing.assert_allclose(out["p"], sx2["p"], rtol=1e-5, atol=1e-10)
+
+
+def test_unsupported_multidimensional_structures_are_rejected() -> None:
+    """The guards read the model only, so a fitted result is given each structure in turn."""
+    name = FAST_CASE
+    spec, df, _, _ = _source(name)
+    res = _at_mirt(name)
+    items = [item for item, _ in spec.items]
+    base = Model.uniform(TwoPL(), items=items)
+    bifactor = base.with_bifactor(specific={"s1": items[:6], "s2": items[6:]})
+    two_tier = base.with_two_tier(
+        primary={"p1": items[:6], "p2": items[6:]}, specific={"s": items[2:8]}
+    )
+    multigroup = spec.with_groups(
+        ref=Normal.standard(), focal=Normal.standard()
+    ).equal_across_groups(items=items)
+    for reduced_spec in (bifactor, two_tier):
+        reduced = dataclasses.replace(res, _model=reduced_spec)
+        with pytest.raises(SpecificationError, match="bifactor or two-tier"):
+            reduced.m2(df)
+        with pytest.raises(SpecificationError, match="bifactor, two-tier or multiple-group"):
+            reduced.item_fit(df)
+    grouped = dataclasses.replace(res, _model=multigroup)
+    with pytest.raises(SpecificationError, match="single-group"):
+        grouped.m2(df)
+    with pytest.raises(SpecificationError, match="multiple-group multidimensional"):
+        grouped.item_fit(df, group=np.tile(["ref", "focal"], len(df) // 2))

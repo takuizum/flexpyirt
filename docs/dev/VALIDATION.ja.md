@@ -69,6 +69,7 @@
 | V33 | 次元縮約による two-tier モデル（相関する主因子 2 つと特殊因子 3 つ（1 つは両方の主因子にまたがる）の 2PL、交差負荷項目 1 つとテストレット 2 つの GRM $K=4$） | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
 | V36 | 合計得点分布のカーネル（Poisson 二項分布: 確率ベクトル 5 例、$J$ 10〜300。多値: GRM $K=4$ と 2PL + GRM の混合） | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`、`poibin::dpoibin()`、`stats::dpois()`。mirt の `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 | V37 | mirt の推定値での情報関数・期待得点・信頼性・合計得点 EAP（2PL $J=12$。同じモデルで欠測 8%。3PL $J=12$。GRM と GPCM $K=4$、$J=8$。名義 $K=4$、$J=6$。2PL + 3PL + GRM + GPCM + 名義の混合 $J=14$。2 群の 2PL + GRM で焦点群の平均・分散を推定） | `iteminfo()`、`testinfo()`、`expected.item()`、`expected.test()`、`marginal_rxx()`、`empirical_rxx()`、`fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
+| V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -297,6 +298,34 @@
   `tests/reference/v15_sx2_multigroup.json`）。Science では mirt の項目パラメタが約 2e-4 収束しきらない（flexpyirt の
   対数尤度のほうが高い）ので、flexpyirt を mirt の推定値で評価する。両ケースの両群で自由度は一致し、S-X2 は相対 `1e-6`
   以内。テスト: `tests/test_mirt_m5_itemfit_multigroup.py`。
+- **確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V39、M6。DESIGN §16.19）**: V14 の 4 モデル（2D 2PL 単純構造、
+  `q07` が交差負荷する 2D 2PL、2D GRM $K=4$、3D 2PL。自由な相関は 2D で 1 つ、3D で 3 つ）を、mirt 1.48 で V14 の
+  推定値に置き、すべての `est` フラグを保ったまま `TOL = NaN` で作り直し、`M2()` と `itemfit(fit_stats = "S_X2")` を
+  推定時の直積格子（$[-6,6]$ 上の $31^2$ と $15^3$ ノード。どちらの関数も推定時の格子を読まないので明示的に渡す）で
+  評価した（`validation/r/m6_fit_multidim_reference.R` → `tests/reference/v39_fit_multidim.json`）。ケース、R スクリプト、
+  参照ファイルが別なので、V15 / V18 の拡張ではなく新しい ID とした。テスト: `tests/test_mirt_m6_fit_multidim.py`
+  （slow tier。2D 単純構造の S-X2 の比較と、拒否するモデル構造のテストだけ fast tier）と、単体テスト `tests/test_m6_fit_multidim.py`（直積格子上の
+  S-X2 の期待表・$\pi_2$・$\Xi_2$ を全反応パターンの列挙と比較、$\Delta_2$ の相関の列を中心差分と比較）。
+  - **S-X2**: 4 モデルのすべての項目（および `mincell = 3` の GRM）で自由度が一致。mirt の推定値では S-X2 が相対
+    `2.7e-14`、p 値が `1.2e-14` で一致。既定の初期値から再推定すると S-X2 が `1.2e-7`、p 値が `5.0e-8`（推定値どうしが
+    一致する水準で、3D のケースが最大）。`collapseCells` の移植はそのまま使っており、セルの併合と求積に違いは
+    見つからなかった。
+  - **$M_2$（mirt の流儀）**: mirt の `M2()` は $\Delta_2$ を作るときに `GroupPars` の `est` フラグを `FALSE` にする
+    ので、自由な相関は $df$ では引かれるのに $\Delta_2$ に列を持たない（V18 の `rasch_free_var` と同じ）。
+    `_latent_in_delta=False` にすると、flexpyirt は mirt の生の $M_2$ を、mirt の推定値で相対 `7.4e-13`、再推定で
+    `1.9e-8` で再現する。$df$ は一致し、SRMSR は `1.5e-14` / `3.4e-8`、TLI / CFI（2 値の 3 ケース）は `4.5e-9` で
+    一致する。R スクリプトでも mirt の部品（`dP`、`buildXi2els`）から mirt の値を計算し直し、`1e-10` で一致することを
+    確認している。
+  - **$M_2$（flexpyirt の既定）**（すべての自由パラメタを $\Delta_2$ に入れる）: 自由な相関ごとに解析的な列を 1 つ
+    加えた R の厳密な計算（R の中で、正規化した事前分布の中心差分と照合）と比較し、mirt の推定値で `2.5e-13`、再推定で
+    `5.3e-9`。既定の値は mirt の生の値より、相対で `4.7e-5`（2D 単純構造）、`2.8e-7`（2D 交差負荷）、`2.5e-4`
+    （2D GRM）、`6.9e-4`（3D）だけ小さい。
+  - **数値計算上の注意**: GRM では、項目得点の周辺モーメントのもとでの $\Delta_2$ は条件が悪い。項目の微分を中心差分
+    （刻み $10^{-6}$、誤差 $\sim10^{-10}$）で求めると $M_2$ が相対 `4e-6` ずれるので、R の参照値では項目の列に mirt の
+    解析的な `dP`（2PL と graded では正しい）を使い、flexpyirt は自動微分を使う。
+  - **照合していない範囲**: 多母集団の多次元モデル（V21 の構成。`SpecificationError` のまま。双因子・two-tier も
+    同じ）、多次元モデルでの 3PL / GPCM / 名義項目（項目カーネルは V18 / V15 で照合済みで、単体テストは 2PL + GRM の
+    混合モデルを扱うが、mirt との比較はない）、mirt の既定以外の格子。
 - **確認的 2–3 次元 MIRT（V14, M4）**: 4 つのシミュレーションケースを `tests/test_mirt_m4_mirt.py` で照合した
   （通常 EM・SQUAREM の双方で通過。参照値生成: `validation/r/m4_mirt_reference.R` →
   `tests/reference/v14_mirt2d.json`、`accelerate = "none"`, `TOL = 1e-10`, `SE.type = "Oakes"`、

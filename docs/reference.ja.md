@@ -141,7 +141,8 @@ Orlando–Thissen の S-X2 項目適合度（[ガイド 5 節](guide.ja.md#項�
 $1,\dots,S-1$ ごとの各カテゴリの観測度数とモデルによる期待度数を比べる。期待度数は、その項目を除いた
 Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在分布の重みで計算する。度数の少ないセルは mirt の
 `itemfit()` と同じ方法でまとめ（`min_cell` は mirt の `mincell`）、$df_j$ = 残ったセル数 − 行数 − その項目の自由パラメタ数 −
-潜在分布の自由パラメタ数（mirt の約束）。
+潜在分布の自由パラメタ数（mirt の約束）。確認的多次元モデル（`with_factors()`、単一群）では、推定時の直積格子の
+すべてのノードで再帰を回して多変量正規の重みで積分し、自由な因子間相関を潜在分布のパラメタとして数える。
 
 | 引数 | 説明 |
 |---|---|
@@ -153,7 +154,7 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 **戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
 `df <= 0` になる項目は `df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
 
-**例外**: 多次元・`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
+**例外**: 双因子・two-tier・多母集団の多次元・`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
 項目、正でない `min_cell` の場合に `SpecificationError`。
 
 #### `FitResult.m2`
@@ -166,7 +167,8 @@ Maydeu-Olivares & Joe (2005, 2006) による限定情報の適合度統計量 $M
 （[ガイド 5 節](guide.ja.md#限定情報の適合度m2)）。$J$ 個の項目得点平均と $\binom{J}{2}$ 個の交差積から計算する
 （mirt の既定 `M2(type = "M2*")` に対応。2 値項目では厳密に $M_2$）。ヤコビ行列
 $\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、すべての自由な項目・潜在分布パラメタを含む
-（共有パラメタは 1 回）。
+（共有パラメタは 1 回）。確認的多次元モデル（`with_factors()`）では推定時の直積格子の上で積分し、$\Delta_2$ は自由な
+因子間相関ごとに 1 列を持つ（mirt の `M2()` は潜在分布の列を入れないので、値がわずかに大きい）。
 
 | 引数 | 説明 |
 |---|---|
@@ -181,7 +183,7 @@ $\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、す
 多値モデルでは `tli` と `cfi` を `NaN` とする（独立帰無モデルは 2 値項目でのみ定義されるため）。2 値モデルで帰無モデルの $M_2$ が当てはめモデルの $M_2$
 以下のときは `FlexpyirtWarning` を出し `tli`・`cfi` を `NaN` とする。
 
-**例外**: JAX 64 ビットが無効なとき `PrecisionError`。多次元・多母集団・`EmpiricalHistogram`・`NormalMixture`・事前分布つきの
+**例外**: JAX 64 ビットが無効なとき `PrecisionError`。双因子・two-tier・多母集団・`EmpiricalHistogram`・`NormalMixture`・事前分布つきの
 MAP モデル、欠測を含むデータ、不正な `ci`、項目数または回答者数が 2 未満のとき `SpecificationError`。
 
 #### `FitResult.local_dependence`

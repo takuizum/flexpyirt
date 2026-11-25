@@ -20,7 +20,6 @@ from flexpyirt import (
     Model,
     Normal,
     NormalPrior,
-    Quadrature,
     Rasch,
     ThreePL,
     TwoPL,

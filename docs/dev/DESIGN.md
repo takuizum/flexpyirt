@@ -2036,7 +2036,7 @@ data-independent shapes (§15.21).
     $$E_j[s,k]=\frac{\sum_qP_{jk}(\boldsymbol\theta_q)L_{-j}(s-k\mid\boldsymbol\theta_q)w_q}{\sum_qL(s\mid\boldsymbol\theta_q)w_q}.$$
     `_itemfit.lord_wingersky` and `s_x2_expected_tables` take a list of `(Q, K_j)` arrays and a
     weight vector and never look at the node coordinates, so they are used unchanged with the
-    flattened grid ($O(J^2SQ)$ work, a fraction of a second for $Q=15^3$). Collapsing
+    flattened grid ($O(J^2SQ)$ work, about a second for $Q=15^3$ and nine items). Collapsing
     (`mirt:::collapseCells`) and $df_j$ = kept cells − rows − free parameters of item $j$ − free
     latent parameters (the free correlations; an item with a cross-loading has one more free
     slope) are as in §15.40. mirt's `itemfit(fit_stats = "S_X2")` does the same on

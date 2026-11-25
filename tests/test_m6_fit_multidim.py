@@ -1,12 +1,13 @@
 """Unit tests: M2 / M2* and S-X2 for confirmatory multidimensional models (DESIGN.md §16.19).
 
 The product-grid statistics are checked against brute-force enumeration of every response
-pattern; agreement with R mirt is in ``tests/test_mirt_m6_fit_multidim.py`` (V39).
+pattern; agreement with R mirt and the rejected model structures are in
+``tests/test_mirt_m6_fit_multidim.py`` (V39). Tests that compile JAX code take more than 5 s and
+are marked slow; the fast tier covers the same code through the V39 comparisons.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import itertools
 import warnings
 from functools import cache
@@ -22,7 +23,6 @@ from flexpyirt import (
     GRM,
     FitResult,
     Model,
-    Normal,
     Quadrature,
     TwoPL,
     _core,
@@ -30,8 +30,8 @@ from flexpyirt import (
     _m2,
     fit,
 )
-from flexpyirt._compile import LATENT_ITEM
-from flexpyirt.errors import FlexpyirtWarning, SpecificationError
+from flexpyirt._compile import LATENT_ITEM, coerce_groups, coerce_responses, compile_problem
+from flexpyirt.errors import FlexpyirtWarning
 
 ITEMS = [f"i{j}" for j in range(6)]
 N_CATEGORIES = [2, 2, 3, 2, 2, 3]
@@ -52,7 +52,9 @@ def _data(n: int = 700, seed: int = 5) -> pd.DataFrame:
 
 
 def _spec() -> Model:
-    models = {name: (GRM(3) if k == 3 else TwoPL()) for name, k in zip(ITEMS, N_CATEGORIES)}
+    models = {
+        name: (GRM(3) if k == 3 else TwoPL()) for name, k in zip(ITEMS, N_CATEGORIES, strict=True)
+    }
     return Model.from_items(models).with_factors(FACTORS)
 
 
@@ -70,6 +72,23 @@ def _grid(res: FitResult) -> tuple[_core.CompiledProblem, list[np.ndarray], np.n
     prob = res._compiled_for(np.zeros((1, len(ITEMS)), dtype=np.int64))
     weights = np.exp(np.asarray(_core._latent_log_weights(prob, jnp.asarray(res._eta))[0]))
     return prob, res._traces(prob), weights
+
+
+@cache
+def _unfitted() -> tuple[_core.CompiledProblem, np.ndarray, pd.DataFrame]:
+    """Compiled problem, a parameter vector away from any optimum, and the parameter table.
+
+    The identities checked against enumeration hold at every parameter value, so no fit is run.
+    """
+    spec, df = _spec(), _data()
+    y = coerce_responses(df, spec)
+    codes, _ = coerce_groups(None, spec, y.shape[0], require_all=False)
+    table = spec.parameter_table(df)
+    compiled = compile_problem(spec, y, codes, table, Quadrature.equispaced(9, bounds=(-4.0, 4.0)))
+    eta = np.array(compiled.eta0, dtype=float)
+    cor = table[(table["item"] == LATENT_ITEM) & table["free"]]
+    eta[int(cor["free_id"].iloc[0])] = 0.4
+    return compiled.problem, eta, table
 
 
 def _pattern_probabilities(
@@ -106,10 +125,16 @@ def test_expected_tables_on_a_product_grid_match_enumeration() -> None:
                     assert got == pytest.approx(brute, rel=1e-12, abs=1e-15)
 
 
+@pytest.mark.slow
 def test_margins_and_xi_match_the_pattern_distribution() -> None:
     """pi_2 and Xi_2 on the product grid are the moments of the multinomial over patterns."""
-    res = _fitted()
-    prob, traces, weights = _grid(res)
+    prob, eta_np, _ = _unfitted()
+    eta = jnp.asarray(eta_np)
+    weights = np.exp(np.asarray(_core._latent_log_weights(prob, eta)[0]))
+    traces: list[np.ndarray] = [np.empty(0)] * len(ITEMS)
+    for fam, logp in zip(prob.families, _core._item_log_probs(prob, eta), strict=True):
+        for pos, col in enumerate(np.asarray(fam.columns)):
+            traces[int(col)] = np.exp(np.asarray(logp))[0, pos]
     assert weights.size == 81 and prob.nodes.shape == (81, 2)
     pats, p_pat = _pattern_probabilities(traces, weights)
     ii, jj = _m2._pairs(len(ITEMS))
@@ -117,25 +142,24 @@ def test_margins_and_xi_match_the_pattern_distribution() -> None:
     mean = p_pat @ stats
     cov = (stats * p_pat[:, None]).T @ stats - np.outer(mean, mean)
 
-    eta = jnp.asarray(res._eta)
     margins = np.asarray(_m2.model_margins(prob, eta))
     np.testing.assert_allclose(margins, mean, rtol=1e-12)
     m1, m2 = (np.asarray(a) for a in _m2.conditional_moments(prob, eta))
     np.testing.assert_allclose(_m2._xi(m1, m2, weights, margins), cov, rtol=1e-10, atol=1e-13)
 
 
+@pytest.mark.slow
 def test_delta_has_a_column_for_the_free_correlation() -> None:
-    res = _fitted()
-    prob, _, _ = _grid(res)
-    eta = jnp.asarray(res._eta)
+    prob, eta_np, table = _unfitted()
+    eta = jnp.asarray(eta_np)
+    n_params = eta_np.size
     jac = np.asarray(jax.jacfwd(lambda e: _m2.model_margins(prob, e))(eta))
-    assert jac.shape == (6 + 15, res.n_params)
-    table = res.parameters
+    assert jac.shape == (6 + 15, n_params) == (21, 16)
     cor = table[(table["item"] == LATENT_ITEM) & table["free"]]
     assert list(cor["param"]) == ["cor_12"]
     col = int(cor["free_id"].iloc[0])
     step = 1e-6
-    shift = np.zeros(res.n_params)
+    shift = np.zeros(n_params)
     shift[col] = step
     numeric = (
         np.asarray(_m2.model_margins(prob, eta + shift))
@@ -152,6 +176,7 @@ def test_delta_has_a_column_for_the_free_correlation() -> None:
     assert np.all(np.abs(jac[6:, col][across]) > 1e-4)
 
 
+@pytest.mark.slow
 def test_m2_and_item_fit_of_a_two_factor_model() -> None:
     res, df = _fitted(), _data()
     out = res.m2(df)
@@ -180,29 +205,3 @@ def test_m2_and_item_fit_of_a_two_factor_model() -> None:
         assert fit_table["s_x2"].iloc[j] == stat
         assert fit_table["df"].iloc[j] == dof
         assert dof == int((~np.isnan(e)).sum() - e.shape[0] - n_free_item - 1)
-
-
-def test_unsupported_multidimensional_structures_are_rejected() -> None:
-    """The guards read the model only, so the fitted result is given each structure in turn."""
-    res, df = _fitted(), _data()
-    base = Model.uniform(TwoPL(), items=ITEMS)
-    bifactor = base.with_bifactor(specific={"s1": ITEMS[:3], "s2": ITEMS[3:]})
-    two_tier = base.with_two_tier(
-        primary={"p1": ITEMS[:3], "p2": ITEMS[3:]}, specific={"s": ITEMS[1:5]}
-    )
-    multigroup = (
-        _spec()
-        .with_groups(ref=Normal.standard(), focal=Normal.standard())
-        .equal_across_groups(items=ITEMS)
-    )
-    for spec in (bifactor, two_tier):
-        reduced = dataclasses.replace(res, _model=spec)
-        with pytest.raises(SpecificationError, match="bifactor or two-tier"):
-            reduced.m2(df)
-        with pytest.raises(SpecificationError, match="bifactor, two-tier or multiple-group"):
-            reduced.item_fit(df)
-    grouped = dataclasses.replace(res, _model=multigroup)
-    with pytest.raises(SpecificationError, match="single-group"):
-        grouped.m2(df)
-    with pytest.raises(SpecificationError, match="multiple-group multidimensional"):
-        grouped.item_fit(df, group=np.tile(["ref", "focal"], len(df) // 2))
