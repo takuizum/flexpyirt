@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from flexpyirt._core import (
+    BifactorBlock,
     CompiledProblem,
     CoupledBlock,
     CoupledMember,
@@ -50,7 +51,6 @@ from flexpyirt.latent import (
     correlation_matrix_is_positive_definite,
     davidian_param_names,
     eh_project_floor,
-    latent_param_names,
     mixture_param_names,
 )
 from flexpyirt.model import LATENT_ITEM
@@ -65,6 +65,8 @@ from flexpyirt.priors import (
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
+    from jax import Array
+
     from flexpyirt.model import Model
 
 __all__ = [
@@ -551,10 +553,12 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                     for m in range(1, n_factors + 1)
                 ),
                 *((f"var_{m}", var0, free_var, 0.0, np.inf) for m in range(1, n_factors + 1)),
+                # Bifactor factors are orthogonal: no correlation rows (DESIGN.md §17.1).
                 *(
                     (f"cor_{i}{j}", 0.0, model.correlated_factors, -1.0, 1.0)
                     for i in range(1, n_factors + 1)
                     for j in range(i + 1, n_factors + 1)
+                    if not model.bifactor
                 ),
             ]
             lat_model = "MVN"
@@ -659,7 +663,7 @@ def model_parameter_schema(model: Model) -> pd.DataFrame:
             rows.append((group_name, LATENT_ITEM, "mean", "Normal", -np.inf, np.inf))
             rows.append((group_name, LATENT_ITEM, "var", "Normal", 0.0, np.inf))
             continue
-        for lat_param in latent_param_names(model.n_factors):
+        for lat_param in model.latent_parameter_names():
             if lat_param.startswith("var_"):
                 lo_hi = (0.0, np.inf)
             elif lat_param.startswith("cor_"):
@@ -889,7 +893,7 @@ def validate_table(
         cor_names = [
             f"cor_{i}{j}" for i in range(1, n_factors + 1) for j in range(i + 1, n_factors + 1)
         ]
-        lat_sub = t[t["item"] == LATENT_ITEM]
+        lat_sub = t[t["item"] == LATENT_ITEM] if not model.bifactor else t.iloc[:0]
         for grp_lat, rows_g in lat_sub.groupby("group", sort=False):
             vals_g = dict(zip(rows_g["param"], rows_g["value"], strict=True))
             cors = [float(vals_g[c]) for c in cor_names]
@@ -1218,7 +1222,7 @@ def _check_identification_mirt_group(t: pd.DataFrame, model: Model, *, check_sca
         free_cors = sum(
             1
             for other in range(1, n_factors + 1)
-            if other != m and lat_free[f"cor_{min(m, other)}{max(m, other)}"]
+            if other != m and lat_free.get(f"cor_{min(m, other)}{max(m, other)}", False)
         )
         if n_fixed_slopes[m - 1] < free_cors:
             raise IdentificationError(
@@ -1361,6 +1365,58 @@ class Compiled:
     n_patterns: int
 
 
+def _bifactor_block(
+    model: Model, quad: Quadrature, families: Sequence[FamilyBlock]
+) -> tuple[BifactorBlock, Array, Array]:
+    r"""Build the Gibbons–Hedeker reduction of a bifactor model (DESIGN.md §17.1).
+
+    Block :math:`s = 0..S-1` holds the items of specific factor :math:`s+1`; block :math:`S`
+    holds the general-only items. Each block's ``(n^2, D)`` nodes put the general node in
+    column 0 and the specific node in column :math:`s+1` (general index major), so the item
+    kernels evaluate :math:`P_j(\theta_g, \theta_t)` unchanged.
+
+    Returns the block, the general grid embedded in ``D`` columns (``CompiledProblem.nodes``)
+    and its base log weights.
+    """
+    assert model.factors is not None
+    n_factors = model.n_factors
+    n_specific = n_factors - 1
+    axis = np.asarray(quad.nodes(), dtype=float)
+    n_pts = axis.shape[0]
+    general = np.repeat(axis, n_pts)
+    spec = np.tile(axis, n_pts)
+    block_nodes = np.zeros((n_specific + 1, n_pts * n_pts, n_factors))
+    block_nodes[:, :, 0] = general
+    for s_idx in range(n_specific):
+        block_nodes[s_idx, :, s_idx + 1] = spec
+    block_of: dict[str, int] = {}
+    for s_idx, (_, assigned) in enumerate(model.factors[1:]):
+        for item in assigned:
+            block_of[item] = s_idx
+    family_block = tuple(
+        jnp.asarray(
+            [block_of.get(model.items[int(j)][0], n_specific) for j in np.asarray(fam.columns)],
+            dtype=jnp.int32,
+        )
+        for fam in families
+    )
+    base_1d = quad.base_log_weights(1)
+    embedded = np.zeros((n_pts, n_factors))
+    embedded[:, 0] = axis
+    block = BifactorBlock(
+        block_nodes=jnp.asarray(block_nodes, dtype=jnp.float64),
+        nodes_1d=jnp.asarray(axis, dtype=jnp.float64),
+        base_1d=jnp.asarray(base_1d, dtype=jnp.float64),
+        family_block=family_block,
+        n_specific=n_specific,
+    )
+    return (
+        block,
+        jnp.asarray(embedded, dtype=jnp.float64),
+        jnp.asarray(base_1d, dtype=jnp.float64),
+    )
+
+
 def compile_problem(
     model: Model,
     y: np.ndarray,
@@ -1466,7 +1522,12 @@ def compile_problem(
             )
         )
 
-    nodes = jnp.asarray(quad.grid(model.n_factors), dtype=jnp.float64)
+    if model.bifactor:
+        reduction, nodes, node_log_base = _bifactor_block(model, quad, families)
+    else:
+        reduction = None
+        nodes = jnp.asarray(quad.grid(model.n_factors), dtype=jnp.float64)
+        node_log_base = jnp.asarray(quad.base_log_weights(model.n_factors), dtype=jnp.float64)
     resolved = model.resolved_groups()
     if model.is_empirical_histogram and quad.kind != "equispaced":
         raise SpecificationError(
@@ -1558,7 +1619,7 @@ def compile_problem(
             davidian_degree=degree,
         )
     else:
-        lat_params = latent_param_names(model.n_factors)
+        lat_params = model.latent_parameter_names()
         lat_vals = np.array(
             [[lookup[(g, LATENT_ITEM, p)][:4] for p in lat_params] for g in groups], dtype=float
         )
@@ -1584,11 +1645,17 @@ def compile_problem(
         counts=jnp.asarray(counts, dtype=jnp.float64),
         group=jnp.asarray(pat_groups, dtype=jnp.int32),
         nodes=nodes,
-        node_log_base=jnp.asarray(quad.base_log_weights(model.n_factors), dtype=jnp.float64),
+        node_log_base=node_log_base,
         families=tuple(families),
         latent=latent,
         priors=priors_block,
         n_groups=n_groups,
         coupled=_coupled_blocks(family_free_index, slot_bounds),
+        reduction=reduction,
     )
+    if model.bifactor and bool(np.any(np.asarray(latent.free_index) >= 0)):
+        raise SpecificationError(
+            "Bifactor models do not support free latent parameters yet; keep every mean_m and "
+            "var_m fixed (DESIGN.md §17.1)."
+        )
     return Compiled(problem=problem, eta0=eta0, inverse=inverse, n_patterns=n_patterns)

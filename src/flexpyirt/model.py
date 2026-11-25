@@ -11,9 +11,16 @@ import pandas as pd
 
 from flexpyirt.errors import SpecificationError
 from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, NominalKernel, Rasch
-from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, LatentSpec, Normal, NormalMixture
+from flexpyirt.latent import (
+    DavidianCurve,
+    EmpiricalHistogram,
+    LatentSpec,
+    Normal,
+    NormalMixture,
+    latent_param_names,
+)
 from flexpyirt.priors import PRIOR_TYPES, Prior
-from flexpyirt.quadrature import MAX_FACTORS
+from flexpyirt.quadrature import MAX_FACTORS, MAX_KERNEL_FACTORS
 
 __all__ = ["LATENT_ITEM", "SINGLE_GROUP", "Model"]
 
@@ -56,6 +63,10 @@ class Model:
         ``None`` means unidimensional.
     correlated_factors : bool
         Whether factor correlations are free by default when ``factors`` is set.
+    bifactor : bool
+        Whether ``factors`` is a bifactor structure from :meth:`with_bifactor` (the first factor
+        is the general factor; the E-step uses Gibbons–Hedeker dimension reduction, DESIGN.md
+        §17.1).
     """
 
     items: tuple[tuple[str, ItemModel], ...]
@@ -67,11 +78,18 @@ class Model:
     priors: tuple[tuple[str, str, Prior], ...] = ()
     factors: tuple[tuple[str, tuple[str, ...]], ...] | None = None
     correlated_factors: bool = True
+    bifactor: bool = False
 
     def __post_init__(self) -> None:
         """Validate item names and group latent-distribution consistency."""
         if not self.items:
             raise SpecificationError("A model needs at least one item.")
+        if self.bifactor and self.factors is None:
+            raise SpecificationError("A bifactor model needs factors; use with_bifactor().")
+        if self.bifactor and self.groups is not None:
+            raise SpecificationError(
+                "Bifactor models do not support multiple groups yet (DESIGN.md §17.1)."
+            )
         names = [name for name, _ in self.items]
         if LATENT_ITEM in names:
             raise SpecificationError(f"Item name {LATENT_ITEM!r} is reserved.")
@@ -157,6 +175,30 @@ class Model:
     def factor_names(self) -> tuple[str, ...]:
         """Declared factor names in order (empty tuple for a unidimensional model)."""
         return () if self.factors is None else tuple(name for name, _ in self.factors)
+
+    @property
+    def quadrature_dimension(self) -> int:
+        """Dimension of the quadrature grid the E-step integrates over.
+
+        ``n_factors`` for product grids; 2 for bifactor models, whose E-step uses the
+        :math:`(1+1)`-dimensional grid of the general and one specific factor (DESIGN.md §17.1).
+        """
+        return 2 if self.bifactor else self.n_factors
+
+    def latent_parameter_names(self) -> tuple[str, ...]:
+        """Return the names of the Normal latent parameters of each group (DESIGN.md §15.30).
+
+        ``("mean", "var")`` for one factor, ``(mean_1..D, var_1..D, cor_ij...)`` for 2–3 factors,
+        and ``(mean_1..D, var_1..D)`` for bifactor models, whose factors are orthogonal
+        (DESIGN.md §17.1).
+        """
+        if self.bifactor:
+            d = self.n_factors
+            return (
+                *(f"mean_{m}" for m in range(1, d + 1)),
+                *(f"var_{m}" for m in range(1, d + 1)),
+            )
+        return latent_param_names(self.n_factors)
 
     def item_kernel(self, item_model: ItemModel) -> ItemKernel:
         """Return ``item_model``'s kernel adapted to this model's dimensionality."""
@@ -415,20 +457,26 @@ class Model:
             raise SpecificationError(f"Items not assigned to any factor: {unassigned}.")
 
         candidate = replace(self, factors=tuple(resolved), correlated_factors=bool(correlated))
+        self._check_parameter_names(candidate, "with_factors")
+        return candidate
+
+    def _check_parameter_names(self, candidate: Model, builder: str) -> None:
+        """Check that fixed values, priors and equalities name parameters of ``candidate``."""
+        n_factors = candidate.n_factors
         lookup = dict(self.items)
         for item, param, _ in self.fixed:
             valid = candidate.item_kernel(lookup[item]).param_names
             if param not in valid:
                 raise SpecificationError(
                     f"Fixed parameter {item!r}.{param} is not valid for a {n_factors}-factor "
-                    f"model (available: {list(valid)}); call with_factors() before fix()."
+                    f"model (available: {list(valid)}); call {builder}() before fix()."
                 )
         for item, param, _ in self.priors:
             valid = candidate.item_kernel(lookup[item]).param_names
             if param not in valid:
                 raise SpecificationError(
                     f"Prior on {item!r}.{param} is not valid for a {n_factors}-factor model "
-                    f"(available: {list(valid)}); call with_factors() before prior()."
+                    f"(available: {list(valid)}); call {builder}() before prior()."
                 )
         for eq_items, eq_params in self.equal_items:
             for item in eq_items:
@@ -437,9 +485,115 @@ class Model:
                 if bad:
                     raise SpecificationError(
                         f"Equality on {item!r}.{bad} is not valid for a {n_factors}-factor model "
-                        f"(available: {list(valid)}); call with_factors() before "
+                        f"(available: {list(valid)}); call {builder}() before "
                         "equal_across_items()."
                     )
+
+    def with_bifactor(
+        self,
+        *,
+        specific: Mapping[str, ItemSelector],
+        general: str = "general",
+    ) -> Model:
+        r"""Return a bifactor model: one general factor plus specific factors (DESIGN.md §17.1).
+
+        Every item loads on the general factor and on at most one specific factor; items listed
+        under no specific factor load on the general factor only. Factors are orthogonal
+        standard normals. Item parameters are ``a1`` (general), ``a2``..``aD`` (specific, in the
+        order of ``specific``; slopes on other specific factors are fixed at 0) and ``d`` (or
+        ``d1``..), matching the columns of mirt's ``bfactor()`` (Chalmers, 2012).
+
+        The marginal likelihood is integrated by Gibbons and Hedeker's (1992) dimension
+        reduction: because item :math:`j` depends on :math:`(\theta_0, \theta_{s(j)})` only,
+
+        .. math::
+            L_p=\sum_g w^{(0)}_g\prod_{s}\Big[\sum_t w^{(s)}_t
+            \prod_{j\in s}P_j(y_{pj}\mid\theta_g,\theta_t)\Big],
+
+        so each E-step needs one :math:`(1+1)`-dimensional grid per specific factor instead of a
+        :math:`(1+S)`-dimensional product grid.
+
+        Parameters
+        ----------
+        specific : mapping of str to iterable of item names or callable
+            Specific factor names (in order, at least one) mapped to their items; each needs at
+            least two items and an item may appear under at most one specific factor.
+        general : str, default "general"
+            Name of the general factor.
+
+        Raises
+        ------
+        SpecificationError
+            If factor names are empty or duplicated, a specific factor has fewer than two items or
+            lists unknown items, an item is under two specific factors, the model already has
+            factors, groups or a latent distribution, or any item is :class:`Rasch` or
+            :class:`PCM` (the factor variances would have to be free; not supported yet).
+        """
+        if self.factors is not None:
+            raise SpecificationError(
+                "This model already has factors; call with_bifactor() on a model without "
+                "with_factors() or with_bifactor()."
+            )
+        if self.groups is not None:
+            raise SpecificationError(
+                "Bifactor models do not support multiple groups yet (DESIGN.md §17.1)."
+            )
+        if self.latent is not None:
+            raise SpecificationError(
+                "with_latent() is not supported for bifactor models; their factors are "
+                "orthogonal standard normals."
+            )
+        if not isinstance(specific, Mapping) or len(specific) == 0:
+            raise SpecificationError(
+                "with_bifactor() requires a non-empty mapping specific factor name -> items."
+            )
+        rasch_like = [name for name, m in self.items if isinstance(m, (Rasch, PCM))]
+        if rasch_like:
+            raise SpecificationError(
+                f"Bifactor models need free slopes; Rasch / PCM items {rasch_like} are not "
+                "supported yet (their factor variances would have to be free)."
+            )
+        if not isinstance(general, str) or not general.strip():
+            raise SpecificationError("The general factor name must be a non-empty string.")
+        resolved: list[tuple[str, tuple[str, ...]]] = [(general, self.item_names)]
+        seen: set[str] = {general}
+        owner: dict[str, str] = {}
+        for raw_name, selector in specific.items():
+            name = str(raw_name)
+            if not name.strip():
+                raise SpecificationError("Factor names must be non-empty strings.")
+            if name in seen:
+                raise SpecificationError(f"Duplicated factor name: {name!r}.")
+            seen.add(name)
+            if isinstance(selector, str):
+                raise SpecificationError(
+                    f"Factor {name!r} items must be an iterable of item names or a callable, "
+                    f"not a single string {selector!r}."
+                )
+            chosen = self._select(selector)
+            if len(set(chosen)) != len(chosen):
+                dup = sorted({i for i in chosen if chosen.count(i) > 1})
+                raise SpecificationError(f"Factor {name!r} lists duplicated items: {dup}.")
+            if len(chosen) < 2:
+                raise SpecificationError(
+                    f"Specific factor {name!r} needs at least two items, got {len(chosen)} "
+                    "(a one-item specific slope is not identified)."
+                )
+            for item in chosen:
+                if item in owner:
+                    raise SpecificationError(
+                        f"Item {item!r} is listed under specific factors {owner[item]!r} and "
+                        f"{name!r}; each item loads on at most one specific factor."
+                    )
+                owner[item] = name
+            resolved.append((name, chosen))
+        if len(resolved) > MAX_KERNEL_FACTORS:
+            raise SpecificationError(
+                f"with_bifactor() supports at most {MAX_KERNEL_FACTORS - 1} specific factors, got "
+                f"{len(resolved) - 1}."
+            )
+        candidate = replace(self, factors=tuple(resolved), correlated_factors=False, bifactor=True)
+        self._check_parameter_names(candidate, "with_bifactor")
         return candidate
 
     def with_latent(self, dist: LatentSpec) -> Model:
