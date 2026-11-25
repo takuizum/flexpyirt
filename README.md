@@ -157,6 +157,36 @@ warm CPU fits are faster than `mirt` in every tested case (`0.12×–0.60×` of 
 JAX/XLA has compiled the model on the first call (a cold EM fit takes ~0.8–1.1 s); `mirt` is
 faster for a single cold fit without standard errors.
 
+## Comparison with other libraries
+
+What each library's own documentation states, as of 2026-11-25 (R
+[mirt](https://cran.r-project.org/package=mirt) 1.48; on PyPI
+[mirt](https://pypi.org/project/mirt/) 1.2.0, [IRTorch](https://pypi.org/project/irtorch/) 0.5.6,
+[py-irt](https://pypi.org/project/py-irt/) 0.8.3, [girth](https://pypi.org/project/girth/) 0.8.0).
+"—" means the documentation does not mention it, not that it is impossible. Corrections are
+welcome on [GitHub Issues](https://github.com/takuizum/flexpyirt/issues).
+
+| | flexpyirt | R mirt | mirt (Python) | IRTorch | py-irt | girth |
+|---|---|---|---|---|---|---|
+| Estimation | MML, Bock–Aitkin EM (SQUAREM) | EM, MH-RM, MCEM / QMCEM, SEM | EM (SQUAREM), MH-RM, MCEM / QMCEM, Gibbs, GVEM (Rust core) | MML and JML by gradient descent, (variational) autoencoders | variational inference (Pyro) | MML, JML, conditional ML |
+| Item models | Rasch, 2PL, 3PL, 4PL, GRM, GPCM, PCM, nominal | these and many more | these and more (5PL, rating scale, nested logit, GGUM, CDMs) | 1–3PL, GRM, GPCM, nominal, nested logit, spline / neural-network models | 1PL, 2PL, 4PL | Rasch, 1–3PL, GRM, PCM, GGUM |
+| Multiple groups, DIF | ✓ | ✓ | ✓ | — | — | — |
+| Fixed item parameter calibration | ✓ | ✓ | ✓ | — | — | — |
+| Characteristic-curve linking | ✓ Haebara, Stocking–Lord, with SEs; also multidimensional | — (separate packages) | Stocking–Lord | linking through anchor items (splines, neural networks) | — | — |
+| Latent density: histogram / Davidian / normal mixture | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | — | — | — | — |
+| Multidimensional | confirmatory 2–3 factors, bifactor, two-tier | exploratory and confirmatory, bifactor, two-tier | exploratory and confirmatory, bifactor | several latent variables | — | multidimensional 2PL and GRM |
+| Fit: $M_2$ / S-X2 / local dependence | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | — / — / Q3 | — | — |
+| Standard errors of item parameters | Oakes, Hessian (exact by autodiff), sandwich, cross-product | many, incl. Oakes, Louis, sandwich | Louis / Oakes, sandwich, cross-product, bootstrap | — | — | bootstrap |
+| Scoring | EAP, MAP, ML, WLE, plausible values, summed-score EAP | the same and more | EAP, MAP, ML, WLE, plausible values | ML, EAP, MAP, neural network | — | ML, MAP, EAP |
+| GPU | ✓ (JAX) | — | ✓ (PyTorch, optional) | ✓ (PyTorch) | — | — |
+| Checked numerically against R mirt | ✓ (cases V1–V40) | (reference) | — | — | — | — |
+| License | MIT | GPL (≥ 3) | MIT | MIT | MIT | MIT |
+
+flexpyirt's open items are tracked in the
+[roadmap](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/ROADMAP.md). Exploratory
+high-dimensional models, MH-RM / MCEM estimation and cognitive diagnosis models are out of scope for
+now.
+
 ## Documentation
 
 - [User guide](https://takuizum.github.io/flexpyirt/guide/) — specifying models, multiple groups, FIPC, editing the
