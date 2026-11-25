@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from flexpyirt._core import (
+    BifactorBlock,
     CompiledProblem,
     CoupledBlock,
     CoupledMember,
@@ -50,7 +51,6 @@ from flexpyirt.latent import (
     correlation_matrix_is_positive_definite,
     davidian_param_names,
     eh_project_floor,
-    latent_param_names,
     mixture_param_names,
 )
 from flexpyirt.model import LATENT_ITEM
@@ -65,6 +65,8 @@ from flexpyirt.priors import (
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
+    from jax import Array
+
     from flexpyirt.model import Model
 
 __all__ = [
@@ -551,10 +553,13 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                     for m in range(1, n_factors + 1)
                 ),
                 *((f"var_{m}", var0, free_var, 0.0, np.inf) for m in range(1, n_factors + 1)),
+                # Bifactor factors are orthogonal: no correlation rows (DESIGN.md §17.1).
+                # Two-tier models correlate the primary factors only (§17.2).
                 *(
                     (f"cor_{i}{j}", 0.0, model.correlated_factors, -1.0, 1.0)
                     for i in range(1, n_factors + 1)
                     for j in range(i + 1, n_factors + 1)
+                    if not model.is_reduced or j <= model.n_primary
                 ),
             ]
             lat_model = "MVN"
@@ -659,7 +664,7 @@ def model_parameter_schema(model: Model) -> pd.DataFrame:
             rows.append((group_name, LATENT_ITEM, "mean", "Normal", -np.inf, np.inf))
             rows.append((group_name, LATENT_ITEM, "var", "Normal", 0.0, np.inf))
             continue
-        for lat_param in latent_param_names(model.n_factors):
+        for lat_param in model.latent_parameter_names():
             if lat_param.startswith("var_"):
                 lo_hi = (0.0, np.inf)
             elif lat_param.startswith("cor_"):
@@ -885,15 +890,18 @@ def validate_table(
     free = t["free"].to_numpy(dtype=bool)
     # Positive-definite latent correlation matrix and nonzero starting slopes per factor (D > 1).
     if model.is_multidimensional:
-        n_factors = model.n_factors
+        # Reduced models correlate their primary factors only (DESIGN.md §17.1, §17.2).
+        n_correlated = model.n_primary if model.is_reduced else model.n_factors
         cor_names = [
-            f"cor_{i}{j}" for i in range(1, n_factors + 1) for j in range(i + 1, n_factors + 1)
+            f"cor_{i}{j}"
+            for i in range(1, n_correlated + 1)
+            for j in range(i + 1, n_correlated + 1)
         ]
-        lat_sub = t[t["item"] == LATENT_ITEM]
+        lat_sub = t[t["item"] == LATENT_ITEM] if cor_names else t.iloc[:0]
         for grp_lat, rows_g in lat_sub.groupby("group", sort=False):
             vals_g = dict(zip(rows_g["param"], rows_g["value"], strict=True))
             cors = [float(vals_g[c]) for c in cor_names]
-            if not correlation_matrix_is_positive_definite(cors, n_factors):
+            if not correlation_matrix_is_positive_definite(cors, n_correlated):
                 raise SpecificationError(
                     f"Latent correlation matrix is not positive definite for group {grp_lat!r}: "
                     f"{dict(zip(cor_names, cors, strict=True))}."
@@ -1009,6 +1017,14 @@ def eh_param_count(t: pd.DataFrame, model: Model, quad: Quadrature) -> int:
 
 def _check_identification(t: pd.DataFrame, model: Model) -> None:
     """Scale identification rules of DESIGN.md §4.5, §14.5, and §15.31 (necessary conditions)."""
+    if model.is_reduced:
+        lat_rows = t[t["item"] == LATENT_ITEM]
+        moments = lat_rows["param"].str.startswith(("mean_", "var_"))
+        if bool(lat_rows.loc[moments, "free"].any()):
+            raise SpecificationError(
+                "Bifactor and two-tier models do not support free latent means or variances "
+                "yet; keep every mean_m and var_m fixed (DESIGN.md §17.1, §17.2)."
+            )
     if model.is_multidimensional:
         _check_identification_mirt(t, model)
         return
@@ -1218,7 +1234,7 @@ def _check_identification_mirt_group(t: pd.DataFrame, model: Model, *, check_sca
         free_cors = sum(
             1
             for other in range(1, n_factors + 1)
-            if other != m and lat_free[f"cor_{min(m, other)}{max(m, other)}"]
+            if other != m and lat_free.get(f"cor_{min(m, other)}{max(m, other)}", False)
         )
         if n_fixed_slopes[m - 1] < free_cors:
             raise IdentificationError(
@@ -1361,6 +1377,64 @@ class Compiled:
     n_patterns: int
 
 
+def _bifactor_block(
+    model: Model, quad: Quadrature, families: Sequence[FamilyBlock]
+) -> tuple[BifactorBlock, Array, Array]:
+    r"""Build the dimension reduction of a bifactor or two-tier model (DESIGN.md §17.1, §17.2).
+
+    The first :math:`P` factors are primary (the general factor of a bifactor model) and share
+    a product grid of :math:`Q_p=n^P` nodes. Block :math:`s = 0..S-1` holds the items of specific
+    factor :math:`s+1`; block :math:`S` holds the items without a specific factor. Each block's
+    ``(Q_p n, D)`` nodes put the primary node in columns :math:`0..P-1` and the specific node in
+    column :math:`P+s` (primary index major), so the item kernels evaluate
+    :math:`P_j(\boldsymbol\theta_g, \theta_t)` unchanged.
+
+    Returns the block, the primary grid embedded in ``D`` columns (``CompiledProblem.nodes``)
+    and its base log weights.
+    """
+    assert model.factors is not None
+    n_factors = model.n_factors
+    n_primary = model.n_primary
+    n_specific = n_factors - n_primary
+    axis = np.asarray(quad.nodes(), dtype=float)
+    n_pts = axis.shape[0]
+    primary = np.asarray(quad.grid(n_primary), dtype=float)  # (Q_p, P)
+    n_prim = primary.shape[0]
+    block_nodes = np.zeros((n_specific + 1, n_prim * n_pts, n_factors))
+    block_nodes[:, :, :n_primary] = np.repeat(primary, n_pts, axis=0)
+    for s_idx in range(n_specific):
+        block_nodes[s_idx, :, n_primary + s_idx] = np.tile(axis, n_prim)
+    block_of: dict[str, int] = {}
+    for s_idx, (_, assigned) in enumerate(model.factors[n_primary:]):
+        for item in assigned:
+            block_of[item] = s_idx
+    family_block = tuple(
+        jnp.asarray(
+            [block_of.get(model.items[int(j)][0], n_specific) for j in np.asarray(fam.columns)],
+            dtype=jnp.int32,
+        )
+        for fam in families
+    )
+    primary_base = quad.base_log_weights(n_primary)
+    embedded = np.zeros((n_prim, n_factors))
+    embedded[:, :n_primary] = primary
+    block = BifactorBlock(
+        block_nodes=jnp.asarray(block_nodes, dtype=jnp.float64),
+        primary_nodes=jnp.asarray(primary, dtype=jnp.float64),
+        primary_base=jnp.asarray(primary_base, dtype=jnp.float64),
+        nodes_1d=jnp.asarray(axis, dtype=jnp.float64),
+        base_1d=jnp.asarray(quad.base_log_weights(1), dtype=jnp.float64),
+        family_block=family_block,
+        n_specific=n_specific,
+        n_primary=n_primary,
+    )
+    return (
+        block,
+        jnp.asarray(embedded, dtype=jnp.float64),
+        jnp.asarray(primary_base, dtype=jnp.float64),
+    )
+
+
 def compile_problem(
     model: Model,
     y: np.ndarray,
@@ -1466,7 +1540,12 @@ def compile_problem(
             )
         )
 
-    nodes = jnp.asarray(quad.grid(model.n_factors), dtype=jnp.float64)
+    if model.is_reduced:
+        reduction, nodes, node_log_base = _bifactor_block(model, quad, families)
+    else:
+        reduction = None
+        nodes = jnp.asarray(quad.grid(model.n_factors), dtype=jnp.float64)
+        node_log_base = jnp.asarray(quad.base_log_weights(model.n_factors), dtype=jnp.float64)
     resolved = model.resolved_groups()
     if model.is_empirical_histogram and quad.kind != "equispaced":
         raise SpecificationError(
@@ -1558,7 +1637,7 @@ def compile_problem(
             davidian_degree=degree,
         )
     else:
-        lat_params = latent_param_names(model.n_factors)
+        lat_params = model.latent_parameter_names()
         lat_vals = np.array(
             [[lookup[(g, LATENT_ITEM, p)][:4] for p in lat_params] for g in groups], dtype=float
         )
@@ -1584,11 +1663,19 @@ def compile_problem(
         counts=jnp.asarray(counts, dtype=jnp.float64),
         group=jnp.asarray(pat_groups, dtype=jnp.int32),
         nodes=nodes,
-        node_log_base=jnp.asarray(quad.base_log_weights(model.n_factors), dtype=jnp.float64),
+        node_log_base=node_log_base,
         families=tuple(families),
         latent=latent,
         priors=priors_block,
         n_groups=n_groups,
         coupled=_coupled_blocks(family_free_index, slot_bounds),
+        reduction=reduction,
     )
+    if model.is_reduced and bool(
+        np.any(np.asarray(latent.free_index)[:, : 2 * model.n_factors] >= 0)
+    ):
+        raise SpecificationError(
+            "Bifactor and two-tier models do not support free latent means or variances yet; "
+            "keep every mean_m and var_m fixed (DESIGN.md §17.1, §17.2)."
+        )
     return Compiled(problem=problem, eta0=eta0, inverse=inverse, n_patterns=n_patterns)

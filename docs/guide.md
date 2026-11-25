@@ -862,6 +862,98 @@ res_mg = fit(
 print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
 ```
 
+### Bifactor models
+
+`.with_bifactor(specific={...}, general="general")` declares one general factor on which every item
+loads and specific factors on which each item loads at most once (items listed under no specific
+factor load on the general factor only; each specific factor needs at least two items). Item
+parameters are `a1` (general), `a2`… (specific, in declared order) and `d`, matching the columns of
+mirt's `bfactor()`. The factors are orthogonal standard normals.
+
+Because each item depends only on the general factor and its own specific factor, the likelihood
+is integrated by Gibbons and Hedeker's (1992) dimension reduction: one two-dimensional grid per
+specific factor instead of a $(1+S)$-dimensional product grid, so any number of specific factors
+stays cheap. One `Quadrature` gives the grid of every factor; the default is 31 points on
+$[-6, 6]$ (mirt's `bfactor()` default). Validated against mirt's `bfactor()` in V32.
+
+```python
+a_bif = np.zeros((9, 4))
+a_bif[:, 0] = [1.4, 1.2, 1.5, 1.1, 1.3, 1.6, 1.0, 1.2, 1.4]  # general
+a_bif[0:3, 1] = [0.9, 1.0, 0.8]  # specific s1
+a_bif[3:6, 2] = [1.1, 0.7, 0.9]  # specific s2
+a_bif[6:9, 3] = [0.8, 1.0, 0.9]  # specific s3
+theta_bif = rng.standard_normal((1500, 4))
+p_bif = 1.0 / (1.0 + np.exp(-(theta_bif @ a_bif.T + np.linspace(-1.0, 1.0, 9))))
+bif_items = [f"b{j}" for j in range(1, 10)]
+bif_df = pd.DataFrame((rng.random(p_bif.shape) < p_bif).astype(float), columns=bif_items)
+
+bif_spec = Model.uniform(TwoPL(), items=bif_items).with_bifactor(
+    specific={"s1": bif_items[0:3], "s2": bif_items[3:6], "s3": bif_items[6:9]},
+    general="G",
+)
+res_bif = fit(
+    bif_spec,
+    bif_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(21, bounds=(-6, 6)),  # 21^2 nodes per specific factor
+)
+print(res_bif.items[["item", "a1", "a2", "a3", "a4", "d", "a1_se"]].round(3))
+print(res_bif.score(bif_df.iloc[:3]).round(3))  # theta_G, theta_s1, ..., se_G, se_s1, ...
+```
+
+- **Supported**: every item model with free slopes (2PL, 3PL, 4PL, GRM, GPCM, nominal), Oakes and
+  Hessian SEs, `"EAP"` scoring (columns per factor), equality constraints, priors, and JSON.
+- **Not yet supported** (`SpecificationError`): multiple groups, Rasch / PCM items (their factor
+  variances would have to be free), free latent means or variances, MAP / ML / WLE / PV scoring,
+  item fit, $M_2$, and local dependence.
+
+### Two-tier models
+
+`.with_two_tier(primary={...}, specific={...}, correlated=True)` generalizes the bifactor model
+(Cai, 2010): one or two **primary** factors, which may correlate with each other, plus specific
+factors that are orthogonal to everything. Every item loads on at least one primary factor
+(cross-loadings among primary factors are allowed) and on at most one specific factor. Item
+parameters are `a1`… (primary, in declared order), then the specific slopes, and `d`, matching the
+columns of mirt's `bfactor(data, model, model2 = ...)`. With `correlated=True` the correlation of
+two primary factors (`cor_12`) is estimated; `correlated=False` fixes it at 0.
+
+The likelihood is integrated over the product grid of the primary factors and one more dimension
+per specific factor, so a model with two primary factors needs one three-dimensional grid per
+specific factor, however many specific factors there are. The default is 15 points per dimension
+on $[-6, 6]$ for two primary factors (31 for one), as in mirt. The results are validated against
+mirt's `bfactor()`.
+
+```python
+a_tt = np.zeros((10, 4))
+a_tt[0:5, 0] = [1.4, 1.2, 1.5, 1.1, 1.3]  # primary math
+a_tt[5:10, 1] = [1.6, 1.0, 1.2, 1.4, 1.3]  # primary reading
+a_tt[0:3, 2] = [0.9, 1.0, 0.8]  # specific t1 (a testlet within math)
+a_tt[5:8, 3] = [1.1, 0.7, 0.9]  # specific t2 (a testlet within reading)
+cov_tt = np.eye(4)
+cov_tt[0, 1] = cov_tt[1, 0] = 0.5
+theta_tt = rng.multivariate_normal(np.zeros(4), cov_tt, size=1500)
+p_tt = 1.0 / (1.0 + np.exp(-(theta_tt @ a_tt.T + np.linspace(-1.0, 1.0, 10))))
+tt_items = [f"t{j}" for j in range(1, 11)]
+tt_df = pd.DataFrame((rng.random(p_tt.shape) < p_tt).astype(float), columns=tt_items)
+
+tt_spec = Model.uniform(TwoPL(), items=tt_items).with_two_tier(
+    primary={"math": tt_items[0:5], "reading": tt_items[5:10]},
+    specific={"t1": tt_items[0:3], "t2": tt_items[5:8]},
+)
+res_tt = fit(
+    tt_spec,
+    tt_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(11, bounds=(-6, 6)),  # 11^3 nodes per specific factor
+)
+print(res_tt.items[["item", "a1", "a2", "a3", "a4", "d"]].round(3))
+print(res_tt.latent[["cor_12", "cor_12_se"]].round(3))  # correlation of math and reading
+print(res_tt.score(tt_df.iloc[:3]).round(3))  # theta_math, theta_reading, theta_t1, ...
+```
+
+The same features are supported, and the same ones are not, as for bifactor models; a model with
+three or more primary factors raises `SpecificationError`.
+
 ## 15. Scale linking
 
 When two forms are calibrated separately on different samples and share common items,
@@ -909,13 +1001,19 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 
 ## 16. Polychoric correlations
 
-`flexpyirt.polychoric(data)` estimates the polychoric correlation matrix of ordinal responses
+Sections 16, 17 and 19 use **flexpyctt**, the companion package for analyses that need no fitted
+model. It is installed together with flexpyirt, and can be installed on its own
+(`pip install flexpyctt`) where JAX is not wanted: it depends on NumPy, SciPy and pandas only and
+needs no 64-bit setting. Its functions take `rng` (an integer seed or a
+`numpy.random.Generator`) where they draw random numbers.
+
+`flexpyctt.polychoric(data)` estimates the polychoric correlation matrix of ordinal responses
 (tetrachoric for binary items), the usual input to eigenvalue-based checks of dimensionality. It
 uses two-step maximum likelihood (Olsson, 1979): thresholds from each item's marginal proportions,
 then one correlation per pair of items.
 
 ```python
-from flexpyirt import polychoric
+from flexpyctt import polychoric
 
 pc = polychoric(df)
 print(pc.correlation.iloc[:4, :4].round(3))
@@ -933,6 +1031,8 @@ print(pc.n_obs.iloc[:2, :2])
 - A matrix assembled from pairwise estimates need not be positive definite. It is then smoothed
   (psych's `cor.smooth` rule) with a `NotPositiveDefiniteWarning`; `pc.unsmoothed_correlation`
   keeps the pairwise estimates.
+- `flexpyirt.polychoric()` is a JAX implementation of the same estimator with the same
+  arguments and result; the two agree to about $10^{-9}$.
 
 ## 17. Number of dimensions
 
@@ -940,14 +1040,12 @@ Before fitting a unidimensional model it is worth asking how many dimensions the
 support. Each method below is a diagnostic with known biases, so look at several of them together.
 
 ```python
-import jax
+from flexpyctt import efa, empirical_kaiser, hull, parallel_analysis, velicer_map
 
-from flexpyirt import efa, empirical_kaiser, hull, parallel_analysis, velicer_map
-
-pa = parallel_analysis(df, key=jax.random.key(0), n_replications=20)
+pa = parallel_analysis(df, rng=0, n_replications=20)
 print(pa.n_factors, pa.observed[:3].round(3), pa.reference[:3].round(3))
 print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
-print(hull(pc, key=jax.random.key(4)).n_factors)
+print(hull(pc, rng=4).n_factors)
 print(efa(pc, n_factors=1).loadings.head(3).round(3))
 ```
 
@@ -955,7 +1053,7 @@ print(efa(pc, n_factors=1).loadings.head(3).round(3))
   above the 95th percentile of eigenvalues from reference data without common factors. By
   default the reference permutes each item's responses independently, which keeps the item
   marginals; `reference="normal"` uses normal data instead, and `eigen_type="smc"` uses the
-  reduced matrix. Results depend on `key`; use more replications (the default is 100) for a
+  reduced matrix. Results depend on `rng`; use more replications (the default is 100) for a
   final analysis.
 - `velicer_map()` minimizes the average partial correlation after removing $m$ principal
   components; the revised fourth-power version is the default (`power=2` for the original).
@@ -973,9 +1071,12 @@ print(efa(pc, n_factors=1).loadings.head(3).round(3))
 ## 18. Local dependence and the dimensionality report
 
 The counts of section 17 use the data only. With a fitted unidimensional model you can also ask
-whether the model leaves dependence between items unexplained.
+whether the model leaves dependence between items unexplained. These tools are part of flexpyirt
+and take a JAX PRNG `key`.
 
 ```python
+import jax
+
 from flexpyirt import dimensionality, model_parallel_analysis
 
 ld = res.local_dependence(df)
@@ -992,7 +1093,13 @@ print(report)
 - `FitResult.local_dependence()` gives, for every pair, Yen's Q3 (the correlation of residuals
   from EAP scores), Q3\* (Q3 minus its mean over pairs) and Chen & Thissen's LD $X^2$ / $G^2$,
   as mirt's `residuals()`. Large Q3\* or $X^2$ point to pairs that share something beyond
-  $\theta$ (a common stem, a testlet, a second dimension).
+  $\theta$ (a common stem, a testlet, a second dimension). It also works for multiple-group
+  models (pass `group=`; the statistics are computed within each group and `pairs` gets a
+  `group` column), for `EmpiricalHistogram`, `DavidianCurve` and `NormalMixture` latent
+  distributions (the fitted distribution is used) and for models with 2 or 3 factors (pairs
+  that still depend on each other given all the factors). `jsi()`, `model_parallel_analysis()`
+  and `dimensionality(fit=...)` need a single-group unidimensional model with a `Normal`
+  latent distribution.
 - `FitResult.jsi()` is Edwards, Houts & Cai's (2018) jackknife slope index: each item is removed
   in turn, the model is re-estimated, and every other item's slope change is divided by its
   standard error. If two items depend on each other, removing one lowers the other's slope, so
@@ -1018,13 +1125,13 @@ near zero; with several dimensions they are positive within clusters of items an
 across them.
 
 ```python
-from flexpyirt import detect, dimtest, exploratory_detect
+from flexpyctt import detect, dimtest, exploratory_detect
 
 halves = {item: ("A" if i < len(items) // 2 else "B") for i, item in enumerate(items)}
 print(detect(df, halves).indices.round(3))
-explore = exploratory_detect(df, max_clusters=3, key=jax.random.key(3))
+explore = exploratory_detect(df, max_clusters=3, rng=3)
 print(explore.table.round(3))
-test = dimtest(df, key=jax.random.key(5))
+test = dimtest(df, rng=5)
 print(test.assessment_items, round(test.statistic, 3), round(test.p_value, 3))
 ```
 

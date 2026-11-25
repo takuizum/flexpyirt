@@ -26,12 +26,13 @@ English | [日本語](VALIDATION.ja.md)
 | Scale linking $(A, B)$ / criterion, on identical item estimates | 1e-9 / 1e-9 (relative) |
 | Scale linking delta-method SE / `vcov`, on identical estimates and covariance | 1e-5 (relative) |
 | Scale linking $(A, B)$ / criterion / SE, end-to-end (calibration + linking) | 1e-6 / 1e-5 (relative) / 1e-3 (relative) |
-| Polychoric correlation vs lavaan / psych; thresholds; smoothing vs `cor.smooth` | 1e-6 / 1e-3; 1e-12; 1e-12 |
+| Polychoric correlation vs lavaan / psych; thresholds; smoothing vs `cor.smooth` (both implementations) | 1e-6 / 1e-3; 1e-12; 1e-12 |
+| flexpyctt (NumPy) vs flexpyirt (JAX) polychoric correlation on the V24 cases; $\Phi_2$ by Owen's $T$ vs Plackett's integral | 1e-9, equal flags; 1e-14 |
 | EKC, MAP, observed eigenvalues on the same matrix; normal reference mean / 95th percentile | 1e-11; $\lvert z\rvert\le4.5$ / 6e-3 |
 | LD $X^2$ / $G^2$; signed $V$, Q3 (refitted models); model-based PA observed / simulated mean / 95th percentile | 1e-5 (relative); 1e-6; 2e-4 / $\lvert z\rvert\le4.5$ / 0.02 |
 | DETECT conditional covariances, indices (both halves), Ward heights | 1e-12 |
 | EFA implied $\Lambda\Lambda^\top$ / communalities; CAF, CFI, RMSEA; $\chi^2$; Hull fit / $st$ | 1e-4; 2e-4; 1e-4 (relative); 1e-5 / 1e-2 (relative) |
-| CD: PAF $\Lambda\Lambda^\top$; one-factor population from the same draws; rank-sum $p$; mean RMSE | 1e-12; exact; 1e-10 (relative); 15% (relative) |
+| CD: PAF $\Lambda\Lambda^\top$; one-factor population from the same draws; rank-sum $p$; mean RMSE (retained $k$ / the rejected extra $k$) | 1e-12; exact; 1e-10 (relative); 15% / 60% (relative) |
 | DIMTEST (simulation study; small version in the tests): type I error at .05 / power | $\le 0.15$ of 20 / $\ge 8$ of 10 |
 
 ## Cases (by milestone)
@@ -63,11 +64,14 @@ English | [日本語](VALIDATION.ja.md)
 | V24 | Polychoric / tetrachoric correlations (simulated tetrachoric, mixed 2–5 categories, 10% MCAR, one-empty-cell 2 x 2 tables, LSAT7, Science) and smoothing | lavaan `lavCor(..., ordered = , missing = )`; psych `polychoric(..., smooth = FALSE, correct = 0)`, `cor.smooth()` | M5 |
 | V25 | Number of dimensions: EKC, MAP (squared and fourth power), PCA / SMC eigenvalues on the V24 matrices; normal-data parallel-analysis references (3 sizes) | EFAtools `EKC()`, `PARALLEL()`; psych `vss()$map`; EFA.dimensions `MAP()`; independent R fourth-power MAP | M5 |
 | V26 | Local dependence (LSAT7 2PL, Science GRM, simulated 2PL with a dependent pair and 5% MCAR) and model-based parallel analysis (LSAT7) | `residuals(m, type = "LD" / "LDG2" / "Q3")`; ltm `unidimTest(data = , thetas = cbind(d, a1), IRT = FALSE)` | M5 |
+| V26 (M7) | Local dependence for two groups (2PL with 4% MCAR, GRM; two factors 2PL), `EmpiricalHistogram`, `DavidianCurve(2)`, `NormalMixture(2)` (V22a's estimates), two factors (2PL with a cross-loading and 3% MCAR, GRM) and three factors (2PL) | `residuals()` on `multipleGroup()`, `dentype = "EH"` / `"Davidian-2"` (`use_dentype_estimate = TRUE`; `Theta = fscores(m, use_dentype_estimate = TRUE)` for Q3) and `mirt.model()` fits; for the mixture a single-group mirt object with the mixture weights as its prior | M7 |
 | V27 | DETECT: confirmatory (simulated 2D with true / wrong partitions, 1D, Science) and exploratory (simulated 3 clusters, given split) | sirt `conf.detect(use_sum_score = TRUE, smooth = FALSE)`, `expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
 | V28 | EFA (ULS, ML; every $k$ up to Hull's bound) and the Hull method (CAF, CFI, RMSEA) on the V24 matrices with $\ge 6$ variables and two simulated matrices | EFAtools `EFA(method = , rotation = "none")`, `HULL(method = , gof = )`; psych `fa(fm = "minres" / "ml", rotate = "none")` | M5 |
 | V29 | Comparison data: PAF, the one-factor population generator from exported draws, rank-sum tests, `CD()` on 3-factor continuous, 2-factor ordinal and 1-factor binary data | EFAtools `.paf_iter`, `.simulate_cfm_empirical`, `CD()`; `wilcox.test(x, y, "less")` | M5 |
-| V30 | DIMTEST: type I error and power (2PL; $N$ 1000–2000, $J$ 20–30; unidimensional and two dimensions correlated 0.7–0.8; 200 replications each) | none (no implementation outside DIMPACK): `validation/simulation/dimtest_study.py` | M5 |
+| V30 | DIMTEST: type I error and power (2PL; $N$ 1000–2000, $J$ 20–30; unidimensional and two dimensions correlated 0.7–0.8; 200 replications each) | none (no implementation outside DIMPACK): `packages/flexpyctt/validation/simulation/dimtest_study.py` | M5 |
 | V31 | Jackknife slope index (LSAT7 2PL, Science GRM, simulated 2PL with two dependent pairs and 5% MCAR, simulated GPCM with a dependent pair); the Newton and one-step approximations against the refit | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
+| V32 | Bifactor models with dimension reduction (2PL with three specific factors and three general-only items; GRM $K=4$ with three testlets) | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
+| V33 | Two-tier models with dimension reduction (2PL with two correlated primary factors and three specific factors, one spanning both; GRM $K=4$ with a cross-loading item and two testlets) | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
 | V36 | Summed-score distribution kernel (Poisson-binomial: five probability vectors, $J$ 10–300; polytomous: GRM $K=4$ and mixed 2PL + GRM) | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`, `poibin::dpoibin()`, `stats::dpois()`; mirt `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 
 ## mirt settings and known differences (found in M1)
@@ -578,6 +582,57 @@ English | [日本語](VALIDATION.ja.md)
   checks vs finite differences and a Monte Carlo linearization check that re-solves the linking
   for parameter draws from $N(\hat\eta, \Sigma)$ with fixed weights — not a bootstrap of the
   calibrations): `tests/test_m5_linking.py`.
+- **Bifactor models (V32, M7)**: two simulated cases in `tests/test_mirt_m7_bifactor.py` (plain
+  EM and SQUAREM; generator `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`,
+  mirt 1.46.1 `bfactor()`, `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`,
+  `SE.type = "Oakes"`, 31 points per dimension on $[-6, 6]$, i.e. one $31^2$ grid per specific
+  factor). mirt's `fscores()` has no bifactor path and integrates over the full four-dimensional
+  product grid, which equals the factorized posterior on the same one-dimensional grid; EAPs are
+  therefore compared at 15 points per dimension ($15^4$ nodes in mirt) with every parameter fixed at
+  mirt's estimates. In both cases the reduced log-likelihood at mirt's estimates equals mirt's to
+  $10^{-15}$ (relative), EM and SQUAREM are monotone, and Oakes agrees with the Hessian to
+  $3\times10^{-16}$ (covariance entries):
+  - **V32a (`bifactor_2pl`, 2PL, $J=15, N=2000$, `s1 = q01-q04`, `s2 = q05-q08`, `s3 = q09-q12`,
+    `q13-q15` general only)**: `loglik` rel `2.2e-16`, item parameters `1.9e-7` (EM, 498 iterations;
+    SQUAREM `5.3e-9`, 80 iterations), Oakes SE rel `3.5e-7` (SQUAREM `8.9e-9`), EAP $\theta$ `4.9e-14` /
+    SD `8.7e-15`.
+  - **V32b (`bifactor_grm`, GRM $K=4$, $J=12, N=2000$, three testlets of four items)**: `loglik` rel
+    `8.9e-16`, item parameters `1.9e-8` (EM, 188 iterations; SQUAREM `2.5e-9`, 29 iterations), Oakes
+    SE rel `2.5e-8` (SQUAREM `3.7e-9`), EAP $\theta$ `4.9e-14` / SD `7.9e-15`.
+  - The unit tests (`tests/test_m7_bifactor.py`) check the reduced likelihood, expected counts and
+    EAP against brute-force integration over the full $(1+S)$-dimensional product grid (to
+    $10^{-12}$ or better, with missing data, a GRM item, 3PL items and general-only items), and a
+    one-specific-factor bifactor model against the validated 2D path
+    (`with_factors(..., correlated=False)`; log-likelihood to $10^{-12}$).
+- **Two-tier models (V33, M7)**: two simulated cases in `tests/test_mirt_m7_two_tier.py` (plain
+  EM and SQUAREM; generator `validation/r/m7_two_tier_reference.R` → `tests/reference/v33_two_tier.json`,
+  mirt 1.48 `bfactor(data, model, model2 = )`, `accelerate = "none"`, `TOL = 1e-10`,
+  `SE.type = "Oakes"`, 15 points per dimension on $[-6, 6]$, i.e. one $15^3$ grid per specific
+  factor). As in the 3D case of V14, the M-step optimizer is `BFGS` with
+  `control = list(reltol = 1e-13, maxit = 500L)`, because mirt's `NR` uses numerical Hessians for
+  `GroupPars` and is very slow on 3,375 nodes. The primary correlation is mirt's `COV_21` (both
+  variances are fixed at 1). mirt's `fscores()` integrates over the full product grid, which equals
+  the factorized posterior on the same one-dimensional grid; EAPs are compared with every parameter
+  fixed at mirt's estimates. In both cases the reduced log-likelihood at mirt's estimates equals
+  mirt's to $2.1\times10^{-15}$ (relative), `flexpyirt.loglik >= fixed_at_mirt.loglik` holds, EM
+  and SQUAREM are monotone, and Oakes agrees with the Hessian to $6.2\times10^{-17}$ (covariance
+  entries):
+  - **V33a (`two_tier_2pl`, 2PL, $J=16, N=2000$, `F1 = q01-q08`, `F2 = q09-q16`, $\rho=0.5$,
+    `s1 = q01-q04`, `s2 = q09-q12`, `s3 = q05, q06, q13, q14`; four items primary only)**: `loglik`
+    rel `2.1e-15`, item parameters `3.0e-7` (EM, 192 iterations; SQUAREM `3.1e-7`, 33 iterations),
+    `cor_12` `2.2e-8` (SQUAREM `1.3e-8`), item Oakes SE rel `4.4e-7` (SQUAREM `4.6e-7`), `cor_12_se`
+    rel `7.3e-6`, EAP $\theta$ `6.9e-15` / SD `4.0e-15` ($9^5$ nodes in mirt).
+  - **V33b (`two_tier_grm`, GRM $K=4$, $J=12, N=2000$, `F1 = g01-g06`, `F2 = g06-g12` with `g06`
+    cross-loading, $\rho=0.4$, `s1 = g01-g04`, `s2 = g07-g10`)**: `loglik` rel `1.1e-15`, item
+    parameters `7.8e-9` (EM, 192 iterations; SQUAREM `1.6e-8`, 30 iterations), `cor_12` `6.3e-9`
+    (SQUAREM `3.9e-9`), item Oakes SE rel `1.0e-7` (SQUAREM `1.1e-7`), `cor_12_se` rel `1.6e-6`, EAP
+    $\theta$ `7.1e-15` / SD `3.4e-15` ($15^4$ nodes in mirt).
+  - The unit tests (`tests/test_m7_two_tier.py`) check the reduced likelihood, expected counts and
+    EAP against brute-force integration over the full $(P+S)$-dimensional product grid (to
+    $10^{-12}$ or better, with missing data, a GRM item, a cross-loading item and items without a
+    specific factor), a one-primary-factor two-tier model against the bifactor path, and a
+    one-specific-factor model against the validated 3D path (`with_factors()` with the specific
+    factor's correlations fixed at 0; log-likelihood to $10^{-12}$).
 - **Summed-score distribution kernel (V36, M7)**: `summed_score_distribution()` (DESIGN §18.1) in
   `tests/test_r_m7_sumscore.py` (fast tier; generator `validation/r/m7_sumscore_reference.R` →
   `tests/reference/v36_sumscore.json`, poibin 1.6, mirt 1.48).
@@ -748,6 +803,50 @@ English | [日本語](VALIDATION.ja.md)
   is called with data and parameters rather than a fitted ltm object, so it simulates
   $\theta\sim N(0,1)$ as flexpyirt does with a standard normal fit; its tetrachorics come from
   polycor (`optimise()` tolerance), which bounds the observed-statistic agreement.
+- **Local dependence beyond single-group unidimensional Normal models (V26, M7, issue #81)**:
+  `validation/r/m7_local_dependence_reference.R` (mirt 1.48) writes
+  `tests/reference/v26_local_dependence_extensions.json`; `tests/test_mirt_m7_local_dependence.py`
+  puts mirt's estimates into a flexpyirt `FitResult` with every parameter fixed (`fit(...,
+  table=)`; the EH weights are mirt's `Internals$Prior`), so the comparison is of the statistics
+  alone (the log-likelihood at mirt's estimates agrees to $10^{-9}$ relative, observed
+  $\le4\times10^{-15}$). Nine cases, 641 group-pairs. Largest observed differences: $X^2$
+  $3\times10^{-12}$ and $G^2$ $8\times10^{-9}$ (relative; tolerance $10^{-7}$), $V$
+  $3\times10^{-15}$ and Q3 $2\times10^{-15}$ (absolute; tolerance $10^{-8}$).
+
+  | Case | mirt call | Grid | Pairs |
+  |---|---|---|---|
+  | two groups, 2PL, 4% MCAR | `multipleGroup(invariance = c(anchors, "free_means", "free_var"))` | 121 | 2 x 45 |
+  | two groups, GRM (4 categories) | same | 121 | 2 x 15 |
+  | two groups, two factors, 2PL | same with `mirt.model` | $61^2$ | 2 x 45 |
+  | EH, 2PL, skewed trait, 3% MCAR | `mirt(dentype = "EH")`, `use_dentype_estimate = TRUE` | 61 | 66 |
+  | Davidian curve of degree 2, same data | `mirt(dentype = "Davidian-2")`, same | 61 | 66 |
+  | normal mixture, V22a's estimates | mixture weights put into `Internals$Prior` | 61 | 190 |
+  | two factors, 2PL, cross-loading, 3% MCAR | `mirt(mirt.model(...))` | $31^2$ | 45 |
+  | two factors, GRM (3 categories) | same | $31^2$ | 28 |
+  | three factors, 2PL | same | $15^3$ | 36 |
+
+  Known differences from mirt's defaults, all handled in the script: (1) for EH and Davidian
+  fits `residuals()` takes a $N(0,1)$ prior unless `use_dentype_estimate = TRUE`; with it,
+  `type = "Q3"` evaluates the residuals at the grid nodes (mirt 1.48), so Q3 is requested with
+  `Theta = fscores(m, use_dentype_estimate = TRUE)`. (2) Q3 scores come from `fscores()`, whose
+  grid is 121 / 61 / 31 points per dimension for 1 / 2 / 3 factors whatever the fit used.
+  Single-group cases pass `Theta = fscores(m, quadpts = <the fit's>)`; `multipleGroup` cases,
+  where `Theta` cannot be passed per group, are fitted on `fscores()`'s grid. mirt's default call
+  is stored as `q3_default`: against flexpyirt on the fitted grid it differs by
+  $2\times10^{-9}$ for $31^2$ against $61^2$ and by $1.3\times10^{-4}$ for $15^3$ against
+  $31^3$ (consistent with the $4\times10^{-8}$ of the M5 cases: 61 against 121 points).
+  (3) mirt has no `residuals()` for its mixture class, so the mixture case checks the statistics
+  given the density, not a mirt mixture fit (the fit is V22). (4) A category not observed in a
+  group makes mirt's `table()` smaller than $K_i\times K_j$; flexpyirt keeps the full table and
+  this is unit-tested only. One end-to-end check refits the two-group 2PL with flexpyirt and
+  agrees with mirt (fitted to `TOL = 1e-6`) to $4\times10^{-4}$ ($X^2$, $G^2$) and
+  $5\times10^{-6}$ ($V$, Q3). mirt orders groups alphabetically, so its $N(0,1)$ reference group
+  is `focal`; the test standardizes the same group. With the other group standardized the
+  model is the same but its discretization is not (the grid is cut at $\pm6$ and the free group
+  has SD 1.34): the log-likelihood differs by $1.9\times10^{-3}$ and $X^2$ by $3\times10^{-3}$. **Not validated, not
+  implemented**: bifactor / two-tier models; `jsi()` beyond single-group unidimensional Normal
+  models (mirt: one factor only, no SE for Davidian curves, no mixtures, and for
+  `multipleGroup` single-group $N(0,1)$ refits per group, which is another statistic).
 - **DETECT (V27, M5)**: sirt's `conf.detect()` is called with `smooth = FALSE`; with the
   default `smooth = TRUE` and `use_sum_score = TRUE` it subtracts raw item scores from the
   standardized total score, which mis-forms the rest-score groups (DESIGN §16.13). `expl.detect()`
@@ -766,12 +865,14 @@ English | [日本語](VALIDATION.ja.md)
   `rnorm()` calls in the generator's order), exporting them and feeding them to flexpyirt; this is
   exact for one factor, where the loadings' sign is fixed by the generator. The selection is
   checked on data sets where the answer is clear; the mean RMSEs are compared loosely because
-  each side draws its own populations. JSON `auto_unbox` would turn a one-element $p$-value vector
+  each side draws its own populations: 15% for the retained numbers of factors, and 60% for the
+  rejected extra factor, whose single population varies much more (0.044 to 0.072 over six seeds
+  where EFAtools' draw gave 0.048). JSON `auto_unbox` would turn a one-element $p$-value vector
   into a scalar, so the script writes `as.list()`.
 - **DIMTEST (V30, M5)**: accepted on a simulation study instead of a reference
   comparison (DESIGN §16.16 has the table): with 200 replications the type I error at .05 is
-  0.0–2.0% (conservative; the bootstrap removes the bias but $T$'s SD under the null is about 0.75)
-  and the power 0.99–1.00. Rerun with `uv run python validation/simulation/dimtest_study.py`
+  0.5–1.0% (conservative; the bootstrap removes the bias but $T$'s SD under the null is about 0.72)
+  and the power 0.99–1.00. Rerun with `uv run python packages/flexpyctt/validation/simulation/dimtest_study.py`
   (about 4 minutes); the tests run 20 null and 10 alternative replications.
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
