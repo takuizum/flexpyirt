@@ -69,7 +69,8 @@ pytrees only (nested `jax.Array`s and our own frozen dataclasses registered with
 ## 4. Algorithms
 
 ### 4.1 Preprocessing: response-pattern compression
-- Make each group's response matrix (missing as `-1`) unique to get frequencies $c_p$.
+- Make each group's response matrix (missing as `-1`) unique to get frequencies $c_p$. With
+  sampling weights, $c_p$ is the sum of the weights of the rows with pattern $p$ (§17.4).
 - To limit jit recompilation, **pad the number of patterns to a power-of-two bucket** (rows with
   frequency 0).
 - Groups have different numbers of patterns, so all groups are concatenated into one array plus
@@ -765,7 +766,7 @@ data-independent shapes (§15.21).
     string and also writes UTF-8 text to `path` (`str` or `os.PathLike`) when given;
     `FitResult.from_json(source) -> FitResult` loads from a file path or JSON string without
     refitting. Plain JSON is used (no `pickle` and never `eval`). The top-level object carries
-    `"format": "flexpyirt.FitResult"`, `"schema_version"` (4 since the naming refactor of §15.46; versions 1–3 are still read), and
+    `"format": "flexpyirt.FitResult"`, `"schema_version"` (4 since the naming refactor of §15.46, 5 since bifactor models, §17.1, 6 since two-tier models, §17.2, 7 since sampling weights, §17.4; older versions are still read), and
     `"flexpyirt_version": flexpyirt.__version__`. `FitResult` stores `_method: BAEM` alongside
     `_model` and `_quadrature` so estimation settings round-trip as well. `from_json` calls
     `check_x64()` at entry (raising `PrecisionError` when 64-bit floating point is disabled, since
@@ -2107,7 +2108,107 @@ data-independent shapes (§15.21).
    **JSON** (schema version 6): the model stores `"n_primary_factors"` (0 unless two-tier);
    versions 1–5 must not contain it. On load a two-tier structure is rebuilt through
    `with_two_tier()`.
+3. **Local dependence for bifactor and two-tier models (`FitResult.local_dependence`, V38,
+   issue #81)**: the statistics of §16.11 on the reduced grids of items 1–2, without the
+   $n^{P+S}$ product grid. Notation as above: primary nodes $\boldsymbol\theta_g$ with weights
+   $w^{(0)}_g$ ($g=1..Q_p$, $Q_p=n^P$), specific nodes $\theta_t$ with weights $w^{(s)}_t$,
+   $s(j)$ the specific factor of item $j$ ($\varnothing$ when it has none) and
+   $P_{ja}(\boldsymbol\theta_g,\theta_t)$ its category probabilities on its block grid.
+   **Expected tables.** Integrating the specific factor out of one item gives its trace given
+   the primary factors,
+   $$\bar P_{ja}(\boldsymbol\theta_g)=\sum_t w^{(s(j))}_t\,P_{ja}(\boldsymbol\theta_g,\theta_t)$$
+   ($\bar P_{ja}=P_{ja}$ when $s(j)=\varnothing$; the uniform weights of that block give the same
+   value). Because the specific factors are independent of each other and of the primary
+   factors, the model-implied table of a pair answered by $n_{ij}$ respondents is
+   $$E_{ab}=n_{ij}\sum_g w^{(0)}_g\sum_t w^{(s)}_t\,P_{ia}(\boldsymbol\theta_g,\theta_t)
+   P_{jb}(\boldsymbol\theta_g,\theta_t)\qquad s(i)=s(j)=s,$$
+   $$E_{ab}=n_{ij}\sum_g w^{(0)}_g\,\bar P_{ia}(\boldsymbol\theta_g)\,\bar P_{jb}(\boldsymbol\theta_g)
+   \qquad s(i)\ne s(j)\ \text{or}\ s(i)=s(j)=\varnothing .$$
+   Both are exact rearrangements of the sum over the full product grid with weights
+   $w^{(0)}_g\prod_s w^{(s)}_{t_s}$ (every factor that neither item loads on sums to 1), so they
+   equal mirt's `residuals(type = "LD")`, which builds that grid (`thetaComb(theta, nfact)`),
+   when the one-dimensional grid is the same. Cost: $O(Q_p n K_iK_j)$ per pair instead of
+   $O(n^{P+S}K_iK_j)$. $X^2$, $G^2$, $df=(K_i-1)(K_j-1)$, the $p$-values and the signed
+   Cramér's $V$ follow from $O_{ab}$ and $E_{ab}$ as in §16.11.
+   **Q3.** $d_{ij}=x_{ij}-E(X_j\mid\hat{\boldsymbol\theta}_i)$ at the vector EAP of all $D=P+S$
+   factors from the factorized posterior (`_bifactor_eap`); the kernels are evaluated at the
+   `(N, D)` scores with the reduction switched off (`CompiledProblem.reduction = None`, so
+   `_family_nodes` returns the scores). Q3\* as in §16.11.
+   **Implementation.** `_local_dependence.ld_pairs` is split: `ld_pairs_from_tables(y,
+   pair_probabilities)` computes the statistics from a function returning the $K_i\times K_j$
+   joint probabilities of a pair, `ld_pairs` (shared grid) and `reduced_pair_probabilities`
+   (the two formulas above, from the traces on the block grids `(Q_p, n, K_j)`, the weights of
+   `_bifactor_log_weights` and each item's block) supply that function. Bifactor and two-tier
+   models are single-group (items 1–2), so there is no group loop here beyond the existing one.
+   **Interpretation.** A pair within a specific factor is tested for dependence *beyond* that
+   factor; a testlet left out of `specific` shows up as large positive $V$ within it (unit-tested on simulated data).
+   **Validation (V38).** mirt's estimates of a bifactor 2PL (with general-only items and
+   missing data), a bifactor GRM and a two-tier 2PL (`bfactor(model2 = )`) are put into a
+   `FitResult` with every parameter fixed and compared with `residuals(type = "LD" / "LDG2" /
+   "Q3")` (Q3 with `Theta = fscores(m, quadpts = <the fit's>)`, because `fscores()` otherwise
+   uses its own grid); a unit test compares the factorized tables with the brute-force product
+   grid. **Not extended.** `jsi()` keeps raising `SpecificationError` for these models: the
+   statistic is defined for one slope per item (Edwards, Houts & Cai, 2018), an item here has a
+   primary and a specific slope, and mirt's `type = "JSI"` requires one factor, so both the
+   definition and a reference are missing.
 
+4. **Sampling (survey) weights (`fit(..., weights=...)`, V34)**: with a weight $w_i\ge0$ for every
+   respondent, `fit()` maximizes the weighted marginal log-likelihood (pseudo-likelihood; Skinner,
+   1989; mirt's `survey.weights`)
+   $$\ell_w(\eta)=\sum_i w_i\log L_i(\eta)=\sum_p c_p\log L_p(\eta),\qquad c_p=\sum_{i:\,y_i=p}w_i,$$
+   plus the log prior for a MAP fit. This is the likelihood of §4.2 with the pattern frequency
+   $c_p$ replaced by the sum of the weights of the rows with pattern $p$ (within a group), so the
+   Core is unchanged: the E-step, the item and latent M-steps, SQUAREM, multiple groups, FIPC,
+   every latent distribution and both information matrices already work on real-valued
+   `CompiledProblem.counts`. Only the Compile layer changes (`coerce_weights`,
+   `compress_patterns(..., weights)` summing with `np.bincount`).
+   - **Argument**: `weights` is an array-like with one number per row of `data` (NumPy array,
+     list, pandas / polars Series). A column name is **not** accepted: `data` must hold exactly
+     the model's items, and `group=` is array-like only, so `weights=` follows the same rule.
+     `SpecificationError` for a wrong length or shape, non-numeric, NaN / infinite or negative
+     values, a zero total, and a declared group whose weights are all zero.
+   - **No rescaling**: the weights are used as given (as in mirt). `loglik`, `log_posterior`, AIC
+     and the information matrix are therefore on the scale of the weights; weights that sum to
+     the number of rows keep them comparable with an unweighted fit. With priors, the prior has
+     the same absolute weight whatever the scale of $w$, so rescaling the weights changes a MAP
+     estimate (not an MLE).
+   - **Zero weights**: rows with $w_i=0$ are dropped right after validation, before the starting
+     values and the estimability check (§14.5), so they affect nothing (a category seen only in
+     zero-weight rows is "never observed").
+   - **Integer weights** are frequency weights: the fit equals the fit to the data with row $i$
+     repeated $w_i$ times (same likelihood, estimates and information; unit-tested).
+   - **What "N" means**: `n_obs` is the number of rows with a positive weight. BIC uses
+     $\log W$ with $W=\sum_i w_i$ in place of $\log N$, as mirt does (its $N$ is the sum of the
+     pattern frequencies), so BIC agrees with mirt and with row replication for integer weights.
+     AIC does not use $N$. $W$ is kept as the private `FitResult._sum_weights` (`None` for an
+     unweighted fit) and shown in `summary()`. The **starting values** (§4.10) are computed
+     without weights from the rows with a positive weight: they change the path of EM, not its
+     limit, and an unweighted moment is a good enough start. The identification checks and the
+     Heywood / degenerate-solution warnings do not use $N$.
+   - **Standard errors**: `se="oakes"` (default) and `se="hessian"` invert
+     $-\nabla^2\ell_w(\hat\eta)$. For frequency weights that is the usual information. For
+     sampling weights it is **not** a valid variance estimate: the design-consistent variance is
+     the sandwich $H^{-1}\big(\sum_i w_i^2 s_i s_i^\top\big)H^{-1}$ (Binder, 1983), which comes
+     with the robust standard errors. Decision: the default stays `"oakes"` (the values equal
+     mirt's `SE.type = "Oakes"` with `survey.weights`, so they can be validated), and `fit()`
+     emits a `FlexpyirtWarning` whenever `weights` is given and `se` is not `None`.
+   - **After the fit**: scoring (`score()`) depends only on the estimates and is unchanged.
+     `link()` uses the estimates and `vcov` (its SEs inherit the caveat above). The data-based
+     diagnostics have no validated weighted form (their statistics and reference distributions
+     assume unweighted counts), so `item_fit()`, `m2()`, `local_dependence()`, `jsi()`, `dif()`,
+     `model_parallel_analysis()` and `dimensionality(fit=...)` raise `SpecificationError` for a
+     weighted fit (`FitResult._require_unweighted`).
+   - **JSON**: `schema_version` 7 adds the optional top-level key `sum_weights` (present only
+     for a weighted fit; a positive finite number); it is rejected in files of version $\le6$,
+     which still load. The weights themselves are not stored (like the data).
+   - **Validation (V34)**: `validation/r/m7_weights_reference.R` (mirt 1.48, `survey.weights`,
+     TOL $=10^{-10}$, Oakes): a 2PL with non-integer weights that do not sum to $N$ and five zero
+     weights, the Science GRM with weights normalized to $N$, two groups with anchors, a free
+     focal latent distribution and 5% missing responses, FIPC with a free latent
+     distribution, and a bifactor 2PL (`bfactor()`). Bifactor and two-tier models (§17.1, §17.2)
+     need nothing special: their dimension-reduced E-step also works on `counts`; the two-tier
+     case is checked against row replication only. Estimates, log-likelihood, AIC, BIC and Oakes SEs agree within the common
+     tolerances (VALIDATION.md V34).
 ## 18. Summed-score distribution kernel, information and reliability (M7)
 
 1. **Lord–Wingersky recursion as a Poisson-binomial kernel (`summed_score_distribution`, V36)**:
@@ -2332,6 +2433,7 @@ data-independent shapes (§15.21).
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
+- Binder, D. A. (1983). On the variances of asymptotically normal estimators from complex surveys. *International Statistical Review*, 51(3), 279–292.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
@@ -2404,6 +2506,7 @@ data-independent shapes (§15.21).
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Skinner, C. J. (1989). Domain means, regression and multivariate analysis. In C. J. Skinner, D. Holt & T. M. F. Smith (Eds.), *Analysis of Complex Surveys* (pp. 59–87). Wiley.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
 - Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.

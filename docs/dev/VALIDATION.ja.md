@@ -67,8 +67,10 @@
 | V31 | ジャックナイフ傾き指標（LSAT7 の 2PL、Science の GRM、依存するペア 2 組と 5% の MCAR を含むシミュレーションの 2PL、依存するペア 1 組を含むシミュレーションの GPCM）。Newton 法と 1 ステップの近似は推定し直した値と比べる | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | 次元縮約による双因子モデル（特殊因子 3 つと一般因子のみの項目 3 つを含む 2PL、テストレット 3 つの GRM $K=4$） | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | 次元縮約による two-tier モデル（相関する主因子 2 つと特殊因子 3 つ（1 つは両方の主因子にまたがる）の 2PL、交差負荷項目 1 つとテストレット 2 つの GRM $K=4$） | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
+| V34 | 標本ウェイト: 非整数ウェイト（合計 $\ne N$、ウェイト 0 が 5 行）の 2PL、合計を $N$ に正規化したウェイトの Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC、次元縮約による双因子 2PL。推定値、対数尤度、AIC、BIC、Oakes の SE | `mirt(..., survey.weights = w)`、`multipleGroup(..., survey.weights = w)`、`bfactor(..., survey.weights = w)`、`SE.type = "Oakes"` | M7 |
 | V36 | 合計得点分布のカーネル（Poisson 二項分布: 確率ベクトル 5 例、$J$ 10〜300。多値: GRM $K=4$ と 2PL + GRM の混合） | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`、`poibin::dpoibin()`、`stats::dpois()`。mirt の `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 | V37 | mirt の推定値での情報関数・期待得点・信頼性・合計得点 EAP（2PL $J=12$。同じモデルで欠測 8%。3PL $J=12$。GRM と GPCM $K=4$、$J=8$。名義 $K=4$、$J=6$。2PL + 3PL + GRM + GPCM + 名義の混合 $J=14$。2 群の 2PL + GRM で焦点群の平均・分散を推定） | `iteminfo()`、`testinfo()`、`expected.item()`、`expected.test()`、`marginal_rxx()`、`empirical_rxx()`、`fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
+| V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -675,9 +677,36 @@
   $4\times10^{-4}$（$X^2$、$G^2$）、$5\times10^{-6}$（$V$、Q3）で一致する。mirt は群をアルファベット順に
   並べるので、$N(0,1)$ の参照群は `focal` になる。テストも同じ群を標準化する。もう一方の群を標準化しても
   モデルは同じだが、離散化は同じにならない（格子は $\pm6$ で切れ、自由な群の SD は 1.34）。対数尤度は
-  $1.9\times10^{-3}$、$X^2$ は $3\times10^{-3}$ ずれる。**照合しておらず、実装していないもの**: bifactor / two-tier モデル、単一群・
+  $1.9\times10^{-3}$、$X^2$ は $3\times10^{-3}$ ずれる。**照合しておらず、実装していないもの**: 単一群・
   1 次元・正規分布以外の `jsi()`（mirt は 1 因子のみ、Davidian 曲線の SE なし、混合分布は非対応、`multipleGroup`
-  では群ごとに単一群の $N(0,1)$ で推定し直す別の統計量）。
+  では群ごとに単一群の $N(0,1)$ で推定し直す別の統計量）。双因子・two-tier モデルは V38。
+- **双因子・two-tier モデルの局所依存（V38、M7、issue #81）**:
+  `validation/r/m7_local_dependence_bifactor_reference.R`（mirt 1.48）が
+  `tests/reference/v38_local_dependence_bifactor.json` を書く。
+  `tests/test_mirt_m7_local_dependence_bifactor.py`（fast tier）は、V26（M7）と同じく mirt の推定値を
+  すべてのパラメタを固定した flexpyirt の `FitResult` に入れるので、比較するのは統計量だけになる（mirt の推定値での
+  対数尤度は相対 $10^{-9}$ で一致、実測 $\le8\times10^{-16}$）。mirt の `residuals(type = "LD")` は適合時の
+  `quadpts` による完全な直積格子 `thetaComb(theta, nfact)` の上で和をとり、flexpyirt は縮約した格子の上で和をとる
+  （DESIGN.md §17.3）。両者は同じ和の並べ替えである。
+
+  | ケース | mirt の呼び出し | 次元あたりの点数（mirt の格子） | ペア数 | $X^2$ 相対 | $G^2$ 相対 | $V$ 絶対 | Q3 絶対 |
+  |---|---|---|---|---|---|---|---|
+  | 双因子 2PL、特殊因子 3、一般因子のみの項目 2、欠測 3% | `bfactor(data, c(1,1,1,2,2,2,3,3,3,NA,NA))` | 21（$21^4$） | 55 | $5\times10^{-13}$ | $2\times10^{-11}$ | $2\times10^{-15}$ | $9\times10^{-16}$ |
+  | 双因子 GRM（3 カテゴリ）、特殊因子 2 | `bfactor(..., itemtype = "graded")` | 21（$21^3$） | 28 | $2\times10^{-14}$ | $7\times10^{-13}$ | $3\times10^{-16}$ | $1\times10^{-15}$ |
+  | two-tier 2PL、相関する主因子 2（交差負荷 1 項目）、特殊因子 2 | `bfactor(..., model2 = mirt.model("F1 = 1-5\nF2 = 5-10\nCOV = F1*F2"))` | 15（$15^4$） | 45 | $1\times10^{-11}$ | $2\times10^{-8}$ | $8\times10^{-15}$ | $3\times10^{-15}$ |
+
+  許容誤差は相対 $10^{-7}$（$X^2$、$G^2$）、絶対 $10^{-8}$（$V$、Q3）。Q3 は
+  `Theta = fscores(m, quadpts = <適合時の値>)` で求める。mirt の既定の呼び出しは `fscores()` 独自の格子で
+  スコアを出し、`q3_default` として保存している（適合時の格子を使う flexpyirt との差は 3 ケースで
+  $2\times10^{-6}$、$1\times10^{-8}$、$2\times10^{-4}$）。1 つめのケースでは、3 項目の特殊因子のうち 2 項目に
+  余分な共有分散を入れてシミュレーションしたが、特殊因子がそれを吸収し、mirt でも flexpyirt でもどのペアも
+  検出されない。単体テスト（`tests/test_m7_local_dependence_reduced.py`）は、因子分解した表を直積格子の総当たりの和と
+  比較し（$7^4$ ノード。GRM 項目と欠測を含む双因子と two-tier。$X^2$ は相対 $10^{-10}$）、Q3 を `score()` の EAP での
+  定義と比較し、`specific` に入れなかったテストレットが検出されることを確認する。**照合していないもの**: flexpyirt が
+  推定した値はここでは比較しない（適合は V32 と V33）。2PL と GRM 以外の項目モデル。特殊因子が 4 つ以上の場合。
+  Gauss–Hermite 格子（mirt の `residuals()` は等間隔）。**実装していないもの**: これらのモデルの `jsi()`
+  （1 項目が主因子と特殊因子の傾きを持ち、mirt の `type = "JSI"` は 1 因子を要求する）。多母集団（双因子・two-tier
+  モデルは単一群のみ）。
 - **DETECT（V27、M5）**: sirt の `conf.detect()` は `smooth = FALSE` で呼ぶ。既定の `smooth = TRUE` で
   `use_sum_score = TRUE` だと、標準化した総得点から生の項目得点を引くので、残りの得点の群が誤る（DESIGN §16.13）。
   `expl.detect()` は自分で `smooth = FALSE` にする。その戻り値の `detect.unweighted` は検証用の半分の指標だけを
@@ -736,9 +765,7 @@
     総当たり積分と比べる（$10^{-12}$ 以内。欠測、GRM 項目、交差負荷項目、特殊因子のない項目を含む）。主因子 1 つの
     two-tier モデルは双因子の経路と、特殊因子 1 つのモデルは照合済みの 3 次元の経路（`with_factors()` で特殊因子の
     相関を 0 に固定。対数尤度が $10^{-12}$ で一致）と比べる。
-  .05 での第 1 種の誤りは 0.0〜2.0%（保守的。ブートストラップは偏りを除くが、帰無仮説の下での $T$ の SD は 0.75 程度）、
-  検出力は 0.99〜1.00。`uv run python validation/simulation/dimtest_study.py`（約 4 分）で再実行できる。テストは帰無
-  20 反復と対立 10 反復を実行する。- **合計得点分布のカーネル（V36、M7）**: `summed_score_distribution()`（DESIGN §18.1）を
+- **合計得点分布のカーネル（V36、M7）**: `summed_score_distribution()`（DESIGN §18.1）を
   `tests/test_r_m7_sumscore.py` で照合する（fast tier。生成スクリプト `validation/r/m7_sumscore_reference.R` →
   `tests/reference/v36_sumscore.json`、poibin 1.6、mirt 1.48）。
   - **2 値項目（Poisson 二項分布）**: 確率ベクトル 5 例（`uniform_10`: $J=10$、$p\sim U(0.05, 0.95)$。
@@ -803,6 +830,26 @@
     求めた期待得点、6 項目の混合テストの全 288 反応パターンの総当たりによる合計得点の表（$10^{-12}$）、
     全期待値の法則、潜在尺度の線形変換に対する周辺信頼性の不変性（$10^{-13}$）、信頼性の範囲と、
     シミュレーションデータでの周辺・経験的信頼性の近さ、エラーの経路。
+- **標本ウェイト（V34、M7）**: mirt の `survey.weights`（mirt 1.48、`optimizer = "NR"`、`TOL = 1e-10`、
+  `SE.type = "Oakes"`）。参照ファイルは行ごとのウェイトとともに元の行を保存するので、ウェイトを足し合わせる
+  パターン圧縮も比較の対象になる。V34a: シミュレーションの 2PL（$J=10$、$N=1000$）、合計点と関係する対数正規
+  ウェイト、正規化なし（$\sum w=1541.7$）、ウェイト 0 が 5 行。V34b: Science の GRM（$N=392$）、合計を $N$ に
+  正規化した一様ウェイト。V34c: 各 800 人の 2 群、アンカー q01–q05、focal 群の平均と分散を推定、5% の MCAR 欠測、
+  2 群で合計の異なるガンマウェイト（$[-8,8]$ の 81 点）。V34d: FIPC（q01–q05 を固定、潜在分布の平均と分散を推定、
+  81 点）、合計を $N$ に正規化した対数正規ウェイト。V34e: 双因子 2PL（`bfactor()`、$J=9$、3 項目ずつの特殊因子 3 つ、
+  $N=1000$、$[-6,6]$ の各軸 21 点）、正規化しない対数正規ウェイト（$\sum w=1467.6$）: 対数尤度
+  $4.7\times10^{-16}$（相対）、パラメタ $9.5\times10^{-7}$、Oakes・Hessian の SE $2.2\times10^{-6}$（相対）、
+  AIC・BIC $3.8\times10^{-11}$。V34a–d の差の実測値（通常の EM・SQUAREM の最大）: 対数尤度
+  $1.8\times10^{-15}$（相対）、パラメタ $7.6\times10^{-8}$、Oakes SE $1.1\times10^{-7}$（相対）、flexpyirt の
+  Hessian SE と mirt の Oakes $1.1\times10^{-7}$（相対）、AIC・BIC $5.1\times10^{-11}$。いずれも共通の許容誤差内。
+  mirt の BIC はウェイトの和を $N$ として使う（flexpyirt も同じ。DESIGN §17.4）。ウェイトの合計が行数と異なる
+  V34a がこれを確かめる。どの参照値も同じデータのウェイトなしの推定とは異なる（対数尤度が $10^{-3}$ 超、
+  パラメタが $10^{-3}$ 超の差）ので、ウェイトを無視すればテストは落ちる。**R と照合していないもの**: 整数ウェイトと
+  行の複製の一致（欠測のある 2PL、通常の EM と SQUAREM での 2 群 GRM、経験ヒストグラムの FIPC、MAP、双因子モデルと two-tier モデル）、
+  ウェイト 0 の行と行の削除の一致、ウェイトの定数倍は、恒等式として `tests/test_m7_weights.py` で確かめる。
+  Oakes・Hessian の SE は mirt と一致するが、標本ウェイトのもとでは正しい分散推定量ではない（DESIGN §17.4）。
+  項目適合度、M2、局所依存、JSI、DIF、モデルに基づく平行分析は、ウェイト付きの推定結果に対してエラーを出す。
+  テスト: `tests/test_mirt_m7_weights.py`。参照値生成: `validation/r/m7_weights_reference.R`。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

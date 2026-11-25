@@ -261,7 +261,7 @@ def _frame_to_html_table(df: pd.DataFrame, *, digits: int = 4) -> str:
 
 @dataclass(frozen=True)
 class FitResult:
-    """Result of :func:`flexpyirt.fit`.
+    r"""Result of :func:`flexpyirt.fit`.
 
     Attributes
     ----------
@@ -293,7 +293,14 @@ class FitResult:
     se_method : str or None
         How ``vcov`` was computed.
     n_obs : int
-        Number of respondents.
+        Number of respondents (with ``weights=``, the rows with a positive weight).
+
+    Notes
+    -----
+    A fit with sampling weights (``fit(..., weights=...)``) keeps the sum of the weights
+    :math:`W=\sum_i w_i`; BIC then uses :math:`\log W` in place of :math:`\log N` (as mirt does
+    with ``survey.weights``; DESIGN.md §17.4), and the data-based diagnostics (``item_fit``,
+    ``m2``, ``local_dependence``, ``jsi``, ``dif``) raise ``SpecificationError``.
     """
 
     parameters: pd.DataFrame
@@ -312,6 +319,7 @@ class FitResult:
     _quadrature: Quadrature = field(repr=False)
     _method: BAEM = field(default_factory=BAEM, repr=False)
     _eh_weights: np.ndarray | None = field(default=None, repr=False)
+    _sum_weights: float | None = field(default=None, repr=False)
 
     # ---- summaries ---------------------------------------------------------------------------
 
@@ -332,7 +340,30 @@ class FitResult:
         return -2.0 * self.loglik + 2.0 * self.n_params
 
     def _bic_value(self) -> float:
-        return -2.0 * self.loglik + self.n_params * float(np.log(self.n_obs))
+        size = self.n_obs if self._sum_weights is None else self._sum_weights
+        return -2.0 * self.loglik + self.n_params * float(np.log(size))
+
+    @property
+    def _is_weighted(self) -> bool:
+        """Whether the model was fitted with sampling weights (DESIGN.md §17.4)."""
+        return self._sum_weights is not None
+
+    def _require_unweighted(self, what: str) -> None:
+        """Raise for a fit with sampling weights (statistics not validated under weights)."""
+        if self._is_weighted:
+            raise SpecificationError(
+                f"{what} is not available for a model fitted with sampling weights (weights=): "
+                "the statistic and its reference distribution are defined for unweighted data."
+            )
+
+    def _data_label(self) -> str:
+        n_items = len(self._model.item_names)
+        weighted = ""
+        if self._sum_weights is not None:
+            weighted = f" (weighted, sum of weights {self._sum_weights:.6g})"
+        return (
+            f"{self.n_obs} observations{weighted}, {n_items} items, {self.n_params} free parameters"
+        )
 
     @property
     def aic(self) -> float:
@@ -348,7 +379,10 @@ class FitResult:
 
     @property
     def bic(self) -> float:
-        r""":math:`-2\ell+k\log N` (warns with ``FlexpyirtWarning`` under MAP)."""
+        r""":math:`-2\ell+k\log N` (warns with ``FlexpyirtWarning`` under MAP).
+
+        For a fit with sampling weights, :math:`N` is the sum of the weights.
+        """
         if self._has_priors:
             warnings.warn(
                 "BIC uses the marginal log-likelihood evaluated at the MAP estimate rather than "
@@ -741,6 +775,7 @@ class FitResult:
             category (within a group).
         """
         check_x64()
+        self._require_unweighted("item_fit()")
         model = self._model
         if (
             model.is_multidimensional
@@ -819,11 +854,19 @@ class FitResult:
         """Per item, ``(G, Q, K_j)`` category probabilities at ``nodes`` (default: the grid).
 
         ``nodes`` is ``(Q,)`` for one factor or ``(Q, D)``; the kernels only read
-        ``CompiledProblem.nodes``, so any set of points can stand in for the grid.
+        ``CompiledProblem.nodes``, so any set of points can stand in for the grid. Without
+        ``nodes``, a bifactor or two-tier model gives each item on its own block grid,
+        ``(G, Q_p n, K_j)`` (DESIGN.md §17.1).
         """
         if nodes is not None:
             n_factors = int(prob.nodes.shape[1])
-            prob = replace(prob, nodes=jnp.asarray(nodes, dtype=jnp.float64).reshape(-1, n_factors))
+            # Without the reduction the kernels read ``nodes`` for bifactor / two-tier models
+            # too (``_family_nodes``; DESIGN.md §17.3).
+            prob = replace(
+                prob,
+                nodes=jnp.asarray(nodes, dtype=jnp.float64).reshape(-1, n_factors),
+                reduction=None,
+            )
         log_probs = _core._item_log_probs(prob, jnp.asarray(self._eta))
         traces: list[np.ndarray] = [np.empty(0)] * len(self._model.items)
         for fam, lp in zip(prob.families, log_probs, strict=True):
@@ -886,7 +929,13 @@ class FitResult:
 
         The weights :math:`w_q` and the EAP prior are the fitted latent distribution on the
         fitted grid: Normal, ``EmpiricalHistogram``, ``DavidianCurve`` or ``NormalMixture``,
-        and the multivariate Normal on the product grid for a model with 2 or 3 factors. In a
+        and the multivariate Normal on the product grid for a model with 2 or 3 factors. For
+        bifactor and two-tier models (:meth:`Model.with_bifactor`, :meth:`Model.with_two_tier`)
+        the expected tables are summed on the reduced grids (DESIGN.md §17.3): over the primary
+        factors and the shared specific factor for a pair within one specific factor, and over
+        the primary factors only, with each item's specific factor integrated out first, for
+        any other pair. Q3 uses the EAP of all factors. A pair within a specific factor is
+        therefore tested for dependence beyond that factor. In a
         multiple-group model every statistic is computed within a group, from that group's
         respondents, item parameters and latent distribution (as mirt does for
         ``multipleGroup`` fits).
@@ -921,6 +970,7 @@ class FitResult:
         from flexpyirt.dimensionality import LocalDependenceResult
 
         check_x64()
+        self._require_unweighted("local_dependence()")
         model = self._model
         y = coerce_responses(data, model, item_names=item_names)
         codes, group_names = coerce_groups(group, model, y.shape[0], require_all=False)
@@ -933,7 +983,16 @@ class FitResult:
         eap = np.asarray(_eap(prob, eta)[0])[: compiled.n_patterns][compiled.inverse]
         at_eap = self._group_traces(prob, eap)  # per item (G, N, K_j)
         on_grid = self._group_traces(prob)  # per item (G, Q, K_j)
-        weights = np.exp(np.asarray(_core._latent_log_weights(prob, eta)))  # (G, Q)
+        red = prob.reduction
+        if red is None:
+            weights = np.exp(np.asarray(_core._latent_log_weights(prob, eta)))  # (G, Q)
+        else:
+            log_primary, log_block = _core._bifactor_log_weights(prob, eta)
+            primary_weights = np.exp(np.asarray(log_primary))  # (G, Q_p)
+            block_weights = np.exp(np.asarray(log_block))  # (G, S + 1, n)
+            item_block = np.empty(len(names), dtype=np.int64)
+            for fam, blocks in zip(prob.families, red.family_block, strict=True):
+                item_block[np.asarray(fam.columns)] = np.asarray(blocks)
         upper = np.triu_indices(len(names), k=1)
         pair_frames: list[pd.DataFrame] = []
         q3_frames: list[pd.DataFrame] = []
@@ -949,7 +1008,19 @@ class FitResult:
             residuals = np.where(y_g >= 0, y_g - expected, np.nan)
             q3 = _local_dependence.q3_matrix(residuals)
             q3_mean = float(np.mean(q3[upper]))
-            ld = _local_dependence.ld_pairs(y_g, [t[g] for t in on_grid], weights[g])
+            if red is None:
+                ld = _local_dependence.ld_pairs(y_g, [t[g] for t in on_grid], weights[g])
+            else:
+                n_primary_nodes = primary_weights.shape[1]
+                block_traces = [
+                    t[g].reshape(n_primary_nodes, -1, t.shape[2]) for t in on_grid
+                ]  # per item (Q_p, n, K_j), the primary index major
+                ld = _local_dependence.ld_pairs_from_tables(
+                    y_g,
+                    _local_dependence.reduced_pair_probabilities(
+                        block_traces, item_block, primary_weights[g], block_weights[g]
+                    ),
+                )
             pairs = pd.DataFrame(
                 {
                     "item_i": [names[int(i)] for i in ld["i"]],
@@ -1061,6 +1132,7 @@ class FitResult:
         from flexpyirt.errors import ConvergenceWarning
 
         check_x64()
+        self._require_unweighted("jsi()")
         self._require_unidimensional_normal("jsi()")
         if method not in ("refit", "newton", "one_step"):
             raise SpecificationError(
@@ -1216,6 +1288,7 @@ class FitResult:
             respondents.
         """
         check_x64()
+        self._require_unweighted("m2()")
         model = self._model
         if (
             model.is_multidimensional
@@ -1424,7 +1497,6 @@ class FitResult:
         est_kind = "MAP, priors active" if self._has_priors else "MMLE"
         se_label = "None" if self.se_method is None else self.se_method
         quad_label = self._quadrature_label()
-        n_items = len(self._model.item_names)
         aic_val = self._aic_value()
         bic_val = self._bic_value()
 
@@ -1438,8 +1510,7 @@ class FitResult:
             "flexpyirt FitResult",
             "===================",
             f"Model:          {self._model_label()} ({est_kind})",
-            f"Data:           {self.n_obs} observations, {n_items} items, "
-            f"{self.n_params} free parameters",
+            f"Data:           {self._data_label()}",
             *(
                 [f"Factors:        {self._factors_label()}"]
                 if self._model.is_multidimensional
@@ -1508,14 +1579,10 @@ class FitResult:
         est_kind = "MAP, priors active" if self._has_priors else "MMLE"
         se_label = "None" if self.se_method is None else self.se_method
         quad_label = self._quadrature_label()
-        n_items = len(self._model.item_names)
 
         meta_rows = [
             ("Model", f"{self._model_label()} ({est_kind})"),
-            (
-                "Data",
-                f"{self.n_obs} observations, {n_items} items, {self.n_params} free parameters",
-            ),
+            ("Data", self._data_label()),
             *([("Factors", self._factors_label())] if self._model.is_multidimensional else []),
             ("Groups", self._groups_label()),
             ("Convergence", self._convergence_label()),

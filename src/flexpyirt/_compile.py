@@ -205,13 +205,49 @@ def coerce_groups(
     return np.array([lookup[v] for v in labels], dtype=np.int32), names
 
 
+def coerce_weights(weights: Any, n: int) -> np.ndarray | None:
+    """Return sampling weights as an ``(N,)`` float array, or ``None`` when not given (§17.4).
+
+    Raises
+    ------
+    SpecificationError
+        Wrong length or shape, non-numeric, non-finite or negative values, or a zero total.
+    """
+    if weights is None:
+        return None
+    if hasattr(weights, "to_numpy"):
+        weights = weights.to_numpy()
+    try:
+        w = np.asarray(weights, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise SpecificationError("weights= must be numeric (one weight per row).") from exc
+    if w.ndim != 1 or w.shape[0] != n:
+        raise SpecificationError(f"weights= must have one weight per row ({n}), got {w.shape}.")
+    if not np.isfinite(w).all():
+        raise SpecificationError("weights= must be finite (no NaN or infinite values).")
+    if (w < 0).any():
+        raise SpecificationError("weights= must be non-negative.")
+    if not w.sum() > 0:
+        raise SpecificationError("weights= must have a positive total.")
+    return w
+
+
 def compress_patterns(
-    y: np.ndarray, group: np.ndarray
+    y: np.ndarray, group: np.ndarray, weights: np.ndarray | None = None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return unique (group, pattern) rows, their groups, counts and each row's index (§4.1)."""
+    """Return unique (group, pattern) rows, their groups, counts and each row's index (§4.1).
+
+    With ``weights``, a pattern's count is the sum of its rows' weights (§17.4).
+    """
     keyed = np.column_stack([group, y])
-    uniq, inverse, counts = np.unique(keyed, axis=0, return_inverse=True, return_counts=True)
-    return uniq[:, 1:], uniq[:, 0], counts.astype(float), inverse.reshape(-1)
+    uniq, inverse, n_rows = np.unique(keyed, axis=0, return_inverse=True, return_counts=True)
+    inverse = inverse.reshape(-1)
+    counts: np.ndarray = (
+        n_rows.astype(float)
+        if weights is None
+        else np.bincount(inverse, weights=weights, minlength=uniq.shape[0]).astype(float)
+    )
+    return uniq[:, 1:], uniq[:, 0], counts, inverse
 
 
 def pad_patterns(
@@ -1349,6 +1385,7 @@ class Prepared:
     group: np.ndarray
     group_names: tuple[str, ...]
     table: pd.DataFrame
+    weights: np.ndarray | None = None
 
 
 def prepare(
@@ -1358,13 +1395,26 @@ def prepare(
     group: Any,
     item_names: Sequence[str] | None,
     table: pd.DataFrame | None,
+    weights: Any = None,
 ) -> Prepared:
-    """Coerce data and build/validate the parameter table."""
+    """Coerce data and build/validate the parameter table.
+
+    With ``weights``, rows of weight 0 are dropped first, so they affect nothing (starting values,
+    estimability checks, ``y``); the returned ``y``, ``group`` and ``weights`` hold the remaining
+    rows (DESIGN.md §17.4).
+    """
     y = coerce_responses(data, model, item_names=item_names)
     codes, names = coerce_groups(group, model, y.shape[0])
+    w = coerce_weights(weights, y.shape[0])
+    if w is not None:
+        keep = w > 0
+        y, codes, w = y[keep], codes[keep], w[keep]
+        empty = [g for k, g in enumerate(names) if not np.any(codes == k)]
+        if empty:
+            raise SpecificationError(f"Groups whose weights are all zero: {empty}.")
     default = build_table(model, y)
     final = validate_table(default if table is None else table, default, model, y, codes)
-    return Prepared(y=y, group=codes, group_names=names, table=final)
+    return Prepared(y=y, group=codes, group_names=names, table=final, weights=w)
 
 
 @dataclass(frozen=True)
@@ -1443,9 +1493,13 @@ def compile_problem(
     quad: Quadrature,
     *,
     eh_weights: np.ndarray | None = None,
+    weights: np.ndarray | None = None,
 ) -> Compiled:
-    """Turn a validated table and responses into a :class:`CompiledProblem` (§5.2, §14.1–14.2)."""
-    patterns, pat_groups, counts, inverse = compress_patterns(y, group)
+    """Turn a validated table and responses into a :class:`CompiledProblem` (§5.2, §14.1–14.2).
+
+    ``weights`` are the rows' sampling weights (already validated; §17.4).
+    """
+    patterns, pat_groups, counts, inverse = compress_patterns(y, group, weights)
     n_patterns = patterns.shape[0]
     patterns, pat_groups, counts = pad_patterns(patterns, pat_groups, counts)
     n_free = int(table["free_id"].max()) + 1 if table["free"].any() else 0
