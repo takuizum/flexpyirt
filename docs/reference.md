@@ -1223,6 +1223,37 @@ Runs several diagnostics and reports them side by side, with two separate consen
 
 ---
 
+## Summed scores
+
+### `summed_score_distribution`
+
+```text
+summed_score_distribution(probs, *, method="recursion", log=False) -> Array
+```
+
+Distribution of the summed score of independent item scores
+([guide section 5](guide.md#summed-score-distribution)). `probs` has shape `(..., J, K)`: the
+category probabilities of `J` items (each row sums to 1; items with fewer than `K` categories are
+padded with zeros), for example an IRT model's category probabilities at one $\theta$; leading axes
+are batch axes. The result has shape `(..., J * (K - 1) + 1)` with the probabilities of the summed
+scores $0, \dots, J(K-1)$. For dichotomous items this is the Poisson-binomial distribution. The
+function works inside `jax.jit` and `jax.vmap` and can be differentiated; values are not checked.
+
+| `method` | What it is | Accuracy |
+|---|---|---|
+| `"recursion"` (default) | Lord–Wingersky recursion | Exact; small relative error in every probability, tails included |
+| `"fft"` | Discrete Fourier transform of the characteristic function | Exact up to an absolute error of about `1e-16`; probabilities below about `1e-15` are not reliable |
+| `"normal"` | Normal approximation with continuity correction | Dichotomous items only; need not sum to exactly 1 |
+| `"refined_normal"` | Normal approximation with a skewness correction | Dichotomous items only; need not sum to exactly 1 |
+| `"poisson"` | Poisson approximation | Dichotomous items only; useful when every probability is small |
+
+`log=True` returns log probabilities. With `"recursion"` the recursion runs in log space and keeps
+tail probabilities that would underflow to 0 (it is slower); for the other methods the logarithm
+of the result is taken. Raises `SpecificationError` for a wrong shape, an unknown `method`, or an
+approximation with `K != 2`.
+
+---
+
 ## Settings
 
 ### `BAEM`

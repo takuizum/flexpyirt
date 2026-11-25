@@ -274,6 +274,34 @@ fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
 print(fit_table.round(3))
 ```
 
+### 合計得点の分布
+
+`summed_score_distribution(probs)` は、項目得点が独立でカテゴリ確率が `probs`（形は `(..., J, K)`）のときの
+合計得点の分布を返す。$\theta$ を固定した IRT モデルがちょうどこの状況にあたる。2 値項目なら Poisson 二項分布で、
+既定の方法は Lord–Wingersky 再帰（上の S-X2 も同じものを使う）。先頭の軸はバッチ軸なので、1 回の呼び出しで
+全求積節点を計算できる。
+
+```python
+import jax.numpy as jnp
+
+from flexpyirt import summed_score_distribution
+
+theta_grid = jnp.linspace(-3.0, 3.0, 7)
+a_ss = jnp.array([1.2, 0.8, 1.5, 1.0, 1.7])
+b_ss = jnp.array([-1.0, -0.3, 0.0, 0.6, 1.2])
+p_correct = 1.0 / (1.0 + jnp.exp(-a_ss * (theta_grid[:, None] - b_ss)))  # (7 nodes, 5 items)
+probs_ss = jnp.stack([1.0 - p_correct, p_correct], axis=-1)  # (7, 5, 2)
+
+score_dist = summed_score_distribution(probs_ss)  # (7, 6): P(S = 0..5 | theta)
+print(np.round(np.asarray(score_dist), 3))
+print(np.asarray(score_dist).sum(axis=1))  # each row sums to 1
+```
+
+`method="fft"` はもう 1 つの厳密な方法だが、誤差が絶対誤差（約 `1e-16`）なので、ごく小さい裾の確率には向かない。
+`"normal"`・`"refined_normal"`・`"poisson"` は 2 値項目用の近似。`log=True` は対数確率を返し、アンダーフローする
+裾も保つ。結果は R の `poibin` と mirt の合計得点の表と照合している。詳しくは
+[リファレンス](reference.ja.md#summed_score_distribution)を参照。
+
 ### 限定情報の適合度（M2）
 
 `m2(data)` は Maydeu-Olivares & Joe (2005, 2006) の限定情報の適合度統計量を、項目得点の平均とペアごとの交差積

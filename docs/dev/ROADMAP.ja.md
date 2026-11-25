@@ -81,6 +81,9 @@
      未対応: 双因子 / two-tier モデルと、単一群・1 次元・正規分布以外の JSI。
 3. [ ] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
    カーネル（#83）の上に作る。
+   - [x] カーネル（#83）: `summed_score_distribution()`。Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰
+     （通常と対数空間）、DFT-CF 法、2 値項目用の正規・精密化正規・Poisson 近似。`jit` / `vmap` / 自動微分に対応。
+     V36 で `poibin`・`dpois`・mirt の EAPsum の表と照合済み。
 4. [ ] 標本ウェイト（#84）。
 5. [ ] ロバスト標準誤差: sandwich と cross-product（#85）。
 - **受け入れ基準**: mirt の `bfactor()`、`residuals()`、`iteminfo()` / `testinfo()` / `marginal_rxx()` /

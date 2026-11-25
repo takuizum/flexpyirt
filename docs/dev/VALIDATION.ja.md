@@ -67,6 +67,7 @@
 | V31 | ジャックナイフ傾き指標（LSAT7 の 2PL、Science の GRM、依存するペア 2 組と 5% の MCAR を含むシミュレーションの 2PL、依存するペア 1 組を含むシミュレーションの GPCM）。Newton 法と 1 ステップの近似は推定し直した値と比べる | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | 次元縮約による双因子モデル（特殊因子 3 つと一般因子のみの項目 3 つを含む 2PL、テストレット 3 つの GRM $K=4$） | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | 次元縮約による two-tier モデル（相関する主因子 2 つと特殊因子 3 つ（1 つは両方の主因子にまたがる）の 2PL、交差負荷項目 1 つとテストレット 2 つの GRM $K=4$） | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
+| V36 | 合計得点分布のカーネル（Poisson 二項分布: 確率ベクトル 5 例、$J$ 10〜300。多値: GRM $K=4$ と 2PL + GRM の混合） | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`、`poibin::dpoibin()`、`stats::dpois()`。mirt の `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -680,6 +681,34 @@
     総当たり積分と比べる（$10^{-12}$ 以内。欠測、GRM 項目、交差負荷項目、特殊因子のない項目を含む）。主因子 1 つの
     two-tier モデルは双因子の経路と、特殊因子 1 つのモデルは照合済みの 3 次元の経路（`with_factors()` で特殊因子の
     相関を 0 に固定。対数尤度が $10^{-12}$ で一致）と比べる。
+  .05 での第 1 種の誤りは 0.0〜2.0%（保守的。ブートストラップは偏りを除くが、帰無仮説の下での $T$ の SD は 0.75 程度）、
+  検出力は 0.99〜1.00。`uv run python validation/simulation/dimtest_study.py`（約 4 分）で再実行できる。テストは帰無
+  20 反復と対立 10 反復を実行する。- **合計得点分布のカーネル（V36、M7）**: `summed_score_distribution()`（DESIGN §18.1）を
+  `tests/test_r_m7_sumscore.py` で照合する（fast tier。生成スクリプト `validation/r/m7_sumscore_reference.R` →
+  `tests/reference/v36_sumscore.json`、poibin 1.6、mirt 1.48）。
+  - **2 値項目（Poisson 二項分布）**: 確率ベクトル 5 例（`uniform_10`: $J=10$、$p\sim U(0.05, 0.95)$。
+    `twopl_50`: $\theta=0.4$ での 2PL。`extreme_200`: $\theta=-3$ での 2PL。`rare_300`: $p\sim U(0.001, 0.02)$。
+    `equal_40`: $p=0.3$）。絶対差の最大値: `"recursion"` と poibin の再帰式（累積分布）で `2.9e-15`、DFT-CF の
+    確率関数で `5.8e-16`。`"fft"` と DFT-CF の確率関数で `6.1e-16`。`"normal"` と `method = "NA"` で `1.2e-15`。
+    `"refined_normal"` と `"RNA"` で `1.3e-15`。`"poisson"` と `dpois` で `8.5e-16`（許容誤差は絶対 $10^{-13}$、
+    `"poisson"` は相対 $10^{-11}$）。poibin の厳密値は累積分布か DFT-CF から来るので、確かめられるのは絶対精度だけ。
+    裾の相対精度は、単体テストの総当たり列挙と二項分布の特別な場合で確かめる。
+  - **多値項目**: GRM（$K=4$、$J=10$、$N=1500$）と、2PL 5 項目 + GRM 5 項目についての mirt の合計得点の表。
+    参照値には mirt の 61 節点上のカテゴリ確率（`probtrace`）と重みを保存してあるので、試されるのはカーネルだけ。
+    $N\sum_qw_qL(s\mid\theta_q)$ は mirt の `expected` 列と `3.1e-15`（相対）で一致し、カーネルから作った合計得点
+    ごとの $\theta$ の EAP と事後 SD は mirt の値と `5.3e-15` / `3.1e-15` で一致する。
+  - **S-$X^2$（V15）**: `_itemfit.lord_wingersky` はこのカーネルを呼ぶようになった。V15 の照合テストは、参照値と
+    許容誤差を変えずに通る。
+  - **単体テスト**（`tests/test_m7_sumscore.py`）: $K\in\{2,3,4\}$ が混在する場合の全反応パターンの列挙（相対
+    $10^{-13}$、厳密な 2 方法とも絶対 $5\times10^{-16}$）、二項分布の特別な場合、$P=10^{-4000}$（2000 項目）での
+    対数空間の再帰、全方法の `jit` / `vmap` / `grad`、勾配の恒等式
+    $\partial P(S=s)/\partial p_j=P_{-j}(s-1)-P_{-j}(s)$。
+  - **厳密な 2 方法の精度と速度**（61 節点、jit 済み、この検証用マシンの CPU、1 回あたりミリ秒）: $J=50, K=2$ で
+    再帰 0.10、対数空間の再帰 2.7、FFT 0.51。$J=200, K=2$ で 1.0 / 49 / 6.8。$J=1000, K=2$ で 57 / 1200 / 174。
+    $J=100, K=5$ で 2.9 / 178 / 9.7。FFT と再帰の絶対差の最大値はどの場合も $3\times10^{-16}$〜$1.1\times10^{-15}$
+    だが、最小の確率は $10^{-31}$〜$10^{-308}$ なので、FFT はそこでは 1 桁も合わない。この実装では、厳密な方法の
+    うち再帰のほうが精度も速度も上なので（特性関数の計算自体に $O(JS_{\max})$ かかる）、既定は再帰のままとし、
+    FFT は比較用に提供する。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

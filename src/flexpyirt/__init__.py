@@ -46,6 +46,7 @@ from flexpyirt.model import Model
 from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
+from flexpyirt.sumscore import summed_score_distribution
 
 try:
     __version__ = version("flexpyirt")
@@ -102,5 +103,6 @@ __all__ = [
     "model_parallel_analysis",
     "parallel_analysis",
     "polychoric",
+    "summed_score_distribution",
     "velicer_map",
 ]

@@ -287,6 +287,36 @@ fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
 print(fit_table.round(3))
 ```
 
+### Summed-score distribution
+
+`summed_score_distribution(probs)` gives the distribution of the summed score when the item scores
+are independent with the category probabilities `probs` (shape `(..., J, K)`), which is the
+situation of an IRT model at a fixed $\theta$. For dichotomous items this is the Poisson-binomial
+distribution; the default method is the Lord–Wingersky recursion, which S-X2 above uses as well.
+Leading axes are batch axes, so one call covers all quadrature nodes.
+
+```python
+import jax.numpy as jnp
+
+from flexpyirt import summed_score_distribution
+
+theta_grid = jnp.linspace(-3.0, 3.0, 7)
+a_ss = jnp.array([1.2, 0.8, 1.5, 1.0, 1.7])
+b_ss = jnp.array([-1.0, -0.3, 0.0, 0.6, 1.2])
+p_correct = 1.0 / (1.0 + jnp.exp(-a_ss * (theta_grid[:, None] - b_ss)))  # (7 nodes, 5 items)
+probs_ss = jnp.stack([1.0 - p_correct, p_correct], axis=-1)  # (7, 5, 2)
+
+score_dist = summed_score_distribution(probs_ss)  # (7, 6): P(S = 0..5 | theta)
+print(np.round(np.asarray(score_dist), 3))
+print(np.asarray(score_dist).sum(axis=1))  # each row sums to 1
+```
+
+`method="fft"` is an alternative exact method whose error is absolute (about `1e-16`), so it is
+not suited to very small tail probabilities; `"normal"`, `"refined_normal"` and `"poisson"` are
+approximations for dichotomous items. `log=True` returns log probabilities and keeps tails that
+would underflow. The results are checked against R's `poibin` and mirt's summed-score tables. See
+the [reference](reference.md#summed_score_distribution) for details.
+
 ### Limited-information fit (M2)
 
 `m2(data)` computes the Maydeu-Olivares & Joe (2005, 2006) limited-information goodness-of-fit
