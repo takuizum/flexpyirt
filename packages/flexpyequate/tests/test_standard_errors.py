@@ -233,7 +233,7 @@ def test_single_group_dependence_reduces_the_standard_error() -> None:
 def test_identity_has_no_sampling_error() -> None:
     x, y = _forms()
     for kind in ("analytic", "analytic_normal"):
-        see = equate(x, y, method="identity", standard_error=kind).see  # type: ignore[arg-type]
+        see = equate(x, y, method="identity", standard_error=kind).see
         assert see is not None and np.all(see == 0)
     assert equate(x, y, method="identity").see is None
     assert list(equate(x, y).table.columns) == ["score", "equated"]
@@ -278,9 +278,9 @@ def test_braun_holland_matches_a_numerical_jacobian() -> None:
         step = 1e-6
         jacobian = np.zeros((result.scores.size, base.size))
         for cell in np.flatnonzero(base.ravel() > 0):
-            shift = np.zeros(base.size)
-            shift[cell] = step
-            shift = shift.reshape(base.shape)
+            flat_shift = np.zeros(base.size)
+            flat_shift[cell] = step
+            shift = flat_shift.reshape(base.shape)
             up, down = list(sources), list(sources)
             up[target], down[target] = base + shift, base - shift
             jacobian[:, cell] = (equated(*up) - equated(*down)) / (2 * step)
@@ -302,7 +302,7 @@ def test_unavailable_analytic_standard_errors() -> None:
         equate(x, y, method="equipercentile", standard_error="analytic_normal")
     for method in ("frequency_estimation", "chained_equipercentile"):
         with pytest.raises(SpecificationError, match="bootstrap"):
-            equate(xa, ya, method=method, standard_error="analytic")  # type: ignore[arg-type]
+            equate(xa, ya, method=method, standard_error="analytic")
     with pytest.raises(SpecificationError, match="moments"):
         equate(xa, ya, method="braun_holland", standard_error="analytic_normal")
     with pytest.raises(SpecificationError, match="Unknown standard_error"):
@@ -360,8 +360,8 @@ def test_bootstrap_resampling_mechanics(design: str) -> None:
             n_replications=n_replications, rng=2026,
         )  # fmt: skip
         for _ in range(n_replications):
-            x_counts = rng.multinomial(300, x.probabilities)
-            y_counts = rng.multinomial(350, y.probabilities)
+            x_counts = rng.multinomial(300, x.probabilities).astype(np.float64)
+            y_counts = rng.multinomial(350, y.probabilities).astype(np.float64)
             replicates.append(
                 equate(
                     ScoreDistribution(x.scores, x_counts), ScoreDistribution(y.scores, y_counts)
@@ -374,7 +374,7 @@ def test_bootstrap_resampling_mechanics(design: str) -> None:
             n_replications=n_replications, rng=2026,
         )  # fmt: skip
         for _ in range(n_replications):
-            counts = rng.multinomial(400, joint.probabilities.ravel())
+            counts = rng.multinomial(400, joint.probabilities.ravel()).astype(np.float64)
             sample = BivariateScoreDistribution(
                 joint.x_scores, joint.y_scores, counts.reshape(joint.frequencies.shape)
             )
@@ -388,7 +388,7 @@ def test_bootstrap_resampling_mechanics(design: str) -> None:
         for _ in range(n_replications):
             samples = []
             for source, size in ((xa, 500), (ya, 600)):
-                counts = rng.multinomial(size, source.probabilities.ravel())
+                counts = rng.multinomial(size, source.probabilities.ravel()).astype(np.float64)
                 samples.append(
                     BivariateScoreDistribution(
                         source.x_scores, source.y_scores, counts.reshape(source.frequencies.shape)
