@@ -357,6 +357,7 @@ polars = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "flexpyequate" },
     { name = "hypothesis" },
     { name = "mypy" },
     { name = "pandas-stubs" },
@@ -382,6 +383,7 @@ provides-extras = ["polars"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "flexpyequate", editable = "packages/flexpyequate" },
     { name = "hypothesis", specifier = ">=6.100" },
     { name = "mypy", specifier = ">=1.11" },
     { name = "pandas-stubs", specifier = ">=2.1" },
