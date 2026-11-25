@@ -436,6 +436,12 @@ def penalty_bandwidth(
     penalty_weight : float, default 1.0
         The weight :math:`K` of the second term (``kequate``'s ``KPEN``, ``SNSequate``'s ``Kp``).
         0 drops it.
+    kernel : {"gaussian", "logistic", "uniform"}, default "gaussian"
+        The kernel of the continuization (see :func:`kernel_equate`). The density of the
+        uniform kernel is piecewise constant, so its second penalty term is zero whatever
+        ``penalty_weight`` (Lee & von Davier, 2011); its first term jumps where the edge of a
+        kernel passes a possible score, and the bandwidth returned is the best point found by
+        the grid and the local search.
 
     Returns
     -------
@@ -444,6 +450,10 @@ def penalty_bandwidth(
 
     References
     ----------
+    Lee, Y.-H., & von Davier, A. A. (2011). Equating through alternative kernels. In A. A. von
+    Davier (Ed.), *Statistical models for test equating, scaling, and linking* (pp. 159-173).
+    Springer.
+
     von Davier, A. A., Holland, P. W., & Thayer, D. T. (2004). *The kernel method of test
     equating*. Springer.
     """
@@ -865,17 +875,20 @@ def kernel_equate(
     kernel: Kernel = "gaussian",
     bandwidth_method: BandwidthMethod = "penalty",
 ) -> KernelEquatingResult:
-    r"""Kernel equating of form X to form Y with a Gaussian kernel.
+    r"""Kernel equating of form X to form Y.
 
     The discrete distributions with score probabilities :math:`r_j` (X) and :math:`s_k` (Y) are
-    continuized (von Davier et al., 2004, ch. 4),
+    continuized (von Davier et al., 2004, ch. 4; Lee & von Davier, 2011),
 
     .. math::
 
-        F_{h_X}(x) = \sum_j r_j\, \Phi\!\left(\frac{x - a_X x_j - (1 - a_X)\mu_X}{a_X h_X}\right),
-        \qquad a_X^2 = \frac{\sigma_X^2}{\sigma_X^2 + h_X^2},
+        F_{h_X}(x) = \sum_j r_j\, K\!\left(\frac{x - a_X x_j - (1 - a_X)\mu_X}{a_X h_X}\right),
+        \qquad a_X^2 = \frac{\sigma_X^2}{\sigma_X^2 + \sigma_V^2 h_X^2},
 
-    and likewise :math:`G_{h_Y}`, and the equating function is
+    and likewise :math:`G_{h_Y}`, with :math:`K` the distribution function of the kernel and
+    :math:`\sigma_V^2` its variance: the standard normal (:math:`\sigma_V^2 = 1`), the standard
+    logistic :math:`K(z) = 1/(1 + e^{-z})` (:math:`\pi^2/3`) or the uniform distribution on
+    :math:`(-1/2, 1/2)` (:math:`1/12`). The equating function is
 
     .. math::
 
@@ -916,8 +929,11 @@ def kernel_equate(
         \mathrm{SEE}_Y(x) = \bigl\lVert J_{e_Y}(x)\, J_{DF}\, C \bigr\rVert, \qquad
         J_{e_Y}(x) = \frac{1}{G'(e_Y(x))}
         \Bigl(\frac{\partial F(x)}{\partial r},\; -\frac{\partial G(e_Y(x))}{\partial s}\Bigr),
+        \qquad
+        \frac{\partial F(x)}{\partial r_j} = K\bigl(R_{jX}(x)\bigr) - M_{jX}(x)\, F'(x),
 
-    where :math:`C C^\top` is the covariance of the estimated probabilities of each sample
+    with :math:`M_{jX}(x) = \tfrac12 (x - \mu_X)(1 - a_X^2)[(x_j - \mu_X)/\sigma_X]^2 +
+    (1 - a_X) x_j` for every kernel, where :math:`C C^\top` is the covariance of the estimated probabilities of each sample
     (:attr:`LoglinearResult.c_matrix` divided by :math:`\sqrt N` for a presmoothed distribution,
     the multinomial covariance otherwise) and :math:`J_{DF}` the Jacobian of the design function.
     For chained equating the chain rule gives, with :math:`a = H_P^{-1}(F_P(x))`,
@@ -946,21 +962,56 @@ def kernel_equate(
         ``"post_stratification"``.
     bandwidth_x, bandwidth_y : float, optional
         Bandwidths :math:`h_X` and :math:`h_Y`. By default each is chosen by
-        :func:`penalty_bandwidth`.
+        ``bandwidth_method``.
     anchor_bandwidths : tuple of float, optional
         Chained equating: bandwidths of the anchor in the population that took X and in the
-        population that took Y. ``None`` entries are chosen by the penalty.
+        population that took Y. ``None`` entries are chosen by ``bandwidth_method``.
     penalty_weight : float, default 1.0
         Weight :math:`K` of the second penalty term in the bandwidth selection.
     linear : bool, default False
         Use bandwidths of 1000 standard deviations, which gives the linear equating function of
-        the design (and its standard error). Not together with explicit bandwidths.
+        the design (and its standard error). Not together with explicit bandwidths, and not
+        with the uniform kernel (whose support is bounded).
     synthetic_weight : float, optional
         Post-stratification: weight :math:`w` of the population that took X, between 0 and 1.
         Default :math:`N_P / (N_P + N_Q)`.
     counterbalance_weights : tuple of float, default (0.5, 0.5)
         Counterbalanced design: :math:`(w_X, w_Y)`, the weights of the sample that took X first
         in :math:`r` and in :math:`s`.
+    kernel : {"gaussian", "logistic", "uniform"}, default "gaussian"
+        The kernel (``kequate``'s ``kernel``; ``SNSequate``'s ``kert``). The logistic kernel is
+        the standard logistic and the uniform kernel is uniform on :math:`(-1/2, 1/2)`, as in
+        Lee & von Davier (2011) and the defaults of both R packages. With the uniform kernel
+        the continuized density is zero outside its support and, for a bandwidth below the
+        score increment, between the possible scores; where the density of Y is zero at an
+        equated score, ``see`` is ``nan``.
+    bandwidth_method : str, default "penalty"
+        Rule for the bandwidths that are not given.
+
+        - ``"penalty"``: :func:`penalty_bandwidth` with ``penalty_weight``; any kernel.
+        - ``"rule_of_thumb"``: :math:`h = 9\sigma / \sqrt{100 N^{2/5} - 81}` (Andersson & von
+          Davier, 2014), with :math:`\sigma` the standard deviation of the distribution that is
+          continuized and :math:`N` the size of the sample that took the form. Not for the
+          counterbalanced design.
+        - ``"double_smoothing"``: minimizes the double-smoothing criterion of Häggström &
+          Wiberg (2014),
+
+          .. math::
+
+              \mathrm{DS}(h) = \sum_{l=1}^{2J-1} \Bigl[\sum_j f_g(x_j)\,
+              \frac{1}{a h}\phi\bigl(R_j(x^*_l)\bigr) - r^*_l\Bigr]^2,
+
+          over the possible scores and the points halfway between them, where :math:`f_g` is a
+          pilot continuization with bandwidth :math:`g` (4 score increments, as in
+          ``kequate``) and :math:`r^*_l` is :math:`r_j` at a possible score and :math:`f_g`
+          halfway between two.
+        - ``"cross_validation"``: minimizes the leave-one-out criterion of ``kequate``,
+          :math:`\sum_j (r_j - \hat r_{(j)})^2` with :math:`\hat r_{(j)} = \sum_{i \ne j} r_i
+          \phi(R_i(x_j)) / \sum_{i \ne j} \phi(R_i(x_j))`. (Not the likelihood
+          cross-validation of Liang & von Davier, 2014, which splits the sample at random.)
+
+        The last three are defined for the Gaussian kernel. The standard errors treat the
+        selected bandwidths as fixed, whatever the rule.
 
     Returns
     -------
@@ -976,6 +1027,16 @@ def kernel_equate(
 
     References
     ----------
+    Andersson, B., & von Davier, A. A. (2014). Improving the bandwidth selection in kernel
+    equating. *Journal of Educational Measurement, 51*, 223-238.
+
+    Häggström, J., & Wiberg, M. (2014). Optimal bandwidth selection in observed-score kernel
+    equating. *Journal of Educational Measurement, 51*, 201-211.
+
+    Lee, Y.-H., & von Davier, A. A. (2011). Equating through alternative kernels. In A. A. von
+    Davier (Ed.), *Statistical models for test equating, scaling, and linking* (pp. 159-173).
+    Springer.
+
     von Davier, A. A., Holland, P. W., & Thayer, D. T. (2004). *The kernel method of test
     equating*. Springer.
     """
@@ -983,6 +1044,12 @@ def kernel_equate(
         raise SpecificationError(f"penalty_weight must be non-negative, got {penalty_weight}.")
     weight = float(penalty_weight)
     _check_kernel_options(kernel, bandwidth_method)
+    if linear and kernel == "uniform":
+        raise SpecificationError(
+            "linear=True is not available with the uniform kernel: its support is bounded, so a "
+            "large bandwidth does not give the linear equating function. Use the Gaussian or "
+            "the logistic kernel for the linear function."
+        )
 
     def is_univariate(source: object) -> bool:
         return isinstance(source, ScoreDistribution) or (
