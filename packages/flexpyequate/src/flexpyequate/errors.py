@@ -11,6 +11,7 @@ __all__ = [
     "FlexpyequateError",
     "FlexpyequateWarning",
     "ScoreDistributionError",
+    "SparseDataWarning",
     "SpecificationError",
 ]
 
@@ -41,3 +42,11 @@ class FlexpyequateWarning(UserWarning):
 
 class ConvergenceWarning(FlexpyequateWarning):
     """An iterative procedure stopped before reaching its convergence criterion."""
+
+
+class SparseDataWarning(FlexpyequateWarning):
+    """The data are too sparse for part of a computation, which was done on what is available.
+
+    Example: an anchor score observed in only one of two populations, so that a conditional
+    distribution given that score cannot be estimated.
+    """

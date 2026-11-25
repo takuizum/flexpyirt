@@ -120,8 +120,8 @@ def test_specification_errors() -> None:
         x_scores=[0, 1], y_scores=[0, 1], frequencies=[[2, 1], [1, 2]]
     )
     with pytest.raises(SpecificationError, match="Unknown method"):
-        equate(x, y, method="tucker")  # type: ignore[arg-type]
-    with pytest.raises(SpecificationError, match="single-group"):
+        equate(x, y, method="circle_arc")  # type: ignore[arg-type]
+    with pytest.raises(SpecificationError, match="not a bivariate and a univariate"):
         equate(joint, y)
     with pytest.raises(SpecificationError, match="two ScoreDistribution"):
         equate(x)
