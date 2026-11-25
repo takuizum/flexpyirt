@@ -1160,8 +1160,8 @@ class ItemKernel(Protocol):
     (c) **確認的な 2〜3 次元モデル**: 直積格子と推定した多変量正規の重みで $E_{ab}=n\sum_qP_{ia}
     (\boldsymbol\theta_q)P_{jb}(\boldsymbol\theta_q)w_q$、ベクトルの EAP で
     $d_{ij}=x_{ij}-E(X_j\mid\hat{\boldsymbol\theta}_i)$。`_traces` はカーネルを `(N, D)` の点で評価する。EAP は
-    推定に使った格子で計算する。mirt の `fscores()` は独自の既定（1 / 2 / 3 因子で各次元 61 / 31 / 15 点）を
-    使うので、推定がその格子なら両者は一致する。$df$ はどの場合も $(K_i-1)(K_j-1)$ のまま（mirt と同じ）で、
+    推定に使った格子で計算する。mirt の `fscores()` は推定の格子によらず独自の既定（1 / 2 / 3 因子で各次元
+    121 / 61 / 31 点）を使うので、格子が同じなら両者は一致する。$df$ はどの場合も $(K_i-1)(K_j-1)$ のまま（mirt と同じ）で、
     推定したパラメタを考慮しない。統計量は診断用（Chen & Thissen, 1997）。**拡張しないもの**: bifactor /
     two-tier モデル（bifactor の PR の後）、`jsi()`、`model_parallel_analysis()`、`dimensionality(fit=...)`。
     これらは `_require_unidimensional_normal` のまま。mirt の JSI は 1 因子が必要で、Davidian 曲線の SE がなく

@@ -1661,8 +1661,8 @@ data-independent shapes (§15.21).
     w_q$ on the product grid with the fitted multivariate Normal weights, and
     $d_{ij}=x_{ij}-E(X_j\mid\hat{\boldsymbol\theta}_i)$ at the vector EAP; `_traces` evaluates
     the kernels at `(N, D)` nodes. The EAP uses the fitted grid, where mirt's `fscores()` uses
-    its own default (61 / 31 / 15 points per dimension for 1 / 2 / 3 factors), so the two agree
-    when the fit uses that grid. $df$ stays $(K_i-1)(K_j-1)$ in every case (mirt's), which
+    its own default grid whatever the fit used (121 / 61 / 31 points per dimension for 1 / 2 /
+    3 factors), so the two agree when the grids are the same. $df$ stays $(K_i-1)(K_j-1)$ in every case (mirt's), which
     ignores estimated parameters; the statistics are diagnostic (Chen & Thissen, 1997).
     **Not extended**: bifactor / two-tier models (after the bifactor PR), `jsi()`,
     `model_parallel_analysis()` and `dimensionality(fit=...)`, which keep

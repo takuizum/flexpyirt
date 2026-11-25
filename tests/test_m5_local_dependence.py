@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import warnings
 from functools import cache
 from typing import Any
 
@@ -23,9 +24,13 @@ import pytest
 from flexpyirt import (
     BAEM,
     GRM,
+    DavidianCurve,
+    EmpiricalHistogram,
     FitResult,
     Model,
     Normal,
+    NormalMixture,
+    Quadrature,
     TwoPL,
     _core,
     fit,
@@ -224,15 +229,182 @@ def test_model_parallel_analysis_invalid_options(kwargs: dict[str, Any], match: 
 
 
 @pytest.mark.filterwarnings("ignore::flexpyirt.errors.ConvergenceWarning")
-def test_unsupported_models_are_rejected() -> None:
+def _two_group_fit() -> tuple[FitResult, pd.DataFrame, np.ndarray]:
     rng = np.random.default_rng(1)
-    data = pd.DataFrame((rng.normal(size=(300, 4)) > 0).astype(float), columns=list("abcd"))
-    group = np.repeat(["g1", "g2"], 150)
-    spec = Model.uniform(TwoPL(), items=list("abcd")).with_groups(
-        g1=Normal.standard(), g2=Normal.standard()
+    a = np.array([1.2, 0.9, 1.4, 1.0, 0.8])
+    d = np.array([0.3, -0.4, 0.0, 0.8, -0.6])
+    theta = np.concatenate([rng.normal(size=300), rng.normal(0.5, 1.2, size=300)])
+    data = (rng.uniform(size=(600, 5)) < 1 / (1 + np.exp(-(np.outer(theta, a) + d)))).astype(float)
+    data[rng.uniform(size=data.shape) < 0.03] = np.nan
+    df = pd.DataFrame(data, columns=list("abcde"))
+    group = np.repeat(["g1", "g2"], 300)
+    spec = (
+        Model.uniform(TwoPL(), items=list("abcde"))
+        .with_groups(g1=Normal.standard(), g2=Normal.free())
+        .equal_across_groups(items=["a", "b"])
     )
-    multi = fit(spec, data, group=group, se=None)
+    return fit(spec, df, group=group, method=BAEM(tol=1e-4), se=None), df, group
+
+
+def _brute_force_2pl(
+    y: np.ndarray, a: np.ndarray, d: np.ndarray, nodes: np.ndarray, weights: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """LD X2 and Q3 of every pair from the definitions, for 2PL items on ``(Q, D)`` nodes."""
+    trace = 1 / (1 + np.exp(-(nodes @ a.T + d)))  # (Q, J)
+    like = np.where(np.isnan(y)[:, None, :], 1.0, np.where(y[:, None, :] == 1, trace, 1 - trace))
+    post = like.prod(axis=2) * weights
+    eap = (post / post.sum(axis=1, keepdims=True)) @ nodes  # (N, D)
+    resid = y - 1 / (1 + np.exp(-(eap @ a.T + d)))
+    n_items = y.shape[1]
+    x2, q3 = [], []
+    for i in range(n_items):
+        for j in range(i + 1, n_items):
+            both = ~np.isnan(y[:, i]) & ~np.isnan(y[:, j])
+            stat = 0.0
+            for u in (0, 1):
+                for v in (0, 1):
+                    p_i = trace[:, i] if u else 1 - trace[:, i]
+                    p_j = trace[:, j] if v else 1 - trace[:, j]
+                    expected = both.sum() * np.sum(p_i * p_j * weights)
+                    observed = np.sum((y[both, i] == u) & (y[both, j] == v))
+                    stat += (observed - expected) ** 2 / expected
+            x2.append(stat)
+            q3.append(np.corrcoef(resid[both, i], resid[both, j])[0, 1])
+    return np.array(x2), np.array(q3)
+
+
+def _normal_weights(nodes: np.ndarray, mean: float, var: float) -> np.ndarray:
+    dens = np.exp(-0.5 * (nodes - mean) ** 2 / var)
+    return np.asarray(dens / dens.sum())
+
+
+def test_multiple_groups_use_each_groups_parameters_and_latent() -> None:
+    res, df, group = _two_group_fit()
+    ld = res.local_dependence(df, group=group)
+    assert list(ld.pairs.columns[:3]) == ["group", "item_i", "item_j"]
+    assert isinstance(ld.q3_mean, pd.Series)
+    assert list(ld.q3_mean.index) == ["g1", "g2"]
+    nodes = np.linspace(-6, 6, 61)
+    for g in ("g1", "g2"):
+        items = res.items[res.items["group"] == g].set_index("item").loc[list("abcde")]
+        latent = res.latent.set_index("group").loc[g]
+        x2, q3 = _brute_force_2pl(
+            df.to_numpy()[group == g],
+            items[["a"]].to_numpy(),
+            items["d"].to_numpy(),
+            nodes[:, None],
+            _normal_weights(nodes, float(latent["mean"]), float(latent["var"])),
+        )
+        sub = ld.pairs[ld.pairs["group"] == g]
+        np.testing.assert_allclose(sub["x2"], x2, rtol=1e-9)
+        np.testing.assert_allclose(sub["q3"], q3, rtol=0, atol=1e-10)
+        np.testing.assert_allclose(sub["q3_star"], q3 - ld.q3_mean[g], rtol=0, atol=1e-10)
+        np.testing.assert_allclose(ld.q3.loc[g].to_numpy()[np.triu_indices(5, 1)], sub["q3"])
+    assert ld.max_q3_star == pytest.approx(float(ld.pairs["q3_star"].max()))
+    # A group without respondents in the data is skipped; the other group is unchanged.
+    only = ld.pairs[ld.pairs["group"] == "g2"].reset_index(drop=True)
+    part = res.local_dependence(df[group == "g2"], group=group[group == "g2"])
+    pd.testing.assert_frame_equal(part.pairs, only)
+    with pytest.raises(SpecificationError):
+        res.local_dependence(df)
+
+
+def test_empirical_histogram_uses_the_fitted_weights() -> None:
+    rng = np.random.default_rng(2)
+    a = np.array([1.2, 0.9, 1.4, 1.0, 0.8, 1.1])
+    d = np.array([0.3, -0.4, 0.0, 0.8, -0.6, 0.2])
+    theta = (rng.chisquare(4, size=500) - 4) / np.sqrt(8)
+    data = (rng.uniform(size=(500, 6)) < 1 / (1 + np.exp(-(np.outer(theta, a) + d)))).astype(float)
+    df = pd.DataFrame(data, columns=list("abcdef"))
+    spec = Model.uniform(TwoPL(), items=list("abcdef")).with_latent(EmpiricalHistogram())
+    quad = Quadrature.equispaced(21, bounds=(-5, 5))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # 30 EM cycles are enough for this check
+        res = fit(spec, df, method=BAEM(max_iter=30), quadrature=quad, se=None)
+    weights = res.latent_weights
+    assert weights is not None
+    items = res.items.set_index("item").loc[list("abcdef")]
+    x2, q3 = _brute_force_2pl(
+        df.to_numpy(),
+        items[["a"]].to_numpy(),
+        items["d"].to_numpy(),
+        weights["node"].to_numpy()[:, None],
+        weights["weight"].to_numpy(),
+    )
+    ld = res.local_dependence(df)
+    assert "group" not in ld.pairs
+    np.testing.assert_allclose(ld.pairs["x2"], x2, rtol=1e-9)
+    np.testing.assert_allclose(ld.pairs["q3"], q3, rtol=0, atol=1e-10)
+    # The histogram is skewed, so a Normal prior on the same grid gives other values.
+    normal_x2, _ = _brute_force_2pl(
+        df.to_numpy(),
+        items[["a"]].to_numpy(),
+        items["d"].to_numpy(),
+        weights["node"].to_numpy()[:, None],
+        _normal_weights(weights["node"].to_numpy(), 0.0, 1.0),
+    )
+    assert np.max(np.abs(normal_x2 - x2)) > 1e-3
+
+
+def test_two_factors_use_the_product_grid_and_vector_eap() -> None:
+    rng = np.random.default_rng(3)
+    z = rng.multivariate_normal([0, 0], [[1, 0.5], [0.5, 1]], size=500)
+    slopes = np.array([[1.2, 0], [0.9, 0], [1.4, 0], [0, 1.0], [0, 0.8], [0, 1.3]])
+    d = np.array([0.3, -0.4, 0.0, 0.8, -0.6, 0.2])
+    data = (rng.uniform(size=(500, 6)) < 1 / (1 + np.exp(-(z @ slopes.T + d)))).astype(float)
+    data[rng.uniform(size=data.shape) < 0.03] = np.nan
+    df = pd.DataFrame(data, columns=list("abcdef"))
+    spec = Model.uniform(TwoPL(), items=list("abcdef")).with_factors(
+        {"F1": ["a", "b", "c"], "F2": ["d", "e", "f"]}
+    )
+    quad = Quadrature.equispaced(15, bounds=(-5, 5))
+    res = fit(spec, df, method=BAEM(tol=1e-4), quadrature=quad, se=None)
+    items = res.items.set_index("item").loc[list("abcdef")]
+    cor = float(res.latent.iloc[0]["cor_12"])
+    grid = np.linspace(-5, 5, 15)
+    nodes = np.array([[u, v] for u in grid for v in grid])
+    quad_form = (nodes[:, 0] ** 2 - 2 * cor * nodes[:, 0] * nodes[:, 1] + nodes[:, 1] ** 2) / (
+        1 - cor**2
+    )
+    dens = np.exp(-0.5 * quad_form)
+    x2, q3 = _brute_force_2pl(
+        df.to_numpy(),
+        items[["a1", "a2"]].to_numpy(),
+        items["d"].to_numpy(),
+        nodes,
+        dens / dens.sum(),
+    )
+    ld = res.local_dependence(df)
+    np.testing.assert_allclose(ld.pairs["x2"], x2, rtol=1e-9)
+    np.testing.assert_allclose(ld.pairs["q3"], q3, rtol=0, atol=1e-10)
+    scores = res.score(df)
+    assert list(scores.columns[:2]) == ["theta_F1", "theta_F2"]
+
+
+@pytest.mark.parametrize("latent", [DavidianCurve(2), NormalMixture(2)])
+def test_davidian_and_mixture_latents_run(latent: DavidianCurve | NormalMixture) -> None:
+    rng = np.random.default_rng(4)
+    a = np.array([1.2, 0.9, 1.4, 1.0, 0.8, 1.1])
+    d = np.array([0.3, -0.4, 0.0, 0.8, -0.6, 0.2])
+    theta = (rng.chisquare(4, size=500) - 4) / np.sqrt(8)
+    data = (rng.uniform(size=(500, 6)) < 1 / (1 + np.exp(-(np.outer(theta, a) + d)))).astype(float)
+    df = pd.DataFrame(data, columns=list("abcdef"))
+    spec = Model.uniform(TwoPL(), items=list("abcdef")).with_latent(latent)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # 30 EM cycles are enough for this check
+        res = fit(spec, df, method=BAEM(max_iter=30), se=None)
+    ld = res.local_dependence(df)
+    assert len(ld.pairs) == 15
+    assert np.isfinite(ld.pairs[["q3", "x2", "g2", "cramer_v"]].to_numpy()).all()
+    assert (ld.pairs["df"] == 1).all()
+    # With the fitted weights the expected tables add up to the observed margins closely
+    # (X2 is small for data generated without local dependence).
+    assert float(ld.pairs["x2"].max()) < 20.0
+
+
+def test_unsupported_models_are_rejected() -> None:
+    multi, df, _ = _two_group_fit()
     with pytest.raises(SpecificationError, match="single-group"):
-        multi.local_dependence(data)
+        model_parallel_analysis(multi, df, key=jax.random.key(0))
     with pytest.raises(SpecificationError, match="single-group"):
-        model_parallel_analysis(multi, data, key=jax.random.key(0))
+        multi.jsi(df)
