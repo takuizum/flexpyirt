@@ -101,6 +101,10 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 1. [ ] Bifactor and two-tier models with dimension reduction (#80).
 2. [ ] Local dependence (Q3, LD-X², JSI) for multiple groups, non-Normal latent and
    multidimensional / bifactor models (#81).
+   - [x] `FitResult.local_dependence()` (Q3, Q3\*, LD-X², G²) for multiple groups, `EmpiricalHistogram` /
+     `DavidianCurve` / `NormalMixture` latent distributions and confirmatory 2–3 factor models
+     (validated in V26 against mirt `residuals()`; the mixture case given the density only).
+     Still open: bifactor / two-tier models and JSI beyond single-group unidimensional Normal models.
 3. [ ] Item / test information, reliability and summed-score EAP (#82), on a public Lord–Wingersky /
    Poisson-binomial kernel (#83).
 4. [ ] Sampling (survey) weights (#84).
