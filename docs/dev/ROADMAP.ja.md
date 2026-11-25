@@ -74,6 +74,10 @@
 3. [ ] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
    カーネル（#83）の上に作る。
 4. [ ] 標本ウェイト（#84）。
+   - [x] `fit(..., weights=...)`: ウェイトを足し合わせるパターン圧縮による重み付き周辺尤度（EM、SQUAREM、多群、
+     欠測、FIPC）。BIC はウェイトの和を使う。Oakes / Hessian の SE は警告つき（度数ウェイトでのみ正しい）。
+     mirt の `survey.weights` と V34 で照合（2PL、GRM、2 群、FIPC）。標本設計に整合する SE は #85 で扱う。
+     項目適合度、M2、局所依存、JSI、DIF はウェイト付きの推定結果に対してエラーを出す。
 5. [ ] ロバスト標準誤差: sandwich と cross-product（#85）。
 - **受け入れ基準**: mirt の `bfactor()`、`residuals()`、`iteminfo()` / `testinfo()` / `marginal_rxx()` /
   `fscores(method = "EAPsum")`、`survey.weights`、`SE.type = "sandwich"` / `"crossprod"` との V 番号つき照合。
