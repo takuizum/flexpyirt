@@ -1,21 +1,22 @@
-"""Kernel equating with a Gaussian kernel (von Davier, Holland & Thayer, 2004).
+"""Kernel equating (von Davier, Holland & Thayer, 2004; Lee & von Davier, 2011).
 
-Continuization, penalty bandwidth selection, the equating function, its standard error (SEE), the
-standard error of the difference between two equating functions (SEED) and the percent relative
-error, for the equivalent-groups, single-group, counterbalanced and anchor-test (chained and
-post-stratification) designs.
+Continuization with a Gaussian, logistic or uniform kernel, bandwidth selection, the equating
+function, its standard error (SEE), the standard error of the difference between two equating
+functions (SEED) and the percent relative error, for the equivalent-groups, single-group,
+counterbalanced and anchor-test (chained and post-stratification) designs.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
 
 import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike
 from scipy.optimize import minimize_scalar
-from scipy.special import ndtr, ndtri
+from scipy.special import expit, ndtr, ndtri
 
 from flexpyequate.distributions import (
     BivariateScoreDistribution,
@@ -26,7 +27,22 @@ from flexpyequate.distributions import (
 from flexpyequate.errors import SpecificationError
 from flexpyequate.presmoothing import LoglinearResult, loglinear_c_matrix, saturated_c_matrix
 
-__all__ = ["KernelEquatingResult", "kernel_equate", "penalty_bandwidth"]
+__all__ = [
+    "BandwidthMethod",
+    "Kernel",
+    "KernelEquatingResult",
+    "kernel_equate",
+    "penalty_bandwidth",
+]
+
+Kernel = Literal["gaussian", "logistic", "uniform"]
+BandwidthMethod = Literal["penalty", "rule_of_thumb", "double_smoothing", "cross_validation"]
+# Variance of the kernel variable V: standard normal, standard logistic, uniform on (-1/2, 1/2).
+_KERNEL_VARIANCE: dict[str, float] = {
+    "gaussian": 1.0,
+    "logistic": float(np.pi**2 / 3.0),
+    "uniform": 1.0 / 12.0,
+}
 
 _SQRT_2PI = float(np.sqrt(2.0 * np.pi))
 # Half-width at which the derivative of the density is inspected (w in ch. 4), in units of the
@@ -35,24 +51,64 @@ _DERIVATIVE_OFFSET = 0.25
 # Search range of the bandwidth in units of the score increment.
 _BANDWIDTH_RANGE = (0.05, 10.0)
 _N_GRID = 400
+# Pilot bandwidth of the double-smoothing criterion, in units of the score increment (kequate).
+_PILOT_BANDWIDTH = 4.0
 
 
 def _normal_density(z: FloatArray) -> FloatArray:
     return np.asarray(np.exp(-0.5 * z * z) / _SQRT_2PI, dtype=np.float64)
 
 
+def _kernel_cdf(z: FloatArray, kernel: Kernel) -> FloatArray:
+    r"""Distribution function :math:`K(z)` of the kernel variable.
+
+    Standard normal :math:`\Phi(z)`; standard logistic :math:`1/(1 + e^{-z})`; uniform on
+    :math:`(-1/2, 1/2)`, :math:`\min\{\max(z + 1/2, 0), 1\}` (Lee & von Davier, 2011).
+    """
+    if kernel == "gaussian":
+        return np.asarray(ndtr(z), dtype=np.float64)
+    if kernel == "logistic":
+        return np.asarray(expit(z), dtype=np.float64)
+    return np.asarray(np.clip(z + 0.5, 0.0, 1.0), dtype=np.float64)
+
+
+def _kernel_density(z: FloatArray, kernel: Kernel) -> FloatArray:
+    r"""Return the kernel density :math:`k(z) = K'(z)`.
+
+    :math:`\phi(z)`; :math:`K(z)[1 - K(z)]`; or 1 on :math:`[-1/2, 1/2)`.
+    """
+    if kernel == "gaussian":
+        return _normal_density(z)
+    if kernel == "logistic":
+        cdf = expit(z)
+        return np.asarray(cdf * (1.0 - cdf), dtype=np.float64)
+    return np.asarray((z >= -0.5) & (z < 0.5), dtype=np.float64)
+
+
+def _kernel_density_derivative(z: FloatArray, kernel: Kernel) -> FloatArray:
+    r"""Return :math:`k'(z)`: :math:`-z\phi(z)`, :math:`k(z)[1 - 2K(z)]`, or 0."""
+    if kernel == "gaussian":
+        return np.asarray(-z * _normal_density(z), dtype=np.float64)
+    if kernel == "logistic":
+        cdf = expit(z)
+        return np.asarray(cdf * (1.0 - cdf) * (1.0 - 2.0 * cdf), dtype=np.float64)
+    return np.zeros_like(z)
+
+
 @dataclass(frozen=True)
 class _Continuized:
-    r"""A discrete score distribution continuized with a Gaussian kernel.
+    r"""A discrete score distribution continuized with a kernel.
 
     .. math::
 
-        F_h(x) = \sum_j r_j\, \Phi\bigl(R_j(x)\bigr), \qquad
+        F_h(x) = \sum_j r_j\, K\bigl(R_j(x)\bigr), \qquad
         R_j(x) = \frac{x - a x_j - (1 - a)\mu}{a h}, \qquad
-        a^2 = \frac{\sigma^2}{\sigma^2 + h^2}
+        a^2 = \frac{\sigma^2}{\sigma^2 + \sigma_V^2 h^2}
 
-    (von Davier et al., 2004, ch. 4), with :math:`\mu` and :math:`\sigma^2` the mean and
-    variance of the discrete distribution. The continuized variable keeps both.
+    (von Davier et al., 2004, ch. 4, for the Gaussian kernel; Lee & von Davier, 2011, for a
+    general kernel), with :math:`\mu` and :math:`\sigma^2` the mean and variance of the discrete
+    distribution, :math:`K` the distribution function of the kernel variable :math:`V` and
+    :math:`\sigma_V^2` its variance. The continuized variable keeps mean and variance.
     """
 
     scores: FloatArray
@@ -60,17 +116,25 @@ class _Continuized:
     bandwidth: float
     mean: float
     variance: float
+    kernel: Kernel = "gaussian"
 
     @classmethod
-    def build(cls, scores: FloatArray, probabilities: FloatArray, bandwidth: float) -> _Continuized:
+    def build(
+        cls,
+        scores: FloatArray,
+        probabilities: FloatArray,
+        bandwidth: float,
+        kernel: Kernel = "gaussian",
+    ) -> _Continuized:
         mean = float(probabilities @ scores)
         variance = float(probabilities @ (scores - mean) ** 2)
-        return cls(scores, probabilities, bandwidth, mean, variance)
+        return cls(scores, probabilities, bandwidth, mean, variance, kernel)
 
     @property
     def shrinkage(self) -> float:
         """The factor :math:`a`."""
-        return float(np.sqrt(self.variance / (self.variance + self.bandwidth**2)))
+        kernel_variance = _KERNEL_VARIANCE[self.kernel]
+        return float(np.sqrt(self.variance / (self.variance + kernel_variance * self.bandwidth**2)))
 
     def standardized(self, values: FloatArray) -> FloatArray:
         """Return :math:`R_j(x)`, shape ``(n_values, n_scores)``."""
@@ -82,24 +146,33 @@ class _Continuized:
 
     def cdf(self, values: FloatArray) -> FloatArray:
         """Return :math:`F_h(x)`."""
-        return np.asarray(ndtr(self.standardized(values)) @ self.probabilities, dtype=np.float64)
+        return np.asarray(
+            _kernel_cdf(self.standardized(values), self.kernel) @ self.probabilities,
+            dtype=np.float64,
+        )
 
     def density(self, values: FloatArray) -> FloatArray:
-        r"""Return :math:`f_h(x) = \frac{1}{a h} \sum_j r_j\, \phi(R_j(x))`."""
+        r"""Return :math:`f_h(x) = \frac{1}{a h} \sum_j r_j\, k(R_j(x))`."""
         scale = self.shrinkage * self.bandwidth
-        weighted = _normal_density(self.standardized(values)) @ self.probabilities
+        weighted = _kernel_density(self.standardized(values), self.kernel) @ self.probabilities
         return np.asarray(weighted / scale, dtype=np.float64)
 
     def density_derivative(self, values: FloatArray) -> FloatArray:
-        r"""Return :math:`f_h'(x) = -\frac{1}{(a h)^2} \sum_j r_j\, R_j(x)\, \phi(R_j(x))`."""
+        r"""Return :math:`f_h'(x) = \frac{1}{(a h)^2} \sum_j r_j\, k'(R_j(x))`."""
         scale = self.shrinkage * self.bandwidth
         z = self.standardized(values)
         return np.asarray(
-            -((z * _normal_density(z)) @ self.probabilities) / scale**2, dtype=np.float64
+            (_kernel_density_derivative(z, self.kernel) @ self.probabilities) / scale**2,
+            dtype=np.float64,
         )
 
     def quantile(self, proportions: FloatArray) -> FloatArray:
-        """Return :math:`F_h^{-1}(u)` by a bracketed Newton iteration."""
+        """Return :math:`F_h^{-1}(u)` by a bracketed Newton iteration.
+
+        With the uniform kernel :math:`F_h` can be flat (below, above and, for a small bandwidth,
+        between the possible scores); the result is then kept inside the support of the
+        continuized distribution.
+        """
         a = self.shrinkage
         spread = 40.0 * a * self.bandwidth
         centers = a * self.scores + (1.0 - a) * self.mean
@@ -120,6 +193,11 @@ class _Continuized:
             current = updated
             if np.all(done):
                 break
+        if self.kernel == "uniform":
+            half_width = 0.5 * a * self.bandwidth
+            current = np.clip(
+                current, float(np.min(centers)) - half_width, float(np.max(centers)) + half_width
+            )
         return np.asarray(current, dtype=np.float64)
 
     def cdf_gradient(self, values: FloatArray) -> FloatArray:
@@ -127,11 +205,12 @@ class _Continuized:
 
         .. math::
 
-            \frac{\partial F_h(x)}{\partial r_j} &= \Phi\bigl(R_j(x)\bigr) - M_j(x)\, f_h(x), \\
+            \frac{\partial F_h(x)}{\partial r_j} &= K\bigl(R_j(x)\bigr) - M_j(x)\, f_h(x), \\
             M_j(x) &= \tfrac12 (x - \mu)(1 - a^2)\Bigl(\frac{x_j - \mu}{\sigma}\Bigr)^2
                       + (1 - a)\, x_j
 
-        (von Davier et al., 2004, ch. 5). Shape ``(n_values, n_scores)``.
+        (von Davier et al., 2004, ch. 5; the same expression holds for any kernel, with its own
+        :math:`a`, Lee & von Davier, 2011). Shape ``(n_values, n_scores)``.
         """
         a = self.shrinkage
         standardized_scores = (self.scores - self.mean) ** 2 / self.variance
@@ -140,13 +219,18 @@ class _Continuized:
             + (1.0 - a) * self.scores[None, :]
         )
         return np.asarray(
-            ndtr(self.standardized(values)) - moment_term * self.density(values)[:, None],
+            _kernel_cdf(self.standardized(values), self.kernel)
+            - moment_term * self.density(values)[:, None],
             dtype=np.float64,
         )
 
 
 def _penalty(
-    bandwidth: float, unit_scores: FloatArray, probabilities: FloatArray, weight: float
+    bandwidth: float,
+    unit_scores: FloatArray,
+    probabilities: FloatArray,
+    weight: float,
+    kernel: Kernel = "gaussian",
 ) -> float:
     r"""Bandwidth penalty on scores with unit increment.
 
@@ -155,40 +239,180 @@ def _penalty(
         \mathrm{PEN}(h) = \sum_j \bigl(r_j - f_h(x_j)\bigr)^2 + K \sum_j A_j (1 - B_j),
 
     with :math:`A_j = 1` if :math:`f_h'(x_j - w) < 0`, :math:`B_j = 0` if
-    :math:`f_h'(x_j + w) > 0` and :math:`w = 1/4` (von Davier et al., 2004, ch. 4).
+    :math:`f_h'(x_j + w) > 0` and :math:`w = 1/4` (von Davier et al., 2004, ch. 4). The density
+    of the uniform kernel is piecewise constant, so its second term is zero (Lee & von Davier,
+    2011).
     """
-    continuized = _Continuized.build(unit_scores, probabilities, bandwidth)
+    continuized = _Continuized.build(unit_scores, probabilities, bandwidth, kernel)
     value = float(np.sum((probabilities - continuized.density(unit_scores)) ** 2))
-    if weight > 0:
+    if weight > 0 and kernel != "uniform":
         left = continuized.density_derivative(unit_scores - _DERIVATIVE_OFFSET)
         right = continuized.density_derivative(unit_scores + _DERIVATIVE_OFFSET)
         value += weight * float(np.sum((left < 0) & (right > 0)))
     return value
 
 
-def _penalty_bandwidth(scores: FloatArray, probabilities: FloatArray, weight: float) -> float:
-    increment = float(scores[1] - scores[0])
-    unit_scores = (scores - scores[0]) / increment
+def _minimize_over_bandwidth(criterion: Callable[[float], float]) -> float:
+    """Minimize a bandwidth criterion: grid search, then a bounded search around the best point.
+
+    The bandwidth is in units of the score increment and is searched between 0.05 and 10. A grid
+    comes first because the criteria can have several local minima and jumps.
+    """
     grid = np.geomspace(*_BANDWIDTH_RANGE, _N_GRID)
-    values = np.array([_penalty(h, unit_scores, probabilities, weight) for h in grid])
+    values = np.array([criterion(float(h)) for h in grid])
     best = int(np.argmin(values))
     lower = grid[max(best - 1, 0)]
     upper = grid[min(best + 1, grid.size - 1)]
     refined = minimize_scalar(
-        _penalty,
-        bounds=(lower, upper),
-        args=(unit_scores, probabilities, weight),
-        method="bounded",
-        options={"xatol": 1e-12},
+        criterion, bounds=(lower, upper), method="bounded", options={"xatol": 1e-12}
     )
-    unit_bandwidth = float(refined.x) if refined.fun <= values[best] else float(grid[best])
+    return float(refined.x) if refined.fun <= values[best] else float(grid[best])
+
+
+def _penalty_bandwidth(
+    scores: FloatArray, probabilities: FloatArray, weight: float, kernel: Kernel = "gaussian"
+) -> float:
+    increment = float(scores[1] - scores[0])
+    unit_scores = (scores - scores[0]) / increment
+    unit_bandwidth = _minimize_over_bandwidth(
+        lambda h: _penalty(h, unit_scores, probabilities, weight, kernel)
+    )
+    return unit_bandwidth * increment
+
+
+def _rule_of_thumb_bandwidth(scores: FloatArray, probabilities: FloatArray, n: float) -> float:
+    r"""Rule-of-thumb bandwidth of Andersson & von Davier (2014) for the Gaussian kernel.
+
+    .. math:: h = \frac{9\,\sigma}{\sqrt{100\,N^{2/5} - 81}}
+
+    with :math:`\sigma` the standard deviation of the score distribution and :math:`N` the sample
+    size: Silverman's rule :math:`h^* = 0.9\,\sigma N^{-1/5}` for a density estimate, adjusted for
+    the shrinkage of the continuization (:math:`a h = h^*`).
+    """
+    mean = float(probabilities @ scores)
+    sd = float(np.sqrt(probabilities @ (scores - mean) ** 2))
+    return 9.0 * sd / float(np.sqrt(100.0 * n**0.4 - 81.0))
+
+
+def _gaussian_weights(
+    points: FloatArray, unit_scores: FloatArray, mean: float, variance: float, bandwidth: float
+) -> FloatArray:
+    r"""Return :math:`\phi(R_j(x))/(a h)` for every point (rows) and possible score (columns)."""
+    a = float(np.sqrt(variance / (variance + bandwidth**2)))
+    z = (points[:, None] - a * unit_scores[None, :] - (1.0 - a) * mean) / (a * bandwidth)
+    return np.asarray(_normal_density(z) / (a * bandwidth), dtype=np.float64)
+
+
+def _double_smoothing(
+    bandwidth: float, unit_scores: FloatArray, probabilities: FloatArray, pilot: float
+) -> float:
+    r"""Double-smoothing criterion of Häggström & Wiberg (2014) on scores with unit increment.
+
+    A pilot density :math:`f_g` with a large bandwidth :math:`g` stands in for the unknown
+    density. On the grid :math:`x_l` of the possible scores and the points halfway between them
+    (:math:`2J - 1` points),
+
+    .. math::
+
+        \mathrm{DS}(h) = \frac{1}{2J - 1} \sum_l
+        \Bigl[\sum_j f_g(x_j)\, \frac{1}{a h}\phi\bigl(R_j(x_l)\bigr) - r^*(x_l)\Bigr]^2,
+
+    where the first term continuizes the pilot values :math:`f_g(x_j)` with bandwidth :math:`h`
+    and :math:`r^*(x_l)` is :math:`r_j` at a possible score and :math:`f_g(x_l)` halfway between
+    two. :math:`a` and :math:`R_j` use the mean and variance of the score distribution.
+    """
+    mean = float(probabilities @ unit_scores)
+    variance = float(probabilities @ (unit_scores - mean) ** 2)
+    grid = np.arange(2 * unit_scores.size - 1) / 2.0 + unit_scores[0]
+    pilot_on_grid = _gaussian_weights(grid, unit_scores, mean, variance, pilot) @ probabilities
+    target = pilot_on_grid.copy()
+    target[::2] = probabilities
+    smoothed = _gaussian_weights(grid, unit_scores, mean, variance, bandwidth) @ pilot_on_grid[::2]
+    return float(np.mean((smoothed - target) ** 2))
+
+
+def _cross_validation(
+    bandwidth: float, unit_scores: FloatArray, probabilities: FloatArray
+) -> float:
+    r"""Leave-one-out cross-validation criterion of ``kequate``, unit increment.
+
+    Each score probability is predicted from the others by a kernel-weighted average,
+
+    .. math::
+
+        \mathrm{CV}(h) = \frac{1}{J} \sum_j \bigl(r_j - \hat r_{(j)}\bigr)^2, \qquad
+        \hat r_{(j)} = \frac{\sum_{i \ne j} r_i\, \phi\bigl(R_i(x_j)\bigr)}
+                             {\sum_{i \ne j} \phi\bigl(R_i(x_j)\bigr)},
+
+    with :math:`a` and :math:`R_i` from the mean and variance of the whole distribution
+    (Andersson et al., 2013, ``kequate`` 1.6.4, ``CV = TRUE``). This is not the likelihood
+    cross-validation of Liang & von Davier (2014), which splits the sample at random.
+    """
+    mean = float(probabilities @ unit_scores)
+    variance = float(probabilities @ (unit_scores - mean) ** 2)
+    weights = _gaussian_weights(unit_scores, unit_scores, mean, variance, bandwidth)
+    np.fill_diagonal(weights, 0.0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        predicted = (weights @ probabilities) / weights.sum(axis=1)
+    if not np.all(np.isfinite(predicted)):
+        return float("inf")
+    return float(np.mean((probabilities - predicted) ** 2))
+
+
+def _check_kernel_options(kernel: str, bandwidth_method: str) -> None:
+    if kernel not in get_args(Kernel):
+        raise SpecificationError(
+            f"Unknown kernel {kernel!r}; choose one of {', '.join(get_args(Kernel))}."
+        )
+    if bandwidth_method not in get_args(BandwidthMethod):
+        raise SpecificationError(
+            f"Unknown bandwidth_method {bandwidth_method!r}; choose one of "
+            f"{', '.join(get_args(BandwidthMethod))}."
+        )
+    if bandwidth_method != "penalty" and kernel != "gaussian":
+        raise SpecificationError(
+            f"bandwidth_method={bandwidth_method!r} is defined for the Gaussian kernel only; "
+            f'use bandwidth_method="penalty" or give the bandwidths with kernel={kernel!r}.'
+        )
+
+
+def _select_bandwidth(
+    scores: FloatArray,
+    probabilities: FloatArray,
+    n: float | None,
+    method: BandwidthMethod,
+    kernel: Kernel,
+    weight: float,
+) -> float:
+    """Select the bandwidth of one continuized distribution by the named rule."""
+    if method == "penalty":
+        return _penalty_bandwidth(scores, probabilities, weight, kernel)
+    if method == "rule_of_thumb":
+        if n is None or not n > 1:
+            raise SpecificationError(
+                'bandwidth_method="rule_of_thumb" needs the sample size of the distribution.'
+            )
+        return _rule_of_thumb_bandwidth(scores, probabilities, n)
+    increment = float(scores[1] - scores[0])
+    unit_scores = (scores - scores[0]) / increment
+    if method == "double_smoothing":
+        unit_bandwidth = _minimize_over_bandwidth(
+            lambda h: _double_smoothing(h, unit_scores, probabilities, _PILOT_BANDWIDTH)
+        )
+    else:
+        unit_bandwidth = _minimize_over_bandwidth(
+            lambda h: _cross_validation(h, unit_scores, probabilities)
+        )
     return unit_bandwidth * increment
 
 
 def penalty_bandwidth(
-    distribution: ScoreDistribution | LoglinearResult, *, penalty_weight: float = 1.0
+    distribution: ScoreDistribution | LoglinearResult,
+    *,
+    penalty_weight: float = 1.0,
+    kernel: Kernel = "gaussian",
 ) -> float:
-    r"""Bandwidth of the Gaussian kernel that minimizes the penalty of von Davier et al. (2004).
+    r"""Bandwidth that minimizes the penalty of von Davier et al. (2004).
 
     .. math::
 
@@ -225,8 +449,9 @@ def penalty_bandwidth(
     """
     if not penalty_weight >= 0:
         raise SpecificationError(f"penalty_weight must be non-negative, got {penalty_weight}.")
+    _check_kernel_options(kernel, "penalty")
     scores, probabilities, _, _ = _unpack(distribution, "distribution")
-    return _penalty_bandwidth(scores, probabilities, float(penalty_weight))
+    return _penalty_bandwidth(scores, probabilities, float(penalty_weight), kernel)
 
 
 KernelDesign = Literal[
@@ -270,9 +495,14 @@ class KernelEquatingResult:
         The vectors whose Euclidean norms are ``see``. Two equating functions computed from the
         same data in the same design family share their columns, which is what :meth:`seed` uses.
     bandwidth_x, bandwidth_y : float
-        Bandwidths :math:`h_X` and :math:`h_Y` of the Gaussian kernel.
+        Bandwidths :math:`h_X` and :math:`h_Y` of the kernel.
     penalty_weight : float
         The weight :math:`K` used when a bandwidth was selected by the penalty.
+    kernel : str
+        ``"gaussian"``, ``"logistic"`` or ``"uniform"``.
+    bandwidth_method : str
+        The rule that selects the bandwidths that were not given: ``"penalty"``,
+        ``"rule_of_thumb"``, ``"double_smoothing"`` or ``"cross_validation"``.
     x_presmoothed, y_presmoothed : bool
         Whether the first and the second input came from a log-linear model (which determines
         the covariance used for the standard errors). Equal for a single group.
@@ -302,11 +532,17 @@ class KernelEquatingResult:
     anchor_bandwidths: tuple[float, float] | None = None
     synthetic_weight: float | None = None
     counterbalance_weights: tuple[float, float] | None = None
+    kernel: Kernel = "gaussian"
+    bandwidth_method: BandwidthMethod = "penalty"
 
     def _continuized(self) -> dict[str, _Continuized]:
         forms = {
-            "x": _Continuized.build(self.x.scores, self.x.probabilities, self.bandwidth_x),
-            "y": _Continuized.build(self.y.scores, self.y.probabilities, self.bandwidth_y),
+            "x": _Continuized.build(
+                self.x.scores, self.x.probabilities, self.bandwidth_x, self.kernel
+            ),
+            "y": _Continuized.build(
+                self.y.scores, self.y.probabilities, self.bandwidth_y, self.kernel
+            ),
         }
         if self.anchor_distributions is not None and self.anchor_bandwidths is not None:
             for name, anchor, bandwidth in zip(
@@ -315,7 +551,9 @@ class KernelEquatingResult:
                 self.anchor_bandwidths,
                 strict=True,
             ):
-                forms[name] = _Continuized.build(anchor.scores, anchor.probabilities, bandwidth)
+                forms[name] = _Continuized.build(
+                    anchor.scores, anchor.probabilities, bandwidth, self.kernel
+                )
         return forms
 
     def transform(self, values: ArrayLike) -> FloatArray:
@@ -492,7 +730,8 @@ class KernelEquatingResult:
     def __repr__(self) -> str:
         """Return a one-line summary."""
         return (
-            f"KernelEquatingResult(design={self.design!r}, bandwidth_x={self.bandwidth_x:.4f}, "
+            f"KernelEquatingResult(design={self.design!r}, kernel={self.kernel!r}, "
+            f"bandwidth_x={self.bandwidth_x:.4f}, "
             f"bandwidth_y={self.bandwidth_y:.4f}, n_scores={self.scores.size})"
         )
 
@@ -579,6 +818,9 @@ def _resolve_bandwidth(
     weight: float,
     linear: bool,
     name: str,
+    kernel: Kernel = "gaussian",
+    method: BandwidthMethod = "penalty",
+    n: float | None = None,
 ) -> float:
     if linear:
         if bandwidth is not None:
@@ -586,7 +828,7 @@ def _resolve_bandwidth(
         mean = float(probabilities @ scores)
         return _LINEAR_BANDWIDTH_SDS * float(np.sqrt(probabilities @ (scores - mean) ** 2))
     if bandwidth is None:
-        return _penalty_bandwidth(scores, probabilities, weight)
+        return _select_bandwidth(scores, probabilities, n, method, kernel, weight)
     if not (np.isfinite(bandwidth) and bandwidth > 0):
         raise SpecificationError(f"{name} must be a positive number, got {bandwidth}.")
     return float(bandwidth)
@@ -620,6 +862,8 @@ def kernel_equate(
     linear: bool = False,
     synthetic_weight: float | None = None,
     counterbalance_weights: tuple[float, float] = (0.5, 0.5),
+    kernel: Kernel = "gaussian",
+    bandwidth_method: BandwidthMethod = "penalty",
 ) -> KernelEquatingResult:
     r"""Kernel equating of form X to form Y with a Gaussian kernel.
 
@@ -738,6 +982,7 @@ def kernel_equate(
     if not penalty_weight >= 0:
         raise SpecificationError(f"penalty_weight must be non-negative, got {penalty_weight}.")
     weight = float(penalty_weight)
+    _check_kernel_options(kernel, bandwidth_method)
 
     def is_univariate(source: object) -> bool:
         return isinstance(source, ScoreDistribution) or (
@@ -787,6 +1032,7 @@ def kernel_equate(
         y_scores, s, c_s, y_distribution = _unpack(y, "y")  # type: ignore[arg-type]
         u_r, u_s = _pad(c_r / np.sqrt(x_distribution.n), c_s / np.sqrt(y_distribution.n))
         presmoothed = (isinstance(x, LoglinearResult), isinstance(y, LoglinearResult))
+        n_x, n_y = x_distribution.n, y_distribution.n
     elif design == "single_group":
         joint = _unpack_joint(x, "x")
         x_scores, y_scores = joint.distribution.x_scores, joint.distribution.y_scores
@@ -795,9 +1041,18 @@ def kernel_equate(
         x_distribution = _as_distribution(x_scores, r, joint.n)
         y_distribution = _as_distribution(y_scores, s, joint.n)
         presmoothed = (joint.presmoothed, joint.presmoothed)
+        n_x = n_y = joint.n
     else:
         first, second = _unpack_joint(x, "x"), _unpack_joint(y, "y")
         presmoothed = (first.presmoothed, second.presmoothed)
+        # Sample size behind each continuized distribution (rule-of-thumb bandwidth): the
+        # population that took the form. The counterbalanced design mixes two samples.
+        n_x, n_y = first.n, second.n
+        if design == "counterbalanced" and bandwidth_method == "rule_of_thumb" and not linear:
+            raise SpecificationError(
+                'bandwidth_method="rule_of_thumb" is not available for the counterbalanced '
+                "design, where X and Y are each observed in two samples."
+            )
         if design == "counterbalanced":
             if not (
                 _same_scores(first.distribution.x_scores, second.distribution.x_scores)
@@ -853,10 +1108,14 @@ def kernel_equate(
 
     if not (x_distribution.variance() > 0 and y_distribution.variance() > 0):
         raise SpecificationError("X and Y need positive variance for kernel equating.")
-    h_x = _resolve_bandwidth(bandwidth_x, x_scores, r, weight, linear, "bandwidth_x")
-    h_y = _resolve_bandwidth(bandwidth_y, y_scores, s, weight, linear, "bandwidth_y")
-    F = _Continuized.build(x_scores, r, h_x)
-    G = _Continuized.build(y_scores, s, h_y)
+    h_x = _resolve_bandwidth(
+        bandwidth_x, x_scores, r, weight, linear, "bandwidth_x", kernel, bandwidth_method, n_x
+    )
+    h_y = _resolve_bandwidth(
+        bandwidth_y, y_scores, s, weight, linear, "bandwidth_y", kernel, bandwidth_method, n_y
+    )
+    F = _Continuized.build(x_scores, r, h_x, kernel)
+    G = _Continuized.build(y_scores, s, h_y, kernel)
 
     if design == "chained":
         assert anchors is not None
@@ -864,14 +1123,30 @@ def kernel_equate(
         if len(given) != 2:
             raise SpecificationError("anchor_bandwidths must hold two values.")
         h_ap = _resolve_bandwidth(
-            given[0], anchor_scores, t_p, weight, linear, "anchor_bandwidths[0]"
+            given[0],
+            anchor_scores,
+            t_p,
+            weight,
+            linear,
+            "anchor_bandwidths[0]",
+            kernel,
+            bandwidth_method,
+            n_x,
         )
         h_aq = _resolve_bandwidth(
-            given[1], anchor_scores, t_q, weight, linear, "anchor_bandwidths[1]"
+            given[1],
+            anchor_scores,
+            t_q,
+            weight,
+            linear,
+            "anchor_bandwidths[1]",
+            kernel,
+            bandwidth_method,
+            n_y,
         )
         anchor_h = (h_ap, h_aq)
-        H_P = _Continuized.build(anchor_scores, t_p, h_ap)
-        H_Q = _Continuized.build(anchor_scores, t_q, h_aq)
+        H_P = _Continuized.build(anchor_scores, t_p, h_ap, kernel)
+        H_Q = _Continuized.build(anchor_scores, t_q, h_aq, kernel)
         on_anchor = H_P.quantile(F.cdf(x_scores))
         equated = G.quantile(H_Q.cdf(on_anchor))
         density_y = G.density(equated)
@@ -879,17 +1154,23 @@ def kernel_equate(
         link_p = F.cdf_gradient(x_scores) @ first.c.sum(axis=1) - H_P.cdf_gradient(
             on_anchor
         ) @ first.c.sum(axis=0)
-        slope = H_Q.density(on_anchor) / density_y / H_P.density(on_anchor)
         # Population Q: the anchor to Y, evaluated at the anchor equivalents.
         link_q = H_Q.cdf_gradient(on_anchor) @ second.c.sum(axis=0) - G.cdf_gradient(
             equated
         ) @ second.c.sum(axis=1)
-        see_vectors = np.hstack([slope[:, None] * link_p, link_q / density_y[:, None]])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            slope = H_Q.density(on_anchor) / density_y / H_P.density(on_anchor)
+            see_vectors = np.hstack([slope[:, None] * link_p, link_q / density_y[:, None]])
     else:
         equated = G.quantile(F.cdf(x_scores))
-        see_vectors = (F.cdf_gradient(x_scores) @ u_r - G.cdf_gradient(equated) @ u_s) / G.density(
-            equated
-        )[:, None]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            see_vectors = (
+                F.cdf_gradient(x_scores) @ u_r - G.cdf_gradient(equated) @ u_s
+            ) / G.density(equated)[:, None]
+    # Uniform kernel: where a continuized density is zero the delta method does not apply.
+    see_vectors = np.where(
+        np.all(np.isfinite(see_vectors), axis=1, keepdims=True), see_vectors, np.nan
+    )
 
     return KernelEquatingResult(
         design=design,
@@ -908,6 +1189,8 @@ def kernel_equate(
         anchor_bandwidths=anchor_h,
         synthetic_weight=used_weight,
         counterbalance_weights=used_cb,
+        kernel=kernel,
+        bandwidth_method=bandwidth_method,
     )
 
 
