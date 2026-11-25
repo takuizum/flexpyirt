@@ -545,21 +545,24 @@ class LocalDependenceResult:
     Attributes
     ----------
     pairs : pandas.DataFrame
-        One row per item pair: ``item_i``, ``item_j``, ``n`` (respondents answering both),
+        One row per item pair (per group and pair, with a leading ``group`` column, in a
+        multiple-group model): ``item_i``, ``item_j``, ``n`` (respondents answering both),
         ``q3``, ``q3_star``, ``x2``, ``g2``, ``df``, ``p_x2``, ``p_g2``, ``cramer_v``.
     q3 : pandas.DataFrame
-        Item x item Q3 matrix (unit diagonal).
-    q3_mean : float
-        Mean off-diagonal Q3 (subtracted in ``q3_star``).
+        Item x item Q3 matrix (unit diagonal); in a multiple-group model one matrix per group
+        stacked on a ``(group, item)`` row index.
+    q3_mean : float or pandas.Series
+        Mean off-diagonal Q3 (subtracted in ``q3_star``); in a multiple-group model a Series
+        indexed by group, each group's ``q3_star`` using its own mean.
     """
 
     pairs: pd.DataFrame
     q3: pd.DataFrame
-    q3_mean: float
+    q3_mean: float | pd.Series
 
     @property
     def max_q3_star(self) -> float:
-        """Largest Q3* over pairs (Christensen, Makransky & Horton, 2017)."""
+        """Largest Q3* over pairs, and over groups (Christensen, Makransky & Horton, 2017)."""
         return float(self.pairs["q3_star"].max())
 
 
