@@ -1300,6 +1300,76 @@ class ItemKernel(Protocol):
     含むシミュレーションの GPCM。推定し直した値は $10^{-5}$ で一致する（観測値 $\le1.2\times10^{-7}$）。テストでは
     ほかに、推定し直した値を項目を除いたデータへの `fit()` と、近似を 15 項目のデータで推定し直した値と（`"newton"`
     1 ステップ 0.03、2 ステップ 0.02、`"one_step"` 0.05）、vmap した勾配を 1 つずつの勾配と比べる。
+18. **パッケージの分割: `flexpyctt`（2026-11-25 決定、issue #87）**: 推定済みの IRT モデルを使わない道具を、JAX に依存
+    しない別の配布物としてこのリポジトリから公開する。flexpyirt は BA-EM による推定と、その結果を使う道具に絞る。
+
+    | 配布物 | 範囲 | 依存 |
+    |---|---|---|
+    | `flexpyirt` | 推定。`FitResult` を使う道具（`local_dependence()`、`jsi()`、`model_parallel_analysis()`、`link()`、IRT の等化）。`dimensionality()` のレポート | JAX、`flexpyctt` |
+    | `flexpyctt` | モデルを使わない項目・テスト分析: `polychoric()`、`parallel_analysis()`、`velicer_map()`、`empirical_kaiser()`、`efa()`、`hull()`、`comparison_data()`、`detect()`、`exploratory_detect()`、`dimtest()`。今後、古典的項目分析と Mantel–Haenszel DIF | NumPy、SciPy、pandas |
+    | `flexpyequate`（今後） | 得点分布の等化のみ | NumPy、SciPy、pandas |
+
+    **配置**: uv ワークスペース。flexpyirt はリポジトリのルートに置いたままにする（`pyproject.toml`、`src/flexpyirt/`、
+    `tests/`）。issue の `packages/flexpyirt/` への移動は見送る（ディレクトリを動かすと、開いているすべてのブランチと
+    衝突するため）。メンバーは `packages/*`。`packages/flexpyctt/` は自分の `pyproject.toml`、`README.md`（PyPI の
+    ページ。リンクは絶対 URL）、`LICENSE`、`src/flexpyctt/`、`tests/`（`tests/reference/` を含む）、`validation/` を持つ。
+    flexpyirt は flexpyctt に依存する（`[tool.uv.sources] flexpyctt = { workspace = true }`）ので、
+    `pip install flexpyirt` だけですべての道具が入る。**バージョンは 1 つ**: どちらも同じタグ `vX.Y.Z` を hatch-vcs で
+    読む（メンバー側は `raw-options.root = "../.."`）。リリースのワークフローは `uv build --package` でそれぞれをビルド
+    し、flexpyctt を flexpyirt より先に公開する。flexpyirt は flexpyctt の非公開ヘルパーをいくつか使う（後述）ので、
+    2 つは同じバージョンで使う前提。依存にはまだバージョンの範囲を付けていない（未決: ビルドフックで
+    `flexpyctt==<同じバージョン>` に固定する）。
+
+    **flexpyctt は JAX を import しない**。64 ビットの設定も要らない（NumPy は float64）。CI のジョブが flexpyctt
+    だけをインストールし、`jax` が無いことを確かめたうえでテストを実行する。
+
+    **ポリコリック相関の 2 つの実装。** `flexpyctt.polychoric()` は §16.9 の推定量を NumPy / SciPy で新しく実装した
+    もの（定義、引数、既定値、警告、`PolychoricResult` は同じ）:
+    - $\Phi_2$ は Owen (1956) の $T$ 関数（`scipy.special.owens_t`）で計算する:
+      $\Phi_2(h,k;\rho)=\tfrac12\Phi(h)+\tfrac12\Phi(k)-T(h,a_h)-T(k,a_k)-\beta$、
+      $a_h=(k-\rho h)/(h\sqrt{1-\rho^2})$、$a_k=(h-\rho k)/(k\sqrt{1-\rho^2})$、$\beta$ は $hk>0$ または
+      （$hk=0$ かつ $h+k\ge0$）のとき 0、それ以外は $\tfrac12$。$\Phi_2(0,0;\rho)=\tfrac14+\arcsin\rho/(2\pi)$。
+      無限大の限界は正確に扱う。JAX 版の Genz (2004) の求積とは独立な計算なので、2 つの一致は意味のある確認になる。
+    - $z=\operatorname{atanh}\rho$ についての Newton 法を、すべてのペアについて同時に行う（配列演算。ペアについての
+      Python ループは無い）。微分は解析的: $\partial_\rho\pi_{ab}=\Delta\phi_2$（Plackett, 1954）、
+      $\partial_\rho\phi_2=\phi_2\,[\rho/s+(hk(1+\rho^2)-\rho(h^2+k^2))/s^2]$、$s=1-\rho^2$。ステップの規則（凹なら
+      Newton、そうでなければ勾配方向に 0.5。ステップは $\pm2$ に制限。ステップ半減）、境界 $|z|\le8$、収束判定、境界解の
+      判定は §16.9 と同じ。
+
+    `flexpyirt.polychoric()` は JAX 版のまま（`_polychoric.py`、`correlation.py`）公開し、動作は変えない。返す
+    `PolychoricResult` は同じクラス（flexpyctt で定義）なので、どちらの結果も `velicer_map()`、`efa()` などに渡せる。
+    移した道具はすべて NumPy 版を使い、`model_parallel_analysis()` と `dimensionality()` も NumPy 版を使う。
+    **照合**: NumPy 版は V24 を同じ許容誤差で通る（lavaan $10^{-6}$、閾値 $10^{-12}$、psych $10^{-3}$）。$\Phi_2$ は
+    Plackett の積分と $10^{-14}$ で一致する。flexpyirt のテストで、V24 のすべてのケースについて 2 つの版が $10^{-9}$ で
+    一致し、フラグが等しいことを確かめる。
+
+    **乱数。** flexpyctt の関数は、JAX 版が `key` を取っていたところで `rng`（`numpy.random.Generator` または整数の
+    シード）を取る。`key` が必須だった関数では `rng` も必須。乱数列は JAX のものと異なるので、参照データを使う結果は
+    モンテカルロ誤差の範囲で変わる。決定的な参照値（V24、V25、V27–V29）は変わらない。flexpyirt に残る関数は `key` の
+    まま: `model_parallel_analysis()` はそれでシミュレーションし、`dimensionality()` はこれまでどおり 6 つのキーに
+    分けてから、flexpyctt の呼び出しごとに生成器に変える（`dimensionality._rng_from_key`: キーのデータをシードにした
+    `numpy.random.default_rng`）。
+
+    **エラーと警告。** flexpyctt は `FlexpycttError`、`SpecificationError`、`FlexpycttWarning`、
+    `ConvergenceWarning`、`HeywoodWarning`、`NotPositiveDefiniteWarning` を定義する（`flexpyctt.errors`）。
+    `flexpyirt.errors` は同じクラスオブジェクトを再公開し、`FlexpyirtError` / `FlexpyirtWarning` は flexpyctt の基底
+    クラスの別名とする。これで `except flexpyirt.errors.SpecificationError`（または `FlexpyirtError`）は flexpyctt の
+    関数が送出したものも捕まえる。`IdentificationError` と `PrecisionError` は flexpyirt に残す。
+
+    **再公開（決定: する）。** `flexpyirt` は移した関数と結果クラスをすべて再公開する
+    （`flexpyirt.parallel_analysis is flexpyctt.parallel_analysis`）。`develop` に対して書いたコードの import は
+    そのまま動き、API の変更は `key=` → `rng=` だけ。例外は `polychoric` で、`flexpyirt.polychoric` は JAX 版。
+    ドキュメントでは、移した道具を flexpyctt のものとして説明する。
+
+    **置き場所。** `flexpyctt.correlation`（`polychoric`、`PolychoricResult`、`smooth_correlation`）、
+    `flexpyctt._polychoric`（カーネル）、`flexpyctt.dimensionality`（9 つの関数と結果クラス）、`flexpyctt._efa`、
+    `_detect`、`_dimtest`、`_comparison_data`（そのまま移動）。`flexpyirt.dimensionality` には `dimensionality()`、
+    `model_parallel_analysis()`、`LocalDependenceResult`、`JSIResult`、`ModelParallelAnalysisResult`、
+    `DimensionalityResult` が残り、flexpyctt の非公開ヘルパー `_coerce_ordinal`、`_observed_correlation`、
+    `_eigenvalues`、`_descending_eigenvalues` を import する。**テストと参照値**: 移した道具のテストと `v24`、`v25`、
+    `v27`、`v28`、`v29` は `packages/flexpyctt/tests/`（JAX なし）、それらの R スクリプトと DIMTEST のシミュレーションは
+    `packages/flexpyctt/validation/` に置く。flexpyirt のテストには、JAX 版ポリコリックのテスト（`v24` は flexpyctt の
+    ディレクトリから読む）、2 つの版の一致テスト、V26、アンサンブルのテストが残る。
 
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1360,6 +1430,7 @@ class ItemKernel(Protocol):
 - Olsson, U. (1979). Maximum likelihood estimation of the polychoric correlation coefficient. *Psychometrika*, 44(4), 443–460.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
+- Owen, D. B. (1956). Tables for computing bivariate normal probabilities. *The Annals of Mathematical Statistics*, 27(4), 1075–1090.
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.

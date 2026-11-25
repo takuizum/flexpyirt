@@ -1836,6 +1836,90 @@ data-independent shapes (§15.21).
     $\le1.2\times10^{-7}$). The tests also check the refit against `fit()` on the data without the
     item, the approximations against the refit on a 15-item data set (`"newton"` 1 step 0.03, 2
     steps 0.02, `"one_step"` 0.05) and the vmapped gradients against single ones.
+18. **Package split: `flexpyctt` (decided 2026-11-25, issue #87)**: tools that need no fitted IRT
+    model are released as separate, JAX-free distributions from this repository. flexpyirt keeps
+    BA-EM estimation and everything that uses its result.
+
+    | Distribution | Scope | Depends on |
+    |---|---|---|
+    | `flexpyirt` | estimation; tools that take a `FitResult` (`local_dependence()`, `jsi()`, `model_parallel_analysis()`, `link()`, IRT equating); the `dimensionality()` report | JAX, `flexpyctt` |
+    | `flexpyctt` | model-free item and test analysis: `polychoric()`, `parallel_analysis()`, `velicer_map()`, `empirical_kaiser()`, `efa()`, `hull()`, `comparison_data()`, `detect()`, `exploratory_detect()`, `dimtest()`; later classical item analysis and Mantel–Haenszel DIF | NumPy, SciPy, pandas |
+    | `flexpyequate` (later) | equating of score distributions only | NumPy, SciPy, pandas |
+
+    **Layout**: a uv workspace. flexpyirt stays at the repository root (`pyproject.toml`,
+    `src/flexpyirt/`, `tests/`); the issue's `packages/flexpyirt/` is postponed, because moving
+    the directory would conflict with every open branch. Members are `packages/*`:
+    `packages/flexpyctt/` has its own `pyproject.toml`, `README.md` (the PyPI page, absolute
+    links), `LICENSE`, `src/flexpyctt/`, `tests/` (with `tests/reference/`) and `validation/`.
+    flexpyirt depends on flexpyctt (`[tool.uv.sources] flexpyctt = { workspace = true }`), so
+    `pip install flexpyirt` still provides every tool. **One version**: both read the same
+    `vX.Y.Z` tag through hatch-vcs (`raw-options.root = "../.."` in the member). The release
+    workflow builds each with `uv build --package` and publishes flexpyctt before flexpyirt.
+    flexpyirt imports a few private helpers of flexpyctt (below), so the two are meant to be
+    installed at the same version; the dependency carries no version bound yet (open point: pin
+    `flexpyctt==<same version>` with a build hook).
+
+    **flexpyctt never imports JAX**, and has no 64-bit requirement (NumPy is float64). A CI job
+    installs it alone, asserts that `jax` is absent and runs its tests.
+
+    **Two polychoric implementations.** `flexpyctt.polychoric()` is a new NumPy / SciPy
+    implementation of the estimator of §16.9 (same definition, options, defaults, warnings and
+    `PolychoricResult`):
+    - $\Phi_2$ by Owen's (1956) $T$ function (`scipy.special.owens_t`):
+      $\Phi_2(h,k;\rho)=\tfrac12\Phi(h)+\tfrac12\Phi(k)-T(h,a_h)-T(k,a_k)-\beta$ with
+      $a_h=(k-\rho h)/(h\sqrt{1-\rho^2})$, $a_k=(h-\rho k)/(k\sqrt{1-\rho^2})$, $\beta=0$ if
+      $hk>0$ or ($hk=0$ and $h+k\ge0$), else $\tfrac12$; $\Phi_2(0,0;\rho)=\tfrac14+
+      \arcsin\rho/(2\pi)$; infinite limits are exact. This is independent of the JAX kernel's
+      Genz (2004) quadrature, so the agreement of the two is a real check.
+    - Newton's method in $z=\operatorname{atanh}\rho$ for all pairs at once (array operations,
+      no Python loop over pairs), with the analytic derivatives
+      $\partial_\rho\pi_{ab}=\Delta\phi_2$ (Plackett, 1954) and
+      $\partial_\rho\phi_2=\phi_2\,[\rho/s+(hk(1+\rho^2)-\rho(h^2+k^2))/s^2]$, $s=1-\rho^2$; the
+      same step rule (Newton when concave, else a half step along the gradient; steps clipped to
+      $\pm2$; step halving), bound $|z|\le8$, convergence criterion and boundary check as §16.9.
+
+    `flexpyirt.polychoric()` stays the JAX version (`_polychoric.py`, `correlation.py`), public
+    and unchanged in behaviour; it returns the same `PolychoricResult` class (defined in
+    flexpyctt), so either result can be passed to `velicer_map()`, `efa()` etc. Every moved tool
+    uses the NumPy version, as do `model_parallel_analysis()` and `dimensionality()`.
+    **Validation**: the NumPy version passes V24 with the same tolerances (lavaan $10^{-6}$,
+    thresholds $10^{-12}$, psych $10^{-3}$), its $\Phi_2$ agrees with Plackett's integral to
+    $10^{-14}$, and a test in flexpyirt requires the two versions to agree to $10^{-9}$ on every
+    V24 case, with equal flags.
+
+    **Random numbers.** flexpyctt functions take `rng` (a `numpy.random.Generator` or an integer
+    seed) where the JAX versions took `key`; `rng` is required where `key` was. The streams
+    differ from the JAX ones, so results with reference data change within Monte Carlo error;
+    the deterministic reference values (V24, V25, V27–V29) are unchanged. The functions that stay
+    in flexpyirt keep `key`: `model_parallel_analysis()` simulates with it, and `dimensionality()`
+    splits it into six keys as before and turns each into a generator for the flexpyctt call
+    (`dimensionality._rng_from_key`: `numpy.random.default_rng` seeded with the key's data).
+
+    **Errors and warnings.** flexpyctt defines `FlexpycttError`, `SpecificationError`,
+    `FlexpycttWarning`, `ConvergenceWarning`, `HeywoodWarning` and `NotPositiveDefiniteWarning`
+    (`flexpyctt.errors`). `flexpyirt.errors` re-exports the same class objects, and
+    `FlexpyirtError` / `FlexpyirtWarning` are aliases of the flexpyctt base classes, so
+    `except flexpyirt.errors.SpecificationError` (or `FlexpyirtError`) also catches what a
+    flexpyctt function raises. `IdentificationError` and `PrecisionError` stay in flexpyirt.
+
+    **Re-exports (decided: yes).** `flexpyirt` re-exports every moved function and result class
+    (`flexpyirt.parallel_analysis is flexpyctt.parallel_analysis`), so code written against
+    `develop` keeps its imports; the only API change is `key=` → `rng=`. The exception is
+    `polychoric`: `flexpyirt.polychoric` is the JAX version. Documentation presents the moved
+    tools under flexpyctt.
+
+    **Where things are.** `flexpyctt.correlation` (`polychoric`, `PolychoricResult`,
+    `smooth_correlation`), `flexpyctt._polychoric` (kernels), `flexpyctt.dimensionality` (the
+    nine functions and their result classes), `flexpyctt._efa`, `_detect`, `_dimtest`,
+    `_comparison_data` (moved unchanged). `flexpyirt.dimensionality` keeps `dimensionality()`,
+    `model_parallel_analysis()`, `LocalDependenceResult`, `JSIResult`,
+    `ModelParallelAnalysisResult`, `DimensionalityResult` and imports flexpyctt's private
+    helpers `_coerce_ordinal`, `_observed_correlation`, `_eigenvalues` and
+    `_descending_eigenvalues`. **Tests and references**: the tests of the moved tools and
+    `v24`, `v25`, `v27`, `v28`, `v29` are in `packages/flexpyctt/tests/` (no JAX), their R
+    scripts and the DIMTEST study in `packages/flexpyctt/validation/`. flexpyirt's tests keep
+    the JAX polychoric tests (reading `v24` from the flexpyctt directory), the two-version
+    agreement test, V26 and the ensemble tests.
 
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
@@ -1896,6 +1980,7 @@ data-independent shapes (§15.21).
 - Olsson, U. (1979). Maximum likelihood estimation of the polychoric correlation coefficient. *Psychometrika*, 44(4), 443–460.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24(1), 50–64.
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
+- Owen, D. B. (1956). Tables for computing bivariate normal probabilities. *The Annals of Mathematical Statistics*, 27(4), 1075–1090.
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
