@@ -44,6 +44,7 @@ from flexpyirt import (
     fit,
 )
 from flexpyirt._compile import LATENT_ITEM, compile_problem, prepare
+from flexpyirt.items import ItemModel
 from tests._reference import check_reference_meta
 
 # mirt reference comparison: nightly and release-PR CI only (CONTRIBUTING.md, "Tests").
@@ -62,9 +63,9 @@ CASES = [
 EH_CASE = "fipc_eh"
 
 TOL_LOGLIK_REL = 1e-9
-TOL_CROSS_PRODUCT = 1e-6
+TOL_CROSS_PRODUCT = 1e-9
 """Entries of the cross-product covariance at mirt's solution, relative to sqrt(v_ii v_jj)."""
-TOL_SANDWICH = 1e-3
+TOL_SANDWICH = 1e-6
 """The same for the sandwich, whose bread in mirt is a finite-difference Oakes Hessian."""
 TOL_PARAM = 1e-4
 TOL_SE_REL = 1e-3
@@ -97,7 +98,12 @@ class Case:
 def _spec(name: str, raw: dict[str, Any]) -> Model:
     items = raw["items"]
     if name == "mixed":
-        models = {"3PL": ThreePL(), "graded": GRM(4), "gpcm": GPCM(3), "nominal": Nominal(3)}
+        models: dict[str, ItemModel] = {
+            "3PL": ThreePL(),
+            "graded": GRM(4),
+            "gpcm": GPCM(3),
+            "nominal": Nominal(3),
+        }
         return Model.from_items(
             {item: models[kind] for item, kind in zip(items, raw["itemtypes"], strict=True)}
         )
@@ -164,7 +170,8 @@ class AtMirt:
         assert sorted(ids.tolist()) == list(range(n_free)), "mirt and flexpyirt free sets differ"
         out = np.empty((n_free, n_free))
         out[np.ix_(ids, ids)] = np.asarray(block["matrix"], dtype=float)
-        return self.logit_scale[:, None] * out * self.logit_scale[None, :]
+        scaled: np.ndarray = self.logit_scale[:, None] * out * self.logit_scale[None, :]
+        return scaled
 
 
 @cache

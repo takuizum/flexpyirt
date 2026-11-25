@@ -43,7 +43,7 @@ Bock–Aitkin EM algorithm (Bock & Aitkin, 1981).
 | `item_names` | list[str], optional | Column names when `data` is an array |
 | `method` | `BAEM`, optional | EM settings (default `BAEM()`) |
 | `quadrature` | `Quadrature`, optional | Quadrature grid (default: 61 points on $[-6, 6]$ for 1 factor, 31 per dimension for 2 factors, 15 per dimension for 3 factors) |
-| `se` | `"oakes"` / `"hessian"` / `None` | Standard-error method (includes prior Hessian under MAP); `None` skips it |
+| `se` | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / `None` | Standard-error method: the inverse observed information (`"oakes"`, `"hessian"`), the inverse cross-product of the per-pattern scores (`"crossprod"`, mirt `SE.type = "crossprod"`) or the robust sandwich covariance (`"sandwich"`, mirt `SE.type = "sandwich"`). All include the prior Hessian under MAP. `"sandwich"` and `"crossprod"` raise `SpecificationError` with `DavidianCurve` or `NormalMixture`. `None` skips it |
 
 **Returns**: [`FitResult`](#fitresult)
 
@@ -77,7 +77,7 @@ Returned by `fit()`. Immutable.
 | `n_safeguards` | int | Number of SQUAREM iterations on which the monotonicity/feasibility safeguard intervened (0 for plain EM) |
 | `history` | DataFrame | `iter`, `loglik`, `log_posterior` (at the parameters entering the iteration; non-decreasing across iterations), `max_change`, `em_evaluations` (cumulative EM map evaluations), `safeguard` (whether the SQUAREM safeguard fired) |
 | `vcov` | ndarray / None | Covariance matrix of the free parameters (in `free_id` order); None if `se=None` |
-| `se_method` | str / None | `"oakes"` / `"hessian"` / None |
+| `se_method` | str / None | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / None |
 
 #### `FitResult.log_posterior`
 
@@ -240,7 +240,7 @@ they warn (`FlexpyirtWarning`), because removing one item changes the estimates 
 **Returns**: [`JSIResult`](#jsiresult)
 
 **Raises**: `PrecisionError`; `SpecificationError` for unsupported models, fewer than three
-items, invalid options, or `"one_step"` without standard errors.
+items, invalid options, or `"one_step"` on a fit without `se="oakes"` or `se="hessian"`.
 
 **Warns**: `ConvergenceWarning` if a refit does not converge.
 

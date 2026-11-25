@@ -9,6 +9,7 @@ import sys
 import warnings
 from collections.abc import Callable
 from functools import cache
+from typing import Literal
 
 import jax
 import jax.numpy as jnp
@@ -42,6 +43,11 @@ from flexpyirt._compile import compile_problem, prepare
 from flexpyirt.errors import SpecificationError
 
 METHOD = BAEM(tol=1e-7, max_iter=5000)
+SE_METHODS: tuple[Literal["oakes", "crossprod", "sandwich"], ...] = (
+    "oakes",
+    "crossprod",
+    "sandwich",
+)
 
 
 def _simulate_2pl(
@@ -275,11 +281,11 @@ def test_fit_composes_the_sandwich_from_its_parts() -> None:
     expected = oakes.vcov @ np.linalg.inv(cross.vcov) @ oakes.vcov
     np.testing.assert_allclose(sandwich.vcov, expected, rtol=0, atol=1e-9 * np.abs(expected).max())
     np.testing.assert_allclose(sandwich.vcov, sandwich.vcov.T, rtol=0, atol=0)
-    for res in (cross, sandwich):
+    for res, vcov in ((cross, cross.vcov), (sandwich, sandwich.vcov)):
         table = res.parameters
         free = table["free"].to_numpy()
         np.testing.assert_allclose(
-            table.loc[free, "se"], np.sqrt(np.diag(res.vcov))[table.loc[free, "free_id"]]
+            table.loc[free, "se"], np.sqrt(np.diag(vcov))[table.loc[free, "free_id"]]
         )
 
 
@@ -356,8 +362,7 @@ def test_empirical_histogram_keeps_the_item_only_covariance() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         results = {
-            se: fit(spec, data, method=method, quadrature=quadrature, se=se)  # type: ignore[arg-type]
-            for se in ("oakes", "crossprod", "sandwich")
+            se: fit(spec, data, method=method, quadrature=quadrature, se=se) for se in SE_METHODS
         }
     n_free = 2 * (6 - 3)
     for res in results.values():

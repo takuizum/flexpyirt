@@ -54,6 +54,7 @@ $10^{-8}$ 程度）。
 | S-X2 項目適合度 | `itemfit(m, fit_stats = "S_X2")` |
 | $M_2$ / $M_2^*$ | `M2(m)`。mirt と異なる場合は R による厳密な計算（下記参照） |
 | DIF 検定 | `DIF(mg, scheme = "add" / "drop")` |
+| ロバスト標準誤差 | `mirt(..., SE.type = "crossprod")`・`SE.type = "sandwich"`: mirt の推定値での共分散行列全体と、通しで当てはめたときの標準誤差 |
 | SQUAREM | 上のすべての照合を `BAEM(squarem=True)` でも行う |
 | ポリコリック相関 | 順序変数に対する lavaan の `lavCor()` と $10^{-6}$ まで、psych の `polychoric()` と $10^{-3}$ まで（その最適化の許容誤差による）、平滑化は psych の `cor.smooth()` |
 | 平行分析、MAP、経験的カイザー基準 | 同じ相関行列に対する EFAtools の `EKC()`・`PARALLEL()`、psych の `vss()`、EFA.dimensions の `MAP()`、4 乗版 MAP の R による独立な実装と $10^{-11}$ まで。正規データの参照固有値は Monte Carlo 誤差の範囲で |

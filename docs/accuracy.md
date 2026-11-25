@@ -59,6 +59,7 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | S-X2 item fit | `itemfit(m, fit_stats = "S_X2")` |
 | $M_2$ / $M_2^*$ | `M2(m)`, plus an exact R computation where mirt differs (see below) |
 | DIF tests | `DIF(mg, scheme = "add" / "drop")` |
+| Robust standard errors | `mirt(..., SE.type = "crossprod")` and `SE.type = "sandwich"`: whole covariance matrices at mirt's estimates, and standard errors from a full fit |
 | SQUAREM | every comparison above is repeated with `BAEM(squarem=True)` |
 | Polychoric correlations | lavaan's `lavCor()` on ordered variables to $10^{-6}$, psych's `polychoric()` to $10^{-3}$ (its optimizer's tolerance) and psych's `cor.smooth()` for smoothing |
 | Parallel analysis, MAP, empirical Kaiser criterion | EFAtools' `EKC()` and `PARALLEL()`, psych's `vss()`, EFA.dimensions' `MAP()` and an independent R implementation of the fourth-power MAP, on the same correlation matrices to $10^{-11}$; reference eigenvalues of normal data within Monte Carlo error |
