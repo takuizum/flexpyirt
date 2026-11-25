@@ -786,11 +786,19 @@ class FitResult:
         """Per item, ``(G, Q, K_j)`` category probabilities at ``nodes`` (default: the grid).
 
         ``nodes`` is ``(Q,)`` for one factor or ``(Q, D)``; the kernels only read
-        ``CompiledProblem.nodes``, so any set of points can stand in for the grid.
+        ``CompiledProblem.nodes``, so any set of points can stand in for the grid. Without
+        ``nodes``, a bifactor or two-tier model gives each item on its own block grid,
+        ``(G, Q_p n, K_j)`` (DESIGN.md §17.1).
         """
         if nodes is not None:
             n_factors = int(prob.nodes.shape[1])
-            prob = replace(prob, nodes=jnp.asarray(nodes, dtype=jnp.float64).reshape(-1, n_factors))
+            # Without the reduction the kernels read ``nodes`` for bifactor / two-tier models
+            # too (``_family_nodes``; DESIGN.md §17.3).
+            prob = replace(
+                prob,
+                nodes=jnp.asarray(nodes, dtype=jnp.float64).reshape(-1, n_factors),
+                reduction=None,
+            )
         log_probs = _core._item_log_probs(prob, jnp.asarray(self._eta))
         traces: list[np.ndarray] = [np.empty(0)] * len(self._model.items)
         for fam, lp in zip(prob.families, log_probs, strict=True):
@@ -853,7 +861,13 @@ class FitResult:
 
         The weights :math:`w_q` and the EAP prior are the fitted latent distribution on the
         fitted grid: Normal, ``EmpiricalHistogram``, ``DavidianCurve`` or ``NormalMixture``,
-        and the multivariate Normal on the product grid for a model with 2 or 3 factors. In a
+        and the multivariate Normal on the product grid for a model with 2 or 3 factors. For
+        bifactor and two-tier models (:meth:`Model.with_bifactor`, :meth:`Model.with_two_tier`)
+        the expected tables are summed on the reduced grids (DESIGN.md §17.3): over the primary
+        factors and the shared specific factor for a pair within one specific factor, and over
+        the primary factors only, with each item's specific factor integrated out first, for
+        any other pair. Q3 uses the EAP of all factors. A pair within a specific factor is
+        therefore tested for dependence beyond that factor. In a
         multiple-group model every statistic is computed within a group, from that group's
         respondents, item parameters and latent distribution (as mirt does for
         ``multipleGroup`` fits).
@@ -900,7 +914,16 @@ class FitResult:
         eap = np.asarray(_eap(prob, eta)[0])[: compiled.n_patterns][compiled.inverse]
         at_eap = self._group_traces(prob, eap)  # per item (G, N, K_j)
         on_grid = self._group_traces(prob)  # per item (G, Q, K_j)
-        weights = np.exp(np.asarray(_core._latent_log_weights(prob, eta)))  # (G, Q)
+        red = prob.reduction
+        if red is None:
+            weights = np.exp(np.asarray(_core._latent_log_weights(prob, eta)))  # (G, Q)
+        else:
+            log_primary, log_block = _core._bifactor_log_weights(prob, eta)
+            primary_weights = np.exp(np.asarray(log_primary))  # (G, Q_p)
+            block_weights = np.exp(np.asarray(log_block))  # (G, S + 1, n)
+            item_block = np.empty(len(names), dtype=np.int64)
+            for fam, blocks in zip(prob.families, red.family_block, strict=True):
+                item_block[np.asarray(fam.columns)] = np.asarray(blocks)
         upper = np.triu_indices(len(names), k=1)
         pair_frames: list[pd.DataFrame] = []
         q3_frames: list[pd.DataFrame] = []
@@ -916,7 +939,19 @@ class FitResult:
             residuals = np.where(y_g >= 0, y_g - expected, np.nan)
             q3 = _local_dependence.q3_matrix(residuals)
             q3_mean = float(np.mean(q3[upper]))
-            ld = _local_dependence.ld_pairs(y_g, [t[g] for t in on_grid], weights[g])
+            if red is None:
+                ld = _local_dependence.ld_pairs(y_g, [t[g] for t in on_grid], weights[g])
+            else:
+                n_primary_nodes = primary_weights.shape[1]
+                block_traces = [
+                    t[g].reshape(n_primary_nodes, -1, t.shape[2]) for t in on_grid
+                ]  # per item (Q_p, n, K_j), the primary index major
+                ld = _local_dependence.ld_pairs_from_tables(
+                    y_g,
+                    _local_dependence.reduced_pair_probabilities(
+                        block_traces, item_block, primary_weights[g], block_weights[g]
+                    ),
+                )
             pairs = pd.DataFrame(
                 {
                     "item_i": [names[int(i)] for i in ld["i"]],
