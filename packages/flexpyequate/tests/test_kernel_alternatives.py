@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,8 @@ from flexpyequate import (
 from flexpyequate.errors import SpecificationError
 from flexpyequate.kernel import (
     _KERNEL_VARIANCE,
+    BandwidthMethod,
+    Kernel,
     _Continuized,
     _cross_validation,
     _double_smoothing,
@@ -59,15 +62,16 @@ def _anchor_groups() -> tuple[BivariateScoreDistribution, BivariateScoreDistribu
 
 
 @pytest.mark.parametrize("kernel", KERNELS)
-def test_kernel_variable_has_the_stated_moments(kernel: str) -> None:
+def test_kernel_variable_has_the_stated_moments(kernel: Kernel) -> None:
     def moment(order: int) -> float:
-        return quad(
-            lambda v: v**order * _kernel_density(np.array([v]), kernel)[0],  # type: ignore[arg-type]
+        integral = quad(
+            lambda v: v**order * _kernel_density(np.array([v]), kernel)[0],
             -60,
             60,
             points=[-0.5, 0.5],
             limit=400,
         )[0]
+        return float(integral)
 
     assert moment(0) == pytest.approx(1.0, abs=1e-9)
     assert moment(1) == pytest.approx(0.0, abs=1e-9)
@@ -75,14 +79,14 @@ def test_kernel_variable_has_the_stated_moments(kernel: str) -> None:
     points = np.linspace(-3, 3, 41) + 0.013
     step = 1e-6
     np.testing.assert_allclose(
-        (_kernel_cdf(points + step, kernel) - _kernel_cdf(points - step, kernel)) / (2 * step),  # type: ignore[arg-type]
-        _kernel_density(points, kernel),  # type: ignore[arg-type]
+        (_kernel_cdf(points + step, kernel) - _kernel_cdf(points - step, kernel)) / (2 * step),
+        _kernel_density(points, kernel),
         atol=1e-8,
     )
     np.testing.assert_allclose(
-        (_kernel_density(points + step, kernel) - _kernel_density(points - step, kernel))  # type: ignore[arg-type]
+        (_kernel_density(points + step, kernel) - _kernel_density(points - step, kernel))
         / (2 * step),
-        _kernel_density_derivative(points, kernel),  # type: ignore[arg-type]
+        _kernel_density_derivative(points, kernel),
         atol=1e-8,
     )
 
@@ -195,7 +199,7 @@ def test_rule_of_thumb_formula() -> None:
 def test_rule_of_thumb_uses_the_sample_that_took_each_form() -> None:
     xa, ya = _anchor_groups()
     for design in ("chained", "post_stratification"):
-        result = kernel_equate(xa, ya, design=design, bandwidth_method="rule_of_thumb")  # type: ignore[arg-type]
+        result = kernel_equate(xa, ya, design=design, bandwidth_method="rule_of_thumb")
         factor_p = 9 / np.sqrt(100 * xa.n**0.4 - 81)
         factor_q = 9 / np.sqrt(100 * ya.n**0.4 - 81)
         assert result.bandwidth_x == pytest.approx(factor_p * result.x.sd())
@@ -210,11 +214,12 @@ def test_criteria_are_minimized_by_the_selected_bandwidths() -> None:
     smooth = presmooth(x, degree=4)
     probabilities = smooth.distribution.probabilities
     scores = x.scores
-    for method, criterion in (
+    criteria: tuple[tuple[BandwidthMethod, Callable[[float], float]], ...] = (
         ("double_smoothing", lambda h: _double_smoothing(h, scores, probabilities, 4.0)),
         ("cross_validation", lambda h: _cross_validation(h, scores, probabilities)),
-    ):
-        selected = kernel_equate(smooth, y, bandwidth_method=method).bandwidth_x  # type: ignore[arg-type]
+    )
+    for method, criterion in criteria:
+        selected = kernel_equate(smooth, y, bandwidth_method=method).bandwidth_x
         grid = np.geomspace(0.05, 10, 300)
         assert criterion(selected) <= min(criterion(h) for h in grid) + 1e-15
 
