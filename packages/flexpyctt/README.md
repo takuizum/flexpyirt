@@ -32,7 +32,7 @@ you do not fit models.
 
 ## Installation
 
-Python 3.11 or later.
+Python 3.12 or later.
 
 ```bash
 pip install flexpyctt  # or: uv add flexpyctt

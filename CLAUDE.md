@@ -42,7 +42,7 @@ uv ワークスペース。配布物は 2 つで、同じタグから同じバ�
 
 ## 開発環境
 
-- Python >= 3.11, パッケージ管理は `uv`。
+- Python >= 3.12, パッケージ管理は `uv`。
 - 依存: `jax`, `numpy`, `scipy`（初期値・検証用）, `pandas`（任意依存で polars も）。
 - 開発依存: `pytest`, `hypothesis`, `ruff`, `mypy`。
 - R 参照値の生成: `validation/r/*.R`（R 4.4+, mirt）。生成した参照値は `tests/reference/*.json` に

@@ -400,6 +400,23 @@ group's `Normal` applies to every factor ([guide section 14](guide.md#14-confirm
 `with_latent()` and `EmpiricalHistogram` are not supported for multidimensional models
 (`SpecificationError`).
 
+#### `Model.with_bifactor`
+
+```text
+model.with_bifactor(*, specific, general="general") -> Model
+```
+
+Declare a bifactor model ([guide section 14](guide.md#bifactor-models)): a general factor named
+`general` on which every item loads, and the specific factors of `specific` (a mapping from factor
+name to items, in order). Each item loads on at most one specific factor, items under none load on
+the general factor only, and each specific factor needs at least two items. Item parameters are
+`a1` (general), `a2`…`aD` (specific; slopes on other specific factors fixed at `0`) and `d` (or
+`d1`…), matching mirt's `bfactor()`. The factors are orthogonal: the latent rows are `mean_1`…`mean_D`
+(fixed `0`) and `var_1`…`var_D` (fixed `1`). The E-step uses Gibbons–Hedeker dimension reduction
+(one two-dimensional grid per specific factor; default 31 points on $[-6, 6]$). Raises
+`SpecificationError` for groups, `with_latent()`, combining with `with_factors()`, Rasch / PCM
+items, or free latent parameters in an edited table. Scoring supports `"EAP"` only.
+
 #### `Model.with_latent`
 
 ```text
@@ -477,8 +494,11 @@ The default ParameterTable for `data`, with columns `group`, `item`, `model`, `p
 |---|---|
 | `item_names` | Tuple of item names |
 | `is_multigroup` | Whether groups were declared with `with_groups()` |
-| `is_multidimensional` | Whether confirmatory factors were declared with `with_factors()` |
-| `n_factors` | Number of latent factors (`1`, `2`, or `3`) |
+| `is_multidimensional` | Whether factors were declared with `with_factors()` or `with_bifactor()` |
+| `n_factors` | Number of latent factors (`1`, `2`, or `3`; `1 + S` for a bifactor model) |
+| `bifactor` | Whether the model was declared with `with_bifactor()` |
+| `quadrature_dimension` | Dimension of the grid the E-step integrates over (`2` for bifactor models) |
+| `latent_parameter_names()` | Names of the Normal latent parameters of each group |
 | `factor_names` | Tuple of factor names (empty for a unidimensional model) |
 | `resolved_latent()` | The single-group latent distribution, with the default rule applied |
 | `resolved_groups()` | Tuple of `(group name, Normal)`; `(("all", ...),)` for a single group |

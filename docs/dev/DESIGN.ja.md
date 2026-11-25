@@ -197,7 +197,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 ### 4.9 求積
 - **決定**: 1 次元の既定は等間隔 61 点、$[-6,6]$（EH と同じ格子を共有でき、Normal でも重みを密度から作る）。
 - Normal 潜在分布では Gauss–Hermite も選べる（`Quadrature.gauss_hermite(n)`、§15.44）。
-- **多次元直積格子（M4, §15.30）**: 2・3 次元モデルは 1 次元等間隔格子の直積（`Quadrature.grid(n_factors)` → `(Q, D)`）を使う。次元あたりの既定節点数は `Quadrature.default(n_factors)` により mirt の `select_quadpts` に合わせ、1 次元で 61 点、2 次元で 31 点（$31^2 = 961$）、3 次元で 15 点（$15^3 = 3{,}375$）、区間 $[-6, 6]$ とする。4 次元以上は対象外（非目的）。
+- **多次元直積格子（M4, §15.30）**: 2・3 次元モデルは 1 次元等間隔格子の直積（`Quadrature.grid(n_factors)` → `(Q, D)`）を使う。次元あたりの既定節点数は `Quadrature.default(n_factors)` により mirt の `select_quadpts` に合わせ、1 次元で 61 点、2 次元で 31 点（$31^2 = 961$）、3 次元で 15 点（$15^3 = 3{,}375$）、区間 $[-6, 6]$ とする。直積格子での 4 次元以上は対象外（非目的）。双因子モデルは特殊因子がいくつあっても $(1+1)$ 次元の格子に縮約する（§17.1）。
 
 ### 4.10 初期値
 - $d_j$: 正答率の logit、$a_j$: 項目−合計の点双列相関から変換（mirt と同様の古典的初期値）。GRM の閾値はカテゴリ累積比率の logit。
@@ -1378,6 +1378,61 @@ class ItemKernel(Protocol):
     `packages/flexpyctt/validation/` に置く。flexpyirt のテストには、JAX 版ポリコリックのテスト（`v24` は flexpyctt の
     ディレクトリから読む）、2 つの版の一致テスト、V26、アンサンブルのテストが残る。
 
+## 17. 実装上の決定（M7）
+
+1. **Gibbons–Hedeker の次元縮約による双因子モデル（`Model.with_bifactor`、V32）**:
+   **指定。** `Model.with_bifactor(*, specific, general="general")` は、全項目が負荷する一般因子
+   1 つと $S\ge1$ 個の特殊因子（`specific: Mapping[str, ItemSelector]`）を宣言する。各項目が負荷
+   する特殊因子は高々 1 つで、どこにも挙げない項目は一般因子のみに負荷する。特殊因子はそれぞれ
+   2 項目以上を要する（1 項目の特殊因子の傾きは識別されない）。表現は §15.29 の確認的モデルを
+   再利用し、`factors = ((general, 全項目), (s_1, 項目), …)`、傾きは $D=1+S$ 個の `a1..aD`
+   （`a1` が一般因子、負荷しない傾きは 0 に固定）で、mirt の `bfactor()` の列順と一致する。新しい
+   フィールド `Model.bifactor = True` が縮約 E ステップを選ぶ。因子は直交で、潜在パラメータの行は
+   `mean_1..D`（0 に固定）と `var_1..D`（1 に固定）のみで `cor_ij` 行はない
+   （`Model.latent_parameter_names()`）。項目カーネルは `MAX_KERNEL_FACTORS = 32` 次元まで受け付ける
+   （直積格子は `with_factors()` と `Quadrature.grid()` で 3 次元までのまま）。未対応（いずれも
+   `SpecificationError`）: 多母集団、`with_latent()`、`with_factors()` との併用、Rasch / PCM 項目
+   （一般因子・特殊因子の分散を自由にする必要がある）、編集したテーブルでの潜在パラメータの自由
+   推定、two-tier モデル（相関する主因子。後日）。
+   **尤度**（Gibbons & Hedeker, 1992; Cai, 2010）。項目 $j$ は $(\theta_0,\theta_{s(j)})$ にしか
+   依存せず因子は独立なので、1 次元格子 $\{\theta_g\}_{g=1}^{n}$（一般）と
+   $\{\theta_t\}_{t=1}^{n}$（各特殊）で
+   $$L_p=\sum_g w^{(0)}_g\,\prod_{s=1}^{S}\Big[\sum_t w^{(s)}_t\prod_{j\in s}P_j(y_{pj}\mid\theta_g,\theta_t)\Big]
+   \prod_{j\in s_\varnothing}P_j(y_{pj}\mid\theta_g)$$
+   となる。$s_\varnothing$ は一般因子のみの項目の集合、
+   $w^{(m)}=\mathrm{softmax}(b+\log\phi(\cdot;\mu_m,\sigma^2_m))$ は因子ごとの正規化した 1 次元重み
+   （§4.4、§15.44）。計算量はパターンあたり $O(n^{1+S})$ ではなく $O(S\,n^2)$。**実装。**
+   一般因子のみの項目は「特殊」重みが一様な追加ブロック $s_\varnothing$ に入れ、すべてのブロックを
+   同じに扱う（その対数確率は $\theta_t$ に依存しないので内側の和は厳密）。ブロック $s$ は形
+   $(n^2, D)$ の埋め込み節点を持ち（0 列目が $\theta_g$、$s$ 列目が $\theta_t$、他は 0）、既存の
+   カーネルがそのまま $P_j$ を評価する（他の特殊因子への傾きは 0 に固定）。
+   $\ell^{(s)}_{pgt}=\sum_{j\in s}\log P_j$、
+   $L^{(s)}_{pg}=\operatorname{logsumexp}_t(\ell^{(s)}_{pgt}+\log w^{(s)}_t)$、
+   $\lambda_{pg}=\log w^{(0)}_g+\sum_s L^{(s)}_{pg}$ とおくと、周辺対数尤度は
+   $\sum_pc_p\operatorname{logsumexp}_g\lambda_{pg}$、ブロック $s$ の事後確率は
+   $h^{(s)}_{pgt}=\exp(\lambda_{pg}-\log L_p)\exp(\ell^{(s)}_{pgt}+\log w^{(s)}_t-L^{(s)}_{pg})$。
+   項目 $j$ の期待度数はそのブロックの $(n^2)$ 格子上
+   $\bar r_{jkgt}=\sum_pc_ph^{(s(j))}_{pgt}\mathbf 1[y_{pj}=k]$ なので、項目ごとの Newton M ステップ
+   （§4.3）、項目間の等値制約（§16.1）、事前分布は、項目のブロック節点を使う以外は変わらない。
+   $\bar n$ は一般因子の周辺と各ブロックの特殊因子の周辺 $(G, 1+B, n)$ を持つ（後の潜在 M ステップ
+   用）。`CompiledProblem.reduction`（`BifactorBlock`: ブロック節点、1 次元節点と基底重み、
+   各ファミリーのブロック番号）が Core の関数を切り替え、`CompiledProblem.nodes` は一般因子の
+   格子を $D$ 列に埋め込んだものを持つ。
+   **標準誤差。** `"hessian"` は縮約した周辺対数尤度を微分する（チャンク化した forward-over-reverse、
+   §15.20）。`"oakes"` は Oakes の恒等式を $I(\hat\eta)=-\,\mathrm d F(\eta)/\mathrm d\eta$、
+   $F(\eta)=\nabla_\eta Q_{\mathrm{post}}(\eta\mid\eta')\big|_{\eta'=\eta}$（同じ点で計算した
+   E ステップの重みでの完全データ勾配。両方の引数で微分するとちょうど Oakes の 2 項になる）の形で、
+   縮約 E ステップを通したチャンク化 forward-mode 自動微分で計算する。§15.20 の構造化した交差項は
+   全節点上の同時事後分布 1 つを前提とするので使わない。**スコアリング。** EAP は分解した事後分布で
+   厳密に計算する: $\hat\theta_{p0}=\sum_g\theta_g h_{pg}$、
+   $\hat\theta_{ps}=\sum_{g,t}\theta_t h^{(s)}_{pgt}$（事後 SD も同様）。MAP・ML・WLE・PV、項目
+   適合度、$M_2$、局所依存、JSI、DIF、リンキングは双因子モデルでは `SpecificationError`（多次元
+   なので）。**求積。** 1 つの `Quadrature` が全因子の 1 次元格子を与え、既定は mirt の
+   `select_quadpts(2) = 31` 点、$[-6, 6]$（mirt の `bfactor()` は
+   `select_quadpts(nfact - nspec + 1)` を使う）。**JSON**（schema version 5）: モデルに
+   `"bifactor": true|false` を保存する。版 1–4 はこのキーを含んではならず、`false` として読む。
+   読み込み時、双因子構造は `with_bifactor()` で組み立て直す。
+
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -1391,6 +1446,7 @@ class ItemKernel(Protocol):
 - Bollen, K. A. (1989). *Structural Equations with Latent Variables*. Wiley.
 - Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
+- Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
@@ -1402,6 +1458,7 @@ class ItemKernel(Protocol):
 - Froelich, A. G., & Habing, B. (2008). Conditional covariance-based subtest selection for DIMTEST. *Applied Psychological Measurement*, 32(2), 138–155.
 - Garrido, L. E., Abad, F. J., & Ponsoda, V. (2013). A new look at Horn's parallel analysis with ordinal variables. *Psychological Methods*, 18(4), 454–474.
 - Genz, A. (2004). Numerical computation of rectangular bivariate and trivariate normal and t probabilities. *Statistics and Computing*, 14(3), 251–260.
+- Gibbons, R. D., & Hedeker, D. R. (1992). Full-information item bi-factor analysis. *Psychometrika*, 57(3), 423–436.
 - Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
 - Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.

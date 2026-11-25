@@ -10,7 +10,7 @@ JAX による Python の項目反応理論（IRT）推定ライブラリ。Bock�
 
 ## インストール
 
-Python 3.11 以上。
+Python 3.12 以上。
 
 ```bash
 pip install flexpyirt  # または uv add flexpyirt

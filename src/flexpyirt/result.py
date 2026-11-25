@@ -31,7 +31,6 @@ from flexpyirt.items import ItemKernel
 from flexpyirt.latent import (
     davidian_param_names,
     eh_moments,
-    latent_param_names,
     mixture_components,
     mixture_param_names,
 )
@@ -452,7 +451,7 @@ class FitResult:
         elif self._model.is_mixture:
             lat_cols = list(mixture_param_names(self._model.mixture_components))
         else:
-            lat_cols = list(latent_param_names(self._model.n_factors))
+            lat_cols = list(self._model.latent_parameter_names())
         est = p.pivot(index="group", columns="param", values="estimate")[lat_cols]
         se = p.pivot(index="group", columns="param", values="se")[lat_cols].add_suffix("_se")
         out = pd.concat([est, se], axis=1).loc[groups]
@@ -602,6 +601,11 @@ class FitResult:
         elif key is not None:
             raise SpecificationError(f"key= is only used with method='PV', not {method!r}.")
 
+        if self._model.bifactor and method != "EAP":
+            raise SpecificationError(
+                f"method={method!r} is not supported for bifactor models yet; use method='EAP' "
+                "(DESIGN.md §17.1)."
+            )
         y = coerce_responses(data, self._model, item_names=item_names)
         codes, _ = coerce_groups(group, self._model, y.shape[0], require_all=False)
         compiled = compile_problem(
@@ -1282,6 +1286,12 @@ class FitResult:
         """Concise description of the quadrature grid."""
         quad = self._quadrature
         d = self._model.n_factors
+        if self._model.bifactor:
+            kind = "Gauss-Hermite" if quad.kind == "gauss_hermite" else "equispaced"
+            return (
+                f"{quad.n_points}^2 = {quad.n_points**2} {kind} nodes per specific factor on "
+                f"[{quad.lower:g}, {quad.upper:g}]^2 (bifactor dimension reduction)"
+            )
         if d == 1:
             return f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
         total = quad.n_points**d
@@ -1293,6 +1303,8 @@ class FitResult:
     def _factors_label(self) -> str:
         """Concise description of latent factors for multidimensional models."""
         fnames = self._model.factor_names
+        if self._model.bifactor:
+            return f"bifactor: general {fnames[0]}; specific {', '.join(fnames[1:])}"
         return f"{len(fnames)} ({', '.join(fnames)})"
 
     def summary(self, *, digits: int = 4) -> str:

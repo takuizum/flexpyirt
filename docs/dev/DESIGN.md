@@ -256,7 +256,8 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   product of the 1-D equispaced grid (`Quadrature.grid(n_factors)` → `(Q, D)`). Default points per
   dimension match mirt's `select_quadpts` via `Quadrature.default(n_factors)`: 61 for 1D, 31 per
   dimension ($31^2 = 961$) for 2D, and 15 per dimension ($15^3 = 3{,}375$) for 3D on $[-6, 6]$.
-  More than 3 dimensions is out of scope (non-goal).
+  More than 3 dimensions is out of scope (non-goal) for product grids; bifactor models reduce
+  any number of specific factors to $(1+1)$-dimensional grids (§17.1).
 
 ### 4.10 Starting values
 - $d_j$: logit of the proportion correct; $a_j$: converted from the item–total point-biserial
@@ -1929,6 +1930,67 @@ data-independent shapes (§15.21).
     the JAX polychoric tests (reading `v24` from the flexpyctt directory), the two-version
     agreement test, V26 and the ensemble tests.
 
+## 17. Implementation decisions (M7)
+
+1. **Bifactor models with Gibbons–Hedeker dimension reduction (`Model.with_bifactor`, V32)**:
+   **Specification.** `Model.with_bifactor(*, specific, general="general")` declares one general
+   factor on which every item loads and $S\ge1$ specific factors (`specific: Mapping[str,
+   ItemSelector]`); each item loads on at most one specific factor, items listed under none load
+   on the general factor only, and every specific factor needs at least two items (a one-item
+   specific slope is not identified). The model reuses the confirmatory representation of §15.29:
+   `factors = ((general, all items), (s_1, items), …)`, $D=1+S$ slopes `a1..aD` with `a1` general
+   and unloaded slopes fixed at 0, matching the column order of mirt's `bfactor()`; a new field
+   `Model.bifactor = True` selects the reduced E-step. Factors are orthogonal: the latent rows are
+   `mean_1..D` (fixed 0) and `var_1..D` (fixed 1) with no `cor_ij` rows
+   (`Model.latent_parameter_names()`). Item kernels accept up to `MAX_KERNEL_FACTORS = 32`
+   dimensions (product grids stay limited to 3 by `with_factors()` and `Quadrature.grid()`).
+   Not supported yet, each with `SpecificationError`: multiple groups, `with_latent()`, combining
+   with `with_factors()`, Rasch / PCM items (the general and specific variances would have to be
+   free), free latent parameters in an edited table, and two-tier models (correlated primary
+   factors; later).
+   **Likelihood** (Gibbons & Hedeker, 1992; Cai, 2010). Item $j$ depends on
+   $(\theta_0,\theta_{s(j)})$ only, and the factors are independent, so with one-dimensional
+   grids $\{\theta_g\}_{g=1}^{n}$ (general) and $\{\theta_t\}_{t=1}^{n}$ (each specific),
+   $$L_p=\sum_g w^{(0)}_g\,\prod_{s=1}^{S}\Big[\sum_t w^{(s)}_t\prod_{j\in s}P_j(y_{pj}\mid\theta_g,\theta_t)\Big]
+   \prod_{j\in s_\varnothing}P_j(y_{pj}\mid\theta_g),$$
+   where $s_\varnothing$ is the set of general-only items and
+   $w^{(m)}=\mathrm{softmax}(b+\log\phi(\cdot;\mu_m,\sigma^2_m))$ is the factor's normalized
+   one-dimensional weight (§4.4, §15.44). The cost is $O(S\,n^2)$ per pattern instead of
+   $O(n^{1+S})$. **Implementation.** General-only items are put in an extra block
+   $s_\varnothing$ whose "specific" weights are uniform, so every block is handled alike (their
+   log-probabilities do not depend on $\theta_t$, so the inner sum is exact). Block $s$ has an
+   embedded node set of shape $(n^2, D)$ — column 0 is $\theta_g$, column $s$ is $\theta_t$, the
+   rest 0 — so the existing kernels evaluate $P_j$ unchanged (the slopes on other specific factors
+   are fixed at 0). With $\ell^{(s)}_{pgt}=\sum_{j\in s}\log P_j$,
+   $L^{(s)}_{pg}=\operatorname{logsumexp}_t(\ell^{(s)}_{pgt}+\log w^{(s)}_t)$ and
+   $\lambda_{pg}=\log w^{(0)}_g+\sum_s L^{(s)}_{pg}$, the marginal log-likelihood is
+   $\sum_pc_p\operatorname{logsumexp}_g\lambda_{pg}$ and the posterior of block $s$ is
+   $h^{(s)}_{pgt}=\exp(\lambda_{pg}-\log L_p)\exp(\ell^{(s)}_{pgt}+\log w^{(s)}_t-L^{(s)}_{pg})$.
+   The expected counts of item $j$ are on its block's $(n^2)$ grid,
+   $\bar r_{jkgt}=\sum_pc_ph^{(s(j))}_{pgt}\mathbf 1[y_{pj}=k]$, so the per-item Newton M-step
+   (§4.3), across-item equalities (§16.1) and priors are unchanged apart from taking the item's
+   block nodes; $\bar n$ stores the general marginal and each block's specific marginal
+   $(G, 1+B, n)$ for a later latent M-step. `CompiledProblem.reduction` (a `BifactorBlock`:
+   block nodes, the 1-D nodes and base weights, and each family's block index) switches the
+   Core functions; `CompiledProblem.nodes` holds the general grid embedded in $D$ columns.
+   **Standard errors.** `"hessian"` differentiates the reduced marginal log-likelihood
+   (chunked forward-over-reverse, §15.20). `"oakes"` uses Oakes' identity in the form
+   $I(\hat\eta)=-\,\mathrm d F(\eta)/\mathrm d\eta$ with
+   $F(\eta)=\nabla_\eta Q_{\mathrm{post}}(\eta\mid\eta')\big|_{\eta'=\eta}$ (the complete-data
+   gradient with the E-step weights computed at the same point; differentiating it in both
+   arguments gives exactly the two Oakes terms), by chunked forward-mode autodiff through the
+   reduced E-step. The structured cross term of §15.20 assumes one joint posterior over all
+   nodes and is not used. **Scoring.** EAP is exact on the factorized posterior:
+   $\hat\theta_{p0}=\sum_g\theta_g h_{pg}$ and
+   $\hat\theta_{ps}=\sum_{g,t}\theta_t h^{(s)}_{pgt}$ (posterior SDs likewise). MAP, ML, WLE and
+   PV, item fit, $M_2$, local dependence, JSI, DIF and linking raise `SpecificationError` for
+   bifactor models (they are multidimensional). **Quadrature.** One `Quadrature` gives the
+   one-dimensional grid for every factor; the default is mirt's
+   `select_quadpts(2) = 31` points on $[-6, 6]$ (mirt's `bfactor()` uses
+   `select_quadpts(nfact - nspec + 1)`). **JSON** (schema version 5): the model stores
+   `"bifactor": true|false`; versions 1–4 must not contain it and load as `false`. On load a
+   bifactor structure is rebuilt through `with_bifactor()`.
+
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -1942,6 +2004,7 @@ data-independent shapes (§15.21).
 - Bollen, K. A. (1989). *Structural Equations with Latent Variables*. Wiley.
 - Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
+- Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
@@ -1953,6 +2016,7 @@ data-independent shapes (§15.21).
 - Froelich, A. G., & Habing, B. (2008). Conditional covariance-based subtest selection for DIMTEST. *Applied Psychological Measurement*, 32(2), 138–155.
 - Garrido, L. E., Abad, F. J., & Ponsoda, V. (2013). A new look at Horn's parallel analysis with ordinal variables. *Psychological Methods*, 18(4), 454–474.
 - Genz, A. (2004). Numerical computation of rectangular bivariate and trivariate normal and t probabilities. *Statistics and Computing*, 14(3), 251–260.
+- Gibbons, R. D., & Hedeker, D. R. (1992). Full-information item bi-factor analysis. *Psychometrika*, 57(3), 423–436.
 - Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
 - Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
 - Golub, G. H., & Welsch, J. H. (1969). Calculation of Gauss quadrature rules. *Mathematics of Computation*, 23(106), 221–230.
