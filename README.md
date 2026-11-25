@@ -38,6 +38,8 @@ calibration and fixed item parameter calibration (FIPC).
 | Saving results | `FitResult.to_json()` / `FitResult.from_json()` (strict schema, no pickle) | — |
 | EM acceleration | SQUAREM (scheme S3) with a monotonicity safeguard, `BAEM(squarem=True)`; agreement with mirt holds with and without it | ✓ |
 | Item fit | Orlando–Thissen S-X2 (`FitResult.item_fit()`, per group for multiple groups) with mirt's cell collapsing, df, RMSEA and p-values | ✓ |
+| Summed scores | Distribution of the summed score given the item category probabilities (`summed_score_distribution()`): Lord–Wingersky recursion (Poisson-binomial distribution for dichotomous items), also in log space, an FFT method, and normal / refined normal / Poisson approximations; works with `jit`, `vmap` and autodiff | ✓ |
+| Information and reliability | Item and test information for every item model by automatic differentiation (`item_information()`, `test_information()` with the conditional standard error), expected scores and the test characteristic curve (`expected_score()`), marginal and empirical reliability (`reliability()`), the summed-score EAP table (`summed_score_table()`) and `score(method="EAPsum")`; unidimensional models, single and multiple groups | ✓ |
 | Limited-information fit | Maydeu-Olivares & Joe M2 / M2* (`FitResult.m2()`) with df, p-value, RMSEA + CI, SRMSR and dichotomous TLI / CFI | ✓ |
 | DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | ✓ |
 | Scale linking | Differentiable characteristic-curve linking (`link()`, `LinkResult`: Haebara and Stocking–Lord, non-symmetric and symmetric, Ogasawara delta-method SEs, transformed items and $\theta$ scores; checked against independent R implementations for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM common items) | ✓ |
@@ -57,6 +59,11 @@ pip install flexpyirt  # or: uv add flexpyirt
 This also installs [flexpyctt](https://pypi.org/project/flexpyctt/), the companion package for
 analyses that need no fitted model. It depends on NumPy, SciPy and pandas only; where JAX is not
 wanted, install it alone with `pip install flexpyctt`.
+
+[flexpyequate](https://pypi.org/project/flexpyequate/), a third package from the same repository,
+equates score distributions (linear, equipercentile and kernel equating). It is independent of
+flexpyirt and is not installed with it: `pip install flexpyequate`
+([documentation](https://takuizum.github.io/flexpyirt/equating/)).
 
 For polars input, install `flexpyirt[polars]`. For GPUs, install a CUDA build of `jax` first
 (see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)).

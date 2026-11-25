@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from jax import Array
 
-from flexpyirt import _core, _itemfit, _local_dependence, _m2, _scoring
+from flexpyirt import _core, _information, _itemfit, _local_dependence, _m2, _scoring
 from flexpyirt._compile import (
     LATENT_ITEM,
     coerce_groups,
@@ -47,14 +47,15 @@ __all__ = ["FitResult"]
 _JSI_APPROXIMATION_MIN_ITEMS = 10
 """Below this many items ``jsi(method="newton" | "one_step")`` warns (DESIGN.md §16.17)."""
 
-ScoreMethod = Literal["EAP", "MAP", "ML", "WLE", "PV"]
-_SCORE_METHODS: tuple[str, ...] = ("EAP", "MAP", "ML", "WLE", "PV")
+ScoreMethod = Literal["EAP", "MAP", "ML", "WLE", "PV", "EAPsum"]
+_SCORE_METHODS: tuple[str, ...] = ("EAP", "MAP", "ML", "WLE", "PV", "EAPsum")
 
 _eap = jax.jit(_core.eap)
 _map = jax.jit(_scoring.map_scores)
 _ml = jax.jit(_scoring.ml_scores)
 _wle = jax.jit(_scoring.wle_scores)
 _pv = jax.jit(_scoring.plausible_values, static_argnames=("n_draws",))
+_summed_score_eap = jax.jit(_information.summed_score_eap)
 
 
 def _is_prng_key(key: Any) -> bool:
@@ -502,8 +503,8 @@ class FitResult:
     ) -> pd.DataFrame:
         r"""Score respondents on the fitted model.
 
-        Supports five scoring methods (DESIGN.md §8, §15.21–§15.25), all dropping missing
-        responses from the likelihood:
+        Supports six scoring methods (DESIGN.md §8, §15.21–§15.25, §18.2). All but ``"EAPsum"``
+        drop missing responses from the likelihood:
 
         - ``"EAP"``: expected a posteriori :math:`\hat\theta=\sum_q\theta_q h_{pq}` and posterior
           SD on the fitted model's quadrature grid using the respondent's group's estimated latent
@@ -531,12 +532,18 @@ class FitResult:
           posterior on a fine equispaced grid with piecewise-linear inverse-CDF interpolation
           (Mislevy, 1991). Requires an explicit JAX PRNG ``key`` and is deterministic given
           ``key``.
+        - ``"EAPsum"``: summed-score EAP (Thissen, Pommerich, Billeaud & Williams, 1995): the
+          posterior mean and SD of :math:`\theta` given the respondent's summed score, looked up
+          in :func:`flexpyirt.summed_score_table` (of the respondent's group). A respondent with
+          any missing response gets ``NaN`` (as in mirt), because a summed score over fewer
+          items is not on the scale of the table. Unidimensional models with ``Normal`` latent
+          distributions only.
 
         Parameters
         ----------
         data : DataFrame or array-like
             Responses on the fitted items (NaN is missing).
-        method : {"EAP", "MAP", "ML", "WLE", "PV"}, default "EAP"
+        method : {"EAP", "MAP", "ML", "WLE", "PV", "EAPsum"}, default "EAP"
             Scoring method.
         group : array-like, optional
             Group labels (required for a multiple-group model).
@@ -551,12 +558,12 @@ class FitResult:
         Returns
         -------
         DataFrame
-            For unidimensional ``"EAP"``, ``"MAP"``, ``"ML"``, and ``"WLE"``: columns ``theta``
-            and ``se``. For unidimensional ``"PV"``: columns ``pv1`` .. ``pv{n_draws}``. For
-            multidimensional ``"EAP"`` and ``"MAP"``: columns ``theta_<factor>`` and
-            ``se_<factor>`` for each declared factor (``"ML"``, ``"WLE"`` and ``"PV"`` raise
-            :class:`SpecificationError` for ``D > 1``). One row per respondent; index follows
-            ``data`` when it is a DataFrame.
+            For unidimensional ``"EAP"``, ``"MAP"``, ``"ML"``, ``"WLE"`` and ``"EAPsum"``: columns
+            ``theta`` and ``se``. For unidimensional ``"PV"``: columns ``pv1`` ..
+            ``pv{n_draws}``. For multidimensional ``"EAP"`` and ``"MAP"``: columns
+            ``theta_<factor>`` and ``se_<factor>`` for each declared factor (``"ML"``, ``"WLE"``
+            and ``"PV"`` raise :class:`SpecificationError` for ``D > 1``). One row per
+            respondent; index follows ``data`` when it is a DataFrame.
 
         Raises
         ------
@@ -564,7 +571,9 @@ class FitResult:
             If JAX is not configured for 64-bit floating point.
         SpecificationError
             If ``method`` is unknown, ``key`` is missing or invalid for ``"PV"``, ``key`` is
-            supplied for a non-PV method, or ``n_draws`` is not a positive integer.
+            supplied for a non-PV method, ``n_draws`` is not a positive integer, or
+            ``method="EAPsum"`` is used with a multidimensional model or a latent distribution
+            other than ``Normal``.
         """
         check_x64()
         if method not in _SCORE_METHODS:
@@ -586,6 +595,16 @@ class FitResult:
                 "method='MAP' is not supported with NormalMixture (the mixture prior can be "
                 "multimodal, so the posterior mode need not be unique); use method='EAP', 'ML', "
                 "'WLE', or 'PV'."
+            )
+        if method == "EAPsum" and (
+            self._model.is_multidimensional
+            or self._model.is_empirical_histogram
+            or self._model.is_davidian
+            or self._model.is_mixture
+        ):
+            raise SpecificationError(
+                "method='EAPsum' supports unidimensional models with Normal latent "
+                "distributions only."
             )
         if method == "PV":
             if key is None:
@@ -635,6 +654,20 @@ class FitResult:
                 return pd.DataFrame(cols_md, index=index)
             cols = [f"pv{m}" for m in range(1, n_draws + 1)]
             return pd.DataFrame(draws, columns=cols, index=index)
+
+        if method == "EAPsum":
+            _, table_theta, table_se = (
+                np.asarray(a) for a in _summed_score_eap(compiled.problem, eta)
+            )
+            complete = (y >= 0).all(axis=1)
+            sums = np.where(y >= 0, y, 0).sum(axis=1)
+            return pd.DataFrame(
+                {
+                    "theta": np.where(complete, table_theta[codes, sums], np.nan),
+                    "se": np.where(complete, table_se[codes, sums], np.nan),
+                },
+                index=index,
+            )
 
         scorer = {"EAP": _eap, "MAP": _map, "ML": _ml, "WLE": _wle}[method]
         theta, se = scorer(compiled.problem, eta)
