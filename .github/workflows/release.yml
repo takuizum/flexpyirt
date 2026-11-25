@@ -43,7 +43,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Find the release PR and the next version
         id: plan
         env:
@@ -103,7 +103,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Tag and build
         env:
           VERSION: ${{ needs.plan.outputs.version }}

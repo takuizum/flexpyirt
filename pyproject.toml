@@ -3,7 +3,7 @@ name = "flexpyirt"
 dynamic = ["version"]
 description = "Bock–Aitkin EM estimation for item response theory models, built on JAX."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "takuizum" }]
@@ -21,7 +21,6 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Mathematics",
@@ -79,7 +78,7 @@ exclude = ["/.github", "/.python-version", "/CLAUDE.md", "/uv.lock", "/site"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -96,7 +95,7 @@ convention = "numpy"
 "tests/**" = ["D"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 files = ["src/flexpyirt", "tests", "scripts"]
 

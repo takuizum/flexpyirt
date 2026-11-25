@@ -21,7 +21,7 @@ English | [日本語](CONTRIBUTING.ja.md)
 ## PRs and reviews
 
 - Every change goes in through a PR. `main` and `develop` are protected by rulesets and cannot be
-  merged into until CI (`test (3.11/3.12/3.13)`) and `pr-rules` pass.
+  merged into until CI (`test (3.12/3.13)`) and `pr-rules` pass.
 - The repository owner reviews PRs before merging them (no automatic merging).
 - Changes to numerical code must pass the agreement tests against R mirt
   ([docs/dev/VALIDATION.md](docs/dev/VALIDATION.md)).

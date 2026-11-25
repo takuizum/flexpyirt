@@ -18,7 +18,7 @@
 
 ## PR とレビュー
 
-- すべての変更は PR で入れる。`main` と `develop` はルールセットで保護され、CI（`test (3.11/3.12/3.13)`）と
+- すべての変更は PR で入れる。`main` と `develop` はルールセットで保護され、CI（`test (3.12/3.13)`）と
   `pr-rules` が通らないとマージできない。
 - PR はリポジトリのオーナーがレビューしてからマージする（自動マージしない）。
 - 数値計算に関わる変更は、R mirt との照合テスト（[docs/dev/VALIDATION.ja.md](docs/dev/VALIDATION.ja.md)）が通ることが前提。

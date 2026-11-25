@@ -34,9 +34,6 @@ env:
   JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES: "0"
   # Keeps the cache from growing without bound across runs (least recently used entries go).
   JAX_COMPILATION_CACHE_MAX_SIZE: "1500000000"
-  # Interim (#43): Python 3.11 runs serially. With 4 workers its runner was shut down near the end
-  # of the full suite (3.11 resolves an older, slower JAX). Remove when 3.11 is dropped (#44).
-  SERIAL_PYTHON: "3.11"
 
 jobs:
   plan:
@@ -69,7 +66,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -97,9 +94,7 @@ jobs:
             jax-fast-py${{ matrix.python-version }}-
       # Parallelism (pytest-xdist, -n auto) is set in pyproject.toml.
       - name: Pytest (fast tier)
-        env:
-          WORKERS: ${{ matrix.python-version == env.SERIAL_PYTHON && '0' || 'auto' }}
-        run: uv run pytest --durations=15 -m "not slow" -n "$WORKERS"
+        run: uv run pytest --durations=15 -m "not slow"
       - name: Save JAX compilation cache
         if: always() && github.event_name != 'pull_request'
         uses: actions/cache/save@v4
@@ -118,7 +113,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13"]
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
@@ -140,10 +135,8 @@ jobs:
             jax-full${{ matrix.shard }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-
             jax-full${{ matrix.shard }}-py${{ matrix.python-version }}-
       - name: Pytest (full tier, shard ${{ matrix.shard }}/4)
-        env:
-          WORKERS: ${{ matrix.python-version == env.SERIAL_PYTHON && '0' || 'auto' }}
         run: |
-          uv run pytest --durations=15 -n "$WORKERS" --shard "${{ matrix.shard }}/4" \
+          uv run pytest --durations=15 --shard "${{ matrix.shard }}/4" \
             --write-durations "durations-${{ matrix.shard }}.json"
       - name: Save JAX compilation cache
         if: always() && github.event_name != 'pull_request'
