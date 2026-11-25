@@ -4,8 +4,8 @@
 # committed.
 #
 # mirt residuals(type = "LD" / "LDG2" / "Q3") on bfactor() fits:
-#   - a bifactor 2PL with three specific factors, two general-only items, one locally dependent
-#     pair inside a specific factor and 3% MCAR (4 factors, 21 points per dimension);
+#   - a bifactor 2PL with three specific factors, two general-only items, extra shared variance
+#     for two items of one specific factor and 3% MCAR (4 factors, 21 points per dimension);
 #   - a bifactor GRM with 3 categories and two specific factors (3 factors, 21 points);
 #   - a two-tier 2PL, bfactor(model2 = ), two correlated primary factors (one cross-loading
 #     item) and two specific factors (4 factors, 15 points).
@@ -102,8 +102,8 @@ set.seed(20261125)
 cases <- list()
 
 # (1) Bifactor 2PL: 11 items, specific factors of 3 items each, q10 and q11 general only;
-#     q01 and q02 share an extra nuisance dimension (dependence beyond their specific factor);
-#     3% MCAR.
+#     q01 and q02 share an extra nuisance dimension (their three-item specific factor absorbs
+#     it: no pair is flagged in the fitted model); 3% MCAR.
 n <- 900
 theta <- matrix(rnorm(4 * n), n)
 ag <- c(1.3, 1.1, 0.9, 1.5, 0.8, 1.2, 1.0, 1.4, 0.9, 1.1, 1.6)

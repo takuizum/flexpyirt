@@ -2105,7 +2105,7 @@ data-independent shapes (§15.21).
    `_bifactor_log_weights` and each item's block) supply that function. Bifactor and two-tier
    models are single-group (items 1–2), so there is no group loop here beyond the existing one.
    **Interpretation.** A pair within a specific factor is tested for dependence *beyond* that
-   factor; a testlet left out of `specific` shows up as large positive $V$ / Q3 within it.
+   factor; a testlet left out of `specific` shows up as large positive $V$ within it (unit-tested on simulated data).
    **Validation (V38).** mirt's estimates of a bifactor 2PL (with general-only items and
    missing data), a bifactor GRM and a two-tier 2PL (`bfactor(model2 = )`) are put into a
    `FitResult` with every parameter fixed and compared with `residuals(type = "LD" / "LDG2" /
