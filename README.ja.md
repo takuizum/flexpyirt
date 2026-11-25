@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/flexpyirt)](https://pypi.org/project/flexpyirt/)
 [![Python](https://img.shields.io/pypi/pyversions/flexpyirt)](https://pypi.org/project/flexpyirt/)
 [![CI](https://github.com/takuizum/flexpyirt/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/takuizum/flexpyirt/actions/workflows/ci.yml)
-[![Docs](https://github.com/takuizum/flexpyirt/actions/workflows/docs.yml/badge.svg?branch=main)](https://takuizum.github.io/flexpyirt/)
+[![Docs](https://github.com/takuizum/flexpyirt/actions/workflows/docs.yml/badge.svg?branch=main)](https://takuizum.github.io/flexpyirt/ja/)
 [![License](https://img.shields.io/pypi/l/flexpyirt)](https://github.com/takuizum/flexpyirt/blob/main/LICENSE)
 
 [English](https://github.com/takuizum/flexpyirt/blob/main/README.md) | 日本語
