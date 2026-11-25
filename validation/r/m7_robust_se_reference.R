@@ -3,8 +3,9 @@
 # Writes tests/reference/v35_<case>.json. CI does not run R; the JSON files are committed.
 #
 # Every case is fitted three times with the same EM settings (optimizer = "NR", accelerate =
-# "none", TOL = 1e-10; BFGS for the three-factor case and TOL = 1e-9 for the empirical histogram,
-# as in the V14 and V6 generators), once per SE.type in "crossprod", "sandwich" and "sandwich.Louis"; the
+# "none", TOL = 1e-10; BFGS for the three-factor case and TOL = 1e-7 for the empirical histogram,
+# where mirt needs about 11,000 cycles and does not reach 1e-9 in 100,000), once per SE.type in
+# "crossprod", "sandwich" and "sandwich.Louis"; the
 # estimates are identical and only vcov(m) differs. The file stores mirt's parameter table
 # (mod2values) and the full covariance matrices, each row labelled by the first `parnum` of its
 # (possibly constrained) parameter, so the tests can rebuild mirt's solution and compare whole
@@ -250,7 +251,7 @@ if (run("fipc_eh")) {
   dat <- simdata(matrix(a), matrix(d), N, itemtype = "2PL", Theta = matrix(skewed(N)))
   colnames(dat) <- sprintf("i%02d", 1:J)
   bank <- data.frame(item = sprintf("i%02d", 1:8), a = a[1:8], d = d[1:8])
-  eh_common <- list(TOL = 1e-9, accelerate = "none", optimizer = "NR", verbose = FALSE)
+  eh_common <- list(TOL = 1e-7, accelerate = "none", optimizer = "NR", verbose = FALSE)
   fit_fun <- function(t) {
     sv <- mirt(dat, 1, "2PL", pars = "values", dentype = "EH", quadpts = 61,
                technical = list(theta_lim = quad61$theta_lim))
@@ -263,7 +264,7 @@ if (run("fipc_eh")) {
   }
   m <- fit_fun("crossprod")
   write_case("fipc_eh", "EH under FIPC (i01-i08 fixed), skewed trait, 2PL J=16, N=3000", dat, NULL,
-             fit_fun, quad61, types = c("crossprod", "Richardson", "sandwich"), tol = 1e-9,
+             fit_fun, quad61, types = c("crossprod", "Richardson", "sandwich"), tol = 1e-7,
              extra = list(bank = bank, nodes = as.vector(m@Model$Theta),
                           eh_weights = as.vector(extract.mirt(m, "Prior")[[1]])))
 }

@@ -34,6 +34,7 @@ English | [日本語](VALIDATION.ja.md)
 | EFA implied $\Lambda\Lambda^\top$ / communalities; CAF, CFI, RMSEA; $\chi^2$; Hull fit / $st$ | 1e-4; 2e-4; 1e-4 (relative); 1e-5 / 1e-2 (relative) |
 | CD: PAF $\Lambda\Lambda^\top$; one-factor population from the same draws; rank-sum $p$; mean RMSE (retained $k$ / the rejected extra $k$) | 1e-12; exact; 1e-10 (relative); 15% / 60% (relative) |
 | DIMTEST (simulation study; small version in the tests): type I error at .05 / power | $\le 0.15$ of 20 / $\ge 8$ of 10 |
+| Cross-product / sandwich covariance at mirt's estimates (entries relative to $\sqrt{v_{ii}v_{jj}}$); parameters / SEs end-to-end | 1e-9 / 1e-6; 1e-6 / 1e-5 (relative) |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -47,7 +48,7 @@ English | [日本語](VALIDATION.ja.md)
 | V7 | 3PL + priors (MAP) | equivalent of `PRIOR = (1-30, g, expbeta, ...)` in `mirt.model` | M3 |
 | V8 | GPCM and PCM (Science + simulated) | `mirt(..., "gpcm")` / `mirt(..., "Rasch")` (polytomous) | M3 |
 | V9 | Missing data (MAR) | data with NA | M2 |
-| V10 | SE (Oakes / crossprod / sandwich) | `SE.type=` | M1–M3 |
+| V10 | SE (Oakes; crossprod / sandwich are V35) | `SE.type=` | M1–M3 |
 | V11 | 3PL and 4PL, single group (simulated) | `mirt(..., "3PL")` / `mirt(..., "4PL")` | M3 |
 | V12 | Display IRT thresholds and delta-method SEs (2PL, Rasch, GRM, GPCM, PCM, 2-group 2PL) | `coef(m, IRTpars = TRUE, printSE = TRUE)` | M4 |
 | V13 | Ability scoring: MAP, ML, WLE (2PL, GRM, GPCM, 3PL, 2-group, missing) | `fscores(m, method = "MAP"/"ML"/"WLE", response.pattern = ..., full.scores.SE = TRUE)` | M4 |
@@ -72,6 +73,7 @@ English | [日本語](VALIDATION.ja.md)
 | V31 | Jackknife slope index (LSAT7 2PL, Science GRM, simulated 2PL with two dependent pairs and 5% MCAR, simulated GPCM with a dependent pair); the Newton and one-step approximations against the refit | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | Bifactor models with dimension reduction (2PL with three specific factors and three general-only items; GRM $K=4$ with three testlets) | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | Two-tier models with dimension reduction (2PL with two correlated primary factors and three specific factors, one spanning both; GRM $K=4$ with a cross-loading item and two testlets) | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
+| V35 | Robust standard errors: cross-product and sandwich covariance matrices (2PL under misspecification with 5% MCAR; 3PL + GRM + GPCM + nominal; MAP with normal priors; two groups with a free focal mean and variance; FIPC with an equality across items; two and three correlated factors; EH under FIPC) | `mirt(..., SE.type = "crossprod")` / `SE.type = "sandwich"` (`"Richardson"` for the EH bread) | M7 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -632,6 +634,73 @@ English | [日本語](VALIDATION.ja.md)
     specific factor), a one-primary-factor two-tier model against the bifactor path, and a
     one-specific-factor model against the validated 3D path (`with_factors()` with the specific
     factor's correlations fixed at 0; log-likelihood to $10^{-12}$).
+- **Robust standard errors (V35, M7)**: `fit(se="crossprod" | "sandwich")` (DESIGN §17.3) against
+  mirt 1.48 `SE.type = "crossprod"` / `"sandwich"`. The generator stores mirt's parameter table
+  (`mod2values`) and the full `vcov` matrices, each row labelled by the first `parnum` of its
+  parameter, so the tests rebuild mirt's solution and compare whole matrices.
+  **Cases** (`validation/r/m7_robust_se_reference.R`, `tests/reference/v35_*.json`): a 2PL fitted
+  to 3PL data with a skewed trait and 5% MCAR ($J=12$, $N=2000$; the model is wrong on purpose,
+  and the sandwich differs from the Oakes covariance by up to 0.49 in the scaled measure below);
+  4 3PL + 3 GRM(4) + 3 GPCM(3) + 2 nominal(3) items ($N=5000$); a 2PL MAP fit with
+  $a\sim N(1.2, 0.5)$, $d\sim N(0, 2)$ and $N=300$; two groups with six anchors and a free focal
+  mean and variance (81 points on $[-8,8]$); FIPC with five fixed items, a free latent mean and
+  variance and equal slopes on four items; two correlated factors with a cross-loading ($31^2$
+  nodes); three correlated factors ($15^3$ nodes); EH under FIPC.
+  **At mirt's solution** (flexpyirt's problem compiled with mirt's estimates; the measure is
+  $\max_{ij}\lvert v_{ij}-v^{\text{mirt}}_{ij}\rvert/\sqrt{v^{\text{mirt}}_{ii}v^{\text{mirt}}_{jj}}$
+  over the whole matrix): the log-likelihood agrees to $\le3.6\times10^{-15}$ (relative), which
+  confirms the parameter mapping; the cross-product covariance to $\le1.3\times10^{-11}$
+  (2PL $8.9\times10^{-15}$, mixed $4.9\times10^{-13}$, MAP $2.6\times10^{-15}$, two groups
+  $1.3\times10^{-11}$, FIPC $9.9\times10^{-15}$, two factors $6.2\times10^{-15}$, three factors
+  $2.0\times10^{-14}$); the sandwich to $\le2.7\times10^{-8}$ in the six cases with NR M-steps in mirt
+  ($2.3\times10^{-10}$, $1.4\times10^{-9}$, $1.1\times10^{-10}$, $2.7\times10^{-8}$,
+  $1.1\times10^{-8}$, $1.6\times10^{-9}$) and to $1.4\times10^{-5}$ for three factors, where
+  the remainder is mirt's Oakes Hessian (finite differences). Tolerances $10^{-9}$ and $10^{-6}$
+  ($10^{-4}$ for the three-factor sandwich; see below).
+  **End to end** (`fit()` from flexpyirt's own starting values, `BAEM(tol=1e-9)`): free parameters
+  within $4.1\times10^{-8}$ of mirt's and standard errors within $4.6\times10^{-8}$ (relative)
+  for both types in the six cases with NR M-steps in mirt; three factors: $5.0\times10^{-7}$ and
+  $6.6\times10^{-6}$. Tolerances $10^{-6}$ and $10^{-5}$. mirt fits the three-factor case with
+  BFGS (as in V14; NR is very slow on the $15^3$ grid) and stops with a score of
+  $5.6\times10^{-6}$ at its estimates, against $\le2.9\times10^{-7}$ with NR, so that case is
+  checked with tolerances 100 times wider ($10^{-4}$ for the sandwich at mirt's solution and
+  for the parameters, $10^{-3}$ for the standard errors).
+  **Lower asymptotes.** mirt's `vcov` is for $\operatorname{logit}g$; the tests transform mirt's
+  matrix with the Jacobian $g(1-g)$.
+  **Priors.** mirt adds $-\nabla^2\log\pi$ to the cross-product (`SE.simple`:
+  `Igrad + Iprior`), as flexpyirt does. Only normal priors are compared: mirt's Hessians of
+  `lnorm` and `expbeta` priors are wrong (V7), and those priors are covered by the unit tests
+  (the difference between the matrices with and without priors is the autodiff Hessian of the
+  log prior).
+  **Empirical histogram.** mirt's cross-product holds the histogram fixed, like flexpyirt's, and
+  is compared directly at mirt's item estimates and histogram: $6.2\times10^{-15}$. mirt's `"sandwich"` uses
+  its Oakes Hessian, which for EH is not the Hessian with the histogram held fixed (V6): its
+  matrix differs from flexpyirt's by 0.049 (standard errors by up to 2.4%). The sandwich is therefore compared with
+  $V_R V_C^{-1} V_R$ assembled from mirt's Richardson covariance $V_R$ (the fixed-histogram
+  Hessian, the definition of DESIGN §15.35) and mirt's cross-product covariance $V_C$: $1.4\times10^{-8}$
+  (Richardson is a finite-difference Hessian; flexpyirt's Oakes covariance against $V_R$:
+  $7.1\times10^{-9}$). Tolerance $10^{-6}$. The EH reference uses `TOL = 1e-7` in mirt (about
+  11,000 cycles; mirt did not reach $10^{-9}$ in 100,000), which does not matter for a comparison
+  at mirt's own estimates and histogram; there is no end-to-end comparison for EH, for the
+  reasons given in V6.
+  **`"sandwich.Louis"`.** The same estimator with the bread computed by Louis' formula. Where no
+  latent parameter is free (2PL, mixed, MAP) mirt's matrix equals its `"sandwich"` one (flexpyirt
+  agrees with both to $\le8.8\times10^{-10}$). Where a latent mean, variance or correlation is
+  free (two groups, FIPC, two factors) mirt's Louis bread is wrong (`SE.type = "Louis"` itself
+  returns no matrix there) and `"sandwich.Louis"` is off by 1.0 to 7.0 in the scaled measure. It
+  is not a distinct estimator and is not offered.
+  **Not covered.** `DavidianCurve` and `NormalMixture`: mirt computes neither type for them, so
+  flexpyirt raises `SpecificationError`. Bifactor and two-tier models raise `SpecificationError` as well (mirt supports them; the
+  score kernel does not use the dimension reduction yet). Multiple-group multidimensional models, 4PL, PCM and
+  Rasch items go through the same code but have no V35 case of their own. Sampling weights and
+  cluster-robust versions are not implemented.
+  Tests: `tests/test_mirt_m7_robust_se.py`. Unit tests (`tests/test_m7_robust_se.py`): the
+  chunked scores against a dense forward-mode Jacobian for any chunk size (missing data, mixed
+  formats with priors, two groups with shared parameters, two factors, EH), $\sum_p c_ps_p$
+  against the gradient, $B=H$ within sampling error for a correct model with $N=20{,}000$
+  (standard errors within 3%), the sandwich equal to the Oakes covariance when $B=H$ is forced,
+  doubled rows halving the covariance, `b_se` and `link()` reading the chosen covariance, JSON
+  round trip, and the rejected cases.
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)

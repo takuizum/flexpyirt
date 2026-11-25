@@ -73,8 +73,6 @@ LOOSE = {"three_factor": 100.0}
 """Tolerance factor for the sandwich and the end-to-end checks: mirt fits the three-factor case
 with BFGS (its score at the estimates is 6e-6, against 1e-7 with NR), so its Oakes Hessian and
 estimates are less exact (observed 1.4e-5, 5.0e-7 and 6.6e-6 against the three tolerances)."""
-TOL_EH = 1e-4
-"""EH: comparisons that involve mirt's Richardson (finite-difference) covariance."""
 
 _information_oakes = jax.jit(_core.information_oakes)
 _information_cross_product = jax.jit(_robust_se.information_cross_product)
@@ -263,9 +261,9 @@ def test_empirical_histogram_at_mirt_solution() -> None:
     cross = m.mirt_matrix(case.raw["vcov"]["crossprod"])
     richardson = m.mirt_matrix(case.raw["vcov"]["Richardson"])
     assert scaled_difference(got["crossprod"], cross) <= TOL_CROSS_PRODUCT
-    assert scaled_difference(got["oakes"], richardson) <= TOL_EH
+    assert scaled_difference(got["oakes"], richardson) <= TOL_SANDWICH
     assembled = richardson @ np.linalg.inv(cross) @ richardson
-    assert scaled_difference(got["sandwich"], assembled) <= TOL_EH
+    assert scaled_difference(got["sandwich"], assembled) <= TOL_SANDWICH
 
 
 @cache
