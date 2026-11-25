@@ -832,6 +832,51 @@ res_mg = fit(
 print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
 ```
 
+### Bifactor models
+
+`.with_bifactor(specific={...}, general="general")` declares one general factor on which every item
+loads and specific factors on which each item loads at most once (items listed under no specific
+factor load on the general factor only; each specific factor needs at least two items). Item
+parameters are `a1` (general), `a2`… (specific, in declared order) and `d`, matching the columns of
+mirt's `bfactor()`. The factors are orthogonal standard normals.
+
+Because each item depends only on the general factor and its own specific factor, the likelihood
+is integrated by Gibbons and Hedeker's (1992) dimension reduction: one two-dimensional grid per
+specific factor instead of a $(1+S)$-dimensional product grid, so any number of specific factors
+stays cheap. One `Quadrature` gives the grid of every factor; the default is 31 points on
+$[-6, 6]$ (mirt's `bfactor()` default). Validated against mirt's `bfactor()` in V32.
+
+```python
+a_bif = np.zeros((9, 4))
+a_bif[:, 0] = [1.4, 1.2, 1.5, 1.1, 1.3, 1.6, 1.0, 1.2, 1.4]  # general
+a_bif[0:3, 1] = [0.9, 1.0, 0.8]  # specific s1
+a_bif[3:6, 2] = [1.1, 0.7, 0.9]  # specific s2
+a_bif[6:9, 3] = [0.8, 1.0, 0.9]  # specific s3
+theta_bif = rng.standard_normal((1500, 4))
+p_bif = 1.0 / (1.0 + np.exp(-(theta_bif @ a_bif.T + np.linspace(-1.0, 1.0, 9))))
+bif_items = [f"b{j}" for j in range(1, 10)]
+bif_df = pd.DataFrame((rng.random(p_bif.shape) < p_bif).astype(float), columns=bif_items)
+
+bif_spec = Model.uniform(TwoPL(), items=bif_items).with_bifactor(
+    specific={"s1": bif_items[0:3], "s2": bif_items[3:6], "s3": bif_items[6:9]},
+    general="G",
+)
+res_bif = fit(
+    bif_spec,
+    bif_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(21, bounds=(-6, 6)),  # 21^2 nodes per specific factor
+)
+print(res_bif.items[["item", "a1", "a2", "a3", "a4", "d", "a1_se"]].round(3))
+print(res_bif.score(bif_df.iloc[:3]).round(3))  # theta_G, theta_s1, ..., se_G, se_s1, ...
+```
+
+- **Supported**: every item model with free slopes (2PL, 3PL, 4PL, GRM, GPCM, nominal), Oakes and
+  Hessian SEs, `"EAP"` scoring (columns per factor), equality constraints, priors, and JSON.
+- **Not yet supported** (`SpecificationError`): multiple groups, Rasch / PCM items (their factor
+  variances would have to be free), free latent means or variances, MAP / ML / WLE / PV scoring,
+  item fit, $M_2$, local dependence, and two-tier models.
+
 ## 15. Scale linking
 
 When two forms are calibrated separately on different samples and share common items,

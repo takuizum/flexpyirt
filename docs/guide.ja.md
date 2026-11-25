@@ -769,6 +769,48 @@ res_mg = fit(
 print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
 ```
 
+### 双因子モデル
+
+`.with_bifactor(specific={...}, general="general")` で、全項目が負荷する一般因子と、各項目が高々 1 つに負荷する
+特殊因子を宣言する（どの特殊因子にも挙げない項目は一般因子のみに負荷する。各特殊因子は 2 項目以上が必要）。
+項目パラメタは `a1`（一般因子）、`a2`…（特殊因子、宣言順）、`d` で、mirt の `bfactor()` の列と一致する。
+因子は直交する標準正規分布。
+
+各項目は一般因子と自分の特殊因子にしか依存しないので、尤度は Gibbons and Hedeker (1992) の次元縮約で積分する。
+$(1+S)$ 次元の直積格子ではなく特殊因子ごとに 2 次元格子 1 つで済むため、特殊因子がいくつあっても計算は軽い。
+1 つの `Quadrature` が全因子の格子を与え、既定は $[-6, 6]$ 上の 31 点（mirt の `bfactor()` の既定）。
+mirt の `bfactor()` との照合は V32。
+
+```python
+a_bif = np.zeros((9, 4))
+a_bif[:, 0] = [1.4, 1.2, 1.5, 1.1, 1.3, 1.6, 1.0, 1.2, 1.4]  # general
+a_bif[0:3, 1] = [0.9, 1.0, 0.8]  # specific s1
+a_bif[3:6, 2] = [1.1, 0.7, 0.9]  # specific s2
+a_bif[6:9, 3] = [0.8, 1.0, 0.9]  # specific s3
+theta_bif = rng.standard_normal((1500, 4))
+p_bif = 1.0 / (1.0 + np.exp(-(theta_bif @ a_bif.T + np.linspace(-1.0, 1.0, 9))))
+bif_items = [f"b{j}" for j in range(1, 10)]
+bif_df = pd.DataFrame((rng.random(p_bif.shape) < p_bif).astype(float), columns=bif_items)
+
+bif_spec = Model.uniform(TwoPL(), items=bif_items).with_bifactor(
+    specific={"s1": bif_items[0:3], "s2": bif_items[3:6], "s3": bif_items[6:9]},
+    general="G",
+)
+res_bif = fit(
+    bif_spec,
+    bif_df,
+    method=BAEM(squarem=True),
+    quadrature=Quadrature.equispaced(21, bounds=(-6, 6)),  # 21^2 nodes per specific factor
+)
+print(res_bif.items[["item", "a1", "a2", "a3", "a4", "d", "a1_se"]].round(3))
+print(res_bif.score(bif_df.iloc[:3]).round(3))  # theta_G, theta_s1, ..., se_G, se_s1, ...
+```
+
+- **対応**: 傾きが自由な全項目モデル（2PL・3PL・4PL・GRM・GPCM・名義）、Oakes / Hessian SE、`"EAP"`
+  スコアリング（因子ごとの列）、等値制約、事前分布、JSON。
+- **未対応**（`SpecificationError`）: 多母集団、Rasch / PCM 項目（因子分散を自由にする必要がある）、潜在平均・分散の
+  自由推定、MAP / ML / WLE / PV スコアリング、項目適合度、$M_2$、局所依存、two-tier モデル。
+
 ## 15. 尺度リンキング
 
 共通項目を含む 2 つのフォームを別々の標本で推定したあと、`flexpyirt.link(source, target)` を使うと、

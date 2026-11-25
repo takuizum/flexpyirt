@@ -86,3 +86,6 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
     its generator).
   - [x] D6 DIMTEST with bootstrap bias correction (`dimtest()`; accepted in V30 on a simulation study:
     type I error 0.0–2.0% at .05, conservative; power 0.99–1.00).
+- [x] Bifactor models with Gibbons–Hedeker dimension reduction (`Model.with_bifactor()`, single group,
+  any number of specific factors, Oakes/Hessian SEs, EAP scoring; validated in V32 against mirt
+  `bfactor()`; M7 item 1 of #80 — two-tier models still open).
