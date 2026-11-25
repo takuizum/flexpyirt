@@ -75,6 +75,10 @@
    - [x] two-tier モデル（`Model.with_two_tier()`、相関してよい主因子 1〜2 個と特殊因子、単一群、Oakes/Hessian SE、
      EAP スコアリング。V33 で mirt の `bfactor(model2 = )` と照合済み）。
 2. [ ] 局所依存（Q3, LD-X², JSI）を多母集団・正規以外の潜在分布・多次元 / 双因子モデルに広げる（#81）。
+   - [x] `FitResult.local_dependence()`（Q3、Q3\*、LD-X²、G²）を多母集団、`EmpiricalHistogram` /
+     `DavidianCurve` / `NormalMixture` の潜在分布、確認的な 2〜3 因子モデルに広げた（V26 で mirt の
+     `residuals()` と照合。混合分布は密度を与えたときの統計量のみ）。
+     未対応: 双因子 / two-tier モデルと、単一群・1 次元・正規分布以外の JSI。
 3. [ ] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
    カーネル（#83）の上に作る。
 4. [ ] 標本ウェイト（#84）。

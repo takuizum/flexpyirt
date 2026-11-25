@@ -205,21 +205,38 @@ multiple-group, `EmpiricalHistogram`, `NormalMixture`, or MAP (with priors) mode
 #### `FitResult.local_dependence`
 
 ```text
-local_dependence(data, *, item_names=None) -> LocalDependenceResult
+local_dependence(data, *, group=None, item_names=None) -> LocalDependenceResult
 ```
 
-Local-dependence statistics for every item pair of a single-group unidimensional model with a
-`Normal` latent distribution ([guide section 18](guide.md#18-local-dependence-and-the-dimensionality-report)):
+Local-dependence statistics for every item pair
+([guide section 18](guide.md#18-local-dependence-and-the-dimensionality-report)):
 Yen's (1984) Q3 (correlation of residuals $x_{ij} - E(X_j \mid \hat\theta_i)$ with EAP
 $\hat\theta$), Q3\* $=$ Q3 $-$ mean Q3 (Christensen, Makransky & Horton, 2017), and Chen &
 Thissen's (1997) LD $X^2$ / $G^2$ against the model-implied table on the fitted grid, with
 $df = (K_i-1)(K_j-1)$, $p$-values and a signed Cramér's $V$, as mirt's
 `residuals(type = "Q3" / "LD" / "LDG2")`. Missing responses are allowed (pairwise).
 
+The expected tables and the EAP use the fitted latent distribution on the fitted grid: `Normal`,
+`EmpiricalHistogram`, `DavidianCurve` or `NormalMixture`, and the multivariate Normal on the
+product grid (with the vector EAP) for models with 2 or 3 factors. In a multiple-group model
+`group` is required and every statistic is computed within a group, from that group's
+respondents, item parameters and latent distribution. Bifactor models are not covered.
+
+Two differences from mirt's defaults: for `dentype = "EH"` / `"Davidian-k"` fits mirt takes a
+standard Normal prior unless called as `residuals(m, type = "LD", use_dentype_estimate = TRUE)`
+and `residuals(m, type = "Q3", Theta = fscores(m, use_dentype_estimate = TRUE))`; and mirt's Q3
+scores on `fscores()`'s own grid (121 / 61 / 31 points per dimension for 1 / 2 / 3 factors),
+flexpyirt on the fitted grid.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `data` | DataFrame or array-like | | Responses on the fitted items; missing as NaN |
+| `group` | array-like | `None` | Group labels (required for a multiple-group model) |
+| `item_names` | list of str | `None` | Column names when `data` is an array |
+
 **Returns**: [`LocalDependenceResult`](#localdependenceresult)
 
-**Raises**: `PrecisionError`; `SpecificationError` for multiple-group, multidimensional or
-non-`Normal` latent models, or invalid data.
+**Raises**: `PrecisionError`; `SpecificationError` for invalid data or group labels.
 
 #### `FitResult.jsi`
 
@@ -1080,10 +1097,10 @@ Returned by `FitResult.local_dependence()`.
 
 | Attribute | Type | Description |
 |---|---|---|
-| `pairs` | DataFrame | One row per pair: `item_i`, `item_j`, `n`, `q3`, `q3_star`, `x2`, `g2`, `df`, `p_x2`, `p_g2`, `cramer_v` |
-| `q3` | DataFrame | Item x item Q3 matrix |
-| `q3_mean` | float | Mean off-diagonal Q3 |
-| `max_q3_star` | float | Largest Q3\* |
+| `pairs` | DataFrame | One row per pair: `item_i`, `item_j`, `n`, `q3`, `q3_star`, `x2`, `g2`, `df`, `p_x2`, `p_g2`, `cramer_v`; with a leading `group` column and one row per group and pair in a multiple-group model |
+| `q3` | DataFrame | Item x item Q3 matrix; one matrix per group on a `(group, item)` row index in a multiple-group model |
+| `q3_mean` | float or Series | Mean off-diagonal Q3; a Series indexed by group in a multiple-group model (each group's Q3\* uses its own mean) |
+| `max_q3_star` | float | Largest Q3\* (over all groups) |
 
 ### `JSIResult`
 

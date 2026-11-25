@@ -1639,6 +1639,46 @@ data-independent shapes (§15.21).
     $B=4000$): observed eigenvalues to $2\times10^{-4}$ (polycor's `optimise()` tolerance; observed
     $2.4\times10^{-5}$), the simulated second-eigenvalue mean within $|z|\le4.5$ (observed
     $|z|<1$ with 2000 replications on two keys) and its 95th percentile to 0.02.
+    **Extension beyond single-group unidimensional Normal models (M7, issue #81, V26)**:
+    `local_dependence()` takes `group=` (as `item_fit()`) and works on the compiled problem of
+    the fitted model, so one code path serves every latent distribution and grid: the weights
+    are `_latent_log_weights` (`(G, Q)`; the EH weights when the model has them), the traces
+    `_item_log_probs` (`(G, J_f, Q, K)`), and the EAP `_core.eap` with each respondent's own
+    group as the prior. (a) **Multiple groups**: every statistic is computed within a group,
+    from that group's respondents, item parameters and latent weights, as mirt's
+    `residuals()` does for a `multipleGroup` fit (it loops over the groups' single-group
+    objects); `pairs` gets a leading `group` column, `q3` a `(group, item)` row index, `q3_mean`
+    is a Series indexed by group, Q3\* subtracts the group's own mean and `max_q3_star` is the
+    largest over all groups. Groups without respondents in `data` are skipped. The tables are
+    always $K_i\times K_j$, also when a category is not observed in a group (mirt's
+    `table()` drops it and fails there). (b) **`EmpiricalHistogram`, `DavidianCurve`,
+    `NormalMixture`**: $E_{ab}$ uses the fitted grid weights and Q3 the EAP under the fitted
+    distribution. mirt's default for `dentype = "EH"` / `"Davidian-k"` fits is different: it
+    takes a $N(0,1)$ prior in both; the fitted density is used with
+    `residuals(type = "LD", use_dentype_estimate = TRUE)` and, for Q3, with
+    `Theta = fscores(m, use_dentype_estimate = TRUE)` (`type = "Q3", use_dentype_estimate =
+    TRUE` evaluates the residuals at the grid nodes instead of the scores in mirt 1.48 and is
+    not usable). flexpyirt follows the fitted density because the Normal prior contradicts the
+    fitted model; the docstring states the mirt calls that agree. (c) **Confirmatory 2–3
+    dimensional models**: $E_{ab}=n\sum_qP_{ia}(\boldsymbol\theta_q)P_{jb}(\boldsymbol\theta_q)
+    w_q$ on the product grid with the fitted multivariate Normal weights, and
+    $d_{ij}=x_{ij}-E(X_j\mid\hat{\boldsymbol\theta}_i)$ at the vector EAP; `_traces` evaluates
+    the kernels at `(N, D)` nodes. The EAP uses the fitted grid, where mirt's `fscores()` uses
+    its own default grid whatever the fit used (121 / 61 / 31 points per dimension for 1 / 2 /
+    3 factors), so the two agree when the grids are the same. $df$ stays $(K_i-1)(K_j-1)$ in every case (mirt's), which
+    ignores estimated parameters; the statistics are diagnostic (Chen & Thissen, 1997).
+    **Not extended**: bifactor / two-tier models (after the bifactor PR), `jsi()`,
+    `model_parallel_analysis()` and `dimensionality(fit=...)`, which keep
+    `_require_unidimensional_normal`. mirt's JSI needs one factor, has no SE for Davidian
+    curves (`"No standard error method currently supported"`), does not support mixtures, and
+    for `multipleGroup` refits each group alone as a single-group $N(0,1)$ model while taking
+    the slopes from the multiple-group fit, which is not the refit of the fitted model; there
+    is no reference to validate an extension against. **Validation (V26, M7)**:
+    `validation/r/m7_local_dependence_reference.R` (mirt 1.48), nine cases (two groups with one
+    and two factors, EH, Davidian, mixture, two and three factors), with mirt's estimates put
+    into a `FitResult` with every parameter fixed: $X^2$ / $G^2$ to $10^{-7}$ relative
+    (observed $\le8\times10^{-9}$), $V$ / Q3 to $10^{-8}$ (observed $\le3\times10^{-15}$);
+    details and mirt's differing defaults in VALIDATION.md.
 12. **The `dimensionality()` ensemble (§16.8)**: one polychoric matrix (with `fit`, the data are
     first coerced to the fitted items) feeds question (A): `parallel_analysis()` (defaults),
     `velicer_map()` (power 4) and `empirical_kaiser()`; the key is split into one key for each

@@ -1063,7 +1063,13 @@ print(report)
 - `FitResult.local_dependence()` gives, for every pair, Yen's Q3 (the correlation of residuals
   from EAP scores), Q3\* (Q3 minus its mean over pairs) and Chen & Thissen's LD $X^2$ / $G^2$,
   as mirt's `residuals()`. Large Q3\* or $X^2$ point to pairs that share something beyond
-  $\theta$ (a common stem, a testlet, a second dimension).
+  $\theta$ (a common stem, a testlet, a second dimension). It also works for multiple-group
+  models (pass `group=`; the statistics are computed within each group and `pairs` gets a
+  `group` column), for `EmpiricalHistogram`, `DavidianCurve` and `NormalMixture` latent
+  distributions (the fitted distribution is used) and for models with 2 or 3 factors (pairs
+  that still depend on each other given all the factors). `jsi()`, `model_parallel_analysis()`
+  and `dimensionality(fit=...)` need a single-group unidimensional model with a `Normal`
+  latent distribution.
 - `FitResult.jsi()` is Edwards, Houts & Cai's (2018) jackknife slope index: each item is removed
   in turn, the model is re-estimated, and every other item's slope change is divided by its
   standard error. If two items depend on each other, removing one lowers the other's slope, so
