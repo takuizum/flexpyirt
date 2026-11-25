@@ -11,7 +11,7 @@ and more. Every supported feature is checked numerically against R `mirt`
 
 ## Installation
 
-Python 3.11 or later.
+Python 3.12 or later.
 
 ```bash
 pip install flexpyirt  # or: uv add flexpyirt
