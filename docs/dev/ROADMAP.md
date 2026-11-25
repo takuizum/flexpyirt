@@ -88,4 +88,7 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
     type I error 0.0–2.0% at .05, conservative; power 0.99–1.00).
 - [x] Bifactor models with Gibbons–Hedeker dimension reduction (`Model.with_bifactor()`, single group,
   any number of specific factors, Oakes/Hessian SEs, EAP scoring; validated in V32 against mirt
-  `bfactor()`; M7 item 1 of #80 — two-tier models still open).
+  `bfactor()`; M7 item 1 of #80).
+- [x] Two-tier models (`Model.with_two_tier()`, one or two correlated primary factors plus specific
+  factors, single group, Oakes/Hessian SEs, EAP scoring; validated in V33 against mirt
+  `bfactor(model2 = )`; completes M7 item 1 of #80).

@@ -64,6 +64,7 @@
 | V30 | DIMTEST: 第 1 種の誤りと検出力（2PL。$N$ 1000〜2000、$J$ 20〜30。1 次元と相関 0.7〜0.8 の 2 次元。各 200 反復） | なし（DIMPACK 以外に実装がない）。`validation/simulation/dimtest_study.py` | M5 |
 | V31 | ジャックナイフ傾き指標（LSAT7 の 2PL、Science の GRM、依存するペア 2 組と 5% の MCAR を含むシミュレーションの 2PL、依存するペア 1 組を含むシミュレーションの GPCM）。Newton 法と 1 ステップの近似は推定し直した値と比べる | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | 次元縮約による双因子モデル（特殊因子 3 つと一般因子のみの項目 3 つを含む 2PL、テストレット 3 つの GRM $K=4$） | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
+| V33 | 次元縮約による two-tier モデル（相関する主因子 2 つと特殊因子 3 つ（1 つは両方の主因子にまたがる）の 2PL、交差負荷項目 1 つとテストレット 2 つの GRM $K=4$） | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -614,6 +615,30 @@
   - 単体テスト（`tests/test_m7_bifactor.py`）は、縮約した尤度・期待度数・EAP を $(1+S)$ 次元の直積格子全体での
     総当たり積分と比べ（欠測、GRM 項目、3PL 項目、一般因子のみの項目を含めて $10^{-12}$ 以内）、特殊因子 1 つの
     双因子モデルを検証済みの 2 次元の経路（`with_factors(..., correlated=False)`、対数尤度 $10^{-12}$）と比べる。
+- **two-tier モデル（V33、M7）**: シミュレーション 2 例を `tests/test_mirt_m7_two_tier.py` で照合する（通常の EM と
+  SQUAREM。生成スクリプト `validation/r/m7_two_tier_reference.R` → `tests/reference/v33_two_tier.json`、
+  mirt 1.48 の `bfactor(data, model, model2 = )`、`accelerate = "none"`、`TOL = 1e-10`、`SE.type = "Oakes"`、
+  $[-6, 6]$ 上の次元あたり 15 点、つまり特殊因子ごとに $15^3$ 格子 1 つ）。V14 の 3 次元の例と同じく、M ステップの
+  最適化は `BFGS`（`control = list(reltol = 1e-13, maxit = 500L)`）を使う。mirt の `NR` は `GroupPars` に数値
+  ヘッセ行列を使うので、3,375 節点では非常に遅い。主因子間の相関は mirt の `COV_21`（分散はどちらも 1 固定）。
+  mirt の `fscores()` は全次元の直積格子で積分するが、これは同じ 1 次元格子での分解した事後分布と等しい。EAP は
+  全パラメタを mirt の推定値に固定して比較する。どちらの例でも、mirt の推定値での縮約対数尤度は mirt の値と
+  $2.1\times10^{-15}$（相対）で一致し、`flexpyirt.loglik >= fixed_at_mirt.loglik` が成り立ち、EM と SQUAREM は
+  単調で、Oakes はヘッセ行列と $6.2\times10^{-17}$（共分散の要素）で一致する:
+  - **V33a（`two_tier_2pl`、2PL、$J=16, N=2000$、`F1 = q01-q08`、`F2 = q09-q16`、$\rho=0.5$、`s1 = q01-q04`、
+    `s2 = q09-q12`、`s3 = q05, q06, q13, q14`。4 項目は主因子のみ）**: `loglik` 相対 `2.1e-15`、項目パラメタ
+    `3.0e-7`（EM、192 反復。SQUAREM は `3.1e-7`、33 反復）、`cor_12` `2.2e-8`（SQUAREM `1.3e-8`）、項目の Oakes SE
+    相対 `4.4e-7`（SQUAREM `4.6e-7`）、`cor_12_se` 相対 `7.3e-6`、EAP $\theta$ `6.9e-15` / SD `4.0e-15`（mirt 側は
+    $9^5$ 節点）。
+  - **V33b（`two_tier_grm`、GRM $K=4$、$J=12, N=2000$、`F1 = g01-g06`、`F2 = g06-g12`（`g06` が交差負荷）、
+    $\rho=0.4$、`s1 = g01-g04`、`s2 = g07-g10`）**: `loglik` 相対 `1.1e-15`、項目パラメタ `7.8e-9`（EM、192 反復。
+    SQUAREM は `1.6e-8`、30 反復）、`cor_12` `6.3e-9`（SQUAREM `3.9e-9`）、項目の Oakes SE 相対 `1.0e-7`（SQUAREM
+    `1.1e-7`）、`cor_12_se` 相対 `1.6e-6`、EAP $\theta$ `7.1e-15` / SD `3.4e-15`（mirt 側は $15^4$ 節点）。
+  - 単体テスト（`tests/test_m7_two_tier.py`）では、縮約した尤度・期待度数・EAP を、全 $(P+S)$ 次元の直積格子での
+    総当たり積分と比べる（$10^{-12}$ 以内。欠測、GRM 項目、交差負荷項目、特殊因子のない項目を含む）。主因子 1 つの
+    two-tier モデルは双因子の経路と、特殊因子 1 つのモデルは照合済みの 3 次元の経路（`with_factors()` で特殊因子の
+    相関を 0 に固定。対数尤度が $10^{-12}$ で一致）と比べる。
+
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。
