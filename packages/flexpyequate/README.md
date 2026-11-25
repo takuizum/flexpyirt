@@ -19,9 +19,10 @@ flexpyequate finds the function that puts scores of form X on the scale of form 
 | Feature | Details | Checked against |
 |---|---|---|
 | Score distributions | `ScoreDistribution` and `BivariateScoreDistribution` from raw scores or frequency tables; equally spaced scores with any increment; moments; percentile ranks and percentiles (Kolen & Brennan, 2014) | R `equate` |
-| Designs | Equivalent groups (two distributions) and single group (one bivariate distribution) | R `equate` |
+| Designs | Equivalent groups (two distributions), single group (one bivariate distribution) and non-equivalent groups with an anchor test (two bivariate distributions) | R `equate` |
 | Mean and linear equating | `equate(x, y, method="mean")`, `method="linear"` (population or sample standard deviations) | R `equate` |
 | Equipercentile equating | `equate(x, y, method="equipercentile")` with the percentile-rank definition of Kolen & Brennan (2014), including distributions with zero frequencies | R `equate`; independent R implementation of the textbook formulas |
+| Linear equating with an anchor test | `equate(xa, ya, method=...)` with `"tucker"`, `"levine_observed"`, `"levine_true"` (internal or external anchor), `"braun_holland"` and `"chained_linear"`; synthetic population weights | R `equate`; independent R implementation of the textbook formulas |
 | Log-linear presmoothing | `presmooth()`: polynomial log-linear models for one score or for the joint distribution of two scores (with cross terms); likelihood-ratio, Pearson and Freeman–Tukey chi-squares, AIC | R `glm`, `equate` |
 | Kernel equating | `kernel_equate()` for equivalent groups: Gaussian kernel, bandwidths chosen by the penalty of von Davier, Holland & Thayer (2004) or given, standard error of equating (with or without presmoothing), percent relative error | R `kequate`, `SNSequate`; independent R implementation |
 
@@ -66,6 +67,20 @@ xy = fe.BivariateScoreDistribution.from_scores(x_scores, y_scores, x_range=(0, 4
 fe.equate(xy, method="equipercentile")  # equates the two margins
 ```
 
+Non-equivalent groups with an anchor test (each group takes one form and the anchor):
+
+```python
+xa = fe.BivariateScoreDistribution.from_scores(x_total, x_anchor, x_range=(0, 36), y_range=(0, 12))
+ya = fe.BivariateScoreDistribution.from_scores(y_total, y_anchor, x_range=(0, 36), y_range=(0, 12))
+
+tucker = fe.equate(xa, ya, method="tucker")  # weights proportional to the sample sizes
+tucker.slope, tucker.intercept
+tucker.synthetic_moments  # mean and sd of X and Y in the synthetic population
+
+fe.equate(xa, ya, method="levine_observed", anchor="internal", synthetic_weight=1.0)
+fe.equate(xa, ya, method="chained_linear")
+```
+
 Presmoothing and kernel equating:
 
 ```python
@@ -92,6 +107,10 @@ kernel.percent_relative_error  # first ten moments
   upper and lower percentiles of form Y, as defined by Kolen & Brennan; `equate` returns the end of
   the form-Y range. The two differ only when nobody obtained the lowest (or highest) form-Y scores.
 
+- For the Braun–Holland method, R `equate` mixes the two groups as counts, which changes the
+  weight of the first group from w to wN₁ / (wN₁ + (1 − w)N₂) when the sample sizes differ.
+  flexpyequate uses w itself, as in Kolen & Brennan; pass that effective weight as
+  `synthetic_weight` to reproduce `equate`.
 - R `kequate` multiplies the variance used in the continuization by N / (N − 1); flexpyequate
   uses the variance of the score distribution itself, as in von Davier, Holland & Thayer (2004)
   and `SNSequate`. The difference in equated scores shrinks with the sample size (about 1e-3 with

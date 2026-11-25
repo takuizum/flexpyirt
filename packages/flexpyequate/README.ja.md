@@ -18,9 +18,10 @@
 | 機能 | 内容 | 照合先 |
 |---|---|---|
 | 得点分布 | 素点または度数表から作る `ScoreDistribution` と `BivariateScoreDistribution`。等間隔なら刻み幅は任意。モーメント、パーセンタイル順位とパーセンタイル（Kolen & Brennan, 2014） | R `equate` |
-| デザイン | 等価群（2 つの分布）と単一群（1 つの 2 変量分布） | R `equate` |
+| デザイン | 等価群（2 つの分布）、単一群（1 つの 2 変量分布）、アンカーテストつき非等価群（2 つの 2 変量分布） | R `equate` |
 | 平均等化・線形等化 | `equate(x, y, method="mean")`、`method="linear"`（標準偏差は母集団形または標本形） | R `equate` |
 | 等パーセンタイル等化 | `equate(x, y, method="equipercentile")`。Kolen & Brennan (2014) のパーセンタイル順位の定義に従い、度数 0 の得点を含む分布にも対応 | R `equate`、教科書の式の独立 R 実装 |
+| アンカーテストを使う線形等化 | `equate(xa, ya, method=...)`。`"tucker"`、`"levine_observed"`、`"levine_true"`（内部・外部アンカー）、`"braun_holland"`、`"chained_linear"`。合成母集団の重みを指定可能 | R `equate`、教科書の式の独立 R 実装 |
 | 対数線形モデルによる事前平滑化 | `presmooth()`: 1 つの得点、または 2 つの得点の同時分布（交差項つき）に対する多項式対数線形モデル。尤度比・Pearson・Freeman–Tukey のカイ二乗、AIC | R `glm`、`equate` |
 | カーネル等化 | `kernel_equate()`（等価群）: ガウスカーネル、von Davier, Holland & Thayer (2004) のペナルティによるバンド幅選択または指定、等化の標準誤差（事前平滑化あり・なし）、相対誤差（PRE） | R `kequate`、`SNSequate`、独立 R 実装 |
 
@@ -65,6 +66,20 @@ xy = fe.BivariateScoreDistribution.from_scores(x_scores, y_scores, x_range=(0, 4
 fe.equate(xy, method="equipercentile")  # 2 つの周辺分布を等化する
 ```
 
+アンカーテストつき非等価群（各群が 1 つの版とアンカーを受ける）:
+
+```python
+xa = fe.BivariateScoreDistribution.from_scores(x_total, x_anchor, x_range=(0, 36), y_range=(0, 12))
+ya = fe.BivariateScoreDistribution.from_scores(y_total, y_anchor, x_range=(0, 36), y_range=(0, 12))
+
+tucker = fe.equate(xa, ya, method="tucker")  # 重みは標本サイズに比例
+tucker.slope, tucker.intercept
+tucker.synthetic_moments  # 合成母集団での X・Y の平均と標準偏差
+
+fe.equate(xa, ya, method="levine_observed", anchor="internal", synthetic_weight=1.0)
+fe.equate(xa, ya, method="chained_linear")
+```
+
 事前平滑化とカーネル等化:
 
 ```python
@@ -91,6 +106,9 @@ kernel.percent_relative_error  # 1〜10 次のモーメント
   定義どおり Y 版の上側・下側パーセンタイルの平均を返します。`equate` は Y 版の得点範囲の端を返します。
   両者が異なるのは、Y 版の最低点（または最高点）付近を取った受検者がいないときだけです。
 
+- Braun–Holland 法で、R `equate` は 2 つの群を度数のまま混ぜます。そのため標本サイズが異なると、
+  第 1 群の重みが w でなく wN₁ / (wN₁ + (1 − w)N₂) になります。flexpyequate は Kolen & Brennan と同じく
+  w そのものを使います。`equate` を再現するには、その実質的な重みを `synthetic_weight` に渡します。
 - R `kequate` は連続化に使う分散に N / (N − 1) を掛けます。flexpyequate は von Davier, Holland &
   Thayer (2004) および `SNSequate` と同じく、得点分布そのものの分散を使います。等化後得点の差は標本が
   大きいほど小さくなります（照合に使った例では 600 人で 1e-3 程度、数千人で 1e-5 以下）。
