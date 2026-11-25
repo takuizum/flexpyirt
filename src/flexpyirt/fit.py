@@ -67,6 +67,7 @@ def fit(
     method: BAEM | None = None,
     quadrature: Quadrature | None = None,
     se: SEMethod | None = "oakes",
+    weights: Any = None,
 ) -> FitResult:
     r"""Estimate an IRT model by MMLE or MAP with Bock–Aitkin EM.
 
@@ -75,7 +76,7 @@ def fit(
     parameter scale without a Jacobian term (DESIGN.md §4.7). Standard errors come from Oakes'
     identity (Oakes, 1999) or the direct Hessian of the log-likelihood (or log posterior with
     priors), both by automatic differentiation (DESIGN.md §4.8). ``se="sandwich"`` and
-    ``se="crossprod"`` use the cross-product of the per-pattern scores (DESIGN.md §17.3).
+    ``se="crossprod"`` use the cross-product of the per-pattern scores (DESIGN.md §17.5).
 
     Parameters
     ----------
@@ -104,7 +105,17 @@ def fit(
         :math:`H^{-1}BH^{-1}` (Huber, 1967; White, 1982; mirt ``SE.type = "sandwich"``), which
         stays valid when the model is misspecified. With priors, the prior curvature is added
         to :math:`B` as it is to :math:`H`. Both are unavailable for ``DavidianCurve`` and
-        ``NormalMixture`` latent distributions and for bifactor and two-tier models.
+        ``NormalMixture`` latent distributions, for bifactor and two-tier models, and together
+        with ``weights``.
+    weights : array-like, optional
+        Sampling (survey) weights, one finite non-negative number per row (mirt
+        ``survey.weights``). The estimates maximize the weighted marginal log-likelihood
+        :math:`\sum_i w_i\log L_i` (DESIGN.md §17.4). Weights are used as given (not rescaled):
+        ``loglik``, AIC and BIC are on the scale of the weights, and BIC uses
+        :math:`\log\sum_i w_i`. Rows with weight 0 are ignored. Integer weights are equivalent
+        to repeating rows. With weights, ``se="oakes"`` and ``se="hessian"`` invert the weighted
+        information, which is a valid variance estimate only for frequency weights (repeated
+        rows), not for sampling weights; a ``FlexpyirtWarning`` says so.
 
     Returns
     -------
@@ -137,9 +148,26 @@ def fit(
     if quadrature is None:
         quadrature = Quadrature.default(spec.quadrature_dimension)
 
-    prep = prepare(spec, data, group=group, item_names=item_names, table=table)
+    if se in ("sandwich", "crossprod") and weights is not None:
+        raise SpecificationError(
+            f"se={se!r} is not available with weights=: the cross-product of the per-pattern "
+            "scores does not yet account for the weights (DESIGN.md §17.5). Use se='oakes', "
+            "se='hessian' or se=None."
+        )
+    prep = prepare(spec, data, group=group, item_names=item_names, table=table, weights=weights)
     final_table = prep.table
-    compiled = compile_problem(spec, prep.y, prep.group, final_table, quadrature)
+    if prep.weights is not None and se is not None:
+        warnings.warn(
+            f"se={se!r} with weights= inverts the information of the weighted log-likelihood. "
+            "That is a valid variance estimate only when the weights are frequencies (repeated "
+            "rows); under sampling weights these standard errors are not valid (sandwich "
+            "standard errors are not available yet). Pass se=None to skip them.",
+            FlexpyirtWarning,
+            stacklevel=2,
+        )
+    compiled = compile_problem(
+        spec, prep.y, prep.group, final_table, quadrature, weights=prep.weights
+    )
     problem = compiled.problem
 
     runner = _squarem if method.squarem else _em
@@ -242,6 +270,7 @@ def fit(
         _quadrature=quadrature,
         _method=method,
         _eh_weights=eh_weights,
+        _sum_weights=None if prep.weights is None else float(prep.weights.sum()),
     )
 
 

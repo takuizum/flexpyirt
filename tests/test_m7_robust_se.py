@@ -1,4 +1,4 @@
-"""Unit tests for the cross-product and sandwich standard errors (DESIGN.md §17.3).
+"""Unit tests for the cross-product and sandwich standard errors (DESIGN.md §17.5).
 
 The agreement with R mirt is in ``tests/test_mirt_m7_robust_se.py`` (VALIDATION.md V35).
 """
@@ -391,7 +391,7 @@ def test_davidian_and_mixture_are_rejected_before_fitting(se: str) -> None:
 
 @pytest.mark.parametrize("se", ["crossprod", "sandwich"])
 def test_bifactor_and_two_tier_are_rejected_before_fitting(se: str) -> None:
-    """Dimension-reduced models are not covered (DESIGN.md §17.3): the scores use the full grid."""
+    """Dimension-reduced models are not covered (DESIGN.md §17.5): the scores use the full grid."""
     data = _simulate_2pl(18, 50, 6)
     base = Model.uniform(TwoPL(), items=data.columns)
     reduced = (
@@ -405,6 +405,15 @@ def test_bifactor_and_two_tier_are_rejected_before_fitting(se: str) -> None:
         assert spec.is_reduced
         with pytest.raises(SpecificationError, match="not available for bifactor and two-tier"):
             fit(spec, data, se=se)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("se", ["crossprod", "sandwich"])
+def test_weights_are_rejected_before_fitting(se: str) -> None:
+    """The cross-product does not account for sampling weights yet (DESIGN.md §17.5)."""
+    data = _simulate_2pl(19, 50, 6)
+    spec = Model.uniform(TwoPL(), items=data.columns)
+    with pytest.raises(SpecificationError, match="not available with weights="):
+        fit(spec, data, se=se, weights=np.ones(len(data)))  # type: ignore[arg-type]
 
 
 def test_unknown_se_lists_the_options() -> None:

@@ -1,7 +1,7 @@
 """V35: cross-product and sandwich covariances vs R mirt ``SE.type = "crossprod"`` / ``"sandwich"``.
 
 Reference values come from ``validation/r/m7_robust_se_reference.R`` (mirt's parameter table and
-full ``vcov`` matrices). Two kinds of checks (VALIDATION.md V35, DESIGN.md §17.3):
+full ``vcov`` matrices). Two kinds of checks (VALIDATION.md V35, DESIGN.md §17.5):
 
 - **At mirt's solution**: flexpyirt's problem is compiled with mirt's estimates, so the covariance
   matrices are compared entry by entry without any difference in the estimates.

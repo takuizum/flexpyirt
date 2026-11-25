@@ -112,6 +112,7 @@ def dif_tests(
     """Run the likelihood-ratio DIF tests of :meth:`FitResult.dif` (see there)."""
     from flexpyirt.fit import fit
 
+    result._require_unweighted("dif()")
     model = result._model
     if not model.is_multigroup:
         raise SpecificationError("dif() needs a multiple-group model (Model.with_groups()).")
