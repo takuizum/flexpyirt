@@ -243,7 +243,11 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   co-occurrences for the cross term while reusing a single E-step (§15.20).
 - Alternatives: the observed (posterior) information $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$ by
   chunked forward-over-reverse autodiff (`jax.linearize(jax.grad(...))` over basis batches; also
-  used to check Oakes), cross-product ($\sum_p c_p s_p s_p^\top$), sandwich.
+  used to check Oakes).
+- **Decision (M7, §17.5)**: `se="crossprod"` inverts the cross-product of the per-pattern scores,
+  $B_{\mathrm{post}}=\sum_p c_p s_p s_p^\top-\nabla^2_\eta\log\pi(\hat\eta)$, and `se="sandwich"` is
+  the robust covariance $H^{-1}B_{\mathrm{post}}H^{-1}$ with $H$ the observed (posterior)
+  information above (Huber, 1967; White, 1982).
 - With MAP, both `oakes` and `hessian` add $-\nabla^2_\eta\log\pi(\hat\eta)$ to the information
   matrix and remain mathematically identical. Fixed parameters are not in $\eta$ and are excluded
   automatically.
@@ -1837,10 +1841,79 @@ data-independent shapes (§15.21).
     item, the approximations against the refit on a 15-item data set (`"newton"` 1 step 0.03, 2
     steps 0.02, `"one_step"` 0.05) and the vmapped gradients against single ones.
 
+## 17. Implementation decisions (M7)
+
+5. **Robust standard errors: cross-product and sandwich (`fit(se="crossprod" | "sandwich")`, V35, #85)**:
+   **Definitions.** With $L_p(\eta)=\sum_q w_{g(p)q}(\eta)\prod_j P_j(y_{pj}\mid\theta_q;\eta)$ the
+   marginal likelihood of response pattern $p$ (count $c_p$) and $s_p=\nabla_\eta\log L_p(\hat\eta)$
+   its score,
+   $$B=\sum_p c_p\,s_p s_p^\top,\qquad B_{\mathrm{post}}=B-\nabla^2_\eta\log\pi(\hat\eta),$$
+   $$V_{\mathrm{crossprod}}=B_{\mathrm{post}}^{-1},\qquad
+     V_{\mathrm{sandwich}}=H^{-1}B_{\mathrm{post}}H^{-1},$$
+   where $H=-\nabla^2_\eta[\ell(\hat\eta)+\log\pi(\hat\eta)]$ is the observed (posterior)
+   information of §4.8, computed by Oakes' identity (`information_oakes`; identical to
+   `information_hessian`). $B$ is the outer-product-of-gradients estimate of the Fisher information
+   (Berndt, Hall, Hall & Hausman, 1974); the sandwich is Huber's (1967) and White's (1982)
+   covariance of a maximum-likelihood estimator under misspecification. The unit of independence
+   is the person: a pattern observed $c_p$ times contributes $c_p$ identical terms, so compressed
+   and row-replicated data give the same $B$. The scores are not centred ($\sum_p c_p s_p=0$ at
+   the ML estimate, and mirt does not centre them either).
+   **Priors.** The prior curvature is added to the cross-product, exactly as it is added to $H$
+   (§15.17): both `oakes`/`hessian` and `crossprod` then estimate the same posterior information,
+   and when the information equality $B=-\nabla^2\ell$ holds the sandwich reduces to
+   $H^{-1}$, the existing MAP covariance. This is mirt's convention (`SE.simple`:
+   `info <- Igrad + Iprior` for `"crossprod"`, the same matrix as the middle of `"sandwich"`), so
+   it can be validated. The alternative $H^{-1}BH^{-1}$ with the likelihood scores only (the
+   repeated-sampling variance of a penalized estimator, which for a log-concave prior is smaller than $H^{-1}$ even under
+   a correct model) is not offered. A fixed parameter is not in $\eta$; a parameter shared across
+   groups or items (one `free_id`) has one score coordinate that sums its occurrences.
+   **Multiple groups and latent parameters.** $\eta$ holds every group's item and latent
+   parameters; a pattern of group $g$ has a zero score for the parameters that enter only other
+   groups, so $B$ is the sum of the groups' cross-products without any special handling.
+   **Empirical histogram.** As for `oakes`/`hessian` (§15.35), the histogram weights are held at
+   their estimates: $s_p$ and $H$ are derivatives with respect to the free item parameters only,
+   and `vcov` keeps its `n_free_items × n_free_items` shape. The sandwich is therefore robust for
+   the item parameters given the estimated histogram, not for the estimation of the histogram.
+   **Not covered.** `DavidianCurve` and `NormalMixture` latent distributions raise
+   `SpecificationError` for both options: mirt computes neither for them ("No standard error
+   method currently supported for Davidian curves"; "Only Oakes and complete SE.types current
+   supported for mixture models"), so there is no reference to validate against (principle 1).
+   Sampling weights and the cluster-robust version (scores summed within clusters) wait for
+   sampling weights (#84).
+   **Computation** (`_robust_se.py`, a separate Core module so that `_core.py` is untouched).
+   `_fold_pattern_scores` evaluates the node tables $\log P_{gjqk}(\eta)$ and $\log w_{gq}(\eta)$
+   once and linearizes them with `jax.vjp`. Patterns are processed in chunks by `lax.scan`: for a
+   chunk, `jax.jacrev` differentiates the chunk's pattern log-likelihoods with respect to the
+   tables and the stored pullback maps each cotangent to $\eta$, giving a `(B, n_free)` block of
+   scores from which $\sum c_p s_p s_p^\top$ is accumulated. Neither `(P, n_free)` nor
+   `(P, G, J, Q, K)` is materialized; the chunk size is the largest (at most 1024) that keeps
+   `chunk × G × Q × (1 + Σ_f J_f K_f (P_f + 1))` under $8\times10^6$ elements (about 64 MB), and
+   chunks of zero-count padding rows are skipped with `lax.cond`. Every derivative is autodiff;
+   `score_sum` ($\sum_p c_p s_p$) is checked against `jax.grad(marginal_loglik)` and the
+   cross-product against a dense `jax.jacfwd` of the pattern log-likelihoods in the unit tests.
+   `fit()` builds the sandwich in NumPy from the inverse of $H$ (the existing positive-definiteness
+   check: `FlexpyirtWarning` and NaN standard errors if $H$ is not positive definite; for
+   `crossprod` the same check applies to $B_{\mathrm{post}}$, which is singular when there are
+   fewer distinct patterns than free parameters).
+   **Consumers of `vcov`.** `FitResult.vcov`, the `se` column, the delta-method display SEs
+   (`b_se`, `bk_se`, latent `sd`/`cor` SEs; §15.18) and `link()` (§16.5) read `vcov` and so use the
+   chosen covariance without change. `FitResult.jsi(method="one_step")` uses `vcov` as the inverse
+   observed information of a Newton step, which $V_{\mathrm{sandwich}}$ and
+   $V_{\mathrm{crossprod}}$ are not; it raises `SpecificationError` unless the fit used `oakes` or
+   `hessian`.
+   **Option names and JSON.** `se` takes `"sandwich"` and `"crossprod"` (mirt's `SE.type`
+   spellings; `"cross_product"` would be the spelling of the naming rule of §15.46 and is left to
+   the owner). `se_method` in the JSON file stores the same strings; the two values are additions,
+   no stored name changes, and `schema_version` stays as it is (as when new latent kinds were
+   added in §16.4 and §16.7). mirt's `"sandwich.Louis"` is the same estimator with $H$ computed by
+   Louis' (1982) formula instead of Oakes'; both formulas give the observed information, so it is
+   not a separate option here.
+
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
+- Berndt, E. R., Hall, B. H., Hall, R. E., & Hausman, J. A. (1974). Estimation and inference in nonlinear structural models. *Annals of Economic and Social Measurement*, 3(4), 653–665.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
@@ -1869,6 +1942,7 @@ data-independent shapes (§15.21).
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
+- Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
@@ -1917,6 +1991,7 @@ data-independent shapes (§15.21).
 - Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
+- White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.

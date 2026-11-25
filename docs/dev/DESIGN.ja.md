@@ -189,8 +189,11 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   パターン分割カテゴリ共起構造を活用する（§15.20）。
 - 代替: 基底ベクトルをチャンク分割した前向き×後ろ向き自動微分
   （`jax.linearize(jax.grad(...))`）による観測（事後）情報行列
-  $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$（Oakes の検証にも使う）、
-  cross-product（$\sum_p c_p s_p s_p^\top$）、sandwich。
+  $-\nabla^2_\eta[\ell(\eta)+\log\pi(\eta)]$（Oakes の検証にも使う）。
+- **決定（M7, §17.5）**: `se="crossprod"` はパターンごとのスコアのクロス積
+  $B_{\mathrm{post}}=\sum_p c_p s_p s_p^\top-\nabla^2_\eta\log\pi(\hat\eta)$ の逆行列、`se="sandwich"` は
+  上の観測（事後）情報行列 $H$ を使ったロバスト共分散 $H^{-1}B_{\mathrm{post}}H^{-1}$
+  （Huber, 1967; White, 1982）。
 - MAP 時は `oakes`・`hessian` とも情報行列に $-\nabla^2_\eta\log\pi(\hat\eta)$ を加え、数学的恒等性を保つ。
   固定パラメタは $\eta$ に含まれないので自動的に除外される。
 
@@ -1301,10 +1304,68 @@ class ItemKernel(Protocol):
     ほかに、推定し直した値を項目を除いたデータへの `fit()` と、近似を 15 項目のデータで推定し直した値と（`"newton"`
     1 ステップ 0.03、2 ステップ 0.02、`"one_step"` 0.05）、vmap した勾配を 1 つずつの勾配と比べる。
 
+## 17. 実装上の決定（M7）
+
+5. **ロバスト標準誤差: クロス積とサンドイッチ（`fit(se="crossprod" | "sandwich")`, V35, #85）**:
+   **定義。** 応答パターン $p$（度数 $c_p$）の周辺尤度を
+   $L_p(\eta)=\sum_q w_{g(p)q}(\eta)\prod_j P_j(y_{pj}\mid\theta_q;\eta)$、そのスコアを
+   $s_p=\nabla_\eta\log L_p(\hat\eta)$ として
+   $$B=\sum_p c_p\,s_p s_p^\top,\qquad B_{\mathrm{post}}=B-\nabla^2_\eta\log\pi(\hat\eta),$$
+   $$V_{\mathrm{crossprod}}=B_{\mathrm{post}}^{-1},\qquad
+     V_{\mathrm{sandwich}}=H^{-1}B_{\mathrm{post}}H^{-1}$$
+   とする。$H=-\nabla^2_\eta[\ell(\hat\eta)+\log\pi(\hat\eta)]$ は §4.8 の観測（事後）情報行列で、
+   Oakes の恒等式（`information_oakes`、`information_hessian` と同一）で計算する。$B$ は Fisher 情報量の
+   勾配外積推定（Berndt, Hall, Hall & Hausman, 1974）、サンドイッチはモデル誤特定のもとでの最尤推定量の
+   共分散（Huber, 1967; White, 1982）。独立な単位は受検者で、$c_p$ 回観測されたパターンは同じ項を
+   $c_p$ 個寄与するので、圧縮したデータと行を複製したデータで $B$ は一致する。スコアは中心化しない
+   （最尤推定値では $\sum_p c_p s_p=0$。mirt も中心化しない）。
+   **事前分布。** 事前分布の曲率は、$H$ に加えるのと同じように（§15.17）クロス積にも加える。これで
+   `oakes`/`hessian` と `crossprod` は同じ事後情報量の推定になり、情報等式 $B=-\nabla^2\ell$ が成り立てば
+   サンドイッチは既存の MAP の共分散 $H^{-1}$ に一致する。mirt と同じ規約（`SE.simple` の
+   `info <- Igrad + Iprior` が `"crossprod"`、同じ行列が `"sandwich"` の中央）なので照合できる。尤度の
+   スコアだけを使う $H^{-1}BH^{-1}$（罰則付き推定量の反復標本分散。対数凹の事前分布では正しいモデルでも $H^{-1}$ より小さい）は
+   提供しない。固定パラメタは $\eta$ に含まれない。群や項目をまたいで共有されるパラメタ（同じ
+   `free_id`）のスコアは 1 成分で、出現箇所の和になる。
+   **多母集団と潜在分布のパラメタ。** $\eta$ は全群の項目・潜在分布パラメタを持つ。群 $g$ のパターンは
+   他の群にしか現れないパラメタについてスコアが 0 なので、特別な処理なしで $B$ は各群のクロス積の和になる。
+   **経験ヒストグラム。** `oakes`/`hessian` と同じく（§15.35）、ヒストグラムの重みは推定値に固定する。
+   $s_p$ と $H$ は自由な項目パラメタだけの微分で、`vcov` の形は `n_free_items × n_free_items` のまま。
+   したがってサンドイッチは、推定されたヒストグラムを与えたときの項目パラメタについてロバストであり、
+   ヒストグラムの推定に対してロバストなわけではない。
+   **対象外。** 潜在分布が `DavidianCurve`・`NormalMixture` のとき、どちらのオプションも
+   `SpecificationError` を出す。mirt はこれらを計算しないので（"No standard error method currently
+   supported for Davidian curves"、"Only Oakes and complete SE.types current supported for mixture
+   models"）、照合する参照値がない（原則 1）。標本ウェイトとクラスタロバスト版（スコアをクラスタ内で
+   合計する）は標本ウェイト（#84）のあと。
+   **計算**（`_robust_se.py`。`_core.py` を変更しないよう Core の別モジュールにした）。
+   `_fold_pattern_scores` はノード上の表 $\log P_{gjqk}(\eta)$ と $\log w_{gq}(\eta)$ を 1 回だけ評価し、
+   `jax.vjp` で線形化する。パターンは `lax.scan` でチャンクごとに処理する。チャンクのパターン対数尤度を
+   `jax.jacrev` で表について微分し、保存した pullback で各余接ベクトルを $\eta$ に戻して `(B, n_free)` の
+   スコアを得て、$\sum c_p s_p s_p^\top$ に足し込む。`(P, n_free)` も `(P, G, J, Q, K)` も作らない。
+   チャンクサイズは `chunk × G × Q × (1 + Σ_f J_f K_f (P_f + 1))` が $8\times10^6$ 要素（約 64 MB）以下に
+   なる最大値（上限 1024）で、度数 0 のパディング行だけのチャンクは `lax.cond` で飛ばす。微分はすべて
+   自動微分。単体テストで `score_sum`（$\sum_p c_p s_p$）を `jax.grad(marginal_loglik)` と、クロス積を
+   パターン対数尤度の密な `jax.jacfwd` と照合する。`fit()` はサンドイッチを $H$ の逆行列から NumPy で
+   組み立てる（既存の正定値チェックを使う。$H$ が正定値でなければ `FlexpyirtWarning` を出して標準誤差は
+   NaN。`crossprod` では同じチェックを $B_{\mathrm{post}}$ に行う。異なるパターン数が自由パラメタ数より
+   少ないと特異になる）。
+   **`vcov` を使う箇所。** `FitResult.vcov`、`se` 列、デルタ法の表示用 SE（`b_se`・`bk_se`、潜在分布の
+   `sd`/`cor` の SE。§15.18）、`link()`（§16.5）は `vcov` を読むので、変更なしで選んだ共分散を使う。
+   `FitResult.jsi(method="one_step")` は `vcov` を Newton ステップの観測情報行列の逆行列として使うが、
+   $V_{\mathrm{sandwich}}$・$V_{\mathrm{crossprod}}$ はそれに当たらないので、`oakes`・`hessian` 以外の当てはめでは
+   `SpecificationError` を出す。
+   **オプション名と JSON。** `se` に `"sandwich"`・`"crossprod"` を追加する（mirt の `SE.type` の綴り。
+   §15.46 の命名規則に従えば `"cross_product"` で、どちらにするかはオーナーが決める）。JSON の
+   `se_method` には同じ文字列を保存する。値の追加だけで保存名は変わらないので `schema_version` は
+   上げない（§16.4・§16.7 で潜在分布の種類を追加したときと同じ）。mirt の `"sandwich.Louis"` は $H$ を
+   Oakes ではなく Louis (1982) の式で計算するだけの同じ推定量で、どちらの式も観測情報行列を与えるので、
+   別のオプションにはしない。
+
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
+- Berndt, E. R., Hall, B. H., Hall, R. E., & Hausman, J. A. (1974). Estimation and inference in nonlinear structural models. *Annals of Economic and Social Measurement*, 3(4), 653–665.
 - Bertsekas, D. P. (1982). Projected Newton methods for optimization problems with simple constraints. *SIAM Journal on Control and Optimization*, 20(2), 221–246.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores* (pp. 397–479). Addison-Wesley.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
@@ -1333,6 +1394,7 @@ class ItemKernel(Protocol):
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
+- Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
@@ -1381,6 +1443,7 @@ class ItemKernel(Protocol):
 - Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
+- White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
