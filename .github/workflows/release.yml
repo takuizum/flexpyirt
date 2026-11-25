@@ -4,10 +4,14 @@ name: Release
 # decides the bump from the latest vX.Y.Z tag; the first release is v0.0.1.
 # The version comes from git tags (hatch-vcs), so releasing = tagging main; nothing is committed.
 #
+# The repository releases two distributions with the same version from the same tag: flexpyctt
+# (packages/flexpyctt, no JAX) and flexpyirt (the repository root), which depends on flexpyctt.
+#
 # Security (CONTRIBUTING.md): only repository admins can update main (ruleset
 # "main-release-gate"), and the publish job runs in the "release" environment, which needs the
-# owner's approval and only deploys from main. The pypi job uploads the same files to PyPI with
-# Trusted Publishing (OIDC, no API token) from the "pypi" environment.
+# owner's approval and only deploys from main. The pypi-flexpyctt and pypi jobs upload the same
+# files to PyPI with Trusted Publishing (OIDC, no API token) from the "pypi" environment, one job
+# per PyPI project, flexpyctt first.
 on:
   push:
     branches: [main]
@@ -84,7 +88,8 @@ jobs:
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.plan.outputs.version }}
         run: |
-          uv build
+          uv build --package flexpyctt
+          uv build --package flexpyirt
           ls dist
           uvx twine check --strict dist/*
 
@@ -112,17 +117,33 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "v$VERSION" -m "v$VERSION"
-          uv build
+          uv build --package flexpyctt
+          uv build --package flexpyirt
           ls dist
-          test -f "dist/flexpyirt-$VERSION-py3-none-any.whl"
-          test -f "dist/flexpyirt-$VERSION.tar.gz"
+          for name in flexpyctt flexpyirt; do
+            test -f "dist/$name-$VERSION-py3-none-any.whl"
+            test -f "dist/$name-$VERSION.tar.gz"
+          done
           uvx twine check --strict dist/*
-          uv run --isolated --no-project --with "dist/flexpyirt-$VERSION-py3-none-any.whl" \
+          uv run --isolated --no-project --with "dist/flexpyctt-$VERSION-py3-none-any.whl" \
+            python -c "import flexpyctt; assert flexpyctt.__version__ == '$VERSION'"
+          # flexpyctt is not on PyPI yet at this version, so install both wheels.
+          uv run --isolated --no-project --with "dist/flexpyctt-$VERSION-py3-none-any.whl" \
+            --with "dist/flexpyirt-$VERSION-py3-none-any.whl" \
             python -c "import flexpyirt; assert flexpyirt.__version__ == '$VERSION'"
+          # One directory per PyPI project: each pypi job uploads only its own files.
+          mkdir -p dist-flexpyctt dist-flexpyirt
+          cp dist/flexpyctt-* dist-flexpyctt/
+          cp dist/flexpyirt-* dist-flexpyirt/
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist/
+          name: dist-flexpyctt
+          path: dist-flexpyctt/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-flexpyirt
+          path: dist-flexpyirt/
           if-no-files-found: error
       - name: Push the tag and publish the GitHub Release
         env:
@@ -153,8 +174,24 @@ jobs:
             done
           done
 
-  pypi:
+  # flexpyctt goes first: flexpyirt depends on it, so it must be installable when flexpyirt appears.
+  pypi-flexpyctt:
     needs: [plan, publish]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/flexpyctt/${{ needs.plan.outputs.version }}/
+    permissions:
+      id-token: write  # Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-flexpyctt
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  pypi:
+    needs: [plan, publish, pypi-flexpyctt]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -164,6 +201,6 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: dist-flexpyirt
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1

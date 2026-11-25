@@ -21,12 +21,13 @@
 | 尺度リンキング $(A, B)$ / 目的関数（同一の項目推定値） | 1e-9 / 1e-9（相対） |
 | 尺度リンキングのデルタ法 SE / `vcov`（同一の推定値・共分散） | 1e-5（相対） |
 | 尺度リンキング $(A, B)$ / 目的関数 / SE（推定 + リンキングの一連） | 1e-6 / 1e-5（相対） / 1e-3（相対） |
-| ポリコリック相関（lavaan / psych と）、閾値、平滑化（`cor.smooth` と） | 1e-6 / 1e-3、1e-12、1e-12 |
+| ポリコリック相関（lavaan / psych と）、閾値、平滑化（`cor.smooth` と）。2 つの実装とも | 1e-6 / 1e-3、1e-12、1e-12 |
+| V24 のケースでの flexpyctt（NumPy）と flexpyirt（JAX）のポリコリック相関、Owen の $T$ による $\Phi_2$ と Plackett の積分 | 1e-9（フラグは一致）、1e-14 |
 | 同じ行列での EKC・MAP・観測固有値、正規の参照の平均 / 95 パーセンタイル | 1e-11、$\lvert z\rvert\le4.5$ / 6e-3 |
 | LD $X^2$ / $G^2$、符号付き $V$・Q3（推定し直したモデル）、モデルに基づく平行分析の観測値 / シミュレーションの平均 / 95 パーセンタイル | 1e-5（相対）、1e-6、2e-4 / $\lvert z\rvert\le4.5$ / 0.02 |
 | DETECT の条件付き共分散、指標（両方の半分）、Ward の併合の高さ | 1e-12 |
 | EFA の含意する $\Lambda\Lambda^\top$ / 共通性、CAF・CFI・RMSEA、$\chi^2$、Hull の適合度 / $st$ | 1e-4、2e-4、1e-4（相対）、1e-5 / 1e-2（相対） |
-| CD: 主因子法の $\Lambda\Lambda^\top$、同じ乱数による 1 因子の母集団、順位和の $p$、平均 RMSE | 1e-12、厳密、1e-10（相対）、15%（相対） |
+| CD: 主因子法の $\Lambda\Lambda^\top$、同じ乱数による 1 因子の母集団、順位和の $p$、平均 RMSE（採用された $k$ / 棄却された追加の $k$） | 1e-12、厳密、1e-10（相対）、15% / 60%（相対） |
 | DIMTEST（シミュレーション研究。テストではその小さい版）: .05 での第 1 種の誤り / 検出力 | 20 回中 $\le 0.15$ / 10 回中 $\ge 8$ |
 
 ## ケース一覧（マイルストーンと対応）
@@ -61,7 +62,7 @@
 | V27 | DETECT: 確認的（シミュレーションの 2 次元で正しい・誤った分割、1 次元、Science）と探索的（3 クラスタのシミュレーション、分割を指定） | sirt の `conf.detect(use_sum_score = TRUE, smooth = FALSE)`、`expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
 | V28 | EFA（ULS、ML。Hull の上限までのすべての $k$）と Hull 法（CAF、CFI、RMSEA）。V24 の行列のうち変数が 6 つ以上のものとシミュレーションの行列 2 つ | EFAtools の `EFA(method = , rotation = "none")`、`HULL(method = , gof = )`、psych の `fa(fm = "minres" / "ml", rotate = "none")` | M5 |
 | V29 | 比較データ法: 主因子法、書き出した乱数による 1 因子の母集団の生成、順位和検定、3 因子の連続・2 因子の順序・1 因子の 2 値のデータでの `CD()` | EFAtools の `.paf_iter`、`.simulate_cfm_empirical`、`CD()`、`wilcox.test(x, y, "less")` | M5 |
-| V30 | DIMTEST: 第 1 種の誤りと検出力（2PL。$N$ 1000〜2000、$J$ 20〜30。1 次元と相関 0.7〜0.8 の 2 次元。各 200 反復） | なし（DIMPACK 以外に実装がない）。`validation/simulation/dimtest_study.py` | M5 |
+| V30 | DIMTEST: 第 1 種の誤りと検出力（2PL。$N$ 1000〜2000、$J$ 20〜30。1 次元と相関 0.7〜0.8 の 2 次元。各 200 反復） | なし（DIMPACK 以外に実装がない）。`packages/flexpyctt/validation/simulation/dimtest_study.py` | M5 |
 | V31 | ジャックナイフ傾き指標（LSAT7 の 2PL、Science の GRM、依存するペア 2 組と 5% の MCAR を含むシミュレーションの 2PL、依存するペア 1 組を含むシミュレーションの GPCM）。Newton 法と 1 ステップの近似は推定し直した値と比べる | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | 次元縮約による双因子モデル（特殊因子 3 つと一般因子のみの項目 3 つを含む 2PL、テストレット 3 つの GRM $K=4$） | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 
@@ -592,11 +593,12 @@
 - **比較データ法（V29、M5）**: CD は両側とも乱数を使う。生成器は、EFAtools の乱数を R で再現し（`set.seed` の
   あと、生成器と同じ順に `sample()` / `rnorm()` を呼ぶ）、書き出して flexpyirt に与えることで厳密に確かめる。負荷量の
   符号が生成器で決まる 1 因子では厳密に一致する。選択は答えがはっきりしたデータで確かめ、平均 RMSE は各側が別の
-  母集団を引くので緩く比べる。JSON の `auto_unbox` は要素が 1 つの $p$ 値のベクトルをスカラーにするので、スクリプトは
+  母集団を引くので緩く比べる（採用された因子数では 15%。棄却された追加の因子では 60%。こちらは 1 つの母集団による
+  ばらつきがずっと大きく、EFAtools の値 0.048 に対して 6 つのシードで 0.044〜0.072 になる）。JSON の `auto_unbox` は要素が 1 つの $p$ 値のベクトルをスカラーにするので、スクリプトは
   `as.list()` で書く。
 - **DIMTEST（V30、M5）**: 参照値との照合ではなくシミュレーション研究で受け入れる（表は DESIGN §16.16）。200 反復で
-  .05 での第 1 種の誤りは 0.0〜2.0%（保守的。ブートストラップは偏りを除くが、帰無仮説の下での $T$ の SD は 0.75 程度）、
-  検出力は 0.99〜1.00。`uv run python validation/simulation/dimtest_study.py`（約 4 分）で再実行できる。テストは帰無
+  .05 での第 1 種の誤りは 0.5〜1.0%（保守的。ブートストラップは偏りを除くが、帰無仮説の下での $T$ の SD は 0.72 程度）、
+  検出力は 0.99〜1.00。`uv run python packages/flexpyctt/validation/simulation/dimtest_study.py`（約 4 分）で再実行できる。テストは帰無
   20 反復と対立 10 反復を実行する。
 - **双因子モデル（V32、M7）**: シミュレーション 2 例を `tests/test_mirt_m7_bifactor.py` で照合する（通常の EM と
   SQUAREM。生成スクリプト `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`、mirt 1.46.1 の

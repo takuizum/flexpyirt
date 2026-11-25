@@ -1,4 +1,9 @@
-"""flexpyirt: Bock–Aitkin EM estimation for item response theory models, built on JAX."""
+"""flexpyirt: Bock–Aitkin EM estimation for item response theory models, built on JAX.
+
+The model-free dimensionality tools (``parallel_analysis``, ``efa``, ``detect``, ...) are defined
+in flexpyctt and re-exported here; ``polychoric`` is flexpyirt's JAX implementation
+(DESIGN.md §16.18).
+"""
 
 from __future__ import annotations
 

@@ -924,13 +924,19 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 
 ## 16. Polychoric correlations
 
-`flexpyirt.polychoric(data)` estimates the polychoric correlation matrix of ordinal responses
+Sections 16, 17 and 19 use **flexpyctt**, the companion package for analyses that need no fitted
+model. It is installed together with flexpyirt, and can be installed on its own
+(`pip install flexpyctt`) where JAX is not wanted: it depends on NumPy, SciPy and pandas only and
+needs no 64-bit setting. Its functions take `rng` (an integer seed or a
+`numpy.random.Generator`) where they draw random numbers.
+
+`flexpyctt.polychoric(data)` estimates the polychoric correlation matrix of ordinal responses
 (tetrachoric for binary items), the usual input to eigenvalue-based checks of dimensionality. It
 uses two-step maximum likelihood (Olsson, 1979): thresholds from each item's marginal proportions,
 then one correlation per pair of items.
 
 ```python
-from flexpyirt import polychoric
+from flexpyctt import polychoric
 
 pc = polychoric(df)
 print(pc.correlation.iloc[:4, :4].round(3))
@@ -948,6 +954,8 @@ print(pc.n_obs.iloc[:2, :2])
 - A matrix assembled from pairwise estimates need not be positive definite. It is then smoothed
   (psych's `cor.smooth` rule) with a `NotPositiveDefiniteWarning`; `pc.unsmoothed_correlation`
   keeps the pairwise estimates.
+- `flexpyirt.polychoric()` is a JAX implementation of the same estimator with the same
+  arguments and result; the two agree to about $10^{-9}$.
 
 ## 17. Number of dimensions
 
@@ -955,14 +963,12 @@ Before fitting a unidimensional model it is worth asking how many dimensions the
 support. Each method below is a diagnostic with known biases, so look at several of them together.
 
 ```python
-import jax
+from flexpyctt import efa, empirical_kaiser, hull, parallel_analysis, velicer_map
 
-from flexpyirt import efa, empirical_kaiser, hull, parallel_analysis, velicer_map
-
-pa = parallel_analysis(df, key=jax.random.key(0), n_replications=20)
+pa = parallel_analysis(df, rng=0, n_replications=20)
 print(pa.n_factors, pa.observed[:3].round(3), pa.reference[:3].round(3))
 print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
-print(hull(pc, key=jax.random.key(4)).n_factors)
+print(hull(pc, rng=4).n_factors)
 print(efa(pc, n_factors=1).loadings.head(3).round(3))
 ```
 
@@ -970,7 +976,7 @@ print(efa(pc, n_factors=1).loadings.head(3).round(3))
   above the 95th percentile of eigenvalues from reference data without common factors. By
   default the reference permutes each item's responses independently, which keeps the item
   marginals; `reference="normal"` uses normal data instead, and `eigen_type="smc"` uses the
-  reduced matrix. Results depend on `key`; use more replications (the default is 100) for a
+  reduced matrix. Results depend on `rng`; use more replications (the default is 100) for a
   final analysis.
 - `velicer_map()` minimizes the average partial correlation after removing $m$ principal
   components; the revised fourth-power version is the default (`power=2` for the original).
@@ -988,9 +994,12 @@ print(efa(pc, n_factors=1).loadings.head(3).round(3))
 ## 18. Local dependence and the dimensionality report
 
 The counts of section 17 use the data only. With a fitted unidimensional model you can also ask
-whether the model leaves dependence between items unexplained.
+whether the model leaves dependence between items unexplained. These tools are part of flexpyirt
+and take a JAX PRNG `key`.
 
 ```python
+import jax
+
 from flexpyirt import dimensionality, model_parallel_analysis
 
 ld = res.local_dependence(df)
@@ -1033,13 +1042,13 @@ near zero; with several dimensions they are positive within clusters of items an
 across them.
 
 ```python
-from flexpyirt import detect, dimtest, exploratory_detect
+from flexpyctt import detect, dimtest, exploratory_detect
 
 halves = {item: ("A" if i < len(items) // 2 else "B") for i, item in enumerate(items)}
 print(detect(df, halves).indices.round(3))
-explore = exploratory_detect(df, max_clusters=3, key=jax.random.key(3))
+explore = exploratory_detect(df, max_clusters=3, rng=3)
 print(explore.table.round(3))
-test = dimtest(df, key=jax.random.key(5))
+test = dimtest(df, rng=5)
 print(test.assessment_items, round(test.statistic, 3), round(test.p_value, 3))
 ```
 

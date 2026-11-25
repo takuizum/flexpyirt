@@ -1,0 +1,77 @@
+[project]
+name = "flexpyctt"
+dynamic = ["version"]
+description = "Model-free item and test analysis: polychoric correlations and dimensionality diagnostics, without JAX."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "takuizum" }]
+keywords = [
+    "psychometrics",
+    "classical test theory",
+    "polychoric correlation",
+    "parallel analysis",
+    "factor analysis",
+    "dimensionality",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pandas>=2.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/takuizum/flexpyirt"
+Documentation = "https://takuizum.github.io/flexpyirt/"
+Repository = "https://github.com/takuizum/flexpyirt"
+Issues = "https://github.com/takuizum/flexpyirt/issues"
+Releases = "https://github.com/takuizum/flexpyirt/releases"
+
+# Enough to run this package's tests on its own (the CI job without JAX). Lint and type checks
+# run from the repository root with the root's dev group.
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-xdist>=3.8.0",
+]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+# One version for every distribution of the repository: the latest vX.Y.Z git tag at the
+# repository root (CONTRIBUTING.md "Releases").
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+root = "../.."
+fallback_version = "0.0.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flexpyctt"]
+
+# The sdist carries the sources, the tests (with the R reference values) and the R scripts.
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/validation", "/README.md", "/README.ja.md", "/LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config", "-n", "auto", "--dist", "loadfile"]
+markers = [
+    "slow: takes more than ~5 s; skipped on PR/push CI, run nightly and on release PRs. Deselect locally with -m 'not slow'.",
+]
+xfail_strict = true

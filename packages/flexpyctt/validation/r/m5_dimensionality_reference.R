@@ -1,9 +1,9 @@
 # Number-of-dimensions diagnostics (VALIDATION.md V25): EKC, MAP and parallel analysis.
 # Run from the repository root (after m5_polychoric_reference.R):
-#   Rscript validation/r/m5_dimensionality_reference.R
-# Writes tests/reference/v25_dimensionality.json. CI does not run R; the JSON is committed.
+#   Rscript packages/flexpyctt/validation/r/m5_dimensionality_reference.R
+# Writes packages/flexpyctt/tests/reference/v25_dimensionality.json. CI does not run R; the JSON is committed.
 #
-# Deterministic parts use the lavaan polychoric matrices of V24 (tests/reference/v24_polychoric.json)
+# Deterministic parts use the lavaan polychoric matrices of V24 (packages/flexpyctt/tests/reference/v24_polychoric.json)
 # as input, so they are compared exactly:
 #   * EKC: EFAtools::EKC (Braeken & van Assen, 2017).
 #   * MAP, squared partial correlations: psych::vss()$map (m >= 1) and EFA.dimensions::MAP (m >= 0).
@@ -22,7 +22,7 @@ suppressMessages({
   library(jsonlite)
 })
 
-v24 <- fromJSON(file.path("tests", "reference", "v24_polychoric.json"), simplifyVector = FALSE)
+v24 <- fromJSON(file.path("packages", "flexpyctt", "tests", "reference", "v24_polychoric.json"), simplifyVector = FALSE)
 
 as_matrix <- function(rows) do.call(rbind, lapply(rows, unlist))
 
@@ -84,6 +84,6 @@ res <- list(
   cases = cases,
   normal_reference = reference
 )
-write_json(res, file.path("tests", "reference", "v25_dimensionality.json"), auto_unbox = TRUE,
+write_json(res, file.path("packages", "flexpyctt", "tests", "reference", "v25_dimensionality.json"), auto_unbox = TRUE,
            digits = NA, null = "null", pretty = FALSE)
-cat("wrote tests/reference/v25_dimensionality.json\n")
+cat("wrote packages/flexpyctt/tests/reference/v25_dimensionality.json\n")

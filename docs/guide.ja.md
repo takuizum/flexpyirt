@@ -852,12 +852,17 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
 
 ## 16. ポリコリック相関
 
-`flexpyirt.polychoric(data)` は順序反応のポリコリック相関行列（2 値項目ではテトラコリック相関）を推定する。固有値に
+16、17、19 節では **flexpyctt** を使う。推定済みのモデルを使わない分析のための、flexpyirt と対になるパッケージで
+ある。flexpyirt と一緒にインストールされる。JAX を入れたくない環境では単独でインストールできる
+（`pip install flexpyctt`）。依存は NumPy、SciPy、pandas だけで、64 ビットの設定も要らない。乱数を使う関数は
+`rng`（整数のシードまたは `numpy.random.Generator`）を受け取る。
+
+`flexpyctt.polychoric(data)` は順序反応のポリコリック相関行列（2 値項目ではテトラコリック相関）を推定する。固有値に
 基づく次元性の確認で入力として使うのが一般的である。two-step の最尤法（Olsson, 1979）で、各項目の周辺比率から閾値を
 求め、そのうえで項目のペアごとに相関を 1 つずつ求める。
 
 ```python
-from flexpyirt import polychoric
+from flexpyctt import polychoric
 
 pc = polychoric(df)
 print(pc.correlation.iloc[:4, :4].round(3))
@@ -872,6 +877,7 @@ print(pc.n_obs.iloc[:2, :2])
   ペアは `HeywoodWarning` を出し、`pc.at_boundary` に示す。
 - ペアごとの推定値を並べた行列は正定値とは限らない。その場合は平滑化し（psych の `cor.smooth` と同じ規則）、
   `NotPositiveDefiniteWarning` を出す。`pc.unsmoothed_correlation` にはペアごとの推定値がそのまま残る。
+- `flexpyirt.polychoric()` は同じ推定量の JAX による実装で、引数と結果は同じである。2 つは $10^{-9}$ 程度で一致する。
 
 ## 17. 次元数
 
@@ -879,20 +885,18 @@ print(pc.n_obs.iloc[:2, :2])
 偏りが知られた診断なので、いくつかを合わせて見る。
 
 ```python
-import jax
+from flexpyctt import efa, empirical_kaiser, hull, parallel_analysis, velicer_map
 
-from flexpyirt import efa, empirical_kaiser, hull, parallel_analysis, velicer_map
-
-pa = parallel_analysis(df, key=jax.random.key(0), n_replications=20)
+pa = parallel_analysis(df, rng=0, n_replications=20)
 print(pa.n_factors, pa.observed[:3].round(3), pa.reference[:3].round(3))
 print(velicer_map(pc).n_factors, empirical_kaiser(pc).n_factors)
-print(hull(pc, key=jax.random.key(4)).n_factors)
+print(hull(pc, rng=4).n_factors)
 print(efa(pc, n_factors=1).loadings.head(3).round(3))
 ```
 
 - `parallel_analysis()`（Horn, 1965）は、ポリコリック相関行列の固有値のうち、共通因子をもたない参照データの固有値の
   95 パーセンタイルを上回るものを先頭から数える。既定の参照データは各項目の回答を独立に並べ替えたもので、項目の
-  周辺分布を保つ。`reference="normal"` で正規データ、`eigen_type="smc"` で縮約行列を使う。結果は `key` によって
+  周辺分布を保つ。`reference="normal"` で正規データ、`eigen_type="smc"` で縮約行列を使う。結果は `rng` によって
   変わるので、最終的な分析では反復を増やす（既定は 100）。
 - `velicer_map()` は $m$ 個の主成分を除いたあとの平均偏相関を最小にする。既定は 4 乗を使う改訂版
   （`power=2` で元の版）。
@@ -907,8 +911,11 @@ print(efa(pc, n_factors=1).loadings.head(3).round(3))
 ## 18. 局所依存と次元性のレポート
 
 17 節の数え方はデータだけを使う。1 次元モデルを推定していれば、項目間の依存をモデルが説明しきれているかも調べられる。
+これらは flexpyirt の道具で、JAX の PRNG `key` を受け取る。
 
 ```python
+import jax
+
 from flexpyirt import dimensionality, model_parallel_analysis
 
 ld = res.local_dependence(df)
@@ -943,13 +950,13 @@ DETECT（Zhang & Stout, 1999）は、総得点（または残りの得点）が�
 一次元なら、この条件付き共分散は 0 に近い。複数の次元があると、項目のクラスタ内では正、クラスタ間では負になる。
 
 ```python
-from flexpyirt import detect, dimtest, exploratory_detect
+from flexpyctt import detect, dimtest, exploratory_detect
 
 halves = {item: ("A" if i < len(items) // 2 else "B") for i, item in enumerate(items)}
 print(detect(df, halves).indices.round(3))
-explore = exploratory_detect(df, max_clusters=3, key=jax.random.key(3))
+explore = exploratory_detect(df, max_clusters=3, rng=3)
 print(explore.table.round(3))
-test = dimtest(df, key=jax.random.key(5))
+test = dimtest(df, rng=5)
 print(test.assessment_items, round(test.statistic, 3), round(test.p_value, 3))
 ```
 

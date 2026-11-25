@@ -1,12 +1,13 @@
 """DIMTEST simulation study (VALIDATION.md V30): type I error and power.
 
-Run from the repository root:  uv run python validation/simulation/dimtest_study.py
-Writes validation/simulation/dimtest_study.json. Not run in CI (minutes); the test suite runs a
+Run from the repository root:
+  uv run python packages/flexpyctt/validation/simulation/dimtest_study.py
+Writes dimtest_study.json next to this file. Not run in CI (minutes); the test suite runs a
 small version of the same conditions.
 
 Conditions: 2PL data (slopes U(0.8, 1.8), intercepts N(0, 0.8)) with J items in two halves on
 correlated dimensions; rho = 1 is unidimensional (type I error), rho < 1 two-dimensional
-(power). Each replication draws new item parameters and data and runs flexpyirt.dimtest() with
+(power). Each replication draws new item parameters and data and runs flexpyctt.dimtest() with
 its defaults (AT chosen on a third of the respondents, B = 100).
 """
 
@@ -17,13 +18,9 @@ import sys
 import time
 from pathlib import Path
 
-import jax
+import numpy as np
 
-jax.config.update("jax_enable_x64", True)  # type: ignore[no-untyped-call]
-
-import numpy as np  # noqa: E402
-
-from flexpyirt import dimtest  # noqa: E402
+from flexpyctt import dimtest
 
 OUT = Path(__file__).with_suffix(".json")
 
@@ -43,7 +40,7 @@ def run(n: int, n_items: int, rho: float, reps: int, seed: int) -> dict[str, obj
     rng = np.random.default_rng(seed)
     stats, ps = [], []
     for r in range(reps):
-        res = dimtest(simulate(rng, n, n_items, rho), key=jax.random.key(seed * 1000 + r))
+        res = dimtest(simulate(rng, n, n_items, rho), rng=seed * 1000 + r)
         stats.append(res.statistic)
         ps.append(res.p_value)
     t = np.asarray(stats)

@@ -1,13 +1,13 @@
 # Comparison data (VALIDATION.md V29) from EFAtools.
 # Run from the repository root (after m5_polychoric_reference.R and m5_efa_hull_reference.R):
-#   Rscript validation/r/m5_comparison_data_reference.R
-# Writes tests/reference/v29_comparison_data.json. CI does not run R; the JSON is committed.
+#   Rscript packages/flexpyctt/validation/r/m5_comparison_data_reference.R
+# Writes packages/flexpyctt/tests/reference/v29_comparison_data.json. CI does not run R; the JSON is committed.
 #
 # 1. Principal axis factoring as used by the generator: EFAtools:::.paf_iter from unit
 #    communalities (criterion 0.001, absolute eigenvalues, max_iter 50).
 # 2. The population generator EFAtools:::.simulate_cfm_empirical with one factor, whose random
 #    draws (resampled marginals, shared and unique normal components) are reproduced here with
-#    the same seed and exported, so flexpyirt can be fed the same draws. With one factor the
+#    the same seed and exported, so flexpyctt can be fed the same draws. With one factor the
 #    result does not depend on eigenvector signs (the generator flips the loadings when the first
 #    is negative), so it is compared exactly.
 # 3. EFAtools::CD on three data sets (suggested number and mean eigenvalue RMSE per k), and R's
@@ -17,8 +17,8 @@ suppressMessages({
   library(jsonlite)
 })
 ns <- asNamespace("EFAtools")
-v24 <- fromJSON(file.path("tests", "reference", "v24_polychoric.json"), simplifyVector = FALSE)
-v28 <- fromJSON(file.path("tests", "reference", "v28_efa_hull.json"), simplifyVector = FALSE)
+v24 <- fromJSON(file.path("packages", "flexpyctt", "tests", "reference", "v24_polychoric.json"), simplifyVector = FALSE)
+v28 <- fromJSON(file.path("packages", "flexpyctt", "tests", "reference", "v28_efa_hull.json"), simplifyVector = FALSE)
 as_matrix <- function(rows) do.call(rbind, lapply(rows, function(r) unlist(lapply(r, function(v) if (is.null(v)) NA else v))))
 rows_of <- function(m) lapply(seq_len(nrow(m)), function(i) unname(as.list(m[i, ])))
 
@@ -74,6 +74,6 @@ res <- list(
               efatools_version = as.character(packageVersion("EFAtools")), converged = TRUE),
   paf = list(case = "sim_3f", fits = paf), generator = generator, cd = cds
 )
-write_json(res, file.path("tests", "reference", "v29_comparison_data.json"), auto_unbox = TRUE,
+write_json(res, file.path("packages", "flexpyctt", "tests", "reference", "v29_comparison_data.json"), auto_unbox = TRUE,
            digits = NA, null = "null", pretty = FALSE)
-cat("wrote tests/reference/v29_comparison_data.json\n")
+cat("wrote packages/flexpyctt/tests/reference/v29_comparison_data.json\n")

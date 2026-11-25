@@ -2,17 +2,26 @@
 
 English | [日本語](reference.ja.md)
 
-The public API of flexpyirt (everything importable with `from flexpyirt import ...`). For the
-workflow see the [user guide](guide.md); for the formulas and algorithms see [Theory](theory.md).
-The docstrings carry the same information plus the formulas and sources
-(`help(flexpyirt.fit)` and so on).
+The public API of flexpyirt (everything importable with `from flexpyirt import ...`) and of its
+companion package flexpyctt. For the workflow see the [user guide](guide.md); for the formulas and
+algorithms see [Theory](theory.md). The docstrings carry the same information plus the formulas
+and sources (`help(flexpyirt.fit)` and so on).
+
+**flexpyctt** holds the tools that need no fitted model: [correlations](#correlations) and the
+model-free part of [number of dimensions](#number-of-dimensions) (each entry below says which
+package it belongs to). It depends on NumPy, SciPy and pandas only, so it can be installed without
+JAX (`pip install flexpyctt`) and needs no 64-bit setting; installing flexpyirt installs it too.
+Import its functions with `from flexpyctt import ...`. flexpyirt re-exports them under the same
+names, except `polychoric`: `flexpyirt.polychoric` is a JAX implementation of the same estimator.
+flexpyctt's functions take `rng` (an integer seed or a `numpy.random.Generator`) where they draw
+random numbers; flexpyirt's take a JAX PRNG `key`.
 
 Apart from the first one or two, arguments of public functions are keyword-only (after `*`).
 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
-- Correlations: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
-- Number of dimensions: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
+- Correlations (flexpyctt): [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
+- Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -808,6 +817,8 @@ Returned by `link()`. Immutable.
 
 ## Correlations
 
+Package: flexpyctt (`from flexpyctt import polychoric`).
+
 ### `polychoric`
 
 ```text
@@ -819,8 +830,12 @@ Polychoric correlation matrix (tetrachoric for binary items) of ordinal response
 maximum likelihood ([guide section 16](guide.md#16-polychoric-correlations)): each item's
 thresholds come from its marginal proportions, then each pair's correlation maximizes the
 likelihood of the pair's table under a discretized bivariate normal (Olsson, 1979). The
-bivariate normal probabilities use Genz's (2004) algorithm. Agrees with lavaan's `lavCor` on
+bivariate normal probabilities use Owen's (1956) $T$ function. Agrees with lavaan's `lavCor` on
 ordered variables.
+
+`flexpyirt.polychoric` has the same arguments and result and computes the same estimator with JAX
+(bivariate normal probabilities by Genz's, 2004, algorithm); it also raises `PrecisionError` when
+JAX's 64-bit mode is disabled. The two agree to about $10^{-9}$.
 
 | Argument | Type | Description |
 |---|---|---|
@@ -835,7 +850,7 @@ pair's table uses respondents who answered both items.
 
 **Returns**: [`PolychoricResult`](#polychoricresult)
 
-**Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (non-numeric data, fewer
+**Raises**: `SpecificationError` (non-numeric data, fewer
 than two items, an item with one observed category, a pair with no respondent answering both, or
 one item constant among those who did).
 
@@ -863,10 +878,14 @@ Returned by `polychoric()`. Immutable.
 These answer "how many dimensions?" as diagnostics; combine several rather than trusting one
 ([guide section 17](guide.md#17-number-of-dimensions)).
 
+Package: flexpyctt, except [`model_parallel_analysis`](#model_parallel_analysis),
+[`dimensionality`](#dimensionality), `LocalDependenceResult` and `JSIResult`, which use a fitted
+model and belong to flexpyirt.
+
 ### `parallel_analysis`
 
 ```text
-parallel_analysis(data, *, key, correlation="polychoric", eigen_type="pca",
+parallel_analysis(data, *, rng, correlation="polychoric", eigen_type="pca",
                   reference="permutation", n_replications=100, quantile=0.95,
                   zero_cell_correction=0.5) -> ParallelAnalysisResult
 ```
@@ -878,7 +897,7 @@ are counted.
 | Argument | Type | Description |
 |---|---|---|
 | `data` | DataFrame / 2-D array | Respondents x items (ordered codes, or continuous scores for `correlation="pearson"`); NaN is missing |
-| `key` | JAX PRNG key | Random key for the reference data, e.g. `jax.random.key(0)` |
+| `rng` | int / `numpy.random.Generator` | Seed or generator for the reference data, e.g. `rng=0` |
 | `correlation` | `"polychoric"` / `"pearson"` | Correlation of the data and of permutation replications (both smoothed when not positive definite) |
 | `eigen_type` | `"pca"` / `"smc"` | Eigenvalues of the correlation matrix, or of the reduced matrix with squared multiple correlations on the diagonal |
 | `reference` | `"permutation"` / `"normal"` | Permute each item independently (keeps the marginals; Garrido, Abad & Ponsoda, 2013), or i.i.d. normal data of the same size (Pearson) |
@@ -888,7 +907,7 @@ are counted.
 
 **Returns**: [`ParallelAnalysisResult`](#parallelanalysisresult)
 
-**Raises**: `PrecisionError`, `SpecificationError` (invalid options or data, fewer than 3 items).
+**Raises**: `SpecificationError` (invalid options or data, fewer than 3 items).
 
 **Warns**: `FlexpyirtWarning` when permutation replications had to be skipped (missing data
 leaving a permuted pair without usable responses).
@@ -968,7 +987,7 @@ uniqueness reaches its bound and `ConvergenceWarning` when the optimizer stops e
 ### `hull`
 
 ```text
-hull(correlation, *, n_obs=None, max_factors=None, key=None, method="uls",
+hull(correlation, *, n_obs=None, max_factors=None, rng=None, method="uls",
      fit_index="caf", n_replications=1000) -> HullResult
 ```
 
@@ -976,7 +995,7 @@ Hull method (Lorenzo-Seva, Timmerman & Kiers, 2011), as EFAtools' `HULL()`: solu
 $k = 0, \dots, J$ factors are placed by fit (CAF, CFI or $1-$RMSEA) and degrees of freedom; on the
 upper convex boundary the selected $k$ maximizes the scree ratio
 $st_k = \frac{(f_k - f_{k-1})/(df_k - df_{k-1})}{(f_{k+1} - f_k)/(df_{k+1} - df_k)}$. By default
-$J$ is one more than parallel analysis (needs `key` and `n_obs`), capped for positive degrees of
+$J$ is one more than parallel analysis (needs `rng` and `n_obs`), capped for positive degrees of
 freedom. At least 6 variables.
 
 ### `HullResult`
@@ -990,7 +1009,7 @@ freedom. At least 6 variables.
 ### `comparison_data`
 
 ```text
-comparison_data(data, *, key, max_factors=None, n_population=10000, n_samples=500,
+comparison_data(data, *, rng, max_factors=None, n_population=10000, n_samples=500,
                 alpha=0.30, max_iter=50) -> ComparisonDataResult
 ```
 
@@ -1084,11 +1103,11 @@ deviation for the partition.
 ### `exploratory_detect`
 
 ```text
-exploratory_detect(data, *, max_clusters=4, key=None,
+exploratory_detect(data, *, max_clusters=4, rng=None,
                    estimation_rows=None) -> ExploratoryDetectResult
 ```
 
-Splits the rows into an estimation half and a validation half (`key` for a random split, or
+Splits the rows into an estimation half and a validation half (`rng` for a random split, or
 `estimation_rows`), clusters the items on the estimation half by Ward's method on
 $\max(\mathrm{ccov}) - \mathrm{ccov}$, and reports DETECT, ASSI and RATIO of every partition
 into $2, \dots,$ `max_clusters` clusters on both halves.
@@ -1105,7 +1124,7 @@ into $2, \dots,$ `max_clusters` clusters on both halves.
 ### `dimtest`
 
 ```text
-dimtest(data, *, key, assessment_items=None, training_fraction=1/3, n_bootstrap=100,
+dimtest(data, *, rng, assessment_items=None, training_fraction=1/3, n_bootstrap=100,
         min_group=20, max_assessment_size=None) -> DimtestResult
 ```
 
@@ -1214,6 +1233,11 @@ Import with `from flexpyirt.errors import ...`.
 #### `FlexpyirtError`
 
 Base class of every exception flexpyirt raises on purpose.
+
+`SpecificationError` and the warning classes are shared with flexpyctt (defined in
+`flexpyctt.errors` and re-exported here), and `FlexpyirtError` / `FlexpyirtWarning` are the same
+classes as flexpyctt's bases `FlexpycttError` / `FlexpycttWarning`. Catching flexpyirt's classes
+therefore also catches what a flexpyctt function raises.
 
 #### `SpecificationError`
 

@@ -59,7 +59,8 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "full tier: $full; ref: ${ref:-(event default)}"
 
-  # Lint, types and the fast tier. The job name ("test (3.x)") is a required status check.
+  # Lint, types and the fast tier of both packages (flexpyirt at the root, flexpyctt under
+  # packages/). The job name ("test (3.x)") is a required status check.
   test:
     needs: plan
     runs-on: ubuntu-latest
@@ -95,6 +96,9 @@ jobs:
       # Parallelism (pytest-xdist, -n auto) is set in pyproject.toml.
       - name: Pytest (fast tier)
         run: uv run pytest --durations=15 -m "not slow"
+      # flexpyctt has its own pytest configuration (packages/flexpyctt/pyproject.toml).
+      - name: Pytest (flexpyctt)
+        run: uv run pytest packages/flexpyctt --durations=10
       - name: Save JAX compilation cache
         if: always() && github.event_name != 'pull_request'
         uses: actions/cache/save@v4
@@ -102,7 +106,42 @@ jobs:
           path: .jax-cache
           key: jax-fast-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-${{ github.run_id }}
       - name: Editable install smoke test (isolated env)
-        run: uv run --isolated --no-project --with-editable . python -c "import flexpyirt; print(flexpyirt.__version__)"
+        run: |
+          uv run --isolated --no-project --with-editable ./packages/flexpyctt --with-editable . \
+            python -c "import flexpyctt, flexpyirt; print(flexpyctt.__version__, flexpyirt.__version__)"
+
+  # flexpyctt installed on its own: JAX must be absent, and the whole flexpyctt suite must pass
+  # without it (DESIGN.md §16.18).
+  flexpyctt:
+    name: flexpyctt without JAX (${{ matrix.python-version }})
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+          fetch-depth: 0  # hatch-vcs derives the version from tags
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install flexpyctt only
+        run: uv sync --locked --package flexpyctt
+      - name: JAX and flexpyirt are not installed, flexpyctt imports
+        run: |
+          uv run --no-sync python -c "
+          import importlib.util as u
+          present = [m for m in ('jax', 'jaxlib', 'flexpyirt') if u.find_spec(m) is not None]
+          assert not present, present
+          import flexpyctt
+          print(flexpyctt.__version__)
+          "
+      - name: Pytest (flexpyctt, without JAX)
+        run: uv run --no-sync pytest packages/flexpyctt --durations=10
 
   # The whole suite, split into shards of about equal duration (tests/durations.json).
   test-full:
@@ -163,11 +202,23 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
-      - name: Build sdist and wheel
-        run: uv build
-      - name: Check metadata (PyPI rendering of README.md)
-        run: uvx twine check --strict dist/*
-      - name: Smoke test the wheel (isolated env)
+      - name: Build sdist and wheel of each package
         run: |
-          uv run --isolated --no-project --with dist/*.whl python -c \
-            "import flexpyirt; print(flexpyirt.__version__)"
+          uv build --package flexpyctt
+          uv build --package flexpyirt
+          ls dist
+      - name: Check metadata (PyPI rendering of each README.md)
+        run: uvx twine check --strict dist/*
+      - name: Smoke test the flexpyctt wheel alone (isolated env, no JAX)
+        run: |
+          uv run --isolated --no-project --with dist/flexpyctt-*.whl python -c "
+          import importlib.util as u
+          assert u.find_spec('jax') is None
+          import flexpyctt
+          print(flexpyctt.__version__)
+          "
+      # flexpyirt depends on flexpyctt, which may not be on PyPI at this version: install both wheels.
+      - name: Smoke test the flexpyirt wheel (isolated env)
+        run: |
+          uv run --isolated --no-project --with dist/flexpyctt-*.whl --with dist/flexpyirt-*.whl \
+            python -c "import flexpyirt, flexpyctt; assert flexpyirt.__version__ == flexpyctt.__version__; print(flexpyirt.__version__)"

@@ -2,6 +2,23 @@
 
 [English](CONTRIBUTING.md) | 日本語
 
+## パッケージ
+
+このリポジトリは uv ワークスペースで、2 つの配布物を同じバージョンで公開する（DESIGN.md §16.18）。
+
+| 配布物 | 場所 | 内容 |
+|---|---|---|
+| `flexpyirt` | リポジトリのルート（`pyproject.toml`、`src/flexpyirt/`、`tests/`、`validation/`） | 推定と、推定済みのモデルを使うものすべて。JAX と flexpyctt に依存する |
+| `flexpyctt` | `packages/flexpyctt/`（自分の `pyproject.toml`、`README.md`、`src/`、`tests/`、`validation/` を持つ） | 推定済みのモデルを使わない項目・テスト分析。依存は NumPy、SciPy、pandas だけ |
+
+- **flexpyctt は JAX も flexpyirt も import しない。** CI のジョブが flexpyctt だけをインストールし、JAX なしで
+  テストを実行する。関数は JAX のキーではなく `rng`（シードまたは `numpy.random.Generator`）を取る。
+- `FitResult` が要る道具は flexpyirt に、データだけで済む道具は flexpyctt に置く。flexpyirt は flexpyctt の公開名を
+  再公開する。
+- `packages/flexpyctt/README.md` は flexpyctt の PyPI のページになる。リンクは絶対 URL にし、開発関連の情報は置かない。
+- lint と型チェックの設定はルートの `pyproject.toml` に 1 つだけあり、両方のパッケージを対象にする。pytest の設定と
+  テストのディレクトリはパッケージごとに持つ。
+
 ## ブランチ
 
 | ブランチ | 役割 | 作り方 / マージ先 |
@@ -19,14 +36,14 @@
 ## PR とレビュー
 
 - すべての変更は PR で入れる。`main` と `develop` はルールセットで保護され、CI（`test (3.12/3.13)`）と
-  `pr-rules` が通らないとマージできない。
+  `pr-rules` が通らないとマージできない。CI では `flexpyctt without JAX (3.12/3.13)` も走る。
 - PR はリポジトリのオーナーがレビューしてからマージする（自動マージしない）。
 - 数値計算に関わる変更は、R mirt との照合テスト（[docs/dev/VALIDATION.ja.md](docs/dev/VALIDATION.ja.md)）が通ることが前提。
 
 ## リリース
 
-バージョンは **git タグ**（`vX.Y.Z`）から決まる（hatch-vcs）。`pyproject.toml` にはバージョンを書かず、
-リリースはタグを打つことで行う。タグのない開発中のコミットは `0.0.2.dev3+g1a2b3c4` のような開発版になる。
+バージョンは **git タグ**（`vX.Y.Z`）から決まる（hatch-vcs）。どの `pyproject.toml` にもバージョンを書かず、
+リリースはタグを打つことで行う。flexpyirt と flexpyctt はいつも同じバージョンになる。タグのない開発中のコミットは `0.0.2.dev3+g1a2b3c4` のような開発版になる。
 
 1. `develop` → `main` の PR を作る。**タイトルでバージョンの上げ方を決める**:
    - `release(major): ...` / `release(minor): ...` / `release(patch): ...`
@@ -34,10 +51,11 @@
 2. マージされると `.github/workflows/release.yml` が動く:
    1. `plan` ジョブ: PR タイトルと最新の `vX.Y.Z` タグから次のバージョンを決める。
    2. `publish` ジョブ: **`release` 環境の承認待ちになる**。オーナーが Actions 画面で承認すると、
-      `main` にタグ `vX.Y.Z` を打って `uv build` し、GitHub Release を作成する（wheel / sdist 添付、
-      リリースノート自動生成）。このリリースに含まれる fix PR が `Closes` していた issue を閉じる。
-   3. `pypi` ジョブ: 同じ wheel / sdist を **PyPI に公開する**（`pypi` 環境、Trusted Publishing。
-      API トークンは使わない）。
+      `main` にタグ `vX.Y.Z` を打って 2 つの配布物をビルドし（`uv build --package flexpyctt`、
+      `uv build --package flexpyirt`）、GitHub Release を作成する（wheel / sdist 添付、リリースノート自動生成）。このリリースに含まれる fix PR が `Closes` していた issue を閉じる。
+   3. `pypi-flexpyctt` ジョブ、続いて `pypi` ジョブ: 同じ wheel / sdist を **PyPI に公開する**（`pypi` 環境、
+      Trusted Publishing。API トークンは使わない）。PyPI のプロジェクトごとに 1 ジョブ。flexpyirt が flexpyctt に
+      依存するので、flexpyctt を先に公開する。
    4. 同じ `main` への push で `.github/workflows/docs.yml` がドキュメントサイトを GitHub Pages に公開する。
 3. **最初のリリース**（`v*` タグがまだない）は、タイトルの上げ方に関係なく **v0.0.1**。
 4. 手動実行（`workflow_dispatch`）は dry run 専用で、次のバージョンの計算とビルドだけを行う。
@@ -54,9 +72,9 @@
   マージできる管理者だけ。
 - **`publish` ジョブは `release` 環境で動き、指定レビュアー（オーナー）の承認が必要**。環境は `main` からしか
   デプロイできないので、他のブランチやフォークからはタグも Release も作れない。
-- **PyPI への公開は Trusted Publishing**（OIDC）。PyPI 側には「リポジトリ `takuizum/flexpyirt`、
-  ワークフロー `release.yml`、環境 `pypi`」だけを信頼する publisher を登録しているので、API トークンは
-  リポジトリに置かない。`pypi` 環境もデプロイ元を `main` に限定しておく。PyPI に一度上げた番号は
+- **PyPI への公開は Trusted Publishing**（OIDC）。PyPI のプロジェクト（`flexpyirt`、`flexpyctt`）ごとに
+  「リポジトリ `takuizum/flexpyirt`、ワークフロー `release.yml`、環境 `pypi`」だけを信頼する publisher を登録するので、
+  API トークンはリポジトリに置かない。新しいプロジェクトは、最初のリリースの前に PyPI で pending publisher を登録する。`pypi` 環境もデプロイ元を `main` に限定しておく。PyPI に一度上げた番号は
   削除しても再利用できない。
 - ワークフローの `GITHUB_TOKEN` は既定で読み取り専用（`permissions: contents: read`）。書き込みは
   `publish` ジョブだけ。フォークからの PR は読み取り専用トークンで CI と PR rules だけが走る。
@@ -69,7 +87,11 @@ Python 環境は `uv` だけで管理する（pip は使わない）。
 ```bash
 uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
+uv run pytest packages/flexpyctt
 ```
+
+`uv sync` は両方のパッケージを編集可能な形でインストールする。ruff と mypy はルートから両方を検査する。
+`uv run pytest` は flexpyirt のテスト、`uv run pytest packages/flexpyctt` は flexpyctt のテストを実行する。
 
 ### テスト
 
@@ -99,6 +121,9 @@ mirt の参照値を作り直すとき（R 4.4+ と mirt が必要）:
 Rscript validation/r/m1_reference.R
 Rscript validation/r/m2_reference.R
 ```
+
+flexpyctt の参照値のスクリプトは `packages/flexpyctt/validation/r/` にあり、`packages/flexpyctt/tests/reference/` に
+書き出す。これらもリポジトリのルートから実行する。
 
 R `mirt` との wall time ベンチマークを再実行するとき（詳細と `--quick` モードは
 [benchmarks/README.ja.md](benchmarks/README.ja.md) を参照）:

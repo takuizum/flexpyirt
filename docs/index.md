@@ -17,6 +17,11 @@ Python 3.12 or later.
 pip install flexpyirt  # or: uv add flexpyirt
 ```
 
+Installing flexpyirt also installs **flexpyctt**, its companion package for analyses that need no
+fitted model (polychoric correlations, number of dimensions, DETECT, DIMTEST). flexpyctt depends
+on NumPy, SciPy and pandas only; install it alone with `pip install flexpyctt` where JAX is not
+wanted.
+
 For polars input, install `flexpyirt[polars]`. For GPUs, install a CUDA build of `jax` first
 (see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)).
 
