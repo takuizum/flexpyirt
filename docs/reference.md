@@ -22,6 +22,8 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Correlations (flexpyctt): [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
+- Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
+- Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -123,25 +125,26 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 ```
 
 Score respondents on the fitted model ([guide section 7](guide.md#7-scoring)). Missing responses
-are dropped from the likelihood (and from $I(\theta)$ in WLE) for every method.
+are dropped from the likelihood (and from $I(\theta)$ in WLE) for every method except `"EAPsum"`.
 
 | Argument | Type | Description |
 |---|---|---|
 | `data` | DataFrame / polars DataFrame / 2-D array | Responses on the fitted items (need not be the fitting data) |
-| `method` | `"EAP"` / `"MAP"` / `"ML"` / `"WLE"` / `"PV"` | Scoring method (default `"EAP"`): EAP (posterior mean & SD on the fitted quadrature grid; Bock & Mislevy, 1982), MAP (posterior mode with continuous normal prior $N(\mu_g,\sigma_g^2)$ & observed curvature SE), ML (maximum likelihood & observed-information SE; $-\infty$/$+\infty$ with SE NaN for patterns with no finite maximum, NaN for all-missing), WLE (Warm, 1989; Firth, 1993: solves $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta))=0$, finite on extreme patterns, NaN for all-missing, SE from observed WLE curvature), or PV (`n_draws` independent posterior draws via piecewise-linear inverse-CDF interpolation on a 501-node grid; Mislevy, 1991) |
+| `method` | `"EAP"` / `"MAP"` / `"ML"` / `"WLE"` / `"PV"` / `"EAPsum"` | Scoring method (default `"EAP"`): EAP (posterior mean & SD on the fitted quadrature grid; Bock & Mislevy, 1982), MAP (posterior mode with continuous normal prior $N(\mu_g,\sigma_g^2)$ & observed curvature SE), ML (maximum likelihood & observed-information SE; $-\infty$/$+\infty$ with SE NaN for patterns with no finite maximum, NaN for all-missing), WLE (Warm, 1989; Firth, 1993: solves $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta))=0$, finite on extreme patterns, NaN for all-missing, SE from observed WLE curvature), or PV (`n_draws` independent posterior draws via piecewise-linear inverse-CDF interpolation on a 501-node grid; Mislevy, 1991), or EAPsum (posterior mean & SD given the summed score, looked up in [`summed_score_table`](#summed_score_table) of the respondent's group; NaN for a row with any missing response; unidimensional models with `Normal` latent distributions only) |
 | `group` | array, optional | Required for a multiple-group model: each row's group label |
 | `item_names` | list[str], optional | Column names when `data` is an array |
 | `key` | `jax.Array`, optional | Explicit JAX PRNG key (from `jax.random.key()` or `jax.random.PRNGKey()`). Required for `method="PV"`; must be `None` for other methods |
 | `n_draws` | int | Number of plausible values per respondent when `method="PV"` (default `5`, must be `>= 1`) |
 
 **Returns**: `DataFrame` with one row per respondent (index follows `data` when it is a
-DataFrame): for unidimensional models, columns `theta`, `se` for `"EAP"`, `"MAP"`, `"ML"`, `"WLE"`
+DataFrame): for unidimensional models, columns `theta`, `se` for `"EAP"`, `"MAP"`, `"ML"`, `"WLE"`, `"EAPsum"`
 and `pv1`…`pv{n_draws}` for `"PV"`; for multidimensional models, columns `theta_<factor>` and `se_<factor>` in declared factor
 order (`"PV"`: `pv<m>_<factor>`).
 
 **Raises**: `SpecificationError` if `method` is unknown, `method="MAP"` with an `EmpiricalHistogram`,
 `DavidianCurve` or `NormalMixture` latent distribution, `key` is missing or invalid for `"PV"`, `key` is supplied for
-a deterministic method, or `n_draws` is not a positive integer.
+a deterministic method, `n_draws` is not a positive integer, or `method="EAPsum"` with a
+multidimensional model or a latent distribution other than `Normal`.
 
 #### `FitResult.item_fit`
 
@@ -1220,6 +1223,143 @@ Runs several diagnostics and reports them side by side, with two separate consen
 | `n_supporting`, `n_unidimensionality_methods` | int | Consensus on essential unidimensionality |
 | `results` | dict | The individual results |
 | `summary()` | str | Plain-text report (also `str(result)`) |
+
+---
+
+## Information and reliability
+
+Functions of a fitted unidimensional model ([guide section 5](guide.md#information-expected-score-and-reliability)).
+All raise `SpecificationError` for a multidimensional model.
+
+### `item_information`
+
+```text
+item_information(res, theta, *, group=None) -> DataFrame
+```
+
+Fisher information of every item at the latent trait values `theta`,
+$I_j(\theta)=\sum_kP_{jk}(\theta)\,(\partial\log P_{jk}(\theta)/\partial\theta)^2$ (Birnbaum, 1968;
+Samejima, 1969), computed for every item model by automatic differentiation. It is what mirt's
+`iteminfo()` returns.
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted unidimensional model |
+| `theta` | float / 1-D array | Latent trait values (finite) |
+| `group` | str, optional | Group name; required for a multiple-group model |
+
+**Returns**: `DataFrame` with one row per value of `theta` (the index, named `theta`) and one
+column per item.
+
+### `test_information`
+
+```text
+test_information(res, theta, *, group=None) -> DataFrame
+```
+
+Test information $I(\theta)=\sum_jI_j(\theta)$ and the conditional standard error
+$1/\sqrt{I(\theta)}$ (mirt's `testinfo()`). Arguments as for
+[`item_information`](#item_information).
+
+**Returns**: `DataFrame` indexed by `theta` with the columns `information` and `se`.
+
+### `expected_score`
+
+```text
+expected_score(res, theta, *, group=None) -> DataFrame
+```
+
+Expected item scores $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ and the test characteristic curve
+$T(\theta)=\sum_jE_j(\theta)$, with categories scored $0,\dots,K_j-1$ as in the data (mirt's
+`expected.item()` and `expected.test()`). Arguments as for
+[`item_information`](#item_information).
+
+**Returns**: `DataFrame` indexed by `theta` with one column per item and the column `total`. An
+item named `total` raises `SpecificationError`.
+
+### `reliability`
+
+```text
+reliability(res, data=None, *, group=None, item_names=None) -> DataFrame
+```
+
+Marginal reliability and, with `data`, the empirical reliability of EAP scores.
+
+- **Marginal**: $\bar\rho=\int\frac{\sigma^2I(\theta)}{\sigma^2I(\theta)+1}\,\phi(\theta;\mu,\sigma^2)\,d\theta$
+  for a latent distribution $N(\mu,\sigma^2)$ and test information $I(\theta)$ (Green et al., 1984;
+  Thissen & Wainer, 2001). It equals mirt's `marginal_rxx()` for $N(0,1)$ and does not change
+  under a linear transformation of the latent scale. The integral is evaluated on 801 equally
+  spaced points on $\mu\pm8\sigma$, whatever quadrature the model was fitted with.
+- **Empirical**: $\hat\rho=s^2_{\hat\theta}/(s^2_{\hat\theta}+\overline{\mathrm{SE}^2})$ from the
+  EAP scores and standard errors of the respondents in `data` (`score(data, method="EAP")`), with
+  the sample variance $s^2_{\hat\theta}$ (denominator $N-1$). It is mirt's `empirical_rxx()`.
+  Rows with missing responses are scored and included.
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted unidimensional model with `Normal` latent distributions |
+| `data` | DataFrame / 2-D array, optional | Responses on the fitted items; adds the empirical reliability |
+| `group` | array, optional | Group label of each row of `data` (required with `data` for a multiple-group model) |
+| `item_names` | list[str], optional | Column names when `data` is an array |
+
+**Returns**: `DataFrame` with one row per group (and a leading `group` column for a
+multiple-group model): `marginal` and, with `data`, `empirical` (NaN for a group with fewer than
+two respondents in `data`).
+
+**Raises**: `SpecificationError` for a multidimensional model, an `EmpiricalHistogram`,
+`DavidianCurve` or `NormalMixture` latent distribution, or `group` / `item_names` without `data`.
+
+---
+
+## Summed scores
+
+### `summed_score_table`
+
+```text
+summed_score_table(res) -> DataFrame
+```
+
+Summed-score EAP table of a fitted model (Thissen, Pommerich, Billeaud & Williams, 1995;
+[guide section 7](guide.md#summed-score-eap)). For each summed score $s$, with the fitted
+quadrature nodes $\theta_q$ and latent weights $w_q$ and the probability $L(s\mid\theta_q)$ of the
+score from [`summed_score_distribution`](#summed_score_distribution):
+$P(s)=\sum_qL(s\mid\theta_q)w_q$, the posterior mean
+$\sum_q\theta_qL(s\mid\theta_q)w_q/P(s)$ and the posterior standard deviation. It is the table of
+mirt's `fscores(method = "EAPsum", full.scores = FALSE)`, whose `expected` column is $N\,P(s)$.
+
+**Returns**: `DataFrame` with one row per summed score $0,\dots,\sum_j(K_j-1)$ (per group and
+score, with a leading `group` column, for a multiple-group model): `score`, `theta`, `se`,
+`probability`.
+
+**Raises**: `SpecificationError` for a multidimensional model or an `EmpiricalHistogram`,
+`DavidianCurve` or `NormalMixture` latent distribution.
+
+### `summed_score_distribution`
+
+```text
+summed_score_distribution(probs, *, method="recursion", log=False) -> Array
+```
+
+Distribution of the summed score of independent item scores
+([guide section 5](guide.md#summed-score-distribution)). `probs` has shape `(..., J, K)`: the
+category probabilities of `J` items (each row sums to 1; items with fewer than `K` categories are
+padded with zeros), for example an IRT model's category probabilities at one $\theta$; leading axes
+are batch axes. The result has shape `(..., J * (K - 1) + 1)` with the probabilities of the summed
+scores $0, \dots, J(K-1)$. For dichotomous items this is the Poisson-binomial distribution. The
+function works inside `jax.jit` and `jax.vmap` and can be differentiated; values are not checked.
+
+| `method` | What it is | Accuracy |
+|---|---|---|
+| `"recursion"` (default) | Lord–Wingersky recursion | Exact; small relative error in every probability, tails included |
+| `"fft"` | Discrete Fourier transform of the characteristic function | Exact up to an absolute error of about `1e-16`; probabilities below about `1e-15` are not reliable |
+| `"normal"` | Normal approximation with continuity correction | Dichotomous items only; need not sum to exactly 1 |
+| `"refined_normal"` | Normal approximation with a skewness correction | Dichotomous items only; need not sum to exactly 1 |
+| `"poisson"` | Poisson approximation | Dichotomous items only; useful when every probability is small |
+
+`log=True` returns log probabilities. With `"recursion"` the recursion runs in log space and keeps
+tail probabilities that would underflow to 0 (it is slower); for the other methods the logarithm
+of the result is taken. Raises `SpecificationError` for a wrong shape, an unknown `method`, or an
+approximation with `K != 2`.
 
 ---
 

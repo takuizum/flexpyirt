@@ -2,7 +2,7 @@
 
 [English](DESIGN.md) | 日本語
 
-> 状態: ドラフト v0.4（2026-11-25）。マイルストーン E1〜E6 は実装し、R と照合済み（§7）。E7 は計画。
+> 状態: ドラフト v0.5（2026-11-25）。マイルストーン E1〜E7 は実装し、R と照合済み（§7）。
 > 決めたことは「決定」と書く。
 
 ## 1. 目的と対象外
@@ -87,7 +87,7 @@ $P^{-1}(p) = \tfrac12\,[P^{-1}_U(p) + P^{-1}_L(p)]$。両者が異なるのは�
 - 平均（Kolen & Brennan, 2014, 2 章）: $e_Y(x) = x - \mu_X + \mu_Y$。
 - 線形（2 章）: $e_Y(x) = \dfrac{\sigma_Y}{\sigma_X}(x - \mu_X) + \mu_Y$。
 
-SG データでは 2 つの周辺分布に同じ式を使う（X と Y の従属性が効くのは標準誤差だけ。E7）。
+SG データでは 2 つの周辺分布に同じ式を使う（X と Y の従属性が効くのは標準誤差だけ。§4.8）。
 
 **決定**: 既定は母集団分散（`ddof=0`）。Kolen & Brennan の式がそうであるため。`ddof=1` は $N - 1$ で
 割る R `equate` を再現する（§7）。
@@ -306,6 +306,235 @@ $H_2$ は、整数でないアンカー上の等化値に対して、§4.1 の�
 その母集団だからで、`moments` も合成母集団を表す。連鎖等化では母集団 1 の X と母集団 2 の Y とし、2 つの
 アンカー分布を `anchor_distributions` に保持して、`transform()` で任意の得点を等化できるようにする。
 
+### 4.8 従来手法の標準誤差（E7）
+
+`equate(..., standard_error=...)` は X の取りうる得点での等化の標準誤差を返す
+（`EquatingResult.see`、`table` の `see` 列）。
+
+**デルタ法**（`"analytic"`。Kolen, 1985; Kolen & Brennan, 2014, 7 章; Zu & Yuan, 2012）。
+Braun–Holland 以外の線形手法は、標本の平均・分散・共分散 $\theta$ の関数
+$e_Y(x) = c(\theta) + b(\theta)x$ なので、
+
+$$\mathrm{SE}[\hat e_Y(x)]^2 = g(x)^\top \Omega\, g(x), \qquad g(x) = \nabla c + x\,\nabla b,
+\qquad \Omega = \operatorname{Cov}(\hat\theta),$$
+
+$\Omega$ は独立な標本ごとのブロックからなる。大きさ $N$ の標本の得点 $A, B, \dots$ と中心モーメント
+$\mu$ について、
+
+$$N\operatorname{Cov}(\bar A, \bar B) = \sigma_{AB}, \qquad
+N\operatorname{Cov}(\bar A, s_{BC}) = \mu_{ABC}, \qquad
+N\operatorname{Cov}(s_{AB}, s_{CD}) = \mu_{ABCD} - \sigma_{AB}\sigma_{CD},$$
+
+これはセル比率の多項分布の共分散をモーメントに移したもので、分布の仮定を置かない。EG の線形等化では
+Braun & Holland (1982) の式になる。
+
+$$\mathrm{SE}^2 = \sigma_Y^2\Bigl\{\frac{1}{N_X} + \frac{1}{N_Y}
++ \Bigl[\frac{\mathrm{sk}(X)}{N_X} + \frac{\mathrm{sk}(Y)}{N_Y}\Bigr] z
++ \Bigl[\frac{\mathrm{ku}(X) - 1}{4N_X} + \frac{\mathrm{ku}(Y) - 1}{4N_Y}\Bigr] z^2\Bigr\},
+\qquad z = \frac{x - \mu_X}{\sigma_X}.$$
+
+勾配: 平均・線形等化では $\partial b/\partial\sigma_X^2 = -b/(2\sigma_X^2)$、
+$\partial b/\partial\sigma_Y^2 = b/(2\sigma_Y^2)$、
+$\nabla c = \nabla\mu_Y - b\nabla\mu_X - \mu_X\nabla b$（平均等化は $b = 1$）。Tucker 法と Levine
+観測得点法では、$\Delta_\mu = \mu_1(V) - \mu_2(V)$、$\Delta_\sigma = \sigma_1^2(V) - \sigma_2^2(V)$
+として（§4.6）、
+
+$$d\mu_s(X) = d\mu_1(X) - w_2\Delta_\mu\, d\gamma_1 - w_2\gamma_1\, d\Delta_\mu, \qquad
+d\mu_s(Y) = d\mu_2(Y) + w_1\Delta_\mu\, d\gamma_2 + w_1\gamma_2\, d\Delta_\mu,$$
+
+$$d\sigma_s^2(X) = d\sigma_1^2(X) + 2\gamma_1(-w_2\Delta_\sigma + w_1w_2\Delta_\mu^2)\, d\gamma_1
+- w_2\gamma_1^2\, d\Delta_\sigma + 2w_1w_2\gamma_1^2\Delta_\mu\, d\Delta_\mu,$$
+
+$$d\sigma_s^2(Y) = d\sigma_2^2(Y) + 2\gamma_2(w_1\Delta_\sigma + w_1w_2\Delta_\mu^2)\, d\gamma_2
++ w_1\gamma_2^2\, d\Delta_\sigma + 2w_1w_2\gamma_2^2\Delta_\mu\, d\Delta_\mu,$$
+
+$$db = \frac b2\Bigl[\frac{d\sigma_s^2(Y)}{\sigma_s^2(Y)} - \frac{d\sigma_s^2(X)}{\sigma_s^2(X)}\Bigr],
+\qquad dc = d\mu_s(Y) - b\, d\mu_s(X) - \mu_s(X)\, db,$$
+
+$d\gamma$ は $\gamma$ の定義から求める（Tucker: $\partial\gamma/\partial\sigma_{XV} =
+1/\sigma_V^2$、$\partial\gamma/\partial\sigma_V^2 = -\sigma_{XV}/\sigma_V^4$。Levine 内部アンカー:
+$\sigma_X^2$ について $1/\sigma_{XV}$、$\sigma_{XV}$ について $-\sigma_X^2/\sigma_{XV}^2$。Levine
+外部アンカー: $\sigma_X^2$、$\sigma_{XV}$、$\sigma_V^2$ についてそれぞれ
+$1/(\sigma_V^2 + \sigma_{XV})$、$(\sigma_V^2 - \sigma_X^2)/(\sigma_V^2 + \sigma_{XV})^2$、
+$-(\sigma_X^2 + \sigma_{XV})/(\sigma_V^2 + \sigma_{XV})^2$）。Levine 真値等化と連鎖線形等化も §4.6 の
+式から同じように微分する。合成母集団の重みは定数として扱う。
+
+**Braun–Holland 法**は同時分布全体に依存するので、セル確率 $p_{jl}$（母集団 1 の X と V）と
+$q_{kl}$（母集団 2 の Y と V）について微分する。$e = \mu_s(Y) + b\,(x - \mu_s(X))$、
+$A_j = -b\,x_j - b\,(x - \mu_s(X))(x_j - \mu_s(X))^2 / (2\sigma_s^2(X))$、
+$B_k = y_k + b\,(x - \mu_s(X))(y_k - \mu_s(Y))^2 / (2\sigma_s^2(Y))$、
+$\bar A_l = \sum_j A_j p_{jl}$、$\bar B_l = \sum_k B_k q_{kl}$ として、
+
+$$\frac{\partial e}{\partial p_{jl}} = A_j\Bigl[w_1 + w_2\frac{h_{2l}}{h_{1l}}\Bigr]
+- w_2\frac{h_{2l}}{h_{1l}^2}\bar A_l + w_1\frac{\bar B_l}{h_{2l}}, \qquad
+\frac{\partial e}{\partial q_{kl}} = B_k\Bigl[w_2 + w_1\frac{h_{1l}}{h_{2l}}\Bigr]
+- w_1\frac{h_{1l}}{h_{2l}^2}\bar B_l + w_2\frac{\bar A_l}{h_{1l}},$$
+
+分散は $\sum_{\text{標本}}[\sum p\,(\partial e)^2 - (\sum p\,\partial e)^2]/N$。
+
+**正規理論**（`"analytic_normal"`）: 勾配は同じで、$\Omega$ を（2 変量）正規分布のもとでの値にする。
+つまり 3 次モーメントは 0、$\mu_{ABCD} - \sigma_{AB}\sigma_{CD} =
+\sigma_{AC}\sigma_{BD} + \sigma_{AD}\sigma_{BC}$。線形等化では EG で
+$\sigma_Y^2 (1/N_X + 1/N_Y)(1 + z^2/2)$、SG で $\sigma_Y^2 (1 - \rho)[z^2(1 + \rho) + 2]/N$ になる
+（Lord, 1950; Angoff, 1971。単体テストで確認）。
+
+**等パーセンタイル等化（EG）**（Lord, 1982; Kolen & Brennan, 2014, 7 章）。$p = P(x)$（割合）、
+$y^*_U = \min\{y_k : G(y_k) > p\}$、$G_0 = G(y^*_U - \delta_Y)$、$g = G(y^*_U) - G_0$ として、
+
+$$\mathrm{SE}^2 = \frac{\delta_Y^2}{g^2}\Bigl\{\frac{p(1 - p)}{N_X}
++ \frac{1}{N_Y}\Bigl[G_0 - p^2 + \frac{(p - G_0)^2}{g}\Bigr]\Bigr\}.$$
+
+第 2 項は $Q(y)$ のデルタ法による分散そのもの。第 1 項はパーセンタイル順位を二項比率として扱っており、
+離散得点ではその分散を $f(x)/(4N_X)$ だけ大きく見積もる。したがってこの式は近似である。参照用の 3 つの
+データでは、パーセンタイル順位が 2〜98 の得点で、ブートストラップ標準誤差（2000 回）と Lord の式の比は
+0.87〜1.13、平均は 0.98〜1.01 だった。
+
+**ブートストラップ**（`"bootstrap"`。Kolen & Brennan, 2014, 7 章。`equate::bootstrap` と同じ）。
+`n_replications` 回の反復それぞれで、各標本から $N$ 人を復元抽出する。度数データでは、観測された
+相対度数を確率とする多項分布からの抽出になる（同時分布はセルを再抽出するので、2 つの得点の従属性は
+保たれる）。X の標本を先に、Y の標本を後に抽出する。各ブートストラップ標本を同じ手法で等化し、等化後
+得点の標準偏差（分母 $B - 1$）を標準誤差とする。`bootstrap_mean` はその平均。
+
+| 手法（デザイン） | `analytic` | `analytic_normal` | `bootstrap` |
+|---|---|---|---|
+| 恒等 | 0 | 0 | 0 |
+| 平均・線形（EG） | あり（Braun & Holland, 1982） | あり | あり |
+| 平均・線形（SG） | あり | あり | あり |
+| 等パーセンタイル（EG） | あり（Lord, 1982） | なし | あり |
+| 等パーセンタイル（SG） | なし | なし | あり |
+| Tucker、Levine 観測得点、連鎖線形 | あり | あり | あり |
+| Levine 真値 | あり | あり | あり |
+| Braun–Holland | あり（セル確率） | なし | あり |
+| 頻度推定、連鎖等パーセンタイル | なし | なし | あり |
+
+**決定**: 標準誤差は別の関数にせず `equate()` のオプションにする（既定は `standard_error=None` で、
+これまでの呼び出しは変わらない）。入力も検証済みのオプションも同じだから。
+
+**決定**: `"analytic"` は分布を仮定しないデルタ法を指す。R `equate` はアンカーテストの手法で両方を、
+EG では分布を仮定しないものだけを返す。正規理論版は別の選択肢 `"analytic_normal"` にする。
+
+**決定**: 解析的な式に代入する分散・共分散は、等化関数と同じく `ddof` に従う。3 次・4 次モーメントは
+常に $N$ で割る。`ddof=1` なら EG の線形等化で `equate` の標準誤差と完全に一致する。
+
+**決定**: ブートストラップは `rng`（`numpy.random.Generator` か非負の整数シード）を必須にし、なければ
+エラーにする。どのブートストラップ結果も再現できるようにするため。引数名は flexpyctt と同じ `rng`、
+反復回数は flexpyirt と同じ `n_replications`。
+
+**決定**: 合成母集団の重みの既定値 $N_1/(N_1 + N_2)$ はデータから一度だけ計算し、ブートストラップ標本
+の間で固定する（標本サイズは変わらない）。
+
+**決定**: 等化できないブートストラップ標本（分散のない得点、Levine 法で共分散が正でない、結果が有限で
+ない）は除き、`SparseDataWarning` で数を知らせる。結果の `n_replications` は実際に使った数。使える
+標本が 2 つ未満ならエラー。
+
+**決定**: $x$ のパーセンタイル順位が 0 か 1 のところでは、Lord の標準誤差を 0 とする（`equate` と
+同じ）。式が値を持たないため。
+
+**決定**: 3 種類とも度数を観測値として扱う。事前平滑化した分布を入力にすると、解析的な式はモデルを
+当てはめたことを無視し、ブートストラップは平滑化した分布から再当てはめなしに抽出する（モデルを固定
+したパラメトリック・ブートストラップ）。標本サイズは度数の合計（ブートストラップでは四捨五入）。
+事前平滑化を考慮した標準誤差は扱わない（下記）。カーネル等化にはある。
+
+**決定**: Braun–Holland 法の解析的標準誤差は、一方の母集団にしかないアンカー得点があるとエラーにする
+（微分が存在しない）。ブートストラップは使える。
+
+**扱わないもの**: SG の等パーセンタイル等化、頻度推定、連鎖等パーセンタイル等化の解析的標準誤差
+（文献に式はある。例: Jarjoura & Kolen, 1985; Liou & Cheng, 1995。R `equate` に照合先がないので
+ブートストラップのみ）。`equate()` で事前平滑化を考慮した標準誤差（`equate::bootstrap` のように
+ブートストラップ標本ごとに対数線形モデルを当てはめ直す）。`kernel_equate()` のブートストラップ標準
+誤差。ブートストラップによるバイアス、RMSE、パーセンタイル区間。
+
+### 4.9 他のカーネルとバンド幅の選び方（E7）
+
+**カーネル**（Lee & von Davier, 2011）。分布関数 $K$、密度 $k$、平均 0、分散 $\sigma_V^2$ のカーネル
+変数 $V$ を使うと、§4.5 の連続化は次のようになる。
+
+$$F_h(x) = \sum_j r_j\, K\bigl(R_{jX}(x)\bigr), \qquad
+R_{jX}(x) = \frac{x - a_X x_j - (1 - a_X)\mu_X}{a_X h_X}, \qquad
+a_X^2 = \frac{\sigma_X^2}{\sigma_X^2 + \sigma_V^2 h_X^2},$$
+
+$$f_h(x) = \frac{1}{a_X h_X}\sum_j r_j\, k\bigl(R_{jX}(x)\bigr), \qquad
+f_h'(x) = \frac{1}{(a_X h_X)^2}\sum_j r_j\, k'\bigl(R_{jX}(x)\bigr),$$
+
+SEE に使う微分は形が変わらず、
+$\partial F_h(x)/\partial r_j = K(R_{jX}(x)) - M_{jX}(x) f_h(x)$（$M_{jX}$ は同じ、$a_X$ はその
+カーネルのもの）。平均と分散はどのカーネルでも保たれる（単体テスト）。
+
+| `kernel` | $K(z)$ | $k(z)$ | $k'(z)$ | $\sigma_V^2$ |
+|---|---|---|---|---|
+| `"gaussian"` | $\Phi(z)$ | $\phi(z)$ | $-z\phi(z)$ | 1 |
+| `"logistic"` | $1/(1 + e^{-z})$ | $K(1 - K)$ | $k\,(1 - 2K)$ | $\pi^2/3$ |
+| `"uniform"` | $\min\{\max(z + \tfrac12, 0), 1\}$ | $[-\tfrac12, \tfrac12)$ で 1 | 0 | $1/12$ |
+
+§4.5 のすべてのデザイン、SEE、SEED、PRE は、カーネルを差し替えた同じコードで計算する。§4.5 の
+ペナルティはそのカーネルの密度で計算する。一様カーネルでは第 2 項が 0 になる。
+
+**決定**: ロジスティックカーネルは標準ロジスティック、一様カーネルは $(-1/2, 1/2)$ 上の一様分布とする。
+Lee & von Davier の「標準」版であり、`kequate`（`slog = 1`、`bunif = 0.5`）と `SNSequate` の既定でも
+ある。尺度を変えた版はバンド幅を変えた同じ連続化（$\sigma_{V1} h_1 = \sigma_{V2} h_2$）なので、尺度
+パラメータは用意しない。
+
+**決定**: 一様カーネルの密度は半開区間 $[-1/2, 1/2)$ で 1 とする。隣り合うカーネルが接するところで
+二重に数えないため（R の `dunif` は両端を含む）。違いが出るのは測度 0 の集合だけ。
+
+**決定**: 一様カーネルでは、連続化した分布の台の外と、$h$ が得点の刻み幅より小さいときの得点の間で
+$F_h$ が平らになる。分位点は台の中に収め、等化後得点で Y の密度が 0 のところは SEE を `nan` にする
+（デルタ法が使えない）。バンド幅を刻み幅以上にすれば隙間はできない。
+
+**決定**: 一様カーネルでは `linear=True` を受け付けない。台が有界なので、バンド幅を大きくしても線形
+関数にならない。ロジスティックカーネルでは線形になる。`kequate` は線形関数と SEED を常にガウス
+カーネルで計算する。こちらでは `result.seed(kernel_equate(..., linear=True))` がそれにあたる。
+
+**決定**: 一様カーネルのペナルティは、カーネルの端が取りうる得点を通過するところで不連続に変わる。
+他のカーネルと同じ探索（格子、続いて区間を限った局所探索）を使い、見つかった最良の点を返す。
+
+**バンド幅の選び方**（`bandwidth_method`、ガウスカーネル）。ペナルティのほかに:
+
+- `"rule_of_thumb"`（Andersson & von Davier, 2014）:
+  $h = 9\sigma/\sqrt{100N^{2/5} - 81}$。実際に使う密度に対する Silverman の経験則
+  $a h = 0.9\,\sigma N^{-1/5}$ を $h$ について解いたもの。
+- `"double_smoothing"`（Häggström & Wiberg, 2014）。大きなバンド幅 $g$ のパイロット連続化 $f_g$ を
+  未知の密度の代わりに使う。取りうる得点とその中点からなる格子 $x^*_l$（$l = 1..2J - 1$）の上で、
+
+  $$\mathrm{DS}(h) = \sum_l \Bigl[\sum_j f_g(x_j)\,\frac{1}{a h}\phi\bigl(R_j(x^*_l)\bigr)
+  - r^*_l\Bigr]^2,$$
+
+  $r^*_l$ は取りうる得点では $r_j$、中点では $f_g(x^*_l)$。
+- `"cross_validation"`: `kequate` の 1 個抜き基準。
+
+  $$\mathrm{CV}(h) = \sum_j \bigl(r_j - \hat r_{(j)}\bigr)^2, \qquad
+  \hat r_{(j)} = \frac{\sum_{i \ne j} r_i\,\phi(R_i(x_j))}{\sum_{i \ne j}\phi(R_i(x_j))}.$$
+
+ペナルティと同じく、後の 2 つは得点を刻み幅の単位で測って計算し、§4.5 の格子探索と局所探索で最小化
+する。
+
+**決定**: 3 つの規則は `kernel_equate()` のオプション（`bandwidth_method`）にする。使ったバンド幅は
+結果に入る。公開関数は増やさない。
+
+**決定**: 経験則の $\sigma$ は連続化する分布の標準偏差（連続化の他の部分と同じ母集団形。`kequate` は
+分散に $N/(N - 1)$ を掛ける）。$N$ はその版を受けた標本の大きさ: EG では $N_X$・$N_Y$、SG では $N$、
+アンカーテストのデザインでは X（とそのアンカー）に母集団 P、Y（とそのアンカー）に母集団 Q の大きさ
+（`kequate` と同じ）。各版が 2 つの標本で観測される CB デザインでは受け付けない。
+
+**決定**: 二重平滑化のパイロットバンド幅は得点の刻み幅の 4 倍とし、候補はそれ未満で探す。出典は
+パイロットを「大きく、主観的に選ぶ」としており、4 は `kequate` の値（探索区間の上端）。上限を置かない
+と、短いテスト（参照データの 9 点のアンカー）では基準が最大のバンド幅で最小になる。
+
+**決定**: `"cross_validation"` は `kequate` の基準（`CV = TRUE`）で、名前もそれに合わせる。標本を
+無作為に 2 つに分けて繰り返す Liang & von Davier (2014) の尤度交差検証ではない。今回は原論文を入手
+できず、上の式は Wallin, Häggström & Wiberg (2021) と `kequate` のソースによる。検証の限界として
+ここに記す。
+
+**決定**: SEE は、どの規則でも選んだバンド幅を固定値として扱う（同書がペナルティについてそうして
+いるのと同じ）。Andersson & von Davier (2014) は、$h$ が $\hat\sigma$ に比例することを考慮した経験則
+用の SEE を与えている。`kequate` のその実装（`altopt = TRUE`）はこちらで導いた微分と一致しない
+（§7）ので、使える参照がなく、扱わない。
+
+**扱わないもの**: `SNSequate` の Epanechnikov カーネルと適応カーネル。`kequate` の
+`"stdgaussian"` カーネル。ロジスティック・一様カーネルの尺度パラメータ。ガウス以外のカーネルでの
+バンド幅規則。Liang & von Davier (2014) の尤度交差検証。データに依存するバンド幅についての
+Andersson & von Davier (2014) の SEE。CB デザインでの経験則。
+
 ## 5. 公開 API のスケッチ
 
 ```python
@@ -353,6 +582,26 @@ levine = fe.equate(xa, ya, method="levine_observed", anchor="internal", syntheti
 tucker.gamma, tucker.synthetic_moments, tucker.synthetic_weight
 fe.equate(xa, ya, method="frequency_estimation")
 fe.equate(xa, ya, method="chained_equipercentile")
+
+# 等化の標準誤差（E7）。
+fe.equate(x, y, method="linear", standard_error="analytic").table  # score, equated, see
+fe.equate(xa, ya, method="tucker", standard_error="analytic_normal").see
+boot = fe.equate(
+    xa,
+    ya,
+    method="chained_equipercentile",
+    standard_error="bootstrap",
+    n_replications=1000,
+    rng=20261125,
+)
+boot.see, boot.bootstrap_mean, boot.n_replications
+
+# 他のカーネルとバンド幅の選び方（E7）。
+fe.kernel_equate(smooth_x, smooth_y, kernel="logistic")
+fe.kernel_equate(smooth_x, smooth_y, kernel="uniform", bandwidth_x=1.0, bandwidth_y=1.0)
+fe.penalty_bandwidth(smooth_x, kernel="logistic")
+fe.kernel_equate(smooth_x, smooth_y, bandwidth_method="double_smoothing")  # "rule_of_thumb"、
+ke.kernel, ke.bandwidth_method  # "cross_validation" も
 ```
 
 - データより後ろの引数はすべて keyword-only。選択肢は小文字 snake_case の `Literal` 文字列:
@@ -365,7 +614,10 @@ fe.equate(xa, ya, method="chained_equipercentile")
   `SpecificationError`（引数が矛盾）、`ConvergenceWarning`、`SparseDataWarning`。
 - 名前は Python の名前にする。役に立つところでは R の名前を docstring に書く（`ddof=1` ↔ R `equate` の
   分散、`penalty_weight` ↔ `kequate` の `KPEN`）。
-- 計画（E7）: `equate()` の標準誤差（解析的・ブートストラップ）、他のカーネル。
+- `equate()` の `standard_error="analytic" | "analytic_normal" | "bootstrap"`（`n_replications` と
+  `rng` を伴う）。`kernel_equate()` の `kernel="gaussian" | "logistic" | "uniform"` と
+  `bandwidth_method="penalty" | "rule_of_thumb" | "double_smoothing" | "cross_validation"`
+  （§4.8、§4.9）。
 
 ## 6. 構成
 
@@ -378,6 +630,7 @@ packages/flexpyequate/
     distributions.py    ScoreDistribution, BivariateScoreDistribution
     equating.py         equate(), EquatingResult
     _neat.py            アンカーテストつき非等価群の式
+    _standard_errors.py 従来手法のデルタ法による標準誤差
     presmoothing.py     presmooth(), LoglinearResult
     kernel.py           kernel_equate(), KernelEquatingResult
     errors.py
@@ -397,7 +650,12 @@ Rscript validation/r/equate_e3_reference.R
 Rscript validation/r/equate_e4_reference.R
 Rscript validation/r/equate_e5_reference.R
 Rscript validation/r/equate_e6_reference.R
+Rscript validation/r/equate_e7_standard_errors_reference.R  # 約 10 分（equate::bootstrap）
+Rscript validation/r/equate_e7_kernel_reference.R           # E3・E6 のファイルを読む
 ```
+
+E7 の 2 つの生成スクリプトは、コミット済みの E1・E3・E4・E6 の参照ファイルからデータを読む。それらを
+先に生成しておくこと。
 
 ### ケース
 
@@ -411,6 +669,10 @@ Rscript validation/r/equate_e6_reference.R
 | Q6 | Tucker、Levine 観測得点、Braun–Holland（それぞれ合成母集団の重み 4 通り）、Levine 真値、連鎖線形。内部アンカー（`KBneat`）と外部アンカー（シミュレーション。標本サイズと版の長さが異なる） | `equate::equate(type = "linear", method = "tucker" / "levine" / "braun/holland" / "chained", lts = )`、母集団モーメントで Kolen & Brennan の式を書き下した R 実装 | E4 |
 | Q7 | 頻度推定（合成母集団の重み 4 通り）と連鎖等パーセンタイル等化。`KBneat` と外部アンカーのシミュレーションデータ。2 変量対数線形モデルで事前平滑化した `KBneat` での両手法 | `equate::equate(type = "equipercentile", method = "frequency estimation" / "chained", smoothmethod = )`、丸めをしない Kolen & Brennan の R 実装 | E5 |
 | Q8 | SG（事前平滑化あり・なし）、CB（重み 3 通り）、NEAT PSE（重み 3 通り）、NEAT CE のカーネル等化。等化後得点、SEE、線形版とカーネル対線形の SEED、PRE、ペナルティによるバンド幅 | `kequate::kequate("SG" / "CB" / "NEAT_PSE" / "NEAT_CE", ...)`、デザイン関数を書き下し全セル確率についての有限差分で SEE を求める R 実装 | E6 |
+| Q9 | 解析的標準誤差。平均・線形等化（EG の 3 データと SG）、等パーセンタイル等化の Lord の標準誤差（EG）、Tucker と Levine 観測得点（合成母集団の重み 3 通り）、Levine 真値、連鎖線形、Braun–Holland（内部アンカーの `KBneat` と外部アンカーのシミュレーションデータ）。分布を仮定しない版と正規理論版 | `equate::equate(..., verbose = TRUE)$concordance$se`（EG の線形と等パーセンタイル。Tucker、Levine 観測得点、連鎖は `se.g` と `se.n`）、全度数を 1e6 倍した同じ呼び出し、全セル確率（正規理論版はモーメント）についての有限差分ヤコビアンでデルタ法を書き下した R 実装 | E7 |
+| Q10 | ブートストラップ標準誤差（2000 回）。EG と SG の線形・等パーセンタイル、Tucker、連鎖線形、頻度推定、連鎖等パーセンタイル | `equate::bootstrap(reps = 2000)`。2 つのモンテカルロ推定値の**統計的な**比較（R の乱数は再現できない）。解析的標準誤差との単体テスト、再抽出の手順の単体テスト | E7 |
+| Q11 | すべてのデザイン（EG、SG、CB は重み 2 通り、PSE は重み 2 通り、CE）でのロジスティック・一様カーネル。連続化 CDF と密度、等化後得点、SEE、ガウスの線形関数に対する SEED、PRE、ペナルティの値とペナルティによるバンド幅 | `kequate::kequate(..., kernel = "logistic" / "uniform")`、`kequate:::PEN`、`SNSequate::bandwidth(kert = "logis" / "unif")`、一般のカーネルの連続化を書き下し有限差分で SEE を求める R 実装 | E7 |
+| Q12 | 経験則、二重平滑化、1 個抜き交差検証によるバンド幅（取りうる得点が 9〜41 個の 8 分布）。格子上の基準の値。EG と CE での一連の計算 | `kequate:::bandwidth.select("altopt" / "DS" / "CV")`、`kequate:::DS`、`kequate:::CV`、`kequate(..., DS = TRUE)`、`kequate(..., CV = TRUE)`、基準を書き下した R 実装 | E7 |
 
 ### 許容誤差（断りがなければ最大絶対差）
 
@@ -444,9 +706,60 @@ Rscript validation/r/equate_e6_reference.R
 | SG・CB・PSE・CE: カーネル等化の等化後得点、SEE（相対）、PRE、バンド幅（$K = 0$） | 分散の係数を除いた `kequate` | 1e-6、1e-6、1e-5、1e-6 |
 | SG・CB・PSE・CE: 線形版の等化後得点、線形版の SEE とカーネル対線形の SEED（相対） | 分散の係数を除いた `kequate` | 1e-6、1e-5 |
 | カーネル等化の等化後得点 / SEE（相対） / バンド幅 | 通常の `kequate` 呼び出し | 5e-3 / 1e-3 / 1e-4 |
+| EG の線形等化の標準誤差（`ddof=1`、相対） | `equate` | 1e-10 |
+| 連鎖線形の標準誤差（分布を仮定しない版・正規理論版、相対） | `equate` | 1e-10 |
+| Tucker、Levine 観測得点の標準誤差（両方の版、相対） | 度数を 1e6 倍した `equate` | 1e-8 |
+| 同上（`ddof=0` と `ddof=1`、相対） | 通常の `equate` 呼び出し | 2e-3 |
+| 平均・線形（EG・SG）、Tucker、Levine 観測得点・真値、連鎖線形、Braun–Holland の標準誤差と正規理論版（相対） | 独立 R 実装（有限差分） | 1e-8 |
+| EG の等パーセンタイル等化の Lord の標準誤差（絶対・相対） | `equate` | 1e-6 |
+| ブートストラップ標準誤差（2000 回、相対）: 各得点 / 得点についての平均 | `equate::bootstrap`（2000 回） | 0.12 / 0.06（統計的） |
+| ロジスティック・一様カーネル: CDF、密度 | 独立 R 実装 | 1e-12 |
+| ロジスティック・一様カーネル、全デザイン: 等化後得点、SEE（相対） | 独立 R 実装 | 1e-9、1e-6 |
+| ロジスティック・一様カーネル、全デザイン: 等化後得点、SEE（相対）、ガウスの線形関数に対する SEED（相対）、PRE | 分散の係数を除いた `kequate` | 1e-6、1e-6、1e-5、5e-5 |
+| ロジスティック・一様カーネルのペナルティの値（相対） | `kequate:::PEN`（$K = 0$）、独立 R 実装（$K = 0, 1$） | 1e-10 |
+| ロジスティック・一様カーネルのペナルティによるバンド幅 | `kequate`（$K = 0$）、独立 R 実装 | 1e-6 |
+| ロジスティック・一様カーネルのペナルティによるバンド幅（$K = 1$） | `SNSequate::bandwidth` | 1e-5 |
+| 二重平滑化・交差検証の基準の値（相対） | `kequate:::DS`、`kequate:::CV`、独立 R 実装 | 1e-10 |
+| 二重平滑化のバンド幅 | 分散の係数を除いた `kequate`、独立 R 実装 | 1e-6 |
+| 交差検証のバンド幅 | 分散の係数を除いた `kequate`、独立 R 実装 | 1e-5 |
+| 経験則のバンド幅（相対） | 係数 $\sqrt{N/(N-1)}$ を掛けた上での `kequate`、独立 R 実装 | 1e-10 |
+| 二重平滑化・交差検証の一連の計算（EG、CE）: 等化後得点、SEE（相対） | 分散の係数を除いた `kequate(..., DS = TRUE / CV = TRUE)` | 1e-5、1e-5 |
 
 実際の差はこれより十分小さい。`kequate` に対して SEE は 1e-8 程度、等化後得点は 2e-7 程度（後者は
 `kequate` の求根精度による）。
+
+E7 での実測値（全ケースでの最大）:
+
+| 量 | 参照 | 実測 |
+|---|---|---|
+| EG の線形等化の標準誤差、`ddof=1`（相対） | `equate` | 1.9e-14 |
+| 連鎖線形の標準誤差（相対） | `equate` | 3.6e-15 |
+| Tucker、Levine 観測得点の標準誤差（相対） | 度数を 1e6 倍した `equate` | 8.1e-10 |
+| Tucker、Levine 観測得点の標準誤差（相対） | 通常の `equate` | 7.6e-4（`ddof=0`）、3.4e-4（`ddof=1`） |
+| デルタ法の標準誤差すべて、両方の版（相対） | 独立 R 実装 | 4.3e-10 |
+| 正規性のもとでの SG の線形等化の標準誤差（相対） | 閉形式 $\sigma_Y^2(1-\rho)[z^2(1+\rho)+2]/N$ | 4.6e-15 |
+| Lord の標準誤差（絶対、相対） | `equate` | 1.4e-7、1.7e-7 |
+| 線形手法のブートストラップ標準誤差（相対、最悪の得点） | `equate::bootstrap` | 0.054 |
+| 等パーセンタイル手法のブートストラップ標準誤差、パーセンタイル順位 2〜98（相対、最悪の得点） | `equate::bootstrap` | 0.074 |
+| ブートストラップ標準誤差の得点についての平均（相対、最悪のケース） | `equate::bootstrap` | 0.038 |
+| ロジスティック・一様カーネル: 等化後得点、SEE（相対） | 独立 R 実装 | 4.4e-11、1.3e-9 |
+| ロジスティック・一様カーネル: 等化後得点、SEE（相対）、SEED（相対）、PRE | 分散の係数を除いた `kequate` | 5.5e-7、1.5e-7、5.3e-8、9.3e-6 |
+| ペナルティの値（相対） | `kequate:::PEN`、独立実装 | 2.4e-13 |
+| ロジスティック・一様カーネルのペナルティによるバンド幅 | `kequate`、独立実装、`SNSequate` | 1.3e-8、7.4e-9、6.6e-9 |
+| 二重平滑化・交差検証の基準の値（相対） | `kequate`、独立実装 | 9.8e-15 |
+| 二重平滑化のバンド幅 | `kequate`、独立実装 | 1.8e-8、9.4e-9 |
+| 交差検証のバンド幅 | `kequate`、独立実装 | 2.6e-7、1.3e-6 |
+| 経験則のバンド幅（相対） | `kequate`、独立実装 | 2.5e-13、4.9e-15 |
+| 一連の計算（EG、CE）: 等化後得点、SEE（相対） | `kequate(DS = TRUE / CV = TRUE)` | 7.7e-7、7.2e-7 |
+
+**ブートストラップの R との一致は統計的なもので、数値的なものではない。** R と NumPy の乱数生成器は
+異なるので、2 つのブートストラップ標準誤差は同じ量の 2 つのモンテカルロ推定値である。それぞれ
+$B = 2000$ 回なら、比の標準偏差は得点ごとに約 $1/\sqrt{B} = 2.2\%$。ブートストラップは 3 通りに検証
+している。(a) 手法とデザインの 8 通りの組み合わせで解析的標準誤差と比べる（1500 回、許容誤差は
+モンテカルロ標準誤差の 5 倍に 3% を加えたもの）。(b) 文書に書いた再抽出の手順（多項分布の度数、X の
+標本を先に Y の標本を後に、分母 $B - 1$ の標準偏差）をテスト内で書き下し、同じシードから `see` と
+`bootstrap_mean` が丸め誤差の範囲で再現されることを EG・SG・アンカーテストのデザインで確かめる
+（決定的なテスト）。(c) `equate::bootstrap` と上の許容誤差で比べる。
 
 ### R パッケージとの既知の違い
 
@@ -488,11 +801,67 @@ Rscript validation/r/equate_e6_reference.R
   単体テストだけで確認している。
 - **`SNSequate::ker.eq`** は等化後得点を $(-1, 101)$ の範囲で探し、−1 を下回る得点があると失敗する
   （試した 2 ケースのうち 1 つ）。バンド幅は 0.65 から始めた `optim()` で求めている。
+- **`equate` の Tucker・Levine 観測得点等化の標準誤差**は、母集団形（$N$ で割る）の分散・共分散から
+  計算するが、$\gamma$ と合成母集団の平均・標準偏差には $N - 1$ を使う等化関数のものを使う。この混在で
+  標準誤差は相対的に $1/N$ 程度変わる（参照データで最大 7.6e-4）。flexpyequate の `ddof` をどちらに
+  しても同じ。全度数を $10^6$ 倍して（結果を $10^3$ 倍して）比べると 2 つの形は一致し、差は 1e-9 に
+  なる。連鎖線形等化は影響を受けない（1 つの母集団の中での比だから）。
+- **`equate` には解析的標準誤差がない**手法がある: 平均等化、SG デザイン、Levine 真値等化、
+  Braun–Holland 法、アンカーテストの等パーセンタイル手法（最初の 2 つの関数は `NULL` を返す）。
+  flexpyequate のものは有限差分による独立実装と照合し、最後のものはブートストラップのみとする。
+- **`equate` の等パーセンタイル等化の標準誤差**には得点の刻み幅が入っていないので、Y の刻み幅が
+  $\delta_Y \ne 1$ のときは刻み幅の単位になる。flexpyequate は $\delta_Y$ を掛ける。パーセンタイル
+  順位は小数 10 桁に丸められる（一致は 2e-7）。
+- **`equate::bootstrap` と得点範囲の両端**: パーセンタイル順位が 0 か 1 のところで `equate` と
+  flexpyequate は等パーセンタイル等化の値の定義が異なり（上記）、最低点・最高点付近のブートストラップ
+  標準誤差に差が出る（参照データで比が 0.48 まで下がる）。比較にはパーセンタイル順位が 2〜98 の得点を
+  使う。頻度推定では `equate` の実効的な合成母集団の重み（上記）を渡す。
+- **`kequate` のロジスティックカーネルのペナルティ**は、密度の微分に余分な係数 $1/(a h)$ を掛けている。
+  正の数なので、符号もペナルティも変わらない。
+- **`kequate` はバンド幅の探索範囲**を $(0, 4)$（一様カーネルでは $(0, 2.618)$）に限り、局所探索の
+  `optimize()` を使う。flexpyequate はまず刻み幅の $(0.05, 10)$ 倍の格子を調べる（二重平滑化は
+  パイロットバンド幅 4 まで）。参照ケースではすべて同じバンド幅が選ばれた。
+- **`kequate` の `altopt`**（経験則）は、バージョン 1.6.4 では `CV = TRUE` と併用したときだけバンド幅
+  に反映され、$h \propto \hat\sigma$ を考慮した別の微分 $\partial F/\partial r$ に切り替わる。
+  $h = c\sigma$ として $F$ を微分すると $\tfrac12 a\,z_j^2 \sum_k x_k r_k \phi(R_k)/(a h)$ という項が
+  出るが、`kequate` のものには係数 $a$ がない。また EG のコードは Y の版に X の平均を渡している。その
+  ため、この SEE は参照に使わず、バンド幅だけを比べる。
+- **`kequate` の `CV`** は得点についての 1 個抜き基準で、標本を分割する Liang & von Davier (2014) の
+  尤度交差検証ではない。`kequate` の `DS` は差の 2 乗の項だけを（平均として）返す。最小点は和の場合と
+  同じ。
 - 独立実装の SEE では、得点確率が 5e-6 程度のところで、刻み 1e-6 の 2 点差分は精度が足りない（誤差
   1.4e-3）。生成スクリプトは刻み 1e-7 の 5 点差分を使う。
 
 ## 参考文献
 
+- Andersson, B., & von Davier, A. A. (2014). Improving the bandwidth selection in kernel
+  equating. *Journal of Educational Measurement, 51*, 223–238.
+- Angoff, W. H. (1971). Scales, norms, and equivalent scores. In R. L. Thorndike (Ed.),
+  *Educational measurement* (2nd ed., pp. 508–600). American Council on Education.
+- Braun, H. I., & Holland, P. W. (1982). Observed-score test equating: A mathematical analysis
+  of some ETS equating procedures. In P. W. Holland & D. B. Rubin (Eds.), *Test equating*
+  (pp. 9–49). Academic Press.
+- Häggström, J., & Wiberg, M. (2014). Optimal bandwidth selection in observed-score kernel
+  equating. *Journal of Educational Measurement, 51*, 201–211.
+- Jarjoura, D., & Kolen, M. J. (1985). Standard errors of equipercentile equating for the
+  common item nonequivalent populations design. *Journal of Educational Statistics, 10*,
+  143–160.
+- Kolen, M. J. (1985). Standard errors of Tucker equating. *Applied Psychological Measurement,
+  9*, 209–223.
+- Lee, Y.-H., & von Davier, A. A. (2011). Equating through alternative kernels. In A. A. von
+  Davier (Ed.), *Statistical models for test equating, scaling, and linking* (pp. 159–173).
+  Springer.（ETS RR-08-12 として参照）
+- Liang, T., & von Davier, A. A. (2014). Cross-validation: An alternative bandwidth selection
+  method in kernel equating. *Applied Psychological Measurement, 38*, 281–295.
+- Liou, M., & Cheng, P. E. (1995). Asymptotic standard error of equipercentile equating.
+  *Journal of Educational and Behavioral Statistics, 20*, 259–286.
+- Lord, F. M. (1950). *Notes on comparable scales for test scores* (ETS RB-50-48).
+- Lord, F. M. (1982). The standard error of equipercentile equating. *Journal of Educational
+  Statistics, 7*, 165–174.
+- Wallin, G., Häggström, J., & Wiberg, M. (2021). How important is the choice of bandwidth in
+  kernel equating? *Applied Psychological Measurement, 45*, 518–535.
+- Zu, J., & Yuan, K.-H. (2012). Standard error of linear observed-score equating for the NEAT
+  design with nonnormally distributed data. *Journal of Educational Measurement, 49*, 190–213.
 - Holland, P. W., & Thayer, D. T. (1987). *Notes on the use of log-linear models for fitting
   discrete probability distributions* (ETS RR-87-31).
 - Holland, P. W., & Thayer, D. T. (2000). Univariate and bivariate loglinear models for discrete

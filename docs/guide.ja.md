@@ -275,6 +275,68 @@ fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
 print(fit_table.round(3))
 ```
 
+### 合計得点の分布
+
+`summed_score_distribution(probs)` は、項目得点が独立でカテゴリ確率が `probs`（形は `(..., J, K)`）のときの
+合計得点の分布を返す。$\theta$ を固定した IRT モデルがちょうどこの状況にあたる。2 値項目なら Poisson 二項分布で、
+既定の方法は Lord–Wingersky 再帰（上の S-X2 も同じものを使う）。先頭の軸はバッチ軸なので、1 回の呼び出しで
+全求積節点を計算できる。
+
+```python
+import jax.numpy as jnp
+
+from flexpyirt import summed_score_distribution
+
+theta_grid = jnp.linspace(-3.0, 3.0, 7)
+a_ss = jnp.array([1.2, 0.8, 1.5, 1.0, 1.7])
+b_ss = jnp.array([-1.0, -0.3, 0.0, 0.6, 1.2])
+p_correct = 1.0 / (1.0 + jnp.exp(-a_ss * (theta_grid[:, None] - b_ss)))  # (7 nodes, 5 items)
+probs_ss = jnp.stack([1.0 - p_correct, p_correct], axis=-1)  # (7, 5, 2)
+
+score_dist = summed_score_distribution(probs_ss)  # (7, 6): P(S = 0..5 | theta)
+print(np.round(np.asarray(score_dist), 3))
+print(np.asarray(score_dist).sum(axis=1))  # each row sums to 1
+```
+
+`method="fft"` はもう 1 つの厳密な方法だが、誤差が絶対誤差（約 `1e-16`）なので、ごく小さい裾の確率には向かない。
+`"normal"`・`"refined_normal"`・`"poisson"` は 2 値項目用の近似。`log=True` は対数確率を返し、アンダーフローする
+裾も保つ。結果は R の `poibin` と mirt の合計得点の表と照合している。詳しくは
+[リファレンス](reference.ja.md#summed_score_distribution)を参照。
+
+### 情報関数・期待得点・信頼性
+
+`item_information(res, theta)` と `test_information(res, theta)` は、`theta` の各値での項目ごと・テスト全体の
+Fisher 情報量を返す。`expected_score(res, theta)` は項目の期待得点とその和（テスト特性曲線）を返す。1 次元の
+推定結果なら、どの項目モデルでも使える。どれも `theta` をインデックスにした DataFrame を返すので、`.plot()` で
+そのまま曲線が描ける。`test_information` には条件付き標準誤差 `se` $=1/\sqrt{I(\theta)}$ も入る。
+
+`reliability(res)` は周辺信頼性を返す。誤差分散 $1/I(\theta)$ の得点の信頼性
+$\sigma^2/(\sigma^2+1/I(\theta))$ を、推定された潜在分布で平均したもの。反応データを渡して
+`reliability(res, data)` とすると、その受検者の EAP 得点の経験的信頼性（得点の分散を、その分散と標準誤差の
+2 乗の平均との和で割った値）が加わる。
+
+```python
+from flexpyirt import expected_score, item_information, reliability, test_information
+
+theta_values = np.linspace(-3.0, 3.0, 13)
+item_info = item_information(res, theta_values)  # インデックスは theta、項目ごとに 1 列
+test_info = test_information(res, theta_values)  # 列 information, se
+tcc = expected_score(res, theta_values)  # 項目ごとの列と total
+print(item_info.iloc[:3, :3].round(3))
+print(test_info.head(3).round(3))
+print(tcc["total"].head(3).round(2))
+
+print(reliability(res))  # 列 marginal
+print(reliability(res, df))  # データを渡すと列 marginal, empirical
+```
+
+- 多母集団モデルでは、`theta` の関数 3 つに `group="<群名>"` が必要。`reliability()` は群ごとに 1 行を返す
+  （`data` を渡すときは `group=labels` も渡す）。
+- 潜在分布が $N(0, 1)$ なら、周辺信頼性は mirt の `marginal_rxx()` と一致する。平均や分散がそれ以外のとき、
+  mirt の関数は推定された分布を使わない。flexpyirt の値は推定された分布を使い、潜在尺度を線形変換しても
+  変わらない。
+- `reliability()` は潜在分布が `Normal` のときに使える。
+
 ### 限定情報の適合度（M2）
 
 `m2(data)` は Maydeu-Olivares & Joe (2005, 2006) の限定情報の適合度統計量を、項目得点の平均とペアごとの交差積
@@ -342,7 +404,7 @@ print((res_sw.parameters["se"] / res.parameters["se"]).describe())  # モデル�
 
 ## 7. スコアリング
 
-`FitResult.score()` は 5 つの手法で回答者ごとの潜在能力 $\theta$ を推定する。
+`FitResult.score()` は 6 つの手法で回答者ごとの潜在能力 $\theta$ を推定する。
 
 | `method` | 内容 | 極端パターン（全最低・全最高） | 全項目欠測の行 | 使い分け |
 |---|---|---|---|---|
@@ -352,9 +414,12 @@ print((res_sw.parameters["se"] / res.parameters["se"]).describe())  # モデル�
 | `"WLE"` | 重み付き最尤推定 $\partial\log L/\partial\theta + I'(\theta)/(2I(\theta))=0$ と観測曲率 SE（Warm, 1989; Firth, 1993） | 有限 | NaN、SE は NaN | 事前分布なしで有限テストのバイアスを抑え、極端パターンも有限にしたいとき |
 | `"PV"` | 事後分布から回答者ごとに独立に `n_draws` 個を抽出（Mislevy, 1991）、列 `pv1..pvM` | 有限 | 事前分布から抽出 | 測定誤差を伝播させる母集団統計・回帰などの二次解析 |
 
-- ベイズ手法（`"EAP"`, `"MAP"`, `"PV"`）は回答者の群の推定済み潜在分布を事前分布に使い、`"ML"` と
+| `"EAPsum"` | 反応パターンではなく合計得点を与えたときの事後平均と事後 SD（Thissen et al., 1995） | 有限 | NaN、SE は NaN | 合計得点だけで決まる得点がほしいとき（得点換算表） |
+
+- ベイズ手法（`"EAP"`, `"MAP"`, `"PV"`, `"EAPsum"`）は回答者の群の推定済み潜在分布を事前分布に使い、`"ML"` と
   `"WLE"` は項目尤度のみを使う。
-- どの手法でも欠測反応は尤度（`"WLE"` ではテスト情報量 $I(\theta)$ も）から除かれる。3PL / 4PL では、
+- `"EAPsum"` 以外の手法では、欠測反応は尤度（`"WLE"` ではテスト情報量 $I(\theta)$ も）から除かれる。`"EAPsum"` は
+  欠測が 1 つでもある行に NaN を返す（下記）。3PL / 4PL では、
   当て推量により尤度が $-\infty$ へ向かって単調増加する低得点パターンも `"ML"` で $-\infty$・SE NaN となる。
   `Nominal` 項目の「最低」「最高」はカテゴリ傾き $a\,\mathrm{ak}_c$ が最小・最大のカテゴリで、カテゴリ 0 / $K-1$
   とは限らない（例: $\mathrm{ak}_1<0$ では全 0 パターンの ML 推定値は有限。mirt はそこで $-\infty$ を返す。
@@ -382,6 +447,27 @@ print(res.score(new, method="MAP"))
 ```
 
 採点に使うデータは、推定に使ったデータと別でもよい（列は同じ項目）。
+
+### 合計得点による EAP
+
+`summed_score_table(res)` は、とりうる合計得点ごとに、その得点の受検者の $\theta$ の事後平均（`theta`）と事後
+標準偏差（`se`）、および推定されたモデルの下でその得点になる確率（`probability`）を並べた表を返す。合計得点から
+$\theta$ の尺度への換算表である。`score(data, method="EAPsum")` は各受検者をこの表で引く。
+
+```python
+from flexpyirt import summed_score_table
+
+score_table = summed_score_table(res)  # 列 score, theta, se, probability
+print(score_table.head(4).round(3))
+scores_sum = res.score(df, method="EAPsum")  # 各行の合計得点に対応する theta, se
+print(scores_sum.head(3))
+```
+
+- 欠測のある受検者は NaN になる。項目数の少ない合計得点はこの表と比べられないため（mirt も `NA` を返す）。
+  欠測のあるデータには `"EAP"` を使う。
+- 表は `"EAP"` と同じく、推定に使った求積格子と潜在分布を使う。多母集団モデルでは `group` 列がつき、各受検者は
+  自分の群の表で採点される。
+- 1 次元で、潜在分布が `Normal` のモデルに限る。
 
 ## 8. 潜在分布と識別性
 
