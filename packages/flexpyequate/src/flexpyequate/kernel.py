@@ -252,13 +252,16 @@ def _penalty(
     return value
 
 
-def _minimize_over_bandwidth(criterion: Callable[[float], float]) -> float:
+def _minimize_over_bandwidth(
+    criterion: Callable[[float], float], upper: float = _BANDWIDTH_RANGE[1]
+) -> float:
     """Minimize a bandwidth criterion: grid search, then a bounded search around the best point.
 
-    The bandwidth is in units of the score increment and is searched between 0.05 and 10. A grid
-    comes first because the criteria can have several local minima and jumps.
+    The bandwidth is in units of the score increment and is searched between 0.05 and ``upper``
+    (10 by default). A grid comes first because the criteria can have several local minima and
+    jumps.
     """
-    grid = np.geomspace(*_BANDWIDTH_RANGE, _N_GRID)
+    grid = np.geomspace(_BANDWIDTH_RANGE[0], upper, _N_GRID)
     values = np.array([criterion(float(h)) for h in grid])
     best = int(np.argmin(values))
     lower = grid[max(best - 1, 0)]
@@ -397,7 +400,8 @@ def _select_bandwidth(
     unit_scores = (scores - scores[0]) / increment
     if method == "double_smoothing":
         unit_bandwidth = _minimize_over_bandwidth(
-            lambda h: _double_smoothing(h, unit_scores, probabilities, _PILOT_BANDWIDTH)
+            lambda h: _double_smoothing(h, unit_scores, probabilities, _PILOT_BANDWIDTH),
+            upper=_PILOT_BANDWIDTH,
         )
     else:
         unit_bandwidth = _minimize_over_bandwidth(
@@ -933,7 +937,8 @@ def kernel_equate(
         \frac{\partial F(x)}{\partial r_j} = K\bigl(R_{jX}(x)\bigr) - M_{jX}(x)\, F'(x),
 
     with :math:`M_{jX}(x) = \tfrac12 (x - \mu_X)(1 - a_X^2)[(x_j - \mu_X)/\sigma_X]^2 +
-    (1 - a_X) x_j` for every kernel, where :math:`C C^\top` is the covariance of the estimated probabilities of each sample
+    (1 - a_X) x_j` for every kernel, where :math:`C C^\top` is the covariance of the estimated
+    probabilities of each sample
     (:attr:`LoglinearResult.c_matrix` divided by :math:`\sqrt N` for a presmoothed distribution,
     the multinomial covariance otherwise) and :math:`J_{DF}` the Jacobian of the design function.
     For chained equating the chain rule gives, with :math:`a = H_P^{-1}(F_P(x))`,
@@ -1004,7 +1009,7 @@ def kernel_equate(
           over the possible scores and the points halfway between them, where :math:`f_g` is a
           pilot continuization with bandwidth :math:`g` (4 score increments, as in
           ``kequate``) and :math:`r^*_l` is :math:`r_j` at a possible score and :math:`f_g`
-          halfway between two.
+          halfway between two. The minimum is searched below the pilot bandwidth.
         - ``"cross_validation"``: minimizes the leave-one-out criterion of ``kequate``,
           :math:`\sum_j (r_j - \hat r_{(j)})^2` with :math:`\hat r_{(j)} = \sum_{i \ne j} r_i
           \phi(R_i(x_j)) / \sum_{i \ne j} \phi(R_i(x_j))`. (Not the likelihood

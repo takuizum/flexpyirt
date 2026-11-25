@@ -307,8 +307,8 @@ cross_validation <- function(h, scores, p) {
   mean((p - as.vector(w %*% p) / rowSums(w))^2)
 }
 rule_of_thumb <- function(scores, p, n) 9 * sqrt(moments(scores, p)[2]) / sqrt(100 * n^(2 / 5) - 81)
-minimize <- function(f, ...) {
-  grid <- exp(seq(log(0.05), log(10), length.out = 2000))
+minimize <- function(f, ..., upper = 10) {
+  grid <- exp(seq(log(0.05), log(upper), length.out = 2000))
   values <- vapply(grid, f, numeric(1), ...)
   i <- which.min(values)
   optimize(f, c(grid[max(i - 1, 1)], grid[min(i + 1, length(grid))]), ..., tol = 1e-12)$minimum
@@ -336,7 +336,8 @@ rule_case <- function(name, scores, p, n) {
     independent = list(
       double_smoothing_values = vapply(RULE_GRID, double_smoothing, numeric(1), scores = scores, p = p),
       cross_validation_values = vapply(RULE_GRID, cross_validation, numeric(1), scores = scores, p = p),
-      double_smoothing = minimize(double_smoothing, scores = scores, p = p),
+      # Candidates stay below the pilot bandwidth (4), as in kequate.
+      double_smoothing = minimize(double_smoothing, scores = scores, p = p, upper = 4),
       cross_validation = minimize(cross_validation, scores = scores, p = p),
       rule_of_thumb = rule_of_thumb(scores, p, n)))
 }
