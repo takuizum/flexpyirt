@@ -238,11 +238,14 @@ def compress_patterns(
     With ``weights``, a pattern's count is the sum of its rows' weights (§17.4).
     """
     keyed = np.column_stack([group, y])
-    uniq, inverse, counts = np.unique(keyed, axis=0, return_inverse=True, return_counts=True)
+    uniq, inverse, n_rows = np.unique(keyed, axis=0, return_inverse=True, return_counts=True)
     inverse = inverse.reshape(-1)
-    if weights is not None:
-        counts = np.bincount(inverse, weights=weights, minlength=uniq.shape[0])
-    return uniq[:, 1:], uniq[:, 0], counts.astype(float), inverse
+    counts: np.ndarray = (
+        n_rows.astype(float)
+        if weights is None
+        else np.bincount(inverse, weights=weights, minlength=uniq.shape[0]).astype(float)
+    )
+    return uniq[:, 1:], uniq[:, 0], counts, inverse
 
 
 def pad_patterns(
