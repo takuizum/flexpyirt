@@ -1,9 +1,11 @@
-"""Differentiable IRT scale linking (Result / Python shell layer, DESIGN.md §16.5).
+r"""Differentiable IRT scale linking (Result / Python shell layer, DESIGN.md §16.5).
 
 Public entry point :func:`link` and result object :class:`LinkResult` for characteristic-curve
-linking of two separately calibrated unidimensional scales via common items (Haebara, 1980;
-Stocking & Lord, 1983; Kim & Lee, 2006; Kolen & Brennan, 2014), with delta-method standard errors
-from the implicit function theorem via JAX automatic differentiation (Ogasawara, 2001).
+linking of two separately calibrated scales via common items (Haebara, 1980; Stocking & Lord,
+1983; Kim & Lee, 2006; Kolen & Brennan, 2014), with delta-method standard errors from the implicit
+function theorem via JAX automatic differentiation (Ogasawara, 2001). Confirmatory
+multidimensional models are linked by :math:`\theta^*=\mathbf A\theta+\boldsymbol\beta` (Li &
+Lissitz, 2000; Oshima, Davey & Lee, 2000; DESIGN.md §19).
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+import scipy.linalg
 
 from flexpyirt._compile import LATENT_ITEM
 from flexpyirt._core import _latent_log_weights_group
@@ -27,23 +30,35 @@ from flexpyirt._linking import (
     LinkingFamily,
     LinkingProblem,
     LinkMethod,
+    LinkTransformation,
     linking_vcov,
+    multidim_linking_vcov,
     solve_linking,
+    solve_multidim_linking,
     transform_kernel_params,
+    transform_multidim_kernel_params,
+    unpack_transformation,
 )
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import ConvergenceWarning, SpecificationError
-from flexpyirt.items import ItemKernel, NominalKernel
+from flexpyirt.items import GPCMKernel, ItemKernel, NominalKernel
 from flexpyirt.latent import davidian_param_names, latent_param_names, mixture_param_names
 from flexpyirt.result import _HTML_STYLE, FitResult, _frame_to_html_table
 
-__all__ = ["LinkMethod", "LinkResult", "link"]
+__all__ = ["LinkMethod", "LinkResult", "LinkTransformation", "link"]
 
 _LINK_METHODS: tuple[str, ...] = ("haebara", "stocking_lord")
+_LINK_TRANSFORMATIONS: tuple[str, ...] = ("diagonal", "orthogonal", "oblique")
 _PV_COL_RE = re.compile(r"^pv\d+$")
 
 _solve_linking = jax.jit(solve_linking, static_argnames=("method", "symmetric"))
 _linking_vcov = jax.jit(linking_vcov, static_argnames=("method", "symmetric"))
+_solve_multidim_linking = jax.jit(
+    solve_multidim_linking, static_argnames=("method", "symmetric", "transformation")
+)
+_multidim_linking_vcov = jax.jit(
+    multidim_linking_vcov, static_argnames=("method", "symmetric", "transformation")
+)
 
 
 def _resolve_group(res: FitResult, group: str | None, role: str) -> tuple[str, int]:
@@ -121,7 +136,10 @@ def _resolve_common_items(
 
 
 def _fitted_grid(res: FitResult, group_name: str, group_idx: int) -> tuple[np.ndarray, np.ndarray]:
-    r"""Return ``(nodes, weights)`` of ``res``'s fitted unidimensional latent distribution.
+    r"""Return ``(nodes, weights)`` of ``res``'s fitted latent distribution.
+
+    For a model with :math:`D > 1` factors, ``nodes`` is the ``(Q, D)`` product grid and the
+    weights are the fitted multivariate normal's (DESIGN.md §15.30, §19).
 
     The weights are those the EM integrates with (DESIGN.md §4.4, §15.44, §16.4, §16.7): the
     fitted histogram for ``EmpiricalHistogram``; otherwise
@@ -130,8 +148,23 @@ def _fitted_grid(res: FitResult, group_name: str, group_idx: int) -> tuple[np.nd
     the fitted latent density :math:`g` (``Normal``, the standardized ``DavidianCurve`` or
     ``NormalMixture``, whose components are each normalized on the grid).
     """
-    nodes = res._quadrature.nodes().astype(np.float64)
     model = res._model
+    n_factors = model.n_factors
+    if n_factors > 1:
+        grid = res._quadrature.grid(n_factors).astype(np.float64)
+        lat_md = res.parameters[
+            (res.parameters["group"] == group_name) & (res.parameters["item"] == LATENT_ITEM)
+        ].set_index("param")["estimate"]
+        names_md = list(model.latent_parameter_names())
+        logw_md = _latent_log_weights_group(
+            jnp.asarray(grid, dtype=jnp.float64),
+            jnp.asarray(res._quadrature.base_log_weights(n_factors), dtype=jnp.float64),
+            jnp.asarray(lat_md.loc[names_md].to_numpy(dtype=np.float64)),
+            (0, 0),
+        )
+        w_md = np.exp(np.asarray(logw_md, dtype=np.float64))
+        return grid, w_md / float(np.sum(w_md))
+    nodes = res._quadrature.nodes().astype(np.float64)
     if model.is_empirical_histogram:
         assert res._eh_weights is not None
         w = np.asarray(res._eh_weights[group_idx], dtype=np.float64)
@@ -168,6 +201,24 @@ def _coerce_1d_float(arr: Any, name: str) -> np.ndarray:
     return out
 
 
+def _coerce_nodes(arr: Any, n_factors: int) -> np.ndarray:
+    """Validate user ``nodes``: 1-D for one factor, ``(Q, D)`` for ``D > 1`` factors."""
+    if n_factors == 1:
+        return _coerce_1d_float(arr, "nodes")
+    try:
+        out = np.asarray(arr, dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise SpecificationError("nodes must be a 2-D numeric array.") from exc
+    if out.ndim != 2 or out.shape[0] == 0 or out.shape[1] != n_factors:
+        raise SpecificationError(
+            f"nodes must have shape (Q, {n_factors}) for a {n_factors}-factor model, got "
+            f"{out.shape}."
+        )
+    if not np.all(np.isfinite(out)):
+        raise SpecificationError("nodes must contain only finite values.")
+    return out
+
+
 def _resolve_grids(
     source: FitResult,
     src_gname: str,
@@ -185,12 +236,13 @@ def _resolve_grids(
         return tgt_nodes, tgt_weights, src_nodes, src_weights
 
     if nodes is not None:
-        u_nodes = _coerce_1d_float(nodes, "nodes")
+        u_nodes = _coerce_nodes(nodes, target._model.n_factors)
+        n_nodes = u_nodes.shape[0]
         if weights is None:
-            u_weights = np.full(u_nodes.shape, 1.0 / u_nodes.size, dtype=np.float64)
+            u_weights = np.full((n_nodes,), 1.0 / n_nodes, dtype=np.float64)
         else:
             u_weights = _coerce_1d_float(weights, "weights")
-            if u_weights.shape != u_nodes.shape:
+            if u_weights.shape != (n_nodes,):
                 raise SpecificationError(
                     f"weights shape {u_weights.shape} must match nodes shape {u_nodes.shape}."
                 )
@@ -202,10 +254,10 @@ def _resolve_grids(
     # nodes is None and weights is not None
     tgt_nodes, _ = _fitted_grid(target, tgt_gname, tgt_gidx)
     u_weights = _coerce_1d_float(weights, "weights")
-    if u_weights.shape != tgt_nodes.shape:
+    if u_weights.shape != (tgt_nodes.shape[0],):
         raise SpecificationError(
             f"weights length {u_weights.size} must match target's quadrature length "
-            f"{tgt_nodes.size} when nodes= is omitted."
+            f"{tgt_nodes.shape[0]} when nodes= is omitted."
         )
     if np.any(u_weights < 0.0) or float(np.sum(u_weights)) <= 0.0:
         raise SpecificationError("weights must be non-negative with a positive sum.")
@@ -280,16 +332,89 @@ def _mean_mean_start(
     return np.array([a0, b0], dtype=np.float64)
 
 
+def _intercept_multipliers(kernel: ItemKernel, params: np.ndarray) -> np.ndarray:
+    r"""Multiplier :math:`m_k` of the linear predictor for each intercept (DESIGN.md §19).
+
+    1 for dichotomous and graded intercepts, :math:`k` for GPCM/PCM and :math:`\mathrm{ak}_k`
+    for the nominal model, aligned with ``kernel.intercept_params``.
+    """
+    n_intercepts = len(kernel.intercept_params)
+    if isinstance(kernel, GPCMKernel):
+        return np.arange(1, n_intercepts + 1, dtype=np.float64)
+    if isinstance(kernel, NominalKernel):
+        d = kernel.n_factors
+        return np.concatenate([params[d : d + n_intercepts - 1], [float(n_intercepts)]])
+    return np.ones(n_intercepts, dtype=np.float64)
+
+
+def _multidim_start(
+    pairs: list[tuple[str, str]],
+    kernels: dict[str, ItemKernel],
+    src_est: dict[str, np.ndarray],
+    tgt_est: dict[str, np.ndarray],
+    n_factors: int,
+    transformation: LinkTransformation,
+) -> np.ndarray:
+    r"""Return starting transformation parameters for multidimensional linking (DESIGN.md §19).
+
+    With :math:`X_s, X_t` the common items' slope matrices, :math:`\mathbf a_s=\mathbf A^\top
+    \mathbf a_t` gives the least-squares :math:`\mathbf A_0=X_t^{+}X_s` (oblique; the direct
+    estimate of Oshima, Davey & Lee, 2000), its polar factor the orthogonal start, and
+    :math:`A_{m,0}=\sum_j|a^{\mathrm{src}}_{jm}|/\sum_j|a^{\mathrm{tgt}}_{jm}|` the diagonal
+    start. :math:`\boldsymbol\beta_0` solves :math:`d^{\mathrm{tgt}}_{jk}-d^{\mathrm{src}}_{jk}
+    =-m_k\,\mathbf a_j^{\mathrm{tgt}\top}\boldsymbol\beta` by least squares.
+    """
+    d = n_factors
+    x_s = np.stack([src_est[s][:d] for s, _ in pairs])
+    x_t = np.stack([tgt_est[t][:d] for _, t in pairs])
+    sum_s, sum_t = np.abs(x_s).sum(axis=0), np.abs(x_t).sum(axis=0)
+    scales = np.where((sum_s > 1e-8) & (sum_t > 1e-8), sum_s / np.maximum(sum_t, 1e-8), 1.0)
+
+    rows: list[np.ndarray] = []
+    rhs: list[float] = []
+    for s, t in pairs:
+        kernel = kernels[s]
+        names = list(kernel.param_names)
+        at = [names.index(p) for p in kernel.intercept_params]
+        for idx, mult in zip(at, _intercept_multipliers(kernel, tgt_est[t]), strict=True):
+            rows.append(-mult * tgt_est[t][:d])
+            rhs.append(float(tgt_est[t][idx] - src_est[s][idx]))
+    beta = np.linalg.lstsq(np.stack(rows), np.asarray(rhs), rcond=None)[0]
+    if not np.all(np.isfinite(beta)):
+        beta = np.zeros(d)
+
+    if transformation == "diagonal":
+        return np.concatenate([scales, beta])
+    a_ls = np.linalg.lstsq(x_t, x_s, rcond=None)[0]
+    usable = bool(np.all(np.isfinite(a_ls))) and float(np.linalg.det(a_ls)) > 1e-6
+    if transformation == "oblique":
+        return np.concatenate([(a_ls if usable else np.diag(scales)).reshape(-1), beta])
+    angles = np.zeros(d * (d - 1) // 2)
+    dilation = float(np.mean(scales))
+    if usable:
+        u, sing, vt = np.linalg.svd(a_ls)
+        rot = u @ vt
+        if float(np.linalg.det(rot)) > 0.0:
+            log_rot = np.real(scipy.linalg.logm(rot))
+            upper = np.triu_indices(d, k=1)
+            candidate = -0.5 * (log_rot - log_rot.T)[upper]
+            if np.all(np.isfinite(candidate)):
+                angles = candidate
+                dilation = float(np.mean(sing))
+    return np.concatenate([[dilation], angles, beta])
+
+
 def _transformed_items_table(
     source: FitResult,
     src_est: dict[str, np.ndarray],
     common_src: set[str],
-    a_const: float,
-    b_const: float,
+    a_const: float | np.ndarray,
+    b_const: float | np.ndarray,
 ) -> pd.DataFrame:
     """Transform all source items to the target scale, adding display IRT thresholds."""
     a_arr = jnp.asarray(a_const, dtype=jnp.float64)
     b_arr = jnp.asarray(b_const, dtype=jnp.float64)
+    transform = transform_kernel_params if a_arr.ndim == 0 else transform_multidim_kernel_params
 
     param_cols = list(
         dict.fromkeys(
@@ -304,9 +429,7 @@ def _transformed_items_table(
     rows: list[dict[str, Any]] = []
     for name, item_model in source._model.items:
         kernel = source._model.item_kernel(item_model)
-        xi_star = transform_kernel_params(
-            kernel, jnp.asarray(src_est[name], dtype=jnp.float64), a_arr, b_arr
-        )
+        xi_star = transform(kernel, jnp.asarray(src_est[name], dtype=jnp.float64), a_arr, b_arr)
         b_star = kernel.irt_thresholds(xi_star)
         row: dict[str, Any] = {
             "item": name,
@@ -329,26 +452,40 @@ def _transformed_items_table(
 class LinkResult:
     r"""Result of :func:`flexpyirt.link` for linear transformation :math:`\theta^* = A\theta + B`.
 
+    For models with :math:`D > 1` factors the transformation is
+    :math:`\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta` and the constants
+    are arrays (DESIGN.md §19).
+
     Attributes
     ----------
-    A : float
-        Slope linking constant (:math:`A > 0`).
-    B : float
-        Intercept linking constant.
-    A_se : float
-        Delta-method standard error of ``A`` (Ogasawara, 2001), or ``NaN`` if unavailable.
-    B_se : float
-        Delta-method standard error of ``B`` (Ogasawara, 2001), or ``NaN`` if unavailable.
+    A : float or ndarray
+        Slope linking constant (:math:`A > 0`); for :math:`D > 1` factors the ``(D, D)`` matrix
+        :math:`\mathbf A`.
+    B : float or ndarray
+        Intercept linking constant; for :math:`D > 1` factors the ``(D,)`` vector
+        :math:`\boldsymbol\beta`.
+    A_se : float or ndarray
+        Delta-method standard error of ``A`` (Ogasawara, 2001), or ``NaN`` if unavailable; same
+        shape as ``A``. Entries of a diagonal :math:`\mathbf A` that are zero by construction have
+        standard error 0.
+    B_se : float or ndarray
+        Delta-method standard error of ``B`` (Ogasawara, 2001), or ``NaN`` if unavailable; same
+        shape as ``B``.
     vcov : ndarray or None
-        ``(2, 2)`` asymptotic covariance matrix of ``(A, B)``, or ``None`` if unavailable (the
-        optimizer did not converge, ``se=None`` on a side with free common-item parameters, all
-        common parameters are fixed, or the criterion Hessian is not positive definite).
+        ``(2, 2)`` asymptotic covariance matrix of ``(A, B)``; for :math:`D > 1` factors the
+        ``(D*D + D, D*D + D)`` covariance of ``(A.ravel(), B)`` (row-major), of rank at most the
+        number of free transformation parameters. ``None`` if unavailable (the optimizer did not
+        converge, ``se=None`` on a side with free common-item parameters, all common parameters
+        are fixed, or the criterion Hessian is not positive definite).
     criterion : float
         Minimized Haebara or Stocking–Lord criterion value at ``(A, B)``.
     method : {"haebara", "stocking_lord"}
         Linking criterion used.
     symmetric : bool
         Whether the symmetric (two-direction) criterion was minimized.
+    transformation : {"diagonal", "orthogonal", "oblique"}
+        Family of :math:`\mathbf A` (always ``"diagonal"`` for unidimensional models, where the
+        three coincide).
     converged : bool
         Whether the Newton optimizer met ``grad_norm <= tol``.
     n_iter : int
@@ -360,20 +497,22 @@ class LinkResult:
     items : DataFrame
         All source items transformed onto the target scale (columns ``item``, ``model``,
         ``common``, internal slope–intercept parameters ``a``, ``d``/``d1..``, ``g``, ``u``, and
-        display IRT thresholds ``b``/``b1..``). Directly usable with :meth:`Model.fix_from`.
+        display IRT thresholds ``b``/``b1..``; slopes ``a1..aD`` and no thresholds for
+        :math:`D > 1` factors). Directly usable with :meth:`Model.fix_from`.
         For fixed-slope models (Rasch, PCM) the transformed slope is :math:`a^* = 1/A`, not 1:
         the items keep their response curves on the target scale, so ``fix_from`` fixes the slope
         at :math:`1/A` (they are unit-slope items again only when :math:`A = 1`).
     """
 
-    A: float
-    B: float
-    A_se: float
-    B_se: float
+    A: Any
+    B: Any
+    A_se: Any
+    B_se: Any
     vcov: np.ndarray | None
     criterion: float
     method: LinkMethod
     symmetric: bool
+    transformation: LinkTransformation
     converged: bool
     n_iter: int
     grad_norm: float
@@ -381,6 +520,7 @@ class LinkResult:
     items: pd.DataFrame
     _source_group: str = field(repr=False)
     _target_group: str = field(repr=False)
+    _factor_names: tuple[str, ...] = field(default=(), repr=False)
 
     @overload
     def transform_theta(self, theta: float) -> float: ...
@@ -402,6 +542,13 @@ class LinkResult:
         :math:`\mathrm{SE}^* = A\,\mathrm{SE}` to an ``se`` column. :math:`(A, B)` are treated as
         known, so the transformed SEs exclude linking error (the sampling variability of
         :math:`(\hat A, \hat B)` summarized by :attr:`vcov`).
+
+        For :math:`D > 1` factors, :math:`\boldsymbol\theta^* = \mathbf A\boldsymbol\theta +
+        \boldsymbol\beta` is applied to the columns ``theta_<factor>`` (and to each draw
+        ``pv<m>_<factor>``) of a score table, or to the last axis (length :math:`D`) of an array.
+        Columns ``se_<factor>`` become :math:`A_m\,\mathrm{se}_m` when :math:`\mathbf A` is
+        diagonal and ``NaN`` otherwise (the standard error of a rotated score needs the posterior
+        covariance, which the score table does not carry). Scalars and Series are not accepted.
 
         Parameters
         ----------
@@ -426,6 +573,8 @@ class LinkResult:
         """
         if isinstance(theta, bool):
             raise SpecificationError("transform_theta() does not accept a boolean.")
+        if self._factor_names:
+            return self._transform_theta_multidim(theta)
         if isinstance(theta, pd.DataFrame):
             out = theta.copy()
             pv_cols = [c for c in out.columns if isinstance(c, str) and _PV_COL_RE.match(c)]
@@ -448,13 +597,86 @@ class LinkResult:
         arr = np.asarray(theta, dtype=np.float64)
         return self.A * arr + self.B
 
+    def _transform_theta_multidim(self, theta: Any) -> Any:
+        """Apply ``A @ theta + B`` to a multidimensional score table or array."""
+        a_mat = np.asarray(self.A, dtype=np.float64)
+        beta = np.asarray(self.B, dtype=np.float64)
+        names = self._factor_names
+        n_factors = len(names)
+        if isinstance(theta, pd.DataFrame):
+            out = theta.copy()
+            theta_cols = [f"theta_{f}" for f in names]
+            pv_draws = sorted(
+                {
+                    int(c[2:].split("_", 1)[0])
+                    for c in out.columns
+                    if isinstance(c, str) and re.match(r"^pv\d+_", c)
+                }
+            )
+            has_theta = all(c in out.columns for c in theta_cols)
+            if not has_theta and not pv_draws:
+                raise SpecificationError(
+                    "DataFrame passed to transform_theta() must contain the columns "
+                    f"{theta_cols} or plausible-value columns ('pv1_{names[0]}', ...)."
+                )
+            if has_theta:
+                out[theta_cols] = out[theta_cols].to_numpy(dtype=np.float64) @ a_mat.T + beta
+                se_cols = [f"se_{f}" for f in names]
+                if all(c in out.columns for c in se_cols):
+                    se = out[se_cols].to_numpy(dtype=np.float64)
+                    is_diagonal = bool(np.all(a_mat == np.diag(np.diag(a_mat))))
+                    out[se_cols] = se * np.diag(a_mat) if is_diagonal else np.full_like(se, np.nan)
+            for m in pv_draws:
+                cols = [f"pv{m}_{f}" for f in names]
+                missing = [c for c in cols if c not in out.columns]
+                if missing:
+                    raise SpecificationError(f"Plausible-value columns {missing} are missing.")
+                out[cols] = out[cols].to_numpy(dtype=np.float64) @ a_mat.T + beta
+            return out
+        if isinstance(theta, (pd.Series, int, float, np.number)):
+            raise SpecificationError(
+                f"transform_theta() of a {n_factors}-factor link needs a score table or an array "
+                f"whose last axis has length {n_factors}."
+            )
+        arr = np.asarray(theta, dtype=np.float64)
+        if arr.ndim == 0 or arr.shape[-1] != n_factors:
+            raise SpecificationError(
+                f"theta must have a last axis of length {n_factors}, got shape {arr.shape}."
+            )
+        return arr @ a_mat.T + beta
+
     def _constants_table(self) -> pd.DataFrame:
-        return pd.DataFrame(
-            [
-                {"constant": "A", "estimate": self.A, "se": self.A_se},
-                {"constant": "B", "estimate": self.B, "se": self.B_se},
-            ]
-        )
+        if not self._factor_names:
+            return pd.DataFrame(
+                [
+                    {"constant": "A", "estimate": self.A, "se": self.A_se},
+                    {"constant": "B", "estimate": self.B, "se": self.B_se},
+                ]
+            )
+        n_factors = len(self._factor_names)
+        rows = [
+            {
+                "constant": f"A[{i + 1},{j + 1}]",
+                "estimate": float(self.A[i, j]),
+                "se": float(self.A_se[i, j]),
+            }
+            for i in range(n_factors)
+            for j in range(n_factors)
+        ]
+        rows += [
+            {"constant": f"B[{i + 1}]", "estimate": float(self.B[i]), "se": float(self.B_se[i])}
+            for i in range(n_factors)
+        ]
+        return pd.DataFrame(rows)
+
+    def _labels(self) -> tuple[str, str]:
+        """Return ``(variant label, constants text)`` for the summaries."""
+        sym = "symmetric" if self.symmetric else "non-symmetric"
+        if not self._factor_names:
+            return sym, f"A={self.A:.4f}, B={self.B:.4f}"
+        a_text = np.array2string(np.asarray(self.A), precision=4, separator=", ")
+        b_text = np.array2string(np.asarray(self.B), precision=4, separator=", ")
+        return f"{sym}, {self.transformation}", f"A={a_text}, B={b_text}".replace("\n", "")
 
     def summary(self, *, digits: int = 4) -> str:
         """Return a readable plain-text summary of the linking result.
@@ -474,7 +696,7 @@ class LinkResult:
         def _fmt(v: float) -> str:
             return f"{v:.{digits}f}"
 
-        sym_label = "symmetric" if self.symmetric else "non-symmetric"
+        sym_label = self._labels()[0]
         status = "Converged" if self.converged else "NOT converged"
         const_str = self._constants_table().to_string(index=False, float_format=_fmt, na_rep="NaN")
         items_str = self.items.to_string(index=False, float_format=_fmt, na_rep="NaN")
@@ -494,16 +716,16 @@ class LinkResult:
 
     def __str__(self) -> str:
         """Concise one-line summary."""
-        sym = "symmetric" if self.symmetric else "non-symmetric"
+        sym, constants = self._labels()
         status = "converged" if self.converged else "NOT converged"
         return (
-            f"LinkResult(method={self.method!r}, {sym}, A={self.A:.4f}, B={self.B:.4f}, "
+            f"LinkResult(method={self.method!r}, {sym}, {constants}, "
             f"criterion={self.criterion:.4g}, {status} in {self.n_iter} iters)"
         )
 
     def _repr_html_(self) -> str:
         """HTML summary for Jupyter notebooks."""
-        sym = "symmetric" if self.symmetric else "non-symmetric"
+        sym = self._labels()[0]
         status = "Converged" if self.converged else "NOT converged"
         meta = [
             ("Method", f"{self.method} ({sym})"),
@@ -536,6 +758,7 @@ def link(
     items: Iterable[str] | Mapping[str, str] | None = None,
     method: LinkMethod = "stocking_lord",
     symmetric: bool = False,
+    transformation: LinkTransformation = "diagonal",
     nodes: Any = None,
     weights: Any = None,
     source_group: str | None = None,
@@ -574,9 +797,22 @@ def link(
     weights are held fixed, which is exact to first order under a correctly specified model
     (DESIGN.md §16.5). No standard errors are reported when the optimizer did not converge.
 
-    Validated against base-R references (VALIDATION.md V20) for 2PL, 3PL, GRM, GPCM, and mixed
-    2PL + GPCM common items; the parameter transforms and criteria for Rasch, 4PL and PCM are
-    covered by exact-recovery unit tests only.
+    Validated against base-R references for 2PL, 3PL, GRM, GPCM and mixed 2PL + GPCM
+    (VALIDATION.md V20) and for 4PL, nominal and mixed 2PL + nominal common items (V40); the
+    parameter transforms and criteria for Rasch and PCM, which share those kernels, are covered
+    by exact-recovery unit tests only. A nominal item is scored by its category index in the
+    Stocking–Lord test characteristic curve, so its contribution depends on how the categories
+    are coded; Haebara does not use scores.
+
+    **Multidimensional models.** Two confirmatory models with the same number of factors
+    (:meth:`Model.with_factors`; factors are matched by position) are linked by
+    :math:`\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta`, under which
+    :math:`\mathbf a^* = \mathbf A^{-\top}\mathbf a` and :math:`d^* = d - \mathbf a^{*\top}
+    \boldsymbol\beta` (Oshima, Davey & Lee, 2000; DESIGN.md §19). The criteria are the same sums
+    over the product quadrature grid, with source curves evaluated at
+    :math:`\mathbf A^{-1}(\boldsymbol\theta - \boldsymbol\beta)`. ``transformation`` selects the
+    family of :math:`\mathbf A`. Validated against base R for two- and three-factor models
+    (VALIDATION.md V40). Bifactor and two-tier models are not supported.
 
     Parameters
     ----------
@@ -593,10 +829,22 @@ def link(
         Characteristic-curve linking criterion.
     symmetric : bool, default False
         If ``True``, minimize the symmetric (two-direction) criterion (Kim & Lee, 2006).
+    transformation : {"diagonal", "orthogonal", "oblique"}, default "diagonal"
+        Family of the matrix :math:`\mathbf A` for models with :math:`D > 1` factors (it has no
+        effect on unidimensional models, where the three coincide):
+
+        - ``"diagonal"``: :math:`\mathbf A = \operatorname{diag}(A_1, \dots, A_D)`,
+          :math:`A_m > 0`; each factor is rescaled and shifted separately. This is the
+          transformation between two calibrations of the same confirmatory structure, and the
+          only one that keeps zero slopes at zero.
+        - ``"orthogonal"``: :math:`\mathbf A = k\,\mathbf R` with a dilation :math:`k > 0` and a
+          rotation :math:`\mathbf R` (Li & Lissitz, 2000); reflections are excluded.
+        - ``"oblique"``: any :math:`\mathbf A` with :math:`\det\mathbf A > 0` (Oshima, Davey &
+          Lee, 2000).
     nodes : array-like, optional
-        1-D quadrature nodes :math:`\theta_q` at which curves are compared. Defaults to the target
-        group's fitted quadrature grid (and the source group's grid for the reverse direction when
-        ``symmetric=True``).
+        1-D quadrature nodes :math:`\theta_q` at which curves are compared (shape ``(Q, D)`` for
+        :math:`D > 1` factors). Defaults to the target group's fitted quadrature grid (and the
+        source group's grid for the reverse direction when ``symmetric=True``).
     weights : array-like, optional
         Non-negative quadrature weights :math:`w_q` matching ``nodes`` (normalized to sum to 1).
         Defaults to the fitted latent distribution weights when ``nodes`` is omitted, or uniform
@@ -624,8 +872,9 @@ def link(
     PrecisionError
         If JAX is not configured for 64-bit floating point.
     SpecificationError
-        If either input is not a unidimensional :class:`FitResult`, a multiple-group fit is
-        passed without selecting a group, no common items exist, common items have mismatched
+        If either input is not a :class:`FitResult`, the two models have different numbers of
+        factors or use dimension reduction (bifactor, two-tier), a multiple-group fit is passed
+        without selecting a group, no common items exist, common items have mismatched
         kernels/categories, or options/nodes/weights are invalid.
     """
     check_x64()
@@ -633,8 +882,18 @@ def link(
         raise SpecificationError(f"source must be a FitResult, got {type(source).__name__}.")
     if not isinstance(target, FitResult):
         raise SpecificationError(f"target must be a FitResult, got {type(target).__name__}.")
-    if source._model.is_multidimensional or target._model.is_multidimensional:
-        raise SpecificationError("link() supports unidimensional models only.")
+    if source._model.is_reduced or target._model.is_reduced:
+        raise SpecificationError("link() does not support bifactor or two-tier models.")
+    n_factors = source._model.n_factors
+    if target._model.n_factors != n_factors:
+        raise SpecificationError(
+            f"source has {n_factors} factor(s) and target has {target._model.n_factors}; link() "
+            "needs models with the same number of factors."
+        )
+    if transformation not in _LINK_TRANSFORMATIONS:
+        raise SpecificationError(
+            f"Unknown transformation={transformation!r}; use one of {_LINK_TRANSFORMATIONS}."
+        )
     if method not in _LINK_METHODS:
         raise SpecificationError(f"Unknown method={method!r}; use one of {_LINK_METHODS}.")
     if not isinstance(symmetric, bool):
@@ -730,20 +989,43 @@ def link(
     )
     eta_s_j = jnp.asarray(eta_s, dtype=jnp.float64)
     eta_t_j = jnp.asarray(eta_t, dtype=jnp.float64)
-    ab0 = jnp.asarray(_mean_mean_start(pairs, common_kernels, src_est, tgt_est), dtype=jnp.float64)
-
-    ab_hat_j, crit_j, grad_norm_j, n_iter_j, conv_j = _solve_linking(
-        prob,
-        eta_s_j,
-        eta_t_j,
-        ab0,
-        method=method,
-        symmetric=symmetric,
-        tol=float(tol),
-        max_iter=int(max_iter),
-    )
-    ab_hat = np.asarray(ab_hat_j, dtype=float)
-    a_const, b_const = float(ab_hat[0]), float(ab_hat[1])
+    a_const: Any
+    b_const: Any
+    if n_factors == 1:
+        ab0 = jnp.asarray(
+            _mean_mean_start(pairs, common_kernels, src_est, tgt_est), dtype=jnp.float64
+        )
+        ab_hat_j, crit_j, grad_norm_j, n_iter_j, conv_j = _solve_linking(
+            prob,
+            eta_s_j,
+            eta_t_j,
+            ab0,
+            method=method,
+            symmetric=symmetric,
+            tol=float(tol),
+            max_iter=int(max_iter),
+        )
+        ab_hat = np.asarray(ab_hat_j, dtype=float)
+        a_const, b_const = float(ab_hat[0]), float(ab_hat[1])
+    else:
+        c0 = jnp.asarray(
+            _multidim_start(pairs, common_kernels, src_est, tgt_est, n_factors, transformation),
+            dtype=jnp.float64,
+        )
+        ab_hat_j, crit_j, grad_norm_j, n_iter_j, conv_j = _solve_multidim_linking(
+            prob,
+            eta_s_j,
+            eta_t_j,
+            c0,
+            method=method,
+            symmetric=symmetric,
+            transformation=transformation,
+            tol=float(tol),
+            max_iter=int(max_iter),
+        )
+        a_mat_j, beta_j, _ = unpack_transformation(ab_hat_j, n_factors, transformation)
+        a_const = np.asarray(a_mat_j, dtype=float)
+        b_const = np.asarray(beta_j, dtype=float)
     criterion = float(crit_j)
     grad_norm = float(grad_norm_j)
     n_iter = int(n_iter_j)
@@ -760,8 +1042,8 @@ def link(
     # Delta-method standard errors (Ogasawara, 2001) when covariances are available. They are only
     # valid at a stationary point, so a non-converged solution reports no SEs.
     vcov_out: np.ndarray | None = None
-    a_se = math.nan
-    b_se = math.nan
+    a_se: Any = math.nan if n_factors == 1 else np.full((n_factors, n_factors), np.nan)
+    b_se: Any = math.nan if n_factors == 1 else np.full((n_factors,), np.nan)
     has_free = bool(src_fids or tgt_fids)
     have_src_cov = (not src_fids) or (source.vcov is not None)
     have_tgt_cov = (not tgt_fids) or (target.vcov is not None)
@@ -785,21 +1067,40 @@ def link(
             if same_fit and src_fids and tgt_fids and source.vcov is not None
             else None
         )
-        cov_j, valid_j = _linking_vcov(
-            ab_hat_j,
-            eta_s_j,
-            eta_t_j,
-            jnp.asarray(vcov_s, dtype=jnp.float64),
-            jnp.asarray(vcov_t, dtype=jnp.float64),
-            prob,
-            method=method,
-            symmetric=symmetric,
-            vcov_st=vcov_st,
-        )
-        if bool(valid_j):
-            vcov_out = np.asarray(cov_j, dtype=float)
-            a_se = math.sqrt(max(float(vcov_out[0, 0]), 0.0))
-            b_se = math.sqrt(max(float(vcov_out[1, 1]), 0.0))
+        if n_factors == 1:
+            cov_j, valid_j = _linking_vcov(
+                ab_hat_j,
+                eta_s_j,
+                eta_t_j,
+                jnp.asarray(vcov_s, dtype=jnp.float64),
+                jnp.asarray(vcov_t, dtype=jnp.float64),
+                prob,
+                method=method,
+                symmetric=symmetric,
+                vcov_st=vcov_st,
+            )
+            if bool(valid_j):
+                vcov_out = np.asarray(cov_j, dtype=float)
+                a_se = math.sqrt(max(float(vcov_out[0, 0]), 0.0))
+                b_se = math.sqrt(max(float(vcov_out[1, 1]), 0.0))
+        else:
+            cov_j, _, valid_j = _multidim_linking_vcov(
+                ab_hat_j,
+                eta_s_j,
+                eta_t_j,
+                jnp.asarray(vcov_s, dtype=jnp.float64),
+                jnp.asarray(vcov_t, dtype=jnp.float64),
+                prob,
+                method=method,
+                symmetric=symmetric,
+                transformation=transformation,
+                vcov_st=vcov_st,
+            )
+            if bool(valid_j):
+                vcov_out = np.asarray(cov_j, dtype=float)
+                ses = np.sqrt(np.clip(np.diag(vcov_out), 0.0, None))
+                a_se = ses[: n_factors * n_factors].reshape(n_factors, n_factors)
+                b_se = ses[n_factors * n_factors :]
 
     common_src_names = tuple(s for s, _ in pairs)
     items_df = _transformed_items_table(source, src_est, set(common_src_names), a_const, b_const)
@@ -813,6 +1114,7 @@ def link(
         criterion=criterion,
         method=method,
         symmetric=symmetric,
+        transformation=transformation if n_factors > 1 else "diagonal",
         converged=converged,
         n_iter=n_iter,
         grad_norm=grad_norm,
@@ -820,4 +1122,5 @@ def link(
         items=items_df,
         _source_group=src_gname,
         _target_group=tgt_gname,
+        _factor_names=source._model.factor_names if n_factors > 1 else (),
     )
