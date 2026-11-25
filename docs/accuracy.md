@@ -57,6 +57,9 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | Davidian curves | the exact standardized Davidian likelihood fitted inside mirt (`createGroup()`), and mirt's built-in `dentype = "Davidian-k"` (see below) |
 | Normal mixtures | `multipleGroup(..., dentype = "mixture-k")` with all items invariant, plus an independent R implementation |
 | S-X2 item fit | `itemfit(m, fit_stats = "S_X2")` |
+| Item and test information, expected scores | `iteminfo()`, `testinfo()`, `expected.item()`, `expected.test()` at mirt's estimates (2PL, 3PL, GRM, GPCM, nominal, mixed formats, two groups): to $10^{-9}$ relative |
+| Reliability | `marginal_rxx()` (also recomputed with a tight integration tolerance, and for a group with mean and variance other than 0 and 1 on the equivalent standardized model) and `empirical_rxx()`: to $10^{-10}$ |
+| Summed-score EAP | `fscores(m, method = "EAPsum")`, the table and the scores of each respondent, including `NA` for incomplete response patterns: to $10^{-9}$ |
 | $M_2$ / $M_2^*$ | `M2(m)`, plus an exact R computation where mirt differs (see below) |
 | DIF tests | `DIF(mg, scheme = "add" / "drop")` |
 | SQUAREM | every comparison above is repeated with `BAEM(squarem=True)` |

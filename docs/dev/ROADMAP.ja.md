@@ -76,6 +76,12 @@
    - [x] カーネル（#83）: `summed_score_distribution()`。Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰
      （通常と対数空間）、DFT-CF 法、2 値項目用の正規・精密化正規・Poisson 近似。`jit` / `vmap` / 自動微分に対応。
      V36 で `poibin`・`dpois`・mirt の EAPsum の表と照合済み。
+   - [x] 1 次元モデル（単一群・多母集団）（#82）: `item_information()`、`test_information()`、`expected_score()`、
+     `reliability()`（周辺・経験的。潜在分布は `Normal`）、`summed_score_table()`、
+     `FitResult.score(method="EAPsum")`。V37 で 2PL・3PL・GRM・GPCM・名義・混合形式のテスト・2 群モデルについて
+     `iteminfo()`・`testinfo()`・`expected.item()` / `expected.test()`・`marginal_rxx()`・`empirical_rxx()`・
+     `fscores(method = "EAPsum")` と照合済み。
+   - [ ] 多次元モデル: 情報行列と方向別の情報量。
 4. [ ] 標本ウェイト（#84）。
 5. [ ] ロバスト標準誤差: sandwich と cross-product（#85）。
 - **受け入れ基準**: mirt の `bfactor()`、`residuals()`、`iteminfo()` / `testinfo()` / `marginal_rxx()` /

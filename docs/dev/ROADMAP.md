@@ -107,6 +107,13 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
      Poisson-binomial kernel in linear and log space, the DFT-CF method, and normal / refined normal /
      Poisson approximations for dichotomous items; `jit` / `vmap` / autodiff; validated in V36 against
      `poibin`, `dpois` and mirt's EAPsum tables.
+   - [x] Unidimensional models, single and multiple groups (#82): `item_information()`,
+     `test_information()`, `expected_score()`, `reliability()` (marginal and empirical; `Normal` latent
+     distributions), `summed_score_table()` and `FitResult.score(method="EAPsum")`; validated in V37
+     against `iteminfo()`, `testinfo()`, `expected.item()` / `expected.test()`, `marginal_rxx()`,
+     `empirical_rxx()` and `fscores(method = "EAPsum")` for 2PL, 3PL, GRM, GPCM, nominal, a
+     mixed-format test and a two-group model.
+   - [ ] Multidimensional models: information matrix and directional information.
 4. [ ] Sampling (survey) weights (#84).
 5. [ ] Robust standard errors: sandwich and cross-product (#85).
 - **Acceptance**: V-numbered comparisons with mirt `bfactor()`, `residuals()`, `iteminfo()` /
