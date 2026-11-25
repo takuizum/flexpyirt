@@ -733,6 +733,7 @@ def exploratory_detect(
         )
     if (rng is None) == (estimation_rows is None):
         raise SpecificationError("Pass exactly one of rng= and estimation_rows=.")
+    est: np.ndarray
     if estimation_rows is None:
         assert rng is not None
         perm = _as_generator(rng).permutation(n_obs)
