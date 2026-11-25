@@ -75,6 +75,7 @@ English | [日本語](VALIDATION.ja.md)
 | V34 | Sampling weights: 2PL with non-integer weights (sum $\ne N$, five zero weights), Science GRM with weights normalized to $N$, two groups with anchors, free focal latent and 5% missing, FIPC with a free latent, a bifactor 2PL with dimension reduction; estimates, log-likelihood, AIC, BIC, Oakes SEs | `mirt(..., survey.weights = w)`, `multipleGroup(..., survey.weights = w)`, `bfactor(..., survey.weights = w)`, `SE.type = "Oakes"` | M7 |
 | V36 | Summed-score distribution kernel (Poisson-binomial: five probability vectors, $J$ 10–300; polytomous: GRM $K=4$ and mixed 2PL + GRM) | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`, `poibin::dpoibin()`, `stats::dpois()`; mirt `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 | V37 | Information, expected score, reliability and summed-score EAP at mirt's estimates (2PL $J=12$; the same with 8% missing; 3PL $J=12$; GRM and GPCM $K=4$, $J=8$; nominal $K=4$, $J=6$; mixed 2PL + 3PL + GRM + GPCM + nominal, $J=14$; two groups, 2PL + GRM, focal mean and variance free) | `iteminfo()`, `testinfo()`, `expected.item()`, `expected.test()`, `marginal_rxx()`, `empirical_rxx()`, `fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
+| V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -924,9 +925,41 @@ English | [日本語](VALIDATION.ja.md)
   is `focal`; the test standardizes the same group. With the other group standardized the
   model is the same but its discretization is not (the grid is cut at $\pm6$ and the free group
   has SD 1.34): the log-likelihood differs by $1.9\times10^{-3}$ and $X^2$ by $3\times10^{-3}$. **Not validated, not
-  implemented**: bifactor / two-tier models; `jsi()` beyond single-group unidimensional Normal
+  implemented**: `jsi()` beyond single-group unidimensional Normal
   models (mirt: one factor only, no SE for Davidian curves, no mixtures, and for
   `multipleGroup` single-group $N(0,1)$ refits per group, which is another statistic).
+  Bifactor and two-tier models are V38.
+- **Local dependence for bifactor and two-tier models (V38, M7, issue #81)**:
+  `validation/r/m7_local_dependence_bifactor_reference.R` (mirt 1.48) writes
+  `tests/reference/v38_local_dependence_bifactor.json`;
+  `tests/test_mirt_m7_local_dependence_bifactor.py` (fast tier) puts mirt's estimates into a
+  flexpyirt `FitResult` with every parameter fixed, as V26 (M7), so the comparison is of the
+  statistics alone (the log-likelihood at mirt's estimates agrees to $10^{-9}$ relative,
+  observed $\le8\times10^{-16}$). mirt's `residuals(type = "LD")` sums over the full product
+  grid `thetaComb(theta, nfact)` with the fit's `quadpts`; flexpyirt sums over the reduced grids
+  (DESIGN.md §17.3), which is the same sum rearranged.
+
+  | Case | mirt call | Points per dimension (mirt's grid) | Pairs | $X^2$ rel. | $G^2$ rel. | $V$ abs. | Q3 abs. |
+  |---|---|---|---|---|---|---|---|
+  | bifactor 2PL, three specific factors, two general-only items, 3% MCAR | `bfactor(data, c(1,1,1,2,2,2,3,3,3,NA,NA))` | 21 ($21^4$) | 55 | $5\times10^{-13}$ | $2\times10^{-11}$ | $2\times10^{-15}$ | $9\times10^{-16}$ |
+  | bifactor GRM (3 categories), two specific factors | `bfactor(..., itemtype = "graded")` | 21 ($21^3$) | 28 | $2\times10^{-14}$ | $7\times10^{-13}$ | $3\times10^{-16}$ | $1\times10^{-15}$ |
+  | two-tier 2PL, two correlated primary factors (one cross-loading item), two specific factors | `bfactor(..., model2 = mirt.model("F1 = 1-5\nF2 = 5-10\nCOV = F1*F2"))` | 15 ($15^4$) | 45 | $1\times10^{-11}$ | $2\times10^{-8}$ | $8\times10^{-15}$ | $3\times10^{-15}$ |
+
+  Tolerances: $10^{-7}$ relative ($X^2$, $G^2$), $10^{-8}$ absolute ($V$, Q3). Q3 is requested
+  with `Theta = fscores(m, quadpts = <the fit's>)`; mirt's default call scores on `fscores()`'s
+  own grid and is stored as `q3_default` (it differs from flexpyirt on the fitted grid by
+  $2\times10^{-6}$, $1\times10^{-8}$ and $2\times10^{-4}$ in the three cases). In the first
+  case two items of a three-item specific factor were simulated with extra shared variance; the
+  specific factor absorbs it and no pair is flagged, in mirt and in flexpyirt alike. Unit tests
+  (`tests/test_m7_local_dependence_reduced.py`) compare the factorized tables with brute-force
+  sums over the product grid ($7^4$ nodes, bifactor and two-tier with a GRM item and missing
+  data; $X^2$ to $10^{-10}$ relative), Q3 with its definition at `score()`'s EAP, and check
+  that a testlet left out of `specific` is flagged. **Not validated**: nothing estimated by
+  flexpyirt is compared here (the fits are V32 and V33); item models other than 2PL and GRM;
+  more than three specific factors; Gauss–Hermite grids (mirt's `residuals()` is equispaced).
+  **Not implemented**: `jsi()` for these models (an item has a primary and a specific slope,
+  and mirt's `type = "JSI"` requires one factor); multiple groups (bifactor and two-tier models
+  are single-group).
 - **DETECT (V27, M5)**: sirt's `conf.detect()` is called with `smooth = FALSE`; with the
   default `smooth = TRUE` and `use_sum_score = TRUE` it subtracts raw item scores from the
   standardized total score, which mis-forms the rest-score groups (DESIGN §16.13). `expl.detect()`

@@ -228,7 +228,15 @@ The expected tables and the EAP use the fitted latent distribution on the fitted
 `EmpiricalHistogram`, `DavidianCurve` or `NormalMixture`, and the multivariate Normal on the
 product grid (with the vector EAP) for models with 2 or 3 factors. In a multiple-group model
 `group` is required and every statistic is computed within a group, from that group's
-respondents, item parameters and latent distribution. Bifactor models are not covered.
+respondents, item parameters and latent distribution.
+
+For bifactor and two-tier models (`with_bifactor()`, `with_two_tier()`) the expected tables are
+summed on the reduced grids instead of the full product grid: over the primary factors and the
+shared specific factor for a pair inside one specific factor, and over the primary factors only,
+with each item's specific factor integrated out first, for any other pair. Q3 uses the EAP of all
+factors. The results equal mirt's `residuals()` on a `bfactor()` fit with the same grid (mirt
+builds the product grid). A pair inside a specific factor is tested for dependence beyond that
+factor.
 
 Two differences from mirt's defaults: for `dentype = "EH"` / `"Davidian-k"` fits mirt takes a
 standard Normal prior unless called as `residuals(m, type = "LD", use_dentype_estimate = TRUE)`

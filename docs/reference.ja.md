@@ -204,7 +204,11 @@ $p$ 値、符号付きの Cramér の $V$）。mirt の `residuals(type = "Q3" /
 期待度数の表と EAP には、推定した格子の上の推定した潜在分布を使う。`Normal`、`EmpiricalHistogram`、
 `DavidianCurve`、`NormalMixture` と、2〜3 因子のモデルでは直積格子の上の多変量正規分布（EAP はベクトル）。
 多母集団モデルでは `group` が必要で、すべての統計量を群ごとに、その群の受験者・項目パラメタ・潜在分布で求める。
-bifactor モデルは対象外。
+
+双因子・two-tier モデル（`with_bifactor()`、`with_two_tier()`）では、期待度数表を完全な直積格子ではなく縮約した
+格子の上で求める。同じ特殊因子内のペアは主因子とその特殊因子について和をとり、それ以外のペアは各項目の特殊因子を
+先に積分してから主因子について和をとる。Q3 は全因子の EAP を使う。結果は、同じ格子での `bfactor()` の適合に対する
+mirt の `residuals()`（直積格子を作る）と一致する。同じ特殊因子内のペアは、その因子を超える依存について検定される。
 
 mirt の既定との違いが 2 つある。`dentype = "EH"` / `"Davidian-k"` の推定では、mirt は
 `residuals(m, type = "LD", use_dentype_estimate = TRUE)` や

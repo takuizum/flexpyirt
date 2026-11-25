@@ -70,6 +70,7 @@
 | V34 | 標本ウェイト: 非整数ウェイト（合計 $\ne N$、ウェイト 0 が 5 行）の 2PL、合計を $N$ に正規化したウェイトの Science GRM、アンカー・focal 群の潜在分布の推定・5% の欠測を持つ 2 群、潜在分布を推定する FIPC、次元縮約による双因子 2PL。推定値、対数尤度、AIC、BIC、Oakes の SE | `mirt(..., survey.weights = w)`、`multipleGroup(..., survey.weights = w)`、`bfactor(..., survey.weights = w)`、`SE.type = "Oakes"` | M7 |
 | V36 | 合計得点分布のカーネル（Poisson 二項分布: 確率ベクトル 5 例、$J$ 10〜300。多値: GRM $K=4$ と 2PL + GRM の混合） | `poibin::ppoibin(method = "RF" / "DFT-CF" / "RNA" / "NA")`、`poibin::dpoibin()`、`stats::dpois()`。mirt の `fscores(method = "EAPsum", full.scores = FALSE)` | M7 |
 | V37 | mirt の推定値での情報関数・期待得点・信頼性・合計得点 EAP（2PL $J=12$。同じモデルで欠測 8%。3PL $J=12$。GRM と GPCM $K=4$、$J=8$。名義 $K=4$、$J=6$。2PL + 3PL + GRM + GPCM + 名義の混合 $J=14$。2 群の 2PL + GRM で焦点群の平均・分散を推定） | `iteminfo()`、`testinfo()`、`expected.item()`、`expected.test()`、`marginal_rxx()`、`empirical_rxx()`、`fscores(method = "EAPsum", full.scores = FALSE / TRUE)` | M7 |
+| V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -622,9 +623,36 @@
   $4\times10^{-4}$（$X^2$、$G^2$）、$5\times10^{-6}$（$V$、Q3）で一致する。mirt は群をアルファベット順に
   並べるので、$N(0,1)$ の参照群は `focal` になる。テストも同じ群を標準化する。もう一方の群を標準化しても
   モデルは同じだが、離散化は同じにならない（格子は $\pm6$ で切れ、自由な群の SD は 1.34）。対数尤度は
-  $1.9\times10^{-3}$、$X^2$ は $3\times10^{-3}$ ずれる。**照合しておらず、実装していないもの**: bifactor / two-tier モデル、単一群・
+  $1.9\times10^{-3}$、$X^2$ は $3\times10^{-3}$ ずれる。**照合しておらず、実装していないもの**: 単一群・
   1 次元・正規分布以外の `jsi()`（mirt は 1 因子のみ、Davidian 曲線の SE なし、混合分布は非対応、`multipleGroup`
-  では群ごとに単一群の $N(0,1)$ で推定し直す別の統計量）。
+  では群ごとに単一群の $N(0,1)$ で推定し直す別の統計量）。双因子・two-tier モデルは V38。
+- **双因子・two-tier モデルの局所依存（V38、M7、issue #81）**:
+  `validation/r/m7_local_dependence_bifactor_reference.R`（mirt 1.48）が
+  `tests/reference/v38_local_dependence_bifactor.json` を書く。
+  `tests/test_mirt_m7_local_dependence_bifactor.py`（fast tier）は、V26（M7）と同じく mirt の推定値を
+  すべてのパラメタを固定した flexpyirt の `FitResult` に入れるので、比較するのは統計量だけになる（mirt の推定値での
+  対数尤度は相対 $10^{-9}$ で一致、実測 $\le8\times10^{-16}$）。mirt の `residuals(type = "LD")` は適合時の
+  `quadpts` による完全な直積格子 `thetaComb(theta, nfact)` の上で和をとり、flexpyirt は縮約した格子の上で和をとる
+  （DESIGN.md §17.3）。両者は同じ和の並べ替えである。
+
+  | ケース | mirt の呼び出し | 次元あたりの点数（mirt の格子） | ペア数 | $X^2$ 相対 | $G^2$ 相対 | $V$ 絶対 | Q3 絶対 |
+  |---|---|---|---|---|---|---|---|
+  | 双因子 2PL、特殊因子 3、一般因子のみの項目 2、欠測 3% | `bfactor(data, c(1,1,1,2,2,2,3,3,3,NA,NA))` | 21（$21^4$） | 55 | $5\times10^{-13}$ | $2\times10^{-11}$ | $2\times10^{-15}$ | $9\times10^{-16}$ |
+  | 双因子 GRM（3 カテゴリ）、特殊因子 2 | `bfactor(..., itemtype = "graded")` | 21（$21^3$） | 28 | $2\times10^{-14}$ | $7\times10^{-13}$ | $3\times10^{-16}$ | $1\times10^{-15}$ |
+  | two-tier 2PL、相関する主因子 2（交差負荷 1 項目）、特殊因子 2 | `bfactor(..., model2 = mirt.model("F1 = 1-5\nF2 = 5-10\nCOV = F1*F2"))` | 15（$15^4$） | 45 | $1\times10^{-11}$ | $2\times10^{-8}$ | $8\times10^{-15}$ | $3\times10^{-15}$ |
+
+  許容誤差は相対 $10^{-7}$（$X^2$、$G^2$）、絶対 $10^{-8}$（$V$、Q3）。Q3 は
+  `Theta = fscores(m, quadpts = <適合時の値>)` で求める。mirt の既定の呼び出しは `fscores()` 独自の格子で
+  スコアを出し、`q3_default` として保存している（適合時の格子を使う flexpyirt との差は 3 ケースで
+  $2\times10^{-6}$、$1\times10^{-8}$、$2\times10^{-4}$）。1 つめのケースでは、3 項目の特殊因子のうち 2 項目に
+  余分な共有分散を入れてシミュレーションしたが、特殊因子がそれを吸収し、mirt でも flexpyirt でもどのペアも
+  検出されない。単体テスト（`tests/test_m7_local_dependence_reduced.py`）は、因子分解した表を直積格子の総当たりの和と
+  比較し（$7^4$ ノード。GRM 項目と欠測を含む双因子と two-tier。$X^2$ は相対 $10^{-10}$）、Q3 を `score()` の EAP での
+  定義と比較し、`specific` に入れなかったテストレットが検出されることを確認する。**照合していないもの**: flexpyirt が
+  推定した値はここでは比較しない（適合は V32 と V33）。2PL と GRM 以外の項目モデル。特殊因子が 4 つ以上の場合。
+  Gauss–Hermite 格子（mirt の `residuals()` は等間隔）。**実装していないもの**: これらのモデルの `jsi()`
+  （1 項目が主因子と特殊因子の傾きを持ち、mirt の `type = "JSI"` は 1 因子を要求する）。多母集団（双因子・two-tier
+  モデルは単一群のみ）。
 - **DETECT（V27、M5）**: sirt の `conf.detect()` は `smooth = FALSE` で呼ぶ。既定の `smooth = TRUE` で
   `use_sum_score = TRUE` だと、標準化した総得点から生の項目得点を引くので、残りの得点の群が誤る（DESIGN §16.13）。
   `expl.detect()` は自分で `smooth = FALSE` にする。その戻り値の `detect.unweighted` は検証用の半分の指標だけを

@@ -1515,6 +1515,44 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    `select_quadpts(nfact - nspec + 1)`）。**JSON**（schema version 6）: モデルに
    `"n_primary_factors"`（two-tier 以外は 0）を保存する。版 1–5 はこのキーを含んではならない。
    読み込み時、two-tier 構造は `with_two_tier()` で組み立て直す。
+3. **双因子・two-tier モデルの局所依存（`FitResult.local_dependence`、V38、issue #81）**:
+   §16.11 の統計量を項目 1–2 の縮約グリッド上で計算し、$n^{P+S}$ の積グリッドは作らない。
+   記法は上と同じ: 主因子のノード $\boldsymbol\theta_g$ と重み $w^{(0)}_g$（$g=1..Q_p$、$Q_p=n^P$）、
+   特殊因子のノード $\theta_t$ と重み $w^{(s)}_t$、$s(j)$ は項目 $j$ の特殊因子（持たないとき
+   $\varnothing$）、$P_{ja}(\boldsymbol\theta_g,\theta_t)$ はブロックグリッド上のカテゴリ確率。
+   **期待度数表。** 1 項目について特殊因子を積分すると、主因子を与えたときのトレースになる:
+   $$\bar P_{ja}(\boldsymbol\theta_g)=\sum_t w^{(s(j))}_t\,P_{ja}(\boldsymbol\theta_g,\theta_t)$$
+   （$s(j)=\varnothing$ なら $\bar P_{ja}=P_{ja}$。そのブロックの一様重みでも同じ値になる）。
+   特殊因子は互いに、また主因子とも独立なので、両方に回答した $n_{ij}$ 人についてのモデル上の表は
+   $$E_{ab}=n_{ij}\sum_g w^{(0)}_g\sum_t w^{(s)}_t\,P_{ia}(\boldsymbol\theta_g,\theta_t)
+   P_{jb}(\boldsymbol\theta_g,\theta_t)\qquad s(i)=s(j)=s,$$
+   $$E_{ab}=n_{ij}\sum_g w^{(0)}_g\,\bar P_{ia}(\boldsymbol\theta_g)\,\bar P_{jb}(\boldsymbol\theta_g)
+   \qquad s(i)\ne s(j)\ \text{または}\ s(i)=s(j)=\varnothing .$$
+   どちらも、重み $w^{(0)}_g\prod_s w^{(s)}_{t_s}$ の完全な積グリッド上の和を並べ替えただけの
+   厳密な式である（どちらの項目も負荷しない因子の和は 1）。したがって 1 次元グリッドが同じなら、
+   積グリッドを作る mirt の `residuals(type = "LD")`（`thetaComb(theta, nfact)`）と一致する。
+   計算量は 1 ペアあたり $O(n^{P+S}K_iK_j)$ ではなく $O(Q_p n K_iK_j)$。$X^2$、$G^2$、
+   $df=(K_i-1)(K_j-1)$、$p$ 値、符号付き Cramér の $V$ は §16.11 と同じく $O_{ab}$ と $E_{ab}$
+   から求める。
+   **Q3。** $d_{ij}=x_{ij}-E(X_j\mid\hat{\boldsymbol\theta}_i)$ を、因子分解した事後分布
+   （`_bifactor_eap`）による全 $D=P+S$ 因子のベクトル EAP で評価する。カーネルは縮約を外して
+   （`CompiledProblem.reduction = None`。`_family_nodes` がスコアを返す）`(N, D)` のスコアで
+   評価する。Q3\* は §16.11 と同じ。
+   **実装。** `_local_dependence.ld_pairs` を分割した: `ld_pairs_from_tables(y,
+   pair_probabilities)` はペアの $K_i\times K_j$ 同時確率を返す関数から統計量を計算し、
+   `ld_pairs`（共通グリッド）と `reduced_pair_probabilities`（上の 2 式。ブロックグリッド上の
+   トレース `(Q_p, n, K_j)`、`_bifactor_log_weights` の重み、各項目のブロックから）がその関数を
+   与える。双因子・two-tier モデルは単一群のみ（項目 1–2）なので、群についての処理は既存のまま。
+   **解釈。** 同じ特殊因子内のペアは、その因子を**超える**依存について検定される。`specific` に
+   入れなかったテストレットは、その中の大きな正の $V$ として現れる（シミュレーションデータの単体テストで確認）。
+   **検証（V38）。** 双因子 2PL（一般因子のみの項目と欠測を含む）、双因子 GRM、two-tier 2PL
+   （`bfactor(model2 = )`）の mirt の推定値を、全パラメータ固定の `FitResult` に入れ、
+   `residuals(type = "LD" / "LDG2" / "Q3")` と比較する（Q3 は `Theta = fscores(m, quadpts =
+   <適合時の値>)`。指定しないと `fscores()` は独自のグリッドを使う）。単体テストでは因子分解した
+   表を積グリッドの総当たり計算と比較する。**拡張しないもの。** `jsi()` はこれらのモデルで
+   引き続き `SpecificationError` を出す。統計量は 1 項目 1 傾きについて定義されており
+   （Edwards, Houts & Cai, 2018）、ここでは 1 項目が主因子と特殊因子の傾きを持ち、mirt の
+   `type = "JSI"` も 1 因子を要求するため、定義も参照値もない。
 
 4. **標本ウェイト（`fit(..., weights=...)`, V34）**: 受験者ごとのウェイト $w_i\ge0$ に対し、`fit()` は重み付き
    周辺対数尤度（擬似尤度。Skinner, 1989。mirt の `survey.weights`）
