@@ -194,9 +194,7 @@ def test_refit_matches_reference(name: str) -> None:
     np.testing.assert_allclose(row["m2"], ref["M2"], rtol=1e-5)
     np.testing.assert_allclose(row["p"], ref["p"], rtol=1e-5, atol=1e-8)
     np.testing.assert_allclose(row["srmsr"], bundle["m2"]["mirt"]["SRMSR"], rtol=1e-5)
-    np.testing.assert_allclose(
-        _m2_no_latent(res, name).m2, bundle["m2"]["mirt"]["M2"], rtol=1e-5
-    )
+    np.testing.assert_allclose(_m2_no_latent(res, name).m2, bundle["m2"]["mirt"]["M2"], rtol=1e-5)
 
     for sx2 in bundle["sx2"].values():
         out = res.item_fit(df, min_cell=sx2["mincell"])
