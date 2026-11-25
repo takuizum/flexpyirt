@@ -288,10 +288,6 @@ equating is defined; `moments` then describes the synthetic population. For chai
 they are X in population 1 and Y in population 2, and the two anchor distributions are kept in
 `anchor_distributions` so that `transform()` can equate arbitrary scores.
 
-**Decision** (all anchor methods): `x` and `y` must have the same possible anchor scores. The
-anchor is one test taken by both populations; different anchor scales are rejected rather than
-silently compared.
-
 ## 5. Public API sketch
 
 ```python
