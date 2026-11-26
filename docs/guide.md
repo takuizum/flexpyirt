@@ -356,7 +356,7 @@ the [reference](reference.md#summed_score_distribution) for details.
 each item and of the whole test at the values `theta`, and `expected_score(res, theta)` gives the
 expected item scores and their sum, the test characteristic curve. They work for every item
 model. Each returns a DataFrame indexed by `theta`, so `.plot()` draws the curves (multidimensional
-models: [section 14](#information-of-multidimensional-models)). `test_information` also has the conditional standard error `se` $=1/\sqrt{I(\theta)}$.
+models: [section 14](#information-of-multidimensional-models)). `test_information` also has the conditional standard error `se` $=1/\sqrt{I(\theta)}$ (unidimensional models).
 
 `reliability(res)` returns the marginal reliability: the reliability
 $\sigma^2/(\sigma^2+1/I(\theta))$ of a score with error variance $1/I(\theta)$, averaged over the
@@ -1013,11 +1013,14 @@ print(information_matrix(res_mirt, grid)[0].round(3))  # 2 x 2 test information 
 print(expected_score(res_mirt, grid)["total"].round(2))
 ```
 
-- mirt's `degrees=` (the angle to each axis) corresponds to `direction=np.cos(np.radians(degrees))`.
+- mirt's `degrees=` (the angle to each axis) corresponds to `direction=np.cos(np.radians(degrees))`
+  when the angles are consistent ($\sum_m\cos^2\alpha_m=1$); flexpyirt scales the direction to length
+  1, mirt does not.
 - `test_information`'s `se` is the standard error of the estimate of the combination
   $\mathbf u^\top\boldsymbol\theta$, $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$, which is at least
   $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ because the other directions are estimated too. It is
-  infinite where the information matrix is singular.
+  infinite where the information matrix is singular. mirt's `plot(type = "SE")` draws
+  $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ instead, `1 / np.sqrt` of the `information` column.
 - In bifactor and two-tier models `theta` has a column for every factor, general and specific.
 - Reliability and the summed-score functions are for unidimensional models only.
 

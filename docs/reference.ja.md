@@ -1221,7 +1221,7 @@ Samejima, 1969）。どの項目モデルでも自動微分で計算する。mir
 単位ベクトル $\mathbf u$ = `direction` / ‖`direction`‖ の方向の情報量
 $\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u$（$\mathbf I_j$ は [`information_matrix`](#information_matrix)
 の項目情報行列。Reckase & McKinley, 1991）。mirt の `iteminfo(..., degrees = )` は
-`direction=np.cos(np.radians(degrees))` にあたる。
+`direction=np.cos(np.radians(degrees))` にあたる（$\sum_m\cos^2\alpha_m=1$ のとき。mirt は方向を正規化しない）。
 
 | 引数 | 型 | 説明 |
 |---|---|---|
@@ -1242,6 +1242,7 @@ test_information(res, theta, *, direction=None, group=None) -> DataFrame
 多次元モデルでは、方向別のテスト情報量 $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$（mirt の
 `testinfo(..., degrees = )`）と、合成値 $\mathbf u^\top\boldsymbol\theta$ の推定値の標準誤差
 $\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$（1 次元では $1/\sqrt{I(\theta)}$ に等しい）。
+mirt の `plot(type = "SE")` が描く $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$（`1 / np.sqrt(information)`）ではない。
 引数は [`item_information`](#item_information) と同じ。
 
 **戻り値**: [`item_information`](#item_information) と同じインデックスで、列 `information` と `se` をもつ

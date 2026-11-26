@@ -231,7 +231,8 @@ def item_information(
 
     along the unit vector :math:`\mathbf u` = ``direction / ||direction||``, with the item
     information matrix :math:`\mathbf I_j` of :func:`information_matrix` (Reckase & McKinley,
-    1991). mirt's ``iteminfo(..., degrees = )`` is ``direction = cos(degrees)``.
+    1991). mirt's ``iteminfo(..., degrees = )`` is ``direction = cos(degrees)`` when the angles
+    satisfy :math:`\sum_m\cos^2\alpha_m=1` (mirt does not normalize the direction).
 
     Parameters
     ----------
@@ -294,7 +295,8 @@ def test_information(
 
     (Reckase & McKinley, 1991; Reckase, 2009): the directional information and the asymptotic
     standard error of the ML estimate of the composite :math:`\mathbf u^\top\boldsymbol\theta`
-    (not :math:`I_{\mathbf u}^{-1/2}`, which assumes the orthogonal coordinates known).
+    (not :math:`I_{\mathbf u}^{-1/2}`, which assumes the orthogonal coordinates known and is what
+    mirt's ``plot(type = "SE")`` draws; it is ``1 / np.sqrt(information)``).
 
     Parameters
     ----------

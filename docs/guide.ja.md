@@ -334,7 +334,7 @@ print(np.asarray(score_dist).sum(axis=1))  # each row sums to 1
 `item_information(res, theta)` と `test_information(res, theta)` は、`theta` の各値での項目ごと・テスト全体の
 Fisher 情報量を返す。`expected_score(res, theta)` は項目の期待得点とその和（テスト特性曲線）を返す。どの
 項目モデルでも使える。どれも `theta` をインデックスにした DataFrame を返すので、`.plot()` でそのまま曲線が描ける
-（多次元モデルは [14 節](#多次元モデルの情報量)）。`test_information` には条件付き標準誤差 `se` $=1/\sqrt{I(\theta)}$ も入る。
+（多次元モデルは [14 節](#多次元モデルの情報量)）。`test_information` には条件付き標準誤差 `se` $=1/\sqrt{I(\theta)}$ も入る（1 次元モデル）。
 
 `reliability(res)` は周辺信頼性を返す。誤差分散 $1/I(\theta)$ の得点の信頼性
 $\sigma^2/(\sigma^2+1/I(\theta))$ を、推定された潜在分布で平均したもの。反応データを渡して
@@ -931,10 +931,12 @@ print(information_matrix(res_mirt, grid)[0].round(3))  # (-1, 0) での 2 x 2 �
 print(expected_score(res_mirt, grid)["total"].round(2))
 ```
 
-- mirt の `degrees=`（各軸との角度）は `direction=np.cos(np.radians(degrees))` にあたる。
+- mirt の `degrees=`（各軸との角度）は、角度が整合している（$\sum_m\cos^2\alpha_m=1$）とき
+  `direction=np.cos(np.radians(degrees))` にあたる。flexpyirt は方向を長さ 1 にするが、mirt はしない。
 - `test_information` の `se` は、組み合わせ $\mathbf u^\top\boldsymbol\theta$ の推定値の標準誤差
   $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$。ほかの方向も推定するので、$1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$
-  以上になる。情報行列が特異な点では無限大。
+  以上になる。情報行列が特異な点では無限大。mirt の `plot(type = "SE")` は代わりに
+  $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ を描く。これは `information` 列の `1 / np.sqrt`。
 - 双因子モデルと two-tier モデルでは、`theta` は一般因子・特殊因子を含むすべての因子の列をもつ。
 - 信頼性と合計得点の関数は 1 次元モデル専用。
 

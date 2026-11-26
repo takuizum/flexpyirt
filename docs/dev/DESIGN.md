@@ -2551,8 +2551,14 @@ data-independent shapes (§15.21).
      eigenvalue is at most $D\varepsilon$ times its largest, $\varepsilon$ the double-precision
      machine epsilon; e.g. fewer linearly independent slope vectors than factors), `se` is
      $+\infty$, as for $I=0$ in one dimension. The item matrices are symmetrized,
-     $(\mathbf M+\mathbf M^\top)/2$, so that they are exactly symmetric. mirt has no counterpart; the reference inverts the sum of
-     mirt's item information matrices in R.
+     $(\mathbf M+\mathbf M^\top)/2$, so that they are exactly symmetric. **This differs from
+     mirt**: mirt has no SE in `testinfo()`, but its `plot(type = "SE")` / `type = "infoSE"` for
+     two- and three-factor models draws $1/\sqrt{I_{\mathbf u}}$ (`1/sqrt(testinfo(x, Theta,
+     degrees = ))`), the conditional-on-the-other-coordinates value above. flexpyirt reports the
+     composite SE instead, because it is the standard error of an estimable quantity and equals
+     the unidimensional SE when $D=1$; $1/\sqrt{I_{\mathbf u}}$ is `1 / np.sqrt(information)`
+     of the same DataFrame. The reference inverts the sum of mirt's item information matrices
+     in R.
    - `information_matrix(res, theta, *, item=None, group=None)` returns a NumPy array of shape
      `(T, D, D)`: the test information matrix, or with `item=` (an item name) that item's matrix.
      It is an array rather than a DataFrame because a $D\times D$ matrix per point has no flat
@@ -2732,6 +2738,7 @@ data-independent shapes (§15.21).
    mirt comparison.
 
 ## References
+- Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -2805,6 +2812,7 @@ data-independent shapes (§15.21).
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.

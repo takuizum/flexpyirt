@@ -1348,7 +1348,8 @@ Samejima, 1969), computed for every item model by automatic differentiation. It 
 $\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u$ along the unit vector
 $\mathbf u$ = `direction` / ‖`direction`‖, with the item information matrix of
 [`information_matrix`](#information_matrix) (Reckase & McKinley, 1991); mirt's
-`iteminfo(..., degrees = )` is `direction=np.cos(np.radians(degrees))`.
+`iteminfo(..., degrees = )` is `direction=np.cos(np.radians(degrees))` when
+$\sum_m\cos^2\alpha_m=1$ (mirt does not normalize the direction).
 
 | Argument | Type | Description |
 |---|---|---|
@@ -1370,7 +1371,8 @@ $1/\sqrt{I(\theta)}$ (mirt's `testinfo()`). For a multidimensional model, the di
 information $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$ (mirt's `testinfo(..., degrees = )`)
 and the standard error of the estimate of the composite $\mathbf u^\top\boldsymbol\theta$,
 $\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$, which equals $1/\sqrt{I(\theta)}$
-in one dimension. Arguments as for [`item_information`](#item_information).
+in one dimension. This is not mirt's `plot(type = "SE")`, which draws $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$
+(`1 / np.sqrt(information)`). Arguments as for [`item_information`](#item_information).
 
 **Returns**: `DataFrame` indexed like [`item_information`](#item_information) with the columns
 `information` and `se` (infinite where the information is 0 or the information matrix is

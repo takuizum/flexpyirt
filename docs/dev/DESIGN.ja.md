@@ -1893,8 +1893,11 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
      $\mathbf I(\boldsymbol\theta)$ が数値的に特異な（最小固有値が最大固有値の $D\varepsilon$ 倍
      以下。$\varepsilon$ は倍精度の機械イプシロン。たとえば一次独立な傾きベクトルが因子数より少ない）
      点では、1 次元で $I=0$ のときと同じく `se` は $+\infty$。項目の行列は $(\mathbf M+\mathbf M^\top)/2$
-     で対称化し、厳密に対称にする。mirt に対応する
-     ものはなく、参照値は R で mirt の項目情報行列の和を逆行列にして作る。
+     で対称化し、厳密に対称にする。**mirt とは異なる**: mirt の `testinfo()` に SE はないが、2・3 因子モデルの
+     `plot(type = "SE")` / `type = "infoSE"` は $1/\sqrt{I_{\mathbf u}}$（`1/sqrt(testinfo(x, Theta, degrees = ))`、
+     上の「他の座標が既知」の値）を描く。flexpyirt は推定可能な量の標準誤差であり $D=1$ で 1 次元の SE に一致する
+     合成値の SE を返す。$1/\sqrt{I_{\mathbf u}}$ は同じ DataFrame の `1 / np.sqrt(information)`。参照値は R で
+     mirt の項目情報行列の和を逆行列にして作る。
    - `information_matrix(res, theta, *, item=None, group=None)` は形 `(T, D, D)` の NumPy 配列を返す:
      テスト情報行列、または `item=`（項目名）を与えればその項目の行列。DataFrame ではなく配列にするのは、
      点ごとの $D\times D$ 行列には引きやすい平らな配置がないため。行と列は推定したモデルの `Model.factor_names` の順。
@@ -2035,6 +2038,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    （GGUM、Roberts, Donoghue & Laughlin, 2000 など）は、それ自身の mirt との照合があるときだけ検証済みとして示す。
 
 ## 参考文献
+- Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -2108,6 +2112,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.

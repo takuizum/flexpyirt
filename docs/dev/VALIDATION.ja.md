@@ -881,7 +881,7 @@
   - **方向別の項目・テスト情報量**（`iteminfo` / `testinfo(degrees = )`、`direction = cos(degrees)`）:
     項目は相対 `1.0e-12`、テストは相対 `5.8e-14`。
   - **合成値の SE** $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$（mirt の行列の和を R の `solve()` で
-    逆行列にしたもの。mirt にこの出力はない）: 相対 `2.8e-14`。
+    逆行列にしたもの。mirt の `plot(type = "SE")` は代わりに $1/\sqrt{I_{\mathbf u}}$ を描く。DESIGN §18.3）: 相対 `2.8e-14`。
   - **`expected.item()` / `expected.test()`**: 絶対 `4.8e-14` / 相対 `4.7e-15`。
   許容誤差はすべて相対 $10^{-10}$ と絶対 $10^{-13}$（傾きを 0 に固定したため 0 になる要素のため）。
   - **単体テスト**（`tests/test_m7_information_multidim.py`。単純構造と多母集団のテストは低速層）: 2 因子の

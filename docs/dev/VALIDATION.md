@@ -858,7 +858,7 @@ English | [日本語](VALIDATION.ja.md)
   - **Directional item and test information** (`iteminfo` / `testinfo(degrees = )`, with
     `direction = cos(degrees)`): item `1.0e-12` relative, test `5.8e-14` relative.
   - **Composite SE** $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$ against the inverse of the
-    sum of mirt's matrices (`solve()` in R; mirt has no such output): `2.8e-14` relative.
+    sum of mirt's matrices (`solve()` in R; mirt's `plot(type = "SE")` shows $1/\sqrt{I_{\mathbf u}}$ instead, DESIGN §18.3): `2.8e-14` relative.
   - **`expected.item()` / `expected.test()`**: `4.8e-14` absolute / `4.7e-15` relative.
   Tolerance for all: $10^{-10}$ relative plus $10^{-13}$ absolute (for entries that are 0 because
   a slope is fixed at 0).
