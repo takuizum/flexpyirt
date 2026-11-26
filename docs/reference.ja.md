@@ -6,8 +6,8 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）と�
 使い方の流れは[ユーザーガイド](guide.ja.md)、数式とアルゴリズムは [理論](theory.ja.md) を参照。
 各関数の docstring にも同じ内容と対応する式・出典がある（`help(flexpyirt.fit)` など）。
 
-**flexpyctt** は、推定済みのモデルを使わない道具をまとめたパッケージである。[相関](#相関)と、[次元数](#次元数)のうち
-モデルを使わないものが入る（どちらのパッケージのものかは各項目に書く）。依存は NumPy、SciPy、pandas だけなので、
+**flexpyctt** は、推定済みのモデルを使わない道具をまとめたパッケージである。[相関](#相関)、[次元数](#次元数)のうち
+モデルを使わないもの、[古典的項目分析](#古典的項目分析)、[観測得点による DIF](#観測得点による特異項目機能dif) が入る（どちらのパッケージのものかは各項目に書く）。依存は NumPy、SciPy、pandas だけなので、
 JAX なしでインストールでき（`pip install flexpyctt`）、64 ビットの設定も要らない。flexpyirt をインストールすると
 一緒に入る。関数は `from flexpyctt import ...` で使う。flexpyirt も同じ名前で再公開しているが、`polychoric` だけは
 別で、`flexpyirt.polychoric` は同じ推定量の JAX による実装である。乱数を使う関数は、flexpyctt では `rng`（整数の
@@ -16,14 +16,21 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 公開関数の引数は、最初の 1〜2 個を除いてキーワード専用（`*` の後ろ）。
 
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
-- 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
+- DIF: [`dif_screen`](#dif_screen), [`DIFScreenResult`](#difscreenresult), [`dif_effect_sizes`](#dif_effect_sizes)（と [`FitResult.dif`](#fitresultdif)）
+- 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult), [`screen_common_items`](#screen_common_items), [`CommonItemScreeningResult`](#commonitemscreeningresult), [`stack_screening_tables`](#stack_screening_tables)
 - 相関（flexpyctt）: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - 次元数（`model_parallel_analysis` と `dimensionality` 以外は flexpyctt）: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) とその結果
-- 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
+- 古典的項目分析（flexpyctt）: [`score_responses`](#score_responses), [`item_analysis`](#item_analysis), [`coefficient_alpha`](#coefficient_alpha), [`coefficient_omega`](#coefficient_omega), [`distractor_analysis`](#distractor_analysis) とその結果
+- 観測得点による DIF（flexpyctt）: [`mantel_haenszel`](#mantel_haenszel), [`mantel`](#mantel), [`generalized_mantel_haenszel`](#generalized_mantel_haenszel), [`logistic_dif`](#logistic_dif), [`DIFResult`](#difresult)
+- 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
+- 図: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
+- IRT 等化: [`irt_equate`](#irt_equate), [`IRTEquatingResult`](#irtequatingresult), [`score_distribution`](#score_distribution), [`scale_table`](#scale_table)
+- モデル比較とシミュレーション: [`compare_fits`](#compare_fits), [`simulate_responses`](#simulate_responses), [`SimulatedData`](#simulateddata)
+- 分類: [`classification_accuracy`](#classification_accuracy), [`ClassificationResult`](#classificationresult)
 - モデル: [`Model`](#model)
-- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
-- 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
+- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)、[ユーザー定義の項目モデル](#ユーザー定義の項目モデル)
+- 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior), [`LogitNormalPrior`](#logitnormalprior)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - 例外と警告: [`flexpyirt.errors`](#flexpyirterrors)
@@ -139,28 +146,74 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 #### `FitResult.item_fit`
 
 ```text
-item_fit(data, *, min_cell=1.0, group=None, item_names=None) -> DataFrame
+item_fit(data, *, statistics=("s_x2",), method="EAP", min_cell=1.0, group=None,
+         item_names=None) -> DataFrame
 ```
 
-Orlando–Thissen の S-X2 項目適合度（[ガイド 5 節](guide.ja.md#項目適合度s-x2)）。各項目について、合計得点
+項目適合度。Orlando–Thissen の S-X2（既定）と infit / outfit（[ガイド 5 節](guide.ja.md#項目適合度s-x2)）。
+
+**S-X2**（`"s_x2"`）。各項目について、合計得点
 $1,\dots,S-1$ ごとの各カテゴリの観測度数とモデルによる期待度数を比べる。期待度数は、その項目を除いた
 Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在分布の重みで計算する。度数の少ないセルは mirt の
 `itemfit()` と同じ方法でまとめ（`min_cell` は mirt の `mincell`）、$df_j$ = 残ったセル数 − 行数 − その項目の自由パラメタ数 −
 潜在分布の自由パラメタ数（mirt の約束）。確認的多次元モデル（`with_factors()`、単一群）では、推定時の直積格子の
 すべてのノードで再帰を回して多変量正規の重みで積分し、自由な因子間相関を潜在分布のパラメタとして数える。
 
+**infit / outfit**（`"infit"`・`"outfit"`）: 各受験者を `method` で推定し、項目 $j$ に回答した $N_j$ 人にわたって
+$\mathrm{outfit}_j=\frac1{N_j}\sum_i r_{ij}^2/W_{ij}$、$\mathrm{infit}_j=\sum_i r_{ij}^2/\sum_i W_{ij}$ とし、
+Wright & Masters (1982) の Wilson–Hilferty 変換の $z$ 値も返す。$r_{ij}$ は $\hat\theta_i$ での項目得点
+$0,\dots,K_j-1$ の残差、$W_{ij}$ はその条件付き分散（[`FitResult.person_fit`](#fitresultperson_fit)、DESIGN §25）。
+1 次元モデルのみ。欠測は飛ばす。mirt と同じく全項目モデルで計算する（Rasch 系以外では記述的な指標）。
+
 | 引数 | 説明 |
 |---|---|
-| `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
-| `min_cell` | まとめる前のセルあたり最小期待度数（既定 `1.0`） |
-| `group` | 群ラベル（多母集団モデルでは必須。群ごとに S-X2 を計算する） |
+| `data` | 推定した項目への反応（通常は推定に使ったデータ）。S-X2 は欠測のないデータが必要 |
+| `statistics` | `"s_x2"`・`"infit"`・`"outfit"` のいずれか（既定 `("s_x2",)`） |
+| `method` | infit / outfit の能力推定法: `"EAP"`（既定）・`"MAP"`・`"ML"`・`"WLE"`。推定値が無限大の受験者は除く |
+| `min_cell` | S-X2 のセルをまとめる前のセルあたり最小期待度数（既定 `1.0`） |
+| `group` | 群ラベル（多母集団モデルでは必須。群ごとに計算する） |
 | `item_names` | `data` が配列のときの列名 |
 
-**戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
-`df <= 0` になる項目は `df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
+**戻り値**: `item` 列に続けて、S-X2 なら `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p`、infit なら
+`infit`, `z_infit`、outfit なら `outfit`, `z_outfit` 列の `DataFrame`。S-X2 の表をまとめた結果 `df <= 0` になる項目は
+`df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
 
-**例外**: 双因子・two-tier・多母集団の多次元・`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
-項目、正でない `min_cell` の場合に `SpecificationError`。
+**例外**: 不明または空の `statistics`。S-X2 では双因子・two-tier・多母集団の多次元・`EmpiricalHistogram`・
+`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある項目、正でない
+`min_cell`。infit / outfit では多次元モデルとそれ以外の `method`。いずれも `SpecificationError`。
+
+#### `FitResult.person_fit`
+
+```text
+person_fit(data, *, method="EAP", group=None, item_names=None,
+           statistics=("lz", "infit", "outfit")) -> DataFrame
+```
+
+各受験者の能力推定値での受験者適合度（[ガイド 5 節](guide.ja.md#受験者適合度と-infit--outfit)、DESIGN §25）。
+回答した項目を $A$、$P_{jk}=P_{jk}(\hat\theta)$ として:
+
+- `"lz"`: $l_z=(l_0-\mathrm E\,l_0)/\sqrt{\mathrm{Var}\,l_0}$、$l_0=\sum_{j\in A}\log P_{jy_j}$、
+  $\mathrm E\,l_0=\sum_j\sum_kP_{jk}\log P_{jk}$（Drasgow, Levine & Williams, 1985。mirt の `Zh`）。
+- `"lz_star"`: $l_z^*=(l_0-\mathrm E\,l_0+c\,r_0(\hat\theta))/\tau$（Snijders, 2001; Sinharay, 2016）。
+  $c=\sum_j\sum_kP'_{jk}\log P_{jk}/\sum_jI_j$、$\tau^2=\mathrm{Var}\,l_0-2c\sum_j\sum_kP'_{jk}\log
+  P_{jk}+c^2\sum_jI_j$、推定法の項 $r_0$ は ML で 0、MAP で $-(\theta-\mu_g)/\sigma_g^2$、WLE で $I'/(2I)$。EAP では定義しない。
+- `"infit"` / `"outfit"`: 回答した $n$ 項目にわたる $\sum_j r_j^2/\sum_j W_j$ と $\frac1n\sum_j r_j^2/W_j$。
+  `z_infit` / `z_outfit` $=(\mathrm{MS}^{1/3}-1)(3/q)+q/3$（Wright & Masters, 1982）。
+
+| 引数 | 説明 |
+|---|---|
+| `data` | 推定した項目への反応（NaN は欠測） |
+| `method` | `score()` と同じ能力推定法: `"EAP"`（既定）・`"MAP"`・`"ML"`・`"WLE"` |
+| `group` | 群ラベル（多母集団モデルでは必須） |
+| `item_names` | `data` が配列のときの列名 |
+| `statistics` | `"lz"`・`"lz_star"`・`"infit"`・`"outfit"` のいずれか（既定 `("lz", "infit", "outfit")`） |
+
+**戻り値**: 受験者 1 人 1 行の `DataFrame`（`data` が DataFrame ならインデックスを引き継ぐ）。`theta` に続けて、要求した
+統計量の `lz`・`lz_star`・`infit`・`z_infit`・`outfit`・`z_outfit` と `n_items`（回答した項目数）。推定値が有限でない行
+（全欠測、全項目が最低・最高カテゴリのパターンの ML）は統計量が NaN。
+
+**例外**: 不明または空の `statistics`、多次元モデル、EAP・MAP・ML・WLE 以外の `method`（またはそのモデルで `score()` が
+受け付けないもの）、`method="EAP"` での `"lz_star"` の場合に `SpecificationError`。
 
 #### `FitResult.m2`
 
@@ -260,7 +313,10 @@ $$\mathrm{JSI}_{ji} = \frac{\hat a_i - \hat a_i^{(-j)}}{\mathrm{SE}(\hat a_i^{(-
 
 **戻り値**: [`JSIResult`](#jsiresult)
 
-**例外**: `PrecisionError`。対応しないモデル、項目が 3 つ未満、不正な指定、標準誤差のない推定結果での `"one_step"` は
+JSI は単一群・1 次元のモデルについてのみ定義されている。多次元・多母集団への拡張は研究されておらず、参照となる実装も
+ないので、ほかのモデルには使えない。
+
+**例外**: `PrecisionError`。多母集団・多次元（双因子・two-tier を含む）・`Normal` 以外の潜在分布のモデル、項目が 3 つ未満、不正な指定、標準誤差のない推定結果での `"one_step"` は
 `SpecificationError`。
 
 **警告**: 推定し直しが収束しなければ `ConvergenceWarning`。
@@ -268,29 +324,38 @@ $$\mathrm{JSI}_{ji} = \frac{\hat a_i - \hat a_i^{(-j)}}{\mathrm{SE}(\hat a_i^{(-
 #### `FitResult.dif`
 
 ```text
-dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None) -> DataFrame
+dif(data=None, *, group=None, items, params=None, scheme="add", test="likelihood_ratio",
+    p_adjust="holm", item_names=None) -> DataFrame
 ```
 
-多母集団モデルの群間の尤度比検定による DIF（[ガイド 9 節](guide.ja.md#特異項目機能dif)）。mirt の `DIF()` に相当。
-項目ごとに、その項目の `params` を群間で等値にして（`scheme="add"`）または群ごとに自由にして（`scheme="drop"`）
-モデルを推定し直し（同じ `BAEM` 設定と求積、この推定値から開始）、
+多母集団モデルの群間の尤度比検定または Wald 検定による DIF（[ガイド 9 節](guide.ja.md#特異項目機能dif)）。mirt の
+`DIF()` に相当。`test="likelihood_ratio"` では、項目ごとに、その項目の `params` を群間で等値にして（`scheme="add"`）
+または群ごとに自由にして（`scheme="drop"`）モデルを推定し直し（同じ `BAEM` 設定と求積、この推定値から開始）、
 $X^2 = 2(\ell_{\text{free}} - \ell_{\text{constrained}})$、$df = |k_{\text{base}} - k_{\text{new}}|$ を求める。
+`test="wald"`（`scheme="add"` のみ）では推定し直さず、項目のパラメタの群間の差 $\mathbf L\boldsymbol\eta$ をこの推定の
+`vcov` で検定する: $W=(\mathbf L\boldsymbol\eta)^\top(\mathbf L\mathbf V\mathbf L^\top)^{-1}\mathbf L\boldsymbol\eta$、
+$df$ = $\mathbf L$ の行数（mirt の `DIF(Wald = TRUE)`）。
 
 | 引数 | 説明 |
 |---|---|
-| `data`, `group` | この結果を推定したときの反応と群ラベル |
-| `items` | 検定する項目（項目ごとに 1 回推定し直す） |
+| `data`, `group` | この結果を推定したときの反応と群ラベル（尤度比検定で必要） |
+| `items` | 検定する項目（尤度比検定では項目ごとに 1 回推定し直す） |
 | `params` | 検定する内部パラメタ（既定: 各項目の全パラメタ） |
 | `scheme` | `"add"`（制約する。推定済みモデルが基準）または `"drop"`（自由にする） |
+| `test` | `"likelihood_ratio"`（既定）または `"wald"`（`fit(..., se=...)` が必要。flexpyirt の自然なパラメタで検定するので、3PL/4PL の `g` / `u` は mirt のロジット尺度の検定と異なる） |
 | `p_adjust` | `adj_p` の補正。`"holm"`（既定、mirt と同じ）、`"BH"`（Benjamini–Hochberg）、`"none"` |
 | `item_names` | `data` が配列のときの列名 |
 
-**戻り値**: `item`, `converged`, `aic`, `sabic`, `hq`, `bic`（項目を自由にしたモデル − 制約したモデル。負なら DIF を
-支持）, `x2`, `df`, `p`, `adj_p` 列の `DataFrame`。
+**戻り値**: `DataFrame`。尤度比: `item`, `converged`, `aic`, `sabic`, `hq`, `bic`（項目を自由にしたモデル − 制約した
+モデル。負なら DIF を支持）, `x2`, `df`, `p`, `adj_p`。Wald: `item`, `x2`（統計量 $W$）, `df`, `p`, `adj_p`。
 
 **例外**: 単一群のモデル、事前分布つきの MAP 推定、未知の項目やパラメタ、検定するものがない項目（`"add"` で
-すでに等値、`"drop"` ですでに自由）では `SpecificationError`。推定し直すモデルが識別できない（例: 唯一のアンカーを
-自由にする）と `IdentificationError`。
+すでに等値、`"drop"` ですでに自由）、`vcov` のない推定や `scheme="drop"` での Wald 検定、`data` / `group` のない
+尤度比検定では `SpecificationError`。推定し直すモデルが識別できない（例: 唯一のアンカーを自由にする）と
+`IdentificationError`。
+
+全項目をアンカーの純化つきでスクリーニングするには [`dif_screen`](#dif_screen)、効果量は
+[`dif_effect_sizes`](#dif_effect_sizes)。
 
 #### `FitResult.to_json`
 
@@ -311,7 +376,7 @@ float64 値は `repr` 厳密な JSON 数値として、非有限値（`NaN`, `+i
 
 **戻り値**: `str`（直列化された JSON 文字列）。
 
-**例外**: `indent` が不正、または未登録のモデル・事前分布型が含まれる場合に `SpecificationError`。
+**例外**: `indent` が不正、または未登録のモデル・事前分布型が含まれる場合に `SpecificationError`（ユーザー定義の項目モデルは先に [`register_item_model`](#flexpyirtitemsregister_item_model) で登録する）。
 
 #### `FitResult.from_json`
 
@@ -331,7 +396,8 @@ FitResult.from_json(source) -> FitResult
 **戻り値**: `FitResult`
 
 **例外**: JAX の 64 ビット浮動小数点が無効なら `PrecisionError`。不正・非厳格な JSON（生の `NaN`/`Infinity`
-リテラルなど）、未知の `format` タグ・スキーマ版・登録名、または内部整合性違反なら `SpecificationError`。存在しない
+リテラルなど）、未知の `format` タグ・スキーマ版・登録名（このセッションで登録していないユーザー定義の項目モデルを含む）、
+または内部整合性違反なら `SpecificationError`。存在しない
 ファイルパスなら `FileNotFoundError`。
 
 ---
@@ -470,7 +536,7 @@ model.equal_across_items(*, items, params) -> Model
 model.prior(*, param, dist, items=None) -> Model
 ```
 
-選択した項目の内部パラメタ `param` に事前分布 `dist`（`NormalPrior`, `LogNormalPrior`, `BetaPrior`）を全群共通で付ける
+選択した項目の内部パラメタ `param` に事前分布 `dist`（`NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior`）を全群共通で付ける
 （MAP 推定、[ガイド 11 節](guide.ja.md#11-事前分布と-map-推定)）。事前分布はヤコビアンなしの自然尺度で評価される。
 固定パラメタの事前分布は無視され、群間で共有されるパラメタ（同じ `free_id`）は 1 回だけ数えられる。潜在分布パラメタ
 （`"mean"`, `"var"`, `"phi_*"`, `"rmean_*"`, `"rvar_*"`, `"logit_*"` など）への指定は `SpecificationError`。
@@ -478,7 +544,7 @@ model.prior(*, param, dist, items=None) -> Model
 | 引数 | 説明 |
 |---|---|
 | `param` | 内部項目パラメタ名（`"a"`, `"d"`, `"g"`, `"u"`, `"d1"`, …） |
-| `dist` | `NormalPrior`, `LogNormalPrior`, `BetaPrior` のいずれか |
+| `dist` | `NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior` のいずれか |
 | `items` | 項目名のリスト、`str -> bool` の関数、または全項目を表す `None` |
 
 #### `Model.parameter_table`
@@ -599,6 +665,65 @@ mirt の `itemtype = "nominal"` と同じ。$\mathrm{ak}_k=k$ に固定すると
 （`n_categories = 2` では自由な `ak` パラメタがなく、`Nominal(2)` は `GPCM(2)` / `TwoPL` と一致する）。
 `NominalKernel(n_categories)` を用いる。
 
+### ユーザー定義の項目モデル
+
+組み込みにない項目モデルは、`flexpyirt.items` の 2 つのプロトコルに沿って書けば、上のクラスと同じように `Model`
+で使える（実例は[ユーザーガイド](guide.ja.md#20-ユーザー定義の項目モデル)）。カーネルが等しい項目はまとめて推定する。
+
+**`flexpyirt.items.ItemKernel`**（反応関数。ハッシュ可能で値で比較できること。frozen dataclass にする）
+
+| メンバ | 必須 | 説明 |
+|---|---|---|
+| `n_factors` | はい | 潜在因子の数 $D$ |
+| `with_factors(n_factors)` | はい | `n_factors` 因子用のカーネルのコピー |
+| `param_names` | はい | パラメタ名（順序つき）。先頭の $D$ 個が傾き |
+| `n_categories` | はい | カテゴリ数 $K \ge 2$（反応は `0..K-1` で符号化） |
+| `slope_params` | はい | 傾き。`param_names[:n_factors]` |
+| `intercept_params` | はい | 位置を担うパラメタ（識別チェックが使う。空でもよい） |
+| `log_prob(theta, params)` | はい | 形 `(Q, D)` の節点 `theta` とパラメタベクトル `params` での `(Q, K)` の対数確率。`jax.numpy` で書き、2 回微分できること。パラメタの定義域外では NaN |
+| `irt_names`、`irt_dependency_indices`、`irt_thresholds(params)` | いいえ | `FitResult.items` にデルタ法 SE 付きで加える表示用閾値。その名前、それぞれが依存するパラメタの添字、値 |
+
+**`flexpyirt.items.ItemModel`**（仕様。frozen dataclass にする）
+
+| メンバ | 説明 |
+|---|---|
+| `name` | クラス属性。`model` 列と JSON での名前（組み込みの名前は使えない） |
+| `kernel` | `n_factors == 1` のカーネル |
+| `default_free()` | 各パラメタを既定で推定するか |
+| `start_values(item, rest)` | 1 項目の観測された反応とその残余得点からの初期値 |
+| `bounds()` | パラメタの上下限の `(lower, upper)` タプル |
+
+`default_free()`・`start_values()`・`bounds()` は 1 次元の `param_names` に従い、$D$ 因子のモデルでは傾きの要素を
+すべての傾きに使う。`Model` は作るときにこれらの規則をチェックする（`SpecificationError`）。`log_prob` を評価する
+機能はすべてユーザー定義モデルで使える: 推定、標準誤差、スコアリング、項目適合度、M2、局所依存、DIF、情報量、
+合計得点、多母集団、事前分布、多次元モデル。ML と WLE のスコアリングは、傾きが正のとき高いカテゴリほど $\theta$
+が高いことを仮定する。使えないもの: `link()` と `Model.fix_from(..., parameterization="irt")`
+（`SpecificationError`）、および `Rasch` / `PCM` だけのモデルが既定で得る潜在分散の推定
+（`Model.with_latent(Normal(free_var=True))` を使う）。
+
+#### `flexpyirt.items.register_item_model`
+
+```text
+register_item_model(cls, *, to_dict=None, from_dict=None) -> cls
+```
+
+ユーザー定義の項目モデルのクラスを登録し、それを使った推定結果を `FitResult.to_json()` で保存し
+`FitResult.from_json()` で読めるようにする。モデルは `{"type": cls.name, **to_dict(model)}` として保存し、
+`from_dict(fields)` で復元する。既定では、フィールドが `bool`・`int`・有限の `float`・`str` の dataclass であること。
+登録は Python セッションの間だけ有効なので、新しいセッションでは読む前に登録し直す。クラスデコレータとしても使える。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `cls` | type | 項目モデルのクラス。`cls.name` が JSON での型名 |
+| `to_dict` | callable、任意 | `model -> dict`（JSON の値、`"type"` を除く） |
+| `from_dict` | callable、任意 | `dict -> model`。`to_dict` の逆（両方を渡すか、どちらも渡さない） |
+
+**戻り値**: `cls`。
+
+**例外**: `cls.name` がないか組み込みの名前のとき、同じ名前で別のクラスが登録済みのとき、`to_dict` / `from_dict`
+の片方だけを渡したとき、dataclass でないクラスに既定の符号化を使ったときに `SpecificationError`。登録しないと
+`to_json()` が `SpecificationError` を出す。
+
 ---
 
 ## 事前分布
@@ -638,6 +763,24 @@ $(0, 1)$ 上のベータ事前分布:
 $\log\pi(x) = (a - 1)\log x + (b - 1)\log(1 - x) - \log B(a, b)$
 （$(0, 1)$ の外で $-\infty$。Swaminathan & Gifford, 1986、mirt の `expbeta` の自然尺度対数事前目的関数と一致、
 logit ヤコビアンなし）。正の有限な `a`, `b` が必要。3PL / 4PL の漸近線 `g`, `u` によく使う。
+
+### `LogitNormalPrior`
+
+```text
+LogitNormalPrior(mean_logit, sd_logit, *, mode_scale="natural")
+```
+
+$(0, 1)$ 上のロジット正規事前分布（$\operatorname{logit} X \sim N(\mu, s^2)$; Aitchison & Shen, 1980）:
+$\log\pi(x) = -\log x - \log(1 - x) - \log s - \tfrac{1}{2}\log(2\pi) - \frac{(\operatorname{logit} x - \mu)^2}{2s^2}$
+（$(0, 1)$ の外では $-\infty$）。$-\log x - \log(1 - x)$ の項は $X$ 自体の密度の一部。有限の `mean_logit` と正の有限な
+`sd_logit` が必要。3PL / 4PL の漸近線によく使う: `LogitNormalPrior(-1.0986, 0.5)` は `g` の中心を $1/4$ に置く。
+flexMIRT の `Guessing : Normal(mean, sd)` と mirt の `PRIOR = (..., g, norm, mean, sd)` は同じ分布だが、事後分布を
+$\operatorname{logit} g$ について（この項なしで）最大化するので、推定値は少し違う（[ガイド 11 節](guide.ja.md#11-事前分布と-map-推定)）。
+
+| 引数 | 説明 |
+|---|---|
+| `mean_logit`, `sd_logit` | $\operatorname{logit} X$ の平均と標準偏差 |
+| `mode_scale` | `"natural"`（既定）: 上の密度で、自然尺度の事後モード。`"logit"`: ヤコビアンなしの項 $\log\phi(\operatorname{logit} x; \mu, s)$ で、flexMIRT と mirt の logit 尺度の事後モード・対数事後・（デルタ法の）SE を与える |
 
 ---
 
@@ -739,6 +882,105 @@ Gauss–Hermite 格子に対応する。成分は交換可能（ラベルスイ�
 
 ---
 
+## 特異項目機能（DIF）
+
+1 次元の多母集団モデルが対象（[ガイド 9 節](guide.ja.md#特異項目機能dif)、DESIGN.md §16.22）。符号は焦点群 − 参照群。
+検定はすべて全群にわたる総括検定。
+
+### `dif_screen`
+
+```text
+dif_screen(spec, data, *, group, items=None, anchor_items=None, strategy="all_others",
+           test="likelihood_ratio", params=None, p_adjust="BH", alpha=0.05, max_iter=10,
+           method=None, quadrature=None, se=None, item_names=None) -> DIFScreenResult
+```
+
+全項目の DIF をスクリーニングし、アンカーを純化する。モデルは `spec` から作る（`spec` の `equal_across_groups()` は
+置き換える）。検定しない項目と `params` 以外のパラメタは群間で等値、検定する項目の `params` は手順に応じて等値か自由。
+自由な検定項目の集合を $F$ とすると、項目 $i$ は $F\cup\{i\}$ と $F\setminus\{i\}$ の比較（尤度比、または
+$F\cup\{i\}$ の推定の Wald 統計量）で検定する。各ラウンドで全検定項目の最新の $p$ を補正し、補正後 $p<$ `alpha`
+を検出とする。
+
+| `strategy` | 手順 | mirt の `DIF(scheme = )` |
+|---|---|---|
+| `"all_others"` | 全検定項目を制約して 1 ラウンド。各項目を他の全項目をアンカーとして検定する | 完全不変モデルからの `"drop"` |
+| `"sequential_free"` | 1 ラウンド目は `"all_others"` と同じ。以後、検出された項目を自由にして他の項目を検定し直し、検出結果が変わらなくなるまで繰り返す | `"drop_sequential"` |
+| `"sequential_constrain"` | アンカー（`anchor_items` が必要）から、検定項目をすべて自由にして始める。以後、検出されなかった項目を制約し、検出された項目を検定し直し、検出結果が変わらなくなるまで繰り返す | `"add_sequential"` |
+
+| 引数 | 説明 |
+|---|---|
+| `spec` | 1 次元の多母集団 `Model`（焦点群の潜在分布は通常 `Normal.free()`）。事前分布と `equal_across_items()` は不可 |
+| `data`, `group` | 反応と群ラベル |
+| `items` | 検定する項目（既定: `anchor_items` 以外の全項目） |
+| `anchor_items` | 常に群間で等値で、検定しない項目（どちらの引数にもない項目もアンカー） |
+| `strategy` | 上の表を参照 |
+| `test` | `"likelihood_ratio"`（検定ごとに 2 回の推定、キャッシュする）または `"wald"`（検定ごとに標準誤差つきの推定 1 回。`"sequential_constrain"` ではラウンドごとに 1 回） |
+| `params` | 検定する内部パラメタ（既定: 全部）。項目が持たない名前はその項目では無視する |
+| `p_adjust` | 検定項目にわたる補正。`"BH"`（既定）、`"holm"`、`"none"` |
+| `alpha` | 補正後 $p<$ `alpha` で検出（mirt の数値の `seq_stat`） |
+| `max_iter` | 逐次戦略の最大ラウンド数（mirt の `max_run` − 1） |
+| `method`, `quadrature` | すべての推定の設定 |
+| `se` | 最終モデル（と Wald 検定の推定）の標準誤差（`None` なら `"oakes"`） |
+| `item_names` | `data` が配列のときの列名 |
+
+**戻り値**: [`DIFScreenResult`](#difscreenresult)。
+
+**例外**: `PrecisionError`。単一群や多次元のモデル、事前分布、項目間の等値制約、未知の項目や重なる項目、`params` を
+1 つも持たない項目、`"sequential_constrain"` でアンカーがない、不正なオプションでは `SpecificationError`。手順の途中の
+モデルが識別できない（例: 全項目が検出された）と `IdentificationError`。
+
+**警告**: 逐次戦略が `max_iter` ラウンドで同じ検出結果を繰り返さなかったら `ConvergenceWarning`。
+
+### `DIFScreenResult`
+
+`dif_screen()` が返す frozen dataclass。
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `table` | DataFrame | 検定項目ごとに 1 行: `item`, `x2`, `df`, `p`, `adj_p`, `flagged`, `converged`。`"all_others"` では唯一のラウンドの検定。逐次戦略では最終的なアンカーに対する各項目の検定（その項目を自由にしたモデルと制約したモデルの比較、他の項目は最終モデルのとおり。検出された項目は mirt の最終出力と同じ）。`adj_p` は表にわたって補正する。`flagged` は手順の判定 |
+| `flagged_items`, `anchor_items` | list[str] | 検出された項目と、それ以外の全項目（最終モデルで群間で等値） |
+| `history` | DataFrame | ラウンドと検定項目ごとに 1 行: `round`, `item`, `retested`, `x2`, `df`, `p`, `adj_p`, `flagged`（検定し直さなかった項目は最新の統計量のまま） |
+| `fit` | `FitResult` | 最終モデル。検出された項目の検定したパラメタを群間で自由にしたもの |
+| `strategy`, `test` | str | 使ったオプション |
+| `n_rounds`, `converged` | int, bool | 検定のラウンド数と、検出結果が繰り返したか |
+
+### `dif_effect_sizes`
+
+```text
+dif_effect_sizes(result, *, data=None, group=None, focal=None, items=None, density="focal",
+                 item_names=None) -> DataFrame
+```
+
+推定した 1 次元の多母集団モデル（`FitResult` か、`fit` を使う `DIFScreenResult`）の効果量を、各焦点群と参照群
+（第 1 群）の間で求める。$D_j(\theta)=E_{fj}(\theta)-E_{rj}(\theta)$ を期待項目得点の差、$w_q$ を推定時の格子上の焦点群
+（または参照群）の推定潜在分布の重みとすると:
+
+| 列 | 定義 | mirt |
+|---|---|---|
+| `signed_difference` | $\sum_qw_qD_j(\theta_q)$（Chalmers, 2018） | `DRF(DIF = TRUE, best_fitting = TRUE)` の `sDIF` |
+| `unsigned_difference` | $\sum_qw_q\lvert D_j(\theta_q)\rvert$ | `uDIF` |
+| `expected_score_standardized_difference`（`data` あり） | 焦点群の回答者の EAP での $E_{fj}(\hat\theta_i)$ と $E_{rj}(\hat\theta_i)$ の Cohen の $d$（Meade, 2010） | `empirical_ES()` の `ESSD` |
+| `rmsd_reference`, `rmsd_focal`（`data` あり） | 群のデータの事後期待項目得点 $\hat E_{gj}$ による $\big(\sum_qw_{gq}(\hat E_{gj}(\theta_q)-E_{gj}(\theta_q))^2\big)^{1/2}$（期待得点の RMSD; Köhler, Robitzsch & Hartig, 2020） | `RMSD_DIF(probfun = FALSE)` |
+
+RMSD は各群のパラメタがその群に合うかを測るので、群間で等値なパラメタの項目（不変モデル）に使う。項目の行の後に、
+焦点群ごとに `level="test"`、`item="test"` の行があり、`items` にわたって合計した期待得点を使う: 符号つき・符号なしの
+DTF（`DRF(DIF = FALSE)`）と期待テスト得点の標準化差（`ETSSD`。RMSD は NaN）。
+
+| 引数 | 説明 |
+|---|---|
+| `result` | `FitResult` または `DIFScreenResult` |
+| `data`, `group` | 推定に使った反応と群ラベル（データに基づく列が加わる） |
+| `focal` | 焦点群（既定: 第 1 群以外の全群） |
+| `items` | 項目（既定: 全項目）。テストの行はこれらにわたって合計する |
+| `density` | `"focal"`（既定）または `"reference"`: 差を重み付ける潜在分布 |
+| `item_names` | `data` が配列のときの列名 |
+
+**戻り値**: `group`（焦点群）, `level`（`"item"` / `"test"`）, `item`, `signed_difference`, `unsigned_difference`、
+`data` を渡すと `expected_score_standardized_difference`, `rmsd_reference`, `rmsd_focal` 列の `DataFrame`。
+
+**例外**: `PrecisionError`。単一群や多次元の推定、（`data` を渡したときの）ウェイトつき推定、未知の群や項目、参照群を
+焦点群に指定、`group` のない `data` では `SpecificationError`。
+
 ## 尺度リンキング
 
 ### `link`
@@ -800,6 +1042,67 @@ $\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta$ で結び�
 | `items` | DataFrame | `source` の全項目を基準尺度へ変換した表（`item`, `model`, `common`、内部の傾き–切片パラメタと表示用 IRT 閾値 `b` / `bk`）。そのまま `Model.fix_from()` に渡せる |
 | `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | 能力値を $\theta^* = A\theta + B$ で変換（採点 DataFrame の `theta` と全 `pv1..` 列。`se` は $A\,\mathrm{se}$ でリンキング誤差を含まない）。因子数 $D > 1$ では `theta_<因子>`・`pv<m>_<因子>` 列、または最後の軸の長さが $D$ の配列。`se_<因子>` は対角の $\mathbf A$ では定数倍、それ以外では NaN |
 | `summary(*, digits=4)` | str | 読みやすいテキスト要約（Jupyter では `_repr_html_()` で HTML 表示） |
+
+### `screen_common_items`
+
+```text
+screen_common_items(source, target, *, items=None, method="stocking_lord", symmetric=False,
+                    statistic="robust_z", threshold=None, purify=True, removal="largest",
+                    min_items=2, max_iter=10, source_group=None,
+                    target_group=None) -> CommonItemScreeningResult
+```
+
+1 次元リンキングの共通項目に項目パラメータドリフトがないかを点検し、動いた項目を外してリンクし直す
+（[ガイド 15 節](guide.ja.md#共通項目の点検)）。各段階で現在のアンカー集合について [`link`](#link) でリンクし、`source` の項目を
+変換して（$a^* = a/A$、位置 $b^* = A\,b + B$）、共通項目ごとに傾きの対数比と位置の差の頑健 z（すべての共通項目にわたる
+$(x - \mathrm{median}) / (0.74\,\mathrm{IQR})$、Huynh & Meyer, 2010）、変位 $|b^* - b^{\mathrm{tgt}}|$、`target` の推定済み格子上の
+期待項目得点曲線の RMSD を計算する。位置は 2 値項目では困難度、GRM・GPCM・PCM の項目では表示用閾値の平均、名義項目では
+$-d_{K-1}/((K-1)a)$。統計量が `threshold` を超える項目にフラグを立て、`purify=True` なら外してリンキングをやり直す
+（Candell & Drasgow, 1988）。mirt の推定結果に対する素の R の再計算と照合済み（2PL、2PL + GRM + GPCM 混在）。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `source`, `target` | `FitResult` | `source`（新）と `target`（基準）の尺度の 1 次元の推定結果 |
+| `items` | iterable[str] / Mapping[str, str]、省略可 | 共通項目。`link()` と同じ |
+| `method`, `symmetric` | | リンキングの規準。`link()` に渡す |
+| `statistic` | `"robust_z"` / `"displacement"` / `"rmsd"` | 点検の統計量: $\max(\lvert z_a\rvert, \lvert z_b\rvert)$（既定）、$\lvert b^* - b^{\mathrm{tgt}}\rvert$、期待得点の RMSD |
+| `threshold` | float、省略可 | 統計量がこれを超えるとフラグ（既定 1.645、0.3、0.1） |
+| `purify` | bool | フラグの立った項目を外してリンクし直す（既定 `True`）。`False` は報告のみ |
+| `removal` | `"largest"` / `"all"` | 各段階で統計量が最大のフラグ項目を外す（既定。同値なら項目順で先）か、フラグ項目をすべて外す |
+| `min_items` | int | 除外の後に残すアンカー集合の最小の大きさ（既定 2） |
+| `max_iter` | int | 除外の段階数の上限（既定 10） |
+| `source_group`, `target_group` | str、省略可 | 多群の推定結果のときの群名 |
+
+**戻り値**: [`CommonItemScreeningResult`](#commonitemscreeningresult)
+
+**例外**: `PrecisionError`、`SpecificationError`（`FitResult` でない・多次元の入力、不正なオプション、`link()` が拒否するもの）。
+
+**警告**: フラグの立った項目を残したままループが止まったとき（`max_iter` を使い切った、または除外すると `min_items` を下回る）に
+`ScreeningWarning`。`link()` からの `ConvergenceWarning`。
+
+### `CommonItemScreeningResult`
+
+`screen_common_items()` が返す。変更不可。
+
+| 属性・メソッド | 型 | 説明 |
+|---|---|---|
+| `table` | DataFrame | 最終のリンキングの下での共通項目ごとの行: `item`、`target_item`、`model`、`a_source`、`b_source`（変換後）、`a_target`、`b_target`、`log_ratio_a`、`difference_b`（$b^* - b^{\mathrm{tgt}}$）、`displacement`、`robust_z_a`、`robust_z_b`、`rmsd`、`statistic`、`flagged`、`kept`、`iteration_removed`（欠測可の整数） |
+| `link` | `LinkResult` | 残した項目でのリンキング |
+| `initial_link` | `LinkResult` | すべての共通項目でのリンキング |
+| `kept_items`, `removed_items` | tuple[str, ...] | 残した項目と、外した順の除外項目（`source` の名前） |
+| `flagged_items` | tuple[str, ...] | 最終のリンキングの下でフラグの立った項目 |
+| `history` | DataFrame | 段階ごとの行: `iteration`、`n_items`、`A`、`B`、`criterion`、`converged`、`removed` |
+| `statistic`, `threshold`, `removal`, `purify` | | 使ったオプション |
+| `summary(*, digits=4)` | str | 読みやすいテキストの要約（Jupyter では `_repr_html_()` で HTML 表示） |
+
+### `stack_screening_tables`
+
+```text
+stack_screening_tables(results) -> DataFrame
+```
+
+1 つの基準フォームに対して点検した複数の実施回の `table` を、`{実施回: CommonItemScreeningResult}` の対応から積む。先頭に
+`administration`、`model` の後に最終の係数 `A`、`B` を置く。空の対応や点検の結果でない値には `SpecificationError`。
 
 ## 相関
 
@@ -1142,39 +1445,289 @@ dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=
 
 ---
 
+## 古典的項目分析
+
+パッケージ: flexpyctt（`from flexpyctt import item_analysis, ...`）。モデルを使わない項目統計量、信頼性係数、
+選択肢の分析（[ガイド 21 節](guide.ja.md#21-古典的項目分析)）。欠測は NaN。
+
+### `score_responses`
+
+```text
+score_responses(data, *, key, missing="incorrect") -> DataFrame
+```
+
+正答キーで生の回答を採点する。その項目の正答選択肢を選んでいれば 1、そうでなければ 0
+（psych の `score.multiple.choice(score = FALSE)`）。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `data` | DataFrame / 2 次元配列 | 1 行が 1 回答者、1 列が 1 項目。選んだ選択肢（数値でも文字列でもよい）。NaN / None は欠測 |
+| `key` | mapping / Series / sequence | 項目ごとの正答選択肢（項目名で、または列の順に）。`==` で比べるので、データと同じコードと型で書く |
+| `missing` | `"incorrect"` / `"keep"` | 無回答を 0 点にする（結果は整数）か NaN のまま残す（結果は浮動小数点）（既定 `"incorrect"`） |
+
+**例外**: `SpecificationError`（キーの項目がデータの項目と一致しない、キーに欠測がある）。**警告**:
+`FlexpycttWarning`（誰も選んでいない正答選択肢がある。キーのコードが違うことが多い）。
+
+### `item_analysis`
+
+```text
+item_analysis(data, *, correlation="pearson", missing="pairwise") -> DataFrame
+```
+
+項目ごとに 1 行: `item`、`n`（観測された得点の数）、`n_categories`（観測された得点の種類数）、`mean`、`sd`
+（分母 $n-1$）、`difficulty`（平均を観測された最大得点で割ったもの。最上位のカテゴリに誰も届かない項目では、
+小さい最大値で割ることになる。0 / 1 項目では正答率）、`item_total`、
+`item_rest`（合計得点との相関と、その項目を除いた合計との相関）、`alpha_if_deleted`（2 項目では NaN）。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `data` | DataFrame / 2 次元配列 | 項目得点（0 / 1 または順序カテゴリの得点。0 以上）。2 項目以上 |
+| `correlation` | `"pearson"` / `"polyserial"` | Pearson 相関（0 / 1 項目では点双列相関）か多分系列相関（0 / 1 項目では双列相関）。多分系列相関は 2 段階推定量 $r\,\sigma_j/\sum_k\phi(\tau_{jk})$（Olsson, Drasgow & Dorans, 1982）で、polycor の `polyserial(ML = FALSE)` と同じ（既定 `"pearson"`） |
+| `missing` | `"pairwise"` / `"listwise"` | ペアワイズの共分散と各項目の観測された得点を使うか、欠測のない行だけを使うか（既定 `"pairwise"`） |
+
+相関は項目の共分散行列 $C$ から $c_j/\sqrt{C_{jj}\,\mathbf 1^\top C\mathbf 1}$ と、項目 $j$ を除いた対応する式で
+計算する。欠測がなければ合計得点・残りの合計との Pearson 相関に等しい。欠測があるとき、psych の `alpha()` は
+`r.drop` は同じ値を返すが、`raw.r` は回答者ごとの観測された得点の和との相関になる。
+
+**例外**: `SpecificationError`（数値でない・負の得点、一定の項目、両方に答えた回答者が 2 人未満の項目の組）。
+**警告**: `HeywoodWarning`（多分系列相関の推定値が $[-1, 1]$ の外に出た。$\pm1$ にする）。
+
+### `coefficient_alpha`
+
+```text
+coefficient_alpha(data, *, missing="pairwise", confidence_level=0.95) -> AlphaResult
+```
+
+α 係数（Cronbach, 1951。0 / 1 項目では KR-20）
+$\alpha=\frac{k}{k-1}\bigl(1-\operatorname{tr}C/\mathbf 1^\top C\mathbf 1\bigr)$、相関行列から求める標準化 α、
+Feldt の信頼区間 $\bigl[1-(1-\alpha)F_{1-\gamma/2},\,1-(1-\alpha)F_{\gamma/2}\bigr]$（$F$ は自由度
+$(n-1,(n-1)(k-1))$ の分位点。Feldt, Woodruff & Salih, 1987）。psych の `alpha()` と一致する。`missing` は
+`item_analysis()` と同じ。`"pairwise"` では Feldt の $n$ は 1 つ以上回答した回答者の数。
+
+### `AlphaResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `alpha`, `standardized_alpha` | float | α と標準化 α |
+| `confidence_interval`, `confidence_level` | tuple, float | Feldt の（下限, 上限）とその信頼水準 |
+| `n_items`, `n_obs` | int | 使った項目数と回答者数（回答が 1 つもない行は除く。psych はすべての行を数える） |
+| `if_deleted` | DataFrame | 項目ごとに、その項目を除いた `alpha` と `standardized_alpha`（2 項目では NaN） |
+
+### `coefficient_omega`
+
+```text
+coefficient_omega(data, *, correlation="pearson") -> OmegaResult
+```
+
+1 因子モデルの ω total。項目の相関行列 $R$ に ULS（minres）で当てはめた負荷量 $\lambda_j$ から
+$s_j=\operatorname{sign}(\lambda_j)$ として $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf s^\top R\mathbf s$
+（McDonald, 1999; Revelle & Zinbarg, 2009）を求める。既定の `flip = TRUE` での psych の
+`omega(nfactors = 1)$omega.tot` と同じ。つまり負の負荷量の項目は反転する（`FlexpycttWarning` を出し、
+`reversed_items` に挙げる）。採点したままの合計の ω が欲しいときは、先にその項目を逆転採点するか除く。`correlation` は `"pearson"`（ペアワイズ）か
+`"polychoric"`（既定の設定の [`polychoric`](#polychoric)）。正定値でない行列は平滑化し、
+`NotPositiveDefiniteWarning` を出す。3 項目以上。階層 ω は提供しない。
+
+### `OmegaResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `omega` | float | $\omega_t$ |
+| `loadings`, `uniquenesses` | Series | 1 因子の負荷量（和が非負になる向き）と $1-\lambda_j^2$ |
+| `correlation` | DataFrame | 因子を当てはめた相関行列（採点したままの項目） |
+| `reversed_items` | tuple of str | 負の負荷量を持ち、`omega` の計算前に反転した項目 |
+
+### `distractor_analysis`
+
+```text
+distractor_analysis(data, *, key, n_groups=3) -> DataFrame
+```
+
+多肢選択の回答の選択肢分析。`key` で採点し（無回答は 0 点）、合計得点 $T$ を求める。項目と選択肢（観測された
+選択肢と正答）の組ごとに 1 行: `item`、`option`、`is_key`、`n`、`proportion`（その項目に答えた人のうちの割合）、
+`point_biserial`（その選択肢を選んだかどうかと残りの合計 $T - x_j$ との点双列相関）、`mean_score`（選んだ人の
+$T$ の平均）、`proportion_group_1` … `proportion_group_<n_groups>`（得点の低い群から高い群へ、各群で選んだ割合）。
+群は $T$ の分位点で、R の `cut(T, quantile(T, 0:G / G), include.lowest = TRUE)` と同じく区切る（同点は同じ群に
+入る）。分位点が重なると `SpecificationError`（群の数を減らす）。
+## 観測得点による特異項目機能（DIF）
+
+パッケージ: flexpyctt（`from flexpyctt import mantel_haenszel, ...`）。IRT モデルを使わない DIF の検出で、回答者を
+観測得点でそろえ（マッチング）、マッチング得点の値ごとに群を比べる。推定済みの多母集団モデルによる DIF の検定は
+[`FitResult.dif`](#fitresult) を参照。
+
+4 つの関数に共通の引数:
+
+| 引数 | 既定値 | 説明 |
+|---|---|---|
+| `data` | | 回答者 x 項目（DataFrame または配列）。検定する項目とマッチングに使う項目に欠測があってはならない（先にその行を除く） |
+| `group` | | 各回答者の群のラベル |
+| `focal` | | 焦点群のラベル（`generalized_mantel_haenszel` ではラベルのリスト）。それ以外の回答者はすべて参照群 |
+| `items` | `None` | 検定する項目（既定ではすべて） |
+| `anchor_items` | `None` | 合計をマッチング得点にする項目（既定ではすべて）。検定する項目は常にそれ自身のマッチング得点に含まれる |
+| `matching` | `None` | 合計得点の代わりに使う外部のマッチング変数（回答者ごとに 1 つ）。`anchor_items`・`purify` とは併用できない |
+| `purify` | `False` | 純化: ある段階で検出された項目を次の段階のマッチング得点から外し、検出される項目の組が繰り返すか `max_iter` に達するまで続ける |
+| `max_iter` | `10` | 純化の反復の上限 |
+| `p_adjust` | `"none"` | `"holm"` または `"BH"`: 最終的な p 値を検定した項目にわたって補正する。純化には補正前の p 値を使う |
+| `alpha` | `0.05` | `flagged`、純化、ETS 分類の有意水準 |
+
+マッチング得点の異なる値はそれぞれ 1 つの層になる（得点をまとめることはしない）。
+
+### `mantel_haenszel`
+
+```text
+mantel_haenszel(data, *, group, focal, items=None, anchor_items=None, matching=None,
+                purify=False, max_iter=10, p_adjust="none", alpha=0.05,
+                continuity_correction=True, classification="ets") -> DIFResult
+```
+
+0 / 1 項目・2 群の Mantel–Haenszel 検定（Holland & Thayer, 1988）。マッチング得点 $k$ で正答・誤答した参照群の
+人数を $A_k, B_k$、焦点群の人数を $C_k, D_k$、$k$ の人数を $T_k$ として
+
+$$\chi^2_{MH}=\frac{\big(\lvert\sum_kA_k-\sum_kE(A_k)\rvert-\tfrac12\big)^2}{\sum_k\operatorname{Var}(A_k)},\qquad
+\hat\alpha_{MH}=\frac{\sum_kA_kD_k/T_k}{\sum_kB_kC_k/T_k},\qquad \Delta_{MH}=-2.35\ln\hat\alpha_{MH}.$$
+
+$\hat\alpha_{MH}>1$（$\Delta_{MH}<0$）は項目が参照群に有利であることを表す。$\ln\hat\alpha_{MH}$ の標準誤差は
+Phillips & Holland (1987) による。`continuity_correction=False` で $\tfrac12$ を引かない。ETS 分類
+（`classification="ets"`）: $\lvert\Delta_{MH}\rvert<1$ または $\chi^2_{MH}$ が有意でなければ（`adj_p` で判定するので、
+B と C の項目は必ず `flagged`）**A**、$\lvert\Delta_{MH}\rvert\ge1.5$ かつ片側検定で 1 より有意に大きければ
+（$(\lvert\Delta_{MH}\rvert-1)/SE>z_{1-\alpha}$。`alpha=0.05` で 1.645）**C**、
+それ以外は **B**。`classification="effect_size"` は閾値 1 と 1.5 だけを使う（difR が表示する分類）。
+
+`table` の列: `item`, `chi2`, `odds_ratio`, `log_odds_ratio`, `log_odds_ratio_se`, `delta`, `delta_se`,
+`ets_class`, `p`, `adj_p`, `flagged`。
+
+### `mantel`
+
+```text
+mantel(data, *, group, focal, items=None, anchor_items=None, matching=None, purify=False,
+       max_iter=10, p_adjust="none", alpha=0.05) -> DIFResult
+```
+
+順序のある多値項目・2 群の Mantel (1963) の検定。焦点群の項目得点の和を、マッチング得点を与えたときの期待値と
+比べる（$df=1$。0 / 1 項目では連続修正なしの $\chi^2_{MH}$ に等しい）。効果量は Liu & Agresti (1996) の累積共通
+オッズ比で、$\hat\alpha_{MH}$ と同じ向き（1 より大きいと参照群に有利。0 / 1 項目では $\hat\alpha_{MH}$ に等しい）に
+し、その対数の Liu & Agresti (1996) の式 (3) による標準誤差をつける。層が少数で大きくても、（合計得点でマッチング
+したときのように）小さな層が多数あっても妥当な推定量である。
+
+`table` の列: `item`, `chi2`, `df`, `cumulative_odds_ratio`, `log_cumulative_odds_ratio`,
+`log_cumulative_odds_ratio_se`, `p`, `adj_p`, `flagged`。
+
+### `generalized_mantel_haenszel`
+
+```text
+generalized_mantel_haenszel(data, *, group, focal, items=None, anchor_items=None,
+                            matching=None, purify=False, max_iter=10, p_adjust="none",
+                            alpha=0.05) -> DIFResult
+```
+
+複数の焦点群（`focal` はリスト）や順序のないカテゴリのための一般化 Mantel–Haenszel 検定（Somes, 1986;
+Penfield, 2001）。各層の群 x カテゴリの表を周辺度数を与えたときの期待値と比べ、$G$ 群・観測された $C$ カテゴリ
+で $df=(G-1)(C-1)$。焦点群が 1 つで 0 / 1 項目なら連続修正なしの $\chi^2_{MH}$ に等しい。
+
+`table` の列: `item`, `chi2`, `df`, `p`, `adj_p`, `flagged`。
+
+### `logistic_dif`
+
+```text
+logistic_dif(data, *, group, focal, items=None, anchor_items=None, matching=None,
+             purify=False, max_iter=10, p_adjust="none", alpha=0.05, kind="both",
+             test="likelihood_ratio") -> DIFResult
+```
+
+0 / 1 項目・2 群のロジスティック回帰による DIF（Swaminathan & Rogers, 1990）。マッチング得点を $S$、焦点群の
+指示変数を $G$ として、モデル $\operatorname{logit}P(x=1)=\beta_0+\beta_1S$ $(M_0)$、$+\beta_2G$ $(M_1)$、
+$+\beta_3SG$ $(M_2)$ を最尤法で推定する。`kind="both"` は $M_0$ と $M_2$（$df=2$）、`"uniform"` は $M_0$ と
+$M_1$、`"non_uniform"` は $M_1$ と $M_2$（$df=1$）を比べる。`test` は `"likelihood_ratio"` または `"wald"`
+（大きいほうのモデルで加えた係数の Wald 検定）。効果量は Nagelkerke の $R^2$ の差（Zumbo, 1999）で、
+$\Delta R^2$ だけによる Zumbo & Thomas（区切り 0.13、0.26）と Jodoin & Gierl（0.035、0.07）の A / B / C 分類を
+つける。外部の `matching` は連続変数でもよい。
+
+`table` の列: `item`, `chi2`, `df`, `delta_r2`, `zumbo_thomas_class`, `jodoin_gierl_class`,
+`group_coefficient`, `group_coefficient_se`, `interaction_coefficient`, `interaction_coefficient_se`
+（大きいほうのモデルの $G$ と $SG$ の係数。その項がなければ NaN）, `p`, `adj_p`, `flagged`。回帰が収束しない
+とき（分離など）は `ConvergenceWarning` を出す。
+
+### `DIFResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `table` | DataFrame | 検定した項目ごとに 1 行（列は上の各関数を参照）。`flagged` は `adj_p < alpha` |
+| `flagged_items` | list[str] | `table` で検出された項目 |
+| `anchor_items` | list[str] | 最後の段階でマッチング得点を作った項目（`matching` を使ったときは空） |
+| `n_iter`, `converged` | int, bool | 純化の反復回数と、検出された項目の組が繰り返したか（しなければ `ConvergenceWarning`） |
+| `flag_history` | DataFrame | 各段階で検出された項目（補正前の $p<$ `alpha`）。0 行目が最初の検定 |
+| `method` | str | `"mantel_haenszel"`, `"mantel"`, `"generalized_mantel_haenszel"`, `"logistic"` |
+
+---
+
 ## 情報関数と信頼性
 
-推定済みの 1 次元モデルに対する関数（[ガイド 5 節](guide.ja.md#情報関数期待得点信頼性)）。多次元モデルでは
-どれも `SpecificationError`。
+推定済みのモデルに対する関数（[ガイド 5 節](guide.ja.md#情報関数期待得点信頼性)）。情報関数と `expected_score` は
+1 次元・確認的多次元・双因子・two-tier モデルに使える（[ガイド 14 節](guide.ja.md#多次元モデルの情報量)）。
+`reliability` と合計得点の関数は、多次元モデルでは `SpecificationError`。
+
+因子が $D$ 個のモデルでは、`theta` は形 `(T, D)` の配列、列がちょうど因子名である DataFrame（順序は任意）、
+または 1 点を表す長さ $D$ の 1 次元配列。結果は、水準名が因子名の `MultiIndex` をインデックスにする。1 次元
+モデルでは `theta` は数値か 1 次元配列で、インデックスの名前は `theta`。
 
 ### `item_information`
 
 ```text
-item_information(res, theta, *, group=None) -> DataFrame
+item_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 潜在特性の値 `theta` での各項目の Fisher 情報量
 $I_j(\theta)=\sum_kP_{jk}(\theta)\,(\partial\log P_{jk}(\theta)/\partial\theta)^2$（Birnbaum, 1968;
-Samejima, 1969）。どの項目モデルでも自動微分で計算する。mirt の `iteminfo()` が返す値と同じ。
+Samejima, 1969）。どの項目モデルでも自動微分で計算する。mirt の `iteminfo()` が返す値と同じ。多次元モデルでは、
+単位ベクトル $\mathbf u$ = `direction` / ‖`direction`‖ の方向の情報量
+$\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u$（$\mathbf I_j$ は [`information_matrix`](#information_matrix)
+の項目情報行列。Reckase & McKinley, 1991）。mirt の `iteminfo(..., degrees = )` は
+`direction=np.cos(np.radians(degrees))` にあたる（$\sum_m\cos^2\alpha_m=1$ のとき。mirt は方向を正規化しない）。
 
 | 引数 | 型 | 説明 |
 |---|---|---|
-| `res` | `FitResult` | 推定済みの 1 次元モデル |
-| `theta` | float / 1 次元配列 | 潜在特性の値（有限） |
+| `res` | `FitResult` | 推定済みのモデル |
+| `theta` | float / 配列 / DataFrame | 潜在特性の値（有限。上を参照） |
+| `direction` | 長さ $D$ の 1 次元配列（任意） | 潜在空間の方向。長さ 1 に正規化する。多次元モデルでは必須、1 次元モデルでは指定できない |
 | `group` | str（任意） | 群名。多母集団モデルでは必須 |
 
-**戻り値**: `theta` の値ごとに 1 行（インデックス。名前は `theta`）、項目ごとに 1 列の `DataFrame`。
+**戻り値**: `theta` の点ごとに 1 行、項目ごとに 1 列の `DataFrame`。
 
 ### `test_information`
 
 ```text
-test_information(res, theta, *, group=None) -> DataFrame
+test_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 テスト情報量 $I(\theta)=\sum_jI_j(\theta)$ と条件付き標準誤差 $1/\sqrt{I(\theta)}$（mirt の `testinfo()`）。
+多次元モデルでは、方向別のテスト情報量 $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$（mirt の
+`testinfo(..., degrees = )`）と、合成値 $\mathbf u^\top\boldsymbol\theta$ の推定値の標準誤差
+$\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$（1 次元では $1/\sqrt{I(\theta)}$ に等しい）。
+mirt の `plot(type = "SE")` が描く $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$（`1 / np.sqrt(information)`）ではない。
 引数は [`item_information`](#item_information) と同じ。
 
-**戻り値**: `theta` をインデックスとし、列 `information` と `se` をもつ `DataFrame`。
+**戻り値**: [`item_information`](#item_information) と同じインデックスで、列 `information` と `se` をもつ
+`DataFrame`（情報量が 0 か情報行列が特異な点では `se` は無限大）。
+
+### `information_matrix`
+
+```text
+information_matrix(res, theta, *, item=None, group=None) -> ndarray
+```
+
+`theta` の各点での 1 項目の Fisher 情報行列
+$\mathbf I_j(\boldsymbol\theta)=\sum_kP_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}^\top$、
+またはテスト情報行列 $\sum_j\mathbf I_j$（Reckase, 2009）。自動微分で計算する。mirt の
+`iteminfo(..., multidim_matrix = TRUE)`（テストは項目についての和）にあたる。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みのモデル |
+| `theta` | float / 配列 / DataFrame | 潜在特性の値（有限。上を参照） |
+| `item` | str（任意） | 項目名。省略するとテスト情報行列 |
+| `group` | str（任意） | 群名。多母集団モデルでは必須 |
+
+**戻り値**: 形 `(T, D, D)` の配列。点ごとに対称な半正定値行列が 1 つで、行と列はモデルの因子の順
+（1 次元モデルでは `(T, 1, 1)`）。
 
 ### `expected_score`
 
@@ -1183,11 +1736,11 @@ expected_score(res, theta, *, group=None) -> DataFrame
 ```
 
 項目の期待得点 $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ とテスト特性曲線 $T(\theta)=\sum_jE_j(\theta)$。
-カテゴリの得点はデータと同じ $0,\dots,K_j-1$（mirt の `expected.item()` と `expected.test()`）。引数は
-[`item_information`](#item_information) と同じ。
+カテゴリの得点はデータと同じ $0,\dots,K_j-1$（mirt の `expected.item()` と `expected.test()`）。多次元モデルでは
+$\theta$ はベクトル。引数 `res`・`theta`・`group` は [`item_information`](#item_information) と同じ。
 
-**戻り値**: `theta` をインデックスとし、項目ごとの列と列 `total` をもつ `DataFrame`。`total` という名前の
-項目があると `SpecificationError`。
+**戻り値**: [`item_information`](#item_information) と同じインデックスで、項目ごとの列と列 `total` をもつ
+`DataFrame`。`total` という名前の項目があると `SpecificationError`。
 
 ### `reliability`
 
@@ -1263,6 +1816,339 @@ IRT モデルのカテゴリ確率。先頭の軸はバッチ軸。結果の形�
 保つ（そのぶん遅い）。他の方法では結果の対数をとる。形が合わない、`method` が未知、`K != 2` で近似を指定した、の
 いずれかで `SpecificationError`。
 
+## IRT 等化
+
+### `irt_equate`
+
+```text
+irt_equate(new, old, *, method="true_score", new_items=None, old_items=None, link=None,
+           new_group=None, old_group=None, population="new", synthetic_weight=None)
+           -> IRTEquatingResult
+```
+
+2 つのフォームが同じ $\theta$ 尺度に乗ったあと、新フォームのすべての合計得点 $x=0,\dots,X$ を旧フォームの合計得点の
+尺度に等化する（[ガイド 15 節](guide.ja.md#等化と素点-尺度得点変換表)）。共通尺度は旧フォームの尺度で、`link=` が
+あれば新フォームの項目は $(\theta-B)/A$ で評価する。1 次元モデル、全項目モデル、単一群・多母集団。
+
+- `"true_score"`（Lord, 1980; Kolen & Brennan, 2014, §6.5）: テスト特性曲線
+  $\tau(\theta)=\sum_j\sum_kk\,P_{jk}(\theta)$ について $\tau_X(\theta_x)=x$ を安全化 Newton 法で解き、
+  $e_Y(x)=\tau_Y(\theta_x)$。下側漸近線の和以下の得点は $(0,0)$ と $(\tau_X^{\mathrm{lo}},\tau_Y^{\mathrm{lo}})$ の間、
+  上側漸近線の和以上の得点は $(\tau_X^{\mathrm{hi}},\tau_Y^{\mathrm{hi}})$ と両フォームの最高点の間の線形補間で等化し、
+  その `theta` は $-\infty$ / $+\infty$。
+- `"observed_score"`（Lord & Wingersky, 1984; Kolen & Brennan, 2014, §6.6）: 合成母集団
+  $w_1\cdot\text{new}+(1-w_1)\cdot\text{old}$ での両フォームのモデル上の合計得点分布（各推定潜在分布上の
+  Lord–Wingersky 再帰）を、Kolen & Brennan（2014, 2 章）の等パーセンタイル法で等化する。
+
+equateIRT・SNSequate（2 値の 3PL / 2PL）と、mirt と equate パッケージから組み立てた参照（GRM・GPCM・3PL・2PL）で
+照合済み。等化得点の標準誤差はない。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `new` | `FitResult` | 新フォーム $X$ を含む 1 次元の推定結果 |
+| `old` | `FitResult` | 旧フォーム $Y$ を含む 1 次元の推定結果（`new` と同じでもよい） |
+| `method` | `"true_score"` / `"observed_score"` | 等化の方法（既定 `"true_score"`） |
+| `new_items`, `old_items` | list[str]（任意） | 各フォームの項目（既定は推定結果の全項目） |
+| `link` | `LinkResult`（任意） | `link(new, old)`: `new` の尺度を `old` の尺度へ写す（1 次元。群は `new_group` / `old_group` と一致すること） |
+| `new_group`, `old_group` | str（任意） | 各フォームのパラメタと母集団の群。多母集団では必須 |
+| `population` | `"new"` / `"old"` / `"synthetic"` | 観測得点等化の母集団: $w_1=1$、$w_1=0$、$w_1=$ `synthetic_weight`（既定 `"new"`。観測得点等化のみ） |
+| `synthetic_weight` | float（任意） | 新フォームの母集団の重み $w_1\in[0,1]$。`population="synthetic"` では必須、それ以外では指定不可 |
+
+**戻り値**: [`IRTEquatingResult`](#irtequatingresult)
+
+**例外**: `PrecisionError`（JAX の 64 ビットが無効）、`SpecificationError`（多次元の推定結果、未知・重複した項目、
+群の指定漏れ・未知の群、これらの群の間の 1 次元 `LinkResult` でないか新フォームの項目を含まない `link`、不正な
+`population` / `synthetic_weight`、真値の方法で減少するテスト特性曲線）、`ConvergenceWarning`（真値の解法が収束しない）。
+
+### `IRTEquatingResult`
+
+| 属性 | 説明 |
+|---|---|
+| `table` | `DataFrame`: `score`（新フォーム、$0..X$）、`equated`（旧フォームの合計得点の尺度）、真値の方法では `theta`（旧フォームの尺度。漸近線の外では $\pm\infty$） |
+| `method` | `"true_score"` / `"observed_score"` |
+| `new_items`, `old_items` | 2 つのフォームの項目 |
+| `new_range`, `old_range` | 2 つのテスト特性曲線の下側・上側漸近値 $(\tau^{\mathrm{lo}},\tau^{\mathrm{hi}})$ |
+| `population`, `synthetic_weight` | 観測得点等化の母集団と $w_1$（真値の方法では `None`） |
+| `new_distribution`, `old_distribution` | `DataFrame`（`score`, `probability`）: 合成母集団でのモデル上の分布（観測得点等化のみ。それ以外は `None`） |
+
+メソッド: `summary(*, digits=4)`、`str()`、Jupyter での HTML 表示。
+
+### `score_distribution`
+
+```text
+score_distribution(res, *, items=None, group=None) -> DataFrame
+```
+
+フォームのモデル上の合計得点分布 $f(x)=\sum_qL(x\mid\theta_q)w_q$（項目の Lord–Wingersky 尤度を群の推定潜在分布で
+積分したもの。潜在分布の種類は問わない）。`Normal` の推定結果の全項目なら
+[`summed_score_table`](#summed_score_table) の `probability` 列と一致する。列は `score`, `probability`。
+多母集団では `group` が必須。
+
+### `scale_table`
+
+```text
+scale_table(res, *, slope, intercept, method="true_score", items=None, group=None,
+            lowest=None, highest=None, n_digits=0) -> DataFrame
+```
+
+素点-尺度得点変換表: フォームの各合計得点 $x$ に $\theta(x)$ とその標準誤差、尺度得点
+$\min\{\max\{\text{slope}\cdot\theta+\text{intercept},\text{lowest}\},\text{highest}\}$ を与える。
+
+| `method` | $\theta(x)$ | 標準誤差 |
+|---|---|---|
+| `"true_score"`（既定） | フォームのテスト特性曲線で $\tau(\theta)=x$ を解く。下側・上側漸近値以下・以上では $-\infty$ / $+\infty$ | フォームの項目のテスト情報量による $I(\theta)^{-1/2}$（$\theta$ が無限大のところは NaN） |
+| `"EAPsum"` | 群の推定潜在分布の下での合計得点 EAP | 事後標準偏差 |
+
+`slope` は正。指定のない側の境界は適用しない（無限大の $\theta$ は無限大の尺度得点になる）。列は `score`, `theta`,
+`theta_se`, `scale_score`, `scale_score_se`（$\text{slope}\cdot$`theta_se`。切らない）, `scale_score_rounded`（NumPy の
+`round` で `n_digits` 桁。偶数丸め）。多次元モデル、未知の項目・群、正でない `slope`、`lowest >= highest`、負の
+`n_digits`、真値の方法で減少するテスト特性曲線のいずれかで `SpecificationError`。
+
+---
+
+## モデル比較とシミュレーション
+
+### `compare_fits`
+
+```text
+compare_fits(*results, names=None) -> DataFrame
+```
+
+同じデータへの 2 つ以上の当てはめを、最も制約の強いモデルから弱いモデルの順に並べ、情報量規準と尤度比検定を
+まとめる（[ガイド 5 節](guide.ja.md#モデルの比較aicbic尤度比検定)）。$\ell$ を周辺対数尤度、$k$ を自由パラメタ数、
+$N$ を回答者数（重み付きの当てはめでは重みの和）として、$\mathrm{AIC}=-2\ell+2k$（Akaike, 1974）、
+$\mathrm{SABIC}=-2\ell+k\log\frac{N+2}{24}$（Sclove, 1987）、$\mathrm{HQ}=-2\ell+2k\log\log N$（Hannan & Quinn,
+1979）、$\mathrm{BIC}=-2\ell+k\log N$（Schwarz, 1978）。2 行目以降は直前の行と
+$X^2=2(\ell_m-\ell_{m-1})$、自由度 $\mathit{df}=k_m-k_{m-1}$ で検定する（Wilks, 1938）。mirt の
+`anova(mod1, mod2, ...)` に当たる。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `*results` | `FitResult` | 同じ回答への 2 つ以上の当てはめ。制約の強いものから |
+| `names` | list[str]、省略可 | `model` 列のラベル（既定は `model1`, `model2`, ...） |
+
+**戻り値**: 当てはめごとに 1 行の `DataFrame`: `model`, `n_params`, `loglik`, `aic`, `sabic`, `hq`, `bic`,
+`x2`, `df`, `p`。1 行目の `x2`・`df`・`p` は NaN。`df <= 0` のとき `p` は NaN。
+
+**例外**: 当てはめが 2 つ未満、`FitResult` でない引数、`names` が当てはめごとに異なる 1 つのラベルでない、回答者数が
+異なる、のいずれかで `SpecificationError`。
+
+**警告**: パラメタ数が増えない、パラメタを増やしたのに対数尤度が下がる、事前分布のある当てはめがある、のいずれかで
+`FlexpyirtWarning`。
+
+入れ子関係は確かめられないので利用者の責任。境界の補正（分散を 0 に固定、混合成分を減らす、`DavidianCurve` 対
+`Normal`）はしない。
+
+### `simulate_responses`
+
+```text
+simulate_responses(source, *, n_obs=None, key, parameters=None, theta=None, group=None)
+    -> SimulatedData
+```
+
+推定済みのモデル、または項目パラメタを与えた `Model` から項目反応を生成する
+（[ガイド 5 節](guide.ja.md#回答データのシミュレーション)）。各回答者の $\boldsymbol\theta_i$ を所属する群の潜在分布から
+引き（または `theta` から取り）、各回答を一様乱数の逆変換
+$X_{ij}=\min\{k: u_{ij}\le\sum_{c\le k}P_{jc}(\boldsymbol\theta_i)\}$ で引く（Devroye, 1986）。潜在特性は、
+`Normal` は推定された平均・分散・相関、`NormalMixture` は成分ごと、`DavidianCurve` は連続密度（細かいグリッド上の
+累積分布関数の逆変換）、`EmpiricalHistogram` は求積点を推定された重みで（推定どおりの離散分布）引く。すべての項目
+モデルとモデルの構造（1 次元、`with_factors`、双因子、two-tier、多母集団）に対応する。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `source` | `FitResult` / `Model` | 当てはめ（その推定値を使う）または仕様 |
+| `n_obs` | int / dict[str, int]、省略可 | 回答者数。多母集団モデルでは群ごとの人数、または群 → 人数の対応。`theta` を与えないときは必須 |
+| `key` | `jax.Array` | JAX の PRNG キー（`jax.random.key(0)`）。同じキーからは同じデータ |
+| `parameters` | DataFrame、省略可 | `Model` のとき（必須）: `Model.fix_from()` と同じ傾き・切片表現の項目バンクで、すべての項目パラメタを含む |
+| `theta` | 配列、省略可 | 生成の代わりに使う潜在特性: 1 因子は `(N,)`、それ以外は `(N, D)` |
+| `group` | 配列、省略可 | 多母集団モデルで `theta` を与えるとき: 各行の群ラベル |
+
+`Model` から生成するときの潜在分布は仕様のもの: `Normal` の `mean` と `var`（因子間相関 0）、または
+`NormalMixture` の `means`・`variances`・`weights`。`EmpiricalHistogram` と `DavidianCurve` は推定前に形がないので
+`theta` が要る。
+
+**戻り値**: [`SimulatedData`](#simulateddata)。
+
+**例外**: 64 ビットの JAX でないと `PrecisionError`。`key`・`n_obs`・`theta`・`group`・`parameters` が不正
+（たとえばバンクに項目パラメタが足りない）だと `SpecificationError`。
+
+欠測は生成しない。テストデザインや欠測の機構には `responses` の要素を NaN にする。
+
+### `SimulatedData`
+
+[`simulate_responses`](#simulate_responses) が返す frozen dataclass。
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `responses` | DataFrame | 項目ごとの `int64` の列（モデルの項目名）、コード `0..K-1`。`fit()` に渡せる |
+| `theta` | ndarray | 潜在特性。1 因子は `(N,)`、それ以外は `(N, D)` |
+| `group` | ndarray または None | 各行の群ラベル（多母集団モデル）。それ以外は `None` |
+
+---
+
+## 図
+
+図の元になる数値（[ガイド 5 節](guide.ja.md#図)）は DataFrame を返す 3 つの関数で作り、
+`flexpyirt.plotting` がそれを matplotlib で描く。多次元モデルではどれも `SpecificationError`。
+
+### `item_probabilities`
+
+```text
+item_probabilities(res, theta, *, items=None, group=None) -> DataFrame
+```
+
+すべての項目モデルのカテゴリ確率（トレースライン）$P_{jk}(\theta)=\Pr(Y_j=k\mid\theta)$、
+$k=0,\dots,K_j-1$（mirt の `probtrace()`）。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みの 1 次元モデル |
+| `theta` | float / 1 次元配列 | 潜在特性の値（有限） |
+| `items` | str / list[str]（任意） | 含める項目（既定: すべて） |
+| `group` | str（任意） | 群名。多母集団モデルでは必須 |
+
+**戻り値**: 項目・カテゴリ・`theta` ごとに 1 行の縦長の `DataFrame`。列は `item`, `category`,
+`theta`, `probability`。
+
+### `empirical_item_curve`
+
+```text
+empirical_item_curve(res, data, *, items=None, n_bins=10, group=None, item_names=None) -> DataFrame
+```
+
+EAP の $\theta$ の区間ごとの観測カテゴリ比率と、モデルの確率（Bock, 1972; Yen, 1981）。項目ごとに、その
+項目に回答した回答者を EAP 推定値で並べ（同順位は行の順）、$\lfloor n/B\rfloor$ 人ずつの連続する
+`n_bins` 個の区間に分ける。余り $c=n\bmod B$ のうち $\lfloor c/2\rfloor$ 人は最初の区間に、残りは
+最後の区間に入れる（mirt の `itemfit()` と同じ）。区間 $b$ とカテゴリ $k$ ごとに、EAP の平均
+$\bar\theta_b$、区間の回答者のうちカテゴリ $k$ の割合 $O_{bk}$、モデルの確率
+$E_{bk}=P_{jk}(\bar\theta_b)$ を返す。$n_bO_{bk}$ と $n_bE_{bk}$ は mirt の
+`itemfit(fit_stats = "X2", return.tables = TRUE)` の表（セル併合なし）に当たる。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みの 1 次元モデル |
+| `data` | DataFrame / 2 次元配列 | 推定した項目への回答（NaN は欠測。回答者は回答した項目の区間にだけ入る） |
+| `items` | str / list[str]（任意） | 含める項目（既定: すべて） |
+| `n_bins` | int | 区間の数（mirt の `group.bins`）。既定 10 |
+| `group` | 配列（任意） | `data` の各行の群ラベル（多母集団モデルでは必須。区間は群ごとに作る） |
+| `item_names` | list[str]（任意） | `data` が配列のときの列名 |
+
+**戻り値**: 項目・区間・カテゴリごとに 1 行の `DataFrame`。列は `item`, `bin`（1, ..., B）, `theta`,
+`n`, `category`, `observed`, `expected`（多母集団モデルでは先頭に `group` 列）。
+
+**例外**: `n_bins` が正の整数でないとき、（ある群で）回答数が `n_bins` 未満の項目があるときも
+`SpecificationError`。
+
+### `wright_map_table`
+
+```text
+wright_map_table(res, data, *, group=None, item_names=None, method="EAP") -> WrightMapTable
+```
+
+項目–受検者（Wright）マップの受検者の推定値と項目の位置。項目の位置はサーストン閾値で、
+$k=1,\dots,K_j-1$ について $P(Y_j\ge k\mid\theta)=\sum_{c\ge k}P_{jc}(\theta)=1/2$ となる $\theta$
+（Wright & Masters, 1982; TAM の `tam.threshold()`）。2PL / Rasch 項目では $b$、GRM 項目では $b_k$ に
+等しい。3PL / 4PL 項目では正答確率が 1/2 になる点、GPCM / PCM 項目ではステップ困難度とは異なる値になる。
+$[-20, 20]$ で探し（最初の交点を二分法で詰める）、交点がなければ NaN（例: $g\ge1/2$ の 3PL 項目）。
+名義項目ではデータのカテゴリ順で数える。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みの 1 次元モデル |
+| `data` | DataFrame / 2 次元配列 | 推定した項目への回答 |
+| `group` | 配列（任意） | `data` の各行の群ラベル（多母集団モデルでは必須） |
+| `item_names` | list[str]（任意） | `data` が配列のときの列名 |
+| `method` | `"EAP"` / `"MAP"` / `"WLE"` | 受検者の推定法。既定 `"EAP"` |
+
+**戻り値**: [`WrightMapTable`](#wrightmaptable)。
+
+### `WrightMapTable`
+
+2 つの DataFrame の名前付きタプル（`persons, items = wright_map_table(...)` で分解できる）。
+
+| フィールド | 説明 |
+|---|---|
+| `persons` | 回答者ごとの `theta`。インデックスは `data` のもの（多母集団モデルでは先頭に `group` 列） |
+| `items` | 項目の閾値ごとに 1 行: `item`, `category`（$1,\dots,K_j-1$）, `location`（多母集団モデルでは先頭に `group` 列があり、全群の閾値を含む） |
+
+### `flexpyirt.plotting`
+
+```text
+plot_item_curves(res, items=None, *, data=None, group=None, n_bins=10, theta=None, item_names=None, ax=None) -> Figure
+plot_information(res, items=None, *, standard_error=False, group=None, theta=None, ax=None) -> Axes
+plot_expected_score(res, *, group=None, theta=None, ax=None) -> Axes
+plot_wright_map(res, data, *, group=None, item_names=None, method="EAP", n_bins=30) -> Figure
+```
+
+`from flexpyirt.plotting import ...` で使う。matplotlib（`pip install "flexpyirt[plot]"`）が必要で、
+関数を呼んだときに import する。入っていなければ [`MissingDependencyError`](#missingdependencyerror)
+を投げる。matplotlib のオブジェクトを返し、`plt.show()` は呼ばない。既定の `theta` 格子は
+$[-4, 4]$ の 161 点。
+
+| 関数 | 描くもの | 数値の出どころ |
+|---|---|---|
+| `plot_item_curves` | 項目ごとに 1 パネル: 2 値項目は $P(Y=1\mid\theta)$、多値項目は全カテゴリ。`data` があれば観測比率を点で描く。多母集団モデルでは群ごとに 1 本（DIF の図）。`ax=` は 1 項目のとき。`group=` は `data` と一緒に使う行ラベル | [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve) |
+| `plot_information` | テスト情報量、または `items` の情報量。`standard_error=True` で SE を第 2 の y 軸（`ax.twinx()`）に描く。`group=` は群名（既定: 全群） | [`test_information`](#test_information), [`item_information`](#item_information) |
+| `plot_expected_score` | テスト特性曲線。既定では群ごとに 1 本 | [`expected_score`](#expected_score)（`total`） |
+| `plot_wright_map` | 受検者の推定値の横向きヒストグラム（`n_bins` 区間）と項目の閾値を、$\theta$ 軸を共有して並べる | [`wright_map_table`](#wright_map_table) |
+
+---
+
+## 分類
+
+### `classification_accuracy`
+
+```text
+classification_accuracy(res, *, cut_scores, method="lee", scale=None, data=None, group=None,
+                        item_names=None, score_method="EAP") -> ClassificationResult
+```
+
+カット得点による分類の正確さと一貫性（[ガイド 7 節](guide.ja.md#分類の正確さと一貫性)、DESIGN.md §18.4）。カット
+$c_1<\dots<c_C$ がカテゴリ $h(v)=\#\{k: v\ge c_k\}=0,\dots,C$ を決める。真の値 $\theta$ で、各方法は観測
+カテゴリの確率 $P_h(\theta)$ と真のカテゴリ $t(\theta)$ を与える:
+
+- `"lee"`（Lee, 2010）: $P_h(\theta)=\sum_{s:\,h(s)=h}L(s\mid\theta)$（合計得点の Lord–Wingersky の分布）、
+  期待合計得点 $\tau$ で $t(\theta)=h(\tau(\theta))$。整数でないカット $c$ では $s\ge\lceil c\rceil$ が上。
+- `"rudner"`（Rudner, 2001, 2005）: $P_h(\theta)=\Phi((c_{h+1}-\theta)/\mathrm{SE})-\Phi((c_h-\theta)/\mathrm{SE})$、
+  $\mathrm{SE}=I(\theta)^{-1/2}$、$t(\theta)=h(\theta)$。
+
+点 $\theta_n$ と重み $w_n$（`data` なしでは推定時の求積点と潜在分布の重み = D 法、`data` ありでは受検者の推定値と
+重み $1/N$ = P 法。Lathrop & Cheng, 2013）で $A_{tk}=\sum_nw_n[t(\theta_n)=t]P_k(\theta_n)$、
+$B_{hk}=\sum_nw_nP_h(\theta_n)P_k(\theta_n)$ とし、正確さ $\sum_hA_{hh}$、一貫性 $\sum_hB_{hh}$、一貫性の
+Cohen の κ を返す。cacIRT の `class.Lee()` / `class.Rud()` にあたる。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みの 1 次元モデル |
+| `cut_scores` | float / 配列 | 狭義単調増加のカット。合計得点上では $(0, S_{\max}]$ にあり、異なる得点を選ぶこと |
+| `method` | `"lee"` / `"rudner"` | 方法（既定 `"lee"`） |
+| `scale` | `"summed_score"` / `"theta"`、省略可 | カットの尺度。既定は方法の本来の尺度。違えばテスト特性曲線で変換する（Lee は $\tau(c)$、Rudner は $\tau^{-1}(c)$） |
+| `data` | DataFrame / 2 次元配列、省略可 | 反応。受検者の推定値で平均する（P 法） |
+| `group` | 配列、省略可 | `data` の各行の群ラベル（多母集団モデルで `data` を与えるときは必須） |
+| `item_names` | list[str]、省略可 | `data` が配列のときの列名 |
+| `score_method` | `"EAP"` / `"MAP"` / `"ML"` / `"WLE"` | P 法の推定値（既定 `"EAP"`）。Rudner の SE は常に $I(\hat\theta)^{-1/2}$ |
+
+**戻り値**: [`ClassificationResult`](#classificationresult)。
+
+**例外**: 多次元モデル、未知の `method` / `scale` / `score_method`、不正なカット、テスト特性曲線の範囲外の合計
+得点のカット（Rudner）、`data` なしの `group` / `item_names` / `score_method`、P 法での有限でない推定値（極端な
+パターンの ML）では `SpecificationError`。
+
+### `ClassificationResult`
+
+[`classification_accuracy`](#classification_accuracy) が返す frozen dataclass。多母集団の結果ではどの
+DataFrame にも先頭に `group` 列がつく（2 つの表は `(group, category)` の行索引）。
+
+| 属性 | 内容 |
+|---|---|
+| `method`, `scale`, `cut_scores`, `approach` | 設定（`approach` は `"D"` か `"P"`） |
+| `summary` | 群ごとに 1 行: `accuracy`、`consistency`、`kappa`（P 法では `n` も） |
+| `by_category` | `category`、`true_proportion`、`proportion`（観測）、`accuracy`（真が $h$ のとき観測も $h$）、`consistency`（1 回目が $h$ のとき 2 回目も $h$） |
+| `by_cut` | `cut`（変換したときは `summed_score_cut` / `theta_cut` も）、`accuracy`、`consistency`、`kappa`、`false_positive`（真は下、観測はカット以上）、`false_negative` |
+| `conditional` | 求積点（D）または受検者（P）ごと: `theta`、`weight`、`true_category`、`accuracy`、`consistency`、Lee では `true_score`、Rudner では `se` |
+| `accuracy_table` | $A$: 真（行）と観測（列）のカテゴリの同時確率 |
+| `consistency_table` | $B$: 独立な 2 回の実施のカテゴリの同時確率 |
+| `accuracy`, `consistency`, `kappa` | 単一群の結果の float（多母集団の結果では `SpecificationError`） |
+
 ---
 
 ## 設定
@@ -1270,7 +2156,7 @@ IRT モデルのカテゴリ確率。先頭の軸はバッチ軸。結果の形�
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural")
 ```
 
 | 引数 | 説明 |
@@ -1279,6 +2165,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 | `max_iter` | 採択される最大反復回数。到達すると `ConvergenceWarning` |
 | `m_step_newton_steps` | 1 回の M-step で進める Newton 法のステップ数。各ステップで期待対数尤度は減らない |
 | `squarem` | SQUAREM スキーム S3 加速（Varadhan & Roland, 2008）と単調性・実行可能性の安全装置を有効にする（既定 `False`） |
+| `m_step_scale` | `"natural"`（既定）: M-step の Newton 法を範囲つきの自然尺度で行い、境界解にちょうど到達する。`"unconstrained"`: 範囲のあるパラメタ（$g$、$u$、潜在分散、因子間相関、事前分布や編集した範囲で制限された傾き）を $\operatorname{logit}$ / $\log$ 尺度で動かす。範囲のないパラメタは変換しない。目的関数と内点解は同じで、推定値・表・事前分布・SE は自然尺度のまま。境界解には近づくだけ（[ガイド 4 節](guide.ja.md#4-推定する)） |
 
 ### `Quadrature`
 
@@ -1323,6 +2210,11 @@ ParameterTable の不正な編集、群ラベルの不一致など。推定の�
 尺度が識別できない指定。例: アンカーなしで焦点群の平均・分散を推定、固定項目なしで単一群の平均を推定。
 推定の前に出る。`ValueError` を継承。
 
+#### `MissingDependencyError`
+
+任意依存が入っていない。例: `flexpyirt.plotting` の matplotlib（`flexpyirt[plot]` を入れる）。
+`import flexpyirt` には不要。`ImportError` を継承。
+
 #### `PrecisionError`
 
 JAX の 64 ビット浮動小数点が無効。`jax.config.update("jax_enable_x64", True)` で有効にする。
@@ -1347,3 +2239,8 @@ flexpyirt が出すすべての警告の基底クラス（`UserWarning` を継�
 #### `NotPositiveDefiniteWarning`
 
 `polychoric()` でペアごとの行列が正定値でなく、`smooth=True` により平滑化したときに出る。
+
+#### `ScreeningWarning`
+
+`screen_common_items()` で、フラグの立った項目をアンカーに残したまま純化が止まったときに出る。`max_iter` 回の除外を
+使い切ったか、除外すると `min_items` 項目を下回る場合。

@@ -1,8 +1,9 @@
-"""Multiple-group likelihood-ratio DIF tests (Result layer, DESIGN.md §16.2).
+"""Multiple-group likelihood-ratio and Wald DIF tests (Result layer, DESIGN.md §16.2, §16.22).
 
-Post-fit Python orchestration: each tested item refits the model with one change to the
+Post-fit Python orchestration: each likelihood-ratio test refits the model with one change to the
 parameter table (its parameters made equal across groups, or freed), and compares the two
-marginal log-likelihoods. Nothing here runs inside ``jit`` except the refits themselves.
+marginal log-likelihoods; a Wald test uses the covariance matrix of the fit and needs no refit.
+Nothing here runs inside ``jit`` except the refits themselves.
 """
 
 from __future__ import annotations
@@ -21,9 +22,20 @@ from flexpyirt.errors import ConvergenceWarning, SpecificationError
 if TYPE_CHECKING:
     from flexpyirt.result import FitResult
 
-__all__ = ["DIFScheme", "PAdjust", "adjust_p", "dif_tests"]
+__all__ = [
+    "DIFScheme",
+    "DIFTest",
+    "PAdjust",
+    "adjust_p",
+    "dif_tests",
+    "information_criteria",
+    "item_rows",
+    "set_shared",
+    "wald_statistic",
+]
 
 DIFScheme = Literal["add", "drop"]
+DIFTest = Literal["likelihood_ratio", "wald"]
 PAdjust = Literal["holm", "BH", "none"]
 
 DIF_COLUMNS = (
@@ -38,6 +50,7 @@ DIF_COLUMNS = (
     "p",
     "adj_p",
 )
+WALD_COLUMNS = ("item", "x2", "df", "p", "adj_p")
 
 
 def adjust_p(p: np.ndarray, method: PAdjust) -> np.ndarray:
@@ -71,8 +84,15 @@ def adjust_p(p: np.ndarray, method: PAdjust) -> np.ndarray:
     return out
 
 
-def _criteria(loglik: float, k: int, n: int) -> dict[str, float]:
-    """AIC, sample-size adjusted BIC, Hannan–Quinn and BIC of one fit (mirt's definitions)."""
+def information_criteria(loglik: float, k: float, n: float) -> dict[str, float]:
+    r"""AIC, sample-size adjusted BIC, Hannan–Quinn and BIC of one fit (mirt's definitions).
+
+    .. math::
+        \mathrm{AIC}=-2\ell+2k,\quad \mathrm{SABIC}=-2\ell+k\log\frac{N+2}{24},\quad
+        \mathrm{HQ}=-2\ell+2k\log\log N,\quad \mathrm{BIC}=-2\ell+k\log N
+
+    (Akaike, 1974; Sclove, 1987; Hannan & Quinn, 1979; Schwarz, 1978).
+    """
     m2 = -2.0 * loglik
     return {
         "aic": m2 + 2.0 * k,
@@ -82,7 +102,7 @@ def _criteria(loglik: float, k: int, n: int) -> dict[str, float]:
     }
 
 
-def _set_shared(table: pd.DataFrame, rows: np.ndarray, *, shared: bool) -> pd.DataFrame:
+def set_shared(table: pd.DataFrame, rows: np.ndarray, *, shared: bool) -> pd.DataFrame:
     """Give the free ``rows`` (one item, several groups) one ``free_id`` per param, or one each."""
     t = table.copy()
     next_id = int(t["free_id"].max()) + 1
@@ -98,6 +118,84 @@ def _set_shared(table: pd.DataFrame, rows: np.ndarray, *, shared: bool) -> pd.Da
     return t
 
 
+def item_rows(table: pd.DataFrame, item: str, params: Sequence[str]) -> np.ndarray:
+    """Positions of the free rows of ``params`` of ``item`` (all groups) in ``table``."""
+    mask = (table["item"] == item) & table["param"].isin(list(params)) & table["free"]
+    return np.flatnonzero(mask.to_numpy())
+
+
+def wald_statistic(
+    eta: np.ndarray, vcov: np.ndarray, table: pd.DataFrame, rows: np.ndarray
+) -> tuple[float, int]:
+    r"""Wald statistic for the equality across groups of the parameters in ``rows``.
+
+    For each parameter (``param``) among ``rows`` with distinct ``free_id``\ s
+    :math:`u_1,\dots,u_m` across groups, the contrasts :math:`\eta_{u_1}-\eta_{u_k}`
+    (:math:`k=2,\dots,m`) are the rows of :math:`\mathbf L`, and
+
+    .. math::
+        W=(\mathbf L\boldsymbol\eta)^\top(\mathbf L\mathbf V\mathbf L^\top)^{-1}
+          (\mathbf L\boldsymbol\eta),\qquad df=\text{number of rows of }\mathbf L
+
+    (Wald, 1943; Lord, 1980), as mirt's ``wald()`` behind ``DIF(Wald = TRUE)``. Returns
+    ``(W, df)``; ``df = 0`` when every parameter is already shared, and ``W`` is NaN when
+    :math:`\mathbf L\mathbf V\mathbf L^\top` is singular.
+    """
+    sub = table.iloc[rows]
+    contrasts = []
+    for _, ids in sub.groupby("param", sort=False)["free_id"]:
+        unique = list(dict.fromkeys(int(v) for v in ids))
+        for other in unique[1:]:
+            row = np.zeros(eta.shape[0])
+            row[unique[0]] = 1.0
+            row[other] = -1.0
+            contrasts.append(row)
+    if not contrasts:
+        return float("nan"), 0
+    contrast = np.vstack(contrasts)
+    diff = contrast @ eta
+    middle = contrast @ vcov @ contrast.T
+    try:
+        stat = float(diff @ np.linalg.solve(middle, diff))
+    except np.linalg.LinAlgError:
+        stat = float("nan")
+    return stat, len(contrasts)
+
+
+def _wald_tests(
+    result: FitResult, tested: list[str], params: Sequence[str] | None, p_adjust: PAdjust
+) -> pd.DataFrame:
+    """Wald DIF tests of :meth:`FitResult.dif` with ``test="wald"`` (DESIGN.md §16.22)."""
+    if result.vcov is None:
+        raise SpecificationError(
+            "dif(test='wald') needs the covariance matrix of the estimates; fit with se= "
+            "(e.g. se='oakes')."
+        )
+    model = result._model
+    lookup = dict(model.items)
+    table = result.parameters
+    eta = np.asarray(result._eta, dtype=float)
+    vcov = np.asarray(result.vcov, dtype=float)
+    rows_out = []
+    for item in tested:
+        names = model.item_kernel(lookup[item]).param_names
+        chosen = names if params is None else tuple(params)
+        bad = [p for p in chosen if p not in names]
+        if bad:
+            raise SpecificationError(f"Item {item!r} has no parameters {bad}.")
+        stat, df = wald_statistic(eta, vcov, table, item_rows(table, item, chosen))
+        if df == 0:
+            raise SpecificationError(
+                f"Item {item!r}: parameters {list(chosen)} are already equal across groups; "
+                "nothing to test."
+            )
+        p = float(stats.chi2.sf(stat, df)) if np.isfinite(stat) else float("nan")
+        rows_out.append({"item": item, "x2": stat, "df": int(df), "p": p})
+    out = pd.DataFrame(rows_out)
+    out["adj_p"] = adjust_p(out["p"].to_numpy(), p_adjust)
+    return out[list(WALD_COLUMNS)]
+
+
 def dif_tests(
     result: FitResult,
     data: Any,
@@ -106,10 +204,11 @@ def dif_tests(
     items: Iterable[str],
     params: Sequence[str] | None,
     scheme: DIFScheme,
+    test: DIFTest = "likelihood_ratio",
     p_adjust: PAdjust,
     item_names: list[str] | None,
 ) -> pd.DataFrame:
-    """Run the likelihood-ratio DIF tests of :meth:`FitResult.dif` (see there)."""
+    """Run the likelihood-ratio or Wald DIF tests of :meth:`FitResult.dif` (see there)."""
     from flexpyirt.fit import fit
 
     result._require_unweighted("dif()")
@@ -122,6 +221,8 @@ def dif_tests(
         )
     if scheme not in ("add", "drop"):
         raise SpecificationError(f"Unknown scheme={scheme!r}; use 'add' or 'drop'.")
+    if test not in ("likelihood_ratio", "wald"):
+        raise SpecificationError(f"Unknown test={test!r}; use 'likelihood_ratio' or 'wald'.")
     if p_adjust not in ("holm", "BH", "none"):
         raise SpecificationError(f"Unknown p_adjust={p_adjust!r}; use 'holm', 'BH' or 'none'.")
     if isinstance(items, str):
@@ -134,13 +235,20 @@ def dif_tests(
         raise SpecificationError(f"Unknown items: {unknown}.")
     if isinstance(params, str):
         raise SpecificationError("params must be an iterable of parameter names, not a str.")
-
+    if test == "wald":
+        if scheme != "add":
+            raise SpecificationError(
+                "dif(test='wald') tests parameters that are free across groups; use scheme='add'."
+            )
+        return _wald_tests(result, tested, params, p_adjust)
+    if data is None or group is None:
+        raise SpecificationError("dif() with the likelihood-ratio test needs data and group=.")
     base = result.parameters[list(TABLE_COLUMNS)].copy()
     # Start every refit at the base estimates (same fixed point, fewer iterations).
     base["value"] = result.parameters["estimate"].to_numpy(dtype=float)
     k_base = result.n_params
     n = result.n_obs
-    base_crit = _criteria(result.loglik, k_base, n)
+    base_crit = information_criteria(result.loglik, k_base, n)
     lookup = dict(model.items)
 
     rows_out = []
@@ -152,7 +260,7 @@ def dif_tests(
             raise SpecificationError(f"Item {item!r} has no parameters {bad}.")
         mask = ((base["item"] == item) & base["param"].isin(list(chosen)) & base["free"]).to_numpy()
         rows = np.flatnonzero(mask)
-        table = _set_shared(base, rows, shared=(scheme == "add"))
+        table = set_shared(base, rows, shared=(scheme == "add"))
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", ConvergenceWarning)
             new = fit(
@@ -176,7 +284,7 @@ def dif_tests(
                 f"{'equal across groups' if scheme == 'add' else 'free in every group'}; "
                 f"nothing to test with scheme={scheme!r}."
             )
-        new_crit = _criteria(new.loglik, k_new, n)
+        new_crit = information_criteria(new.loglik, k_new, n)
         # mirt's sign: criteria of the model with the item free minus the constrained one, so a
         # negative difference favours DIF in both schemes.
         if scheme == "add":

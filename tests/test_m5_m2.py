@@ -467,7 +467,7 @@ def test_m2_fourpl_and_pcm() -> None:
     assert abs(float(out_pcm["m2"]) - nolat.m2) > 1e-6
 
 
-# ---- multiple groups, missing data and MAP fits (DESIGN.md §16.20) ----------------------------
+# ---- multiple groups, missing data and MAP fits (DESIGN.md §16.23) ----------------------------
 
 
 def test_sample_margins_match_brute_force_with_missing() -> None:
@@ -538,7 +538,7 @@ def test_m2_invariant_to_all_missing_rows_and_map_fit_runs() -> None:
 
 @pytest.mark.slow
 def test_m2_with_mcar_missing_follows_chi2_at_true_parameters() -> None:
-    """Calibration of the MCAR covariance (DESIGN.md §16.20) with every parameter fixed at truth.
+    """Calibration of the MCAR covariance (DESIGN.md §16.23) with every parameter fixed at truth.
 
     With ``n_params = 0`` the statistic is :math:`r^\\top\\Gamma^{-1}r` with ``df = s``, so its
     distribution checks :math:`\\Gamma` alone; mirt's weighting is visibly off.

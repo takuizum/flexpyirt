@@ -6,7 +6,7 @@ orthogonal complement, and fit indices run in NumPy / SciPy outside ``jit``. Not
 on the number of factors: for a confirmatory multidimensional model the ``Q`` nodes are the
 product grid and the weights are multivariate normal (DESIGN.md §16.19). Multiple groups, missing
 responses (pairwise-available margins with their exact covariance under MCAR) and MAP fits follow
-DESIGN.md §16.20.
+DESIGN.md §16.23.
 """
 
 from __future__ import annotations
@@ -268,7 +268,7 @@ def null_m2(y: np.ndarray) -> tuple[float, int]:
 
 @dataclass(frozen=True)
 class SampleMargins:
-    r"""Pairwise-available sample margins of one group (DESIGN.md §16.20).
+    r"""Pairwise-available sample margins of one group (DESIGN.md §16.23).
 
     ``obs`` holds :math:`\hat p_a=N_a^{-1}\sum_n o_{na}y_{na}` for the :math:`J` items and
     :math:`\binom J2` pairs, ``count`` the :math:`N_a`, ``joint`` the :math:`N_{ab}` (``None``
@@ -291,7 +291,7 @@ def sample_margins(y: np.ndarray, item_names: Sequence[str] | None = None) -> Sa
         N_{ab}=\sum_n o_{na}\,o_{nb},
 
     where :math:`o_{na}=1` when respondent :math:`n` answered every item of margin :math:`a`
-    and :math:`y_{na}` is the item score or the product of the two scores (DESIGN.md §16.20).
+    and :math:`y_{na}` is the item score or the product of the two scores (DESIGN.md §16.23).
 
     Raises
     ------
@@ -333,7 +333,7 @@ def sample_margins(y: np.ndarray, item_names: Sequence[str] | None = None) -> Sa
 def _residual_and_gamma(
     sample: SampleMargins, margins: np.ndarray, xi: np.ndarray, mirt_convention: bool
 ) -> tuple[np.ndarray, np.ndarray]:
-    r"""Return the scaled residual :math:`r_g` and its covariance :math:`\Gamma_g` (§16.20).
+    r"""Return the scaled residual :math:`r_g` and its covariance :math:`\Gamma_g` (§16.23).
 
     Default: :math:`r_g=\sqrt{N_g}(\hat p_g-\pi_g)` and
     :math:`\Gamma_{g,ab}=N_g N_{ab}\,\Xi_{ab}/(N_aN_b)`, the exact covariance of
@@ -445,7 +445,7 @@ def m2_statistic(
     where :math:`r=(\sqrt{N_g}(\hat p_g - \pi_g))_g` stacks the residuals of the
     :math:`G` groups, :math:`\Gamma=\operatorname{blockdiag}(\Gamma_g)` is their asymptotic
     covariance (:math:`\Xi_2` of group :math:`g` under local independence; with missing
-    responses rescaled by :math:`N_gN_{ab}/(N_aN_b)`, DESIGN.md §16.20), :math:`\Delta_c` is an
+    responses rescaled by :math:`N_gN_{ab}/(N_aN_b)`, DESIGN.md §16.23), :math:`\Delta_c` is an
     orthonormal basis for the orthogonal complement of
     :math:`\Delta^\ast=(\sqrt{N_g/N}\,\partial\pi_g/\partial\eta^\top)_g` (shared parameters
     once), :math:`s = J + \binom{J}{2}`, and :math:`q = \text{n\_params}`. For one group with

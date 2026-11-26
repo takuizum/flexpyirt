@@ -1,11 +1,11 @@
-# M2* for multiple groups, missing data and MAP fits (VALIDATION.md V42, DESIGN.md §16.20).
+# M2* for multiple groups, missing data and MAP fits (VALIDATION.md V42, DESIGN.md §16.23).
 # Run from the repository root:  Rscript validation/r/m6_m2_groups_missing_map_reference.R
 # Writes tests/reference/v42_m2_groups_missing_map.json. CI does not run R; the JSON is committed.
 #
 # Every case is simulated here, fitted with mirt (mirt() or multipleGroup()), and M2() is called on
 # the fit's grid (quadpts / theta_lim of the fit). The JSON records the data, mirt's estimates (in
 # flexpyirt's parameter names), mirt's raw M2() output, and `exact`: M2* recomputed in R from the
-# formulas of DESIGN.md §16.20 with
+# formulas of DESIGN.md §16.23 with
 #   - Delta from central differences of expected.item() and of the normalized latent weights over
 #     every free parameter (one column per parameter, equality constraints across groups merged,
 #     free latent means / variances / correlations included), the rows of group g scaled by

@@ -34,7 +34,10 @@ English | [日本語](VALIDATION.ja.md)
 | EFA implied $\Lambda\Lambda^\top$ / communalities; CAF, CFI, RMSEA; $\chi^2$; Hull fit / $st$ | 1e-4; 2e-4; 1e-4 (relative); 1e-5 / 1e-2 (relative) |
 | CD: PAF $\Lambda\Lambda^\top$; one-factor population from the same draws; rank-sum $p$; mean RMSE (retained $k$ / the rejected extra $k$) | 1e-12; exact; 1e-10 (relative); 15% / 60% (relative) |
 | DIMTEST (simulation study; small version in the tests): type I error at .05 / power | $\le 0.15$ of 20 / $\ge 8$ of 10 |
+| Observed-score DIF: MH / GMH statistics, $\hat\alpha_{MH}$, its log variance, Mantel statistic, cumulative odds ratio and its SE; logistic LRT, $\Delta R^2$, coefficients / SEs and Wald; flags and purification paths | 1e-10 (relative); 1e-8 / 1e-6 (relative); equal |
 | Cross-product / sandwich covariance at mirt's estimates (entries relative to $\sqrt{v_{ii}v_{jj}}$); parameters / SEs end-to-end | 1e-9 / 1e-6; 1e-6 / 1e-5 (relative) |
+| Classical item analysis (alpha, standardized alpha, if-deleted values, Feldt interval, item–total / item–rest, point-biserial, two-step polyserial / biserial, keyed scores, option statistics) vs psych / ltm / polycor / base R; omega total and its loadings vs psych | 1e-12 (scores exact); 1e-6 / 1e-5 |
+| Person / item fit at mirt's $\theta$ ($l_z$, infit, outfit, $z$); $l_z^*$ vs the R recomputation; end-to-end with flexpyirt's own estimates | 1e-9 (relative); 1e-7; 1e-4 |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -81,6 +84,17 @@ English | [日本語](VALIDATION.ja.md)
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
 | V42 | $M_2^*$ for multiple groups, missing data and MAP fits (two-group 2PL with unequal groups and anchors, complete and 15% MCAR; two-group GRM $K=3$; two-group two-factor 2PL; single-group 2PL with 20% MCAR; 2PL MAP) | `M2(m, quadpts =, theta_lim =)` on `multipleGroup()` / `mirt()` fits at mirt's estimates, plus an independent R computation of DESIGN §16.20 and R code with mirt's conventions | M6 |
+| V43 | Information matrix, directional information and expected scores of multidimensional models at chosen parameters (two correlated factors with 2PL, 3PL, 4PL, GRM, GPCM and nominal items and four cross-loadings; three factors with 2PL, 3PL, GRM and GPCM and two cross-loadings; bifactor 2PL + GRM with three specific factors; two-tier 2PL + GRM with two correlated primary factors and two specific factors) | `iteminfo(item, Theta, multidim_matrix = TRUE)`, `iteminfo(item, Theta, degrees = )`, `testinfo(m, Theta, degrees = )`, `expected.item()`, `expected.test()` on `mirt()` / `bfactor()` objects built with `pars =` and `TOL = NaN` | M7 |
+| V45 | Optional unconstrained M-step scale (`BAEM(m_step_scale="unconstrained")`) on the V3, V4, V5, V7, V9, V11 and V14 cases; `LogitNormalPrior` (`"natural"`: no mirt equivalent, independent numerical check; `mode_scale="logit"`: mirt `norm` on `g`) | the existing references of those cases; SciPy (`stats.norm`, `integrate.quad`) and a stationarity condition written from the formula; `v45_3pl_logit_norm_map.json` (mirt) and the flexMIRT logit-metric mode computed in the test | #15 |
+| V46 | Classical item analysis (flexpyctt): keyed scoring, alpha (pairwise and listwise), item statistics, point-biserial / biserial / polyserial correlations, omega total (Pearson and polychoric), option analysis; simulated 10-item multiple-choice (complete, 5% MCAR) and 6-item 0–4 data (complete, 6% MCAR) | none (not mirt): psych `alpha()`, `score.multiple.choice()`, `responseFrequency()`, `polyserial()`, `biserial()`, `fa()`, `omega(nfactors = 1)`; ltm `cronbach.alpha()`, `biserial.cor()`; polycor `polyserial(ML = FALSE)`; lavaan `lavCor()`; base R for option statistics | flexpyctt |
+| V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `packages/flexpyctt/validation/r/ctt_dif_reference.R`; the worked example of Liu & Agresti (1996, Table 1) | — |
+| V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
+| V49 | DIF screening with anchor purification (all others as anchors, sequential freeing, sequential constraining; two groups, 8 2PL + 4 GRM $K=3$; three groups 2PL), Wald DIF tests, signed / unsigned expected-score differences, DTF, ESSD / ETSSD and RMSD at mirt's estimates | `DIF(scheme = "drop" / "drop_sequential" / "add_sequential", seq_stat = 0.05, p.adjust = "BH", max_run = )`, `DIF(Wald = TRUE)`, `mirt:::calc_DRFs(best_fitting = TRUE)` (behind `DRF()`), `empirical_ES()`, `RMSD_DIF(probfun = FALSE)` | M5 |
+| V50 | Common-item screening for linking (#105): robust z (Huynh & Meyer, 2010), displacement and RMSD of expected item score curves; removal order, linking constants at every purification step and the final item table (2PL; mixed 2PL + GRM + GPCM) | separate `mirt()` calibrations + base-R recomputation (`median()`, `quantile(type = 7)`, `expected.item()`, V20 linking); `equateIRT::dif.test` as a cross-check of the drifted items | field |
+| V51 | IRT true-score and observed-score equating and raw-to-scale tables (dichotomous: 20 + 20 items, 3PL + 2PL, with a link; polytomous: 4 GRM $K=4$ + 6 2PL vs 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL, with a link; populations new / old / synthetic $w_1=0.5$; scale table true score and EAPsum) | `equateIRT:::score_compute(method = "TSE" / "OSE")`, `SNSequate::irt.eq(method = "TS")`; mirt `expected.test()`, `probtrace()`, `testinfo()`, `fscores(method = "EAPsum", full.scores = FALSE)` with `uniroot()`, and `equate::equate(type = "equipercentile")` | #106 |
+| V52 | Classification accuracy and consistency for cut scores (#107): Lee (summed-score cuts) and Rudner ($\theta$ cuts), D and P approaches, one to three cuts, non-integer cuts, both cut-scale conversions (3PL $J=20$; GRM $K=4$, $J=10$; two-group 2PL $J=15$, focal mean and variance free) | cacIRT 1.4 `class.Lee()`, `Lee.poly.D()` / `Lee.poly.P()`, `Rud.D()` / `Rud.P()` with mirt's `testinfo()` SE; independent recomputation from mirt `probtrace()` / `expected.test()` / `testinfo()` (kappa, false positive / negative rates, per-category indices, tables) | field |
+| V53 | Person fit ($l_z$, $l_z^*$, person infit / outfit with $z$) and item infit / outfit at the EAP, MAP, ML and WLE estimates, on V37's data and estimates (2PL; 2PL with 8% missing; 3PL; GRM and GPCM $K=4$; nominal $K=4$; mixed 2PL + 3PL + GRM + GPCM + nominal; two groups 2PL + GRM) and a Rasch refit | `personfit(m, Theta = )`, `itemfit(m, fit_stats = "infit", Theta = )`; `sirt::personfit.stat()`; $l_z^*$ recomputed in R from the formulas | — |
+| V54 | Model-comparison table (Rasch vs 2PL vs 3PL on the V11a data; PCM vs GPCM on the V8b data; a fully invariant two-group 2PL vs the anchored model and vs the model with the last item free, V4 data) and simulation of responses (deterministic inversion for 2PL, Rasch, 3PL, 4PL, GRM, GPCM and nominal items, unidimensional and two-factor; distributional and recovery checks per latent distribution) | `anova(mod1, mod2, ...)`; `probtrace()` with the same $\theta$ and uniform numbers (random streams cannot match `simdata()`) | #109 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -402,7 +416,7 @@ English | [日本語](VALIDATION.ja.md)
     in a multidimensional model (the item kernels are those validated in V18 / V15 and the unit
     tests cover a mixed 2PL + GRM model, but there is no mirt comparison), and grids other than
     mirt's defaults.
-- **$M_2^*$ for multiple groups, missing data and MAP fits (V42, M6, #76; DESIGN §16.20)**: six
+- **$M_2^*$ for multiple groups, missing data and MAP fits (V42, M6, #76; DESIGN §16.23)**: six
   simulated cases fitted by mirt 1.46.1 (`multipleGroup()` / `mirt()`, `TOL = 1e-10`, $[-6,6]$
   with 61 points, 31 per dimension for two factors; `validation/r/m6_m2_groups_missing_map_reference.R`
   → `tests/reference/v42_m2_groups_missing_map.json`): `twogroup_2pl` (2PL, $J=6$, 700 / 300,
@@ -411,7 +425,7 @@ English | [日本語](VALIDATION.ja.md)
   `twogroup_2d` (two-factor 2PL, $J=8$, 600 / 400, all items equal, focal means, variances and
   correlation free), `missing_2pl` (2PL, $J=7$, $N=800$, 20% MCAR) and `map_2pl` (2PL, $J=6$,
   $N=250$, `lnorm(0, 0.5)` on $a$ and `norm(0, 2)` on $d$). mirt's `M2()` is the raw reference.
-  The R script also computes `exact`, the formulas of DESIGN §16.20 written independently in R
+  The R script also computes `exact`, the formulas of DESIGN §16.23 written independently in R
   (central-difference $\Delta$ over every free parameter with the group rows scaled by
   $\sqrt{N_g/N}$, mirt's `buildXi2els` per group rescaled by $N_gN_{ab}/(N_aN_b)$, the
   multiple-group independence model), and the same code with mirt's conventions, which must
@@ -745,6 +759,85 @@ English | [日本語](VALIDATION.ja.md)
   closed forms, the one-factor criterion equal to §16.5's, finite-difference gradients, exact
   recovery of known transformations for two and three factors, the delta-method Jacobian
   against re-solving the linking, `transform_theta`, errors): `tests/test_m6_linking_multidim.py`.
+- **Common-item screening (V50, #105)**: no R package implements the robust z, the displacement
+  or the expected-score RMSD together with characteristic-curve linking and purification, so
+  `validation/r/v50_screening_reference.R` (→ `tests/reference/v50_screening.json`, mirt 1.48,
+  equateIRT 2.5.2) recomputes the rules of DESIGN §22 in base R: each form is calibrated with
+  `mirt` (`optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`, 61 nodes on $[-6, 6]$, latent
+  $N(0, 1)$); the linking on each anchor set is the V20 base-R Stocking–Lord / Haebara (asserted
+  `max |grad| < 1e-9`); locations, `log_ratio_a`, robust z (`median()`,
+  `quantile(type = 7)`, `IQR()`), displacement and the RMSD of `expected.item()` curves on the
+  target grid follow the formulas, and the purification loop is written out with the same removal
+  rule. `tests/test_r_v50_screening.py` runs `screen_common_items()` on `FitResult`s fixed at
+  mirt's estimates and compares the removal order, $(A, B)$ and the criterion at every step, the
+  final item table, the flags and the `ScreeningWarning`. Source populations $N(0.4, 1.2^2)$ on
+  the target scale; drift planted in the source form.
+  - **V50a (`v50a_2pl`, 2PL, 12 common + 8 unique items per form, $N=2000$/form; drift: `c01`
+    $b + 0.8$, `c02` $a \times 1.8$, `c03` $b - 0.6$)**: seven variants (robust z with
+    `removal="largest"` and `"all"`, displacement, RMSD, displacement with symmetric Haebara,
+    robust z with `max_iter=1`, RMSD 0.02 with `min_items=11`). Removal orders agree exactly
+    (robust z removes `c02, c01, c03, c10`; displacement and RMSD `c01, c03`); over all steps
+    `max |Δ(A, B)| = 2.3e-11`, per-item quantities `5.0e-12`, robust z `2.7e-10`.
+    `equateIRT::dif.test` (Lord's Wald test after Stocking–Lord linking, with purification,
+    $\alpha = 0.05$) flags `c01, c02, c03, c12`: the three planted drifts, which robust z also
+    removes first.
+  - **V50b (`v50b_mixed`, 2PL + GRM $K=4$ + GPCM $K=4$, 6 + 3 + 3 common, $N=2500$/form; drift:
+    `d01` $b + 0.7$, `g01` thresholds $+0.6$, `p02` $a \times 0.5$)**: four variants (robust z,
+    displacement, RMSD, RMSD with Haebara and `removal="all"`). Removal orders agree exactly
+    (robust z `p02, d01, g01`; RMSD `g01, p02, d01`; displacement `d01, g01`);
+    `max |Δ(A, B)| = 1.0e-11`, per-item quantities `4.8e-12`, robust z `3.4e-10`.
+  Tolerances: $(A, B)$ `1e-9`, criterion rel `1e-7`, per-item quantities `1e-9`, robust z
+  `1e-8`. **Checked only independently** (unit tests in `tests/test_screening.py`): the
+  location of 4PL and nominal items ($b^* = A\,b + B$ for every kernel), the RMSD against a direct
+  evaluation of the moved source curve, exact recovery of $(A, B)$ on drift-free items, the removal of
+  planted drifts among slightly perturbed items, the NaN robust z of Rasch slope ratios, the `items=`
+  subset and `stack_screening_tables()`. The thresholds are conventions (DESIGN §22); V50 checks
+  that the rules are computed as specified, not that the thresholds are good.
+- **Classification accuracy and consistency (V52, #107)**: DESIGN §18.4 in
+  `tests/test_r_classification.py` (slow tier; generator `validation/r/classification_reference.R`
+  → `tests/reference/v52_classification.json`, mirt 1.48, cacIRT 1.4, 61 points on $[-6, 6]$).
+  Each case's parameters go into a flexpyirt `FitResult` with every parameter fixed; mirt's EAP
+  scores are stored for the P approach. Cases: `threepl` (3PL, $J=20$, $N=3000$, generating
+  parameters fixed in mirt because a 3PL fit of this size did not converge), `grm` (GRM $K=4$,
+  $J=10$, $N=2000$, mirt estimates) and `twogroup` (2PL $J=15$, $N=1500$ per group, all items
+  invariant, focal mean and variance free). Runs: Lee with summed-score cuts 12, (8, 14),
+  (7.5, 13.2) and with $\theta$ cuts (−0.5, 0.8) converted by $\tau$; Rudner with $\theta$ cuts
+  0.3, (−0.5, 0.8) and with summed-score cuts (8, 14) converted by $\tau^{-1}$ (`uniroot` in R);
+  each with the D approach (fitted nodes and weights) and the P approach (mirt's EAP scores). Two
+  references per run:
+  - **cacIRT** (Lathrop, 2015): `class.Lee()` for the 3PL, `Lee.poly.D()` / `Lee.poly.P()` for
+    the GRM, and `Rud.D()` / `Rud.P()` with the SE $1/\sqrt{I(\theta)}$ from mirt's
+    `testinfo()`: "Simultaneous" (overall) and "Marginal" (per cut) accuracy and consistency and
+    the conditional values. `class.Rud()` is not used: cacIRT's `iif()` writes the 3PL
+    information with $(1-c^2)$ where Birnbaum's formula has $(1-c)^2$, so its SE is wrong
+    whenever $c>0$ (it is right for the 2PL). Largest differences: exact functions `1.2e-15`
+    (D) and `2.4e-15` (P); `Lee.poly.D()` `3.9e-12`, because cacIRT clips the category
+    probabilities to $[10^{-4}, 1-10^{-4}]$ before its recursion. cacIRT's `class.Lee()` puts a
+    true score equal to a cut below it in the D approach (`cut(right = TRUE)`) and above it in
+    the P approach; flexpyirt puts it above in both (no case hits a tie).
+  - **Recomputation in R** from mirt's `probtrace()`, `expected.test()` and `testinfo()` with a
+    Lord–Wingersky recursion written in the script: the tables $A$ and $B$, kappa, the per-cut
+    false positive / negative rates and the per-category indices (none of which cacIRT has), and
+    the conditional values. The script asserts that it reproduces cacIRT's exact functions to
+    $10^{-12}$. Largest differences: D `2.0e-14`, P `4.4e-15`; flexpyirt's EAP scores against
+    mirt's `7.8e-15`. Tolerances $10^{-12}$ (D, P, EAP) and $10^{-10}$ against `Lee.poly.D()`.
+  - **Without R** (`tests/test_classification.py`): brute-force enumeration of all 72 response
+    patterns of a mixed 2PL + 3PL + GRM $K=3$ + GPCM $K=3$ test with the item probabilities
+    written out in NumPy (tables, conditional values, kappa; `1e-14`), Rudner against
+    `scipy.stats.norm` with `test_information()`, identities between the indices (tables sum to
+    1, equal observed margins, accuracy + false positive + false negative = 1 per cut), the
+    scale conversions against `expected_score()`, multiple groups and the errors (fast tier).
+    Slow tier: a Monte Carlo simulation of two parallel administrations ($N=200\,000$,
+    $\theta\sim N(0,1)$) agrees with the D approach on a 2401-node grid within 4.5 Monte Carlo
+    SEs for accuracy, consistency and the accuracy table, for Lee and Rudner.
+  - **Discretization**: on the default 61-node grid the D approach's accuracy differs from the
+    continuous-latent value (2401 nodes) by up to `7.6e-3` (Lee, 5-item mixed test) and `2.5e-3`
+    (Rudner); consistency and kappa by `1e-9`. This is the jump of the conditional accuracy
+    where the true category changes (DESIGN §18.4), not an error of the implementation; cacIRT
+    gives the same value on the same grid.
+  - **Not validated**: `sirt::class.accuracy.rasch` (Rasch, cuts on $\theta$) was not used,
+    since cacIRT covers the same indices; latent distributions other than `Normal` (the code
+    path is the same weights; not compared with R).
 - **Bifactor models (V32, M7)**: two simulated cases in `tests/test_mirt_m7_bifactor.py` (plain
   EM and SQUAREM; generator `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`,
   mirt 1.46.1 `bfactor()`, `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`,
@@ -867,7 +960,8 @@ English | [日本語](VALIDATION.ja.md)
     mirt returns `NA` for exactly those and flexpyirt NaN (mirt refuses the
     `full.scores = FALSE` table for data with missing responses, so that case has no table
     reference).
-  - **Not validated, raises `SpecificationError`**: multidimensional models (all functions);
+  - **Not validated, raises `SpecificationError`**: reliability, the summed-score table and
+    EAPsum for multidimensional models (their information and expected scores are V43);
     reliability, the summed-score table and EAPsum with `EmpiricalHistogram`, `DavidianCurve`
     or `NormalMixture`. The pooled `empirical_rxx()` of a `multipleGroup` fit (stored as
     `empirical_rxx_pooled`) has no flexpyirt counterpart; flexpyirt reports it per group.
@@ -879,6 +973,119 @@ English | [日本語](VALIDATION.ja.md)
     the marginal reliability under a linear change of the latent scale ($10^{-13}$),
     reliability bounds and closeness of the marginal and empirical values on simulated data,
     and the error paths.
+- **Multidimensional information matrix, directional information and expected score (V43,
+  M7)**: DESIGN §18.3 in `tests/test_mirt_m7_information_multidim.py` (slow tier, about 40 s;
+  generator `validation/r/m7_information_multidim_reference.R` →
+  `tests/reference/v43_information_multidim.json`, mirt 1.46.1). Nothing is estimated: each case
+  sets chosen item parameters with `pars = "values"` and builds the mirt object with
+  `TOL = NaN` (`mirt()` for the confirmatory models, `bfactor()` / `bfactor(model2 = )` for the
+  bifactor and two-tier models), and flexpyirt gets the same values with every parameter fixed.
+  Cases: `cfa2_mixed` (10 items: 2PL, 3PL, 4PL with $u<1$, GRM $K=3,4$, GPCM $K=3,4$, nominal
+  $K=3$; four items load on both factors), `cfa3` (9 items, 2PL, 3PL, GRM, GPCM; two
+  cross-loadings), `bifactor` (12 items, 2PL + GRM $K=3$, general and three specific factors)
+  and `two_tier` (8 items, 2PL + GRM $K=3$, two correlated primary factors with one
+  cross-loading and two specific factors). Each has 15 points: 12 uniform on $[-3,3]^D$, all
+  $-5$, alternating $\pm5$, and the origin; and 4–5 directions given as angles with
+  $\sum_m\cos^2\alpha_m=1$, including the axes, the diagonal and directions with a negative
+  cosine. The generator also asserts that mirt's `testinfo(degrees = )` equals
+  $\mathbf u^\top(\sum_j\mathbf I_j)\mathbf u$ of its own `multidim_matrix = TRUE` matrices
+  ($10^{-10}$). Largest differences over all cases:
+  - **Item information matrices** (`iteminfo(multidim_matrix = TRUE)`): `1.1e-15` absolute,
+    `1.0e-12` relative (at entries of size about $10^{-4}$ at the extreme points); the test
+    matrix (their sum) `1.8e-15` absolute.
+  - **Directional item and test information** (`iteminfo` / `testinfo(degrees = )`, with
+    `direction = cos(degrees)`): item `1.0e-12` relative, test `5.8e-14` relative.
+  - **Composite SE** $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$ against the inverse of the
+    sum of mirt's matrices (`solve()` in R; mirt's `plot(type = "SE")` shows $1/\sqrt{I_{\mathbf u}}$ instead, DESIGN §18.3): `2.8e-14` relative.
+  - **`expected.item()` / `expected.test()`**: `4.8e-14` absolute / `4.7e-15` relative.
+  Tolerance for all: $10^{-10}$ relative plus $10^{-13}$ absolute (for entries that are 0 because
+  a slope is fixed at 0).
+  - **Unit tests** (`tests/test_m7_information_multidim.py`; the simple-structure and
+    multiple-group tests are in the slow tier): a two-factor simple-structure model equals the two
+    unidimensional sub-tests along the axes (item and test information, composite SE, expected
+    scores; $10^{-12}$) and its matrices are block diagonal; matrices are exactly symmetric, PSD and
+    of rank 1 for the built-in families; the 2PL closed form $P(1-P)\mathbf a\mathbf a^\top$
+    ($10^{-12}$); directional information $=\mathbf u^\top\mathbf I\mathbf u$, invariance under
+    scaling and sign of the direction, the composite SE against a direct inverse and the bound
+    $\mathrm{SE}_{\mathbf u}\ge I_{\mathbf u}^{-1/2}$; infinite SE for a numerically singular matrix;
+    in a bifactor model each item's matrix is 0 outside the general and own specific factors; a
+    multiple-group model uses each group's parameters; unidimensional `information_matrix` is
+    the scalar information; the `theta` layouts (array, DataFrame by factor name, one point) and
+    the error paths.
+- **The numbers behind the plots (V48, #103)**: DESIGN §21 in `tests/test_mirt_v48_plots.py`
+  (slow tier, about 20 s; generator `validation/r/v48_plots_reference.R` →
+  `tests/reference/v48_plots.json`, mirt 1.48, TAM 4.3-25, 61 points on $[-6, 6]$). mirt fits
+  every model (`TOL = 1e-8`, converged) and its estimates go into a `FitResult` with every
+  parameter fixed, as in V37. The data are stored row by row (unique patterns plus each row's
+  pattern) because the bins depend on the order of the respondents. Cases: `twopl` ($J=10$,
+  $N=1003$, so the remainder 3 puts one extra respondent in the first bin and two in the last),
+  `twopl_missing` ($N=1200$, 10% MCAR, bins per item over the respondents who answered it),
+  `grm` ($K=4$, $J=6$, $N=1500$), `mixed` (3 2PL, 3 3PL, 2 GPCM $K=4$, 2 nominal $K=3$;
+  $N=3000$), `twogroup` (5 2PL + 3 GRM $K=4$, all items invariant, $N=805$ per group, focal mean
+  and variance free) and `gpcm_tam` (TAM's own GPCM fit). Largest differences over all cases:
+  - **EAP scores** (the input of the bins) against `fscores(method = "EAP")`: `7.1e-15`
+    (tolerance $10^{-9}$).
+  - **`empirical_item_curve()`** against `itemfit(fit_stats = "X2", return.tables = TRUE,
+    group.bins = 10, mincell.X2 = 0, Theta = eap)`, item by item (mirt returns one item's tables
+    per call; `mincell.X2 = 0` turns its cell collapsing off; a `multipleGroup` fit is refused,
+    so each group's `extract.group()` is called with that group's rows of `Theta`, which is what
+    mirt's own per-group `itemfit()` does): the bin sizes equal mirt's row sums exactly;
+    observed proportions are identical (`0`); expected probabilities `4.6e-15` (tolerance
+    $10^{-9}$); bin means against mirt's labels, which are rounded to 4 decimals, `5.0e-5`
+    (the rounding; tolerance $5\times10^{-5}$). The expected tables are $N\,P(\bar\theta_b)$, so
+    they also check the bin means to full precision.
+  - **`item_probabilities()`** against `probtrace()` on $\theta\in\{-6,-4,-3.5,\dots,4,6\}$:
+    `2.9e-15` (tolerance $10^{-12}$).
+  - **`wright_map_table()` item locations** against `uniroot(tol = 1e-13)` of
+    $\sum_{c\ge k}$`probtrace()`$-1/2$ on $[-20, 20]$: `2.1e-14`; against
+    `coef(IRTpars = TRUE)` $b$ (2PL) and $b_k$ (GRM): `1.1e-14` (tolerance $10^{-9}$). For the
+    3PL items the threshold is below $b$, as it must be. Against TAM's `tam.threshold()` at TAM's
+    own GPCM estimates (slopes and intercepts read from `B` and `AXsi`): `8.4e-5`, TAM's bisection
+    stops when the interval is below $10^{-4}$ (tolerance $10^{-4}$).
+  - **Not validated**: mirt's $X^2$ / $G^2$ statistics and cell collapsing, and the
+    Clopper–Pearson interval of `empirical.plot` (not computed); the figures themselves.
+  - **Unit and smoke tests** (`tests/test_plotting.py`, fast tier): mirt's bin-size rule, a
+    brute-force recomputation of the bins with missing responses, closed-form thresholds (2PL
+    $-d/a$, GRM $-d_k/a$, a 3PL item with and without a crossing), two groups with DIF, the
+    error paths; every plot function on the Agg back end with the plotted data equal to the
+    DataFrames; `MissingDependencyError` when matplotlib cannot be imported. CI also runs
+    `scripts/check_plotting_without_matplotlib.py` in an environment without matplotlib.
+- **DIF screening, Wald DIF tests and effect sizes (V49, #104)**: DESIGN §16.22 in
+  `tests/test_mirt_m5_dif_screen.py` (slow tier, about 7 min; generator
+  `validation/r/m5_dif_screen_reference.R` → `tests/reference/v49_dif_screen.json`, mirt 1.48;
+  `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`, 81 points on $[-8,8]$ for every fit and
+  refit; set `V49_CACHE=<file.rds>` to keep the long `DIF()` runs between runs of the generator).
+  Data: two groups of 1200 (8 2PL items and 4 graded items $K=3$; DIF in q02's slope, q04's and
+  q07's intercepts and q09's intercepts; focal $N(0.4, 1.3)$) and three groups of 800 (8 2PL items,
+  intercept DIF in q03 for g3).
+  - **`"all_others"`** against `DIF(<fully invariant>, scheme = "drop", p.adjust = "BH")` for all
+    parameters and for intercepts only (two and three groups): $X^2$ to $1.5\times10^{-11}$, `df`
+    exact, flagged sets equal.
+  - **Sequential strategies** against `DIF(scheme = "drop_sequential" / "add_sequential",
+    seq_stat = 0.05, p.adjust = "BH")` with `max_run` 2, 3 and `Inf` (our `max_iter` = `max_run` − 1):
+    flagged sets equal after every number of rounds, the flagged items' final tests (mirt's output)
+    $X^2$ to $1.5\times10^{-11}$, and the final model's log-likelihood
+    (`return_seq_model = TRUE`) to $1.5\times10^{-15}$ relative. In these data the flags are the
+    same from round 1 on (both strategies converge in two rounds); the iteration itself is unit-tested
+    (`tests/test_m5_dif_screen.py`). mirt's sequential loop indexes item names by position within
+    `items2test`, so the generator tests a prefix `1:k` (the anchors are the last items).
+  - **Wald** against `DIF(Wald = TRUE)` on the anchored model with Oakes SEs (`SE.type = "Oakes"`),
+    both fitted independently: $W$ to $2.7\times10^{-7}$ relative, `p` / `adj_p` (Holm) to
+    $1.2\times10^{-7}$ relative.
+  - **Effect sizes** at mirt's estimates of the partially invariant model (q02, q04, q07, q09 free)
+    and the invariant model, put into fixed `FitResult`s on 201 points on $[-6,6]$ (DRF's
+    `quadpts`, `theta_lim` and `RMSD_DIF()`'s grid): signed / unsigned differences (focal and
+    reference densities) and DTF against `mirt:::calc_DRFs(best_fitting = TRUE)` to
+    $1.1\times10^{-15}$; EAP scores to $6.7\times10^{-15}$; ESSD and ETSSD against `empirical_ES()`
+    (with `Theta.focal` the EAPs on the same grid) to $2.2\times10^{-15}$; RMSD of both groups and
+    both models against `RMSD_DIF(probfun = FALSE)` to $9.7\times10^{-16}$. Tolerances: $X^2$
+    $10^{-8}$, $p$ $10^{-3}$ relative (mirt's `p` is `1 - pchisq()`, imprecise for tiny $p$),
+    log-likelihood $10^{-8}$ relative, $W$ $10^{-5}$ relative, effect sizes $10^{-12}$.
+  - **mirt differences**: `DRF(den.type = "focal" / "reference")` stops in mirt 1.48
+    (`add_std.DRF()` refers to an undefined `VAR`), so the generator calls `calc_DRFs()`, which
+    computes `DRF()`'s point estimates. mirt's `DRF()` default density (`best_fitting = FALSE`) is
+    the posterior counts of the data, not reproduced (DESIGN §16.22). For the sequential schemes
+    mirt reports only the flagged items; `DIFScreenResult.table` has every tested item.
 - **Robust standard errors (V35, M7)**: `fit(se="crossprod" | "sandwich")` (DESIGN §17.5) against
   mirt 1.48 `SE.type = "crossprod"` / `"sandwich"`. The generator stores mirt's parameter table
   (`mod2values`) and the full `vcov` matrices, each row labelled by the first `parnum` of its
@@ -975,6 +1182,112 @@ English | [日本語](VALIDATION.ja.md)
   local dependence, JSI, DIF and model-based parallel analysis raise an error for a weighted fit.
   Tests: `tests/test_mirt_m7_weights.py`. Reference generator:
   `validation/r/m7_weights_reference.R`.
+- **Model comparison and simulation of responses (V54, #109; DESIGN §24)**:
+  - **`compare_fits()` against `anova()`**: every model is fitted by mirt (`optimizer = "NR"`,
+    `accelerate = "none"`, `TOL = 1e-10`) and by flexpyirt (`BAEM(tol=1e-9)`) on the same grid,
+    and the whole table is compared: Rasch / 2PL / 3PL on the V11a data (61 points on
+    $[-6, 6]$), PCM / GPCM on the V8b data, and the fully invariant two-group 2PL (focal mean and
+    variance free) against the model with anchors q01–q05 only and against the model with only
+    the last item free across groups (V4 data, 81 points on $[-8, 8]$; $p=0.188$, so the
+    $p$-value is checked away from 0). `n_params` equals mirt's `nest` exactly; log-likelihoods
+    and the four criteria agree to $5\times10^{-11}$, $X^2$ to $1.4\times10^{-11}$ and $p$ to
+    $7\times10^{-13}$ (tolerances $10^{-7}$, $10^{-7}$, $10^{-9}$, absolute). mirt prints
+    $p=0$ where $p<10^{-16}$ (`1 - pchisq()`); flexpyirt reports the upper tail.
+  - **`simulate_responses()`, deterministic part**: random streams cannot match R's
+    (`simdata()` uses R's generator), so the reference fixes the item parameters, $\theta$ and
+    the uniform numbers. For 9 items (Rasch, 2PL ×2, 3PL, 4PL, graded $K=3,4$, GPCM $K=4$,
+    nominal $K=4$ with free scoring coefficients) at 400 values of $\theta$ (including
+    $\pm6$, $\pm3$, 0) and for a two-factor model (2PL, graded $K=3$, 3PL; one cross-loading
+    item) at 300 points, flexpyirt's category probabilities equal `probtrace()` to $10^{-12}$
+    and the responses obtained in R by $x=\#\{k<K-1: u>F_k\}$ are reproduced exactly.
+  - **`simulate_responses()`, distributional part** (Monte Carlo, $|z|<4.5$): category
+    proportions and the summed-score distribution of 60 000 simulated respondents (mixed
+    Rasch, 2PL, 3PL, 4PL, GRM, GPCM and nominal items, $N(0.3, 1.4)$) and of two groups
+    (30 000 and 40 000) agree with the model-implied marginals (81-point Gauss–Hermite
+    quadrature of the same kernels and of the Lord–Wingersky recursion, V36); the latent draws
+    have the specified covariance (two factors; bifactor with two specific factors, where items
+    sharing a specific factor are more correlated); `NormalMixture` and fitted `DavidianCurve`
+    draws pass a Kolmogorov–Smirnov test (0.1% level) against the exact CDF; fitted
+    `EmpiricalHistogram` draws are grid nodes with frequencies matching the fitted weights.
+  - **Recovery**: `fit()` on 20 000 simulated respondents (the mixed-format test) returns every
+    item parameter within 4.5 SEs of the generating value, and a two-group fit on 8 000 per
+    group recovers the focal mean and variance (0.5, 1.3) within 4.5 SEs. A `FitResult` and a
+    `Model` with the fit's estimates produce identical data from the same key, and data are
+    reproducible from `key`.
+  Tests: `tests/test_mirt_v54_compare_fits.py`, `tests/test_v54_simulate.py`. Reference generator:
+  `validation/r/v54_compare_simulate_reference.R`.
+
+- **IRT equating and raw-to-scale tables (V51, #106)**: DESIGN §23 in `tests/test_r_equating.py`
+  (generator `validation/r/v51_irt_equating_reference.R` → `tests/reference/v51_irt_equating.json`;
+  mirt 1.48, equateIRT 2.5.2, SNSequate 1.3.5, equate 2.0.9). No parameters are estimated: the
+  item parameters are chosen in R and stored, the latent distributions are $N(0,1)$ on 61
+  equispaced points on $[-6,6]$, and the link is $\theta_Y=A\theta_X+B$ ($A=1.15$, $B=-0.25$
+  dichotomous; $A=0.9$, $B=0.3$ polytomous). The fast tier builds the forms from the stored
+  parameters and checks the kernels and the conversion rules; the slow tier repeats every
+  comparison end to end through `irt_equate()`, `score_distribution()` and `scale_table()` on
+  fits fixed at those values. Largest differences:
+  - **Dichotomous true score** (20 + 20 items; 12 and 9 3PL items, $\sum c=2.317$ and $1.477$):
+    against equateIRT's own Newton solution for the scores inside the range of the curve
+    (`score_compute`, whose $|\Delta\theta|<10^{-6}$ stop leaves about $10^{-12}$): equated
+    scores `2.4e-12`, $\theta$ `1.2e-12` (tolerance $10^{-9}$). Against SNSequate for every
+    score: the Kolen & Brennan interpolation below $\sum c$ and the maximum score `2.4e-15`
+    (tolerance $10^{-11}$); inside, `1.2e-4`, the default `uniroot()` tolerance SNSequate uses
+    (tolerance $10^{-3}$, a cross-check only).
+  - **Dichotomous observed score**: equateIRT's OSE with the same nodes and weights for both
+    populations, $w_1=1$, $0$, $0.5$: `5.7e-14` (tolerance $10^{-11}$).
+  - **Polytomous and mixed true score** (new: 4 GRM $K=4$ + 6 2PL, maximum 18; old: 3 GPCM
+    $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL, maximum 20, $\sum c=0.795$): no R package equates
+    polytomous forms by IRT; the reference solves `expected.test()` of the new form with
+    `uniroot(tol = 1e-13)` and evaluates `expected.test()` of the old form at $A\theta+B$:
+    $\theta$ `5.5e-13`, equated scores `9.3e-13` (tolerance $10^{-9}$).
+  - **Model-implied distributions**: the R Lord–Wingersky recursion on `probtrace()` equals
+    mirt's `fscores(method = "EAPsum", full.scores = FALSE)` `expected` / $N$ to $10^{-12}$ in R;
+    flexpyirt's distributions equal both to `5.6e-15` relative, in every population (tolerance
+    $10^{-11}$ relative).
+  - **Polytomous observed score**: `equate::equate(type = "equipercentile")` on the two
+    synthetic distributions: `4.5e-9`. equate rounds percentile ranks and the cumulative
+    distribution to 10 decimals (`equate:::equip`), about $10^{-10}/g(y)$ in the score
+    (tolerance $10^{-8}$). On the same distributions flexpyequate's equipercentile equating
+    agrees to `2.5e-14`, and the unit tests compare the two on random distributions with zero
+    probabilities to $10^{-12}$.
+  - **Raw-to-scale table** of the old polytomous form (slope 10, intercept 50, bounds 25 and
+    75, rounded to integers): true score ($\theta$ by `uniroot()` on `expected.test()`, SE
+    $1/\sqrt{\texttt{testinfo}}$): $\theta$ `2.3e-12`, SE `1.2e-12` relative; EAPsum (mirt
+    `fscores`): $\theta$ `5.6e-15`, SE `1.6e-15` relative; the rounded scale scores are equal.
+  - **Not covered by R**: the 4PL upper-asymptote interpolation, multiple-group forms and
+    populations, and links are unit-tested (`tests/test_equating.py`) against `expected_score()`,
+    `item_information()`, `summed_score_table()` and the formulas of DESIGN §23. EH, Davidian and
+    mixture populations come from the same fitted grid as `link()` (`_fitted_grid`) and have no
+    equating test of their own.
+- **Person fit and residual item fit (V53, #108)**: DESIGN §25. The cases reuse V37's data and
+  mirt estimates (every parameter fixed, 61 points on $[-6, 6]$); per case and estimator (EAP,
+  MAP, ML, WLE) the R script computes mirt's `fscores()`, `personfit(m, Theta = )` on the full
+  data (stored for the first 300 unique patterns) and `itemfit(m, fit_stats = "infit", Theta = )`
+  (EAP, MAP and WLE; ML's infinite estimates are replaced by mirt). **At mirt's $\theta$** (the
+  kernel evaluated at the stored estimates): $l_z$, infit, outfit and their $z$ values agree to
+  $8.3\times10^{-9}$ (relative) over all eight cases and four estimators, and $l_z^*$ agrees with
+  the R recomputation of DESIGN §25 item 3 (`probtrace()` with central differences, `iteminfo()`)
+  to $2.8\times10^{-8}$ for $|\hat\theta|\le10$; beyond that (mirt's ML on 3PL flat tails and on
+  its missing-data extremes, V13) the central differences lose precision, and flexpyirt agrees
+  with an analytic NumPy evaluation instead. **End to end** (flexpyirt's own estimates, which
+  differ from mirt's by up to $5.6\times10^{-15}$ (EAP), $2.9\times10^{-6}$ (MAP),
+  $1.2\times10^{-5}$ (ML) and $2.6\times10^{-6}$ (WLE)): person statistics within
+  $2.0\times10^{-5}$, item statistics within $3.1\times10^{-5}$. **Rasch**: $l_z$, infit and outfit
+  agree with `sirt::personfit.stat()` to $3.7\times10^{-13}$ (relative) at mirt's WLE estimates
+  (mirt and sirt agree to $1.8\times10^{-15}$). **Known differences from mirt** (DESIGN §25
+  item 5): person `z_outfit` uses $n^2$ (answered items) where mirt's `personfit()` uses $J^2$,
+  and mirt's `itemfit()` recycles the per-item respondent count over rows in the item
+  `z.outfit`; both matter only with missing responses, so the references recompute these $z$
+  values from mirt's own residual moments (`attr(m, "inoutfitreturn")`), and on complete data
+  the tests also compare with mirt's values directly. **$l_z^*$ has no R package reference**
+  (`PerFit` could not be installed here, and its `lzstar()` covers dichotomous items only); in
+  addition to the R recomputation, `tests/test_person_fit.py` checks it against Snijders' (2001)
+  closed form for 2PL items (ML, MAP, WLE; $10^{-10}$) and simulates its null distribution (2PL,
+  $J=20$, $N=3000$, true parameters): $l_z^*$ has mean within sampling error of 0 and SD in
+  $[0.93, 1.07]$ for ML and WLE, while $l_z$ has SD below 0.93. Whether this suffices to list
+  $l_z^*$ as validated is the owner's decision (#108). Tests:
+  `tests/test_mirt_v53_person_fit.py`, `tests/test_person_fit.py`. Reference generator:
+  `validation/r/person_fit_reference.R`.
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)
@@ -1215,11 +1528,135 @@ English | [日本語](VALIDATION.ja.md)
   0.5–1.0% (conservative; the bootstrap removes the bias but $T$'s SD under the null is about 0.72)
   and the power 0.99–1.00. Rerun with `uv run python packages/flexpyctt/validation/simulation/dimtest_study.py`
   (about 4 minutes); the tests run 20 null and 10 alternative replications.
+- **Classical item analysis (V46, flexpyctt, #101)**:
+  `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R` (R 4.6.2, psych 2.6.9, ltm
+  1.2.0, polycor 0.8.2, lavaan 0.7.3) writes `packages/flexpyctt/tests/reference/v46_item_analysis.json`;
+  `packages/flexpyctt/tests/test_item_analysis.py` compares. Four simulated cases: 10
+  multiple-choice items ($N=500$, keys and distractors of varying pull, one item with five
+  options) complete and with 5% MCAR, and 6 items scored 0–4 ($N=300$, graded model) complete and
+  with 6% MCAR; plus three items for a just-identified omega and the complete 0–4 data with one
+  item reverse-scored, where psych's default `flip = TRUE` reverses it (its `flip = FALSE` value
+  is also recorded, 0.18 lower, and equals the unreversed formula). Observed differences: closed forms
+  (alpha, standardized alpha, if-deleted values, Feldt bounds, means, SDs, item–total and
+  item–rest correlations, point-biserial, polyserial and biserial, option proportions,
+  point-biserials, mean scores and group proportions) $\le6\times10^{-15}$; keyed scores
+  identical; omega total $\le7\times10^{-8}$ and loadings $\le1.4\times10^{-6}$ (psych's `fa()`
+  stops its minres optimization earlier); polychoric matrices against lavaan $\le2\times10^{-8}$; the reversed item is the one psych
+  reverses, and omega with it reversed equals omega of the data reverse-scored by hand.
+  Known differences, each asserted in the tests: (1) psych's `raw.r` correlates with
+  `rowSums(na.rm = TRUE)`, so with missing data it is compared with the $C$-based
+  `colSums(C)/sqrt(diag(C) * sum(C))` computed in R, and `raw.r` itself only on complete or
+  listwise data (DESIGN §16.21); `r.drop` is $C$-based in psych too and is compared in every
+  case. (2) ltm's raw `cronbach.alpha(na.rm = TRUE)` takes the total variance from complete rows
+  and the item variances from all observed scores, which is neither rule; it is compared on
+  complete data only (its standardized alpha uses complete rows and matches `"listwise"`).
+  (3) psych's `biserial()` equals the two-step biserial times $\sqrt{(n-1)/n}$. (4) psych's
+  `polyserial()` counts missing rows in its $n$, so it is compared on complete data; with missing
+  data the two-step factor $\sigma_j/\sum_k\phi(\tau_{jk})$ is recomputed in R. (5) Option
+  statistics have no installed R implementation (TAM's `tam.ctt3` is not installed); the script
+  computes them in base R from their definitions, and option proportions also match psych's
+  `responseFrequency()`. lavaan's one-factor CFA, listed in the issue, was not used (ML on the
+  covariance matrix is another estimator and scale).
+- **Observed-score DIF (V47, flexpyctt, #102)**: references from difR 6.1.0 and base R,
+  committed in `packages/flexpyctt/tests/reference/v47_dif.json`. Measured agreement: MH
+  $\chi^2$, $\hat\alpha_{MH}$ and Phillips–Holland variance, GMH statistics (difGMH and
+  `mantelhaen.test()` on groups x categories x strata tables), Mantel statistics and odds ratios
+  to $10^{-10}$ relative (the computations are closed form); purification paths (`difPur`),
+  iteration counts, convergence flags and final flags equal. Logistic regression: `difLogistic()`
+  calls `glm()` with its default `epsilon = 1e-8`, which leaves the coefficients and statistics
+  up to $2\times10^{-4}$ (relative) from the MLE on these data, so the script replaces
+  `stats::glm.control` by one with `epsilon = 1e-14`; then LRT statistics, $\Delta R^2$ and
+  coefficients agree to $10^{-8}$ and SEs and Wald statistics to $10^{-6}$ (`glm()`'s `vcov()`
+  uses the IRLS weights of the previous iterate; the deviance criterion stops at a step of about
+  $\sqrt{\epsilon}$). Known differences, checked in the tests: (1) `mantelhaen.test()` drops the
+  continuity correction when $\lvert\sum A-\sum E(A)\rvert<1/2$ (difR and flexpyctt do not; three
+  items of the simulated set); (2) `difMantel.poly()` rounds its output (statistic to 3, odds
+  ratio to 4 decimals) and its purification removes a flagged item from its own matching
+  score, so Mantel's statistic and its purification path are recomputed in R with difR's rule
+  for the other methods, and `difMantel.poly()` is a rounded cross-check; (3)
+  `liu_agresti_ccor(se = "liu_agresti")` differentiates $T=\sum ad/N-\hat\psi\sum bc/N$ with
+  respect to the focal cumulative count as $a/N-\hat\psi b/N$ (the sign of $a/N$ is wrong) and
+  divides by $\sum bc/N$ instead of $\sum ad/N$, so its `SE_log_Psi` is neither
+  $SE(\ln\hat\psi)$ nor $SE(\hat\psi)$ (0.031 against a Monte Carlo SD of 0.0296 for $\psi=1.48$,
+  300 replications of $N=20000$ in three strata; 0.14 against the Phillips–Holland 0.36 on a
+  `verbal` item). flexpyctt and the R script's `la_eq3()` use instead Liu & Agresti's (1996)
+  eq. 3, which stays valid with many small strata (DESIGN §16.20). Its R implementation, written
+  in the paper's notation and independently of the Python one, reproduces the paper's worked
+  example (Table 1, 28 centres: $\ln\hat\theta=-1.153$, SE .571), and the Python tests check
+  the same published values, Mantel's 4.84 included. A plug-in delta method (used before
+  review; 0.0291 against the Monte Carlo 0.0296 with large strata) gives 0.375 there and is about
+  40% too small with four respondents per stratum. A Python Monte Carlo test (150 strata of 4
+  and of 10 respondents, a four-category proportional-odds item, 400 replications) checks that
+  the mean eq. 3 SE is within 10% of the Monte Carlo SD of $\ln\hat\psi$, and another checks
+  that for 0 / 1 items with large strata it is within 1% of the Phillips–Holland SE. (4) `liu_agresti_ccor()` reports $1/\hat\psi$ of
+  flexpyctt (difR's orientation: above 1 favours the focal group).
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
+- **Unconstrained M-step scale and `LogitNormalPrior` (V45, #15)**: DESIGN §15.47–§15.48.
+  1. *Interior solutions on both M-step scales.* The mirt comparisons of V3, V4, V5 and V9
+     (`tests/test_mirt_m2.py`: log-likelihood, item and latent parameters; the focal variance of V4
+     is stepped on $\log\sigma^2$), V11 (`tests/test_mirt_m3.py`: 3PL/4PL, $\operatorname{logit}g$,
+     $\operatorname{logit}u$, plus Oakes and Hessian SEs), V7 (`tests/test_mirt_m3_priors.py`: MAP,
+     the slopes with `LogNormalPrior` stepped on $\log a$) and V14 (`tests/test_mirt_m4_mirt.py`:
+     2–3 factor models, correlations stepped on $2\operatorname{atanh}\rho$) are repeated with
+     `BAEM(m_step_scale="unconstrained")` at the same tolerances as the natural scale; all pass.
+     `tests/test_m_step_scale.py` adds unit tests of the transforms and of the Newton step (same
+     interior maximum, boundary approached from inside, fixed slots untouched, rejected step
+     exact), a simulated 3PL MAP fit (estimates within 1e-5 of the natural scale with
+     `tol=1e-8`, log posterior to 1e-12, Oakes covariance to 1e-4 relative, with and without
+     SQUAREM), a two-group fit with a free focal variance, and a boundary case (items generated
+     with $g=0$): both scales end with $g<10^{-4}$ on those items, raise `HeywoodWarning`, and
+     agree in log-likelihood to 1e-5.
+  2. *`LogitNormalPrior`.* mirt has no prior with this density on the natural scale (its `norm`
+     prior on `g` acts on the internal $\operatorname{logit}g$ without the Jacobian, like
+     flexMIRT's `Guessing : Normal`), so there is no mirt reference for the default
+     `mode_scale="natural"`. `tests/test_logitnormal_prior.py`
+     checks instead: `log_pdf` against $\log\phi(\operatorname{logit}x;\mu,s)-\log x-\log(1-x)$
+     from `scipy.stats.norm` (1e-13 relative) for four $(\mu,s)$; by `scipy.integrate.quad`, the
+     density integrates to 1 (1e-10) and $\operatorname{logit}X$ has mean $\mu$ (1e-9) and variance
+     $s^2$ (1e-9 relative); the Core `eval_log_prior` equals `log_pdf` and inactive slots have zero,
+     finite gradients; and the MAP of a simulated 3PL ($J=8$, $N=1200$,
+     `LogitNormalPrior(-1.3863, 0.6)` on $g$, `NormalPrior(0, 3)` on $d$, `tol=1e-10`) on both
+     M-step scales is a stationary point of $\ell(\eta)+\sum\log\pi$ with the prior gradient
+     $-1/g+1/(1-g)-(\operatorname{logit}g-\mu)/(s^2g(1-g))$ written in the test (max |gradient|
+     3e-8 natural, 3e-9 unconstrained; tested at 1e-6) and a strict local maximum (negative
+     definite Hessian). The likelihood gradient is that of the mirt-validated marginal
+     log-likelihood. The same test maximizes flexMIRT's logit-scale objective (the kernel
+     without the Jacobian) by Newton's method: every $g$ lies nearer $1/2$ than with
+     `LogitNormalPrior`, up to 0.037 apart, which confirms that the two estimates differ
+     (DESIGN §15.48).
+  3. *`LogitNormalPrior(..., mode_scale="logit")` (logit-metric mode, DESIGN §15.48).* Here mirt
+     is the reference: its `PRIOR = (..., g, norm, μ, s)` is a normal prior on its internal
+     $\operatorname{logit}g$ without a Jacobian. `validation/r/m7_logit_norm_prior_reference.R`
+     fits a simulated 3PL ($J=8$, $N=1200$, `norm(-1.3863, 0.6)` on $g$, `norm(0, 3)` on $d$;
+     NR, `TOL = 1e-10`, Oakes SEs) and checks in R that mirt's `logPrior` equals
+     $\sum\log\phi(\operatorname{logit}g)+\sum\log\phi(d)$ (1e-9) and that mirt's estimate is a
+     stationary point of the logit-metric objective with the gradient written in the script
+     (max |gradient| 2e-9). mirt prints $\operatorname{logit}g$ and its SE; the reference stores
+     $g$ and the delta-method $\mathrm{SE}(g)=g(1-g)\,\mathrm{SE}(\operatorname{logit}g)$. On both
+     M-step scales flexpyirt matches mirt's log-likelihood and log posterior (tested at 1e-9
+     relative; observed 4e-10 and 5e-12 absolute), $a,d,g$ (tested at 1e-6; observed 2e-8)
+     and Oakes SEs of $a,d,g$ (tested at 1e-5 relative; observed 3e-8). Independently of mirt,
+     on the V45 data of item 2 the MAP on both M-step scales is a stationary point of
+     $\ell+\sum\log\phi(\operatorname{logit}g;\mu,s)+\sum\log\pi(d)$ with the gradient written in the
+     test (max 2e-8 natural, 2e-9 unconstrained; tested at 1e-6) and a strict local maximum; it
+     equals the flexMIRT mode computed there by Newton's method on $\lambda=\operatorname{logit}g$
+     (5e-9; tested at 1e-7), with the same log posterior (1e-12; tested at 1e-8); its Hessian SEs
+     equal the delta-method SEs from the inverse logit-scale Hessian of that independent
+     objective (7e-9 relative; tested at 1e-6); and it differs from the `"natural"` mode by up to
+     0.037 in $g$. Unit tests check `log_pdf` against `scipy.stats.norm.logpdf` of
+     $\operatorname{logit}x$ (1e-13), the Core code `PRIOR_LOGITNORMAL_LOGIT = 5` and its
+     gradient, validation of `mode_scale`, and the JSON key (round trip; absent → `"natural"`).
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is
   non-decreasing across iterations.
 - **Internal SE consistency**: Oakes SEs agree with SEs from the direct `jax.hessian` of the
   marginal log-likelihood at the converged point (small cases).
 - **Invariance**: results do not change with item reordering, group relabelling, or with or
   without pattern compression.
+- **User-defined item models (#86, DESIGN §20)**: `tests/test_custom_items.py` re-implements the
+  2PL and the GRM against the public `ItemModel` / `ItemKernel` protocols only. In one mixed model
+  they reproduce the built-in fit to $10^{-12}$ (log-likelihood, iteration count, estimates, Oakes
+  SEs, display thresholds and SEs, EAP/MAP/ML/WLE scores, S-X2, M2, item information); a
+  two-factor model agrees to $10^{-5}$ (different starting values). This checks the extension
+  machinery, not a new model: an example model that is not built in (e.g. GGUM) needs its own
+  mirt comparison (V44 is reserved for GGUM) before it is presented as validated.

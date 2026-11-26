@@ -8,6 +8,7 @@ same models and compares the refit; the two approximations are compared with the
 from __future__ import annotations
 
 import json
+import warnings
 from functools import cache
 from typing import Any
 
@@ -17,7 +18,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from flexpyirt import BAEM, GPCM, GRM, FitResult, Model, Normal, Rasch, TwoPL, fit
+from flexpyirt import (
+    BAEM,
+    GPCM,
+    GRM,
+    EmpiricalHistogram,
+    FitResult,
+    Model,
+    Normal,
+    Rasch,
+    TwoPL,
+    fit,
+)
 from flexpyirt._jsi import gradient_without, gradients_without
 from flexpyirt.errors import FlexpyirtWarning, PrecisionError, SpecificationError
 from tests._reference import REFERENCE_DIR, check_reference_meta
@@ -169,6 +181,21 @@ def test_unsupported_models() -> None:
     mg = fit(spec, df, group=groups, se=None)
     with pytest.raises(SpecificationError, match="single-group"):
         mg.jsi(df)
+
+
+def test_jsi_is_not_defined_beyond_single_group_unidimensional_normal() -> None:
+    # Issue #81: no definition or reference exists for these models (DESIGN.md §16.17).
+    df = _simulate(3, 400, 6)
+    names = list(df.columns)
+    lean = BAEM(max_iter=5)
+    eh = Model.uniform(TwoPL(), items=names).with_latent(EmpiricalHistogram())
+    two = Model.uniform(TwoPL(), items=names).with_factors({"F1": names[:3], "F2": names[3:]})
+    for spec in (eh, two):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # a few EM cycles are enough for this check
+            res = fit(spec, df, method=lean, se=None)
+        with pytest.raises(SpecificationError, match="has not been studied"):
+            res.jsi(df)
 
 
 def test_jsi_requires_x64() -> None:

@@ -7,7 +7,7 @@ GRM, two-group two-factor 2PL, single-group 2PL with 20% MCAR missing, and a 2PL
 
 At mirt's estimates (the fitted result with its free vector replaced by mirt's values):
 
-- the default ``m2()`` matches ``exact``, the formulas of DESIGN.md §16.20 recomputed in R
+- the default ``m2()`` matches ``exact``, the formulas of DESIGN.md §16.23 recomputed in R
   (central-difference Delta over every free parameter with group rows scaled by
   ``sqrt(N_g / N)``, mirt's ``buildXi2els`` rescaled to the exact MCAR covariance of the
   pairwise-available margins, and the multiple-group independence model);
@@ -226,7 +226,7 @@ def test_refit_m2_close_to_exact(name: str) -> None:
 
 
 def test_mirt_differs_where_documented() -> None:
-    """mirt's raw value differs from the exact one most with missing data (DESIGN.md §16.20)."""
+    """mirt's raw value differs from the exact one most with missing data (DESIGN.md §16.23)."""
     rel = {
         name: abs(_bundle()[name]["mirt"]["M2"] - _bundle()[name]["exact"]["M2"])
         / _bundle()[name]["exact"]["M2"]

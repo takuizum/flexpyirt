@@ -2,17 +2,19 @@
 
 Implements the versioned plain-JSON format specified in DESIGN.md §15.26–§15.28:
 
-- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 7`` (versions 1
+- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 8`` (versions 1
   and 2, written before multidimensional models and across-item equalities were stored,
   version 3, written before the naming refactor of §15.46, version 4, written before bifactor
   models (§17.1), version 5, written before two-tier models (§17.2), and version 6, written
-  before sampling weights (§17.4), are still read), and
+  before sampling weights (§17.4), and version 7, written before ``BAEM.m_step_scale`` and
+  ``LogitNormalPrior`` (§15.47–§15.48), are still read), and
   ``"flexpyirt_version"``.
 - Strict RFC 8259 JSON (``allow_nan=False`` on write; rejecting ``parse_constant`` on read).
   Finite IEEE-754 float64 values use standard ``repr``-exact JSON numbers; non-finite values in
   float-typed fields are encoded explicitly as ``"NaN"``, ``"Infinity"``, or ``"-Infinity"``.
 - Explicit name registries for item models, latent distributions, priors, quadrature grids, and
-  estimation methods (never ``eval`` or ``pickle``).
+  estimation methods (never ``eval`` or ``pickle``). User-defined item models join the item-model
+  registry through :func:`flexpyirt.items.register_item_model` (DESIGN.md §20).
 """
 
 from __future__ import annotations
@@ -35,7 +37,20 @@ from flexpyirt._compile import (
 )
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import SpecificationError
-from flexpyirt.items import GPCM, GRM, PCM, FourPL, ItemModel, Nominal, Rasch, ThreePL, TwoPL
+from flexpyirt.items import (
+    GPCM,
+    GRM,
+    PCM,
+    FourPL,
+    ItemModel,
+    Nominal,
+    Rasch,
+    ThreePL,
+    TwoPL,
+    check_item_model,
+    registered_item_model,
+    registration_for,
+)
 from flexpyirt.latent import (
     MAX_DAVIDIAN_DEGREE,
     MAX_MIXTURE_COMPONENTS,
@@ -47,7 +62,7 @@ from flexpyirt.latent import (
 )
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
-from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior, Prior
+from flexpyirt.priors import BetaPrior, LogitNormalPrior, LogNormalPrior, NormalPrior, Prior
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -61,7 +76,7 @@ __all__ = [
 ]
 
 FORMAT_TAG = "flexpyirt.FitResult"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 """Schema version written by :func:`dump_fit_result`.
 
 2 adds the confirmatory factor structure, 3 across-item equalities, 4 renames the item-model
@@ -69,9 +84,12 @@ key ``n_cat`` to ``n_categories`` and the priors ``LogNormal(meanlog, sdlog)`` /
 ``LogNormalPrior(mean_log, sd_log)`` / ``BetaPrior`` (DESIGN.md §15.46), 5 adds the model key
 ``bifactor`` (DESIGN.md §17.1), 6 the model key ``n_primary_factors`` (DESIGN.md §17.2), and 7
 the optional top-level key ``sum_weights`` (the sum of the sampling weights; present only for a
-fit with ``weights=``, DESIGN.md §17.4).
+fit with ``weights=``, DESIGN.md §17.4), and 8 the method key ``m_step_scale`` (DESIGN.md §15.47;
+older files read as ``"natural"``) and the prior ``LogitNormalPrior`` with keys ``mean_logit``,
+``sd_logit`` and ``mode_scale`` (DESIGN.md §15.48; ``mode_scale`` is optional on read, absent
+meaning ``"natural"``).
 """
-SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7})
+SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7, 8})
 """Schema versions accepted by :func:`load_fit_result`; version 1 has no factor keys."""
 
 _LEGACY_PRIOR_TYPES = {"LogNormal": "LogNormalPrior", "Beta": "BetaPrior"}
@@ -320,28 +338,62 @@ _ITEM_MODEL_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], ItemModel]]
 
 
 def _serialize_item_model(item_model: ItemModel) -> dict[str, Any]:
-    """Serialize a registered :class:`~flexpyirt.items.ItemModel`."""
+    """Serialize a built-in or registered :class:`~flexpyirt.items.ItemModel` (DESIGN §20)."""
     serializer = _ITEM_MODEL_SERIALIZERS.get(type(item_model))
-    if serializer is None:
+    if serializer is not None:
+        return serializer(item_model)
+    reg = registration_for(item_model)
+    if reg is None:
         raise SpecificationError(
-            f"Unsupported item model {type(item_model).__name__!r} for JSON serialization."
+            f"Item model {type(item_model).__name__!r} is not registered for JSON; call "
+            "flexpyirt.items.register_item_model() on its class first."
         )
-    return serializer(item_model)
+    fields = dict(reg.to_dict(item_model))
+    if "type" in fields:
+        raise SpecificationError(
+            f"to_dict() of item model {item_model.name!r} must not return the key 'type'."
+        )
+    out = {"type": str(item_model.name), **fields}
+    try:
+        json.dumps(out, allow_nan=False)
+    except (TypeError, ValueError) as e:
+        raise SpecificationError(
+            f"to_dict() of item model {item_model.name!r} returned non-JSON values: {e}"
+        ) from e
+    return out
 
 
 def _deserialize_item_model(raw: Any, *, field_name: str) -> ItemModel:
-    """Deserialize an :class:`~flexpyirt.items.ItemModel` by its registered name."""
+    """Deserialize an :class:`~flexpyirt.items.ItemModel` by its built-in or registered name."""
     obj = _require_dict(raw, field_name=field_name)
     if "type" not in obj:
         raise SpecificationError(f"Missing 'type' key in {field_name}.")
     kind = _require_str(obj["type"], field_name=f"{field_name}.type")
     loader = _ITEM_MODEL_DESERIALIZERS.get(kind)
-    if loader is None:
+    if loader is not None:
+        return loader(obj, field_name)
+    reg = registered_item_model(kind)
+    if reg is None:
         raise SpecificationError(
-            f"Unknown item model type {kind!r} in {field_name}; "
-            f"supported: {sorted(_ITEM_MODEL_DESERIALIZERS)}."
+            f"Unknown item model type {kind!r} in {field_name}; built-in: "
+            f"{sorted(_ITEM_MODEL_DESERIALIZERS)}. A user-defined item model must be registered "
+            "with flexpyirt.items.register_item_model() before loading."
         )
-    return loader(obj, field_name)
+    fields = {k: v for k, v in obj.items() if k != "type"}
+    try:
+        rebuilt = reg.from_dict(fields)
+    except (TypeError, ValueError) as e:
+        raise SpecificationError(
+            f"Could not rebuild item model {kind!r} in {field_name} from {fields}: {e}"
+        ) from e
+    if not isinstance(rebuilt, reg.cls) or rebuilt.name != kind:
+        raise SpecificationError(
+            f"from_dict() for {kind!r} in {field_name} returned {rebuilt!r}, not a {kind!r} "
+            "item model."
+        )
+    item_model: ItemModel = rebuilt
+    check_item_model(field_name, item_model)
+    return item_model
 
 
 def _serialize_normal_latent(dist: Normal) -> dict[str, Any]:
@@ -539,6 +591,15 @@ def _serialize_beta_prior(prior: BetaPrior) -> dict[str, Any]:
     }
 
 
+def _serialize_logitnormal_prior(prior: LogitNormalPrior) -> dict[str, Any]:
+    return {
+        "type": "LogitNormalPrior",
+        "mean_logit": _encode_float(prior.mean_logit),
+        "sd_logit": _encode_float(prior.sd_logit),
+        "mode_scale": prior.mode_scale,
+    }
+
+
 def _deserialize_normal_prior(obj: dict[str, Any], field_name: str) -> NormalPrior:
     _check_keys(obj, required={"type", "mean", "sd"}, field_name=field_name)
     return NormalPrior(
@@ -563,15 +624,35 @@ def _deserialize_beta_prior(obj: dict[str, Any], field_name: str) -> BetaPrior:
     )
 
 
+def _deserialize_logitnormal_prior(obj: dict[str, Any], field_name: str) -> LogitNormalPrior:
+    # ``mode_scale`` was added within schema version 8; absent means "natural" (DESIGN.md §15.48).
+    required = {"type", "mean_logit", "sd_logit"}
+    if "mode_scale" in obj:
+        required = required | {"mode_scale"}
+    _check_keys(obj, required=required, field_name=field_name)
+    mode_scale = "natural"
+    if "mode_scale" in obj:
+        mode_scale = _require_str(obj["mode_scale"], field_name=f"{field_name}.mode_scale")
+    return LogitNormalPrior(
+        mean_logit=_decode_float(
+            obj["mean_logit"], field_name=f"{field_name}.mean_logit", finite=True
+        ),
+        sd_logit=_decode_float(obj["sd_logit"], field_name=f"{field_name}.sd_logit", finite=True),
+        mode_scale=mode_scale,  # type: ignore[arg-type]  # validated by LogitNormalPrior
+    )
+
+
 _PRIOR_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
     NormalPrior: _serialize_normal_prior,
     LogNormalPrior: _serialize_lognormal_prior,
     BetaPrior: _serialize_beta_prior,
+    LogitNormalPrior: _serialize_logitnormal_prior,
 }
 _PRIOR_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], Prior]] = {
     "NormalPrior": _deserialize_normal_prior,
     "LogNormalPrior": _deserialize_lognormal_prior,
     "BetaPrior": _deserialize_beta_prior,
+    "LogitNormalPrior": _deserialize_logitnormal_prior,
 }
 
 
@@ -700,15 +781,20 @@ def _serialize_baem(method: BAEM) -> dict[str, Any]:
         "max_iter": int(method.max_iter),
         "m_step_newton_steps": int(method.m_step_newton_steps),
         "squarem": bool(method.squarem),
+        "m_step_scale": method.m_step_scale,
     }
 
 
-def _deserialize_baem(obj: dict[str, Any], field_name: str) -> BAEM:
-    _check_keys(
-        obj,
-        required={"type", "tol", "max_iter", "m_step_newton_steps", "squarem"},
-        field_name=field_name,
-    )
+def _deserialize_baem(
+    obj: dict[str, Any], field_name: str, schema_version: int = SCHEMA_VERSION
+) -> BAEM:
+    required = {"type", "tol", "max_iter", "m_step_newton_steps", "squarem"}
+    if schema_version >= 8:
+        required = required | {"m_step_scale"}
+    _check_keys(obj, required=required, field_name=field_name)
+    scale = "natural"
+    if schema_version >= 8:
+        scale = _require_str(obj["m_step_scale"], field_name=f"{field_name}.m_step_scale")
     return BAEM(
         tol=_decode_float(obj["tol"], field_name=f"{field_name}.tol", finite=True),
         max_iter=_require_int(
@@ -720,13 +806,14 @@ def _deserialize_baem(obj: dict[str, Any], field_name: str) -> BAEM:
             max_value=_INT32_MAX,
         ),
         squarem=_require_bool(obj["squarem"], field_name=f"{field_name}.squarem"),
+        m_step_scale=scale,  # type: ignore[arg-type]  # validated by BAEM
     )
 
 
 _METHOD_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
     BAEM: _serialize_baem,
 }
-_METHOD_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], BAEM]] = {
+_METHOD_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str, int], BAEM]] = {
     "BAEM": _deserialize_baem,
 }
 
@@ -741,7 +828,7 @@ def _serialize_method(method: BAEM) -> dict[str, Any]:
     return serializer(method)
 
 
-def _deserialize_method(raw: Any, *, field_name: str) -> BAEM:
+def _deserialize_method(raw: Any, *, field_name: str, schema_version: int = SCHEMA_VERSION) -> BAEM:
     """Deserialize an estimation method by its registered name."""
     obj = _require_dict(raw, field_name=field_name)
     if "type" not in obj:
@@ -753,7 +840,7 @@ def _deserialize_method(raw: Any, *, field_name: str) -> BAEM:
             f"Unknown estimation method type {kind!r} in {field_name}; "
             f"supported: {sorted(_METHOD_DESERIALIZERS)}."
         )
-    return loader(obj, field_name)
+    return loader(obj, field_name, schema_version)
 
 
 # --------------------------------------------------------------------------------------------
@@ -1538,7 +1625,7 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
         raise SpecificationError(
             "Unexpected key 'latent_weights' for a non-EmpiricalHistogram FitResult."
         )
-    method = _deserialize_method(obj["method"], field_name="method")
+    method = _deserialize_method(obj["method"], field_name="method", schema_version=schema_version)
     n_obs = _require_int(obj["n_obs"], field_name="n_obs", min_value=1, max_value=_INT64_MAX)
     se_method = obj["se_method"]
     if se_method not in _VALID_SE_METHODS:

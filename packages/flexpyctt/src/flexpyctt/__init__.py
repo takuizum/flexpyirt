@@ -6,6 +6,13 @@ from importlib.metadata import PackageNotFoundError, version
 
 from flexpyctt import errors
 from flexpyctt.correlation import PolychoricResult, polychoric
+from flexpyctt.dif import (
+    DIFResult,
+    generalized_mantel_haenszel,
+    logistic_dif,
+    mantel,
+    mantel_haenszel,
+)
 from flexpyctt.dimensionality import (
     ComparisonDataResult,
     DetectResult,
@@ -26,6 +33,15 @@ from flexpyctt.dimensionality import (
     parallel_analysis,
     velicer_map,
 )
+from flexpyctt.item_analysis import (
+    AlphaResult,
+    OmegaResult,
+    coefficient_alpha,
+    coefficient_omega,
+    distractor_analysis,
+    item_analysis,
+    score_responses,
+)
 
 try:
     __version__ = version("flexpyctt")
@@ -33,7 +49,9 @@ except PackageNotFoundError:  # pragma: no cover - only when running from an unb
     __version__ = "0.0.0+unknown"
 
 __all__ = [
+    "AlphaResult",
     "ComparisonDataResult",
+    "DIFResult",
     "DetectResult",
     "DimtestResult",
     "EFAResult",
@@ -41,18 +59,28 @@ __all__ = [
     "ExploratoryDetectResult",
     "HullResult",
     "MAPResult",
+    "OmegaResult",
     "ParallelAnalysisResult",
     "PolychoricResult",
     "__version__",
+    "coefficient_alpha",
+    "coefficient_omega",
     "comparison_data",
     "detect",
     "dimtest",
+    "distractor_analysis",
     "efa",
     "empirical_kaiser",
     "errors",
     "exploratory_detect",
+    "generalized_mantel_haenszel",
     "hull",
+    "item_analysis",
+    "logistic_dif",
+    "mantel",
+    "mantel_haenszel",
     "parallel_analysis",
     "polychoric",
+    "score_responses",
     "velicer_map",
 ]

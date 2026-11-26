@@ -47,6 +47,7 @@ from flexpyirt.items import (
     GradedKernel,
     ItemModel,
     NominalKernel,
+    irt_thresholds,
 )
 
 METHODS: tuple[LinkMethod, ...] = ("stocking_lord", "haebara")
@@ -136,8 +137,8 @@ def test_transform_kernel_params_preserves_icc_and_irt_thresholds(
     np.testing.assert_allclose(np.asarray(p_star), np.asarray(p_orig), rtol=0, atol=1e-14)
 
     # Display IRT thresholds transform linearly: b* = A * b + B.
-    b_orig = np.asarray(kernel.irt_thresholds(jnp.asarray(params)))
-    b_star = np.asarray(kernel.irt_thresholds(xi_star))
+    b_orig = np.asarray(irt_thresholds(kernel, jnp.asarray(params)))
+    b_star = np.asarray(irt_thresholds(kernel, xi_star))
     np.testing.assert_allclose(b_star, a_const * b_orig + b_const, rtol=1e-13, atol=1e-13)
 
 

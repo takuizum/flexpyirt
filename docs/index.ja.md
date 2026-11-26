@@ -17,14 +17,14 @@ pip install flexpyirt  # または uv add flexpyirt
 ```
 
 flexpyirt をインストールすると **flexpyctt** も入る。推定済みのモデルを使わない分析（ポリコリック相関、次元数、
-DETECT、DIMTEST）のための、対になるパッケージである。依存は NumPy、SciPy、pandas だけなので、JAX を入れたくない
+DETECT、DIMTEST、古典的項目分析、観測得点による DIF）のための、対になるパッケージである。依存は NumPy、SciPy、pandas だけなので、JAX を入れたくない
 環境では `pip install flexpyctt` で単独でインストールできる。
 
 同じリポジトリから公開している 3 つめのパッケージ **flexpyequate** は、得点分布の等化（線形等化、等パーセンタイル
 等化、カーネル等化）を行う。flexpyirt とは独立で、flexpyirt をインストールしても入らない
 （`pip install flexpyequate`）。[得点の等化](equating.ja.md)を参照。
 
-polars の DataFrame を使う場合は `flexpyirt[polars]`。GPU を使う場合は、先に CUDA 版の `jax` を入れる
+polars の DataFrame を使う場合は `flexpyirt[polars]`、図（`flexpyirt.plotting`）を描く場合は `flexpyirt[plot]`。GPU を使う場合は、先に CUDA 版の `jax` を入れる
 （[JAX のインストール手順](https://docs.jax.dev/en/latest/installation.html)）。
 
 flexpyirt は **64 bit 浮動小数点**で計算する。JAX の設定はユーザーのものなのでライブラリは変更しない。
