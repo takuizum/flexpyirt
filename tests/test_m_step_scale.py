@@ -27,6 +27,7 @@ from flexpyirt import (
     TwoPL,
     fit,
 )
+from flexpyirt._json import SCHEMA_VERSION
 from flexpyirt._newton import _to_natural, _to_unconstrained, _transform_kind, newton_ascent
 from flexpyirt.errors import HeywoodWarning, SpecificationError
 
@@ -260,7 +261,7 @@ def test_json_round_trip_and_old_schema(tmp_path: pytest.TempPathFactory) -> Non
     path = tmp_path / "fit.json"  # type: ignore[operator]
     res.to_json(path)
     raw = json.loads(path.read_text())
-    assert raw["schema_version"] == 8
+    assert raw["schema_version"] == SCHEMA_VERSION
     assert raw["method"]["m_step_scale"] == "unconstrained"
     assert FitResult.from_json(path)._method.m_step_scale == "unconstrained"
     # A version-7 file has no m_step_scale key and reads as the natural scale.

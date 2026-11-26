@@ -236,6 +236,32 @@ def coerce_weights(weights: Any, n: int) -> np.ndarray | None:
     return w
 
 
+def coerce_clusters(cluster: Any, n: int) -> tuple[np.ndarray, int] | None:
+    """Return integer cluster codes (``(N,)``, ``0..G-1``) and ``G``, or ``None`` (§17.6).
+
+    Labels can be any hashable values (array-like with one label per row, like ``group=``).
+
+    Raises
+    ------
+    SpecificationError
+        Wrong length or shape, or a missing label (NaN / None).
+    """
+    if cluster is None:
+        return None
+    if isinstance(cluster, str):
+        raise SpecificationError(
+            "cluster= must be an array-like with one label per row, not a column name."
+        )
+    values = cluster.to_numpy() if hasattr(cluster, "to_numpy") else cluster
+    labels = np.asarray(values, dtype=object) if not isinstance(values, np.ndarray) else values
+    if labels.shape != (n,):
+        raise SpecificationError(f"cluster= must have one label per row ({n}), got {labels.shape}.")
+    codes, uniques = pd.factorize(pd.Series(labels, dtype=object), sort=False)
+    if np.any(codes < 0):
+        raise SpecificationError("cluster= has missing labels (NaN or None).")
+    return codes.astype(np.int32), len(uniques)
+
+
 def compress_patterns(
     y: np.ndarray, group: np.ndarray, weights: np.ndarray | None = None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -265,6 +291,49 @@ def pad_patterns(
         np.vstack([patterns, np.zeros((pad, patterns.shape[1]), dtype=patterns.dtype)]),
         np.concatenate([groups, np.zeros(pad, dtype=groups.dtype)]),
         np.concatenate([counts, np.zeros(pad)]),
+    )
+
+
+@dataclass(frozen=True)
+class MeatPatterns:
+    """Padded patterns of the sandwich's middle matrix (DESIGN.md §17.6).
+
+    Without clusters, one row per (group, pattern) with ``counts`` the sum of the squared weights
+    of its rows; with clusters, one row per (group, cluster, pattern) with ``counts`` the sum of
+    the weights and ``cluster`` the cluster code of each row (0 on padding rows).
+    """
+
+    y: np.ndarray
+    group: np.ndarray
+    counts: np.ndarray
+    cluster: np.ndarray | None = None
+    n_clusters: int | None = None
+
+
+def meat_patterns(
+    y: np.ndarray,
+    group: np.ndarray,
+    weights: np.ndarray | None,
+    cluster: np.ndarray | None = None,
+    n_clusters: int | None = None,
+) -> MeatPatterns:
+    """Compress the rows for the middle matrix of the weighted / cluster sandwich (§17.6)."""
+    w = np.ones(y.shape[0]) if weights is None else np.asarray(weights, dtype=float)
+    if cluster is None:
+        patterns, pat_groups, _, inverse = compress_patterns(y, group)
+        counts = np.bincount(inverse, weights=w**2, minlength=patterns.shape[0]).astype(float)
+        patterns, pat_groups, counts = pad_patterns(patterns, pat_groups, counts)
+        return MeatPatterns(y=patterns, group=pat_groups, counts=counts)
+    keyed = np.column_stack([group, cluster, y])
+    uniq, inverse = np.unique(keyed, axis=0, return_inverse=True)
+    inverse = inverse.reshape(-1)
+    counts = np.bincount(inverse, weights=w, minlength=uniq.shape[0]).astype(float)
+    n_real = uniq.shape[0]
+    patterns, pat_groups, counts = pad_patterns(uniq[:, 2:], uniq[:, 0], counts)
+    codes = np.zeros(patterns.shape[0], dtype=np.int32)
+    codes[:n_real] = uniq[:, 1]
+    return MeatPatterns(
+        y=patterns, group=pat_groups, counts=counts, cluster=codes, n_clusters=n_clusters
     )
 
 
@@ -1459,6 +1528,8 @@ class Prepared:
     group_names: tuple[str, ...]
     table: pd.DataFrame
     weights: np.ndarray | None = None
+    cluster: np.ndarray | None = None
+    n_clusters: int | None = None
 
 
 def prepare(
@@ -1469,25 +1540,47 @@ def prepare(
     item_names: Sequence[str] | None,
     table: pd.DataFrame | None,
     weights: Any = None,
+    cluster: Any = None,
 ) -> Prepared:
     """Coerce data and build/validate the parameter table.
 
     With ``weights``, rows of weight 0 are dropped first, so they affect nothing (starting values,
-    estimability checks, ``y``); the returned ``y``, ``group`` and ``weights`` hold the remaining
-    rows (DESIGN.md §17.4).
+    estimability checks, ``y``); the returned ``y``, ``group``, ``weights`` and ``cluster`` hold
+    the remaining rows (DESIGN.md §17.4). ``cluster`` labels are coded ``0..G-1`` over the
+    remaining rows, and at least two clusters are required (§17.6).
     """
     y = coerce_responses(data, model, item_names=item_names)
     codes, names = coerce_groups(group, model, y.shape[0])
     w = coerce_weights(weights, y.shape[0])
+    clusters = coerce_clusters(cluster, y.shape[0])
+    cl = None if clusters is None else clusters[0]
     if w is not None:
         keep = w > 0
         y, codes, w = y[keep], codes[keep], w[keep]
+        cl = None if cl is None else cl[keep]
         empty = [g for k, g in enumerate(names) if not np.any(codes == k)]
         if empty:
             raise SpecificationError(f"Groups whose weights are all zero: {empty}.")
+    n_clusters = None
+    if cl is not None:
+        _, cl_codes = np.unique(cl, return_inverse=True)
+        cl = cl_codes.reshape(-1).astype(np.int32)
+        n_clusters = int(cl.max()) + 1
+        if n_clusters < 2:
+            raise SpecificationError(
+                "cluster= needs at least two clusters (among the rows with a positive weight)."
+            )
     default = build_table(model, y)
     final = validate_table(default if table is None else table, default, model, y, codes)
-    return Prepared(y=y, group=codes, group_names=names, table=final, weights=w)
+    return Prepared(
+        y=y,
+        group=codes,
+        group_names=names,
+        table=final,
+        weights=w,
+        cluster=cl,
+        n_clusters=n_clusters,
+    )
 
 
 @dataclass(frozen=True)

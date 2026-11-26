@@ -2,12 +2,13 @@
 
 Implements the versioned plain-JSON format specified in DESIGN.md §15.26–§15.28:
 
-- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 8`` (versions 1
+- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 9`` (versions 1
   and 2, written before multidimensional models and across-item equalities were stored,
   version 3, written before the naming refactor of §15.46, version 4, written before bifactor
   models (§17.1), version 5, written before two-tier models (§17.2), and version 6, written
   before sampling weights (§17.4), and version 7, written before ``BAEM.m_step_scale`` and
-  ``LogitNormalPrior`` (§15.47–§15.48), are still read), and
+  ``LogitNormalPrior`` (§15.47–§15.48), and version 8, written before the cluster-robust
+  sandwich (§17.6), are still read), and
   ``"flexpyirt_version"``.
 - Strict RFC 8259 JSON (``allow_nan=False`` on write; rejecting ``parse_constant`` on read).
   Finite IEEE-754 float64 values use standard ``repr``-exact JSON numbers; non-finite values in
@@ -76,7 +77,7 @@ __all__ = [
 ]
 
 FORMAT_TAG = "flexpyirt.FitResult"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 """Schema version written by :func:`dump_fit_result`.
 
 2 adds the confirmatory factor structure, 3 across-item equalities, 4 renames the item-model
@@ -87,9 +88,11 @@ the optional top-level key ``sum_weights`` (the sum of the sampling weights; pre
 fit with ``weights=``, DESIGN.md §17.4), and 8 the method key ``m_step_scale`` (DESIGN.md §15.47;
 older files read as ``"natural"``) and the prior ``LogitNormalPrior`` with keys ``mean_logit``,
 ``sd_logit`` and ``mode_scale`` (DESIGN.md §15.48; ``mode_scale`` is optional on read, absent
-meaning ``"natural"``).
+meaning ``"natural"``), and 9 the optional top-level key ``n_clusters`` (the number of clusters of
+a cluster-robust sandwich; present only for ``fit(..., cluster=..., se="sandwich")``, DESIGN.md
+§17.6).
 """
-SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7, 8})
+SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9})
 """Schema versions accepted by :func:`load_fit_result`; version 1 has no factor keys."""
 
 _LEGACY_PRIOR_TYPES = {"LogNormal": "LogNormalPrior", "Beta": "BetaPrior"}
@@ -1523,6 +1526,8 @@ def dump_fit_result(
         payload["latent_weights"] = _serialize_eh_weights(result._eh_weights)
     if result._sum_weights is not None:
         payload["sum_weights"] = float(result._sum_weights)
+    if result._n_clusters is not None:
+        payload["n_clusters"] = int(result._n_clusters)
     text = json.dumps(payload, indent=indent, allow_nan=False)
     if path is not None:
         Path(path).write_text(text, encoding="utf-8")
@@ -1597,6 +1602,8 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
     allowed_keys = _TOP_LEVEL_KEYS | {"latent_weights"}
     if schema_version >= 7:
         allowed_keys = allowed_keys | {"sum_weights"}
+    if schema_version >= 9:
+        allowed_keys = allowed_keys | {"n_clusters"}
     keys = set(obj.keys())
     missing_top = sorted(_TOP_LEVEL_KEYS - keys)
     if missing_top:
@@ -1638,6 +1645,15 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
         if not (math.isfinite(sum_weights) and sum_weights > 0.0):
             raise SpecificationError(
                 f"sum_weights must be a positive finite number, got {obj['sum_weights']!r}."
+            )
+    n_clusters: int | None = None
+    if "n_clusters" in obj:
+        n_clusters = _require_int(
+            obj["n_clusters"], field_name="n_clusters", min_value=2, max_value=_INT64_MAX
+        )
+        if se_method != "sandwich":
+            raise SpecificationError(
+                f"n_clusters is only valid with se_method 'sandwich', not {se_method!r}."
             )
     loglik = _decode_float(obj["loglik"], field_name="loglik")
     log_posterior = _decode_float(obj["log_posterior"], field_name="log_posterior")
@@ -1694,4 +1710,5 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
         _method=method,
         _eh_weights=eh_weights,
         _sum_weights=sum_weights,
+        _n_clusters=n_clusters,
     )
