@@ -27,7 +27,7 @@ from flexpyirt._compile import (
 from flexpyirt._json import dump_fit_result, load_fit_result
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
-from flexpyirt.items import ItemKernel
+from flexpyirt.items import ItemKernel, irt_dependency_indices, irt_names, irt_thresholds
 from flexpyirt.latent import (
     davidian_param_names,
     eh_moments,
@@ -107,11 +107,15 @@ def _mixture_derived(
 @cache
 def _irt_val_and_jac(kernel: ItemKernel) -> Callable[[Array], tuple[Array, Array]]:
     """Return a jitted ``(irt_thresholds, jacfwd(irt_thresholds))`` pair for ``kernel``."""
-    jac_fn = jax.jacfwd(kernel.irt_thresholds)
+
+    def thresholds(params: Array) -> Array:
+        return irt_thresholds(kernel, params)
+
+    jac_fn = jax.jacfwd(thresholds)
 
     @jax.jit
     def fn(params: Array) -> tuple[Array, Array]:
-        return kernel.irt_thresholds(params), jac_fn(params)
+        return thresholds(params), jac_fn(params)
 
     return fn
 
@@ -141,7 +145,7 @@ def _delta_irt_thresholds(
     b_ses = np.full(b_vals.shape, np.nan, dtype=float)
     if vcov is None:
         return b_vals, b_ses
-    for m, deps in enumerate(kernel.irt_dependency_indices):
+    for m, deps in enumerate(irt_dependency_indices(kernel)):
         active = [p for p in deps if fids[p] >= 0]
         if not active:
             continue
@@ -419,7 +423,7 @@ class FitResult:
         kernels = {name: self._model.item_kernel(m) for name, m in self._model.items}
         irt_cols = list(
             dict.fromkeys(
-                name for _, m in self._model.items for name in self._model.item_kernel(m).irt_names
+                name for _, m in self._model.items for name in irt_names(self._model.item_kernel(m))
             )
         )
         if irt_cols:
@@ -435,7 +439,7 @@ class FitResult:
                 xi = est_ord.loc[(grp, itm), p_names].to_numpy(dtype=float)
                 fids = fids_ord.loc[(grp, itm), p_names].to_numpy(dtype=int)
                 b_vals, b_ses = _delta_irt_thresholds(kernel, xi, fids, self.vcov)
-                for name, val, se_val in zip(kernel.irt_names, b_vals, b_ses, strict=True):
+                for name, val, se_val in zip(irt_names(kernel), b_vals, b_ses, strict=True):
                     b_data[name][row_idx] = val
                     b_data[f"{name}_se"][row_idx] = se_val
             for col, arr in b_data.items():

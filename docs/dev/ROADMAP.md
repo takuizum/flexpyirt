@@ -147,5 +147,8 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 
 ## Ongoing
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).
-- [ ] Public extension API for user-defined item models, with docs examples (#86). New item models
-  (e.g. GGUM) are added as validated examples of this API rather than as built-ins.
+- [x] Public extension API for user-defined item models, with docs examples (#86): the
+  `ItemModel` / `ItemKernel` contract, `register_item_model` for JSON, and a 2PL worked example
+  in the guide (DESIGN §20); custom 2PL / GRM reproduce the built-ins to machine precision.
+- [ ] Validated examples of models that are not built in (e.g. GGUM against mirt
+  `itemtype = "ggum"`, V44). New item models are added this way rather than as built-ins.

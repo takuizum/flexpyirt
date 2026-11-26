@@ -12,7 +12,8 @@ Implements the versioned plain-JSON format specified in DESIGN.md §15.26–§15
   Finite IEEE-754 float64 values use standard ``repr``-exact JSON numbers; non-finite values in
   float-typed fields are encoded explicitly as ``"NaN"``, ``"Infinity"``, or ``"-Infinity"``.
 - Explicit name registries for item models, latent distributions, priors, quadrature grids, and
-  estimation methods (never ``eval`` or ``pickle``).
+  estimation methods (never ``eval`` or ``pickle``). User-defined item models join the item-model
+  registry through :func:`flexpyirt.items.register_item_model` (DESIGN.md §20).
 """
 
 from __future__ import annotations
@@ -35,7 +36,20 @@ from flexpyirt._compile import (
 )
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import SpecificationError
-from flexpyirt.items import GPCM, GRM, PCM, FourPL, ItemModel, Nominal, Rasch, ThreePL, TwoPL
+from flexpyirt.items import (
+    GPCM,
+    GRM,
+    PCM,
+    FourPL,
+    ItemModel,
+    Nominal,
+    Rasch,
+    ThreePL,
+    TwoPL,
+    check_item_model,
+    registered_item_model,
+    registration_for,
+)
 from flexpyirt.latent import (
     MAX_DAVIDIAN_DEGREE,
     MAX_MIXTURE_COMPONENTS,
@@ -320,28 +334,62 @@ _ITEM_MODEL_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], ItemModel]]
 
 
 def _serialize_item_model(item_model: ItemModel) -> dict[str, Any]:
-    """Serialize a registered :class:`~flexpyirt.items.ItemModel`."""
+    """Serialize a built-in or registered :class:`~flexpyirt.items.ItemModel` (DESIGN §20)."""
     serializer = _ITEM_MODEL_SERIALIZERS.get(type(item_model))
-    if serializer is None:
+    if serializer is not None:
+        return serializer(item_model)
+    reg = registration_for(item_model)
+    if reg is None:
         raise SpecificationError(
-            f"Unsupported item model {type(item_model).__name__!r} for JSON serialization."
+            f"Item model {type(item_model).__name__!r} is not registered for JSON; call "
+            "flexpyirt.items.register_item_model() on its class first."
         )
-    return serializer(item_model)
+    fields = dict(reg.to_dict(item_model))
+    if "type" in fields:
+        raise SpecificationError(
+            f"to_dict() of item model {item_model.name!r} must not return the key 'type'."
+        )
+    out = {"type": str(item_model.name), **fields}
+    try:
+        json.dumps(out, allow_nan=False)
+    except (TypeError, ValueError) as e:
+        raise SpecificationError(
+            f"to_dict() of item model {item_model.name!r} returned non-JSON values: {e}"
+        ) from e
+    return out
 
 
 def _deserialize_item_model(raw: Any, *, field_name: str) -> ItemModel:
-    """Deserialize an :class:`~flexpyirt.items.ItemModel` by its registered name."""
+    """Deserialize an :class:`~flexpyirt.items.ItemModel` by its built-in or registered name."""
     obj = _require_dict(raw, field_name=field_name)
     if "type" not in obj:
         raise SpecificationError(f"Missing 'type' key in {field_name}.")
     kind = _require_str(obj["type"], field_name=f"{field_name}.type")
     loader = _ITEM_MODEL_DESERIALIZERS.get(kind)
-    if loader is None:
+    if loader is not None:
+        return loader(obj, field_name)
+    reg = registered_item_model(kind)
+    if reg is None:
         raise SpecificationError(
-            f"Unknown item model type {kind!r} in {field_name}; "
-            f"supported: {sorted(_ITEM_MODEL_DESERIALIZERS)}."
+            f"Unknown item model type {kind!r} in {field_name}; built-in: "
+            f"{sorted(_ITEM_MODEL_DESERIALIZERS)}. A user-defined item model must be registered "
+            "with flexpyirt.items.register_item_model() before loading."
         )
-    return loader(obj, field_name)
+    fields = {k: v for k, v in obj.items() if k != "type"}
+    try:
+        rebuilt = reg.from_dict(fields)
+    except (TypeError, ValueError) as e:
+        raise SpecificationError(
+            f"Could not rebuild item model {kind!r} in {field_name} from {fields}: {e}"
+        ) from e
+    if not isinstance(rebuilt, reg.cls) or rebuilt.name != kind:
+        raise SpecificationError(
+            f"from_dict() for {kind!r} in {field_name} returned {rebuilt!r}, not a {kind!r} "
+            "item model."
+        )
+    item_model: ItemModel = rebuilt
+    check_item_model(field_name, item_model)
+    return item_model
 
 
 def _serialize_normal_latent(dist: Normal) -> dict[str, Any]:
