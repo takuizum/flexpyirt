@@ -81,10 +81,11 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | DETECT (confirmatory, exploratory) | sirt's `conf.detect(use_sum_score = TRUE, smooth = FALSE)` and `expl.detect(use_sum_score = TRUE)` with the same split: conditional covariances, indices, partitions, to $10^{-12}$ |
 | Observed-score DIF (Mantel–Haenszel, Mantel, generalized MH, logistic regression) | difR's `difMH()`, `difGMH()` and `difLogistic()` (statistics, odds ratios and their variances, $\Delta R^2$, coefficients, purification paths and flags) and R's `mantelhaen.test()`: to $10^{-10}$, logistic regression to $10^{-8}$ (standard errors and Wald statistics $10^{-6}$); Mantel's statistic and the cumulative odds ratio against `difMantel.poly()` / `liu_agresti_ccor()` and a direct R implementation |
 | Scale linking (Haebara, Stocking–Lord; unidimensional and confirmatory multidimensional models) | independent R implementations of the criteria using mirt's response functions (mirt itself has no characteristic-curve linking) |
+| Classical item analysis (scoring with a key, alpha, item–total and item–rest correlations, point-biserial / biserial / polyserial, omega total, option statistics) | psych's `alpha()`, `score.multiple.choice()`, `polyserial()`, `biserial()` and `omega()`, ltm's `cronbach.alpha()` and `biserial.cor()`, polycor's `polyserial()` and base R: closed forms to $10^{-12}$, omega to $10^{-6}$ |
 
 Polychoric correlations, parallel analysis, MAP, the empirical Kaiser criterion, factor analysis,
-the Hull method, comparison data, DETECT, DIMTEST and observed-score DIF are functions of the companion package
-flexpyctt (NumPy / SciPy, no JAX). flexpyirt's own `polychoric()` is a JAX implementation of the
+the Hull method, comparison data, DETECT, DIMTEST, classical item analysis and observed-score DIF are
+functions of the companion package flexpyctt (NumPy / SciPy, no JAX). flexpyirt's own `polychoric()` is a JAX implementation of the
 same estimator: it passes the same checks, and the two agree to $10^{-9}$ on every check case.
 
 ## Validation cases
@@ -214,6 +215,15 @@ The complete validation plan, with every case, mirt call and measured difference
   so the "rest score" groups are not rest-score groups and the indices differ (DETECT 6.73
   instead of 1.60 on one test case). With `smooth = FALSE`, and in `expl.detect()`, sirt and
   flexpyirt agree.
+- **Missing data in psych's `alpha()` and ltm's `cronbach.alpha()`.** With missing responses
+  psych's `raw.r` correlates each item with the sum of the observed scores (a missing response
+  counts as 0), while its alpha and `r.drop` use pairwise covariances; flexpyctt's `item_total`
+  is the correlation implied by those pairwise covariances, so it differs from `raw.r` (by up to
+  0.014 on a test case with 6% missing). ltm's raw alpha with `na.rm = TRUE` takes the total
+  variance from complete rows and the item variances from all responses; flexpyctt's
+  `missing="listwise"` uses complete rows for both. On complete data all of them agree.
+- **psych's `biserial()`** divides by the $n-1$ standard deviation of the total score, so it is
+  smaller than the two-step biserial correlation (polycor's) by the factor $\sqrt{(n-1)/n}$.
 - **Standard error of the Liu–Agresti odds ratio in difR.** difR 6.1's `liu_agresti_ccor()`
   (used by `difMantel.poly()`) reports as `SE_log_Psi` a delta-method value whose derivative with
   respect to the focal counts has a sign error and which is divided by the wrong sum, so it is

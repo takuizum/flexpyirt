@@ -193,3 +193,5 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   in the guide (DESIGN §20); custom 2PL / GRM reproduce the built-ins to machine precision.
 - [ ] Validated examples of models that are not built in (e.g. GGUM against mirt
   `itemtype = "ggum"`, V44). New item models are added this way rather than as built-ins.
+- [x] flexpyctt: classical item analysis (keyed scoring, item statistics, alpha / omega, option
+  analysis; #101), validated in V46 against psych, ltm and polycor.

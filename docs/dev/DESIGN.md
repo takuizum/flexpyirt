@@ -2028,7 +2028,7 @@ data-independent shapes (§15.21).
     | Distribution | Scope | Depends on |
     |---|---|---|
     | `flexpyirt` | estimation; tools that take a `FitResult` (`local_dependence()`, `jsi()`, `model_parallel_analysis()`, `link()`, IRT equating); the `dimensionality()` report | JAX, `flexpyctt` |
-    | `flexpyctt` | model-free item and test analysis: `polychoric()`, `parallel_analysis()`, `velicer_map()`, `empirical_kaiser()`, `efa()`, `hull()`, `comparison_data()`, `detect()`, `exploratory_detect()`, `dimtest()`; observed-score DIF (`mantel_haenszel()`, `mantel()`, `generalized_mantel_haenszel()`, `logistic_dif()`, §16.20); later classical item analysis | NumPy, SciPy, pandas |
+    | `flexpyctt` | model-free item and test analysis: `polychoric()`, `parallel_analysis()`, `velicer_map()`, `empirical_kaiser()`, `efa()`, `hull()`, `comparison_data()`, `detect()`, `exploratory_detect()`, `dimtest()`; observed-score DIF (`mantel_haenszel()`, `mantel()`, `generalized_mantel_haenszel()`, `logistic_dif()`, §16.20); classical item analysis (`score_responses()`, `item_analysis()`, `coefficient_alpha()`, `coefficient_omega()`, `distractor_analysis()`, §16.21) | NumPy, SciPy, pandas |
     | `flexpyequate` | equating of score distributions only: mean, linear and equipercentile equating, the anchor-test methods, log-linear presmoothing, kernel equating (its own design document: `packages/flexpyequate/docs/DESIGN.md`) | NumPy, SciPy, pandas |
 
     **Layout**: a uv workspace. flexpyirt stays at the repository root (`pyproject.toml`,
@@ -2274,6 +2274,63 @@ data-independent shapes (§15.21).
     `group_coefficient_se`, `interaction_coefficient`, `interaction_coefficient_se`. (5) Owner
     decision 4 (standardization, STD P-DIF): not included, as in the scope list of #102.
     **Not in this PR**: ordinal logistic DIF (the second PR of #102).
+21. **Classical item analysis (flexpyctt, #101, V46)**: `flexpyctt/item_analysis.py` (NumPy /
+    SciPy / pandas), re-exported by flexpyirt. The API is the one proposed in the issue and approved
+    by the owner (2026-11-26): `score_responses()`, `item_analysis()`, `coefficient_alpha()`
+    (`AlphaResult`), `coefficient_omega()` (`OmegaResult`), `distractor_analysis()`. The names do not
+    clash with flexpyirt's model-based `reliability()`. **Changes from the issue's sketch** (no
+    signature changed): `AlphaResult` also carries `confidence_level` and `if_deleted` has both
+    `alpha` and `standardized_alpha`; `OmegaResult` also carries the `correlation` matrix it was
+    fitted to and the `reversed_items` reversed before computing omega; `score_responses()` also
+    accepts the key as a sequence in column order.
+    **Missing data** (owner decision 2: the issue's `"pairwise"` default): everything is computed
+    from the pairwise-complete covariance matrix $C$ (R's `cov(use = "pairwise")`) and, for
+    standardized alpha and omega, the pairwise-complete correlation matrix (R's
+    `cor(use = "pairwise")`, not `cov2cor(C)`), as psych's `alpha()`. `"listwise"` drops incomplete
+    rows first. Rows with no response are dropped in both cases, so `n_obs` (the Feldt $n$) counts
+    respondents with at least one response; psych uses `nrow(x)`.
+    **Item–total and item–rest correlations** are $c_j/\sqrt{C_{jj}\,\mathbf 1^\top C\mathbf 1}$ and
+    $(c_j-C_{jj})/\sqrt{C_{jj}(\mathbf 1^\top C\mathbf 1-2c_j+C_{jj})}$ with $c_j=\sum_l C_{jl}$,
+    the Pearson correlations with $T$ and $T-x_j$ on complete data. psych's `r.drop` is the same
+    formula; its `raw.r` correlates with `rowSums(x, na.rm = TRUE)`, which treats a missing
+    response as 0 in the total and so is not the quantity alpha is built from. flexpyctt keeps the
+    $C$-based definition for both columns so that they, `alpha` and `alpha_if_deleted` describe
+    the same matrix; the difference from `raw.r` under missing data is tested and documented.
+    **Polyserial / biserial** (`correlation="polyserial"`): the two-step estimator of Olsson,
+    Drasgow & Dorans (1982), $\hat\rho=r\,\sigma_j/\sum_k\phi(\tau_{jk})$, with $\sigma_j$ the
+    item's SD (denominator $n$) and $\tau_{jk}=\Phi^{-1}$ of its cumulative proportions, both over
+    the item's observed scores; $r$ is the Pearson item–total (–rest) correlation above. This is
+    polycor's `polyserial(ML = FALSE)`, psych's `polyserial()` on complete data and, for two
+    categories, $r\sqrt{pq}/\phi(\Phi^{-1}(p))$. The issue's "thresholds from the margins, then
+    $\rho$" means this estimator: polycor's two-step version does not maximize over $\rho$ (the
+    maximum-likelihood polyserial, `ML = TRUE`, is not provided). psych's `biserial()` divides by
+    the $n-1$ SD of the total while using $p,q$, so it is this value times $\sqrt{(n-1)/n}$
+    (tested). Estimates outside $[-1,1]$ are set to $\pm1$ with a `HeywoodWarning`, as psych does.
+    `difficulty` is the mean over the largest observed score, so scores must be $\ge0$.
+    **Omega**: $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf s^\top R\mathbf s$ from the one-factor ULS
+    solution (`_efa.fit_factors`, the kernel of `efa()`), with $s_j=\operatorname{sign}(\lambda_j)$
+    ($+1$ for a zero loading), i.e. psych's `omega.tot` (Revelle & Zinbarg, 2009) with its default
+    `flip = TRUE` and the observed total variance in the denominator. Items that load negatively
+    are reversed, as psych does (review of #127): otherwise one reverse-keyed item makes
+    $\mathbf 1^\top R\mathbf 1$ small and omega describes a total nobody would use. The reversal is
+    not silent: a `FlexpycttWarning` names the items and `OmegaResult.reversed_items` lists them,
+    while `loadings` and `correlation` stay those of the items as scored; reverse-scoring the items
+    first gives the same omega (tested). The model-implied form
+    $(\sum\lambda)^2/((\sum\lambda)^2+\sum\psi)$ equals it only under perfect fit and is not
+    reported. Calling the kernel instead of `efa()` admits three items (a just-identified model,
+    which `efa()` rejects for having no degrees of freedom). The Pearson matrix is smoothed with
+    `smooth_correlation` when not positive definite (pairwise matrices may not be), as
+    `polychoric()` does. lavaan's one-factor CFA (listed in the issue) was not used as a reference:
+    it fits ML to the covariance matrix, a different estimator on a different scale.
+    **Keyed scoring and options**: options are compared with `==` per cell, so codes of any type
+    work; a key option never chosen warns (usually a key in the wrong codes or type). In
+    `distractor_analysis()` a missing response scores 0 in $T$; each option's statistics use the
+    item's respondents; the key is listed even if nobody chose it. Score groups follow R's
+    `cut(T, quantile(T, 0:G/G), include.lowest = TRUE)` (type-7 quantiles, ties never split); equal
+    quantiles raise instead of silently merging groups.
+    **Validation (V46)**: `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R`, see
+    VALIDATION.md. **Left out** (as in the issue): hierarchical $\omega$, split-half, Guttman
+    $\lambda$, glb, the upper–lower 27% index, plots (#103), weights.
 
 ## 17. Implementation decisions (M7)
 

@@ -26,7 +26,8 @@ for the models and algorithms behind them, see [Theory](theory.md).
 18. [Local dependence and the dimensionality report](#18-local-dependence-and-the-dimensionality-report)
 19. [DETECT](#19-detect)
 20. [User-defined item models](#20-user-defined-item-models)
-21. [Errors and warnings](#21-errors-and-warnings)
+21. [Classical item analysis](#21-classical-item-analysis)
+22. [Errors and warnings](#22-errors-and-warnings)
 
 ## 1. Setup
 
@@ -1582,7 +1583,7 @@ print(linked_md.transform_theta(res_mirt_new.score(new_mirt_df.iloc[:3])).round(
 
 ## 16. Polychoric correlations
 
-Sections 16, 17 and 19 use **flexpyctt**, the companion package for analyses that need no fitted
+Sections 16, 17, 19 and 21 use **flexpyctt**, the companion package for analyses that need no fitted
 model. It is installed together with flexpyirt, and can be installed on its own
 (`pip install flexpyctt`) where JAX is not wanted: it depends on NumPy, SciPy and pandas only and
 needs no 64-bit setting. Its functions take `rng` (an integer seed or a
@@ -1843,7 +1844,59 @@ print(restored.items.equals(custom.items))
 flexpyirt checks the machinery, not your model: a user-defined model is as correct as its
 `log_prob`. Check a new model against an independent implementation before relying on it.
 
-## 21. Errors and warnings
+## 21. Classical item analysis
+
+Before (or instead of) fitting an IRT model, classical item statistics show which items behave
+badly. They need no model, so they are in flexpyctt.
+
+```python
+from flexpyctt import (
+    coefficient_alpha,
+    coefficient_omega,
+    distractor_analysis,
+    item_analysis,
+    score_responses,
+)
+
+# Raw multiple-choice answers: "B" is correct; wrong answers are spread over A, C and D.
+choice_rng = np.random.default_rng(20)
+wrong = choice_rng.choice(np.array(["A", "C", "D"]), size=df.shape)
+raw = pd.DataFrame(np.where(df.to_numpy() == 1, "B", wrong), columns=items)
+key = {item: "B" for item in items}
+
+scores = score_responses(raw, key=key)
+print(item_analysis(scores).round(3).head())
+alpha = coefficient_alpha(scores)
+print(round(alpha.alpha, 3), np.round(alpha.confidence_interval, 3))
+print(round(coefficient_omega(scores, correlation="polychoric").omega, 3))
+options = distractor_analysis(raw, key=key)
+print(options[options["item"] == items[0]].round(3))
+```
+
+- `score_responses()` turns chosen options into 0 / 1 scores. Options are compared with `==`, so
+  the key must use the data's codes and types (`1` does not match `"1"`; a key option that nobody
+  chose gives a warning). A missing response scores 0, or stays NaN with `missing="keep"`.
+- `item_analysis()` gives one row per item: `difficulty` (the mean divided by the largest
+  score: the proportion correct for 0 / 1 items), `item_total` and `item_rest` (the correlation
+  with the total score and with the total of the other items; point-biserial for 0 / 1 items) and
+  `alpha_if_deleted`. Read `item_rest`: `item_total` includes the item itself and is inflated
+  for short tests. `correlation="polyserial"` reports polyserial (biserial for 0 / 1 items)
+  correlations instead, by the two-step estimator.
+- `coefficient_alpha()` is KR-20 for 0 / 1 items. It also gives standardized alpha, Feldt's
+  confidence interval and alpha with each item left out (`alpha.if_deleted`).
+- `coefficient_omega()` fits one factor (ULS) to the item correlations and reports omega total.
+  Like psych's `omega()`, it reverses items that load negatively, with a warning and the items in
+  `reversed_items`; reverse-score such items yourself if the total you report keeps them as scored.
+  With `correlation="polychoric"` it describes the latent responses behind the categories rather
+  than the observed sum score.
+- Missing responses (NaN) are used pairwise by default: every covariance or correlation from the
+  respondents who answered both items. `missing="listwise"` uses complete rows only.
+- `distractor_analysis()` has one row per item and option. A working distractor is chosen less
+  often in higher score groups (`proportion_group_1` is the lowest third) and has a negative
+  `point_biserial` with the rest score; the key should show the opposite. Here the wrong answers
+  were drawn at random, so the distractors of an item look alike.
+
+## 22. Errors and warnings
 
 | Type | When |
 |---|---|

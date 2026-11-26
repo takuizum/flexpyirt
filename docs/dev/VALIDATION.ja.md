@@ -31,6 +31,7 @@
 | DIMTEST（シミュレーション研究。テストではその小さい版）: .05 での第 1 種の誤り / 検出力 | 20 回中 $\le 0.15$ / 10 回中 $\ge 8$ |
 | 観測得点による DIF: MH・一般化 MH の統計量、$\hat\alpha_{MH}$ とその対数の分散、Mantel の統計量、累積オッズ比とその標準誤差。ロジスティック回帰の尤度比統計量、$\Delta R^2$、係数／標準誤差と Wald。検出結果と純化の経過 | 1e-10（相対）。1e-8 / 1e-6（相対）。一致 |
 | mirt の推定値でのクロス積／サンドイッチの共分散（各要素を $\sqrt{v_{ii}v_{jj}}$ で割った差）。通しで当てはめたときのパラメタ／SE | 1e-9 / 1e-6、1e-6 / 1e-5（相対） |
+| 古典的項目分析（α、標準化 α、項目を除いたときの値、Feldt の区間、項目–合計・項目–残りの相関、点双列相関、2 段階の多分系列・双列相関、キーによる得点、選択肢の統計量）と psych / ltm / polycor / 素の R。ω total とその負荷量と psych | 1e-12（得点は完全一致）。1e-6 / 1e-5 |
 | mirt の $\theta$ での受験者・項目適合度（$l_z$、infit、outfit、$z$）、R で再計算した $l_z^*$、flexpyirt 自身の推定値での端から端まで | 1e-9（相対）、1e-7、1e-4 |
 
 ## ケース一覧（マイルストーンと対応）
@@ -79,6 +80,7 @@
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
 | V43 | 指定したパラメタでの多次元モデルの情報行列・方向別の情報量・期待得点（相関する 2 因子で 2PL・3PL・4PL・GRM・GPCM・名義の項目と交差負荷 4 項目。3 因子で 2PL・3PL・GRM・GPCM と交差負荷 2 項目。特殊因子 3 の双因子 2PL + GRM。相関する主因子 2 と特殊因子 2 の two-tier 2PL + GRM） | `pars =` と `TOL = NaN` で作った `mirt()` / `bfactor()` のオブジェクトでの `iteminfo(item, Theta, multidim_matrix = TRUE)`、`iteminfo(item, Theta, degrees = )`、`testinfo(m, Theta, degrees = )`、`expected.item()`、`expected.test()` | M7 |
 | V45 | M-step の非拘束尺度（任意、`BAEM(m_step_scale="unconstrained")`）を V3・V4・V5・V7・V9・V11・V14 のケースで照合。`LogitNormalPrior`（`"natural"` は mirt に同等なものがないため独立な数値検証。`mode_scale="logit"` は mirt の `g` への `norm`） | 各ケースの既存の参照値。SciPy（`stats.norm`、`integrate.quad`）と式から書いた停留条件。`v45_3pl_logit_norm_map.json`（mirt）とテスト内で計算した flexMIRT の logit 尺度のモード | #15 |
+| V46 | 古典的項目分析（flexpyctt）: キーによる採点、α（ペアワイズとリストワイズ）、項目統計量、点双列・双列・多分系列相関、ω total（Pearson とポリコリック）、選択肢分析。シミュレーションによる 10 項目の多肢選択データ（欠測なし、5% MCAR）と 6 項目の 0〜4 のデータ（欠測なし、6% MCAR） | なし（mirt ではない）: psych `alpha()`、`score.multiple.choice()`、`responseFrequency()`、`polyserial()`、`biserial()`、`fa()`、`omega(nfactors = 1)`。ltm `cronbach.alpha()`、`biserial.cor()`。polycor `polyserial(ML = FALSE)`。lavaan `lavCor()`。選択肢の統計量は素の R | flexpyctt |
 | V47 | 観測得点による DIF（flexpyctt、#102）: 連続修正の有無、Holm / BH、純化、利用者のアンカー、外部のマッチング変数を含む Mantel–Haenszel（`difR::verbal`、均一・不均一 DIF を入れたシミュレーションの 2PL）。3 群と名義カテゴリの一般化 MH（シミュレーションの段階反応）。Mantel 検定と Liu–Agresti のオッズ比。ロジスティック回帰（both / uniform / non-uniform、尤度比 / Wald、純化、アンカー、マッチング） | difR 6.1.0 の `difMH()`、`difGMH()`、`difLogistic()`、`difMantel.poly()`、`liu_agresti_ccor()`。`stats::mantelhaen.test()`。R での直接の実装: `packages/flexpyctt/validation/r/ctt_dif_reference.R`。Liu & Agresti（1996、表 1）の計算例 | — |
 | V48 | mirt の推定値での図の数値（2PL $J=10$、$N=1003$。欠測 10% の 2PL。GRM $K=4$、$J=6$。2PL + 3PL + GPCM + 名義の混合 $J=10$。2 群の 2PL + GRM で焦点群の平均・分散を推定。TAM の GPCM $K=4$、$J=6$）: 経験的項目曲線、トレースライン、サーストン閾値 | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))`（群ごとは `extract.group()`）、`probtrace()`、`probtrace()` に対する `uniroot()`、`coef(IRTpars = TRUE)`。TAM `tam.threshold()` | #103 |
 | V50 | リンキングの共通項目の点検（#105）: 頑健 z（Huynh & Meyer, 2010）・変位・期待項目得点曲線の RMSD。除外の順序、純化の各段階のリンキング係数、最終の項目表（2PL、2PL + GRM + GPCM 混在） | 個別の `mirt()` 推定 + 素の R による再計算（`median()`、`quantile(type = 7)`、`expected.item()`、V20 のリンキング）。ドリフト項目の照合に `equateIRT::dif.test` | 現場向け |
@@ -1154,6 +1156,28 @@
   `tests/test_mirt_v53_person_fit.py`、`tests/test_person_fit.py`。参照値の生成: `validation/r/person_fit_reference.R`。
 
 ## 照合以外の検証
+- **古典的項目分析（V46、flexpyctt、#101）**:
+  `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R`（R 4.6.2、psych 2.6.9、ltm 1.2.0、
+  polycor 0.8.2、lavaan 0.7.3）が `packages/flexpyctt/tests/reference/v46_item_analysis.json` を書き、
+  `packages/flexpyctt/tests/test_item_analysis.py` で照合する。シミュレーションの 4 例: 多肢選択 10 項目（$N=500$、
+  正答と誤答の引きつけ方を変え、1 項目は 5 選択肢）の欠測なしと 5% MCAR、0〜4 で採点する 6 項目（$N=300$、
+  段階反応モデル）の欠測なしと 6% MCAR。ほかに丁度識別の ω を見る 3 項目と、0〜4 の欠測なしデータの 1 項目を逆転採点したもの（psych の既定の
+  `flip = TRUE` がその項目を反転する。`flip = FALSE` の値も記録し、0.18 低く、反転しない式と一致する）。観測された差: 閉じた式（α、標準化 α、
+  項目を除いたときの値、Feldt の上下限、平均、SD、項目–合計・項目–残りの相関、点双列・多分系列・双列相関、
+  選択肢の割合・点双列相関・平均得点・群ごとの割合）は $6\times10^{-15}$ 以下、キーによる得点は完全一致、
+  ω total は $7\times10^{-8}$ 以下、負荷量は $1.4\times10^{-6}$ 以下（psych の `fa()` が minres の最適化を早く
+  止めるため）、lavaan とのポリコリック行列は $2\times10^{-8}$ 以下。反転する項目は psych が反転するものと一致し、反転したときの ω は
+  手で逆転採点したデータの ω と一致する。既知の違い（それぞれテストで確かめる）:
+  (1) psych の `raw.r` は `rowSums(na.rm = TRUE)` との相関なので、欠測があるときは R で求めた $C$ に基づく
+  `colSums(C)/sqrt(diag(C) * sum(C))` と比べ、`raw.r` そのものとは欠測なし・リストワイズのときだけ比べる
+  （DESIGN §16.21）。`r.drop` は psych でも $C$ に基づくので全例で比べる。(2) ltm の素の
+  `cronbach.alpha(na.rm = TRUE)` は合計の分散を欠測のない行から、項目の分散をすべての観測された得点から求め、
+  どちらの規則でもない。欠測のないデータでだけ比べる（標準化 α は欠測のない行を使い、`"listwise"` と一致する）。
+  (3) psych の `biserial()` は 2 段階の双列相関の $\sqrt{(n-1)/n}$ 倍になる。(4) psych の `polyserial()` は欠測の
+  ある行も $n$ に数えるので、欠測のないデータで比べる。欠測があるときは 2 段階の係数 $\sigma_j/\sum_k\phi(\tau_{jk})$
+  を R で計算し直して比べる。(5) 選択肢の統計量にはインストール済みの R 実装がない（TAM の `tam.ctt3` は未導入）。
+  スクリプトが定義どおり素の R で計算し、選択肢の割合は psych の `responseFrequency()` とも一致する。issue に挙げた
+  lavaan の 1 因子 CFA は使わなかった（共分散行列への ML は推定量も尺度も違う）。
 - **観測得点による DIF（V47、flexpyctt、#102）**: 参照値は difR 6.1.0 と base R によるもので、
   `packages/flexpyctt/tests/reference/v47_dif.json` にコミットする。一致の程度: MH の $\chi^2$、$\hat\alpha_{MH}$ と
   Phillips–Holland の分散、一般化 MH の統計量（difGMH と、群 x カテゴリ x 層の表への `mantelhaen.test()`）、Mantel の
