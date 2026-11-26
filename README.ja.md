@@ -36,8 +36,8 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | スコアリング | EAP・MAP・ML・WLE（1–3 因子、標準誤差つき）および plausible values（`PV`、1–3 因子、明示的な JAX PRNG `key`）。ベイズ手法は群ごとの潜在分布を事前分布に使う | ✓ |
 | 多次元モデル | 確認的 2–3 因子 MIRT（`Model.with_factors()`、多母集団も可）。交差負荷、相関／直交の多変量正規因子、直積求積格子、Oakes/Hessian SE、EAP・MAP・ML・WLE スコアリング。次元縮約による特殊因子数に制限のない双因子モデル（`Model.with_bifactor()`、単一群、EAP スコアリング）。相関してよい主因子 1〜2 個の two-tier モデル（`Model.with_two_tier()`） | ✓ |
 | 経験ヒストグラム | 歪んだ・多峰の潜在分布のための `EmpiricalHistogram()`（Woods, 2007）。参照群は厳密な制約付き M-step で平均 0・分散 1 に標準化、FIPC では自由。重みと 4 次までのモーメントを報告 | ✓ |
-| Davidian 曲線 | 単一群 1 次元モデル向けの半ノンパラメトリック潜在分布 `DavidianCurve(degree)`（Zhang & Davidian, 2001; Woods & Lin, 2009）。厳密な連続 `mean`/`var` へ解析的に標準化（Rasch・PCM・FIPC で `free_mean`/`free_var` 可）、項目・潜在パラメタの同時 Oakes/Hessian SE と EAP/PV 採点に対応 | ✓ |
-| 混合正規 | 単一群 1 次元モデル向けの、項目を共通とする有限混合正規潜在密度 `NormalMixture(n_components)`（Mislevy, 1984）。mirt の `dentype = "mixture-k"` のクラスのパラメタ化を厳密な連続 `mean`/`var` へ解析的に標準化、標準化した成分（`pi_c`・`mean_c`・`var_c`）とデルタ法 SE、項目・潜在パラメタの同時 Oakes/Hessian SE、EAP/PV 採点、退化解の警告 | ✓ |
+| Davidian 曲線 | 1 次元モデル向けの半ノンパラメトリック潜在分布（多母集団では群ごと。アンカーつき・FIPC） `DavidianCurve(degree)`（Zhang & Davidian, 2001; Woods & Lin, 2009）。厳密な連続 `mean`/`var` へ解析的に標準化（Rasch・PCM・FIPC で `free_mean`/`free_var` 可）、項目・潜在パラメタの同時 Oakes/Hessian SE と EAP/PV 採点に対応 | ✓ |
+| 混合正規 | 1 次元モデル向けの、項目を共通とする有限混合正規潜在密度（多母集団では群ごと） `NormalMixture(n_components)`（Mislevy, 1984）。mirt の `dentype = "mixture-k"` のクラスのパラメタ化を厳密な連続 `mean`/`var` へ解析的に標準化、標準化した成分（`pi_c`・`mean_c`・`var_c`）とデルタ法 SE、項目・潜在パラメタの同時 Oakes/Hessian SE、EAP/PV 採点、退化解の警告 | ✓ |
 | 結果の保存 | `FitResult.to_json()` / `FitResult.from_json()`（厳密なスキーマ、pickle 不使用） | — |
 | EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | ✓ |
 | 項目適合度 | Orlando–Thissen の S-X2（`FitResult.item_fit()`、多母集団は群ごと。単一群の確認的 2〜3 因子モデルにも対応）。mirt と同じセルのまとめ方・自由度・RMSEA・p 値。項目の infit / outfit 平均平方と $z$ 値（`item_fit(statistics=("infit", "outfit"))`、1 次元） | ✓ |

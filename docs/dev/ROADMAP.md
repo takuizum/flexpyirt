@@ -98,7 +98,10 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 
 ## M6 Lifting the single-group / unidimensional restrictions
 Each item is accepted when its mirt (or independent) comparison passes; the issue lists the reference.
-- [ ] Davidian curve and normal-mixture latent distributions in multiple-group models (#75).
+- [x] Davidian curve and normal-mixture latent distributions in multiple-group models (#75;
+  DESIGN §27): one family per model, a shape per group, anchored or FIPC designs, Oakes / Hessian
+  SEs, EAP / PV, `item_fit()` per group (S-X2 now also for one group), JSON unchanged. Validated
+  in V56 (mirt `multipleGroup(customGroup = ...)` with an independent R likelihood).
 - [x] M2 for multiple groups, missing data and MAP fits (#76; DESIGN §16.23, validated in V42):
   stacked statistic over groups with the group rows of $\Delta$ scaled by $\sqrt{N_g/N}$,
   pairwise-available margins with their exact covariance under MCAR, and MAP fits evaluated at the

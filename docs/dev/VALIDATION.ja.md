@@ -91,6 +91,7 @@
 | V53 | EAP・MAP・ML・WLE の推定値での受験者適合度（$l_z$、$l_z^*$、受験者の infit / outfit と $z$）と項目の infit / outfit。V37 のデータと推定値（2PL、8% 欠測の 2PL、3PL、GRM と GPCM $K=4$、名義 $K=4$、2PL + 3PL + GRM + GPCM + 名義の混在、2PL + GRM の 2 群）と Rasch での再推定 | `personfit(m, Theta = )`、`itemfit(m, fit_stats = "infit", Theta = )`、`sirt::personfit.stat()`、式から R で再計算した $l_z^*$ | — |
 | V54 | モデル比較表（V11a のデータで Rasch・2PL・3PL、V8b のデータで PCM・GPCM、V4 のデータで全項目不変の 2 群 2PL とアンカーのみのモデル・最後の項目だけ自由なモデル）と回答データのシミュレーション（2PL・Rasch・3PL・4PL・GRM・GPCM・名義反応の 1 次元と 2 因子での決定的な逆変換、潜在分布ごとの分布と復元の確認） | `anova(mod1, mod2, ...)`。同じ $\theta$ と一様乱数での `probtrace()`（乱数列は `simdata()` と一致させられない） | #109 |
 | V55 | 群ブロック化した E-step での多数の群: 2PL、大きさの異なる 10 群（200–470）、15 項目、q01–q06 を不変なアンカー、q07–q15 は群ごとに自由、焦点群の平均・分散は自由、5% MCAR 欠測。ブロック化した E-step と平坦な E-step の回帰 | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`、`fscores(extract.group(m, g), method = "EAP")`。回帰は平坦な経路 | #79 |
+| V56 | 群ごとの `DavidianCurve` と `NormalMixture`: (a) 2PL、3 群（二峰・右に歪む・左に歪む）、`DavidianCurve(2)`、q01–q06 がアンカー、3% 欠測。(b) 2PL $J=15$、2 群、`NormalMixture(2)`、全項目不変。(c) FIPC、2 群、`DavidianCurve(2)`、全潜在パラメタ自由。推定値、R の Hessian による SE、EAP、群ごとの S-X2 | 格子上で正規化した標準化密度（`dcurver::ddc`）による `multipleGroup(customGroup = createGroup(...))` を独立な R の周辺対数尤度上の Newton で磨く。R の Richardson Hessian による SE、R で計算した EAP、各群の推定値で固定した 1 群オブジェクトでの `itemfit(use_dentype_estimate = TRUE)` | #75 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -1229,6 +1230,24 @@
   GRM 項目と 5% 欠測を含む）: 固定したパラメタでの期待度数・対数尤度・EAP が $10^{-10}$ 以内、Oakes と Hessian の
   情報行列が（最大要素に対して）$10^{-9}$ 以内、ブロックを Oakes のサブチャンクに分けても同じ。推定結果は推定値
   $10^{-6}$・SE 相対 $10^{-5}$ 以内（和の順序が違うので EM の反復は丸め誤差の水準で異なる）。
+
+- **群ごとの Davidian 曲線と正規混合（V56、#75、DESIGN §27）**: `tests/test_mirt_v56_multigroup_shapes.py`（参照値は
+  `validation/r/v56_multigroup_shapes_reference.R`。$[-6, 6]$ の 61 点）。mirt の `multipleGroup()` は平均・分散が自由な
+  Davidian の群を受け付けず、`dentype = "mixture-k"` は潜在クラスモデルなので、V19・V22 と同じく mirt に `customGroup` で
+  flexpyirt の厳密な離散化モデルを推定させ（BFGS、`TOL = 1e-10`）、その解を独立な R の周辺対数尤度上の Newton ステップで
+  磨く（中心差分、Richardson Hessian。最終の max |grad| $\le 3\times10^{-6}$）。参照 SE は R の Hessian の逆行列。磨いた点での
+  mirt の Oakes SE は証拠として保存する（R の Hessian と相対 $5\times10^{-4}$ で一致）。EAP は磨いたパラメタから R で計算する。
+  S-X2 は、各群の推定値で項目と密度を固定した 1 群の mirt オブジェクトでの `itemfit()` から得る。`use_dentype_estimate = TRUE`
+  が必要で、これがないと mirt の S-X2 は群の平均・分散の正規事前分布で積分する（V56 の作成中に判明。そのときは値が 3 程度
+  ずれる）。Davidian と混合の尤度は形について多峰なので（3 群目が正規だったケースは極大が複数あり角度の SE が 16–19 だったので、
+  歪んだ群に置き換えた）、テストは各群の潜在パラメタを参照値を有効数字 2 桁に丸めた値から始める。`BAEM(tol=1e-10, squarem=True)`
+  での結果: 対数尤度が $2\times10^{-11}$ 以内（相対 $2\times10^{-15}$）、項目と潜在分布の推定値がすべて $1.1\times10^{-7}$ 以内、
+  SE が R の Hessian と相対 $1.3\times10^{-4}$ 以内（最大は数値 Hessian の精度が最も低い焦点群の混合の `rmean_2`）、EAP と
+  その SD が $4.4\times10^{-8}$ 以内、S-X2 が $4\times10^{-8}$ 以内で、$df$ は mirt の $df$ から項目と群の自由な潜在分布
+  パラメタの数を引いたものに等しい（mirt の固定したオブジェクトには自由パラメタがない）。許容誤差は相対 $10^{-8}$、$10^{-4}$、
+  相対 $10^{-3}$、$10^{-5}$、$10^{-4}$。内部の検査（`tests/test_multigroup_latent_shapes.py`）: Oakes = Hessian の SE、
+  `phi_*` をすべて 0 に固定した Davidian モデルが 2 群の `Normal` モデルを対数尤度 $10^{-8}$ で再現、`link()` の既定の重みと
+  空パターンの EAP が各群の密度を使う、群ごとの混合の警告、JSON の往復（スキーマ 8）、アンカーつきの点から始めた FIPC。
 
 ## 照合以外の検証
 - **古典的項目分析（V46、flexpyctt、#101）**:
