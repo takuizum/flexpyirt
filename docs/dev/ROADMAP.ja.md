@@ -81,7 +81,7 @@
    - [x] 双因子・two-tier モデルの `FitResult.local_dependence()`。期待度数表は縮約した格子の上で求める
      （V38 で `bfactor()` の適合に対する mirt の `residuals()` と照合）。
      未対応: 単一群・1 次元・正規分布以外の JSI（複数の傾きを持つ項目についての定義がなく、mirt にも参照値がない）。
-3. [ ] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
+3. [x] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
    カーネル（#83）の上に作る。
    - [x] カーネル（#83）: `summed_score_distribution()`。Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰
      （通常と対数空間）、DFT-CF 法、2 値項目用の正規・精密化正規・Poisson 近似。`jit` / `vmap` / 自動微分に対応。
@@ -91,7 +91,10 @@
      `FitResult.score(method="EAPsum")`。V37 で 2PL・3PL・GRM・GPCM・名義・混合形式のテスト・2 群モデルについて
      `iteminfo()`・`testinfo()`・`expected.item()` / `expected.test()`・`marginal_rxx()`・`empirical_rxx()`・
      `fscores(method = "EAPsum")` と照合済み。
-   - [ ] 多次元モデル: 情報行列と方向別の情報量。
+   - [x] 多次元モデル（確認的 2–3 因子、双因子、two-tier。単一群と多母集団）: `information_matrix()`、
+     `item_information(direction=)` / `test_information(direction=)` による方向別の情報量（合成値の SE つき）と
+     `expected_score()`。V43 で `iteminfo(multidim_matrix = TRUE)`・`iteminfo(degrees = )`・
+     `testinfo(degrees = )`・`expected.item()` / `expected.test()` と照合。
 4. [ ] 標本ウェイト（#84）。
    - [x] `fit(..., weights=...)`: ウェイトを足し合わせるパターン圧縮による重み付き周辺尤度（EM、SQUAREM、多群、
      欠測、FIPC）。BIC はウェイトの和を使う。Oakes / Hessian の SE は警告つき（度数ウェイトでのみ正しい）。
