@@ -53,6 +53,11 @@ from flexpyirt.model import Model
 from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
+from flexpyirt.screening import (
+    CommonItemScreeningResult,
+    screen_common_items,
+    stack_screening_tables,
+)
 from flexpyirt.sumscore import summed_score_distribution
 
 try:
@@ -66,6 +71,7 @@ __all__ = [
     "GRM",
     "PCM",
     "BetaPrior",
+    "CommonItemScreeningResult",
     "ComparisonDataResult",
     "DavidianCurve",
     "DetectResult",
@@ -113,6 +119,8 @@ __all__ = [
     "parallel_analysis",
     "polychoric",
     "reliability",
+    "screen_common_items",
+    "stack_screening_tables",
     "summed_score_distribution",
     "summed_score_table",
     "test_information",

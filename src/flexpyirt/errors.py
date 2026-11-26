@@ -28,6 +28,7 @@ __all__ = [
     "IdentificationError",
     "NotPositiveDefiniteWarning",
     "PrecisionError",
+    "ScreeningWarning",
     "SpecificationError",
 ]
 
@@ -52,4 +53,12 @@ class PrecisionError(FlexpyirtError, RuntimeError):
 
     flexpyirt requires ``jax_enable_x64``. It never changes this global setting
     on the user's behalf.
+    """
+
+
+class ScreeningWarning(FlexpyirtWarning):
+    """Common-item purification stopped while kept anchor items were still flagged.
+
+    Emitted by :func:`flexpyirt.screen_common_items` when ``max_iter`` removal steps are used up or
+    a removal would take the anchor set below ``min_items`` (DESIGN.md §20).
     """
