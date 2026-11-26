@@ -139,7 +139,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 
 ## 7. 主なクラス・関数の一覧
 
-推定済みのモデルを使わない道具（下の表の `polychoric` から `detect` まで。`model_parallel_analysis` と
+推定済みのモデルを使わない道具（下の表の `polychoric` から `logistic_dif` まで。`model_parallel_analysis` と
 `dimensionality` を除く）は flexpyctt で定義し、flexpyirt が再公開する。これらは JAX の `key` の代わりに `rng`
 （シードまたは `numpy.random.Generator`）を取る。`flexpyirt.polychoric` は JAX 版、`flexpyctt.polychoric` は
 NumPy / SciPy 版（DESIGN.md §16.18）。
@@ -167,6 +167,7 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `comparison_data` | 関数 | 比較データ法（Ruscio & Roche, 2012）。`ComparisonDataResult` を返す |
 | `efa`, `hull` | 関数 | 相関行列の回転なしの ULS / ML 因子分析（EFAtools と同じ適合度指標）と Hull 法。`EFAResult`, `HullResult` を返す |
 | `dimtest` | 関数 | ブートストラップでバイアス補正する DIMTEST。`DimtestResult` を返す |
+| `mantel_haenszel`, `mantel`, `generalized_mantel_haenszel`, `logistic_dif` | 関数 | 観測得点による DIF（flexpyctt）: ETS 分類つきの Mantel–Haenszel、Mantel 検定、一般化 MH、ロジスティック回帰。マッチング得点の純化つき。`DIFResult`（`table`, `anchor_items`, `n_iter`, `converged`, `flag_history`）を返す |
 | `detect`, `exploratory_detect` | 関数 | 確認的・探索的 DETECT。`DetectResult`, `ExploratoryDetectResult` を返す |
 | `model_parallel_analysis`, `dimensionality` | 関数 | `FitResult` のモデルに基づく平行分析と、まとめのレポート。`ModelParallelAnalysisResult`, `DimensionalityResult` を返す |
 | `item_information`, `test_information`, `expected_score` | 関数 | `FitResult` の、与えた `theta` での項目・テスト情報量（条件付き SE つき）と期待得点。`theta` をインデックスにした DataFrame を返す（DESIGN §18.2） |

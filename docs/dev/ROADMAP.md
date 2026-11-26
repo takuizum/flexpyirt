@@ -90,6 +90,11 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
     its generator).
   - [x] D6 DIMTEST with bootstrap bias correction (`dimtest()`; accepted in V30 on a simulation study:
     type I error 0.5–1.0% at .05, conservative; power 0.99–1.00).
+- [x] Observed-score DIF in flexpyctt (#102; DESIGN §16.20): Mantel–Haenszel with ETS classes
+  (`mantel_haenszel()`), Mantel's test for ordered items (`mantel()`), generalized MH
+  (`generalized_mantel_haenszel()`) and logistic regression (`logistic_dif()`), with
+  purification; validated in V47 against difR and `mantelhaen.test()`.
+- [ ] Ordinal logistic-regression DIF (#102, second PR; reference `difR::difPolyLogistic`).
 
 ## M6 Lifting the single-group / unidimensional restrictions
 Each item is accepted when its mirt (or independent) comparison passes; the issue lists the reference.
