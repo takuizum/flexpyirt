@@ -1901,6 +1901,82 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    対角の $\mathbf A$ では $A_m\,\mathrm{se}_m$、それ以外では NaN にする（回転後の標準誤差には事後共分散が必要だが、
    得点表はそれを持たない）。
 
+## 20. 図と、その元になる数値（#103、V48）
+
+1. **図の置き場所（決定、オーナー 2026-11-26: #103 の案 A）。** モジュール `flexpyirt.plotting` とし、
+   matplotlib は任意依存 `flexpyirt[plot]` にする。matplotlib は各描画関数の中で import し、
+   `import flexpyirt` や `import flexpyirt.plotting` では読み込まない。入っていなければ描画関数は
+   extra の名前を示す `errors.MissingDependencyError`（`FlexpyirtError` かつ `ImportError`）を投げる。
+   図の元になる数値はすべて DataFrame を返す公開関数で作る（`flexpyirt.curves` に定義し、`flexpyirt`
+   から公開）。照合するのはその数値だけ（V48）。描画関数は薄く、それらの関数を呼んで列を描き、
+   matplotlib のオブジェクトを返し、`plt.show()` は呼ばない。Agg バックエンドでのスモークテスト
+   （オブジェクトができること、描いたデータが DataFrame と等しいこと）だけで、画像比較はしない。
+   **範囲。** 1 次元モデル、全項目族、単群・多群、任意の潜在分布。対話的なバックエンド、多次元の曲面、
+   スタイルのテーマ、flexpyctt / flexpyequate の図は範囲外。`FitResult` には何も保存せず、
+   `schema_version` は変えない。
+
+2. **項目反応曲線（トレースライン）: `item_probabilities(res, theta, *, items=None, group=None)`。**
+   カテゴリ確率 $P_{jk}(\theta)=\Pr(Y_j=k\mid\theta)$、$k=0,\dots,K_j-1$ を項目カーネルから求める
+   （`_information.category_probabilities`。0 で埋めた $(G, T, J, K_{\max})$ を返す jit カーネル）。
+   縦長形式で列は `item`, `category`, `theta`, `probability`（項目・カテゴリ・$\theta$ の順に 1 行）。
+   `group` は `item_information()` と同じく群の名前で、多群モデルでは必須。mirt: `probtrace()`。
+
+3. **経験的項目曲線: `empirical_item_curve(res, data, *, items=None, n_bins=10, group=None,
+   item_names=None)`。** 項目 $j$ に回答した $n_j$ 人を EAP 推定値 $\hat\theta_i$（推定に使った格子での
+   `score(method="EAP")`。同順位は行の順、安定ソート）で並べ、連続する $B$ 個の区間に分ける。
+   各区間に $\lfloor n_j/B\rfloor$ 人を入れ、余り $c=n_j\bmod B$ のうち $\lfloor c/2\rfloor$ 人を最初の
+   区間に、$c-\lfloor c/2\rfloor$ 人を最後の区間に入れる。これは mirt の `itemfit()` の規則
+   （`group.bins`）で、#103 で提案した「EAP $\theta$ の等人数区間」である。区間 $b$ について
+   $$\bar\theta_b=\frac1{n_b}\sum_{i\in\mathcal B_b}\hat\theta_i,\qquad
+   O_{bk}=\frac1{n_b}\sum_{i\in\mathcal B_b}[y_{ij}=k],\qquad E_{bk}=P_{jk}(\bar\theta_b)$$
+   （Bock, 1972; Yen, 1981）。それぞれ列 `theta`, `observed`, `expected` で、ほかに `n` $=n_b$、
+   `bin` $=1,\dots,B$、`category`。$n_bO_{bk}$ と $n_bE_{bk}$ は mirt の
+   `itemfit(fit_stats = "X2", return.tables = TRUE)` の観測表・期待表（セル併合 `mincell.X2` の前）、
+   $(\bar\theta_b,O_{bk})$ は `itemfit(empirical.plot = )` の点に当たる。
+   欠測: 回答者は回答した項目の区間にだけ入る（mirt の `pick`）。多群モデルでは群ごとにその群の
+   パラメータで区間を作る（mirt の群ごとの `itemfit()`）。`group=` は `score()` と同じく `data` の各行の
+   群ラベルで、結果の先頭に `group` 列が付く。（ある群で）回答数が `n_bins` 未満の項目は
+   `SpecificationError`（mirt なら空の区間ができる）。意図して mirt と変えた点: セル併合と $X^2$ は
+   しない（適合度統計量は別 issue）、`empirical.CI` の Clopper–Pearson 区間は出さない、`method` は EAP
+   だけ（mirt の `method=`）。
+
+4. **Wright マップの項目位置: `wright_map_table(res, data, *, group=None, item_names=None,
+   method="EAP")`。** 2 つの DataFrame の名前付きタプル `WrightMapTable(persons, items)` を返す。
+   `persons` は `score(method=method)`（`"EAP"`, `"MAP"`, `"WLE"`。いずれも有限）の `theta` で、
+   インデックスは `data` のもの。`items` は項目の閾値ごとに 1 行で、`item`、`category`
+   $k=1,\dots,K_j-1$、`location`。`location` はサーストン閾値
+   $$\tau_{jk}:\quad P(Y_j\ge k\mid\tau_{jk})=\sum_{c\ge k}P_{jc}(\tau_{jk})=\tfrac12$$
+   （Wright & Masters, 1982; Wu, Adams, Wilson & Haldane, 2007; TAM の `tam.threshold()`）。2PL / Rasch
+   では $b_j=-d_j/a_j$、GRM では $b_{jk}$ に等しい。3PL / 4PL では $P=1/2$ となる点（$P=(g+u)/2$ と
+   なる $b$ ではない）、GPCM / PCM ではステップ困難度と異なる。すべての項目族で 1 つの定義にするため、
+   issue の「`b` / サーストン閾値」は閾値だけにした。**求根**: $P(Y_j\ge k\mid\theta)$ を $[-20,20]$ の
+   等間隔 4001 点で評価し、$P(Y_j\ge k\mid\theta)-1/2$ の最初の符号変化を二分法 64 回で詰める（全閾値を
+   まとめて、1 回あたりカーネル呼び出し 1 回）。$a>0$ の順序付き項目族ではこの関数は増加する。名義
+   項目（カテゴリに順序がない）ではデータのカテゴリ順での最初の交点、交点がなければ（例: $g\ge1/2$ の
+   3PL 項目）NaN。多群モデルでは `items` に各群のパラメータによる閾値を全群分入れる（両方の表に
+   `group` 列）。
+
+5. **描画関数**（`flexpyirt.plotting`。既定の $\theta$ 格子は $[-4,4]$ の 161 点で、`theta=` で変える）。
+   - `plot_item_curves(res, items=None, *, data=None, group=None, n_bins=10, theta=None,
+     item_names=None, ax=None) -> Figure`: 項目ごとに 1 パネル（1 行 3 個）。2 値項目は $P_{j1}$、
+     多値項目は全カテゴリ。`data` があれば `empirical_item_curve()` の点。多群の推定結果では各パネルに
+     群ごとの曲線を描く（色が群、線種がカテゴリ）。これが **DIF の図**。`ax=` は 1 項目を既存の Axes に
+     描く（`ax` の Figure を返す）。`group=` は `data` と一緒に使う行ラベルで、曲線は常に全群を描く。
+   - `plot_information(res, items=None, *, standard_error=False, group=None, theta=None, ax=None)
+     -> Axes`: `test_information()`（既定）または指定項目の `item_information()`。
+     `standard_error=True` で `se` を `ax.twinx()` に描く。`group` は群の名前（既定: 全群）。
+   - `plot_expected_score(res, *, group=None, theta=None, ax=None) -> Axes`: `expected_score()` の列
+     `total`。既定では群ごとに 1 本。
+   - `plot_wright_map(res, data, *, group=None, item_names=None, method="EAP", n_bins=30) ->
+     Figure`: $\theta$ 軸を共有する 2 つの Axes。`persons` の横向きヒストグラムと、`items` の閾値を
+     項目ごとの印で描く（群ごとに重ねる）。
+   **`FitResult.plot_*()` メソッドではなく関数**にした（`item_information()` や `link()` と同じ）。
+   描画の依存を結果クラスに持ち込まないため。
+   **`group=` の意味**は、$\theta$ の関数（`item_probabilities`, `plot_information`,
+   `plot_expected_score`。`item_information` と同じ）では群の名前、`data` を取る関数
+   （`empirical_item_curve`, `wright_map_table`, `plot_item_curves`, `plot_wright_map`。
+   `reliability` や `score` と同じ）では `data` の各行の群ラベル。
+
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -2001,6 +2077,9 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
+- Wright, B. D., & Masters, G. N. (1982). *Rating Scale Analysis*. MESA Press.
+- Wu, M. L., Adams, R. J., Wilson, M. R., & Haldane, S. A. (2007). *ACER ConQuest Version 2: Generalised Item Response Modelling Software*. Australian Council for Educational Research.
+- Yen, W. M. (1981). Using simulation results to choose a latent trait model. *Applied Psychological Measurement*, 5(2), 245–262.
 - Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.
