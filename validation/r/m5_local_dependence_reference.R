@@ -12,6 +12,7 @@
 # flexpyirt does; its tetrachorics come from polycor::polychor and the diagonal is the largest
 # off-diagonal correlation.
 # ltm ships its own (factor-coded) Science and LSAT data, so mirt's are named with mirt::.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(ltm)
@@ -77,7 +78,7 @@ unidim <- list(case = "lsat7_2pl", B = 4000, observed = ut$Tobs,
 
 res <- list(
   meta = list(case = "v26_local_dependence", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")),
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
               ltm_version = as.character(packageVersion("ltm")),
               polycor_version = as.character(packageVersion("polycor")),
               converged = TRUE, TOL = 1e-10, quadpts = 61, theta_lim = c(-6, 6)),

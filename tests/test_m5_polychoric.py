@@ -92,7 +92,8 @@ def test_smooth_correlation_leaves_positive_definite_matrix() -> None:
 @cache
 def _reference() -> dict[str, Any]:
     raw = dict(json.loads((CTT_REFERENCE_DIR / "v24_polychoric.json").read_text(encoding="utf-8")))
-    check_reference_meta(raw["meta"])
+    # mirt only supplies the LSAT7 / Science data here; the values come from lavaan and psych.
+    check_reference_meta(raw["meta"], mirt_estimates=False)
     return raw
 
 

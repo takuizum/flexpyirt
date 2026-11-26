@@ -24,6 +24,7 @@
 #      observed-information SEs (they are close to the complete-data SEs with known classes), so
 #      the SE reference is the R Richardson Hessian; mirt's Oakes and "complete" SEs and the R
 #      Hessian SEs on mirt's own scale are stored as evidence (VALIDATION.md V22).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -405,7 +406,7 @@ write_v22 <- function(case, description, dat, itemtype, n_cat, k, res, extra = l
       case = case,
       description = description,
       r_version = R.version.string,
-      mirt_version = as.character(packageVersion("mirt")),
+      mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
       TOL = TOL,
       quadpts = QUADPTS,
       theta_lim = LIM,

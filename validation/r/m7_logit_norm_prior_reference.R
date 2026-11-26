@@ -12,6 +12,7 @@
 #    the logit-metric one (no -log g - log(1 - g) term).
 # 2. mirt's estimate is a stationary point of logLik + logPrior on (a, d, logit g), with the
 #    gradient written here (max |grad| < 1e-6).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -118,7 +119,7 @@ res <- list(
     ),
     itemtype = "3PL",
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     TOL = 1e-10,
     quadpts = quad$quadpts,
     theta_lim = quad$theta_lim,

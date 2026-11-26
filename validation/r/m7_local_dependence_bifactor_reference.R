@@ -18,6 +18,7 @@
 # The Python test puts mirt's estimates into a flexpyirt FitResult (every parameter fixed) and
 # compares, so the comparison does not depend on how tightly either program converged (the
 # estimates themselves are compared in V32 and V33).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -158,7 +159,7 @@ cases[[3]] <- run_case("two_tier_2pl", "two_tier", dat, block, "2PL", 15, primar
 
 out <- list(
   meta = list(case = "v38_local_dependence_bifactor", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")), converged = TRUE,
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(), converged = TRUE,
               theta_lim = LIM, grid_check = LIM),
   cases = cases
 )

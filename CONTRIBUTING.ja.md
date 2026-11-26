@@ -131,12 +131,16 @@ mirt 参照値との照合は、full 層（夜間実行またはリリース PR�
 
 手元で素早く確かめるなら `uv run pytest -m "not slow"`。CI と同じ full 層の 1 シャードだけ走らせるなら `uv run pytest --shard 2/4`（fast 層なら `uv run pytest -m "not slow" --shard 2/3 --durations-file tests/durations-fast.json`）。
 
-mirt の参照値を作り直すとき（R 4.4+ と mirt が必要）:
+mirt の参照値を作り直すとき（R 4.4+ が必要。mirt は GitHub の `philchalmers/mirt` からユーザーライブラリか
+`FLEXPYIRT_R_LIB` に入れる。[VALIDATION.ja.md](docs/dev/VALIDATION.ja.md)「R と mirt の版」）:
 
 ```bash
-Rscript validation/r/m1_reference.R
-Rscript validation/r/m2_reference.R
+Rscript validation/r/install_mirt.R
+validation/r/run_references.sh
 ```
+
+1 本だけ作り直すなら `validation/r/run_references.sh m1 m2`。mirt を使うスクリプトを新しく足すときは
+`validation/r/setup.R` を `source` し、`run_references.sh` の段のリストに加える。
 
 flexpyctt の参照値のスクリプトは `packages/flexpyctt/validation/r/` にあり、`packages/flexpyctt/tests/reference/` に
 書き出す。これらもリポジトリのルートから実行する。flexpyequate のスクリプトは `validation/r/equate_*.R` で、

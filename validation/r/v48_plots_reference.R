@@ -17,6 +17,7 @@
 #   - coef(IRTpars = TRUE) b / b1.. of the 2PL and graded items              -> irt_b
 # The case gpcm_tam is a TAM fit (tam.mml.2pl(irtmodel = "GPCM")): its slopes and intercepts
 # (from B and AXsi) and tam.threshold() (bisection to 1e-4).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(TAM)
@@ -239,7 +240,7 @@ bundle <- list(
                         "/ probtrace / Thurstonian thresholds by uniroot / coef(IRTpars = TRUE)",
                         "and TAM tam.threshold"),
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     tam_version = as.character(packageVersion("TAM")),
     quadpts = quadpts, theta_lim = theta_lim, n_bins = n_bins,
     # Every mirt fit above is asserted to have converged (fit_single(), multipleGroup()).

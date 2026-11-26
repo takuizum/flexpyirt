@@ -12,6 +12,7 @@
 # expected.item() for the characteristic curves and optim(BFGS) + nlm() for tight optimization.
 # Haebara sums squared differences over all categories of each item (Kim & Lee, 2006), including
 # both categories of a dichotomous item.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -637,7 +638,7 @@ res <- list(
       "mirt's probtrace() and expected.item() for characteristic curves."
     ),
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     TOL = 1e-10,
     quadpts = quadpts,
     theta_lim = theta_lim,

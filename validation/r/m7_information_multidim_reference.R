@@ -15,6 +15,7 @@
 #       testinfo(m, Theta, degrees = )                                  -> testinfo [T]
 #       sqrt(u' (sum_j I_j)^-1 u), u = cos(degrees), from the matrices  -> se [T]
 #   - expected.item() per item and expected.test()                     -> expected_item, expected_test
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -206,7 +207,7 @@ bundle <- list(
                         "TRUE) / iteminfo(degrees = ) / testinfo(degrees = ) / expected.item /",
                         "expected.test"),
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     # Nothing is estimated (TOL = NaN at chosen parameters), so there is no convergence to check.
     converged = TRUE
   ),

@@ -17,6 +17,7 @@
 # The same R function with `mirt_convention = TRUE` (no latent columns, unscaled group rows, mirt's
 # N.ratio weighting of the residuals) must reproduce mirt's raw M2 (asserted below), which checks
 # the R implementation against mirt itself.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -387,7 +388,7 @@ cases$map_2pl <- record("map_2pl", m, y, NULL, th1, QUADPTS_1D,
 
 meta <- list(
   case = "v42_m2_groups_missing_map", converged = TRUE,
-  r_version = R.version.string, mirt_version = as.character(packageVersion("mirt"))
+  r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha()
 )
 write_json(list(meta = meta, cases = cases),
            file.path("tests", "reference", "v42_m2_groups_missing_map.json"),

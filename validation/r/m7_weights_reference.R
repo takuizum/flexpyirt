@@ -6,6 +6,7 @@
 # Cases with a free latent mean/variance use 81 points on [-8, 8] (VALIDATION.md, DESIGN.md §14.9).
 # Each file stores the raw rows (`data`, NA = missing), the group label and the weight of every
 # row, so the Python side exercises the weighted pattern compression itself.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -48,7 +49,7 @@ write_case <- function(case, description, dat, groups, group_labels, weights, fi
   m_unweighted <- fit_fun(NULL)
   res <- c(list(
     meta = list(case = case, description = description,
-                r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+                r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
                 TOL = 1e-10, quadpts = quad$quadpts, theta_lim = quad$theta_lim,
                 grid_check = range(m@Model$Theta),
                 accelerate = "none", optimizer = "NR", se_type = "Oakes",
@@ -191,7 +192,7 @@ names(params_e) <- colnames(dat_e)
 res_e <- list(
   meta = list(case = "v34_weights_bifactor",
               description = "V34e: bifactor 2PL, J=9, three specific factors, N=1000, lognormal weights (sum != N)",
-              r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+              r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
               TOL = 1e-10, quadpts = 21, theta_lim = c(-6, 6), grid_check = range(m_e@Model$Theta),
               accelerate = "none", optimizer = "NR", se_type = "Oakes",
               converged = extract.mirt(m_e, "converged"),
