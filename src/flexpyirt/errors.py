@@ -26,6 +26,7 @@ __all__ = [
     "FlexpyirtWarning",
     "HeywoodWarning",
     "IdentificationError",
+    "MissingDependencyError",
     "NotPositiveDefiniteWarning",
     "PrecisionError",
     "SpecificationError",
@@ -44,6 +45,14 @@ class IdentificationError(FlexpyirtError, ValueError):
 
     Example: freeing the mean and variance of a focal group without any anchor item. Raised before
     estimation starts.
+    """
+
+
+class MissingDependencyError(FlexpyirtError, ImportError):
+    """An optional dependency needed by the called function is not installed.
+
+    Example: a function of :mod:`flexpyirt.plotting` without matplotlib (install
+    ``flexpyirt[plot]``). ``import flexpyirt`` never needs the optional dependencies.
     """
 
 
