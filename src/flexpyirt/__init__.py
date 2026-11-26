@@ -37,6 +37,7 @@ from flexpyirt.dimensionality import (
     parallel_analysis,
     velicer_map,
 )
+from flexpyirt.equating import IRTEquatingResult, irt_equate, scale_table, score_distribution
 from flexpyirt.fit import fit
 from flexpyirt.information import (
     expected_score,
@@ -78,6 +79,7 @@ __all__ = [
     "FitResult",
     "FourPL",
     "HullResult",
+    "IRTEquatingResult",
     "JSIResult",
     "LinkResult",
     "LocalDependenceResult",
@@ -107,12 +109,15 @@ __all__ = [
     "exploratory_detect",
     "fit",
     "hull",
+    "irt_equate",
     "item_information",
     "link",
     "model_parallel_analysis",
     "parallel_analysis",
     "polychoric",
     "reliability",
+    "scale_table",
+    "score_distribution",
     "summed_score_distribution",
     "summed_score_table",
     "test_information",
