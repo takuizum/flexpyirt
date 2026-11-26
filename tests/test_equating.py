@@ -1,4 +1,4 @@
-"""Unit tests of IRT equating and scale tables (DESIGN.md §21; R references in test_r_equating).
+"""Unit tests of IRT equating and scale tables (DESIGN.md §22; R references in test_r_equating).
 
 Fits have every parameter fixed, so they only carry item parameters and latent distributions.
 """
