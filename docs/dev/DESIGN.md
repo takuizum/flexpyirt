@@ -2397,9 +2397,9 @@ data-independent shapes (§15.21).
    **Measured accuracy and speed** are recorded in VALIDATION.md (V36).
 
 2. **Information, expected score, reliability and summed-score EAP (#82, V37)**:
-   **Scope.** Unidimensional models, single and multiple groups. Every function raises
-   `SpecificationError` for a multidimensional model (the information matrix and directional
-   information are a later change).
+   **Scope.** Unidimensional models, single and multiple groups. The information matrix and
+   directional information of multidimensional models are item 3; reliability and the
+   summed-score functions raise `SpecificationError` for a multidimensional model.
    **API (Decision, owner 2026-11-25).** Module-level functions that take the fit first, like
    `link()` and `dimensionality()`:
    `item_information(res, theta, *, group=None)`, `test_information(res, theta, *, group=None)`,
@@ -2486,6 +2486,71 @@ data-independent shapes (§15.21).
    for a fitted non-Normal density, and mirt's EAPsum uses a normal prior by default).
    **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
    **Measured agreement** is recorded in VALIDATION.md (V37).
+
+3. **Information matrix and directional information of multidimensional models (#82, V43)**:
+   **Scope.** Confirmatory models from `with_factors` (2–3 factors, any loading pattern
+   including cross-loadings), bifactor models (`with_bifactor`) and two-tier models
+   (`with_two_tier`), single and multiple groups. `item_information`, `test_information` and
+   `expected_score` accept them; the new `information_matrix` returns the matrix itself.
+   `reliability`, `summed_score_table` and `score(method="EAPsum")` stay unidimensional (a
+   multidimensional summed-score EAP and a marginal reliability of a composite are separate
+   questions without a mirt reference).
+   **Information matrix.** With $\boldsymbol\theta\in\mathbb R^D$, item $j$'s Fisher information
+   matrix and the test information matrix are
+   $$\mathbf I_j(\boldsymbol\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)^\top,\qquad
+     \mathbf I(\boldsymbol\theta)=\sum_j\mathbf I_j(\boldsymbol\theta)$$
+   (Reckase, 2009, ch. 5), from the same forward-mode autodiff of the item kernel's category
+   log-probabilities as item 2, now with respect to all $D$ coordinates (`jax.jacfwd` gives
+   the $K_j\times D$ Jacobian). For every built-in family $P_{jk}$ depends on
+   $\boldsymbol\theta$ only through $\mathbf a_j^\top\boldsymbol\theta$, so $\mathbf I_j=c_j(\boldsymbol\theta)\,\mathbf a_j\mathbf a_j^\top$
+   has rank 1; the code does not use this (user-defined kernels need not have it). For a
+   unidimensional model $D=1$ and the matrix is the scalar of item 2; there is one code path.
+   In bifactor and two-tier models the kernels are evaluated at the full $D$-vector; the
+   dimension reduction of §17 concerns only the integration over $\boldsymbol\theta$ and plays
+   no role here.
+   **Directional information.** Along a unit vector $\mathbf u$ ($\|\mathbf u\|=1$),
+   $$I_{j,\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u,\qquad
+     I_{\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$$
+   (Reckase & McKinley, 1991; Ackerman, 1994), the information about $\boldsymbol\theta$ when
+   it moves along $\mathbf u$. mirt's `iteminfo(..., degrees = )` / `testinfo(..., degrees = )`
+   take the angles $\alpha_m$ to the axes and use $u_m=\cos\alpha_m$ without normalizing;
+   flexpyirt takes the direction vector and **normalizes it**, so the two agree whenever the
+   angles are consistent ($\sum_m\cos^2\alpha_m=1$), and mirt's angles are
+   `direction=np.cos(np.radians(degrees))`.
+   **API (Decision, 2026-11-26).**
+   - `theta` of a multidimensional model is a `(T, D)` array-like, or a DataFrame whose columns
+     are exactly the factor names (in any order; reordered to the model's order); a 1-D array of
+     length $D$ is a single point. Unidimensional models keep the 1-D `theta` of item 2. The
+     result is indexed by a `MultiIndex` whose level names are the factor names (index name
+     `theta` for unidimensional models, as before).
+   - `item_information(res, theta, *, direction=None, group=None)` and
+     `test_information(res, theta, *, direction=None, group=None)`: for a multidimensional model
+     `direction` (1-D, length $D$, finite, non-zero; normalized) is **required**, because there
+     is no natural default direction (mirt also requires `degrees`); one column per item,
+     respectively the columns `information` and `se`. For a unidimensional model `direction`
+     must be `None`. One direction per call; several directions are several calls.
+   - `test_information`'s `se` is $\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$,
+     the asymptotic conditional standard error of the ML estimate of the composite
+     $\mathbf u^\top\boldsymbol\theta$, which reduces to $I(\theta)^{-1/2}$ for $D=1$. It is not
+     $I_{\mathbf u}^{-1/2}$, which would be the standard error if the coordinates orthogonal to
+     $\mathbf u$ were known; the two coincide only when $\mathbf u$ is an eigenvector of
+     $\mathbf I$. Where $\mathbf I(\boldsymbol\theta)$ is not positive definite (Cholesky
+     fails; e.g. fewer linearly independent slope vectors than factors), `se` is $+\infty$, as
+     for $I=0$ in one dimension. mirt has no counterpart; the reference inverts the sum of
+     mirt's item information matrices in R.
+   - `information_matrix(res, theta, *, item=None, group=None)` returns a NumPy array of shape
+     `(T, D, D)`: the test information matrix, or with `item=` (an item name) that item's matrix.
+     It is an array rather than a DataFrame because a $D\times D$ matrix per point has no flat
+     layout that is not awkward to index; rows and columns follow the fitted model's `Model.factor_names`.
+     Unidimensional models give `(T, 1, 1)`. This is mirt's
+     `iteminfo(..., multidim_matrix = TRUE)` (per point), summed over items for the test.
+   - `expected_score(res, theta, *, group=None)`: $E_j(\boldsymbol\theta)=\sum_kk\,P_{jk}(\boldsymbol\theta)$
+     and `total`, as in item 2 with the multidimensional `theta`; mirt's `expected.item()` /
+     `expected.test()` with a $D$-column `Theta`.
+   **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
+   **Measured agreement** is recorded in VALIDATION.md (V43).
 
 ## 19. Multidimensional scale linking (M6)
 
