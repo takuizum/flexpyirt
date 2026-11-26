@@ -10,6 +10,7 @@ recomputation in R is in ``test_r_classification.py``.
 from __future__ import annotations
 
 import itertools
+from collections.abc import Sequence
 from functools import cache
 from typing import Any
 
@@ -116,7 +117,7 @@ def _fine() -> FitResult:
     return _fixed(MIXED, quadrature=Quadrature.equispaced(2401))
 
 
-def _category(values: np.ndarray, cuts: list[float]) -> np.ndarray:
+def _category(values: Any, cuts: Sequence[float]) -> np.ndarray:
     return np.sum(np.asarray(values)[..., None] >= np.asarray(cuts), axis=-1)
 
 

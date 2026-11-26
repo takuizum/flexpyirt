@@ -533,6 +533,44 @@ print(scores_sum.head(3))
   their group.
 - Unidimensional models with `Normal` latent distributions only.
 
+### Classification accuracy and consistency
+
+When a test has cut scores (pass / fail, proficiency levels), `classification_accuracy(res,
+cut_scores=...)` estimates from the fitted model how often the observed category agrees with the
+true one (**accuracy**) and how often two parallel administrations would agree (**consistency**),
+with Cohen's kappa for consistency. A score at or above a cut is in the higher category.
+
+```python
+from flexpyirt import classification_accuracy
+
+cls = classification_accuracy(res, cut_scores=[5, 9])  # Lee (2010): cuts on the summed score
+print(round(cls.accuracy, 3), round(cls.consistency, 3), round(cls.kappa, 3))
+print(cls.by_cut.round(3))  # per cut: accuracy, consistency, kappa, false_positive, false_negative
+print(cls.by_category.round(3))  # per category: true_proportion, proportion, accuracy, consistency
+
+cls_theta = classification_accuracy(res, cut_scores=[-0.5, 0.8], method="rudner")  # cuts on theta
+cls_data = classification_accuracy(res, cut_scores=[5, 9], data=df)  # over the respondents' EAPs
+print(cls_theta.summary.round(3))
+print(cls_data.summary.round(3))
+```
+
+- `method="lee"` (default; Lee, 2010) uses the exact distribution of the summed score given
+  $\theta$, for every item model; the true category is that of the expected summed score.
+  `method="rudner"` (Rudner, 2001, 2005) takes the estimate of $\theta$ as normal around $\theta$
+  with standard error $1/\sqrt{I(\theta)}$. The results are checked against the R package cacIRT.
+- Without `data` the indices are integrated over the fitted latent distribution on the quadrature
+  grid; with `data` they are averaged over the respondents' estimates (`score_method`, default
+  `"EAP"`).
+- `scale="theta"` with Lee, or `scale="summed_score"` with Rudner, converts the cuts through the
+  test characteristic curve (`by_cut` shows the converted cuts).
+- `conditional` gives the accuracy and consistency at each quadrature node or respondent;
+  `accuracy_table` (true x observed) and `consistency_table` are the joint distributions.
+- For a multiple-group model the indices are computed per group, and every table has a `group`
+  column (use `summary` instead of `accuracy` / `consistency` / `kappa`).
+- The conditional accuracy jumps where the true category changes, so on the fitted grid the
+  accuracy can differ from its value for a continuous latent distribution by up to about the node
+  spacing (below 0.01 with the default 61 nodes); consistency and kappa are not affected.
+
 ## 8. Latent distributions and identification
 
 The latent distribution is a normal `Normal`, with weights from the density normalized on the

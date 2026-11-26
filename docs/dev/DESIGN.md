@@ -2541,6 +2541,14 @@ data-independent shapes (§15.21).
    (requires $\tau$ to be increasing, which holds for every family except possibly nominal
    items, and $\tau(-40)<c_k<\tau(40)$). In a multiple-group model the converted cuts differ by
    group and are reported in `by_cut` (`summed_score_cut` / `theta_cut`).
+   **Discretization (D approach).** The D approach integrates over the quadrature grid, i.e.
+   over the discrete latent distribution the EM works with, as cacIRT does with the quadrature it
+   is given. Consistency is smooth in $\theta$ and agrees with the continuous-latent integral to
+   about $10^{-10}$ with 61 nodes; accuracy jumps where $t(\theta)$ changes, so it differs from
+   the continuous integral by up to the order of the node spacing (measured up to 0.008 for a
+   5-item test with 61 nodes on $[-6,6]$, VALIDATION V52). The value is reported on the fitted
+   grid, not on a dedicated finer grid, so that every latent distribution (EH included) is
+   handled the same way; a finer `Quadrature` or the P approach is the remedy.
    **Validation of cuts.** Finite, strictly increasing; on the summed score
    $0<c_k\le S_{\max}$ and the ceilings $\lceil c_k\rceil$ distinct (otherwise an observed
    category is empty). Otherwise `SpecificationError`.

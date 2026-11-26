@@ -80,6 +80,7 @@ English | [日本語](VALIDATION.ja.md)
 | V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
+| V52 | Classification accuracy and consistency for cut scores (#107): Lee (summed-score cuts) and Rudner ($\theta$ cuts), D and P approaches, one to three cuts, non-integer cuts, both cut-scale conversions (3PL $J=20$; GRM $K=4$, $J=10$; two-group 2PL $J=15$, focal mean and variance free) | cacIRT 1.4 `class.Lee()`, `Lee.poly.D()` / `Lee.poly.P()`, `Rud.D()` / `Rud.P()` with mirt's `testinfo()` SE; independent recomputation from mirt `probtrace()` / `expected.test()` / `testinfo()` (kappa, false positive / negative rates, per-category indices, tables) | field |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -699,6 +700,51 @@ English | [日本語](VALIDATION.ja.md)
   closed forms, the one-factor criterion equal to §16.5's, finite-difference gradients, exact
   recovery of known transformations for two and three factors, the delta-method Jacobian
   against re-solving the linking, `transform_theta`, errors): `tests/test_m6_linking_multidim.py`.
+- **Classification accuracy and consistency (V52, #107)**: DESIGN §18.3 in
+  `tests/test_r_classification.py` (slow tier; generator `validation/r/classification_reference.R`
+  → `tests/reference/v52_classification.json`, mirt 1.48, cacIRT 1.4, 61 points on $[-6, 6]$).
+  Each case's parameters go into a flexpyirt `FitResult` with every parameter fixed; mirt's EAP
+  scores are stored for the P approach. Cases: `threepl` (3PL, $J=20$, $N=3000$, generating
+  parameters fixed in mirt because a 3PL fit of this size did not converge), `grm` (GRM $K=4$,
+  $J=10$, $N=2000$, mirt estimates) and `twogroup` (2PL $J=15$, $N=1500$ per group, all items
+  invariant, focal mean and variance free). Runs: Lee with summed-score cuts 12, (8, 14),
+  (7.5, 13.2) and with $\theta$ cuts (−0.5, 0.8) converted by $\tau$; Rudner with $\theta$ cuts
+  0.3, (−0.5, 0.8) and with summed-score cuts (8, 14) converted by $\tau^{-1}$ (`uniroot` in R);
+  each with the D approach (fitted nodes and weights) and the P approach (mirt's EAP scores). Two
+  references per run:
+  - **cacIRT** (Lathrop, 2015): `class.Lee()` for the 3PL, `Lee.poly.D()` / `Lee.poly.P()` for
+    the GRM, and `Rud.D()` / `Rud.P()` with the SE $1/\sqrt{I(\theta)}$ from mirt's
+    `testinfo()`: "Simultaneous" (overall) and "Marginal" (per cut) accuracy and consistency and
+    the conditional values. `class.Rud()` is not used: cacIRT's `iif()` writes the 3PL
+    information with $(1-c^2)$ where Birnbaum's formula has $(1-c)^2$, so its SE is wrong
+    whenever $c>0$ (it is right for the 2PL). Largest differences: exact functions `1.2e-15`
+    (D) and `2.4e-15` (P); `Lee.poly.D()` `3.9e-12`, because cacIRT clips the category
+    probabilities to $[10^{-4}, 1-10^{-4}]$ before its recursion. cacIRT's `class.Lee()` puts a
+    true score equal to a cut below it in the D approach (`cut(right = TRUE)`) and above it in
+    the P approach; flexpyirt puts it above in both (no case hits a tie).
+  - **Recomputation in R** from mirt's `probtrace()`, `expected.test()` and `testinfo()` with a
+    Lord–Wingersky recursion written in the script: the tables $A$ and $B$, kappa, the per-cut
+    false positive / negative rates and the per-category indices (none of which cacIRT has), and
+    the conditional values. The script asserts that it reproduces cacIRT's exact functions to
+    $10^{-12}$. Largest differences: D `2.0e-14`, P `4.4e-15`; flexpyirt's EAP scores against
+    mirt's `7.8e-15`. Tolerances $10^{-12}$ (D, P, EAP) and $10^{-10}$ against `Lee.poly.D()`.
+  - **Without R** (`tests/test_classification.py`): brute-force enumeration of all 72 response
+    patterns of a mixed 2PL + 3PL + GRM $K=3$ + GPCM $K=3$ test with the item probabilities
+    written out in NumPy (tables, conditional values, kappa; `1e-14`), Rudner against
+    `scipy.stats.norm` with `test_information()`, identities between the indices (tables sum to
+    1, equal observed margins, accuracy + false positive + false negative = 1 per cut), the
+    scale conversions against `expected_score()`, multiple groups and the errors (fast tier).
+    Slow tier: a Monte Carlo simulation of two parallel administrations ($N=200\,000$,
+    $\theta\sim N(0,1)$) agrees with the D approach on a 2401-node grid within 4.5 Monte Carlo
+    SEs for accuracy, consistency and the accuracy table, for Lee and Rudner.
+  - **Discretization**: on the default 61-node grid the D approach's accuracy differs from the
+    continuous-latent value (2401 nodes) by up to `7.6e-3` (Lee, 5-item mixed test) and `2.5e-3`
+    (Rudner); consistency and kappa by `1e-9`. This is the jump of the conditional accuracy
+    where the true category changes (DESIGN §18.3), not an error of the implementation; cacIRT
+    gives the same value on the same grid.
+  - **Not validated**: `sirt::class.accuracy.rasch` (Rasch, cuts on $\theta$) was not used,
+    since cacIRT covers the same indices; latent distributions other than `Normal` (the code
+    path is the same weights; not compared with R).
 - **Bifactor models (V32, M7)**: two simulated cases in `tests/test_mirt_m7_bifactor.py` (plain
   EM and SQUAREM; generator `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`,
   mirt 1.46.1 `bfactor()`, `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`,

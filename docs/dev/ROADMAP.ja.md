@@ -104,6 +104,11 @@
 - **受け入れ基準**: mirt の `bfactor()`、`residuals()`、`iteminfo()` / `testinfo()` / `marginal_rxx()` /
   `fscores(method = "EAPsum")`、`survey.weights`、`SE.type = "sandwich"` / `"crossprod"` との V 番号つき照合。
 
+## 現場向け機能
+- [x] カット得点による分類の正確さと一貫性（#107。`classification_accuracy()`、`ClassificationResult`: 合計得点上の
+  カットの Lee, 2010 と $\theta$ 上のカットの Rudner, 2001, 2005、D 法と P 法、κ、カットごとの偽陽性・偽陰性率。
+  1 次元モデル、単一群と多母集団。V52 で cacIRT と mirt からの再計算と照合）。
+
 ## 継続的な作業
 - [ ] GitHub 上の最新の R mirt で照合し、参照値を定期的に確認する（#74）。
 - [ ] ユーザー定義の項目モデルの公開拡張 API と docs の例（#86）。新しい項目モデル（GGUM など）は本体に

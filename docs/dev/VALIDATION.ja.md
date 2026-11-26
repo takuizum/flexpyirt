@@ -75,6 +75,7 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
+| V52 | カット得点による分類の正確さと一貫性（#107）: Lee（合計得点のカット）と Rudner（$\theta$ のカット）、D 法と P 法、カット 1〜3 個、整数でないカット、両方向のカット尺度の変換（3PL $J=20$、GRM $K=4$・$J=10$、2 群の 2PL $J=15$・焦点群の平均と分散は自由） | cacIRT 1.4 `class.Lee()`、`Lee.poly.D()` / `Lee.poly.P()`、mirt の `testinfo()` の SE を与えた `Rud.D()` / `Rud.P()`。mirt の `probtrace()` / `expected.test()` / `testinfo()` からの独立な再計算（κ、偽陽性・偽陰性率、カテゴリごとの指標、表） | field |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -567,6 +568,44 @@
   （拒否する）。外部の R リンキングパッケージは使っていない。単体テスト（全カーネル・全族での曲線の不変性、3 つの族の
   閉じた式、1 因子の規準が §16.5 に一致、有限差分の勾配、2・3 因子での既知の変換の厳密な再現、リンキングを解き直して確かめる
   デルタ法のヤコビアン、`transform_theta`、エラー）: `tests/test_m6_linking_multidim.py`。
+- **分類の正確さと一貫性（V52、#107）**: DESIGN §18.3 を `tests/test_r_classification.py`
+  （低速層。生成スクリプト `validation/r/classification_reference.R` →
+  `tests/reference/v52_classification.json`、mirt 1.48、cacIRT 1.4、$[-6, 6]$ 上 61 点）で照合する。
+  各ケースのパラメタを全パラメタ固定の flexpyirt `FitResult` に入れ、P 法のために mirt の EAP を
+  保存する。ケース: `threepl`（3PL、$J=20$、$N=3000$。この規模の 3PL の推定が収束しなかったので、
+  mirt でも生成値に固定）、`grm`（GRM $K=4$、$J=10$、$N=2000$、mirt の推定値）、`twogroup`
+  （2PL $J=15$、群ごとに $N=1500$、全項目不変、焦点群の平均と分散は自由）。実行: Lee は合計得点の
+  カット 12、(8, 14)、(7.5, 13.2) と、$\tau$ で変換する $\theta$ のカット (−0.5, 0.8)。Rudner は
+  $\theta$ のカット 0.3、(−0.5, 0.8) と、$\tau^{-1}$（R では `uniroot`）で変換する合計得点のカット
+  (8, 14)。それぞれ D 法（推定時の求積点と重み）と P 法（mirt の EAP）。参照は 1 回の実行に 2 つ:
+  - **cacIRT**（Lathrop, 2015）: 3PL は `class.Lee()`、GRM は `Lee.poly.D()` / `Lee.poly.P()`、
+    `Rud.D()` / `Rud.P()` には mirt の `testinfo()` からの SE $1/\sqrt{I(\theta)}$ を与える。
+    "Simultaneous"（全体）と "Marginal"（カットごと）の正確さ・一貫性、条件つきの値。`class.Rud()`
+    は使わない: cacIRT の `iif()` は 3PL の情報量で Birnbaum の式の $(1-c)^2$ を $(1-c^2)$ と書いて
+    おり、$c>0$ だと SE が誤る（2PL では正しい）。最大差: 厳密な関数とは `1.2e-15`（D）・`2.4e-15`
+    （P）。`Lee.poly.D()` とは `3.9e-12`（cacIRT が漸化式の前にカテゴリ確率を
+    $[10^{-4}, 1-10^{-4}]$ に切り詰めるため）。cacIRT の `class.Lee()` はカットに等しい真の得点を
+    D 法では下（`cut(right = TRUE)`）、P 法では上に入れる。flexpyirt はどちらも上（同点になる
+    ケースはない）。
+  - **R での再計算**: mirt の `probtrace()`・`expected.test()`・`testinfo()` とスクリプト内で書いた
+    Lord–Wingersky の漸化式から、表 $A$ と $B$、κ、カットごとの偽陽性・偽陰性率、カテゴリごとの
+    指標（いずれも cacIRT にない）と条件つきの値。スクリプトは cacIRT の厳密な関数を $10^{-12}$ で
+    再現することを確かめる。最大差: D `2.0e-14`、P `4.4e-15`。flexpyirt の EAP と mirt の EAP の差
+    `7.8e-15`。許容誤差は $10^{-12}$（D、P、EAP）、`Lee.poly.D()` とは $10^{-10}$。
+  - **R を使わない検査**（`tests/test_classification.py`）: 2PL + 3PL + GRM $K=3$ + GPCM $K=3$ の
+    混在テストの全 72 反応パターンの総当たり（項目の確率は NumPy で書き下す。表、条件つきの値、κ。
+    `1e-14`）、`test_information()` を使った `scipy.stats.norm` との Rudner の照合、指標間の恒等式
+    （表の和が 1、観測側の周辺が等しい、カットごとに正確さ + 偽陽性 + 偽陰性 = 1）、
+    `expected_score()` との尺度変換の照合、多母集団、エラー（高速層）。低速層: 平行測定 2 回の
+    モンテカルロ（$N=200\,000$、$\theta\sim N(0,1)$）が、2401 点の格子での D 法と正確さ・一貫性・
+    正確さの表について Lee と Rudner ともモンテカルロ SE の 4.5 倍以内で一致する。
+  - **離散化**: 既定の 61 点の格子では、D 法の正確さは連続な潜在分布での値（2401 点）と最大
+    `7.6e-3`（Lee、5 項目の混在テスト）・`2.5e-3`（Rudner）違う。一貫性と κ は `1e-9`。真の
+    カテゴリが変わるところで条件つきの正確さが跳ぶためで（DESIGN §18.3）、実装の誤差ではない。
+    同じ格子なら cacIRT も同じ値になる。
+  - **照合していないもの**: `sirt::class.accuracy.rasch`（Rasch、$\theta$ 上のカット）は cacIRT が
+    同じ指標を扱うので使っていない。`Normal` 以外の潜在分布（同じ重みのコード経路だが R とは
+    比べていない）。
 
 - **混合正規潜在分布（V22、M5）**: flexpyirt の `NormalMixture`（DESIGN §16.7）は形状に mirt のクラスのパラメタ化を
   使い、混合を解析的に標準化する。したがって格子 $\theta_q$ 上では、像の格子 $z_q=M+\sqrt V\theta_q$ 上の mirt の

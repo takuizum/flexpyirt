@@ -165,6 +165,7 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `item_information`, `test_information`, `expected_score` | 関数 | 1 次元の `FitResult` の、与えた `theta` での項目・テスト情報量（条件付き SE つき）と期待得点。`theta` をインデックスにした DataFrame を返す（DESIGN §18.2） |
 | `reliability`, `summed_score_table` | 関数 | 周辺信頼性・経験的信頼性と、合計得点 EAP の表（`FitResult.score(method="EAPsum")` も）。DataFrame を返す |
 | `summed_score_distribution` | 関数 | カテゴリ確率に対する Lord–Wingersky / Poisson 二項分布のカーネル（DESIGN §18.1） |
+| `classification_accuracy` | 関数 | カット得点による分類の正確さと一貫性（合計得点上の Lee, 2010、$\theta$ 上の Rudner, 2001, 2005。D 法と P 法）。1 次元の `FitResult` に対し `ClassificationResult`（`summary`、`by_category`、`by_cut`、`conditional`、`accuracy_table`、`consistency_table`。DESIGN §18.3）を返す |
 | `LocalDependenceResult` | frozen dataclass | `FitResult.local_dependence()` の戻り値（`pairs`, `q3`, `q3_mean`, `max_q3_star`） |
 | `JSIResult` | frozen dataclass | `FitResult.jsi()` の戻り値（`matrix`, `pairs`, `method`, `converged`） |
 
