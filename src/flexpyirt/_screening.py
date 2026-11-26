@@ -1,4 +1,4 @@
-r"""Pure numerical core of common-item screening for linking (DESIGN.md §20).
+r"""Pure numerical core of common-item screening for linking (DESIGN.md §21).
 
 Functions here take item kernels, parameter arrays and quadrature grids only; names, tables and
 validation live in :mod:`flexpyirt.screening`.
@@ -28,7 +28,7 @@ _IQR_FLOOR = 1e-12
 
 
 def item_location(kernel: ItemKernel, params: Array) -> Array:
-    r"""One location per item, transforming as :math:`b^* = A\,b + B` (DESIGN.md §20).
+    r"""One location per item, transforming as :math:`b^* = A\,b + B` (DESIGN.md §21).
 
     - 2PL / Rasch / 3PL / 4PL: the display difficulty :math:`b = -d/a`.
     - GRM, GPCM / PCM: the mean of the display thresholds,
@@ -60,7 +60,7 @@ def expected_score_rmsd(
     nodes: Array,
     weights: Array,
 ) -> Array:
-    r"""Root mean squared difference of two expected item score curves (DESIGN.md §20).
+    r"""Root mean squared difference of two expected item score curves (DESIGN.md §21).
 
     .. math::
         \mathrm{RMSD} = \Big\{\sum_q w_q\,\big[E^{*}(\theta_q) - E^{\mathrm{tgt}}(\theta_q)\big]^2
@@ -104,7 +104,7 @@ def robust_z(values: np.ndarray) -> np.ndarray:
         z_j = \frac{x_j - \operatorname{median}_i x_i}{0.74\,\mathrm{IQR}_i(x_i)},
 
     with quantiles by linear interpolation (R ``quantile(type = 7)``). The median and IQR are
-    taken over every common item, kept or removed (DESIGN.md §20).
+    taken over every common item, kept or removed (DESIGN.md §21).
 
     Parameters
     ----------

@@ -571,7 +571,7 @@
 
 - **共通項目の点検（V50、#105）**: 頑健 z・変位・期待得点の RMSD を特性曲線リンキングと純化と組み合わせて実装した R パッケージは
   ないので、`validation/r/v50_screening_reference.R`（→ `tests/reference/v50_screening.json`、mirt 1.48、equateIRT 2.5.2）が
-  DESIGN §20 の規則を素の R で計算し直す。各フォームを `mirt`（`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、
+  DESIGN §21 の規則を素の R で計算し直す。各フォームを `mirt`（`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、
   $[-6, 6]$ 上 61 節点、潜在分布 $N(0, 1)$）で推定し、各アンカー集合のリンキングは V20 の素の R の Stocking–Lord / Haebara
   （`max |grad| < 1e-9` を確認）。位置、`log_ratio_a`、頑健 z（`median()`、`quantile(type = 7)`、`IQR()`）、変位、
   `target` の格子上の `expected.item()` 曲線の RMSD は式どおりに計算し、純化のループも同じ除外規則で書き下す。
@@ -591,7 +591,7 @@
   許容誤差: $(A, B)$ `1e-9`、規準値は相対 `1e-7`、項目ごとの量 `1e-9`、頑健 z `1e-8`。**独立にのみ確認したもの**
   （`tests/test_screening.py` の単体テスト）: 4PL と名義項目の位置（すべてのカーネルで $b^* = A\,b + B$）、移した `source`
   曲線の直接評価との RMSD の一致、ドリフトのない項目での $(A, B)$ の厳密な回復、わずかに揺らした項目に仕込んだドリフトの除外、Rasch の傾きの比の頑健 z が
-  NaN になること、`items=` による部分集合、`stack_screening_tables()`。閾値は慣行であり（DESIGN §20）、V50 が確かめるのは
+  NaN になること、`items=` による部分集合、`stack_screening_tables()`。閾値は慣行であり（DESIGN §21）、V50 が確かめるのは
   規則が仕様どおりに計算されることで、閾値のよさではない。
 
 - **混合正規潜在分布（V22、M5）**: flexpyirt の `NormalMixture`（DESIGN §16.7）は形状に mirt のクラスのパラメタ化を
@@ -969,3 +969,8 @@
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。
 - **SE の内部整合**: Oakes の SE と、収束点での周辺対数尤度の直接 `jax.hessian` による SE が一致すること（小規模ケース）。
 - **不変性**: 項目の並べ替え、群ラベルの付け替え、パターン圧縮の有無で結果が変わらないこと。
+- **ユーザー定義の項目モデル（#86、DESIGN §20）**: `tests/test_custom_items.py` は公開の `ItemModel` / `ItemKernel`
+  プロトコルだけを使って 2PL と GRM を実装し直す。1 つの混合モデルで、組み込みの推定と $10^{-12}$ まで一致する
+  （対数尤度、反復回数、推定値、Oakes SE、表示用閾値とその SE、EAP/MAP/ML/WLE の得点、S-X2、M2、項目情報量）。
+  2 因子モデルは $10^{-5}$ まで一致する（初期値が違う）。これは拡張の仕組みの検証であり、新しいモデルの検証ではない。
+  組み込みでない例のモデル（GGUM など）は、検証済みとして示す前にそれ自身の mirt との照合が要る（GGUM には V44 を予約）。

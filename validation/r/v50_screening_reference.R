@@ -4,7 +4,7 @@
 #
 # No R package implements the robust z of Huynh & Meyer (2010), the displacement or the RMSD
 # between expected item score curves together with purification on characteristic-curve linking,
-# so the rules of DESIGN.md §20 are recomputed here in base R:
+# so the rules of DESIGN.md §21 are recomputed here in base R:
 #   - each form is calibrated separately with mirt (optimizer = "NR", accelerate = "none",
 #     TOL = 1e-10, 61 equispaced quadrature points on [-6, 6], latent N(0, 1));
 #   - the Stocking-Lord / Haebara linking on the current anchor set is the V20 base-R
@@ -139,7 +139,7 @@ solve_base_r <- function(fn, start) {
   list(A = ab[1], B = ab[2], criterion = fn(ab), grad_norm = max(abs(grad)))
 }
 
-# ---- Screening quantities (DESIGN.md §20) --------------------------------------------------------
+# ---- Screening quantities (DESIGN.md §21) --------------------------------------------------------
 
 # Item location from mirt's slope-intercept parameters: -d / a for 2PL, the mean of the graded
 # thresholds -d_k / a for GRM, and the mean of the step difficulties for GPCM.
@@ -155,7 +155,7 @@ item_location <- function(par, itemtype) {
   stop("unsupported itemtype ", itemtype)
 }
 
-# Median and IQR over all common items (DESIGN.md §20), not only the kept ones.
+# Median and IQR over all common items (DESIGN.md §21), not only the kept ones.
 robust_z <- function(x) {
   ref <- x[is.finite(x)]
   q <- unname(quantile(ref, c(0.25, 0.75), type = 7))

@@ -1,4 +1,4 @@
-r"""Common-item screening for linking and item parameter drift (Python shell, DESIGN.md §20).
+r"""Common-item screening for linking and item parameter drift (Python shell, DESIGN.md §21).
 
 :func:`screen_common_items` checks the common items of a unidimensional linking (:func:`link`)
 for item parameter drift with the robust z of Huynh & Meyer (2010), the displacement of the item
@@ -49,7 +49,7 @@ ScreeningRemoval = Literal["largest", "all"]
 _STATISTICS: tuple[str, ...] = ("robust_z", "displacement", "rmsd")
 _REMOVALS: tuple[str, ...] = ("largest", "all")
 DEFAULT_THRESHOLDS: dict[str, float] = {"robust_z": 1.645, "displacement": 0.3, "rmsd": 0.1}
-"""Default flagging thresholds per statistic (DESIGN.md §20)."""
+"""Default flagging thresholds per statistic (DESIGN.md §21)."""
 
 _TABLE_COLUMNS: tuple[str, ...] = (
     "item",
@@ -95,7 +95,7 @@ def _screening_table(
     threshold: float,
     iteration_removed: list[int | None],
 ) -> pd.DataFrame:
-    """Per-item screening quantities under the linking ``(a_const, b_const)`` (DESIGN.md §20)."""
+    """Per-item screening quantities under the linking ``(a_const, b_const)`` (DESIGN.md §21)."""
     a_j = jnp.asarray(a_const, dtype=jnp.float64)
     b_j = jnp.asarray(b_const, dtype=jnp.float64)
     nodes_j = jnp.asarray(nodes, dtype=jnp.float64)
@@ -147,7 +147,7 @@ def _screening_table(
 
 @dataclass(frozen=True)
 class CommonItemScreeningResult:
-    r"""Result of :func:`flexpyirt.screen_common_items` (DESIGN.md §20).
+    r"""Result of :func:`flexpyirt.screen_common_items` (DESIGN.md §21).
 
     Attributes
     ----------
@@ -296,7 +296,7 @@ def screen_common_items(
 
     Each step links ``source`` onto ``target`` with :func:`link` on the current anchor set,
     transforms the source items (:math:`a^* = a/A`, location :math:`b^* = A\,b + B`) and computes
-    per common item (DESIGN.md §20):
+    per common item (DESIGN.md §21):
 
     - ``robust_z`` (Huynh & Meyer, 2010): for :math:`x_j = \log|a_j^*| - \log|a_j^{\mathrm{tgt}}|`
       and for :math:`x_j = b_j^* - b_j^{\mathrm{tgt}}`,

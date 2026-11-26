@@ -81,6 +81,76 @@ the Hull method, comparison data, DETECT and DIMTEST are functions of the compan
 flexpyctt (NumPy / SciPy, no JAX). flexpyirt's own `polychoric()` is a JAX implementation of the
 same estimator: it passes the same checks, and the two agree to $10^{-9}$ on every check case.
 
+## Validation cases
+
+Every case below is a test in the repository. Its reference values were generated in R (V30: by a
+simulation study) and stored with the source, and the test suite compares against them. Fitted
+models are compared with mirt within the tolerances above; quantities with tolerances of their own
+are listed in the table after this one. The
+[validation plan](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/VALIDATION.md) has the
+exact R calls, settings and the largest differences measured in each case. V26 has a second part
+added in M7.
+
+| ID | Feature | Models and data | Compared with |
+|---|---|---|---|
+| V1 | 2PL | `LSAT7`, single group | `mirt(..., "2PL")`, Oakes SEs |
+| V2 | Rasch | single group, latent variance estimated | `mirt(..., "Rasch")` |
+| V3 | GRM | `Science` | `mirt(..., "graded")` |
+| V4 | Multiple groups | 2PL, two groups, partial anchors, focal mean and variance free | `multipleGroup(..., invariance = c(<anchors>, "free_means", "free_var"))` |
+| V5 | FIPC | fixed items, latent distribution estimated | `mirt()` with `pars = "values"`, `est = FALSE` |
+| V6 | Empirical histogram | under FIPC, one and two groups | `mirt(..., dentype = "EH")`, `multipleGroup(...)` |
+| V7 | Priors and MAP | 3PL with priors | `mirt.model(... PRIOR = ...)` |
+| V8 | GPCM, PCM | `Science` and simulated | `mirt(..., "gpcm")`, `mirt(..., "Rasch")` |
+| V9 | Missing responses | MAR data | `mirt()` on data with `NA` |
+| V10 | Standard errors | Oakes' identity (robust SEs are V35) | `mirt(..., SE.type = "Oakes")` |
+| V11 | 3PL, 4PL | simulated, single group | `mirt(..., "3PL" / "4PL")` |
+| V12 | IRT thresholds, delta-method SEs | 2PL, Rasch, GRM, GPCM, PCM, two-group 2PL | `coef(m, IRTpars = TRUE, printSE = TRUE)` |
+| V13 | MAP, ML, WLE scores | 2PL, GRM, GPCM, 3PL, two groups, missing responses | `fscores(m, method = ...)` |
+| V14 | Confirmatory 2–3 factor models | 2PL simple structure and cross-loading, GRM, three-factor 2PL | `mirt()` with `mirt.model(... COV = ...)` |
+| V15 | S-X2 item fit | GRM, GPCM, PCM, 3PL, FIPC; minimum cell 1 and 3; per group for two groups | `itemfit(m, fit_stats = "S_X2")` |
+| V16 | Equality constraints across items | common slope; 2PL + GRM with cross-model constraints; two groups | `mirt.model(... CONSTRAIN = ...)` |
+| V17 | DIF tests | V4 data, `add` and `drop` schemes | `DIF(mg, scheme = ...)` |
+| V18 | $M_2$ / $M_2^*$ | 2PL, 3PL, Rasch with free variance, GRM, GPCM | `M2(m)`, plus an exact R computation |
+| V19 | Davidian curves | 2PL, GRM, FIPC 2PL with free mean and variance | `mirt(..., dentype = "Davidian-k")` and the exact likelihood inside mirt |
+| V20 | Scale linking | 2PL, GRM, GPCM, 3PL, mixed 2PL + GPCM; Haebara and Stocking–Lord, both symmetric forms; SEs | separate `mirt()` calibrations + independent R criteria |
+| V21 | Multiple-group confirmatory models | two factors, anchors on both, focal means and variances free | `multipleGroup()` with `COV = F1*F2` |
+| V22 | Normal mixtures | 2PL and GRM with two components, GPCM with three | `multipleGroup(..., dentype = "mixture-k")` with all items invariant, plus an independent R implementation |
+| V23 | Nominal model | `Science`, unordered scoring, mixed with 2PL, two factors | `mirt(..., "nominal")`, `itemfit()` |
+| V24 | Polychoric correlations | tetrachoric, 2–5 categories, 10% MCAR, empty cells, `LSAT7`, `Science`; smoothing | lavaan `lavCor()`, psych `polychoric()`, `cor.smooth()` |
+| V25 | Number of dimensions | EKC, MAP, eigenvalues on the V24 matrices; parallel-analysis references | EFAtools `EKC()`, `PARALLEL()`; psych `vss()`; EFA.dimensions `MAP()` |
+| V26 | Local dependence, model-based parallel analysis | `LSAT7` 2PL, `Science` GRM, simulated 2PL with a dependent pair and MCAR | `residuals(m, type = "LD" / "LDG2" / "Q3")`; ltm `unidimTest()` |
+| V26 (M7) | Local dependence beyond one group | two groups; EH, Davidian and mixture latent distributions; two and three factors | `residuals()` on the corresponding mirt fits |
+| V27 | DETECT | confirmatory (two and one dimensions, `Science`) and exploratory | sirt `conf.detect()`, `expl.detect()` |
+| V28 | EFA, Hull method | ULS and ML, every number of factors; CAF, CFI, RMSEA | EFAtools `EFA()`, `HULL()`; psych `fa()` |
+| V29 | Comparison data | population generator, rank-sum tests, three data sets | EFAtools `CD()` and its internal steps |
+| V30 | DIMTEST | 2PL, $N$ 1000–2000, $J$ 20–30, 200 replications per condition | simulation study (no reference implementation outside DIMPACK) |
+| V31 | Jackknife slope index | `LSAT7` 2PL, `Science` GRM, simulated 2PL and GPCM | `residuals(m, type = "JSI")` |
+| V32 | Bifactor models | 2PL with three specific factors and general-only items; GRM with three testlets | `bfactor()`, `fscores()` |
+| V33 | Two-tier models | 2PL with two correlated primary factors; GRM with a cross-loading item | `bfactor(..., model2 = )` |
+| V34 | Sampling weights | 2PL, GRM, two groups with missing responses, FIPC, bifactor 2PL | `mirt()`, `multipleGroup()`, `bfactor()` with `survey.weights` |
+| V35 | Robust standard errors | misspecified 2PL, mixed formats, MAP, two groups, FIPC, two and three factors, EH | `mirt(..., SE.type = "crossprod" / "sandwich")` |
+| V36 | Summed-score distribution | Poisson-binomial with $J$ 10–300; GRM and mixed formats | poibin `ppoibin()`, `dpoibin()`; `dpois()`; `fscores(method = "EAPsum")` |
+| V37 | Information, expected score, reliability, summed-score EAP | 2PL (also with missing), 3PL, GRM, GPCM, nominal, mixed formats, two groups | `iteminfo()`, `testinfo()`, `expected.item()`, `marginal_rxx()`, `empirical_rxx()`, `fscores(method = "EAPsum")` |
+| V38 | Local dependence for bifactor and two-tier models | bifactor 2PL with MCAR, bifactor GRM, two-tier 2PL | `residuals()` on `bfactor()` fits |
+| V39 | $M_2$ and S-X2 for confirmatory models | the four V14 models | `M2()`, `itemfit()`, plus an exact R $M_2^*$ |
+| V40 | Linking: 4PL, nominal, multidimensional | 4PL, nominal, mixed 2PL + nominal; two- and three-factor models with diagonal, orthogonal or oblique $\mathbf A$ | separate `mirt()` calibrations + independent R criteria |
+
+Tolerances of the cases that are not plain comparisons of fitted models with mirt:
+
+| Quantity | Tolerance |
+|---|---|
+| Scale linking $(A,B)$ / criterion, on identical item estimates | $10^{-9}$ / $10^{-9}$ (relative) |
+| Scale linking SEs, on identical estimates and covariance | $10^{-5}$ (relative) |
+| Scale linking end to end (calibration + linking): $(A,B)$ / criterion / SE | $10^{-6}$ / $10^{-5}$ (relative) / $10^{-3}$ (relative) |
+| Polychoric correlations vs lavaan / psych; thresholds; smoothing | $10^{-6}$ / $10^{-3}$; $10^{-12}$; $10^{-12}$ |
+| EKC, MAP, observed eigenvalues; normal reference mean / 95th percentile | $10^{-11}$; $\lvert z\rvert\le4.5$ / $6\times10^{-3}$ |
+| LD $X^2$ / $G^2$; signed $V$, Q3; model-based PA observed / simulated mean / 95th percentile | $10^{-5}$ (relative); $10^{-6}$; $2\times10^{-4}$ / $\lvert z\rvert\le4.5$ / 0.02 |
+| DETECT conditional covariances, indices, Ward heights | $10^{-12}$ |
+| EFA implied $\Lambda\Lambda^\top$ / communalities; CAF, CFI, RMSEA; $\chi^2$; Hull fit / $st$ | $10^{-4}$; $2\times10^{-4}$; $10^{-4}$ (relative); $10^{-5}$ / $10^{-2}$ (relative) |
+| Comparison data: PAF; population from the same draws; rank-sum $p$; mean RMSE | $10^{-12}$; exact; $10^{-10}$ (relative); 15% (relative) for the retained $k$, 60% for the next |
+| DIMTEST (small rerun of the simulation study): rejections at .05 under the null / power | at most 3 of 20 / at least 8 of 10 |
+| Cross-product / sandwich covariance at mirt's estimates (entries relative to $\sqrt{v_{ii}v_{jj}}$); parameters / SEs end to end | $10^{-9}$ / $10^{-6}$; $10^{-6}$ / $10^{-5}$ (relative) |
+
 ## Known differences from mirt
 
 These differences are intentional: flexpyirt maximizes exactly the quantity it reports. They are

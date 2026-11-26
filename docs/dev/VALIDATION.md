@@ -703,7 +703,7 @@ English | [日本語](VALIDATION.ja.md)
 - **Common-item screening (V50, #105)**: no R package implements the robust z, the displacement
   or the expected-score RMSD together with characteristic-curve linking and purification, so
   `validation/r/v50_screening_reference.R` (→ `tests/reference/v50_screening.json`, mirt 1.48,
-  equateIRT 2.5.2) recomputes the rules of DESIGN §20 in base R: each form is calibrated with
+  equateIRT 2.5.2) recomputes the rules of DESIGN §21 in base R: each form is calibrated with
   `mirt` (`optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`, 61 nodes on $[-6, 6]$, latent
   $N(0, 1)$); the linking on each anchor set is the V20 base-R Stocking–Lord / Haebara (asserted
   `max |grad| < 1e-9`); locations, `log_ratio_a`, robust z (`median()`,
@@ -732,7 +732,7 @@ English | [日本語](VALIDATION.ja.md)
   location of 4PL and nominal items ($b^* = A\,b + B$ for every kernel), the RMSD against a direct
   evaluation of the moved source curve, exact recovery of $(A, B)$ on drift-free items, the removal of
   planted drifts among slightly perturbed items, the NaN robust z of Rasch slope ratios, the `items=`
-  subset and `stack_screening_tables()`. The thresholds are conventions (DESIGN §20); V50 checks
+  subset and `stack_screening_tables()`. The thresholds are conventions (DESIGN §21); V50 checks
   that the rules are computed as specified, not that the thresholds are good.
 - **Bifactor models (V32, M7)**: two simulated cases in `tests/test_mirt_m7_bifactor.py` (plain
   EM and SQUAREM; generator `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`,
@@ -1212,3 +1212,10 @@ English | [日本語](VALIDATION.ja.md)
   marginal log-likelihood at the converged point (small cases).
 - **Invariance**: results do not change with item reordering, group relabelling, or with or
   without pattern compression.
+- **User-defined item models (#86, DESIGN §20)**: `tests/test_custom_items.py` re-implements the
+  2PL and the GRM against the public `ItemModel` / `ItemKernel` protocols only. In one mixed model
+  they reproduce the built-in fit to $10^{-12}$ (log-likelihood, iteration count, estimates, Oakes
+  SEs, display thresholds and SEs, EAP/MAP/ML/WLE scores, S-X2, M2, item information); a
+  two-factor model agrees to $10^{-5}$ (different starting values). This checks the extension
+  machinery, not a new model: an example model that is not built in (e.g. GGUM) needs its own
+  mirt comparison (V44 is reserved for GGUM) before it is presented as validated.
