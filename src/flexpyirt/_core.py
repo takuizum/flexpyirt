@@ -131,7 +131,8 @@ class PriorBlock:
     Attributes
     ----------
     kind : (n_free,) int32
-        ``0`` none, ``1`` NormalPrior, ``2`` LogNormalPrior, ``3`` BetaPrior.
+        ``0`` none, ``1`` NormalPrior, ``2`` LogNormalPrior, ``3`` BetaPrior,
+        ``4`` LogitNormalPrior, ``5`` LogitNormalPrior with ``mode_scale="logit"``.
     param1, param2 : (n_free,) float64
         Distribution parameters (unused entries hold ``0.0`` and ``1.0``).
     """
@@ -644,7 +645,12 @@ def _coupled_masks(prob: CompiledProblem) -> list[Array]:
 
 
 def _m_step_coupled(
-    prob: CompiledProblem, eta: Array, new_eta: Array, counts: ExpectedCounts, n_steps: int
+    prob: CompiledProblem,
+    eta: Array,
+    new_eta: Array,
+    counts: ExpectedCounts,
+    n_steps: int,
+    unconstrained: bool = False,
 ) -> Array:
     r"""Joint masked Newton per component of items linked across items (DESIGN.md §16.1).
 
@@ -686,12 +692,26 @@ def _m_step_coupled(
             return total
 
         mask = jnp.ones(fids.shape, dtype=jnp.bool_)
-        u_new = newton_ascent(coupled_q, u0, mask, block.slot_lower, block.slot_upper, n_steps)
+        u_new = newton_ascent(
+            coupled_q,
+            u0,
+            mask,
+            block.slot_lower,
+            block.slot_upper,
+            n_steps,
+            unconstrained=unconstrained,
+        )
         new_eta = new_eta.at[fids].set(u_new)
     return new_eta
 
 
-def _m_step_items(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: int) -> Array:
+def _m_step_items(
+    prob: CompiledProblem,
+    eta: Array,
+    counts: ExpectedCounts,
+    n_steps: int,
+    unconstrained: bool = False,
+) -> Array:
     """Item-wise masked Newton M-step, then the coupled components (DESIGN.md §4.3, §14.2, §16.1).
 
     Items in a :class:`CoupledBlock` are held in the item-wise ``vmap`` and solved jointly by
@@ -735,7 +755,7 @@ def _m_step_items(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_s
                 q_lik = jnp.sum(jax.vmap(lambda rg, pg: _item_q(k, x, rg, pg))(rj, xi))
                 return q_lik + jnp.sum(eval_log_prior(v, sk, sp1, sp2))
 
-            return newton_ascent(q_item, u, free, lo, hi, n_steps)
+            return newton_ascent(q_item, u, free, lo, hi, n_steps, unconstrained=unconstrained)
 
         u_new = jax.vmap(solve_item, in_axes=(0,) * 10 + (axis,))(
             r_items,
@@ -751,7 +771,9 @@ def _m_step_items(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_s
             nodes,
         )
         new_eta = _scatter(new_eta, u_new, fam.slot_free_index)
-    return _m_step_coupled(prob, eta, new_eta, counts, n_steps) if prob.coupled else new_eta
+    if not prob.coupled:
+        return new_eta
+    return _m_step_coupled(prob, eta, new_eta, counts, n_steps, unconstrained)
 
 
 def _nodes_1d(prob: CompiledProblem) -> Array:
@@ -779,14 +801,24 @@ def _eh_weights_update(prob: CompiledProblem, counts_or_w: Array) -> Array:
 
 
 def _m_step_eh(
-    prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: int
+    prob: CompiledProblem,
+    eta: Array,
+    counts: ExpectedCounts,
+    n_steps: int,
+    unconstrained: bool = False,
 ) -> tuple[Array, Array]:
     """Item Newton M-step + exact (moment-constrained) EH M-step (DESIGN.md §4.4, §15.34)."""
-    new_eta = _m_step_items(prob, eta, counts, n_steps)
+    new_eta = _m_step_items(prob, eta, counts, n_steps, unconstrained)
     return new_eta, _eh_weights_update(prob, counts.n)
 
 
-def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: int) -> Array:
+def m_step(
+    prob: CompiledProblem,
+    eta: Array,
+    counts: ExpectedCounts,
+    n_steps: int,
+    unconstrained: bool = False,
+) -> Array:
     """M-step: item-wise and group-wise masked Newton, ``vmap``-ed (DESIGN.md §4.3, §4.4, §14.2).
 
     Each item is one Newton block over its local vector, which holds the parameters of all
@@ -794,7 +826,7 @@ def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: i
     directly to each item's local objective so the item-wise decomposition is preserved and every
     shared parameter's prior is counted once.
     """
-    new_eta = _m_step_items(prob, eta, counts, n_steps)
+    new_eta = _m_step_items(prob, eta, counts, n_steps, unconstrained)
     red = prob.reduction
     if prob.latent.is_eh or (red is not None and red.n_primary < 2):
         # Bifactor latent parameters are all fixed (compile_problem checks; DESIGN.md §17.1).
@@ -805,7 +837,15 @@ def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: i
     if red is not None:
         # Two-tier: only the correlations among primary factors can be free (§17.2).
         def solve_reduced(n: Array, x: Array, free: Array, lo: Array, hi: Array) -> Array:
-            return newton_ascent(lambda p: _reduced_latent_q(red, n, p), x, free, lo, hi, n_steps)
+            return newton_ascent(
+                lambda p: _reduced_latent_q(red, n, p),
+                x,
+                free,
+                lo,
+                hi,
+                n_steps,
+                unconstrained=unconstrained,
+            )
 
         lat_reduced = jax.vmap(solve_reduced)(
             counts.n, lat, lat_block.free_index >= 0, lat_block.lower, lat_block.upper
@@ -821,6 +861,7 @@ def m_step(prob: CompiledProblem, eta: Array, counts: ExpectedCounts, n_steps: i
             lo,
             hi,
             n_steps,
+            unconstrained=unconstrained,
         )
 
     lat_new = jax.vmap(solve_group)(
@@ -872,7 +913,15 @@ def _with_eh_weights(prob: CompiledProblem, eh_weights: Array) -> CompiledProble
     return replace(prob, latent=replace(prob.latent, eh_weights=eh_weights))
 
 
-def em(prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newton: int) -> EMResult:
+def em(
+    prob: CompiledProblem,
+    eta0: Array,
+    *,
+    tol: float,
+    max_iter: int,
+    n_newton: int,
+    unconstrained: bool = False,
+) -> EMResult:
     """Bock–Aitkin EM in a ``lax.while_loop`` (DESIGN.md §4.6, §4.7).
 
     ``loglik_history[t]`` and ``log_posterior_history[t]`` are evaluated at the parameters entering
@@ -898,13 +947,13 @@ def em(prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newto
         counts, ll = e_step(prob_t, eta)
         lp = ll + log_prior(prob_t, eta)
         if is_eh:
-            new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton)
+            new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton, unconstrained)
             change = jnp.maximum(
                 jnp.max(jnp.abs(new_eta - eta), initial=0.0),
                 jnp.max(jnp.abs(new_w - eh_w), initial=0.0),
             )
         else:
-            new_eta = m_step(prob, eta, counts, n_newton)
+            new_eta = m_step(prob, eta, counts, n_newton, unconstrained)
             new_w = eh_w
             change = jnp.max(jnp.abs(new_eta - eta), initial=0.0)
         next_it = it + one
@@ -982,7 +1031,13 @@ def _eh_unpack(
 
 
 def _squarem_eh(
-    prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newton: int
+    prob: CompiledProblem,
+    eta0: Array,
+    *,
+    tol: float,
+    max_iter: int,
+    n_newton: int,
+    unconstrained: bool = False,
 ) -> EMResult:
     """SQUAREM scheme S3 on ``(eta, sqrt(w))`` for EH models (DESIGN.md §15.36)."""
     lower, upper = _eta_bounds(prob, eta0)
@@ -1005,7 +1060,7 @@ def _squarem_eh(
         prob_t = _with_eh_weights(prob, eh_w)
         counts, ll = e_step(prob_t, eta)
         lp = ll + log_prior(prob_t, eta)
-        new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton)
+        new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton, unconstrained)
         return new_eta, new_w, ll, lp
 
     def _is_acceptable(cand: Array, lp_ref: Array) -> Array:
@@ -1144,7 +1199,13 @@ def _squarem_eh(
 
 
 def squarem(
-    prob: CompiledProblem, eta0: Array, *, tol: float, max_iter: int, n_newton: int
+    prob: CompiledProblem,
+    eta0: Array,
+    *,
+    tol: float,
+    max_iter: int,
+    n_newton: int,
+    unconstrained: bool = False,
 ) -> EMResult:
     r"""SQUAREM-accelerated Bock–Aitkin EM (Varadhan & Roland, 2008, scheme S3; DESIGN §4.6, §4.7).
 
@@ -1172,7 +1233,14 @@ def squarem(
     inside ``lax.while_loop``.
     """
     if prob.latent.is_eh:
-        return _squarem_eh(prob, eta0, tol=tol, max_iter=max_iter, n_newton=n_newton)
+        return _squarem_eh(
+            prob,
+            eta0,
+            tol=tol,
+            max_iter=max_iter,
+            n_newton=n_newton,
+            unconstrained=unconstrained,
+        )
     lower, upper = _eta_bounds(prob, eta0)
     nan_hist = jnp.full((max_iter,), jnp.nan, dtype=eta0.dtype)
     eval_hist = jnp.zeros((max_iter,), dtype=jnp.int32)
@@ -1204,9 +1272,9 @@ def squarem(
         eta, it, _, n_evals, n_safe, ll_hist, lp_hist, ch_hist, ev_hist, sf_hist = state
         counts0, ll0 = e_step(prob, eta)
         lp0 = ll0 + log_prior(prob, eta)
-        theta1 = m_step(prob, eta, counts0, n_newton)
+        theta1 = m_step(prob, eta, counts0, n_newton, unconstrained)
         counts1, _ = e_step(prob, theta1)
-        theta2 = m_step(prob, theta1, counts1, n_newton)
+        theta2 = m_step(prob, theta1, counts1, n_newton, unconstrained)
 
         r = theta1 - eta
         s = theta2 - theta1
@@ -1250,7 +1318,7 @@ def squarem(
 
         def _stabilize(t: Array) -> tuple[Array, Array]:
             c, _ = e_step(prob, t)
-            return m_step(prob, t, c, n_newton), three
+            return m_step(prob, t, c, n_newton, unconstrained), three
 
         def _fallback(_unused: Array) -> tuple[Array, Array]:
             return theta2, two

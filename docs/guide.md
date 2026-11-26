@@ -202,6 +202,16 @@ res = fit(
   variance, multiple groups, 3PL/4PL, or tight `tol`). It converges to the same fixed point with
   monotone `history["loglik"]` and far fewer EM evaluations. Plain EM (`squarem=False`) is the
   default.
+- **`m_step_scale="unconstrained"`** (default `"natural"`): runs the M-step's Newton steps on
+  $\operatorname{logit}$ / $\log$ scales of the parameters that have a bound — $g$ and $u$ on
+  $\operatorname{logit}$, latent variances on $\log$, factor correlations on
+  $2\operatorname{atanh}\rho$, and a slope only when a `LogNormalPrior` or an edited bound
+  restricts it to $(0, \infty)$. Unbounded parameters such as slopes are not transformed, so
+  negative slopes stay possible. The objective is the same, so an interior solution is the same as
+  with the default; the estimates, parameter table, priors and standard errors stay on the natural
+  scale. The difference is at a bound: the default stops exactly on it (e.g. $g=0$), while the
+  unconstrained scale only approaches it, sometimes after many more iterations. Both raise
+  `HeywoodWarning` once a parameter is within `1e-4` of its bound.
 - **`quadrature`**: the latent-variable grid. The default is 61 equally spaced points on
   $[-6, 6]$ (mirt's default). See [section 13](#13-choosing-the-quadrature-grid) for when to
   widen it.
@@ -861,7 +871,7 @@ fipc_spec_irt = (
 ## 11. Priors and MAP estimation
 
 Attach prior distributions to item parameters with `Model.prior(*, param, dist, items=None)` to
-perform Bayes modal (MAP) estimation (Mislevy, 1986; Swaminathan & Gifford, 1986). Three
+perform Bayes modal (MAP) estimation (Mislevy, 1986; Swaminathan & Gifford, 1986). Four
 natural-scale priors are provided:
 
 | Class | Support | Typical use |
@@ -869,9 +879,21 @@ natural-scale priors are provided:
 | `NormalPrior(mean, sd)` | $(-\infty, \infty)$ | Intercepts `d` / `dk`, or slopes `a` |
 | `LogNormalPrior(mean_log, sd_log)` | $(0, \infty)$ | Slopes `a` ($\log a \sim N(\mu, s^2)$) |
 | `BetaPrior(a, b)` | $(0, 1)$ | 3PL / 4PL asymptotes `g` and `u` |
+| `LogitNormalPrior(mean_logit, sd_logit)` | $(0, 1)$ | 3PL / 4PL asymptotes ($\operatorname{logit} g \sim N(\mu, s^2)$) |
 
 Priors are evaluated directly on the **natural parameter scale** without a Jacobian term
-(matching R mirt's log-prior objective `LL.Priors`). In a multiple-group model, `.prior()`
+(matching R mirt's log-prior objective `LL.Priors`). `LogitNormalPrior` is the density of $g$
+when $\operatorname{logit} g$ is normal (Aitchison & Shen, 1980), so its formula contains
+$-\log g - \log(1 - g)$: that term is part of the density of $g$, not a change of scale. For
+example, `LogitNormalPrior(-1.0986, 0.5)` centers $g$ on $1/4$, the chance rate of four-option
+items. flexMIRT's `Guessing : Normal(mean, sd)` (and R mirt's `PRIOR = (..., g, norm, mean, sd)`)
+describes the same distribution of $g$ but maximizes the posterior over $\operatorname{logit} g$,
+which leaves that term out, so its estimates of $g$ typically lie somewhat closer to $1/2$. To
+reproduce those estimates, pass `mode_scale="logit"`:
+`LogitNormalPrior(-1.0986, 0.5, mode_scale="logit")` evaluates
+$\log\phi(\operatorname{logit} g; \mu, s)$ without the Jacobian, so the MAP estimate, the
+log posterior and the standard errors are those of the logit-metric objective (the SE of $g$
+is the delta-method SE $g(1-g)\,\mathrm{SE}(\operatorname{logit} g)$). In a multiple-group model, `.prior()`
 applies to every group, and a parameter shared across groups (same `free_id`) is counted **once**.
 Fixed parameters ignore their prior. Priors on latent-distribution parameters (`"mean"`, `"var"`)
 are not supported (`SpecificationError`).
@@ -916,7 +938,7 @@ print(table.head(4))
 | `value` | Starting value (the fixed value if not free) |
 | `free` | Whether the parameter is estimated |
 | `lower`, `upper` | Bounds; starting values must lie strictly inside |
-| `prior` | Prior object (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, or `None`; ignored if fixed) |
+| `prior` | Prior object (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior`, or `None`; ignored if fixed) |
 | `free_id` | Free-parameter number. **Rows with the same number are constrained to be equal.** Newly freed rows may keep `-1` (they get a number) |
 
 ```python
@@ -1237,6 +1259,55 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
   `Model.fix_from()`; Rasch/PCM items get slope $1/A$); `linked.transform_theta()` transforms
   scalars, arrays, Series, or scoring DataFrames (`theta`, `se`, and plausible values `pv1..`),
   treating $(A, B)$ as known (the transformed `se` excludes linking error).
+
+### Screening the common items
+
+Before a linking is trusted, the common items are checked for item parameter drift: an item whose
+parameters moved between the two calibrations (exposure, a changed context) is removed from the
+anchor set and the linking is repeated. `screen_common_items(source, target)` links with `link()`,
+transforms the source items and computes for every common item
+
+| `statistic` | Per item | Default `threshold` |
+|---|---|---|
+| `"robust_z"` (default) | $\max(\lvert z_a\rvert, \lvert z_b\rvert)$: robust z of the log slope ratios and of the location differences, $(x - \mathrm{median}) / (0.74\,\mathrm{IQR})$ over the common items (Huynh & Meyer, 2010) | 1.645 |
+| `"displacement"` | $\lvert b^* - b^{\mathrm{tgt}}\rvert$, the location difference after the transformation (logits) | 0.3 |
+| `"rmsd"` | root mean squared difference of the two expected item score curves, weighted by the target's latent distribution | 0.1 |
+
+The location $b$ is the difficulty of a dichotomous item and the mean of the thresholds of a GRM
+or GPCM item. With `purify=True` (default) the flagged item with the largest statistic is removed
+and the linking repeated until no kept item is flagged (`removal="all"` removes every flagged item
+per step; `min_items` and `max_iter` bound the loop and a `ScreeningWarning` says when they stop
+it):
+
+```python
+from flexpyirt import screen_common_items
+
+# A later administration in which the first common item became one logit harder.
+d_drift = d_new.copy()
+d_drift[0] -= a_new[0]
+drift_df = pd.DataFrame(
+    simulate_2pl(a_new, d_drift, rng.normal(0.5, 1.2, 800), rng), columns=new_items
+)
+drift_res = fit(Model.uniform(TwoPL(), items=new_items), drift_df, method=BAEM(squarem=True))
+
+screened = screen_common_items(drift_res, res, statistic="displacement")
+print(screened.removed_items)
+print(screened.history[["iteration", "n_items", "A", "B", "removed"]].round(3))
+print(screened.table[["item", "difference_b", "rmsd", "flagged", "kept"]].round(3))
+linked_screened = screened.link  # the LinkResult on the kept items
+```
+
+- `screened.table` has one row per common item under the final linking: transformed source and
+  target slopes and locations, `log_ratio_a`, `difference_b`, `displacement`, `robust_z_a`,
+  `robust_z_b`, `rmsd`, `flagged`, `kept` and `iteration_removed`. `history` gives $(A, B)$ and the
+  removed items at every step, and `initial_link` the linking on all common items.
+- The thresholds are conventions, not derived values; set them for your programme. Robust z with
+  few common items (fewer than about 8) has an unstable IQR.
+- For drift across several administrations, screen each against the base form and stack the
+  tables: `stack_screening_tables({"2025": screened_2025, "2026": screened_2026})`.
+- Unidimensional fits only. DIF tests inside one multiple-group fit are `FitResult.dif()`.
+  Validated against a base-R recomputation of the same rules on mirt calibrations (2PL and mixed
+  2PL + GRM + GPCM).
 
 ### Equating and raw-to-scale tables
 
@@ -1625,6 +1696,7 @@ except SpecificationError as e:
 
 ## References
 
+- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.

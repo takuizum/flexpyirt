@@ -167,6 +167,9 @@ one (DESIGN.md §16.18).
 | `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
 | `link` | function | Differentiable IRT scale linking (Haebara / Stocking–Lord, non-symmetric & symmetric; `transformation=` for a diagonal, orthogonal or oblique $\mathbf A$ in multidimensional models); returns a `LinkResult` |
 | `LinkResult` | class | Scale-linking result (`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `transformation`, `items`, `transform_theta`, `summary`) |
+| `screen_common_items` | function | Common-item screening for linking and item parameter drift (robust z, displacement, expected-score RMSD; iterative purification with `link()`); returns a `CommonItemScreeningResult` |
+| `CommonItemScreeningResult` | class | Screening result (`table`, `link`, `initial_link`, `kept_items`, `removed_items`, `history`, `flagged_items`, `summary`) |
+| `stack_screening_tables` | function | Stacks the screening tables of several administrations with an `administration` column |
 | `irt_equate` | function | IRT true-score / observed-score equating of the summed scores of a new form to an old form on one scale (or through a `LinkResult`); returns an `IRTEquatingResult` (`table`, `new_distribution`, `old_distribution`, `summary`) |
 | `score_distribution` | function | Model-implied summed-score distribution of a form (items, group) in its fitted population |
 | `scale_table` | function | Raw-to-scale table: $\theta$ per summed score (true score or EAPsum), its SE, and a clipped, rounded linear scale score |

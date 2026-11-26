@@ -1,4 +1,4 @@
-r"""IRT equating kernels (Core layer, DESIGN.md §22).
+r"""IRT equating kernels (Core layer, DESIGN.md §23).
 
 Pure JAX functions on the :class:`Form` pytree: the category probabilities of a test form on a
 common :math:`\theta` scale, its test characteristic curve (TCC) and test information, a
@@ -59,7 +59,7 @@ class Form:
     r"""A test form evaluated on a common scale (Core pytree).
 
     The items are evaluated at their own scale's :math:`\theta_X=(\theta-B)/A`, so
-    :math:`P_{jk}(\theta)=P_{jk}((\theta-B)/A;\xi_j)` (DESIGN.md §22.2).
+    :math:`P_{jk}(\theta)=P_{jk}((\theta-B)/A;\xi_j)` (DESIGN.md §23.2).
 
     Attributes
     ----------
@@ -88,7 +88,7 @@ def form_probs(form: Form, theta: Array) -> Array:
     ``theta`` has shape ``(T,)`` on the common scale; the result has shape ``(T, J, K_max)``,
     items with fewer categories padded with zeros. A NaN probability is set to 0: far in the
     tails the graded kernel returns NaN for a category whose two cumulative probabilities round
-    to the same double, i.e. whose probability underflows (DESIGN.md §22.2).
+    to the same double, i.e. whose probability underflows (DESIGN.md §23.2).
     """
     own = (theta - form.intercept) / form.slope
     out = jnp.zeros((theta.shape[0], form.n_items, form.max_categories), dtype=theta.dtype)
