@@ -186,9 +186,11 @@ def test_loglik_and_log_posterior(name: str, squarem: bool, scale: str) -> None:
     assert _fixed_at_reference(name).loglik == pytest.approx(ref_ll, rel=1e-12)
     assert res.log_posterior >= _log_posterior_at_reference(name) - 1e-8
     if name == "v7_3pl_map":
-        # mirt 1.46's BFGS stops at a strictly lower log-posterior due to its expbeta gradient bug.
+        # mirt 1.46-1.48's BFGS stopped 40.9 below the MAP (expbeta derivatives without the logit
+        # chain rule, issue #20 item 1); fixed on mirt's GitHub HEAD (commit eedbd05, mirt 1.48.5),
+        # whose BFGS reaches the same log-posterior (VALIDATION.md, "R and mirt versions").
         mirt_bfgs_lp = float(case.raw["meta"]["mirt_bfgs_diagnostic"]["log_posterior"])
-        assert res.log_posterior > mirt_bfgs_lp + 1.0
+        assert abs(res.log_posterior - mirt_bfgs_lp) <= TOL_LOGLIK_REL * abs(mirt_bfgs_lp)
 
 
 @pytest.mark.parametrize(("squarem", "scale"), RUNS)

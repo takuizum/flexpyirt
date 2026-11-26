@@ -158,12 +158,17 @@ run one full-tier shard as CI does
 (`uv run pytest -m "not slow" --shard 2/3 --durations-file tests/durations-fast.json` for a fast-tier
 one).
 
-To regenerate the mirt reference values (needs R 4.4+ and mirt):
+To regenerate the mirt reference values (needs R 4.4+; mirt is installed from GitHub,
+`philchalmers/mirt`, into the user library or `FLEXPYIRT_R_LIB`; see
+[VALIDATION.md](docs/dev/VALIDATION.md), "R and mirt versions"):
 
 ```bash
-Rscript validation/r/m1_reference.R
-Rscript validation/r/m2_reference.R
+Rscript validation/r/install_mirt.R
+validation/r/run_references.sh
 ```
+
+`validation/r/run_references.sh m1 m2` reruns single scripts; a new script that uses mirt sources
+`validation/r/setup.R` and is added to the stage lists of `run_references.sh`.
 
 flexpyctt's reference scripts are in `packages/flexpyctt/validation/r/` and write to
 `packages/flexpyctt/tests/reference/`; run them from the repository root too. flexpyequate's are

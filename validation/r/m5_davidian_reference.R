@@ -20,6 +20,7 @@
 #   3. Independent checks of the closed-form Davidian moments (mu_z, var_z) by adaptive numerical
 #      integration of dcurver::ddc (stats::integrate), so the shared closed-form formula is not
 #      validated only against itself.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(dcurver)
@@ -437,7 +438,7 @@ write_v19 <- function(case, description, dat, itemtype, n_cat, degree, quad,
       case = case,
       description = description,
       r_version = R.version.string,
-      mirt_version = as.character(packageVersion("mirt")),
+      mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
       dcurver_version = as.character(packageVersion("dcurver")),
       TOL = TOL,
       quadpts = quad$quadpts,

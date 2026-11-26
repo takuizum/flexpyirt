@@ -7,6 +7,7 @@
 # fscores(method = "ML" / "WLE") scores the same unique patterns used for EAP plus copies with
 # some responses set to missing, all-lowest / all-highest patterns, and patterns that are extreme
 # on one factor only. SEs are mirt's defaults (inverse nlm Hessian).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -74,7 +75,7 @@ for (case in names(v14$cases)) {
 }
 res <- list(
   meta = list(case = "v14_mirt_mlwle", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")),
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
               source = "tests/reference/v14_mirt2d.json (all parameters fixed at mirt's estimates)",
               converged = TRUE),
   cases = out

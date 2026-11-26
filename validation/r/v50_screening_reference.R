@@ -15,6 +15,7 @@
 # The simulated drift (planted in the source form) gives a known answer for a sanity check, and
 # equateIRT::dif.test() (Lord's Wald test after linking, with purification) is run on the same
 # mirt fits as an independent cross-check of which items drifted.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -424,7 +425,7 @@ res <- list(
       "with the V20 base-R Stocking-Lord / Haebara linking."
     ),
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     equateIRT_version = as.character(packageVersion("equateIRT")),
     TOL = 1e-10,
     quadpts = quadpts,

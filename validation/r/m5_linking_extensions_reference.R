@@ -28,6 +28,7 @@
 #                 R = [[cos phi, -sin phi], [sin phi, cos phi]]; for D = 3 Rodrigues' formula for
 #                 exp(S), S[i, j] = -phi_ij, S[j, i] = phi_ij (i < j; phi = (phi_12, phi_13, phi_23)).
 # Covariances are reported for (vec(A) row-major, beta) in every parameterization.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -444,7 +445,7 @@ write_bundle <- function(cases, file, description) {
         "from the published formulas using mirt's probtrace() and expected.item()."
       ),
       r_version = R.version.string,
-      mirt_version = as.character(packageVersion("mirt")),
+      mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
       TOL = 1e-10, accelerate = "none", SE_type = "Oakes",
       theta_lim = c(-6, 6), grid_check = c(-6, 6), converged = TRUE
     ),

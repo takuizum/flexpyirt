@@ -5,7 +5,8 @@
     "kind": "davidian",
     "k": 2,
     "r_version": "R version 4.6.2 (2026-10-29)",
-    "mirt_version": "1.48",
+    "mirt_version": "1.48.5",
+    "mirt_sha": "2b342bb17e773d8d97f1ffd0a8144244901dfbff",
     "dcurver_version": "0.9.3",
     "quadpts": 61,
     "theta_lim": [-6, 6],
@@ -13,7 +14,7 @@
     "converged": true,
     "iterations": 362,
     "optimizer": "BFGS (customGroup)",
-    "elapsed_seconds": 11.146,
+    "elapsed_seconds": 9.39200000000005,
     "max_grad_mirt": 0.00142244971357286,
     "max_grad": 1.81898940354586e-07,
     "n_polish": 1

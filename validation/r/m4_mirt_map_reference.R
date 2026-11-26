@@ -7,6 +7,7 @@
 # scores the same unique patterns used for EAP plus copies with some responses set to missing.
 # The prior is the estimated multivariate normal (means 0, variances 1, estimated correlations);
 # SEs are the square roots of the diagonal of the inverse negative Hessian at the mode.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -66,7 +67,7 @@ for (case in names(v14$cases)) {
 }
 res <- list(
   meta = list(case = "v14_mirt_map", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")),
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
               source = "tests/reference/v14_mirt2d.json (all parameters fixed at mirt's estimates)",
               converged = TRUE),
   cases = out

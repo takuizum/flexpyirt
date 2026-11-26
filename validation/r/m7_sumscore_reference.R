@@ -13,6 +13,7 @@
 # whose `expected` column is N * sum_q w_q L(s | theta_q) by mirt's own Lord-Wingersky recursion.
 # The item category probabilities on the grid (probtrace) and the weights are stored, so the
 # Python test needs only the kernel.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(poibin)
   library(mirt)
@@ -98,7 +99,7 @@ bundle <- list(
     description = "V36: summed-score distribution kernel vs poibin, dpois and mirt EAPsum tables",
     r_version = R.version.string,
     poibin_version = as.character(packageVersion("poibin")),
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     # The two mirt fits behind the EAPsum tables (asserted in eapsum_case()).
     converged = TRUE
   ),

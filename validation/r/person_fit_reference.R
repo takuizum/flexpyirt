@@ -26,6 +26,7 @@
 # Rasch case (rasch_sirt): the V37 2PL data refitted as a Rasch model (free variance); WLE
 # person and item fit from mirt, and sirt::personfit.stat(dat, abil = theta, b = -d) as an
 # independent implementation of lz, infit and outfit.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -267,7 +268,7 @@ bundle <- list(
                         "mirt personfit() / itemfit(fit_stats = 'infit'), sirt personfit.stat()",
                         "and an R recomputation of lz*"),
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     sirt_version = as.character(packageVersion("sirt")),
     quadpts = quadpts, theta_lim = theta_lim,
     # Every model is fixed at V37's estimates (converged there); the Rasch fit is asserted.

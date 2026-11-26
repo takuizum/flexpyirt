@@ -2,7 +2,8 @@
   "meta": {
     "case": "v54_simulate",
     "r_version": "R version 4.6.2 (2026-10-29)",
-    "mirt_version": "1.48",
+    "mirt_version": "1.48.5",
+    "mirt_sha": "2b342bb17e773d8d97f1ffd0a8144244901dfbff",
     "seed": 20261126,
     "converged": true
   },

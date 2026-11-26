@@ -15,6 +15,7 @@
 # category probabilities below u,  x = sum_{k < K-1} [u > F_k(theta)],  with F from mirt's
 # probtrace(). Stored per case: the item parameters (flexpyirt names), theta, u, probtrace() and
 # the responses.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -80,7 +81,7 @@ last_free <- anova_table(list(invariant, mg(c(head(items4, -1), "free_means", "f
 
 compare <- list(
   meta = list(case = "v54_compare_fits", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")), TOL = 1e-10,
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(), TOL = 1e-10,
               accelerate = "none", optimizer = "NR", converged = TRUE,
               sources = list(dichotomous = "v11_3pl", polytomous = "v8_sim_gpcm",
                              twogroup = "v4_twogroup_2pl")),
@@ -176,7 +177,7 @@ two <- deterministic(mirt.model(two_model), two_items, two_values, two_k,
 
 simulate <- list(
   meta = list(case = "v54_simulate", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")), seed = 20261126,
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(), seed = 20261126,
               converged = TRUE),
   unidimensional = uni,
   two_factor = c(two, list(factors = list(F1 = c("j1", "j2", "j3"),

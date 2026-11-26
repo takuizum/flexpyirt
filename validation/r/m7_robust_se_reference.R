@@ -29,6 +29,7 @@
 # - Davidian curves and mixtures: mirt computes neither type ("No standard error method currently
 #   supported for Davidian curves", "Only Oakes and complete SE.types current supported for
 #   mixture models"); flexpyirt raises SpecificationError there.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -77,7 +78,7 @@ write_case <- function(case, description, dat, grp, fit_fun, quad,
   stopifnot(isTRUE(extract.mirt(m, "converged")), all(grid_check == quad$theta_lim))
   res <- c(list(
     meta = list(case = case, description = description, r_version = R.version.string,
-                mirt_version = as.character(packageVersion("mirt")), TOL = tol,
+                mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(), TOL = tol,
                 quadpts = quad$quadpts, theta_lim = quad$theta_lim, grid_check = grid_check,
                 accelerate = "none", optimizer = optimizer, converged = TRUE,
                 iterations = extract.mirt(m, "iterations")),

@@ -11,6 +11,7 @@
 # grid that difference (VALIDATION.md, M1 notes) moves anchor slopes by ~3e-4.
 # mirt reports the focal covariance COV_21; the correlation cor_12 = COV_21 / sqrt(COV_11 COV_22)
 # and its SE (delta method with mirt's vcov) are written alongside.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -64,7 +65,7 @@ run_case <- function(case, description, dat, grp, spec, anchors, factors) {
   first <- !duplicated(key)
   cat(sprintf("%-22s loglik=%.6f iter=%d\n", case, extract.mirt(m, "logLik"), extract.mirt(m, "iterations")))
   list(
-    meta = list(case = case, description = description, mirt_version = as.character(packageVersion("mirt")),
+    meta = list(case = case, description = description, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
                 r_version = R.version.string, quadpts = quad$quadpts, theta_lim = quad$theta_lim,
                 grid_check = grid_check, TOL = 1e-10, optimizer = "NR", accelerate = "none",
                 converged = TRUE, iterations = extract.mirt(m, "iterations")),
@@ -101,7 +102,7 @@ cases$mg2d_cross <- run_case("mg2d_cross", "2 groups, 2D 2PL with cross-loading 
                              dat2, grp, "F1 = 1-7\nF2 = 7-12\nCOV = F1*F2", sprintf("q%02d", c(1:3, 8:10)),
                              list(F1 = sprintf("q%02d", 1:7), F2 = sprintf("q%02d", 7:12)))
 
-res <- list(meta = list(case = "v21_mirt_multigroup", mirt_version = as.character(packageVersion("mirt")),
+res <- list(meta = list(case = "v21_mirt_multigroup", mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
                         converged = TRUE), cases = cases)
 write_json(res, file.path("tests", "reference", "v21_mirt_multigroup.json"), auto_unbox = TRUE,
            digits = NA, pretty = TRUE, na = "null")

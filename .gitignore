@@ -8,6 +8,7 @@ dist/
 build/
 .ipynb_checkpoints/
 validation/r/.Rhistory
+validation/r/logs/
 .hypothesis/
 benchmarks/data/
 site/

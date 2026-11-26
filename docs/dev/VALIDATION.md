@@ -5,13 +5,74 @@ English | [日本語](VALIDATION.ja.md)
 ## Approach
 - Reference values come from R `mirt` and are committed as JSON in `tests/reference/`. CI does not
   run R.
-- Generator scripts are `validation/r/<case>.R`. Each writes the equivalent of `sessionInfo()`
-  (R and mirt versions) into the JSON.
+- Generator scripts are `validation/r/<case>.R`. Each writes the R version, the mirt version and
+  mirt's commit SHA into the JSON's `meta` (see "R and mirt versions" below).
 - Comparisons use **the same conditions**: the same quadrature (e.g. 61 equally spaced points on
   $[-6,6]$), the same convergence criterion (a strict `TOL` on the mirt side, e.g. 1e-8), no
   acceleration, the same priors.
 - Data are both simulated (fixed seeds) and public (e.g. mirt's bundled `LSAT7`, `Science`,
   `SAT12`).
+
+## R and mirt versions
+- **Policy (#74)**: references are generated with the latest R mirt on GitHub
+  (`philchalmers/mirt`, default branch), not with a CRAN release, so a fix or a regression in mirt
+  shows up here before it reaches CRAN. Every reference JSON records `mirt_version` and
+  `mirt_sha` (the commit, `packageDescription("mirt")$RemoteSha`) in its `meta`;
+  `tests/test_reference_meta.py` and `tests/test_reference_provenance.py` reject a reference
+  without a commit SHA, a script that does not load mirt through `validation/r/setup.R`, and a
+  script missing from `validation/r/run_references.sh`.
+- **Regenerating**: `Rscript validation/r/install_mirt.R [ref]` installs mirt from GitHub into the
+  user library (or `FLEXPYIRT_R_LIB`); `validation/r/run_references.sh` reruns every script that
+  uses mirt, in two stages (the second reads JSON written by the first; `JOBS` sets the
+  parallelism). `validation/r/setup.R` stops if the mirt it would load has no `RemoteSha`.
+- **Scheduled check**: `.github/workflows/mirt-head.yml` (weekly and on demand, separate from the
+  test CI, which still never runs R) installs R and mirt HEAD, reruns the scripts, compares the new
+  JSON with the committed JSON (`scripts/compare_references.py`: SEs 1e-3 relative,
+  log-likelihoods and fit statistics 1e-6 relative, other values 1e-5 absolute + 1e-6 relative,
+  i.e. the strictest entry of the tolerance table for each kind) and runs the whole test suite on
+  the regenerated references. On drift or a failure it opens an issue (or comments on the open
+  one). References are never updated automatically: a person decides whether the drift is a mirt
+  regression, a fix of a known mirt issue (#20) or a change to adopt, regenerates locally and opens
+  a PR; every adopted drift is recorded below, and a test tolerance changes only with a written
+  reason.
+- **Current references**: R 4.6.2, mirt 1.48.5 at `2b342bb` (philchalmers/mirt, 2026-11-23).
+  Before #74 they came from CRAN mirt 1.46.1 (V1–V13, `v14_mirt2d`, V16–V20, V22, V23, `v26_local_dependence`, V31, V32, V43) and
+  1.48 (the rest).
+  The flexpyctt references V24 (`v24_polychoric`) and V27 (`v27_detect`) load mirt only for its
+  bundled LSAT7 / Science data (the values come from lavaan, psych and sirt), so they are not
+  regenerated on mirt HEAD and do not record `mirt_sha`.
+- **Drift found when regenerating on mirt 1.48.5 (`2b342bb`, #74)**: all references were
+  regenerated and compared with the committed ones (`scripts/compare_references.py`). Item
+  parameters, latent parameters, SEs, log-likelihoods, EAPs and fit statistics of every case
+  moved by less than the drift tolerances above, except:
+  - **V18 (`v18_m2`)**: mirt's raw `M2()` for `threepl` (64.82 → 68.106) and `gpcm_sim`
+    (5.266 → 5.901) now equals the exact R recomputation (rel. < 1e-9): the `dP()` derivative
+    bugs (#20 items 14–15) are fixed upstream (philchalmers/mirt `337ada6`). The test now asserts
+    the equality instead of the old > 4% / > 10% gaps. `rasch_free_var` is unchanged (item 16).
+  - **V7c (`v7_3pl_map`)**: mirt's own BFGS run under the `expbeta` prior, recorded as a
+    diagnostic, now reaches the exact MAP (log-posterior deficit 40.9 → 4.7e-8): the prior
+    derivatives are on the logit scale since `eedbd05` (#20 item 1). The test now asserts that
+    flexpyirt and mirt's BFGS agree. The exact MAP and SEs that V7 compares with are unchanged.
+  - **V13 (`v13_fscores`, 3PL case)**: the generator drops patterns whose mirt ML score is finite
+    with an `NA` SE (#20 item 5); on 1.48.5 two fewer patterns hit it (114 instead of 112 scored
+    patterns). The other scores are unchanged.
+  - **V14 ML/WLE (`v14_mirt_mlwle`) and V53 (`v53_person_fit`)**: ML scores of patterns whose
+    ML diverges moved by up to 6e-4 in absolute value (θ between −14 and ±20, near the bound
+    mirt's optimizer stops at), and in the multidimensional ML of V14 one coordinate of 14
+    patterns switched between a large finite value (θ ≈ −14 to −20, SE 0 or `NA`) and −∞ (10
+    to −∞, 4 back to finite). The tests compare these patterns by their non-finite / boundary
+    status, not by value, so no tolerance changed.
+  - **V15 multiple-group S-X2 (`v15_sx2_multigroup`) and V42 (`v42_m2_groups_missing_map`)**:
+    multiple-group estimates moved by up to 1.1e-5 (focal mean of `science_grm_2g`) and 2e-5,
+    below the 1e-4 parameter tolerance; S-X2 by up to 1.3e-5 relative.
+  - **Run diagnostics**: EM iteration counts and timings of the V22 mixture fits, `nlm`
+    convergence codes of V20 and the R-side optimizer iterations of V19, and one random-start
+    row of V23 (`alt_starts`: mirt HEAD's random starting values differ; the default-start NR
+    still stops at the saddle, #20 item 21a). Not compared since #74.
+  - JSON layout only: matrices in `v6_twogroup_fipc_eh` are written one row per line (same content).
+
+  No test tolerance was changed. The #20 issues were re-checked on 1.48.5: items 1, 14 and 15
+  are fixed upstream; all the others behave as on 1.48 (re-check posted on #20).
 
 ## Tolerances (initial values, revised as needed)
 | Quantity | Tolerance (max. absolute difference) |

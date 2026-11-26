@@ -8,6 +8,7 @@
 #   (a_i - a_i^(-j)) / SE(a_i^(-j))
 # for every other item i, with the SE from the refit (Oakes, mirt's default SE.type). The Python
 # test refits the same models with flexpyirt and compares.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -73,7 +74,7 @@ cases[[4]] <- jsi_case("sim_gpcm_ld", as.data.frame(gp), "gpcm")
 
 res <- list(
   meta = list(case = "v31_jsi", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")),
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
               converged = TRUE, TOL = 1e-10, quadpts = 61, theta_lim = c(-6, 6)),
   cases = cases
 )

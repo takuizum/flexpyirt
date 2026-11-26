@@ -22,6 +22,7 @@
 # q07-q10 free per group, focal means and variances free, 3% missing; (b) 2PL (J = 15), 2 groups,
 # NormalMixture-2, every item invariant, focal mean / variance free; (c) FIPC: 2PL items fixed at bank values, 2 groups, Davidian-2, every group's mean and
 # variance free.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(dcurver)
@@ -314,7 +315,7 @@ run_case <- function(case, description, dat, grp, groups, kind, k, start, anchor
 
   list(
     meta = list(case = case, description = description, kind = kind, k = k,
-                r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+                r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
                 dcurver_version = as.character(packageVersion("dcurver")),
                 quadpts = QUADPTS, theta_lim = LIM, grid_check = range(m@Model$Theta),
                 converged = extract.mirt(m, "converged"), iterations = iterations,

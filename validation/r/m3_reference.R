@@ -20,6 +20,7 @@
 # (a = 0.851) causes NR on the logit scale to overshoot logit(g) to ~-15 on early iterations and
 # become trapped at a strictly lower log-likelihood; starting mirt at a = 2.0 avoids that trap and
 # reaches the interior global MLE (verified against BFGS and flexpyirt from default starts).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -73,7 +74,7 @@ write_case <- function(case, description, dat, itemtype, truth, pars = NULL) {
                 quadpts = quad$quadpts, theta_lim = quad$theta_lim)
   res <- list(
     meta = list(case = case, description = description, itemtype = itemtype,
-                r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+                r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
                 TOL = 1e-10, quadpts = quad$quadpts, theta_lim = quad$theta_lim,
                 grid_check = range(m_oakes@Model$Theta),
                 accelerate = "none", optimizer = "NR",

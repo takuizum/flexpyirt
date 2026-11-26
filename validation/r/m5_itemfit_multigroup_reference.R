@@ -9,6 +9,7 @@
 # twogroup_2pl: V4 data and mirt's V4 estimates, rebuilt with TOL = NaN (no EM step) as in V15.
 # science_grm_2g: Science (GRM, 4 items) split into two groups by row parity, all items invariant,
 #   focal mean/variance free; fitted here, the data and estimates are stored for the Python fit.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -97,7 +98,7 @@ science <- list(
 
 res <- list(
   meta = list(case = "v15_sx2_multigroup", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")), converged = TRUE),
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(), converged = TRUE),
   cases = list(twogroup_2pl = twogroup, science_grm_2g = science)
 )
 write_json(res, file.path("tests", "reference", "v15_sx2_multigroup.json"), auto_unbox = TRUE,

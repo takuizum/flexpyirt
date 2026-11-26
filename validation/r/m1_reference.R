@@ -6,6 +6,7 @@
 # M-step iteration cap shrinks as the log-likelihood stabilizes, the M-step stops moving, and the
 # TOL test passes before EM has converged (Rasch on LSAT7: log-likelihood still rising ~2e-9 per
 # cycle, latent variance off by ~2e-5, independent of TOL). Newton-Raphson converges properly.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -49,7 +50,7 @@ write_case <- function(case, dat, itemtype, description) {
   rich <- extract(m_rich)
   res <- list(
     meta = list(case = case, description = description,
-                r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+                r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
                 itemtype = itemtype, TOL = 1e-10, quadpts = 61, theta_lim = c(-6, 6),
                 grid_check = range(m_oakes@Model$Theta),
                 accelerate = "none", optimizer = "NR",

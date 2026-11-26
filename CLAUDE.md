@@ -54,6 +54,15 @@ uv ワークスペース。配布物は 3 つで、同じタグから同じバ�
 - 開発依存: `pytest`, `hypothesis`, `ruff`, `mypy`。
 - R 参照値の生成: `validation/r/*.R`（R 4.4+, mirt）。生成した参照値は `tests/reference/*.json` に
   コミットし、CI では R を走らせない（R がない環境でもテストが通るように）。
+- mirt は CRAN 版ではなく **GitHub の最新版**（`philchalmers/mirt` の既定ブランチ）で照合する
+  （VALIDATION.md「R と mirt の版」）。`Rscript validation/r/install_mirt.R` で入れ、
+  `validation/r/run_references.sh` で全参照値を作り直す。mirt を使うスクリプトは必ず
+  `validation/r/setup.R` を `library(mirt)` の前に `source` し、`meta` に `mirt_version` と
+  `mirt_sha` を書く（`tests/test_reference_meta.py` が検査）。現在の参照値: R 4.6.2、mirt 1.48.5
+  （`2b342bb`）。
+- 週次の `mirt-head.yml` ワークフローが mirt HEAD で参照値を作り直して比較し、ずれたら issue を立てる。
+  参照値は自動では更新しない。ずれを読み、mirt の退行か修正かを判断してから手元で作り直して PR にする。
+  ずれと許容誤差の変更（理由を書いたものだけ）は VALIDATION.md に記録する。
 
 ## コーディング規約
 
