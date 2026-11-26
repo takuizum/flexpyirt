@@ -43,6 +43,8 @@ Releases = "https://github.com/takuizum/flexpyirt/releases"
 
 [project.optional-dependencies]
 polars = ["polars>=1.0"]
+# flexpyirt.plotting (imported lazily; DESIGN.md §21).
+plot = ["matplotlib>=3.8"]
 
 [dependency-groups]
 dev = [
@@ -52,6 +54,7 @@ dev = [
     "mypy>=1.11",
     "pandas-stubs>=2.1",
     "pytest-xdist>=3.8.0",
+    "matplotlib>=3.8",
     # Workspace member, for development only: `uv sync` installs it (editable) so that its tests
     # and type checks run from the root environment. flexpyirt itself does not depend on it.
     "flexpyequate",

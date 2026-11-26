@@ -363,6 +363,61 @@ print(reliability(res, df))  # データを渡すと列 marginal, empirical
   変わらない。
 - `reliability()` は潜在分布が `Normal` のときに使える。
 
+### 図
+
+`flexpyirt.plotting` は、毎回の分析で見る図を描く: 観測比率つきの項目特性曲線、情報関数、テスト特性
+曲線、項目–受検者（Wright）マップ。matplotlib が必要で、`pip install "flexpyirt[plot]"` で入る。
+入っていなくても `import flexpyirt` は動き、描画関数が `MissingDependencyError` を投げる。描画関数は
+matplotlib のオブジェクトを返し（`fig.savefig(...)` で保存できる）、`plt.show()` は呼ばない。
+
+図の数値はすべて DataFrame を返す関数から来るので、ほかのライブラリでも同じ図を描ける:
+
+- `item_probabilities(res, theta)`: カテゴリ確率 $P_{jk}(\theta)$（mirt の `probtrace()`）。項目・
+  カテゴリ・`theta` ごとに 1 行。
+- `empirical_item_curve(res, data)`: 回答者を EAP の $\theta$ で並べて `n_bins` 個の等人数区間に分け
+  （mirt の `itemfit()` と同じ）、区間・カテゴリごとに `theta` の平均、人数 `n`、観測比率 `observed`、
+  その平均でのモデルの確率 `expected` を返す。
+- `wright_map_table(res, data)`: `persons`（EAP 推定値）と `items`（項目とカテゴリ $k\ge1$ ごとに、
+  $P(Y\ge k\mid\theta)=1/2$ となる `location`。サーストン閾値で、2PL 項目では $b$）。
+
+```python
+from flexpyirt import empirical_item_curve, item_probabilities, wright_map_table
+
+trace = item_probabilities(res, np.linspace(-3.0, 3.0, 7), items="q01")
+print(trace.head(3).round(3))  # item, category, theta, probability
+observed = empirical_item_curve(res, df, items=["q01"], n_bins=10)
+print(observed.head(4).round(3))  # item, bin, theta, n, category, observed, expected
+wright = wright_map_table(res, df)
+print(wright.items.head(3).round(3))  # item, category, location
+```
+
+```python
+from flexpyirt.plotting import (
+    plot_expected_score,
+    plot_information,
+    plot_item_curves,
+    plot_wright_map,
+)
+
+fig_curves = plot_item_curves(res, items[:3], data=df)  # 項目ごとのパネル、観測比率の点
+ax_information = plot_information(res, standard_error=True)  # テスト情報量とその SE
+ax_expected = plot_expected_score(res)  # テスト特性曲線
+fig_wright = plot_wright_map(res, df)  # 受検者と項目位置を並べる
+```
+
+![観測比率つきの項目特性曲線](images/plots/item_curves.png)
+
+![テスト情報量と標準誤差](images/plots/information.png)
+![テスト特性曲線](images/plots/expected_score.png)
+
+![Wright マップ](images/plots/wright_map.png)
+
+- `plot_item_curves` は 2 値項目では $P(Y=1\mid\theta)$、多値項目では全カテゴリを描く。`ax=` を渡すと
+  1 項目を既存の Axes に描く。
+- `plot_information(res, items=[...])` はテスト情報量の代わりに項目情報量を描く。
+- 多群モデルでは全群の曲線を描く（[DIF](#特異項目機能dif) を参照）。`data` を渡すときは `score()` と
+  同じく `group=labels` も渡す。
+
 ### 限定情報の適合度（M2）
 
 `m2(data)` は Maydeu-Olivares & Joe (2005, 2006) の限定情報の適合度統計量を、項目得点の平均とペアごとの交差積
@@ -731,6 +786,17 @@ print(mg_scores)
 dif_table = mg.dif(mg_df, group=group, items=items[6:9])
 print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
 ```
+
+多群の推定結果に `plot_item_curves` を使うと群ごとの曲線を描き、`data` と `group` を渡せば群ごとの
+観測比率も描く。これが項目の DIF の図になる。
+
+```python
+from flexpyirt.plotting import plot_item_curves
+
+fig_dif = plot_item_curves(mg, items[6:9], data=mg_df, group=group)
+```
+
+![群ごとの項目特性曲線（DIF の図）](images/plots/dif.png)
 
 ## 10. 固定項目パラメタ推定（FIPC）
 

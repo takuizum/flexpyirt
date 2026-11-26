@@ -12,6 +12,12 @@ from importlib.metadata import PackageNotFoundError, version
 from flexpyirt import errors
 from flexpyirt.comparison import compare_fits
 from flexpyirt.correlation import PolychoricResult, polychoric
+from flexpyirt.curves import (
+    WrightMapTable,
+    empirical_item_curve,
+    item_probabilities,
+    wright_map_table,
+)
 from flexpyirt.dimensionality import (
     ComparisonDataResult,
     DetectResult,
@@ -98,6 +104,7 @@ __all__ = [
     "SimulatedData",
     "ThreePL",
     "TwoPL",
+    "WrightMapTable",
     "__version__",
     "compare_fits",
     "comparison_data",
@@ -105,6 +112,7 @@ __all__ = [
     "dimensionality",
     "dimtest",
     "efa",
+    "empirical_item_curve",
     "empirical_kaiser",
     "errors",
     "expected_score",
@@ -112,6 +120,7 @@ __all__ = [
     "fit",
     "hull",
     "item_information",
+    "item_probabilities",
     "link",
     "model_parallel_analysis",
     "parallel_analysis",
@@ -122,4 +131,5 @@ __all__ = [
     "summed_score_table",
     "test_information",
     "velicer_map",
+    "wright_map_table",
 ]

@@ -148,7 +148,13 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and
   `SE.type = "sandwich"` / `"crossprod"`.
 
-## Field tools (#103–#109)
+## Field features
+- [x] Plots (#103): `item_probabilities()`, `empirical_item_curve()` and `wright_map_table()` return
+  the numbers behind the figures; `flexpyirt.plotting` (`plot_item_curves` with observed proportions and
+  per-group curves for DIF, `plot_information`, `plot_expected_score`, `plot_wright_map`) draws them with
+  matplotlib from the optional extra `flexpyirt[plot]`. Unidimensional models, every item family, single
+  and multiple groups; validated in V48 against mirt `itemfit(return.tables = TRUE)`, `probtrace()`,
+  `coef(IRTpars = TRUE)` and TAM `tam.threshold()`.
 - [ ] Model-comparison table and simulation of responses (#109): `compare_fits()` (AIC, SABIC, HQ,
   BIC, likelihood-ratio tests; mirt's `anova()`) and `simulate_responses()` / `SimulatedData` (from
   a `FitResult` or a `Model` with an item bank; every item model, latent distribution and model

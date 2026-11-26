@@ -1,4 +1,4 @@
-"""Model-comparison table over several fits of the same data (Result layer, DESIGN.md §21.1).
+"""Model-comparison table over several fits of the same data (Result layer, DESIGN.md §22.1).
 
 Pure post-fit Python: every number comes from ``FitResult.loglik``, ``FitResult.n_params`` and
 the sample size; nothing is refitted and nothing runs inside ``jit``.
