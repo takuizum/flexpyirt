@@ -340,6 +340,7 @@ class ItemKernel(Protocol):
     # optional: display thresholds (empty for D > 1)
     irt_names: tuple[str, ...]
     irt_dependency_indices: tuple[tuple[int, ...], ...]
+
     def irt_thresholds(self, params: Array) -> Array: ...
 ```
 The design goal: writing `log_prob` on `(Q, D)` nodes is enough for a new item kernel to get the

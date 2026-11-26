@@ -271,6 +271,7 @@ class ItemKernel(Protocol):
     # 任意: 表示用閾値（D > 1 では空）
     irt_names: tuple[str, ...]
     irt_dependency_indices: tuple[tuple[int, ...], ...]
+
     def irt_thresholds(self, params: Array) -> Array: ...
 ```
 新しい項目カーネルは `(Q, D)` 節点に対する `log_prob` を書くだけで、$D \in \{1, 2, 3\}$ の E-step・M-step（自動微分 Newton）・Oakes/Hessian SE・EAP スコアリングがすべて動くことを設計目標にする。
