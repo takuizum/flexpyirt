@@ -17,7 +17,7 @@ pip install flexpyirt  # または uv add flexpyirt
 ```
 
 flexpyirt をインストールすると **flexpyctt** も入る。推定済みのモデルを使わない分析（ポリコリック相関、次元数、
-DETECT、DIMTEST）のための、対になるパッケージである。依存は NumPy、SciPy、pandas だけなので、JAX を入れたくない
+DETECT、DIMTEST、古典的項目分析）のための、対になるパッケージである。依存は NumPy、SciPy、pandas だけなので、JAX を入れたくない
 環境では `pip install flexpyctt` で単独でインストールできる。
 
 同じリポジトリから公開している 3 つめのパッケージ **flexpyequate** は、得点分布の等化（線形等化、等パーセンタイル

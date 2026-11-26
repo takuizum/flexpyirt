@@ -1,7 +1,7 @@
 [project]
 name = "flexpyctt"
 dynamic = ["version"]
-description = "Model-free item and test analysis: polychoric correlations and dimensionality diagnostics, without JAX."
+description = "Model-free item and test analysis: polychoric correlations, dimensionality diagnostics and classical item analysis, without JAX."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -14,6 +14,8 @@ keywords = [
     "parallel analysis",
     "factor analysis",
     "dimensionality",
+    "item analysis",
+    "reliability",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

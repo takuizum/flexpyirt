@@ -2,13 +2,13 @@
 
 [English](https://github.com/takuizum/flexpyirt/blob/main/packages/flexpyctt/README.md) | 日本語
 
-推定済みの IRT モデルを使わない項目・テスト分析のライブラリです。ポリコリック相関と、テストの次元数を調べる道具を
-提供します。依存は NumPy、SciPy、pandas だけです（JAX は不要）。
+推定済みの IRT モデルを使わない項目・テスト分析のライブラリです。ポリコリック相関、テストの次元数を調べる道具、
+古典的項目分析を提供します。依存は NumPy、SciPy、pandas だけです（JAX は不要）。
 
 flexpyctt は、IRT モデルを推定する [flexpyirt](https://pypi.org/project/flexpyirt/) と対になるパッケージです。
 flexpyirt をインストールすると flexpyctt も入ります。モデルを推定しない場合は flexpyctt だけをインストールできます。
 
-- **R と数値照合済み**: 結果を lavaan、psych、EFAtools、EFA.dimensions、sirt と数値で比べています
+- **R と数値照合済み**: 結果を lavaan、psych、ltm、polycor、EFAtools、EFA.dimensions、sirt と数値で比べています
   （[精度と検証](https://takuizum.github.io/flexpyirt/ja/accuracy/)）。
 - **軽い**: コンパイルも 64 ビットの設定も要りません。
 
@@ -27,6 +27,7 @@ flexpyirt をインストールすると flexpyctt も入ります。モデル�
 | 比較データ法 | `comparison_data()`（Ruscio & Roche, 2012） | EFAtools |
 | DETECT | `detect()`、`exploratory_detect()`（条件付き共分散、DETECT、ASSI、RATIO） | sirt |
 | DIMTEST | `dimtest()`（ブートストラップによるバイアス補正） | シミュレーション |
+| 古典的項目分析 | `score_responses()`（正答キーによる採点）、`item_analysis()`（困難度、項目–合計・項目–残りの相関: 点双列相関または双列・多分系列相関）、`coefficient_alpha()`（α / KR-20、標準化 α、Feldt の信頼区間、項目を除いたときの α）、`coefficient_omega()`（ω total。Pearson またはポリコリック相関）、`distractor_analysis()`（得点群ごとの選択肢の統計量） | psych、ltm、polycor |
 
 ## インストール
 

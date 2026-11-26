@@ -7,8 +7,8 @@ companion package flexpyctt. For the workflow see the [user guide](guide.md); fo
 algorithms see [Theory](theory.md). The docstrings carry the same information plus the formulas
 and sources (`help(flexpyirt.fit)` and so on).
 
-**flexpyctt** holds the tools that need no fitted model: [correlations](#correlations) and the
-model-free part of [number of dimensions](#number-of-dimensions) (each entry below says which
+**flexpyctt** holds the tools that need no fitted model: [correlations](#correlations), the
+model-free part of [number of dimensions](#number-of-dimensions) and [classical item analysis](#classical-item-analysis) (each entry below says which
 package it belongs to). It depends on NumPy, SciPy and pandas only, so it can be installed without
 JAX (`pip install flexpyctt`) and needs no 64-bit setting; installing flexpyirt installs it too.
 Import its functions with `from flexpyctt import ...`. flexpyirt re-exports them under the same
@@ -22,6 +22,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Correlations (flexpyctt): [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
+- Classical item analysis (flexpyctt): [`score_responses`](#score_responses), [`item_analysis`](#item_analysis), [`coefficient_alpha`](#coefficient_alpha), [`coefficient_omega`](#coefficient_omega), [`distractor_analysis`](#distractor_analysis) and their results
 - Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - Model: [`Model`](#model)
@@ -1249,6 +1250,117 @@ Runs several diagnostics and reports them side by side, with two separate consen
 | `summary()` | str | Plain-text report (also `str(result)`) |
 
 ---
+
+## Classical item analysis
+
+Package: flexpyctt (`from flexpyctt import item_analysis, ...`). Model-free item statistics,
+reliability coefficients and option analysis ([guide section 20](guide.md#20-classical-item-analysis)).
+Missing responses are NaN.
+
+### `score_responses`
+
+```text
+score_responses(data, *, key, missing="incorrect") -> DataFrame
+```
+
+Score raw responses with an answer key: 1 if the respondent chose the item's keyed option, else 0
+(psych's `score.multiple.choice(score = FALSE)`).
+
+| Argument | Type | Description |
+|---|---|---|
+| `data` | DataFrame / 2-D array | One row per respondent, one column per item; chosen options in any codes (numbers or strings); NaN / None is missing |
+| `key` | mapping / Series / sequence | Correct option per item (by item name, or in column order). Compared with `==`, so the key must use the data's codes and types |
+| `missing` | `"incorrect"` / `"keep"` | Score a missing response 0 (integer result) or keep it NaN (float result) (default `"incorrect"`) |
+
+**Raises**: `SpecificationError` (the key does not name exactly the data's items, or a key entry
+is missing). **Warns**: `FlexpycttWarning` (nobody chose some item's keyed option, often a key in
+the wrong codes).
+
+### `item_analysis`
+
+```text
+item_analysis(data, *, correlation="pearson", missing="pairwise") -> DataFrame
+```
+
+One row per item: `item`, `n` (observed scores), `n_categories` (distinct observed scores),
+`mean`, `sd` ($n-1$ denominator), `difficulty` (mean divided by the largest observed score; the
+proportion correct for 0 / 1 items), `item_total`, `item_rest` (correlation with the total score
+and with the total of the other items) and `alpha_if_deleted` (NaN with two items).
+
+| Argument | Type | Description |
+|---|---|---|
+| `data` | DataFrame / 2-D array | Item scores (0 / 1 or ordered category scores, at least 0); at least two items |
+| `correlation` | `"pearson"` / `"polyserial"` | Pearson (point-biserial for 0 / 1 items) or polyserial (biserial for 0 / 1 items) correlations; the polyserial is the two-step estimator $r\,\sigma_j/\sum_k\phi(\tau_{jk})$ (Olsson, Drasgow & Dorans, 1982), polycor's `polyserial(ML = FALSE)` (default `"pearson"`) |
+| `missing` | `"pairwise"` / `"listwise"` | Pairwise-complete covariances and each item's observed scores, or complete rows only (default `"pairwise"`) |
+
+The correlations are computed from the item covariance matrix $C$:
+$c_j/\sqrt{C_{jj}\,\mathbf 1^\top C\mathbf 1}$ and its counterpart without item $j$, which equal the
+Pearson correlations with the total and rest scores on complete data. With missing data psych's
+`alpha()` reports the same `r.drop`, but its `raw.r` correlates with each respondent's sum of
+observed scores.
+
+**Raises**: `SpecificationError` (non-numeric or negative scores, a constant item, a pair of items
+with fewer than two joint observations). **Warns**: `HeywoodWarning` (a polyserial estimate
+outside $[-1, 1]$, set to $\pm1$).
+
+### `coefficient_alpha`
+
+```text
+coefficient_alpha(data, *, missing="pairwise", confidence_level=0.95) -> AlphaResult
+```
+
+Coefficient alpha (Cronbach, 1951; KR-20 for 0 / 1 items),
+$\alpha=\frac{k}{k-1}\bigl(1-\operatorname{tr}C/\mathbf 1^\top C\mathbf 1\bigr)$, standardized alpha
+from the correlation matrix, and Feldt's interval
+$\bigl[1-(1-\alpha)F_{1-\gamma/2},\,1-(1-\alpha)F_{\gamma/2}\bigr]$ with $F$ quantiles on
+$(n-1,(n-1)(k-1))$ degrees of freedom (Feldt, Woodruff & Salih, 1987). Agrees with psych's
+`alpha()`. `missing` as in `item_analysis()`; under `"pairwise"` the Feldt $n$ is the number of
+respondents with at least one response.
+
+### `AlphaResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `alpha`, `standardized_alpha` | float | Alpha and standardized alpha |
+| `confidence_interval`, `confidence_level` | tuple, float | Feldt's (lower, upper) interval and its level |
+| `n_items`, `n_obs` | int | Items and respondents used |
+| `if_deleted` | DataFrame | Per item, `alpha` and `standardized_alpha` without it (NaN with two items) |
+
+### `coefficient_omega`
+
+```text
+coefficient_omega(data, *, correlation="pearson") -> OmegaResult
+```
+
+Omega total of a one-factor model: ULS (minres) loadings $\lambda_j$ fitted to the item
+correlation matrix $R$, and $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf 1^\top R\mathbf 1$ (McDonald,
+1999; Revelle & Zinbarg, 2009), psych's `omega(nfactors = 1)$omega.tot`. `correlation` is
+`"pearson"` (pairwise-complete) or `"polychoric"` ([`polychoric`](#polychoric) with its defaults);
+a matrix that is not positive definite is smoothed with a `NotPositiveDefiniteWarning`. At least
+three items. Hierarchical omega is not provided.
+
+### `OmegaResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `omega` | float | $\omega_t$ |
+| `loadings`, `uniquenesses` | Series | One-factor loadings (signed to a non-negative sum) and $1-\lambda_j^2$ |
+| `correlation` | DataFrame | The correlation matrix the factor was fitted to |
+
+### `distractor_analysis`
+
+```text
+distractor_analysis(data, *, key, n_groups=3) -> DataFrame
+```
+
+Option analysis of multiple-choice responses. Responses are scored with `key` (missing scores 0)
+to give the total score $T$. One row per item and option (observed options and the key):
+`item`, `option`, `is_key`, `n`, `proportion` (of the item's respondents), `point_biserial`
+(choosing the option against the rest score $T - x_j$), `mean_score` (mean $T$ of those who chose
+it) and `proportion_group_1` ... `proportion_group_<n_groups>`: the proportion choosing it in
+total-score groups from low to high, cut at the quantiles of $T$ as R's
+`cut(T, quantile(T, 0:G / G), include.lowest = TRUE)` (ties stay in one group). Raises
+`SpecificationError` when the quantiles are not distinct (use fewer groups).
 
 ## Information and reliability
 

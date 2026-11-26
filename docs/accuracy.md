@@ -75,10 +75,11 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | DIMTEST | No implementation outside the stand-alone DIMPACK exists, so it is checked by simulation: type I error 0.5–1% at the 5% level (conservative) and power 99–100% against two dimensions correlated 0.7–0.8 |
 | DETECT (confirmatory, exploratory) | sirt's `conf.detect(use_sum_score = TRUE, smooth = FALSE)` and `expl.detect(use_sum_score = TRUE)` with the same split: conditional covariances, indices, partitions, to $10^{-12}$ |
 | Scale linking (Haebara, Stocking–Lord; unidimensional and confirmatory multidimensional models) | independent R implementations of the criteria using mirt's response functions (mirt itself has no characteristic-curve linking) |
+| Classical item analysis (scoring with a key, alpha, item–total and item–rest correlations, point-biserial / biserial / polyserial, omega total, option statistics) | psych's `alpha()`, `score.multiple.choice()`, `polyserial()`, `biserial()` and `omega()`, ltm's `cronbach.alpha()` and `biserial.cor()`, polycor's `polyserial()` and base R: closed forms to $10^{-12}$, omega to $10^{-6}$ |
 
 Polychoric correlations, parallel analysis, MAP, the empirical Kaiser criterion, factor analysis,
-the Hull method, comparison data, DETECT and DIMTEST are functions of the companion package
-flexpyctt (NumPy / SciPy, no JAX). flexpyirt's own `polychoric()` is a JAX implementation of the
+the Hull method, comparison data, DETECT, DIMTEST and classical item analysis are functions of the
+companion package flexpyctt (NumPy / SciPy, no JAX). flexpyirt's own `polychoric()` is a JAX implementation of the
 same estimator: it passes the same checks, and the two agree to $10^{-9}$ on every check case.
 
 ## Known differences from mirt
@@ -138,6 +139,15 @@ The complete validation plan, with every case, mirt call and measured difference
   so the "rest score" groups are not rest-score groups and the indices differ (DETECT 6.73
   instead of 1.60 on one test case). With `smooth = FALSE`, and in `expl.detect()`, sirt and
   flexpyirt agree.
+- **Missing data in psych's `alpha()` and ltm's `cronbach.alpha()`.** With missing responses
+  psych's `raw.r` correlates each item with the sum of the observed scores (a missing response
+  counts as 0), while its alpha and `r.drop` use pairwise covariances; flexpyctt's `item_total`
+  is the correlation implied by those pairwise covariances, so it differs from `raw.r` (by up to
+  0.014 on a test case with 6% missing). ltm's raw alpha with `na.rm = TRUE` takes the total
+  variance from complete rows and the item variances from all responses; flexpyctt's
+  `missing="listwise"` uses complete rows for both. On complete data all of them agree.
+- **psych's `biserial()`** divides by the $n-1$ standard deviation of the total score, so it is
+  smaller than the two-step biserial correlation (polycor's) by the factor $\sqrt{(n-1)/n}$.
 
 ## References
 

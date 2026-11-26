@@ -43,6 +43,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | ポリコリック相関 | ポリコリック・テトラコリック相関行列（`polychoric()`: two-step の最尤法、欠測は利用可能なケース、lavaan と同じ 2 x 2 表の空セル補正、正定値でない行列の平滑化。lavaan の `lavCor` と照合済み）。対になるパッケージ [flexpyctt](https://pypi.org/project/flexpyctt/)（JAX 不要。flexpyirt と一緒に入る）が提供する | ✓ |
 | 次元数 | 平行分析（`parallel_analysis()`: ポリコリックまたは Pearson 相関、PCA または SMC の固有値、並べ替えまたは正規の参照データ、分位点または平均の基準）、Velicer の MAP（`velicer_map()`、元の版と改訂版）、経験的カイザー基準（`empirical_kaiser()`）、回転しない ULS / ML の因子分析（`efa()`）、Hull 法（`hull()`）、比較データ法（`comparison_data()`）。EFAtools・psych・EFA.dimensions と照合済み）。flexpyctt が提供する | ✓ |
 | 局所依存と一次元性 | Q3、Q3\*、Chen & Thissen の LD $X^2$ / $G^2$（`FitResult.local_dependence()`、mirt の `residuals()` と同じ）、ジャックナイフ傾き指標（`FitResult.jsi()`、mirt と同じ。速い近似もある）、モデルに基づく平行分析（`model_parallel_analysis()`、ltm の `unidimTest` と同じ）、確認的・探索的 DETECT（`detect()`、`exploratory_detect()`、sirt と同じ）、ブートストラップでバイアス補正する DIMTEST（`dimtest()`、シミュレーションで確認）、複数の手法を実行して合意を別々に示す `dimensionality()` のレポート。DETECT と DIMTEST は flexpyctt が提供する | ✓ |
+| 古典的項目分析 | 正答キーによる採点（`score_responses()`）、項目の困難度と項目–合計・項目–残りの相関（点双列相関または双列・多分系列相関。`item_analysis()`）、Feldt の信頼区間つきの α 係数（`coefficient_alpha()`）、ω total（`coefficient_omega()`）、得点群ごとの選択肢分析（`distractor_analysis()`）。psych、ltm、polycor と照合済み。flexpyctt が提供 | ✓ |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
 
 ## インストール

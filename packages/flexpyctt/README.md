@@ -2,15 +2,15 @@
 
 English | [日本語](https://github.com/takuizum/flexpyirt/blob/main/packages/flexpyctt/README.ja.md)
 
-Item and test analysis that needs no fitted IRT model: polychoric correlations and tools for
-judging the number of dimensions of a test. It depends on NumPy, SciPy and pandas only (no JAX).
+Item and test analysis that needs no fitted IRT model: polychoric correlations, tools for judging
+the number of dimensions of a test, and classical item analysis. It depends on NumPy, SciPy and pandas only (no JAX).
 
 flexpyctt is the model-free companion of [flexpyirt](https://pypi.org/project/flexpyirt/), which
 estimates IRT models. Installing flexpyirt installs flexpyctt as well; install flexpyctt alone when
 you do not fit models.
 
-- **Checked against R**: results are compared numerically with lavaan, psych, EFAtools,
-  EFA.dimensions and sirt (see
+- **Checked against R**: results are compared numerically with lavaan, psych, ltm, polycor,
+  EFAtools, EFA.dimensions and sirt (see
   [accuracy and validation](https://takuizum.github.io/flexpyirt/accuracy/)).
 - **Light**: no compilation step and no 64-bit configuration.
 
@@ -29,6 +29,7 @@ you do not fit models.
 | Comparison data | `comparison_data()` (Ruscio & Roche, 2012) | EFAtools |
 | DETECT | `detect()`, `exploratory_detect()` (conditional covariances, DETECT, ASSI, RATIO) | sirt |
 | DIMTEST | `dimtest()` with bootstrap bias correction | simulation study |
+| Classical item analysis | `score_responses()` (scoring with an answer key), `item_analysis()` (difficulty, item–total and item–rest correlations: point-biserial or biserial / polyserial), `coefficient_alpha()` (alpha / KR-20, standardized alpha, Feldt interval, alpha if deleted), `coefficient_omega()` (omega total, Pearson or polychoric), `distractor_analysis()` (option statistics by score group) | psych, ltm, polycor |
 
 ## Installation
 
