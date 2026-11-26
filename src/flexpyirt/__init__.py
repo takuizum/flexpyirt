@@ -27,6 +27,7 @@ from flexpyctt.item_analysis import (
     score_responses,
 )
 from flexpyirt import errors
+from flexpyirt.classification import ClassificationResult, classification_accuracy
 from flexpyirt.comparison import compare_fits
 from flexpyirt.correlation import PolychoricResult, polychoric
 from flexpyirt.curves import (
@@ -61,6 +62,7 @@ from flexpyirt.dimensionality import (
     parallel_analysis,
     velicer_map,
 )
+from flexpyirt.equating import IRTEquatingResult, irt_equate, scale_table, score_distribution
 from flexpyirt.fit import fit
 from flexpyirt.information import (
     expected_score,
@@ -98,6 +100,7 @@ __all__ = [
     "PCM",
     "AlphaResult",
     "BetaPrior",
+    "ClassificationResult",
     "CommonItemScreeningResult",
     "ComparisonDataResult",
     "DIFResult",
@@ -112,6 +115,7 @@ __all__ = [
     "FitResult",
     "FourPL",
     "HullResult",
+    "IRTEquatingResult",
     "JSIResult",
     "LinkResult",
     "LocalDependenceResult",
@@ -134,6 +138,7 @@ __all__ = [
     "TwoPL",
     "WrightMapTable",
     "__version__",
+    "classification_accuracy",
     "coefficient_alpha",
     "coefficient_omega",
     "compare_fits",
@@ -152,6 +157,7 @@ __all__ = [
     "generalized_mantel_haenszel",
     "hull",
     "information_matrix",
+    "irt_equate",
     "item_analysis",
     "item_information",
     "item_probabilities",
@@ -163,6 +169,8 @@ __all__ = [
     "parallel_analysis",
     "polychoric",
     "reliability",
+    "scale_table",
+    "score_distribution",
     "score_responses",
     "screen_common_items",
     "simulate_responses",

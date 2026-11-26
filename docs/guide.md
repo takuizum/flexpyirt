@@ -331,6 +331,47 @@ fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
 print(fit_table.round(3))
 ```
 
+### Person fit and infit / outfit
+
+`person_fit(data)` checks each respondent's response vector against the fitted model at the
+respondent's ability estimate (`method=` as in `score()`: `"EAP"`, `"MAP"`, `"ML"` or `"WLE"`;
+missing responses are skipped). It returns one row per respondent with `theta`, the requested
+statistics and `n_items` (answered items):
+
+- `lz`: the standardized log-likelihood $l_z$ (Drasgow, Levine & Williams, 1985; mirt's `Zh`).
+  Large negative values mean the responses are less likely than the model expects (guessing,
+  careless responding, items answered against their difficulty).
+- `lz_star`: $l_z^*$, corrected for using $\hat\theta$ instead of $\theta$ (Snijders, 2001;
+  Sinharay, 2016 for polytomous items), so that it is close to $N(0, 1)$ under the model; $l_z$
+  itself has a variance below 1 and is conservative. Needs `method="ML"`, `"MAP"` or `"WLE"`.
+  It is checked against an R recomputation of the formulas and a simulation of its null
+  distribution, as no R package at hand implements it.
+- `infit` / `outfit` with `z_infit` / `z_outfit`: information-weighted and unweighted mean
+  squares of the standardized residuals and their Wilson–Hilferty $z$ values (Wright & Masters,
+  1982). Values near 1 fit; well above 1 means unexpected responses (outfit is sensitive to
+  outliers on items far from $\hat\theta$), well below 1 means responses more predictable than
+  the model says. They are computed for every item model, as in mirt, but their reference
+  distribution is derived for Rasch-family models; for other models read them descriptively.
+
+`item_fit(data, statistics=...)` adds `"infit"` and `"outfit"` for items, computed over the
+respondents who answered each item (S-X2 stays the default; `"infit"` / `"outfit"` allow missing
+responses). In a multiple-group model pass `group=`: each respondent is evaluated with their own
+group's parameters, and item statistics are computed within each group.
+
+```python
+# A respondent who answers every item the opposite way is flagged.
+aberrant = df.copy()
+aberrant.iloc[0] = 1.0 - aberrant.iloc[0]
+pf = res.person_fit(aberrant, method="WLE", statistics=("lz", "lz_star", "infit", "outfit"))
+flagged = pf[pf["lz_star"] < -1.645]  # one-sided 5% test
+print(f"{len(flagged)} of {len(pf)} respondents flagged")
+print(pf.sort_values("lz_star").head().round(3))
+assert 0 in flagged.index
+
+item_table = res.item_fit(df, statistics=("s_x2", "infit", "outfit"), method="WLE")
+print(item_table.round(3))
+```
+
 ### Summed-score distribution
 
 `summed_score_distribution(probs)` gives the distribution of the summed score when the item scores
@@ -659,6 +700,44 @@ print(scores_sum.head(3))
   multiple-group model it has a `group` column, and each respondent is scored with the table of
   their group.
 - Unidimensional models with `Normal` latent distributions only.
+
+### Classification accuracy and consistency
+
+When a test has cut scores (pass / fail, proficiency levels), `classification_accuracy(res,
+cut_scores=...)` estimates from the fitted model how often the observed category agrees with the
+true one (**accuracy**) and how often two parallel administrations would agree (**consistency**),
+with Cohen's kappa for consistency. A score at or above a cut is in the higher category.
+
+```python
+from flexpyirt import classification_accuracy
+
+cls = classification_accuracy(res, cut_scores=[5, 9])  # Lee (2010): cuts on the summed score
+print(round(cls.accuracy, 3), round(cls.consistency, 3), round(cls.kappa, 3))
+print(cls.by_cut.round(3))  # per cut: accuracy, consistency, kappa, false_positive, false_negative
+print(cls.by_category.round(3))  # per category: true_proportion, proportion, accuracy, consistency
+
+cls_theta = classification_accuracy(res, cut_scores=[-0.5, 0.8], method="rudner")  # cuts on theta
+cls_data = classification_accuracy(res, cut_scores=[5, 9], data=df)  # over the respondents' EAPs
+print(cls_theta.summary.round(3))
+print(cls_data.summary.round(3))
+```
+
+- `method="lee"` (default; Lee, 2010) uses the exact distribution of the summed score given
+  $\theta$, for every item model; the true category is that of the expected summed score.
+  `method="rudner"` (Rudner, 2001, 2005) takes the estimate of $\theta$ as normal around $\theta$
+  with standard error $1/\sqrt{I(\theta)}$. The results are checked against the R package cacIRT.
+- Without `data` the indices are integrated over the fitted latent distribution on the quadrature
+  grid; with `data` they are averaged over the respondents' estimates (`score_method`, default
+  `"EAP"`).
+- `scale="theta"` with Lee, or `scale="summed_score"` with Rudner, converts the cuts through the
+  test characteristic curve (`by_cut` shows the converted cuts).
+- `conditional` gives the accuracy and consistency at each quadrature node or respondent;
+  `accuracy_table` (true x observed) and `consistency_table` are the joint distributions.
+- For a multiple-group model the indices are computed per group, and every table has a `group`
+  column (use `summary` instead of `accuracy` / `consistency` / `kappa`).
+- The conditional accuracy jumps where the true category changes, so on the fitted grid the
+  accuracy can differ from its value for a continuous latent distribution by up to about the node
+  spacing (below 0.01 with the default 61 nodes); consistency and kappa are not affected.
 
 ## 8. Latent distributions and identification
 
@@ -1404,6 +1483,54 @@ linked_screened = screened.link  # the LinkResult on the kept items
 - Unidimensional fits only. DIF tests inside one multiple-group fit are `FitResult.dif()`.
   Validated against a base-R recomputation of the same rules on mirt calibrations (2PL and mixed
   2PL + GRM + GPCM).
+
+### Equating and raw-to-scale tables
+
+Once two forms are on one scale (here with `linked_sl`; FIPC or a concurrent calibration need no
+link), `irt_equate(new, old)` converts every summed score of the new form to the summed-score
+scale of the old form (Kolen & Brennan, 2014, §6.5–6.6):
+
+- `method="true_score"` (default): solve $\tau_X(\theta)=x$ on the new form's test characteristic
+  curve and report $\tau_Y(\theta)$. Scores at or below the sum of the lower asymptotes (3PL /
+  4PL guessing) and at or above the sum of the upper asymptotes are equated by the linear
+  interpolation of Kolen & Brennan; their `theta` is $-\infty$ / $+\infty$.
+- `method="observed_score"`: the model-implied summed-score distributions of both forms
+  (Lord–Wingersky recursion over the fitted latent distribution) in the population `"new"`,
+  `"old"` or `"synthetic"` (with `synthetic_weight=` for the new form's population), equated
+  by the equipercentile method.
+
+`score_distribution()` returns the model-implied distribution of a form, and `scale_table()`
+maps each summed score to a reporting scale $\text{slope}\cdot\theta+\text{intercept}$, clipped
+to `[lowest, highest]` and rounded, with $\theta$ from the test characteristic curve
+(`"true_score"`) or the summed-score EAP (`"EAPsum"`).
+
+```python
+from flexpyirt import irt_equate, scale_table, score_distribution
+
+true_eq = irt_equate(src_res, res, link=linked_sl)
+print(true_eq.table.head().round(3))  # score, theta (base scale), equated
+observed_eq = irt_equate(
+    src_res,
+    res,
+    method="observed_score",
+    link=linked_sl,
+    population="synthetic",
+    synthetic_weight=0.5,
+)
+print(observed_eq.table.head().round(3))
+print(score_distribution(res).head().round(4))
+
+raw_to_scale = scale_table(res, slope=10.0, intercept=50.0, lowest=20.0, highest=80.0)
+print(raw_to_scale.round(2).head())
+```
+
+- With one fit holding both forms, pass it twice with `new_items=` / `old_items=` (and
+  `new_group=` / `old_group=` for a multiple-group fit).
+- True-score methods need test characteristic curves that do not decrease (no negative slopes,
+  no nominal items whose expected score falls); observed-score equating has no such condition.
+- Standard errors of equated scores are not available yet. Validated against equateIRT and
+  SNSequate (dichotomous items) and against references built from mirt and the equate package
+  (polytomous and mixed formats).
 
 ### Multidimensional models
 

@@ -57,6 +57,10 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - [x] Differentiable linking (`link()`, `LinkResult`: Haebara / Stocking–Lord, non-symmetric and
   symmetric, Ogasawara delta-method SEs via autodiff; validated in V20 for 2PL, 3PL, GRM, GPCM and
   mixed 2PL + GPCM common items).
+- [x] IRT true-score and observed-score equating and raw-to-scale tables (#106; `irt_equate()`,
+  `score_distribution()`, `scale_table()`; unidimensional, every item model, single and multiple
+  groups; validated in V51 against equateIRT, SNSequate and references built from mirt and the
+  equate package). Standard errors of equated scores are a follow-up.
 - [x] Item fit: S-X2 (`FitResult.item_fit()`, unidimensional, per group for multiple groups; validated in V15).
 - [x] DIF: multiple-group likelihood-ratio tests (`FitResult.dif()`, schemes `add` / `drop`,
   Holm / BH adjustment; validated in V17).
@@ -167,10 +171,20 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 - [x] Common-item screening for linking and item parameter drift (#105; `screen_common_items()`,
   `CommonItemScreeningResult`, `stack_screening_tables()`: robust z, displacement and
   expected-score RMSD with iterative purification, unidimensional; validated in V50).
+- [x] Person fit and residual item fit (#108): `FitResult.person_fit()` ($l_z$, $l_z^*$, person
+  infit / outfit with $z$ values) and `FitResult.item_fit(statistics=("infit", "outfit"))` for
+  unidimensional models (every item model, missing data, multiple groups); validated in V53 against
+  mirt `personfit()` / `itemfit(fit_stats = "infit")` and sirt `personfit.stat()`; $l_z^*$ against an
+  R recomputation of the formulas and a simulation of its null distribution (no R package
+  reference; pending the owner's acceptance).
 - [ ] Model-comparison table and simulation of responses (#109): `compare_fits()` (AIC, SABIC, HQ,
   BIC, likelihood-ratio tests; mirt's `anova()`) and `simulate_responses()` / `SimulatedData` (from
   a `FitResult` or a `Model` with an item bank; every item model, latent distribution and model
   structure; JAX key). Validated in V54; checked once the comparison passes the nightly CI.
+- [x] Classification accuracy and consistency for cut scores (#107; `classification_accuracy()`,
+  `ClassificationResult`: Lee, 2010, on summed-score cuts and Rudner, 2001, 2005, on $\theta$
+  cuts, D and P approaches, kappa, per-cut false positive / negative rates, unidimensional models,
+  single and multiple groups; validated in V52 against cacIRT and a recomputation from mirt).
 
 ## Ongoing
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).

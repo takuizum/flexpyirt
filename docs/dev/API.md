@@ -28,6 +28,8 @@ res  # a table in Jupyter (_repr_html_)
 res.items  # DataFrame: item, a, b(=-d/a), a_se, b_se, ...
 res.loglik, res.aic, res.bic
 res.score(df, method="EAP")  # DataFrame: theta, se
+res.person_fit(df)  # DataFrame: theta, lz, infit, z_infit, outfit, z_outfit, n_items
+res.item_fit(df, statistics=("infit", "outfit"))  # item, infit, z_infit, outfit, z_outfit
 ```
 
 ## 2. Mixed formats + priors (MAP)
@@ -164,12 +166,15 @@ one (DESIGN.md §16.18).
 | `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
 | `fit` | function | Estimation; returns a `FitResult` |
-| `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
+| `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `person_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
 | `link` | function | Differentiable IRT scale linking (Haebara / Stocking–Lord, non-symmetric & symmetric; `transformation=` for a diagonal, orthogonal or oblique $\mathbf A$ in multidimensional models); returns a `LinkResult` |
 | `LinkResult` | class | Scale-linking result (`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `transformation`, `items`, `transform_theta`, `summary`) |
 | `screen_common_items` | function | Common-item screening for linking and item parameter drift (robust z, displacement, expected-score RMSD; iterative purification with `link()`); returns a `CommonItemScreeningResult` |
 | `CommonItemScreeningResult` | class | Screening result (`table`, `link`, `initial_link`, `kept_items`, `removed_items`, `history`, `flagged_items`, `summary`) |
 | `stack_screening_tables` | function | Stacks the screening tables of several administrations with an `administration` column |
+| `irt_equate` | function | IRT true-score / observed-score equating of the summed scores of a new form to an old form on one scale (or through a `LinkResult`); returns an `IRTEquatingResult` (`table`, `new_distribution`, `old_distribution`, `summary`) |
+| `score_distribution` | function | Model-implied summed-score distribution of a form (items, group) in its fitted population |
+| `scale_table` | function | Raw-to-scale table: $\theta$ per summed score (true score or EAPsum), its SE, and a clipped, rounded linear scale score |
 | `polychoric` | function | Polychoric / tetrachoric correlation matrix (two-step ML, smoothing); returns a `PolychoricResult` |
 | `parallel_analysis`, `velicer_map`, `empirical_kaiser` | function | Number-of-dimensions diagnostics; return `ParallelAnalysisResult`, `MAPResult`, `EmpiricalKaiserResult` (frozen dataclasses with `n_factors`) |
 | `comparison_data` | function | Comparison-data method (Ruscio & Roche, 2012); returns `ComparisonDataResult` |
@@ -186,6 +191,7 @@ one (DESIGN.md §16.18).
 | `summed_score_distribution` | function | Lord–Wingersky / Poisson-binomial kernel on category probabilities (DESIGN §18.1) |
 | `compare_fits` | function | Model-comparison table over fits of the same data: `n_params`, `loglik`, AIC, SABIC, HQ, BIC and likelihood-ratio tests against the previous row (mirt's `anova()`; DESIGN §24.1) |
 | `simulate_responses`, `SimulatedData` | function, frozen dataclass | Simulated responses from a `FitResult` or a `Model` + item bank, with a JAX `key`; returns `responses`, `theta`, `group` (DESIGN §24.2) |
+| `classification_accuracy` | function | Classification accuracy and consistency of cut scores (Lee, 2010, on the summed score; Rudner, 2001, 2005, on $\theta$; D and P approaches) for a unidimensional `FitResult`; returns a `ClassificationResult` (`summary`, `by_category`, `by_cut`, `conditional`, `accuracy_table`, `consistency_table`; DESIGN §18.4) |
 | `LocalDependenceResult` | frozen dataclass | Returned by `FitResult.local_dependence()` (`pairs`, `q3`, `q3_mean`, `max_q3_star`) |
 | `JSIResult` | frozen dataclass | Returned by `FitResult.jsi()` (`matrix`, `pairs`, `method`, `converged`) |
 | `PolychoricResult` | frozen dataclass | `correlation`, `unsmoothed_correlation`, `thresholds`, `categories`, `n_obs`, per-pair `converged` / `at_boundary` / `zero_cell_corrected`, `smoothed`, `min_eigenvalue` |

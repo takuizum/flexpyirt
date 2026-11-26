@@ -24,7 +24,9 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 - 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - 図: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
+- IRT 等化: [`irt_equate`](#irt_equate), [`IRTEquatingResult`](#irtequatingresult), [`score_distribution`](#score_distribution), [`scale_table`](#scale_table)
 - モデル比較とシミュレーション: [`compare_fits`](#compare_fits), [`simulate_responses`](#simulate_responses), [`SimulatedData`](#simulateddata)
+- 分類: [`classification_accuracy`](#classification_accuracy), [`ClassificationResult`](#classificationresult)
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)、[ユーザー定義の項目モデル](#ユーザー定義の項目モデル)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior), [`LogitNormalPrior`](#logitnormalprior)
@@ -143,28 +145,74 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 #### `FitResult.item_fit`
 
 ```text
-item_fit(data, *, min_cell=1.0, group=None, item_names=None) -> DataFrame
+item_fit(data, *, statistics=("s_x2",), method="EAP", min_cell=1.0, group=None,
+         item_names=None) -> DataFrame
 ```
 
-Orlando–Thissen の S-X2 項目適合度（[ガイド 5 節](guide.ja.md#項目適合度s-x2)）。各項目について、合計得点
+項目適合度。Orlando–Thissen の S-X2（既定）と infit / outfit（[ガイド 5 節](guide.ja.md#項目適合度s-x2)）。
+
+**S-X2**（`"s_x2"`）。各項目について、合計得点
 $1,\dots,S-1$ ごとの各カテゴリの観測度数とモデルによる期待度数を比べる。期待度数は、その項目を除いた
 Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在分布の重みで計算する。度数の少ないセルは mirt の
 `itemfit()` と同じ方法でまとめ（`min_cell` は mirt の `mincell`）、$df_j$ = 残ったセル数 − 行数 − その項目の自由パラメタ数 −
 潜在分布の自由パラメタ数（mirt の約束）。確認的多次元モデル（`with_factors()`、単一群）では、推定時の直積格子の
 すべてのノードで再帰を回して多変量正規の重みで積分し、自由な因子間相関を潜在分布のパラメタとして数える。
 
+**infit / outfit**（`"infit"`・`"outfit"`）: 各受験者を `method` で推定し、項目 $j$ に回答した $N_j$ 人にわたって
+$\mathrm{outfit}_j=\frac1{N_j}\sum_i r_{ij}^2/W_{ij}$、$\mathrm{infit}_j=\sum_i r_{ij}^2/\sum_i W_{ij}$ とし、
+Wright & Masters (1982) の Wilson–Hilferty 変換の $z$ 値も返す。$r_{ij}$ は $\hat\theta_i$ での項目得点
+$0,\dots,K_j-1$ の残差、$W_{ij}$ はその条件付き分散（[`FitResult.person_fit`](#fitresultperson_fit)、DESIGN §25）。
+1 次元モデルのみ。欠測は飛ばす。mirt と同じく全項目モデルで計算する（Rasch 系以外では記述的な指標）。
+
 | 引数 | 説明 |
 |---|---|
-| `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
-| `min_cell` | まとめる前のセルあたり最小期待度数（既定 `1.0`） |
-| `group` | 群ラベル（多母集団モデルでは必須。群ごとに S-X2 を計算する） |
+| `data` | 推定した項目への反応（通常は推定に使ったデータ）。S-X2 は欠測のないデータが必要 |
+| `statistics` | `"s_x2"`・`"infit"`・`"outfit"` のいずれか（既定 `("s_x2",)`） |
+| `method` | infit / outfit の能力推定法: `"EAP"`（既定）・`"MAP"`・`"ML"`・`"WLE"`。推定値が無限大の受験者は除く |
+| `min_cell` | S-X2 のセルをまとめる前のセルあたり最小期待度数（既定 `1.0`） |
+| `group` | 群ラベル（多母集団モデルでは必須。群ごとに計算する） |
 | `item_names` | `data` が配列のときの列名 |
 
-**戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
-`df <= 0` になる項目は `df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
+**戻り値**: `item` 列に続けて、S-X2 なら `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p`、infit なら
+`infit`, `z_infit`、outfit なら `outfit`, `z_outfit` 列の `DataFrame`。S-X2 の表をまとめた結果 `df <= 0` になる項目は
+`df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
 
-**例外**: 双因子・two-tier・多母集団の多次元・`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
-項目、正でない `min_cell` の場合に `SpecificationError`。
+**例外**: 不明または空の `statistics`。S-X2 では双因子・two-tier・多母集団の多次元・`EmpiricalHistogram`・
+`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある項目、正でない
+`min_cell`。infit / outfit では多次元モデルとそれ以外の `method`。いずれも `SpecificationError`。
+
+#### `FitResult.person_fit`
+
+```text
+person_fit(data, *, method="EAP", group=None, item_names=None,
+           statistics=("lz", "infit", "outfit")) -> DataFrame
+```
+
+各受験者の能力推定値での受験者適合度（[ガイド 5 節](guide.ja.md#受験者適合度と-infit--outfit)、DESIGN §25）。
+回答した項目を $A$、$P_{jk}=P_{jk}(\hat\theta)$ として:
+
+- `"lz"`: $l_z=(l_0-\mathrm E\,l_0)/\sqrt{\mathrm{Var}\,l_0}$、$l_0=\sum_{j\in A}\log P_{jy_j}$、
+  $\mathrm E\,l_0=\sum_j\sum_kP_{jk}\log P_{jk}$（Drasgow, Levine & Williams, 1985。mirt の `Zh`）。
+- `"lz_star"`: $l_z^*=(l_0-\mathrm E\,l_0+c\,r_0(\hat\theta))/\tau$（Snijders, 2001; Sinharay, 2016）。
+  $c=\sum_j\sum_kP'_{jk}\log P_{jk}/\sum_jI_j$、$\tau^2=\mathrm{Var}\,l_0-2c\sum_j\sum_kP'_{jk}\log
+  P_{jk}+c^2\sum_jI_j$、推定法の項 $r_0$ は ML で 0、MAP で $-(\theta-\mu_g)/\sigma_g^2$、WLE で $I'/(2I)$。EAP では定義しない。
+- `"infit"` / `"outfit"`: 回答した $n$ 項目にわたる $\sum_j r_j^2/\sum_j W_j$ と $\frac1n\sum_j r_j^2/W_j$。
+  `z_infit` / `z_outfit` $=(\mathrm{MS}^{1/3}-1)(3/q)+q/3$（Wright & Masters, 1982）。
+
+| 引数 | 説明 |
+|---|---|
+| `data` | 推定した項目への反応（NaN は欠測） |
+| `method` | `score()` と同じ能力推定法: `"EAP"`（既定）・`"MAP"`・`"ML"`・`"WLE"` |
+| `group` | 群ラベル（多母集団モデルでは必須） |
+| `item_names` | `data` が配列のときの列名 |
+| `statistics` | `"lz"`・`"lz_star"`・`"infit"`・`"outfit"` のいずれか（既定 `("lz", "infit", "outfit")`） |
+
+**戻り値**: 受験者 1 人 1 行の `DataFrame`（`data` が DataFrame ならインデックスを引き継ぐ）。`theta` に続けて、要求した
+統計量の `lz`・`lz_star`・`infit`・`z_infit`・`outfit`・`z_outfit` と `n_items`（回答した項目数）。推定値が有限でない行
+（全欠測、全項目が最低・最高カテゴリのパターンの ML）は統計量が NaN。
+
+**例外**: 不明または空の `statistics`、多次元モデル、EAP・MAP・ML・WLE 以外の `method`（またはそのモデルで `score()` が
+受け付けないもの）、`method="EAP"` での `"lz_star"` の場合に `SpecificationError`。
 
 #### `FitResult.m2`
 
@@ -1653,6 +1701,93 @@ IRT モデルのカテゴリ確率。先頭の軸はバッチ軸。結果の形�
 保つ（そのぶん遅い）。他の方法では結果の対数をとる。形が合わない、`method` が未知、`K != 2` で近似を指定した、の
 いずれかで `SpecificationError`。
 
+## IRT 等化
+
+### `irt_equate`
+
+```text
+irt_equate(new, old, *, method="true_score", new_items=None, old_items=None, link=None,
+           new_group=None, old_group=None, population="new", synthetic_weight=None)
+           -> IRTEquatingResult
+```
+
+2 つのフォームが同じ $\theta$ 尺度に乗ったあと、新フォームのすべての合計得点 $x=0,\dots,X$ を旧フォームの合計得点の
+尺度に等化する（[ガイド 15 節](guide.ja.md#等化と素点-尺度得点変換表)）。共通尺度は旧フォームの尺度で、`link=` が
+あれば新フォームの項目は $(\theta-B)/A$ で評価する。1 次元モデル、全項目モデル、単一群・多母集団。
+
+- `"true_score"`（Lord, 1980; Kolen & Brennan, 2014, §6.5）: テスト特性曲線
+  $\tau(\theta)=\sum_j\sum_kk\,P_{jk}(\theta)$ について $\tau_X(\theta_x)=x$ を安全化 Newton 法で解き、
+  $e_Y(x)=\tau_Y(\theta_x)$。下側漸近線の和以下の得点は $(0,0)$ と $(\tau_X^{\mathrm{lo}},\tau_Y^{\mathrm{lo}})$ の間、
+  上側漸近線の和以上の得点は $(\tau_X^{\mathrm{hi}},\tau_Y^{\mathrm{hi}})$ と両フォームの最高点の間の線形補間で等化し、
+  その `theta` は $-\infty$ / $+\infty$。
+- `"observed_score"`（Lord & Wingersky, 1984; Kolen & Brennan, 2014, §6.6）: 合成母集団
+  $w_1\cdot\text{new}+(1-w_1)\cdot\text{old}$ での両フォームのモデル上の合計得点分布（各推定潜在分布上の
+  Lord–Wingersky 再帰）を、Kolen & Brennan（2014, 2 章）の等パーセンタイル法で等化する。
+
+equateIRT・SNSequate（2 値の 3PL / 2PL）と、mirt と equate パッケージから組み立てた参照（GRM・GPCM・3PL・2PL）で
+照合済み。等化得点の標準誤差はない。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `new` | `FitResult` | 新フォーム $X$ を含む 1 次元の推定結果 |
+| `old` | `FitResult` | 旧フォーム $Y$ を含む 1 次元の推定結果（`new` と同じでもよい） |
+| `method` | `"true_score"` / `"observed_score"` | 等化の方法（既定 `"true_score"`） |
+| `new_items`, `old_items` | list[str]（任意） | 各フォームの項目（既定は推定結果の全項目） |
+| `link` | `LinkResult`（任意） | `link(new, old)`: `new` の尺度を `old` の尺度へ写す（1 次元。群は `new_group` / `old_group` と一致すること） |
+| `new_group`, `old_group` | str（任意） | 各フォームのパラメタと母集団の群。多母集団では必須 |
+| `population` | `"new"` / `"old"` / `"synthetic"` | 観測得点等化の母集団: $w_1=1$、$w_1=0$、$w_1=$ `synthetic_weight`（既定 `"new"`。観測得点等化のみ） |
+| `synthetic_weight` | float（任意） | 新フォームの母集団の重み $w_1\in[0,1]$。`population="synthetic"` では必須、それ以外では指定不可 |
+
+**戻り値**: [`IRTEquatingResult`](#irtequatingresult)
+
+**例外**: `PrecisionError`（JAX の 64 ビットが無効）、`SpecificationError`（多次元の推定結果、未知・重複した項目、
+群の指定漏れ・未知の群、これらの群の間の 1 次元 `LinkResult` でないか新フォームの項目を含まない `link`、不正な
+`population` / `synthetic_weight`、真値の方法で減少するテスト特性曲線）、`ConvergenceWarning`（真値の解法が収束しない）。
+
+### `IRTEquatingResult`
+
+| 属性 | 説明 |
+|---|---|
+| `table` | `DataFrame`: `score`（新フォーム、$0..X$）、`equated`（旧フォームの合計得点の尺度）、真値の方法では `theta`（旧フォームの尺度。漸近線の外では $\pm\infty$） |
+| `method` | `"true_score"` / `"observed_score"` |
+| `new_items`, `old_items` | 2 つのフォームの項目 |
+| `new_range`, `old_range` | 2 つのテスト特性曲線の下側・上側漸近値 $(\tau^{\mathrm{lo}},\tau^{\mathrm{hi}})$ |
+| `population`, `synthetic_weight` | 観測得点等化の母集団と $w_1$（真値の方法では `None`） |
+| `new_distribution`, `old_distribution` | `DataFrame`（`score`, `probability`）: 合成母集団でのモデル上の分布（観測得点等化のみ。それ以外は `None`） |
+
+メソッド: `summary(*, digits=4)`、`str()`、Jupyter での HTML 表示。
+
+### `score_distribution`
+
+```text
+score_distribution(res, *, items=None, group=None) -> DataFrame
+```
+
+フォームのモデル上の合計得点分布 $f(x)=\sum_qL(x\mid\theta_q)w_q$（項目の Lord–Wingersky 尤度を群の推定潜在分布で
+積分したもの。潜在分布の種類は問わない）。`Normal` の推定結果の全項目なら
+[`summed_score_table`](#summed_score_table) の `probability` 列と一致する。列は `score`, `probability`。
+多母集団では `group` が必須。
+
+### `scale_table`
+
+```text
+scale_table(res, *, slope, intercept, method="true_score", items=None, group=None,
+            lowest=None, highest=None, n_digits=0) -> DataFrame
+```
+
+素点-尺度得点変換表: フォームの各合計得点 $x$ に $\theta(x)$ とその標準誤差、尺度得点
+$\min\{\max\{\text{slope}\cdot\theta+\text{intercept},\text{lowest}\},\text{highest}\}$ を与える。
+
+| `method` | $\theta(x)$ | 標準誤差 |
+|---|---|---|
+| `"true_score"`（既定） | フォームのテスト特性曲線で $\tau(\theta)=x$ を解く。下側・上側漸近値以下・以上では $-\infty$ / $+\infty$ | フォームの項目のテスト情報量による $I(\theta)^{-1/2}$（$\theta$ が無限大のところは NaN） |
+| `"EAPsum"` | 群の推定潜在分布の下での合計得点 EAP | 事後標準偏差 |
+
+`slope` は正。指定のない側の境界は適用しない（無限大の $\theta$ は無限大の尺度得点になる）。列は `score`, `theta`,
+`theta_se`, `scale_score`, `scale_score_se`（$\text{slope}\cdot$`theta_se`。切らない）, `scale_score_rounded`（NumPy の
+`round` で `n_digits` 桁。偶数丸め）。多次元モデル、未知の項目・群、正でない `slope`、`lowest >= highest`、負の
+`n_digits`、真値の方法で減少するテスト特性曲線のいずれかで `SpecificationError`。
+
 ---
 
 ## モデル比較とシミュレーション
@@ -1840,6 +1975,64 @@ $[-4, 4]$ の 161 点。
 | `plot_information` | テスト情報量、または `items` の情報量。`standard_error=True` で SE を第 2 の y 軸（`ax.twinx()`）に描く。`group=` は群名（既定: 全群） | [`test_information`](#test_information), [`item_information`](#item_information) |
 | `plot_expected_score` | テスト特性曲線。既定では群ごとに 1 本 | [`expected_score`](#expected_score)（`total`） |
 | `plot_wright_map` | 受検者の推定値の横向きヒストグラム（`n_bins` 区間）と項目の閾値を、$\theta$ 軸を共有して並べる | [`wright_map_table`](#wright_map_table) |
+
+---
+
+## 分類
+
+### `classification_accuracy`
+
+```text
+classification_accuracy(res, *, cut_scores, method="lee", scale=None, data=None, group=None,
+                        item_names=None, score_method="EAP") -> ClassificationResult
+```
+
+カット得点による分類の正確さと一貫性（[ガイド 7 節](guide.ja.md#分類の正確さと一貫性)、DESIGN.md §18.4）。カット
+$c_1<\dots<c_C$ がカテゴリ $h(v)=\#\{k: v\ge c_k\}=0,\dots,C$ を決める。真の値 $\theta$ で、各方法は観測
+カテゴリの確率 $P_h(\theta)$ と真のカテゴリ $t(\theta)$ を与える:
+
+- `"lee"`（Lee, 2010）: $P_h(\theta)=\sum_{s:\,h(s)=h}L(s\mid\theta)$（合計得点の Lord–Wingersky の分布）、
+  期待合計得点 $\tau$ で $t(\theta)=h(\tau(\theta))$。整数でないカット $c$ では $s\ge\lceil c\rceil$ が上。
+- `"rudner"`（Rudner, 2001, 2005）: $P_h(\theta)=\Phi((c_{h+1}-\theta)/\mathrm{SE})-\Phi((c_h-\theta)/\mathrm{SE})$、
+  $\mathrm{SE}=I(\theta)^{-1/2}$、$t(\theta)=h(\theta)$。
+
+点 $\theta_n$ と重み $w_n$（`data` なしでは推定時の求積点と潜在分布の重み = D 法、`data` ありでは受検者の推定値と
+重み $1/N$ = P 法。Lathrop & Cheng, 2013）で $A_{tk}=\sum_nw_n[t(\theta_n)=t]P_k(\theta_n)$、
+$B_{hk}=\sum_nw_nP_h(\theta_n)P_k(\theta_n)$ とし、正確さ $\sum_hA_{hh}$、一貫性 $\sum_hB_{hh}$、一貫性の
+Cohen の κ を返す。cacIRT の `class.Lee()` / `class.Rud()` にあたる。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みの 1 次元モデル |
+| `cut_scores` | float / 配列 | 狭義単調増加のカット。合計得点上では $(0, S_{\max}]$ にあり、異なる得点を選ぶこと |
+| `method` | `"lee"` / `"rudner"` | 方法（既定 `"lee"`） |
+| `scale` | `"summed_score"` / `"theta"`、省略可 | カットの尺度。既定は方法の本来の尺度。違えばテスト特性曲線で変換する（Lee は $\tau(c)$、Rudner は $\tau^{-1}(c)$） |
+| `data` | DataFrame / 2 次元配列、省略可 | 反応。受検者の推定値で平均する（P 法） |
+| `group` | 配列、省略可 | `data` の各行の群ラベル（多母集団モデルで `data` を与えるときは必須） |
+| `item_names` | list[str]、省略可 | `data` が配列のときの列名 |
+| `score_method` | `"EAP"` / `"MAP"` / `"ML"` / `"WLE"` | P 法の推定値（既定 `"EAP"`）。Rudner の SE は常に $I(\hat\theta)^{-1/2}$ |
+
+**戻り値**: [`ClassificationResult`](#classificationresult)。
+
+**例外**: 多次元モデル、未知の `method` / `scale` / `score_method`、不正なカット、テスト特性曲線の範囲外の合計
+得点のカット（Rudner）、`data` なしの `group` / `item_names` / `score_method`、P 法での有限でない推定値（極端な
+パターンの ML）では `SpecificationError`。
+
+### `ClassificationResult`
+
+[`classification_accuracy`](#classification_accuracy) が返す frozen dataclass。多母集団の結果ではどの
+DataFrame にも先頭に `group` 列がつく（2 つの表は `(group, category)` の行索引）。
+
+| 属性 | 内容 |
+|---|---|
+| `method`, `scale`, `cut_scores`, `approach` | 設定（`approach` は `"D"` か `"P"`） |
+| `summary` | 群ごとに 1 行: `accuracy`、`consistency`、`kappa`（P 法では `n` も） |
+| `by_category` | `category`、`true_proportion`、`proportion`（観測）、`accuracy`（真が $h$ のとき観測も $h$）、`consistency`（1 回目が $h$ のとき 2 回目も $h$） |
+| `by_cut` | `cut`（変換したときは `summed_score_cut` / `theta_cut` も）、`accuracy`、`consistency`、`kappa`、`false_positive`（真は下、観測はカット以上）、`false_negative` |
+| `conditional` | 求積点（D）または受検者（P）ごと: `theta`、`weight`、`true_category`、`accuracy`、`consistency`、Lee では `true_score`、Rudner では `se` |
+| `accuracy_table` | $A$: 真（行）と観測（列）のカテゴリの同時確率 |
+| `consistency_table` | $B$: 独立な 2 回の実施のカテゴリの同時確率 |
+| `accuracy`, `consistency`, `kappa` | 単一群の結果の float（多母集団の結果では `SpecificationError`） |
 
 ---
 

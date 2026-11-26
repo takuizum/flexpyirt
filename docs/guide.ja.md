@@ -309,6 +309,40 @@ fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
 print(fit_table.round(3))
 ```
 
+### 受験者適合度と infit / outfit
+
+`person_fit(data)` は、受験者ごとの回答パターンが推定したモデルに合っているかを、その受験者の能力推定値で調べる
+（`method=` は `score()` と同じく `"EAP"`・`"MAP"`・`"ML"`・`"WLE"`。欠測は飛ばす）。受験者 1 人 1 行で、
+`theta`、要求した統計量と `n_items`（回答した項目数）を返す。
+
+- `lz`: 標準化対数尤度 $l_z$（Drasgow, Levine & Williams, 1985。mirt の `Zh`）。大きな負の値は、回答がモデルの予想より
+  起こりにくいことを示す（当て推量、不注意な回答、難易度に逆らう正誤など）。
+- `lz_star`: $\theta$ の代わりに $\hat\theta$ を使うことを補正した $l_z^*$（Snijders, 2001。多値項目は Sinharay, 2016）。
+  モデルのもとで $N(0, 1)$ に近い。$l_z$ そのものは分散が 1 より小さく保守的になる。`method="ML"`・`"MAP"`・`"WLE"` が
+  必要。手元に実装した R パッケージがないので、式を R で再計算した値と、帰無分布のシミュレーションで確かめている。
+- `infit` / `outfit` と `z_infit` / `z_outfit`: 標準化残差の情報量重み付き・重みなしの平均平方と、その
+  Wilson–Hilferty 変換の $z$ 値（Wright & Masters, 1982）。1 に近ければ当てはまっている。1 より大きく上回れば予想外の回答
+  （outfit は $\hat\theta$ から離れた項目での外れた回答に敏感）、大きく下回ればモデルより予測しやすすぎる回答を示す。
+  mirt と同じく全項目モデルで計算するが、参照分布は Rasch 系モデルで導かれたものなので、それ以外のモデルでは記述的に読む。
+
+`item_fit(data, statistics=...)` は項目の `"infit"` と `"outfit"` も計算する。各項目に回答した受験者にわたって集計する
+（既定は S-X2 のまま。`"infit"` / `"outfit"` は欠測があってもよい）。多母集団モデルでは `group=` を渡すと、各受験者を
+その群のパラメータで評価し、項目統計量は群ごとに計算する。
+
+```python
+# すべての項目に逆の回答をした受験者は検出される。
+aberrant = df.copy()
+aberrant.iloc[0] = 1.0 - aberrant.iloc[0]
+pf = res.person_fit(aberrant, method="WLE", statistics=("lz", "lz_star", "infit", "outfit"))
+flagged = pf[pf["lz_star"] < -1.645]  # 片側 5% の検定
+print(f"{len(flagged)} of {len(pf)} respondents flagged")
+print(pf.sort_values("lz_star").head().round(3))
+assert 0 in flagged.index
+
+item_table = res.item_fit(df, statistics=("s_x2", "infit", "outfit"), method="WLE")
+print(item_table.round(3))
+```
+
 ### 合計得点の分布
 
 `summed_score_distribution(probs)` は、項目得点が独立でカテゴリ確率が `probs`（形は `(..., J, K)`）のときの
@@ -605,6 +639,40 @@ print(scores_sum.head(3))
 - 表は `"EAP"` と同じく、推定に使った求積格子と潜在分布を使う。多母集団モデルでは `group` 列がつき、各受検者は
   自分の群の表で採点される。
 - 1 次元で、潜在分布が `Normal` のモデルに限る。
+
+### 分類の正確さと一貫性
+
+合否や到達度レベルのカット得点があるテストでは、`classification_accuracy(res, cut_scores=...)` が推定済みの
+モデルから、観測されたカテゴリが真のカテゴリと一致する確率（**正確さ**）と、平行な 2 回の実施でカテゴリが一致する
+確率（**一貫性**）、一貫性の Cohen の κ を求める。カット以上の得点は上のカテゴリに入る。
+
+```python
+from flexpyirt import classification_accuracy
+
+cls = classification_accuracy(res, cut_scores=[5, 9])  # Lee (2010): 合計得点上のカット
+print(round(cls.accuracy, 3), round(cls.consistency, 3), round(cls.kappa, 3))
+print(cls.by_cut.round(3))  # カットごとの正確さ・一貫性・κ・偽陽性・偽陰性
+print(cls.by_category.round(3))  # カテゴリごと: true_proportion, proportion, accuracy, consistency
+
+cls_theta = classification_accuracy(res, cut_scores=[-0.5, 0.8], method="rudner")  # theta 上
+cls_data = classification_accuracy(res, cut_scores=[5, 9], data=df)  # 受検者の EAP で平均
+print(cls_theta.summary.round(3))
+print(cls_data.summary.round(3))
+```
+
+- `method="lee"`（既定。Lee, 2010）は $\theta$ を与えたときの合計得点の厳密な分布を使う（全項目モデル）。真の
+  カテゴリは期待合計得点のカテゴリ。`method="rudner"`（Rudner, 2001, 2005）は $\theta$ の推定値を、$\theta$ を
+  中心とする標準誤差 $1/\sqrt{I(\theta)}$ の正規分布とみなす。結果は R パッケージ cacIRT と照合している。
+- `data` がなければ推定された潜在分布で求積格子上で積分し、`data` があれば受検者の推定値（`score_method`、
+  既定 `"EAP"`）で平均する。
+- Lee で `scale="theta"`、Rudner で `scale="summed_score"` とすると、テスト特性曲線でカットを変換する
+  （変換後のカットは `by_cut` に出る）。
+- `conditional` は求積点または受検者ごとの正確さと一貫性、`accuracy_table`（真 x 観測）と
+  `consistency_table` は同時分布。
+- 多母集団モデルでは群ごとに求め、どの表にも `group` 列がつく（`accuracy` / `consistency` / `kappa` の代わりに
+  `summary` を使う）。
+- 条件つきの正確さは真のカテゴリが変わるところで跳ぶので、推定時の格子での正確さは連続な潜在分布での値と、
+  求積点の間隔程度まで違いうる（既定の 61 点なら 0.01 未満）。一貫性と κ はこの影響を受けない。
 
 ## 8. 潜在分布と識別性
 
@@ -1274,6 +1342,50 @@ linked_screened = screened.link  # 残した項目での LinkResult
   `stack_screening_tables({"2025": screened_2025, "2026": screened_2026})`。
 - 1 次元の推定結果のみ。1 つの多群推定の中での DIF 検定は `FitResult.dif()`。mirt の推定結果に同じ規則を素の R で当てた
   再計算と照合済み（2PL と 2PL + GRM + GPCM 混在）。
+
+### 等化と素点-尺度得点変換表
+
+2 つのフォームが同じ尺度に乗ったら（ここでは `linked_sl`。FIPC や同時推定ならリンクは不要）、
+`irt_equate(new, old)` は新フォームのすべての合計得点を旧フォームの合計得点の尺度に変換する
+（Kolen & Brennan, 2014, §6.5–6.6）:
+
+- `method="true_score"`（既定）: 新フォームのテスト特性曲線で $\tau_X(\theta)=x$ を解き、
+  $\tau_Y(\theta)$ を返す。下側漸近線（3PL / 4PL の当て推量）の和以下と上側漸近線の和以上の得点は
+  Kolen & Brennan の線形補間で等化し、その `theta` は $-\infty$ / $+\infty$。
+- `method="observed_score"`: 両フォームのモデル上の合計得点分布（推定潜在分布上の Lord–Wingersky
+  再帰）を、母集団 `"new"`・`"old"`・`"synthetic"`（新フォームの母集団の重みを `synthetic_weight=`
+  で指定）で求め、等パーセンタイル法で等化する。
+
+`score_distribution()` はフォームのモデル上の分布を返し、`scale_table()` は各合計得点を報告尺度
+$\text{slope}\cdot\theta+\text{intercept}$ に変換する（`[lowest, highest]` で切り、丸める）。
+$\theta$ はテスト特性曲線（`"true_score"`）か合計得点 EAP（`"EAPsum"`）から求める。
+
+```python
+from flexpyirt import irt_equate, scale_table, score_distribution
+
+true_eq = irt_equate(src_res, res, link=linked_sl)
+print(true_eq.table.head().round(3))  # score, theta（基準尺度）, equated
+observed_eq = irt_equate(
+    src_res,
+    res,
+    method="observed_score",
+    link=linked_sl,
+    population="synthetic",
+    synthetic_weight=0.5,
+)
+print(observed_eq.table.head().round(3))
+print(score_distribution(res).head().round(4))
+
+raw_to_scale = scale_table(res, slope=10.0, intercept=50.0, lowest=20.0, highest=80.0)
+print(raw_to_scale.round(2).head())
+```
+
+- 1 つの推定結果に両フォームがあるときは、それを 2 回渡して `new_items=` / `old_items=` を指定する
+  （多母集団なら `new_group=` / `old_group=` も）。
+- 真値の方法はテスト特性曲線が減少しないことを要する（負の傾きや、期待得点が下がる名義項目は不可）。
+  観測得点等化にはこの条件はない。
+- 等化得点の標準誤差はまだない。equateIRT・SNSequate（2 値項目）と、mirt と equate パッケージから
+  組み立てた参照（多値・混合形式）で照合済み。
 
 ### 多次元モデル
 

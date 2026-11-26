@@ -2820,6 +2820,91 @@ data-independent shapes (§15.21).
    **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
    **Measured agreement** is recorded in VALIDATION.md (V43).
 
+4. **Classification accuracy and consistency for cut scores (#107, V52)**:
+   **What it computes.** A test with cut scores $c_1<\dots<c_C$ sorts respondents into $H=C+1$
+   ordered categories $h=0,\dots,C$; a value at or above $c_k$ is above that cut, so
+   the category of a value $v$ is $h(v)=\#\{k: v\ge c_k\}$. From one administration and the
+   fitted model, **classification accuracy** is the probability that the observed category
+   equals the true category, and **classification consistency** the probability that two
+   independent parallel administrations give the same category (Lee, 2010; Rudner, 2001, 2005).
+   **Conditional category probabilities.** At a true value $\theta$:
+   - **Lee (2010)** (`method="lee"`, cuts on the summed score). The observed category comes from
+     the summed score $S$, whose conditional distribution is the Lord–Wingersky likelihood
+     $L(s\mid\theta)$ of item 1 (exact recursion, every item family):
+     $P_h(\theta)=\sum_{s:\,h(s)=h}L(s\mid\theta)$. The true category is that of the expected
+     summed score (true score) $\tau(\theta)=\sum_j\sum_kk\,P_{jk}(\theta)$, i.e.
+     $t(\theta)=h(\tau(\theta))$. A non-integer cut $c$ puts the scores $s\ge\lceil c\rceil$ above
+     it (as cacIRT does).
+   - **Rudner (2001, 2005)** (`method="rudner"`, cuts on $\theta$). The estimate is
+     $\hat\theta\sim N(\theta,\mathrm{SE}(\theta)^2)$ with $\mathrm{SE}(\theta)=I(\theta)^{-1/2}$
+     from the test information of item 2:
+     $P_h(\theta)=\Phi\big((c_{h+1}-\theta)/\mathrm{SE}\big)-\Phi\big((c_h-\theta)/\mathrm{SE}\big)$
+     with $c_0=-\infty$, $c_H=\infty$; the true category is $t(\theta)=h(\theta)$.
+   **Integration over the true values.** With points $\theta_n$ and weights $w_n$
+   ($\sum_nw_n=1$):
+   - **D method** (`data=None`; Lathrop & Cheng, 2013): the fitted quadrature nodes and the
+     fitted latent weights of the group (the weights the EM integrates with, so every latent
+     distribution works; the R reference covers `Normal`).
+   - **P method** (`data` given): the respondents' estimates $\hat\theta_i$ of the group
+     (`score(data, method=score_method)`, default `"EAP"`) as if they were true values, each with
+     weight $1/N_g$. For Rudner the SE is $I(\hat\theta_i)^{-1/2}$ from the information, not the
+     scoring SE (as Rudner, 2005, and cacIRT). Non-finite estimates (ML on extreme patterns)
+     raise `SpecificationError`.
+   **Indices.** All of them come from two $H\times H$ tables,
+   $$A_{tk}=\sum_nw_n\,[t(\theta_n)=t]\,P_k(\theta_n),\qquad
+   B_{hk}=\sum_nw_nP_h(\theta_n)P_k(\theta_n),$$
+   the joint distribution of (true, observed) category and of the categories of two independent
+   administrations. Accuracy $\gamma=\sum_hA_{hh}$, consistency $\phi=\sum_hB_{hh}$, and
+   Cohen's (1960) kappa for consistency $\kappa=(\phi-\phi_c)/(1-\phi_c)$,
+   $\phi_c=\sum_hp_h^2$, $p_h=\sum_kB_{hk}$ (Lee, 2010). Conditional indices at $\theta_n$ are
+   $\gamma(\theta_n)=P_{t(\theta_n)}(\theta_n)$ and $\phi(\theta_n)=\sum_hP_h(\theta_n)^2$.
+   Per category $h$: `true_proportion` $\sum_kA_{hk}$, `proportion` $p_h$, `accuracy`
+   $A_{hh}/\sum_kA_{hk}$ (observed $=h$ given true $=h$), `consistency` $B_{hh}/p_h$ (second
+   $=h$ given first $=h$); NaN where the denominator is 0. Per cut $c_k$ (the two-category
+   split "below $c_k$" / "at or above $c_k$"): accuracy, consistency and kappa of that
+   dichotomy (sums of the blocks of $A$ and $B$), `false_positive`
+   $\sum_{t<k\le h}A_{th}$ (true below, observed above) and `false_negative`
+   $\sum_{h<k\le t}A_{th}$. With one cut, the per-cut and overall indices coincide. These are
+   cacIRT's "Marginal" (per cut) and "Simultaneous" (overall) indices; kappa, false
+   positive/negative rates and the per-category indices are not in cacIRT and are checked by an
+   independent recomputation in R.
+   **Scales.** `scale=None` uses the method's own scale. `method="lee", scale="theta"` maps each
+   cut through the test characteristic curve, $c^S_k=\tau(c_k)$; `method="rudner",
+   scale="summed_score"` inverts it, $c^\theta_k=\tau^{-1}(c_k)$ by bisection on $[-40, 40]$
+   (requires $\tau$ to be increasing, which holds for every family except possibly nominal
+   items, and $\tau(-40)<c_k<\tau(40)$). In a multiple-group model the converted cuts differ by
+   group and are reported in `by_cut` (`summed_score_cut` / `theta_cut`).
+   **Discretization (D approach).** The D approach integrates over the quadrature grid, i.e.
+   over the discrete latent distribution the EM works with, as cacIRT does with the quadrature it
+   is given. Consistency is smooth in $\theta$ and agrees with the continuous-latent integral to
+   about $10^{-10}$ with 61 nodes; accuracy jumps where $t(\theta)$ changes, so it differs from
+   the continuous integral by up to the order of the node spacing (measured up to 0.008 for a
+   5-item test with 61 nodes on $[-6,6]$, VALIDATION V52). The value is reported on the fitted
+   grid, not on a dedicated finer grid, so that every latent distribution (EH included) is
+   handled the same way; a finer `Quadrature` or the P approach is the remedy.
+   **Validation of cuts.** Finite, strictly increasing; on the summed score
+   $0<c_k\le S_{\max}$ and the ceilings $\lceil c_k\rceil$ distinct (otherwise an observed
+   category is empty). Otherwise `SpecificationError`.
+   **API (Decision, owner approved the proposal in #107).**
+   `classification_accuracy(res, *, cut_scores, method="lee", scale=None, data=None, group=None,
+   item_names=None, score_method="EAP") -> ClassificationResult`, unidimensional models only.
+   `ClassificationResult` holds DataFrames `summary` (`accuracy`, `consistency`, `kappa`; one
+   row per group), `by_category`, `by_cut`, `conditional` (per node or respondent: `theta`,
+   `weight`, `true_category`, `accuracy`, `consistency`, plus `true_score` for Lee or `se` for
+   Rudner), `accuracy_table` ($A$, rows true, columns observed) and `consistency_table` ($B$);
+   a multiple-group result has a leading `group` column (a `(group, category)` index for the
+   tables). The float properties `accuracy`, `consistency` and `kappa` are for single-group
+   results and raise `SpecificationError` otherwise. Multiple-group fits give one set of
+   indices per group (the group's item parameters and latent distribution); with `data`, a group
+   without respondents is left out.
+   **Kernel.** `_classification.py` holds pure JAX functions (category probabilities for both
+   methods, the tables $A$ and $B$); the shell computes the derived indices from the small
+   $H\times H$ tables in NumPy.
+   **Left out.** Model-free observed-score methods (Livingston & Lewis, 1995; Hanson & Brennan,
+   1990), composite scores, standard errors of the indices, multidimensional models.
+   **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
+   **Measured agreement** is recorded in VALIDATION.md (V52).
+
 ## 19. Multidimensional scale linking (M6)
 
 1. **Linking of confirmatory multidimensional models (`link(..., transformation=)`, V40, #78)**:
@@ -3147,9 +3232,109 @@ data-independent shapes (§15.21).
    (`FitResult.dif()`, #104), robust linking criteria that down-weight instead of removing items,
    linking error over chains, multidimensional screening.
 
-## References
-- Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
-- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
+## 23. IRT true-score and observed-score equating, raw-to-scale tables (#106)
+
+1. **Scope and API (Decision, owner 2026-11-26: the API and scope proposed in #106)**:
+   unidimensional models, every item family, single- and multiple-group fits.
+   - `irt_equate(new, old, *, method="true_score", new_items=None, old_items=None, link=None,
+     new_group=None, old_group=None, population="new", synthetic_weight=None)` →
+     `IRTEquatingResult` converts every summed score $x=0,\dots,X_{\max}$ of the new form $X$ to
+     the scale of summed scores on the old form $Y$. `new` and `old` are `FitResult`s whose
+     $\theta$ scales coincide (FIPC, a concurrent calibration, or the same fit with
+     `new_items` / `old_items` naming the items of each form), or `link=` is a `LinkResult` that
+     maps the scale of `new` onto that of `old`, $\theta_Y = A\theta_X + B$ (§16.5). The common
+     scale is always the old form's. `link` must be unidimensional and its source and target
+     groups must be `new_group` and `old_group`.
+   - `score_distribution(res, *, items=None, group=None)` → DataFrame `score`, `probability`:
+     the model-implied summed-score distribution of a form in the fitted population of a group.
+   - `scale_table(res, *, slope, intercept, method="true_score", items=None, group=None,
+     lowest=None, highest=None, n_digits=0)` → DataFrame `score`, `theta`, `theta_se`,
+     `scale_score`, `scale_score_se`, `scale_score_rounded`.
+   **Deviation from the #106 sketch.** `synthetic_weight` defaults to `None` and is allowed (and
+   required) only with `population="synthetic"`; `population="new"` / `"old"` are the weights 1
+   and 0. One argument then never silently overrides the other.
+   **Left out** (follow-ups): standard errors of equated scores (delta method through `vcov`),
+   kernel smoothing of the model-implied distributions, nonlinear scale transformations,
+   multidimensional models.
+
+2. **Form curves on the common scale**: each form is a set of items with kernel parameters
+   $\xi_j$ of one group of one fit. With a link, the new form's items are evaluated on their own
+   scale at $\theta_X=(\theta-B)/A$, so $P^{X}_{jk}(\theta)=P_{jk}((\theta-B)/A;\xi_j)$; this is
+   exactly the transformed item of §16.5 for every kernel, without transforming parameters.
+   The test characteristic curve (TCC) is
+   $$\tau(\theta)=\sum_j\sum_{k=0}^{K_j-1}k\,P_{jk}(\theta),$$
+   categories scored $0,\dots,K_j-1$ as in `expected_score()`. Its asymptotes
+   $\tau_{\mathrm{lo}}=\lim_{\theta\to-\infty}\tau$ and $\tau_{\mathrm{hi}}=\lim_{\theta\to\infty}\tau$
+   (the sums of the lower and upper asymptotes $g_j$, $u_j$ of 3PL/4PL items, 0 and $K_j-1$ for
+   the others) are evaluated at $\theta_X=\mp10^{8}$, where every kernel has reached its limit in
+   double precision unless a slope is below about $10^{-6}$. True-score methods need a
+   non-decreasing TCC: it is checked on 801 points of $[-20,20]$ (own scale) and a decrease of
+   more than $10^{-10}(1+X_{\max})$ raises `SpecificationError` (negative slopes, nominal items
+   whose expected score is not monotone). Far in the tails the graded kernel returns NaN for a
+   category whose two cumulative probabilities round to the same double (`log1mexp(0)`); there
+   the probability has underflowed, and the form's category probabilities set NaN to 0. Curves
+   are evaluated on θ arrays padded to a power of 2 of at least 1024 points, so a form compiles
+   each curve once whatever the number of scores.
+
+3. **True-score equating (Lord, 1980; Kolen & Brennan, 2014, §6.5)**: for
+   $\tau^X_{\mathrm{lo}}<x<\tau^X_{\mathrm{hi}}$, solve $\tau^X(\theta_x)=x$ and set
+   $e_Y(x)=\tau^Y(\theta_x)$. **Solver**: safeguarded Newton (Newton–bisection) on all scores at
+   once inside one `jit`-ed `lax.while_loop`; the bracket starts at $[-10,10]$ on the form's own
+   scale and is doubled (in Python, up to $|\theta|=10^{6}$) until it holds every root;
+   $\tau'$ comes from `jax.jvp`. A Newton step that leaves the bracket, or a non-positive
+   derivative, is replaced by bisection. Stop when every $|\tau^X(\theta)-x|\le10^{-13}(1+X_{\max})$
+   or the bracket is narrower than $10^{-14}(1+|\theta|)$ (at most 300 iterations; not
+   converging raises `ConvergenceWarning`).
+   **Scores outside the range of the TCC** (Kolen & Brennan, 2014, §6.5, eq. 6.27 and the
+   procedure for the highest score): no $\theta$ solves the equation, and the scores are
+   equated by linear interpolation between the points $(0,0)$,
+   $(\tau^X_{\mathrm{lo}},\tau^Y_{\mathrm{lo}})$ and, at the top,
+   $(\tau^X_{\mathrm{hi}},\tau^Y_{\mathrm{hi}})$, $(X_{\max},Y_{\max})$:
+   $$e_Y(x)=x\,\frac{\tau^Y_{\mathrm{lo}}}{\tau^X_{\mathrm{lo}}}\ (0\le x\le\tau^X_{\mathrm{lo}}),\qquad
+   e_Y(x)=\tau^Y_{\mathrm{hi}}+(x-\tau^X_{\mathrm{hi}})\frac{Y_{\max}-\tau^Y_{\mathrm{hi}}}{X_{\max}-\tau^X_{\mathrm{hi}}}\ (\tau^X_{\mathrm{hi}}\le x\le X_{\max}).$$
+   When $\tau^X_{\mathrm{lo}}=0$ (no lower asymptotes) only $x=0$ is in the first range and maps to
+   0; when $\tau^X_{\mathrm{hi}}=X_{\max}$ only $x=X_{\max}$ maps to $Y_{\max}$. The `theta`
+   column is $-\infty$ for $x\le\tau^X_{\mathrm{lo}}$ and $+\infty$ for $x\ge\tau^X_{\mathrm{hi}}$
+   (the limits of $\theta_x$; for $x$ strictly beyond an asymptote there is no solution).
+
+4. **Observed-score equating (Lord & Wingersky, 1984; Kolen & Brennan, 2014, §6.6)**:
+   **Populations.** The new population is the fitted latent distribution of `new_group` in `new`
+   (nodes and weights as `link()` uses them: Normal, EH, Davidian or mixture, `_fitted_grid`),
+   with nodes mapped to the common scale by $A\theta+B$ when a link is given; the old population
+   is that of `old_group` in `old`. The synthetic population is
+   $w_1\cdot\text{new}+(1-w_1)\cdot\text{old}$ with $w_1$ = 1, 0 or `synthetic_weight`
+   (Braun & Holland, 1982).
+   **Distributions.** For each form and population, $f(x)=\sum_qL(x\mid\theta_q)w_q$ with the
+   Lord–Wingersky likelihood of §18.1 (the existing kernel `summed_score_distribution`,
+   `method="recursion"`); in the synthetic population
+   $f_s(x)=w_1f_1(x)+(1-w_1)f_2(x)$, the same for $g_s(y)$.
+   **Equipercentile step (Decision for #106 owner question 2: option (b))**: flexpyirt keeps
+   its own percentile-rank functions for integer scores, tested against flexpyequate
+   (`flexpyequate.equate(method="equipercentile")`, a development dependency only). With
+   $F$, $G$ the cumulative distributions, $P(x)=F(x-1)+f(x)/2$, and
+   $$e_Y(x)=Q^{-1}(P(x)),\quad Q^{-1}_U(p)=\frac{p-G(y_U-1)}{g(y_U)}+y_U-\tfrac12,\ y_U=\min\{y:G(y)>p\},$$
+   $Q^{-1}_L(p)=\frac{p-G(y_L)}{g(y_L+1)}+y_L+\tfrac12$, $y_L=\max\{y:G(y)<p\}$, and
+   $Q^{-1}=(Q^{-1}_U+Q^{-1}_L)/2$ (Kolen & Brennan, 2014, ch. 2; the two coincide unless some
+   $g(y)=0$). This is what flexpyequate, `equate::equate(type = "equipercentile")` and
+   equateIRT's OSE compute. A dependency on flexpyequate (option (a)) was not taken because
+   flexpyirt would then pull in a second distribution for about 30 lines of NumPy, and
+   flexpyequate's design forbids the reverse direction anyway.
+
+5. **Raw-to-scale tables**: `method="true_score"`: $\theta(x)$ as in point 3 on the fit's own
+   scale ($\pm\infty$ outside the TCC's range), `theta_se` $=I(\theta)^{-1/2}$ with the test
+   information of the form's items (§18.2; NaN where $\theta$ is infinite).
+   `method="EAPsum"`: the summed-score EAP and posterior SD of §18.2 computed for the form's items
+   under the group's fitted latent distribution (any latent family; equals
+   `summed_score_table()` for a whole Normal form). Then
+   `scale_score` $=\mathrm{clip}(\text{slope}\cdot\theta+\text{intercept},\text{lowest},\text{highest})$
+   (slope $>0$; a missing bound is not applied, so infinite $\theta$ gives $\pm\infty$),
+   `scale_score_se` $=\text{slope}\cdot$`theta_se` (not clipped), and `scale_score_rounded` is
+   NumPy's `round(scale_score, n_digits)` (half to even; ties do not occur in practice).
+
+6. **Layers**: `_equating.py` (Core, pure JAX: form category probabilities, TCC and its
+   derivative, information, the Newton–bisection solver, summed-score distributions and EAPs on
+   a grid; NumPy: the equipercentile functions) and `equating.py` (shell: validation, forms from
+   fits, the K&B boundary rules, DataFrames, `IRTEquatingResult`). Validated in V51.
 
 ## 24. Model comparison and simulation of responses (#109)
 
@@ -3221,8 +3406,95 @@ data-independent shapes (§15.21).
    analysis, §16.11) is kept as it is so that its random stream and validated results do not
    change.
 
+## 25. Person fit and residual item fit (#108)
+
+1. **Scope and API (V53, #108)**: `FitResult.person_fit(data, *, method="EAP", group=None,
+   item_names=None, statistics=("lz", "infit", "outfit"))` returns one row per respondent with
+   `theta`, the requested statistics (`lz`, `lz_star`, `infit`, `z_infit`, `outfit`, `z_outfit`)
+   and `n_items` (answered items). `FitResult.item_fit(data, *, statistics=("s_x2",),
+   method="EAP", ...)` gains `"infit"` and `"outfit"`; the default stays S-X2 (§15.40), so
+   existing calls do not change, and the residual columns are merged onto the S-X2 table when
+   both are requested. Unidimensional models (one or several groups, every item family, any
+   latent distribution `score()` supports for the chosen estimator); missing responses are
+   skipped. `method` is the ability estimator of `score()` restricted to the point estimators
+   EAP, MAP, ML and WLE (PV and EAPsum raise). Every statistic is evaluated at the respondent's
+   estimate $\hat\theta$ with the respondent's group's item parameters. Owner decisions taken
+   in #108: a method on `FitResult` (as `item_fit()`), `statistics=` on `item_fit()` rather than
+   a separate method, infit / outfit allowed for every item family (as mirt; their reference
+   distribution is derived for Rasch-family models, so for other models they are descriptive
+   and the guide says so), and $l_z^*$ validated by an R recomputation (item 5).
+   Out of scope: nonparametric person fit (U3, $H^T$, caution indices), CUSUM, resampling
+   p-values, TAM's marginal infit / outfit, multidimensional models.
+   **Layers.** `_personfit.pattern_statistics` (jit, `vmap` over the unique patterns of the
+   compiled problem) returns per pattern $l_z$, $l_z^*$, the number of answered items and the
+   per-item residual moments $r_{pj}^2$, $W_{pj}$, $C_{pj}$ (NaN for unanswered items);
+   derivatives in $\theta$ come from JAX autodiff (`jacfwd` of each kernel's `log_prob`).
+   `_personfit.mean_square` forms the mean squares and $z$ values in NumPy along the item axis
+   (persons) or the person axis (items, within each group).
+2. **$l_z$ (Drasgow, Levine & Williams, 1985)**: with $A$ the answered items and
+   $P_{jk}=P_{jk}(\hat\theta)$,
+   $$l_0=\sum_{j\in A}\log P_{jy_j},\qquad
+   \mathrm E(l_0)=\sum_{j\in A}\sum_k P_{jk}\log P_{jk},\qquad
+   \mathrm{Var}(l_0)=\sum_{j\in A}\Big[\sum_k P_{jk}(\log P_{jk})^2-\Big(\sum_k P_{jk}\log
+   P_{jk}\Big)^2\Big],$$
+   $l_z=(l_0-\mathrm E(l_0))/\sqrt{\mathrm{Var}(l_0)}$, the polytomous form of mirt's `Zh`
+   (mirt writes the variance as $\sum_{k\ne k'}P_kP_{k'}\log P_k\log(P_k/P_{k'})$, the same
+   quantity). Terms with $P_{jk}=0$ contribute 0.
+3. **$l_z^*$ (Snijders, 2001; polytomous items: Sinharay, 2016)**: $l_z$ evaluated at
+   $\hat\theta$ instead of $\theta$ has variance below 1. Write
+   $l_0-\mathrm E(l_0)=\sum_j a_j$ with $a_j=\log P_{jy_j}-\sum_k P_{jk}\log P_{jk}$ (mean 0) and
+   let the estimator solve $\sum_j b_j(\theta)+r_0(\theta)=0$ with $b_j=\partial\log
+   P_{jy_j}/\partial\theta$. A first-order expansion of $\sum_j a_j(\hat\theta)$ around $\theta$,
+   with $\mathrm E[\partial a_j/\partial\theta]=-\mathrm{Cov}(a_j,b_j)=-\sum_k P'_{jk}\log P_{jk}$
+   and $\hat\theta-\theta\approx(\sum_j b_j+r_0)/\sum_j I_j$, gives
+   $$l_z^*=\frac{l_0-\mathrm E(l_0)+c\,r_0(\hat\theta)}{\tau},\quad
+   c=\frac{\sum_j\sum_k P'_{jk}\log P_{jk}}{\sum_j I_j},\quad
+   \tau^2=\sum_j\Big[\mathrm{Var}(a_j)-2c\sum_k P'_{jk}\log P_{jk}+c^2I_j\Big],$$
+   all at $\hat\theta$, with $I_j=\sum_k P'^2_{jk}/P_{jk}$. For dichotomous items this is
+   Snijders' $l_z^*$ with $w_j=\log(P_j/Q_j)$ and $r_j=P'_j/(P_jQ_j)$. The estimator's term is
+   $r_0=0$ for ML, $r_0=-(\theta-\mu_g)/\sigma_g^2$ for MAP (the group's normal prior, §15.22)
+   and $r_0=I'(\theta)/(2I(\theta))$ for WLE — flexpyirt's WLE maximizes $\log L+\tfrac12\log I$
+   (§15.24), so its $r_0$ uses $I'=\partial I/\partial\theta$, which equals Warm's
+   $\sum_jP'_jP''_j/(P_jQ_j)$ for 1PL / 2PL items but not for 3PL / 4PL. EAP has no estimating
+   equation of this form, so `"lz_star"` with `method="EAP"` raises.
+4. **Residuals, infit and outfit (Wright & Masters, 1982)**: with category scores
+   $0,\dots,K_j-1$, $E_j=\sum_k kP_{jk}$, $r_j=y_j-E_j$, $W_j=\sum_k(k-E_j)^2P_{jk}$ and
+   $C_j=\sum_k(k-E_j)^4P_{jk}$, over the $n$ answered items of a respondent (or the $N_j$
+   respondents who answered item $j$):
+   $$\mathrm{outfit}=\frac1n\sum\frac{r^2}{W},\quad
+   q_{\mathrm{out}}^2=\frac1{n^2}\sum\frac{C}{W^2}-\frac1n,\qquad
+   \mathrm{infit}=\frac{\sum r^2}{\sum W},\quad
+   q_{\mathrm{in}}^2=\frac{\sum(C-W^2)}{(\sum W)^2},$$
+   $q$ capped at 1.4142 and $z=(\mathrm{MS}^{1/3}-1)(3/q)+q/3$ (Wilson–Hilferty). Category
+   scores $0,\dots,K_j-1$ are used for every family, nominal included (as mirt). $W_j$ is
+   floored at $\sqrt{10^{-5}}$ whenever $W_j^2<10^{-5}$ (mirt's guard at extreme $\hat\theta$).
+   Item statistics are computed within each group in a multiple-group model (as mirt's
+   `itemfit()` on `multipleGroup` fits); weighted fits raise (as S-X2).
+5. **Differences from mirt and validation**: (a) person `z_outfit` uses $n^2$ (answered items)
+   under the square root; mirt's `personfit()` uses $J^2$ (all items) and takes an absolute
+   value, which differs only for rows with missing responses. Item `z_outfit` uses each item's
+   respondent count $N_j$; mirt's `itemfit()` writes `colSums((C / W^2) / N^2)` with `N` a
+   length-$J$ vector, which R recycles down the rows instead of across the columns, so its
+   `z.outfit` is off when the items have different counts (missing responses) and right
+   otherwise. (b) A non-finite $\hat\theta$ (ML on an all-lowest or
+   all-highest pattern, all-missing rows) gives NaN statistics and is skipped in item
+   statistics; mirt replaces $\pm\infty$ by the most extreme finite estimate $\pm0.1$.
+   (c) mirt sets a picked probability below machine epsilon to 1 in $l_0$; flexpyirt keeps the
+   log-probability. V53 compares $l_z$ and person infit / outfit with mirt's `personfit()`,
+   person and item $z_{\mathrm{out}}$ with the formulas above on mirt's own residual moments
+   (and with mirt's values on complete data), item infit / outfit with
+   `itemfit(fit_stats = "infit")`, lz, infit and outfit for a Rasch model
+   with `sirt::personfit.stat()`, and $l_z^*$ with an R recomputation from the formulas of
+   item 3 (`probtrace()` with central differences, `iteminfo()`; compared for
+   $|\hat\theta|\le10$, beyond which the differences lose precision) and with a 2PL closed form
+   and a simulation of its null distribution in the unit tests: no installed R package
+   implements $l_z^*$ (`PerFit::lzstar` could not be installed, and it covers dichotomous items
+   only). The $l_z^*$ entry is listed in the user documentation only if the owner accepts this
+   validation (#108).
+
 ## References
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
+- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Akaike, H. (1974). A new look at the statistical model identification. *IEEE Transactions on Automatic Control*, 19(6), 716–723.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -3238,14 +3510,17 @@ data-independent shapes (§15.21).
 - Bollen, K. A. (1989). *Structural Equations with Latent Variables*. Wiley.
 - Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
+- Braun, H. I., & Holland, P. W. (1982). Observed-score test equating: A mathematical analysis of some ETS equating procedures. In P. W. Holland & D. B. Rubin (Eds.), *Test Equating* (pp. 9–49). Academic Press.
 - Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
 - Candell, G. L., & Drasgow, F. (1988). An iterative procedure for linking metrics and assessing item bias in item response theory. *Applied Psychological Measurement*, 12(3), 253–260.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
+- Cohen, J. (1960). A coefficient of agreement for nominal scales. *Educational and Psychological Measurement*, 20(1), 37–46.
 - Devroye, L. (1986). *Non-Uniform Random Variate Generation*. Springer.
 - Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
+- Drasgow, F., Levine, M. V., & Williams, E. A. (1985). Appropriateness measurement with polychotomous item response models and standardized indices. *British Journal of Mathematical and Statistical Psychology*, 38(1), 67–86.
 - Drezner, Z., & Wesolowsky, G. O. (1990). On the computation of the bivariate normal integral. *Journal of Statistical Computation and Simulation*, 35(1–2), 101–107.
 - Edwards, M. C., Houts, C. R., & Cai, L. (2018). A diagnostic procedure to detect departures from local independence in item response theory models. *Psychological Methods*, 23(1), 138–149.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
@@ -3261,6 +3536,7 @@ data-independent shapes (§15.21).
 - Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Hannan, E. J., & Quinn, B. G. (1979). The determination of the order of an autoregression. *JRSS B*, 41(2), 190–195.
+- Hanson, B. A., & Brennan, R. L. (1990). An investigation of classification consistency indexes estimated under alternative strong true score models. *Journal of Educational Measurement*, 27(4), 345–359.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holland, P. W., & Thayer, D. T. (1988). Differential item performance and the Mantel–Haenszel procedure. In H. Wainer & H. I. Braun (Eds.), *Test Validity* (pp. 129–145). Erlbaum.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
@@ -3277,9 +3553,13 @@ data-independent shapes (§15.21).
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Landis, J. R., Heyman, E. R., & Koch, G. G. (1978). Average partial association in three-way contingency tables: A review and discussion of alternative tests. *International Statistical Review*, 46(3), 237–254.
+- Lathrop, Q. N., & Cheng, Y. (2013). Two approaches to estimation of classification accuracy rate under item response theory. *Applied Psychological Measurement*, 37(3), 226–241.
 - Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
+- Lee, W.-C. (2010). Classification consistency and accuracy for complex assessments using item response theory. *Journal of Educational Measurement*, 47(1), 1–17.
 - Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24(2), 115–138.
 - Liu, I.-M., & Agresti, A. (1996). Mantel–Haenszel-type inference for cumulative odds ratios with a stratified ordinal response. *Biometrics*, 52(4), 1223–1234.
+- Livingston, S. A., & Lewis, C. (1995). Estimating the consistency and accuracy of classifications based on test scores. *Journal of Educational Measurement*, 32(2), 179–197.
+- Lord, F. M. (1980). *Applications of Item Response Theory to Practical Testing Problems*. Lawrence Erlbaum.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -3309,6 +3589,7 @@ data-independent shapes (§15.21).
 - Penfield, R. D., & Algina, J. (2003). Applying the Liu–Agresti estimator of the cumulative common odds ratio to DIF detection in polytomous items. *Journal of Educational Measurement*, 40(4), 353–370.
 - Phillips, A., & Holland, P. W. (1987). Estimators of the variance of the Mantel–Haenszel log-odds-ratio estimate. *Biometrics*, 43(2), 425–431.
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
+- Press, W. H., Teukolsky, S. A., Vetterling, W. T., & Flannery, B. P. (2007). *Numerical Recipes: The Art of Scientific Computing* (3rd ed.). Cambridge University Press.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
@@ -3317,12 +3598,16 @@ data-independent shapes (§15.21).
 - Robins, J., Breslow, N., & Greenland, S. (1986). Estimators of the Mantel–Haenszel variance consistent in both sparse data and large-strata limiting models. *Biometrics*, 42(2), 311–323.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
+- Rudner, L. M. (2001). Computing the expected proportions of misclassified examinees. *Practical Assessment, Research, and Evaluation*, 7, Article 14.
+- Rudner, L. M. (2005). Expected classification accuracy. *Practical Assessment, Research, and Evaluation*, 10, Article 13.
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Schwarz, G. (1978). Estimating the dimension of a model. *The Annals of Statistics*, 6(2), 461–464.
 - Sclove, S. L. (1987). Application of model-selection criteria to some problems in multivariate analysis. *Psychometrika*, 52(3), 333–343.
+- Sinharay, S. (2016). Asymptotically correct standardization of person-fit statistics beyond dichotomous items. *Psychometrika*, 81(4), 992–1013.
 - Skinner, C. J. (1989). Domain means, regression and multivariate analysis. In C. J. Skinner, D. Holt & T. M. F. Smith (Eds.), *Analysis of Complex Surveys* (pp. 59–87). Wiley.
+- Snijders, T. A. B. (2001). Asymptotic null distribution of person fit statistics with estimated person parameter. *Psychometrika*, 66(3), 331–342.
 - Somes, G. W. (1986). The generalized Mantel–Haenszel statistic. *The American Statistician*, 40(2), 106–108.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
