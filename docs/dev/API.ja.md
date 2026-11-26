@@ -164,7 +164,8 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `mantel_haenszel`, `mantel`, `generalized_mantel_haenszel`, `logistic_dif` | 関数 | 観測得点による DIF（flexpyctt）: ETS 分類つきの Mantel–Haenszel、Mantel 検定、一般化 MH、ロジスティック回帰。マッチング得点の純化つき。`DIFResult`（`table`, `anchor_items`, `n_iter`, `converged`, `flag_history`）を返す |
 | `detect`, `exploratory_detect` | 関数 | 確認的・探索的 DETECT。`DetectResult`, `ExploratoryDetectResult` を返す |
 | `model_parallel_analysis`, `dimensionality` | 関数 | `FitResult` のモデルに基づく平行分析と、まとめのレポート。`ModelParallelAnalysisResult`, `DimensionalityResult` を返す |
-| `item_information`, `test_information`, `expected_score` | 関数 | 1 次元の `FitResult` の、与えた `theta` での項目・テスト情報量（条件付き SE つき）と期待得点。`theta` をインデックスにした DataFrame を返す（DESIGN §18.2） |
+| `item_information`, `test_information`, `expected_score` | 関数 | `FitResult` の、与えた `theta` での項目・テスト情報量（条件付き SE つき）と期待得点。`theta` をインデックスにした DataFrame を返す（DESIGN §18.2） |
+| `information_matrix` | 関数 | 与えた `theta` でのテスト（または 1 項目）の Fisher 情報行列。形 `(T, D, D)` の配列。多次元モデルでは `item_information` / `test_information` が `direction=`（方向別の情報量と合成値の SE）と形 `(T, D)` の `theta` をとり、因子名の `MultiIndex` をインデックスにする（DESIGN §18.3） |
 | `item_probabilities`, `empirical_item_curve`, `wright_map_table` | 関数 | 図の元になる数値: トレースライン（縦長の DataFrame）、EAP の $\theta$ の等人数区間ごとの観測カテゴリ比率とモデルの確率、Wright マップの受検者の推定値と項目のサーストン閾値（`WrightMapTable(persons, items)`）（DESIGN §21） |
 | `flexpyirt.plotting` | モジュール | `plot_item_curves`（観測比率つき。群ごとの曲線が DIF の図）、`plot_information`、`plot_expected_score`、`plot_wright_map`。matplotlib は任意依存 `flexpyirt[plot]` から遅延 import（なければ `MissingDependencyError`）（DESIGN §21） |
 | `reliability`, `summed_score_table` | 関数 | 周辺信頼性・経験的信頼性と、合計得点 EAP の表（`FitResult.score(method="EAPsum")` も）。DataFrame を返す |

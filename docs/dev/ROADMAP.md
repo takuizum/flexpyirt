@@ -125,7 +125,7 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
      extension has not been studied and there is no reference implementation (mirt's
      `type = "JSI"` needs one factor). `jsi()` raises `SpecificationError` for these models
      (DESIGN.md §16.17).
-3. [ ] Item / test information, reliability and summed-score EAP (#82), on a public Lord–Wingersky /
+3. [x] Item / test information, reliability and summed-score EAP (#82), on a public Lord–Wingersky /
    Poisson-binomial kernel (#83).
    - [x] Kernel (#83): `summed_score_distribution()`, the Lord–Wingersky recursion as a
      Poisson-binomial kernel in linear and log space, the DFT-CF method, and normal / refined normal /
@@ -137,7 +137,11 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
      against `iteminfo()`, `testinfo()`, `expected.item()` / `expected.test()`, `marginal_rxx()`,
      `empirical_rxx()` and `fscores(method = "EAPsum")` for 2PL, 3PL, GRM, GPCM, nominal, a
      mixed-format test and a two-group model.
-   - [ ] Multidimensional models: information matrix and directional information.
+   - [x] Multidimensional models (confirmatory 2–3 factors, bifactor, two-tier; single and multiple
+     groups): `information_matrix()`, directional information with `item_information(direction=)` /
+     `test_information(direction=)` (with the SE of the composite) and `expected_score()`; validated in
+     V43 against `iteminfo(multidim_matrix = TRUE)`, `iteminfo(degrees = )`, `testinfo(degrees = )` and
+     `expected.item()` / `expected.test()`.
 4. [ ] Sampling (survey) weights (#84).
    - [x] `fit(..., weights=...)`: weighted marginal likelihood with weighted pattern compression
      for EM, SQUAREM, multiple groups, missing data and FIPC; BIC with the sum of the weights;
