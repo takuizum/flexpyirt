@@ -1283,8 +1283,9 @@ item_analysis(data, *, correlation="pearson", missing="pairwise") -> DataFrame
 ```
 
 One row per item: `item`, `n` (observed scores), `n_categories` (distinct observed scores),
-`mean`, `sd` ($n-1$ denominator), `difficulty` (mean divided by the largest observed score; the
-proportion correct for 0 / 1 items), `item_total`, `item_rest` (correlation with the total score
+`mean`, `sd` ($n-1$ denominator), `difficulty` (mean divided by the largest observed score, so
+an item whose top category nobody reached is divided by a smaller maximum; the proportion correct
+for 0 / 1 items), `item_total`, `item_rest` (correlation with the total score
 and with the total of the other items) and `alpha_if_deleted` (NaN with two items).
 
 | Argument | Type | Description |
@@ -1323,7 +1324,7 @@ respondents with at least one response.
 |---|---|---|
 | `alpha`, `standardized_alpha` | float | Alpha and standardized alpha |
 | `confidence_interval`, `confidence_level` | tuple, float | Feldt's (lower, upper) interval and its level |
-| `n_items`, `n_obs` | int | Items and respondents used |
+| `n_items`, `n_obs` | int | Items and respondents used (rows without any response are dropped; psych counts every row) |
 | `if_deleted` | DataFrame | Per item, `alpha` and `standardized_alpha` without it (NaN with two items) |
 
 ### `coefficient_omega`
@@ -1333,8 +1334,11 @@ coefficient_omega(data, *, correlation="pearson") -> OmegaResult
 ```
 
 Omega total of a one-factor model: ULS (minres) loadings $\lambda_j$ fitted to the item
-correlation matrix $R$, and $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf 1^\top R\mathbf 1$ (McDonald,
-1999; Revelle & Zinbarg, 2009), psych's `omega(nfactors = 1)$omega.tot`. `correlation` is
+correlation matrix $R$, and $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf s^\top R\mathbf s$ with
+$s_j=\operatorname{sign}(\lambda_j)$ (McDonald, 1999; Revelle & Zinbarg, 2009), psych's
+`omega(nfactors = 1)$omega.tot` with its default `flip = TRUE`. Items that load negatively are
+thus reversed (with a `FlexpycttWarning` and listed in `reversed_items`); reverse-score or drop
+them first to get the omega of the total as scored. `correlation` is
 `"pearson"` (pairwise-complete) or `"polychoric"` ([`polychoric`](#polychoric) with its defaults);
 a matrix that is not positive definite is smoothed with a `NotPositiveDefiniteWarning`. At least
 three items. Hierarchical omega is not provided.
@@ -1345,7 +1349,8 @@ three items. Hierarchical omega is not provided.
 |---|---|---|
 | `omega` | float | $\omega_t$ |
 | `loadings`, `uniquenesses` | Series | One-factor loadings (signed to a non-negative sum) and $1-\lambda_j^2$ |
-| `correlation` | DataFrame | The correlation matrix the factor was fitted to |
+| `correlation` | DataFrame | The correlation matrix the factor was fitted to (items as scored) |
+| `reversed_items` | tuple of str | Items with a negative loading, reversed before computing `omega` |
 
 ### `distractor_analysis`
 

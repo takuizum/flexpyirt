@@ -942,15 +942,17 @@
 
 ## 照合以外の検証
 - **古典的項目分析（V46、flexpyctt、#101）**:
-  `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R`（psych 2.6.5、ltm 1.2.0、polycor 0.8.2、
-  lavaan 0.7.2）が `packages/flexpyctt/tests/reference/v46_item_analysis.json` を書き、
+  `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R`（R 4.6.2、psych 2.6.9、ltm 1.2.0、
+  polycor 0.8.2、lavaan 0.7.3）が `packages/flexpyctt/tests/reference/v46_item_analysis.json` を書き、
   `packages/flexpyctt/tests/test_item_analysis.py` で照合する。シミュレーションの 4 例: 多肢選択 10 項目（$N=500$、
   正答と誤答の引きつけ方を変え、1 項目は 5 選択肢）の欠測なしと 5% MCAR、0〜4 で採点する 6 項目（$N=300$、
-  段階反応モデル）の欠測なしと 6% MCAR。ほかに丁度識別の ω を見る 3 項目。観測された差: 閉じた式（α、標準化 α、
+  段階反応モデル）の欠測なしと 6% MCAR。ほかに丁度識別の ω を見る 3 項目と、0〜4 の欠測なしデータの 1 項目を逆転採点したもの（psych の既定の
+  `flip = TRUE` がその項目を反転する。`flip = FALSE` の値も記録し、0.18 低く、反転しない式と一致する）。観測された差: 閉じた式（α、標準化 α、
   項目を除いたときの値、Feldt の上下限、平均、SD、項目–合計・項目–残りの相関、点双列・多分系列・双列相関、
-  選択肢の割合・点双列相関・平均得点・群ごとの割合）は $5\times10^{-15}$ 以下、キーによる得点は完全一致、
+  選択肢の割合・点双列相関・平均得点・群ごとの割合）は $6\times10^{-15}$ 以下、キーによる得点は完全一致、
   ω total は $7\times10^{-8}$ 以下、負荷量は $1.4\times10^{-6}$ 以下（psych の `fa()` が minres の最適化を早く
-  止めるため）、lavaan とのポリコリック行列は $2.3\times10^{-8}$ 以下。既知の違い（それぞれテストで確かめる）:
+  止めるため）、lavaan とのポリコリック行列は $2\times10^{-8}$ 以下。反転する項目は psych が反転するものと一致し、反転したときの ω は
+  手で逆転採点したデータの ω と一致する。既知の違い（それぞれテストで確かめる）:
   (1) psych の `raw.r` は `rowSums(na.rm = TRUE)` との相関なので、欠測があるときは R で求めた $C$ に基づく
   `colSums(C)/sqrt(diag(C) * sum(C))` と比べ、`raw.r` そのものとは欠測なし・リストワイズのときだけ比べる
   （DESIGN §16.20）。`r.drop` は psych でも $C$ に基づくので全例で比べる。(2) ltm の素の

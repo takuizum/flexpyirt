@@ -159,6 +159,27 @@ def test_omega_matches_psych(name: str) -> None:
         _close(ref["omega_from_fa"], ref["omega_tot"], 1e-12)  # psych's omega.tot is this formula
         _close(result.loadings, ref["fa_loadings"], LOADINGS)
         _close(result.uniquenesses, 1.0 - result.loadings**2, 0.0)
+        assert result.reversed_items == ()
+
+
+def test_omega_reverses_negative_items_as_psych() -> None:
+    ref = REF["reversed_item"]
+    scores = _frame(ref["scores"], ref["items"])
+    with pytest.warns(FlexpycttWarning, match="reversed"):
+        result = coefficient_omega(scores)
+    _close(result.correlation, ref["correlation"], CLOSED_FORM)
+    _close(result.omega, ref["omega_tot"], OMEGA)
+    _close(result.loadings, ref["fa_loadings"], LOADINGS)
+    reversed_items = tuple(n for n, k in zip(ref["items"], ref["key"], strict=True) if k < 0)
+    assert result.reversed_items == reversed_items == ("y2",)
+    # psych's flip = FALSE (the total as scored) is the formula without reversing.
+    _close(ref["omega_from_fa"], ref["omega_tot_unflipped"], 1e-12)
+    assert ref["omega_tot"] - ref["omega_tot_unflipped"] > 0.1
+    # Reverse-scoring the item by hand gives the same omega with nothing reversed.
+    rescored = scores.assign(y2=4 - scores["y2"])
+    by_hand = coefficient_omega(rescored)
+    assert by_hand.reversed_items == ()
+    _close(by_hand.omega, result.omega, 1e-9)
 
 
 def test_omega_three_items() -> None:
@@ -369,6 +390,7 @@ def test_omega_smooths_a_pairwise_matrix() -> None:
     )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", HeywoodWarning)
+        warnings.filterwarnings("ignore", message=".*load negatively")
         with pytest.warns(NotPositiveDefiniteWarning):
             result = coefficient_omega(x)
     assert np.linalg.eigvalsh(result.correlation.to_numpy()).min() > 0

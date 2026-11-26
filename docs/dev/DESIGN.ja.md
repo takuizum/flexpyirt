@@ -1493,7 +1493,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     `item_analysis()`、`coefficient_alpha()`（`AlphaResult`）、`coefficient_omega()`（`OmegaResult`）、
     `distractor_analysis()`。名前は flexpyirt のモデルに基づく `reliability()` と重ならない。**issue の案からの変更**
     （シグネチャは変えていない）: `AlphaResult` に `confidence_level` を加え、`if_deleted` は `alpha` と
-    `standardized_alpha` の両方を持つ。`OmegaResult` に当てはめた相関行列 `correlation` を加えた。`score_responses()`
+    `standardized_alpha` の両方を持つ。`OmegaResult` に当てはめた相関行列 `correlation` と、ω の計算前に反転した `reversed_items` を加えた。`score_responses()`
     はキーを列の順の列としても受け取る。
     **欠測**（オーナーの決定事項 2。issue の既定 `"pairwise"`）: すべてペアワイズの共分散行列 $C$（R の
     `cov(use = "pairwise")`）から計算し、標準化 α と ω にはペアワイズの相関行列（R の `cor(use = "pairwise")`。
@@ -1513,8 +1513,12 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     使いながら合計の分母 $n-1$ の SD で割るので、この値の $\sqrt{(n-1)/n}$ 倍になる（テスト済み）。$[-1,1]$ の外の
     推定値は psych と同じく $\pm1$ にし、`HeywoodWarning` を出す。`difficulty` は平均を観測された最大得点で割るので、
     得点は 0 以上とする。
-    **ω**: 1 因子の ULS 解（`efa()` のカーネル `_efa.fit_factors`）から $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf 1^\top
-    R\mathbf 1$。分母に観測された合計の分散を使う psych の `omega.tot`（Revelle & Zinbarg, 2009）と同じ。モデルが
+    **ω**: 1 因子の ULS 解（`efa()` のカーネル `_efa.fit_factors`）から、$s_j=\operatorname{sign}(\lambda_j)$（負荷量
+    0 なら $+1$）として $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf s^\top R\mathbf s$。分母に観測された合計の分散を使う、
+    既定の `flip = TRUE` での psych の `omega.tot`（Revelle & Zinbarg, 2009）と同じ。負の負荷量の項目は psych と同じく
+    反転する（#127 のレビュー）。反転しないと、逆転項目が 1 つあるだけで $\mathbf 1^\top R\mathbf 1$ が小さくなり、誰も
+    使わない合計の ω になる。反転は黙って行わない。`FlexpycttWarning` で項目名を示し、`OmegaResult.reversed_items` に
+    挙げる。`loadings` と `correlation` は採点したままの項目のもの。先に項目を逆転採点しても同じ ω になる（テスト済み）。モデルが
     含意する形 $(\sum\lambda)^2/((\sum\lambda)^2+\sum\psi)$ は完全に適合するときだけ一致し、返さない。`efa()` ではなく
     カーネルを呼ぶので 3 項目でも計算できる（丁度識別のモデルで、`efa()` は自由度 0 として受け付けない）。Pearson の
     行列が正定値でないとき（ペアワイズの行列ではありうる）は、`polychoric()` と同じく `smooth_correlation` で平滑化

@@ -1245,6 +1245,8 @@ print(options[options["item"] == items[0]].round(3))
 - `coefficient_alpha()` は 0 / 1 項目では KR-20 になる。標準化 α、Feldt の信頼区間、各項目を除いたときの α
   （`alpha.if_deleted`）も返す。
 - `coefficient_omega()` は項目間相関に 1 因子モデルを（ULS で）当てはめ、ω total を返す。
+  psych の `omega()` と同じく、負の負荷量の項目は反転する（警告を出し、`reversed_items` に挙げる）。報告する合計が
+  採点したままの項目を使うなら、その項目は自分で逆転採点しておく。
   `correlation="polychoric"` では、観測された合計得点ではなく、カテゴリの背後にある潜在反応についての値になる。
 - 欠測（NaN）は既定ではペアワイズに使う。共分散・相関のそれぞれを、両方の項目に答えた回答者から計算する。
   `missing="listwise"` なら欠測のない行だけを使う。

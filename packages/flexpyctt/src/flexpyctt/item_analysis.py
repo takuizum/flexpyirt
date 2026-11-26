@@ -559,18 +559,21 @@ class OmegaResult:
     omega : float
         :math:`\omega_t` of the one-factor model.
     loadings : pandas.Series
-        One-factor ULS (minres) loadings, signed to a non-negative sum.
+        One-factor ULS (minres) loadings of the items as scored, signed to a non-negative sum.
     uniquenesses : pandas.Series
         :math:`1-\lambda_j^2`.
     correlation : pandas.DataFrame
-        The correlation matrix the factor model was fitted to (smoothed if it was not positive
-        definite).
+        The correlation matrix the factor model was fitted to, items as scored (smoothed if it
+        was not positive definite).
+    reversed_items : tuple of str
+        Items with a negative loading, reversed before computing ``omega`` (empty if none).
     """
 
     omega: float
     loadings: pd.Series
     uniquenesses: pd.Series
     correlation: pd.DataFrame
+    reversed_items: tuple[str, ...]
 
 
 def coefficient_omega(
@@ -584,11 +587,14 @@ def coefficient_omega(
     squares (minres, :func:`~flexpyctt.efa`) and
 
     .. math::
-        \omega_t=1-\frac{\sum_j(1-\lambda_j^2)}{\mathbf 1^\top R\,\mathbf 1}
+        \omega_t=1-\frac{\sum_j(1-\lambda_j^2)}{\mathbf s^\top R\,\mathbf s},\qquad
+        s_j=\operatorname{sign}(\lambda_j)\ (s_j=1\text{ if }\lambda_j=0)
 
     (McDonald, 1999; in this form Revelle & Zinbarg, 2009), the reliability of the sum of the
-    standardized items, with the observed total variance :math:`\mathbf 1^\top R\mathbf 1` in
-    the denominator. This is psych's ``omega(m = R, nfactors = 1)$omega.tot``.
+    standardized items with the items that load negatively reversed, with the observed total
+    variance :math:`\mathbf s^\top R\mathbf s` in the denominator. This is psych's
+    ``omega(m = R, nfactors = 1)$omega.tot`` with its default ``flip = TRUE``; when every
+    loading is non-negative, :math:`\mathbf s=\mathbf 1`.
 
     Parameters
     ----------
@@ -609,6 +615,9 @@ def coefficient_omega(
 
     Warns
     -----
+    FlexpycttWarning
+        If some items load negatively and were reversed (reverse-score them, or drop them, to
+        get the omega of the total as scored).
     NotPositiveDefiniteWarning
         If the correlation matrix was smoothed before the factor analysis.
     HeywoodWarning, ConvergenceWarning
@@ -641,12 +650,23 @@ def coefficient_omega(
     _warn_efa(solution, 1)
     loadings = solution.loadings[:, 0]
     uniquenesses = 1.0 - loadings**2
-    omega = float(1.0 - uniquenesses.sum() / mat.sum())
+    signs = np.where(loadings < 0.0, -1.0, 1.0)
+    reversed_items = tuple(names[j] for j in np.flatnonzero(signs < 0.0))
+    if reversed_items:
+        warnings.warn(
+            f"Item(s) {list(reversed_items[:5])}{' ...' if len(reversed_items) > 5 else ''} "
+            "load negatively and were reversed before computing omega (as psych's omega() "
+            "with flip = TRUE).",
+            FlexpycttWarning,
+            stacklevel=2,
+        )
+    omega = float(1.0 - uniquenesses.sum() / (signs @ mat @ signs))
     return OmegaResult(
         omega=omega,
         loadings=pd.Series(loadings, index=names, name="loading"),
         uniquenesses=pd.Series(uniquenesses, index=names, name="uniqueness"),
         correlation=pd.DataFrame(mat, index=names, columns=names),
+        reversed_items=reversed_items,
     )
 
 

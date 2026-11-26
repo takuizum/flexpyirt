@@ -2079,7 +2079,8 @@ data-independent shapes (§15.21).
     clash with flexpyirt's model-based `reliability()`. **Changes from the issue's sketch** (no
     signature changed): `AlphaResult` also carries `confidence_level` and `if_deleted` has both
     `alpha` and `standardized_alpha`; `OmegaResult` also carries the `correlation` matrix it was
-    fitted to; `score_responses()` also accepts the key as a sequence in column order.
+    fitted to and the `reversed_items` reversed before computing omega; `score_responses()` also
+    accepts the key as a sequence in column order.
     **Missing data** (owner decision 2: the issue's `"pairwise"` default): everything is computed
     from the pairwise-complete covariance matrix $C$ (R's `cov(use = "pairwise")`) and, for
     standardized alpha and omega, the pairwise-complete correlation matrix (R's
@@ -2104,9 +2105,15 @@ data-independent shapes (§15.21).
     the $n-1$ SD of the total while using $p,q$, so it is this value times $\sqrt{(n-1)/n}$
     (tested). Estimates outside $[-1,1]$ are set to $\pm1$ with a `HeywoodWarning`, as psych does.
     `difficulty` is the mean over the largest observed score, so scores must be $\ge0$.
-    **Omega**: $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf 1^\top R\mathbf 1$ from the one-factor ULS
-    solution (`_efa.fit_factors`, the kernel of `efa()`), i.e. psych's `omega.tot` (Revelle &
-    Zinbarg, 2009) with the observed total variance in the denominator; the model-implied form
+    **Omega**: $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf s^\top R\mathbf s$ from the one-factor ULS
+    solution (`_efa.fit_factors`, the kernel of `efa()`), with $s_j=\operatorname{sign}(\lambda_j)$
+    ($+1$ for a zero loading), i.e. psych's `omega.tot` (Revelle & Zinbarg, 2009) with its default
+    `flip = TRUE` and the observed total variance in the denominator. Items that load negatively
+    are reversed, as psych does (review of #127): otherwise one reverse-keyed item makes
+    $\mathbf 1^\top R\mathbf 1$ small and omega describes a total nobody would use. The reversal is
+    not silent: a `FlexpycttWarning` names the items and `OmegaResult.reversed_items` lists them,
+    while `loadings` and `correlation` stay those of the items as scored; reverse-scoring the items
+    first gives the same omega (tested). The model-implied form
     $(\sum\lambda)^2/((\sum\lambda)^2+\sum\psi)$ equals it only under perfect fit and is not
     reported. Calling the kernel instead of `efa()` admits three items (a just-identified model,
     which `efa()` rejects for having no degrees of freedom). The Pearson matrix is smoothed with

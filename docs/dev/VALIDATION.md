@@ -1172,17 +1172,20 @@ English | [日本語](VALIDATION.ja.md)
   and the power 0.99–1.00. Rerun with `uv run python packages/flexpyctt/validation/simulation/dimtest_study.py`
   (about 4 minutes); the tests run 20 null and 10 alternative replications.
 - **Classical item analysis (V46, flexpyctt, #101)**:
-  `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R` (psych 2.6.5, ltm 1.2.0,
-  polycor 0.8.2, lavaan 0.7.2) writes `packages/flexpyctt/tests/reference/v46_item_analysis.json`;
+  `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R` (R 4.6.2, psych 2.6.9, ltm
+  1.2.0, polycor 0.8.2, lavaan 0.7.3) writes `packages/flexpyctt/tests/reference/v46_item_analysis.json`;
   `packages/flexpyctt/tests/test_item_analysis.py` compares. Four simulated cases: 10
   multiple-choice items ($N=500$, keys and distractors of varying pull, one item with five
   options) complete and with 5% MCAR, and 6 items scored 0–4 ($N=300$, graded model) complete and
-  with 6% MCAR; plus three items for a just-identified omega. Observed differences: closed forms
+  with 6% MCAR; plus three items for a just-identified omega and the complete 0–4 data with one
+  item reverse-scored, where psych's default `flip = TRUE` reverses it (its `flip = FALSE` value
+  is also recorded, 0.18 lower, and equals the unreversed formula). Observed differences: closed forms
   (alpha, standardized alpha, if-deleted values, Feldt bounds, means, SDs, item–total and
   item–rest correlations, point-biserial, polyserial and biserial, option proportions,
-  point-biserials, mean scores and group proportions) $\le5\times10^{-15}$; keyed scores
+  point-biserials, mean scores and group proportions) $\le6\times10^{-15}$; keyed scores
   identical; omega total $\le7\times10^{-8}$ and loadings $\le1.4\times10^{-6}$ (psych's `fa()`
-  stops its minres optimization earlier); polychoric matrices against lavaan $\le2.3\times10^{-8}$.
+  stops its minres optimization earlier); polychoric matrices against lavaan $\le2\times10^{-8}$; the reversed item is the one psych
+  reverses, and omega with it reversed equals omega of the data reverse-scored by hand.
   Known differences, each asserted in the tests: (1) psych's `raw.r` correlates with
   `rowSums(na.rm = TRUE)`, so with missing data it is compared with the $C$-based
   `colSums(C)/sqrt(diag(C) * sum(C))` computed in R, and `raw.r` itself only on complete or

@@ -1167,7 +1167,8 @@ item_analysis(data, *, correlation="pearson", missing="pairwise") -> DataFrame
 ```
 
 項目ごとに 1 行: `item`、`n`（観測された得点の数）、`n_categories`（観測された得点の種類数）、`mean`、`sd`
-（分母 $n-1$）、`difficulty`（平均を観測された最大得点で割ったもの。0 / 1 項目では正答率）、`item_total`、
+（分母 $n-1$）、`difficulty`（平均を観測された最大得点で割ったもの。最上位のカテゴリに誰も届かない項目では、
+小さい最大値で割ることになる。0 / 1 項目では正答率）、`item_total`、
 `item_rest`（合計得点との相関と、その項目を除いた合計との相関）、`alpha_if_deleted`（2 項目では NaN）。
 
 | 引数 | 型 | 説明 |
@@ -1201,7 +1202,7 @@ $(n-1,(n-1)(k-1))$ の分位点。Feldt, Woodruff & Salih, 1987）。psych の `
 |---|---|---|
 | `alpha`, `standardized_alpha` | float | α と標準化 α |
 | `confidence_interval`, `confidence_level` | tuple, float | Feldt の（下限, 上限）とその信頼水準 |
-| `n_items`, `n_obs` | int | 使った項目数と回答者数 |
+| `n_items`, `n_obs` | int | 使った項目数と回答者数（回答が 1 つもない行は除く。psych はすべての行を数える） |
 | `if_deleted` | DataFrame | 項目ごとに、その項目を除いた `alpha` と `standardized_alpha`（2 項目では NaN） |
 
 ### `coefficient_omega`
@@ -1211,8 +1212,10 @@ coefficient_omega(data, *, correlation="pearson") -> OmegaResult
 ```
 
 1 因子モデルの ω total。項目の相関行列 $R$ に ULS（minres）で当てはめた負荷量 $\lambda_j$ から
-$\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf 1^\top R\mathbf 1$（McDonald, 1999; Revelle & Zinbarg, 2009）を
-求める。psych の `omega(nfactors = 1)$omega.tot` と同じ。`correlation` は `"pearson"`（ペアワイズ）か
+$s_j=\operatorname{sign}(\lambda_j)$ として $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf s^\top R\mathbf s$
+（McDonald, 1999; Revelle & Zinbarg, 2009）を求める。既定の `flip = TRUE` での psych の
+`omega(nfactors = 1)$omega.tot` と同じ。つまり負の負荷量の項目は反転する（`FlexpycttWarning` を出し、
+`reversed_items` に挙げる）。採点したままの合計の ω が欲しいときは、先にその項目を逆転採点するか除く。`correlation` は `"pearson"`（ペアワイズ）か
 `"polychoric"`（既定の設定の [`polychoric`](#polychoric)）。正定値でない行列は平滑化し、
 `NotPositiveDefiniteWarning` を出す。3 項目以上。階層 ω は提供しない。
 
@@ -1222,7 +1225,8 @@ $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf 1^\top R\mathbf 1$（McDonald, 1999; R
 |---|---|---|
 | `omega` | float | $\omega_t$ |
 | `loadings`, `uniquenesses` | Series | 1 因子の負荷量（和が非負になる向き）と $1-\lambda_j^2$ |
-| `correlation` | DataFrame | 因子を当てはめた相関行列 |
+| `correlation` | DataFrame | 因子を当てはめた相関行列（採点したままの項目） |
+| `reversed_items` | tuple of str | 負の負荷量を持ち、`omega` の計算前に反転した項目 |
 
 ### `distractor_analysis`
 

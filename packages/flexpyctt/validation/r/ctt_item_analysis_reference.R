@@ -214,6 +214,21 @@ cases <- list(
 three <- poly[, 1:3]
 small <- list(scores = as_rows(three), omega_pearson = omega_stats(cor(three), nrow(three)))
 
+# A reverse-keyed item (y2 scored 4 - y2): psych's omega(flip = TRUE), the default, reverses the
+# items with negative loadings before computing omega.tot; flip = FALSE is the as-scored value.
+reversed <- poly
+reversed[, 2] <- 4L - reversed[, 2]
+rm_ <- cor(reversed)
+om_flip <- suppressWarnings(suppressMessages(
+  psych::omega(rm_, nfactors = 1, fm = "minres", n.obs = nrow(reversed), plot = FALSE)))
+om_noflip <- suppressWarnings(suppressMessages(
+  psych::omega(rm_, nfactors = 1, fm = "minres", n.obs = nrow(reversed), plot = FALSE,
+               flip = FALSE)))
+reversed_case <- c(
+  list(items = colnames(reversed), scores = as_rows(reversed), key = unname(om_flip$key),
+       omega_tot_unflipped = om_noflip$omega.tot),
+  omega_stats(rm_, nrow(reversed)))
+
 res <- list(
   meta = list(case = "v46_item_analysis", r_version = R.version.string,
               psych_version = as.character(packageVersion("psych")),
@@ -222,7 +237,8 @@ res <- list(
               lavaan_version = as.character(packageVersion("lavaan")),
               converged = TRUE),
   cases = cases,
-  three_items = small
+  three_items = small,
+  reversed_item = reversed_case
 )
 out <- file.path("packages", "flexpyctt", "tests", "reference", "v46_item_analysis.json")
 write_json(res, out, auto_unbox = TRUE, digits = NA, null = "null", na = "null", pretty = FALSE)

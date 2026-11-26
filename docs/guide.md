@@ -1374,6 +1374,8 @@ print(options[options["item"] == items[0]].round(3))
 - `coefficient_alpha()` is KR-20 for 0 / 1 items. It also gives standardized alpha, Feldt's
   confidence interval and alpha with each item left out (`alpha.if_deleted`).
 - `coefficient_omega()` fits one factor (ULS) to the item correlations and reports omega total.
+  Like psych's `omega()`, it reverses items that load negatively, with a warning and the items in
+  `reversed_items`; reverse-score such items yourself if the total you report keeps them as scored.
   With `correlation="polychoric"` it describes the latent responses behind the categories rather
   than the observed sum score.
 - Missing responses (NaN) are used pairwise by default: every covariance or correlation from the
