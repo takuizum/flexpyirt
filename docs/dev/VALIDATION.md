@@ -86,6 +86,7 @@ English | [日本語](VALIDATION.ja.md)
 | V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `packages/flexpyctt/validation/r/ctt_dif_reference.R`; the worked example of Liu & Agresti (1996, Table 1) | — |
 | V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
 | V50 | Common-item screening for linking (#105): robust z (Huynh & Meyer, 2010), displacement and RMSD of expected item score curves; removal order, linking constants at every purification step and the final item table (2PL; mixed 2PL + GRM + GPCM) | separate `mirt()` calibrations + base-R recomputation (`median()`, `quantile(type = 7)`, `expected.item()`, V20 linking); `equateIRT::dif.test` as a cross-check of the drifted items | field |
+| V51 | IRT true-score and observed-score equating and raw-to-scale tables (dichotomous: 20 + 20 items, 3PL + 2PL, with a link; polytomous: 4 GRM $K=4$ + 6 2PL vs 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL, with a link; populations new / old / synthetic $w_1=0.5$; scale table true score and EAPsum) | `equateIRT:::score_compute(method = "TSE" / "OSE")`, `SNSequate::irt.eq(method = "TS")`; mirt `expected.test()`, `probtrace()`, `testinfo()`, `fscores(method = "EAPsum", full.scores = FALSE)` with `uniroot()`, and `equate::equate(type = "equipercentile")` | #106 |
 | V54 | Model-comparison table (Rasch vs 2PL vs 3PL on the V11a data; PCM vs GPCM on the V8b data; a fully invariant two-group 2PL vs the anchored model and vs the model with the last item free, V4 data) and simulation of responses (deterministic inversion for 2PL, Rasch, 3PL, 4PL, GRM, GPCM and nominal items, unidimensional and two-factor; distributional and recovery checks per latent distribution) | `anova(mod1, mod2, ...)`; `probtrace()` with the same $\theta$ and uniform numbers (random streams cannot match `simdata()`) | #109 |
 
 ## mirt settings and known differences (found in M1)
@@ -1082,6 +1083,49 @@ English | [日本語](VALIDATION.ja.md)
     reproducible from `key`.
   Tests: `tests/test_mirt_v54_compare_fits.py`, `tests/test_v54_simulate.py`. Reference generator:
   `validation/r/v54_compare_simulate_reference.R`.
+
+- **IRT equating and raw-to-scale tables (V51, #106)**: DESIGN §23 in `tests/test_r_equating.py`
+  (generator `validation/r/v51_irt_equating_reference.R` → `tests/reference/v51_irt_equating.json`;
+  mirt 1.48, equateIRT 2.5.2, SNSequate 1.3.5, equate 2.0.9). No parameters are estimated: the
+  item parameters are chosen in R and stored, the latent distributions are $N(0,1)$ on 61
+  equispaced points on $[-6,6]$, and the link is $\theta_Y=A\theta_X+B$ ($A=1.15$, $B=-0.25$
+  dichotomous; $A=0.9$, $B=0.3$ polytomous). The fast tier builds the forms from the stored
+  parameters and checks the kernels and the conversion rules; the slow tier repeats every
+  comparison end to end through `irt_equate()`, `score_distribution()` and `scale_table()` on
+  fits fixed at those values. Largest differences:
+  - **Dichotomous true score** (20 + 20 items; 12 and 9 3PL items, $\sum c=2.317$ and $1.477$):
+    against equateIRT's own Newton solution for the scores inside the range of the curve
+    (`score_compute`, whose $|\Delta\theta|<10^{-6}$ stop leaves about $10^{-12}$): equated
+    scores `2.4e-12`, $\theta$ `1.2e-12` (tolerance $10^{-9}$). Against SNSequate for every
+    score: the Kolen & Brennan interpolation below $\sum c$ and the maximum score `2.4e-15`
+    (tolerance $10^{-11}$); inside, `1.2e-4`, the default `uniroot()` tolerance SNSequate uses
+    (tolerance $10^{-3}$, a cross-check only).
+  - **Dichotomous observed score**: equateIRT's OSE with the same nodes and weights for both
+    populations, $w_1=1$, $0$, $0.5$: `5.7e-14` (tolerance $10^{-11}$).
+  - **Polytomous and mixed true score** (new: 4 GRM $K=4$ + 6 2PL, maximum 18; old: 3 GPCM
+    $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL, maximum 20, $\sum c=0.795$): no R package equates
+    polytomous forms by IRT; the reference solves `expected.test()` of the new form with
+    `uniroot(tol = 1e-13)` and evaluates `expected.test()` of the old form at $A\theta+B$:
+    $\theta$ `5.5e-13`, equated scores `9.3e-13` (tolerance $10^{-9}$).
+  - **Model-implied distributions**: the R Lord–Wingersky recursion on `probtrace()` equals
+    mirt's `fscores(method = "EAPsum", full.scores = FALSE)` `expected` / $N$ to $10^{-12}$ in R;
+    flexpyirt's distributions equal both to `5.6e-15` relative, in every population (tolerance
+    $10^{-11}$ relative).
+  - **Polytomous observed score**: `equate::equate(type = "equipercentile")` on the two
+    synthetic distributions: `4.5e-9`. equate rounds percentile ranks and the cumulative
+    distribution to 10 decimals (`equate:::equip`), about $10^{-10}/g(y)$ in the score
+    (tolerance $10^{-8}$). On the same distributions flexpyequate's equipercentile equating
+    agrees to `2.5e-14`, and the unit tests compare the two on random distributions with zero
+    probabilities to $10^{-12}$.
+  - **Raw-to-scale table** of the old polytomous form (slope 10, intercept 50, bounds 25 and
+    75, rounded to integers): true score ($\theta$ by `uniroot()` on `expected.test()`, SE
+    $1/\sqrt{\texttt{testinfo}}$): $\theta$ `2.3e-12`, SE `1.2e-12` relative; EAPsum (mirt
+    `fscores`): $\theta$ `5.6e-15`, SE `1.6e-15` relative; the rounded scale scores are equal.
+  - **Not covered by R**: the 4PL upper-asymptote interpolation, multiple-group forms and
+    populations, and links are unit-tested (`tests/test_equating.py`) against `expected_score()`,
+    `item_information()`, `summed_score_table()` and the formulas of DESIGN §23. EH, Davidian and
+    mixture populations come from the same fitted grid as `link()` (`_fitted_grid`) and have no
+    equating test of their own.
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)

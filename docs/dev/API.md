@@ -170,6 +170,9 @@ one (DESIGN.md §16.18).
 | `screen_common_items` | function | Common-item screening for linking and item parameter drift (robust z, displacement, expected-score RMSD; iterative purification with `link()`); returns a `CommonItemScreeningResult` |
 | `CommonItemScreeningResult` | class | Screening result (`table`, `link`, `initial_link`, `kept_items`, `removed_items`, `history`, `flagged_items`, `summary`) |
 | `stack_screening_tables` | function | Stacks the screening tables of several administrations with an `administration` column |
+| `irt_equate` | function | IRT true-score / observed-score equating of the summed scores of a new form to an old form on one scale (or through a `LinkResult`); returns an `IRTEquatingResult` (`table`, `new_distribution`, `old_distribution`, `summary`) |
+| `score_distribution` | function | Model-implied summed-score distribution of a form (items, group) in its fitted population |
+| `scale_table` | function | Raw-to-scale table: $\theta$ per summed score (true score or EAPsum), its SE, and a clipped, rounded linear scale score |
 | `polychoric` | function | Polychoric / tetrachoric correlation matrix (two-step ML, smoothing); returns a `PolychoricResult` |
 | `parallel_analysis`, `velicer_map`, `empirical_kaiser` | function | Number-of-dimensions diagnostics; return `ParallelAnalysisResult`, `MAPResult`, `EmpiricalKaiserResult` (frozen dataclasses with `n_factors`) |
 | `comparison_data` | function | Comparison-data method (Ruscio & Roche, 2012); returns `ComparisonDataResult` |

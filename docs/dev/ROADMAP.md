@@ -57,6 +57,10 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 - [x] Differentiable linking (`link()`, `LinkResult`: Haebara / Stocking–Lord, non-symmetric and
   symmetric, Ogasawara delta-method SEs via autodiff; validated in V20 for 2PL, 3PL, GRM, GPCM and
   mixed 2PL + GPCM common items).
+- [x] IRT true-score and observed-score equating and raw-to-scale tables (#106; `irt_equate()`,
+  `score_distribution()`, `scale_table()`; unidimensional, every item model, single and multiple
+  groups; validated in V51 against equateIRT, SNSequate and references built from mirt and the
+  equate package). Standard errors of equated scores are a follow-up.
 - [x] Item fit: S-X2 (`FitResult.item_fit()`, unidimensional, per group for multiple groups; validated in V15).
 - [x] DIF: multiple-group likelihood-ratio tests (`FitResult.dif()`, schemes `add` / `drop`,
   Holm / BH adjustment; validated in V17).

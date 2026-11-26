@@ -1404,6 +1404,54 @@ linked_screened = screened.link  # the LinkResult on the kept items
   Validated against a base-R recomputation of the same rules on mirt calibrations (2PL and mixed
   2PL + GRM + GPCM).
 
+### Equating and raw-to-scale tables
+
+Once two forms are on one scale (here with `linked_sl`; FIPC or a concurrent calibration need no
+link), `irt_equate(new, old)` converts every summed score of the new form to the summed-score
+scale of the old form (Kolen & Brennan, 2014, §6.5–6.6):
+
+- `method="true_score"` (default): solve $\tau_X(\theta)=x$ on the new form's test characteristic
+  curve and report $\tau_Y(\theta)$. Scores at or below the sum of the lower asymptotes (3PL /
+  4PL guessing) and at or above the sum of the upper asymptotes are equated by the linear
+  interpolation of Kolen & Brennan; their `theta` is $-\infty$ / $+\infty$.
+- `method="observed_score"`: the model-implied summed-score distributions of both forms
+  (Lord–Wingersky recursion over the fitted latent distribution) in the population `"new"`,
+  `"old"` or `"synthetic"` (with `synthetic_weight=` for the new form's population), equated
+  by the equipercentile method.
+
+`score_distribution()` returns the model-implied distribution of a form, and `scale_table()`
+maps each summed score to a reporting scale $\text{slope}\cdot\theta+\text{intercept}$, clipped
+to `[lowest, highest]` and rounded, with $\theta$ from the test characteristic curve
+(`"true_score"`) or the summed-score EAP (`"EAPsum"`).
+
+```python
+from flexpyirt import irt_equate, scale_table, score_distribution
+
+true_eq = irt_equate(src_res, res, link=linked_sl)
+print(true_eq.table.head().round(3))  # score, theta (base scale), equated
+observed_eq = irt_equate(
+    src_res,
+    res,
+    method="observed_score",
+    link=linked_sl,
+    population="synthetic",
+    synthetic_weight=0.5,
+)
+print(observed_eq.table.head().round(3))
+print(score_distribution(res).head().round(4))
+
+raw_to_scale = scale_table(res, slope=10.0, intercept=50.0, lowest=20.0, highest=80.0)
+print(raw_to_scale.round(2).head())
+```
+
+- With one fit holding both forms, pass it twice with `new_items=` / `old_items=` (and
+  `new_group=` / `old_group=` for a multiple-group fit).
+- True-score methods need test characteristic curves that do not decrease (no negative slopes,
+  no nominal items whose expected score falls); observed-score equating has no such condition.
+- Standard errors of equated scores are not available yet. Validated against equateIRT and
+  SNSequate (dichotomous items) and against references built from mirt and the equate package
+  (polytomous and mixed formats).
+
 ### Multidimensional models
 
 Two fits of confirmatory models with the same number of factors are linked by

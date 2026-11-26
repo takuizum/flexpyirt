@@ -159,6 +159,9 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `screen_common_items` | 関数 | リンキングの共通項目の点検と項目パラメータドリフト（頑健 z・変位・期待得点の RMSD。`link()` による反復的な純化）。`CommonItemScreeningResult` を返す |
 | `CommonItemScreeningResult` | クラス | 点検の結果（`table`, `link`, `initial_link`, `kept_items`, `removed_items`, `history`, `flagged_items`, `summary`） |
 | `stack_screening_tables` | 関数 | 複数の実施回の点検の表を `administration` 列を付けて積む |
+| `irt_equate` | 関数 | 同じ尺度上の（または `LinkResult` を介した）新フォームの合計得点を旧フォームへ IRT 真値等化・観測得点等化する。`IRTEquatingResult`（`table`, `new_distribution`, `old_distribution`, `summary`）を返す |
+| `score_distribution` | 関数 | フォーム（項目・群）の推定母集団におけるモデル上の合計得点分布 |
+| `scale_table` | 関数 | 素点-尺度得点変換表: 合計得点ごとの $\theta$（真値または EAPsum）、その SE、切って丸めた線形の尺度得点 |
 | `polychoric` | 関数 | ポリコリック・テトラコリック相関行列（2 段階の最尤法、平滑化）。`PolychoricResult` を返す |
 | `parallel_analysis`, `velicer_map`, `empirical_kaiser` | 関数 | 次元数の診断。`ParallelAnalysisResult`, `MAPResult`, `EmpiricalKaiserResult`（`n_factors` を持つ frozen dataclass）を返す |
 | `comparison_data` | 関数 | 比較データ法（Ruscio & Roche, 2012）。`ComparisonDataResult` を返す |
