@@ -76,6 +76,10 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
+| V43 | 指定したパラメタでの多次元モデルの情報行列・方向別の情報量・期待得点（相関する 2 因子で 2PL・3PL・4PL・GRM・GPCM・名義の項目と交差負荷 4 項目。3 因子で 2PL・3PL・GRM・GPCM と交差負荷 2 項目。特殊因子 3 の双因子 2PL + GRM。相関する主因子 2 と特殊因子 2 の two-tier 2PL + GRM） | `pars =` と `TOL = NaN` で作った `mirt()` / `bfactor()` のオブジェクトでの `iteminfo(item, Theta, multidim_matrix = TRUE)`、`iteminfo(item, Theta, degrees = )`、`testinfo(m, Theta, degrees = )`、`expected.item()`、`expected.test()` | M7 |
+| V45 | M-step の非拘束尺度（任意、`BAEM(m_step_scale="unconstrained")`）を V3・V4・V5・V7・V9・V11・V14 のケースで照合。`LogitNormalPrior`（`"natural"` は mirt に同等なものがないため独立な数値検証。`mode_scale="logit"` は mirt の `g` への `norm`） | 各ケースの既存の参照値。SciPy（`stats.norm`、`integrate.quad`）と式から書いた停留条件。`v45_3pl_logit_norm_map.json`（mirt）とテスト内で計算した flexMIRT の logit 尺度のモード | #15 |
+| V48 | mirt の推定値での図の数値（2PL $J=10$、$N=1003$。欠測 10% の 2PL。GRM $K=4$、$J=6$。2PL + 3PL + GPCM + 名義の混合 $J=10$。2 群の 2PL + GRM で焦点群の平均・分散を推定。TAM の GPCM $K=4$、$J=6$）: 経験的項目曲線、トレースライン、サーストン閾値 | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))`（群ごとは `extract.group()`）、`probtrace()`、`probtrace()` に対する `uniroot()`、`coef(IRTpars = TRUE)`。TAM `tam.threshold()` | #103 |
+| V50 | リンキングの共通項目の点検（#105）: 頑健 z（Huynh & Meyer, 2010）・変位・期待項目得点曲線の RMSD。除外の順序、純化の各段階のリンキング係数、最終の項目表（2PL、2PL + GRM + GPCM 混在） | 個別の `mirt()` 推定 + 素の R による再計算（`median()`、`quantile(type = 7)`、`expected.item()`、V20 のリンキング）。ドリフト項目の照合に `equateIRT::dif.test` | 現場向け |
 | V53 | EAP・MAP・ML・WLE の推定値での受験者適合度（$l_z$、$l_z^*$、受験者の infit / outfit と $z$）と項目の infit / outfit。V37 のデータと推定値（2PL、8% 欠測の 2PL、3PL、GRM と GPCM $K=4$、名義 $K=4$、2PL + 3PL + GRM + GPCM + 名義の混在、2PL + GRM の 2 群）と Rasch での再推定 | `personfit(m, Theta = )`、`itemfit(m, fit_stats = "infit", Theta = )`、`sirt::personfit.stat()`、式から R で再計算した $l_z^*$ | — |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -570,6 +574,31 @@
   閉じた式、1 因子の規準が §16.5 に一致、有限差分の勾配、2・3 因子での既知の変換の厳密な再現、リンキングを解き直して確かめる
   デルタ法のヤコビアン、`transform_theta`、エラー）: `tests/test_m6_linking_multidim.py`。
 
+- **共通項目の点検（V50、#105）**: 頑健 z・変位・期待得点の RMSD を特性曲線リンキングと純化と組み合わせて実装した R パッケージは
+  ないので、`validation/r/v50_screening_reference.R`（→ `tests/reference/v50_screening.json`、mirt 1.48、equateIRT 2.5.2）が
+  DESIGN §22 の規則を素の R で計算し直す。各フォームを `mirt`（`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、
+  $[-6, 6]$ 上 61 節点、潜在分布 $N(0, 1)$）で推定し、各アンカー集合のリンキングは V20 の素の R の Stocking–Lord / Haebara
+  （`max |grad| < 1e-9` を確認）。位置、`log_ratio_a`、頑健 z（`median()`、`quantile(type = 7)`、`IQR()`）、変位、
+  `target` の格子上の `expected.item()` 曲線の RMSD は式どおりに計算し、純化のループも同じ除外規則で書き下す。
+  `tests/test_r_v50_screening.py` は mirt の推定値に固定した `FitResult` で `screen_common_items()` を実行し、除外の順序、
+  各段階の $(A, B)$ と規準値、最終の項目表、フラグ、`ScreeningWarning` を比較する。`source` の母集団は `target` の尺度で
+  $N(0.4, 1.2^2)$。ドリフトは `source` のフォームに仕込む。
+  - **V50a（`v50a_2pl`、2PL、各フォーム共通 12 + 固有 8 項目、各フォーム $N=2000$。ドリフト: `c01` $b + 0.8$、
+    `c02` $a \times 1.8$、`c03` $b - 0.6$）**: 7 通り（頑健 z の `removal="largest"` と `"all"`、変位、RMSD、対称 Haebara での
+    変位、`max_iter=1` の頑健 z、`min_items=11` の RMSD 0.02）。除外の順序は完全に一致（頑健 z は `c02, c01, c03, c10`、変位と
+    RMSD は `c01, c03`）。全段階で `max |Δ(A, B)| = 2.3e-11`、項目ごとの量 `5.0e-12`、頑健 z `2.7e-10`。
+    `equateIRT::dif.test`（Stocking–Lord リンキング後の Lord の Wald 検定、純化あり、$\alpha = 0.05$）は `c01, c02, c03, c12`
+    にフラグを立てる。仕込んだ 3 項目であり、頑健 z も最初にこの 3 項目を外す。
+  - **V50b（`v50b_mixed`、2PL + GRM $K=4$ + GPCM $K=4$、共通 6 + 3 + 3 項目、各フォーム $N=2500$。ドリフト: `d01`
+    $b + 0.7$、`g01` 閾値 $+0.6$、`p02` $a \times 0.5$）**: 4 通り（頑健 z、変位、RMSD、Haebara と `removal="all"` の RMSD）。
+    除外の順序は完全に一致（頑健 z は `p02, d01, g01`、RMSD は `g01, p02, d01`、変位は `d01, g01`）。
+    `max |Δ(A, B)| = 1.0e-11`、項目ごとの量 `4.8e-12`、頑健 z `3.4e-10`。
+  許容誤差: $(A, B)$ `1e-9`、規準値は相対 `1e-7`、項目ごとの量 `1e-9`、頑健 z `1e-8`。**独立にのみ確認したもの**
+  （`tests/test_screening.py` の単体テスト）: 4PL と名義項目の位置（すべてのカーネルで $b^* = A\,b + B$）、移した `source`
+  曲線の直接評価との RMSD の一致、ドリフトのない項目での $(A, B)$ の厳密な回復、わずかに揺らした項目に仕込んだドリフトの除外、Rasch の傾きの比の頑健 z が
+  NaN になること、`items=` による部分集合、`stack_screening_tables()`。閾値は慣行であり（DESIGN §22）、V50 が確かめるのは
+  規則が仕様どおりに計算されることで、閾値のよさではない。
+
 - **混合正規潜在分布（V22、M5）**: flexpyirt の `NormalMixture`（DESIGN §16.7）は形状に mirt のクラスのパラメタ化を
   使い、混合を解析的に標準化する。したがって格子 $\theta_q$ 上では、像の格子 $z_q=M+\sqrt V\theta_q$ 上の mirt の
   `multipleGroup(dat, 1, itemtype = ..., dentype = "mixture-k", invariance = c(<全項目>, "free_means", "free_var"))`
@@ -854,7 +883,8 @@
     `9.4e-16`。`twopl_missing` では一意なパターン 660 個のうち 453 個に欠測があり、mirt はちょうどそれらに `NA` を
     返し、flexpyirt は NaN を返す（mirt は欠測のあるデータに対して `full.scores = FALSE` の表を作らないので、
     このケースに表の参照値はない）。
-  - **照合しておらず `SpecificationError` になるもの**: 多次元モデル（全関数）。`EmpiricalHistogram`・
+  - **照合しておらず `SpecificationError` になるもの**: 多次元モデルの信頼性・合計得点の表・EAPsum（情報量と
+    期待得点は V43）。`EmpiricalHistogram`・
     `DavidianCurve`・`NormalMixture` での信頼性・合計得点の表・EAPsum。`multipleGroup` の全受検者をまとめた
     `empirical_rxx()`（`empirical_rxx_pooled` として保存）に対応するものは flexpyirt にない。flexpyirt は群ごとに
     報告する。
@@ -863,6 +893,66 @@
     求めた期待得点、6 項目の混合テストの全 288 反応パターンの総当たりによる合計得点の表（$10^{-12}$）、
     全期待値の法則、潜在尺度の線形変換に対する周辺信頼性の不変性（$10^{-13}$）、信頼性の範囲と、
     シミュレーションデータでの周辺・経験的信頼性の近さ、エラーの経路。
+- **多次元の情報行列・方向別の情報量・期待得点（V43、M7）**: DESIGN §18.3 を
+  `tests/test_mirt_m7_information_multidim.py` で照合する（低速層、約 40 秒。参照値生成
+  `validation/r/m7_information_multidim_reference.R` → `tests/reference/v43_information_multidim.json`、
+  mirt 1.46.1）。推定はしない: 各ケースで項目パラメタを `pars = "values"` で指定し、`TOL = NaN` で mirt の
+  オブジェクトを作る（確認的モデルは `mirt()`、双因子と two-tier は `bfactor()` / `bfactor(model2 = )`）。
+  flexpyirt には同じ値をすべて固定して与える。ケース: `cfa2_mixed`（10 項目: 2PL、3PL、$u<1$ の 4PL、
+  GRM $K=3,4$、GPCM $K=3,4$、名義 $K=3$。4 項目が両方の因子に負荷）、`cfa3`（9 項目、2PL・3PL・GRM・GPCM、
+  交差負荷 2 項目）、`bifactor`（12 項目、2PL + GRM $K=3$、一般因子と特殊因子 3）、`two_tier`（8 項目、
+  2PL + GRM $K=3$、交差負荷 1 項目のある相関する主因子 2 と特殊因子 2）。点は各 15 個: $[-3,3]^D$ の一様
+  乱数 12 点、全座標 $-5$、$\pm5$ の交互、原点。方向は $\sum_m\cos^2\alpha_m=1$ を満たす角度で 4–5 個
+  （軸、対角線、余弦が負の方向を含む）。参照値生成スクリプトは、mirt の `testinfo(degrees = )` が mirt 自身の
+  `multidim_matrix = TRUE` の行列から求めた $\mathbf u^\top(\sum_j\mathbf I_j)\mathbf u$ に一致すること
+  （$10^{-10}$）も確かめる。全ケースでの最大の差:
+  - **項目情報行列**（`iteminfo(multidim_matrix = TRUE)`）: 絶対 `1.1e-15`、相対 `1.0e-12`（極端な点で
+    大きさ $10^{-4}$ 程度の要素）。テスト情報行列（その和）は絶対 `1.8e-15`。
+  - **方向別の項目・テスト情報量**（`iteminfo` / `testinfo(degrees = )`、`direction = cos(degrees)`）:
+    項目は相対 `1.0e-12`、テストは相対 `5.8e-14`。
+  - **合成値の SE** $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$（mirt の行列の和を R の `solve()` で
+    逆行列にしたもの。mirt の `plot(type = "SE")` は代わりに $1/\sqrt{I_{\mathbf u}}$ を描く。DESIGN §18.3）: 相対 `2.8e-14`。
+  - **`expected.item()` / `expected.test()`**: 絶対 `4.8e-14` / 相対 `4.7e-15`。
+  許容誤差はすべて相対 $10^{-10}$ と絶対 $10^{-13}$（傾きを 0 に固定したため 0 になる要素のため）。
+  - **単体テスト**（`tests/test_m7_information_multidim.py`。単純構造と多母集団のテストは低速層）: 2 因子の
+    単純構造モデルが、軸の方向で 2 つの 1 次元の部分テストに一致する（項目・テスト情報量、合成値の SE、期待得点。
+    $10^{-12}$）、その行列がブロック対角。行列が厳密に対称・半正定値で、組み込みの項目族では階数 1。2PL の閉じた式
+    $P(1-P)\mathbf a\mathbf a^\top$（$10^{-12}$）。方向別の情報量 $=\mathbf u^\top\mathbf I\mathbf u$、方向の
+    スケールと符号に対する不変性、合成値の SE と直接の逆行列の一致、$\mathrm{SE}_{\mathbf u}\ge I_{\mathbf u}^{-1/2}$。
+    数値的に特異な行列で SE が無限大。双因子モデルで各項目の行列が一般因子と自分の特殊因子の外で 0。多母集団モデルで
+    群ごとのパラメタを使う。1 次元の `information_matrix` がスカラーの情報量。`theta` の形（配列、因子名で引く
+    DataFrame、1 点）とエラーの経路。
+- **図の数値（V48、#103）**: DESIGN §21 を `tests/test_mirt_v48_plots.py` で照合する（slow tier、約 20 秒。
+  生成スクリプト `validation/r/v48_plots_reference.R` → `tests/reference/v48_plots.json`、mirt 1.48、TAM 4.3-25、
+  $[-6, 6]$ の 61 点）。V37 と同じく mirt がすべてのモデルを推定し（`TOL = 1e-8`、収束）、その推定値をすべて固定した
+  `FitResult` に入れる。区間は回答者の順序に依存するので、データは行ごとに保存する（ユニークなパターンと各行の
+  パターン番号）。ケース: `twopl`（$J=10$、$N=1003$。余り 3 のため最初の区間に 1 人、最後の区間に 2 人多い）、
+  `twopl_missing`（$N=1200$、10% MCAR。区間は項目ごとにその項目に回答した回答者で作る）、`grm`（$K=4$、
+  $J=6$、$N=1500$）、`mixed`（2PL 3、3PL 3、GPCM $K=4$ 2、名義 $K=3$ 2。$N=3000$）、`twogroup`（2PL 5 + GRM
+  $K=4$ 3、全項目を等値、群あたり $N=805$、焦点群の平均・分散を推定）、`gpcm_tam`（TAM 自身の GPCM 推定）。
+  全ケースでの最大差:
+  - **EAP 推定値**（区間の入力）と `fscores(method = "EAP")`: `7.1e-15`（許容 $10^{-9}$）。
+  - **`empirical_item_curve()`** と `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10,
+    mincell.X2 = 0, Theta = eap)`（項目ごと。mirt は 1 回の呼び出しで 1 項目の表を返す。`mincell.X2 = 0` で
+    セル併合を止める。`multipleGroup` の推定結果は拒否されるので、群ごとに `extract.group()` とその群の
+    `Theta` の行で呼ぶ。mirt 自身の群ごとの `itemfit()` も同じことをしている）: 区間の人数は mirt の行和と
+    完全に一致、観測比率も一致（`0`）、期待確率 `4.6e-15`（許容 $10^{-9}$）、区間平均と mirt のラベル
+    （小数 4 桁に丸めてある）`5.0e-5`（丸めの分。許容 $5\times10^{-5}$）。期待表は
+    $N\,P(\bar\theta_b)$ なので、区間平均も全精度で確かめている。
+  - **`item_probabilities()`** と $\theta\in\{-6,-4,-3.5,\dots,4,6\}$ での `probtrace()`: `2.9e-15`
+    （許容 $10^{-12}$）。
+  - **`wright_map_table()` の項目位置** と、$[-20, 20]$ での $\sum_{c\ge k}$`probtrace()`$-1/2$ の
+    `uniroot(tol = 1e-13)`: `2.1e-14`。`coef(IRTpars = TRUE)` の $b$（2PL）・$b_k$（GRM）と: `1.1e-14`
+    （許容 $10^{-9}$）。3PL 項目の閾値は当然 $b$ より小さい。TAM 自身の GPCM 推定値（傾きと切片は `B` と
+    `AXsi` から読む）での `tam.threshold()` と: `8.4e-5`。TAM の二分法は区間が $10^{-4}$ を下回ると止まる
+    （許容 $10^{-4}$）。
+  - **照合していないもの**: mirt の $X^2$ / $G^2$ とセル併合、`empirical.plot` の Clopper–Pearson 区間
+    （計算しない）、図そのもの。
+  - **単体テスト・スモークテスト**（`tests/test_plotting.py`、fast tier）: mirt の区間の人数の規則、欠測の
+    ある区間の総当たりでの再計算、閾値の閉形式（2PL の $-d/a$、GRM の $-d_k/a$、交点のある・ない 3PL 項目）、
+    DIF のある 2 群、エラーの経路。すべての描画関数を Agg バックエンドで描き、描いたデータが DataFrame と
+    等しいこと。matplotlib を import できないときの `MissingDependencyError`。CI では matplotlib のない環境で
+    `scripts/check_plotting_without_matplotlib.py` も実行する。
 - **標本ウェイト（V34、M7）**: mirt の `survey.weights`（mirt 1.48、`optimizer = "NR"`、`TOL = 1e-10`、
   `SE.type = "Oakes"`）。参照ファイルは行ごとのウェイトとともに元の行を保存するので、ウェイトを足し合わせる
   パターン圧縮も比較の対象になる。V34a: シミュレーションの 2PL（$J=10$、$N=1000$）、合計点と関係する対数正規
@@ -940,18 +1030,18 @@
   一致すること、行を 2 倍にすると共分散が半分になること、`b_se` と `link()` が選んだ共分散を読むこと、
   JSON の往復、拒否するケース。
 
-- **受験者適合度と残差にもとづく項目適合度（V53、#108）**: DESIGN §20。V37 のデータと mirt の推定値を再利用する
+- **受験者適合度と残差にもとづく項目適合度（V53、#108）**: DESIGN §23。V37 のデータと mirt の推定値を再利用する
   （全パラメタ固定、$[-6, 6]$ の 61 点）。ケースと推定法（EAP・MAP・ML・WLE）ごとに、R スクリプトは mirt の
   `fscores()`、全データでの `personfit(m, Theta = )`（最初の 300 個の一意なパターンを保存）と
   `itemfit(m, fit_stats = "infit", Theta = )`（EAP・MAP・WLE。ML の無限大の推定値は mirt が置き換えるため除く）を計算する。
   **mirt の $\theta$ で**（保存した推定値でカーネルを評価）: $l_z$・infit・outfit とその $z$ 値は 8 ケース・4 推定法の
-  すべてで $8.3\times10^{-9}$（相対）以内、$l_z^*$ は DESIGN §20 の 3 項を R で再計算した値（`probtrace()` と中心差分、
+  すべてで $8.3\times10^{-9}$（相対）以内、$l_z^*$ は DESIGN §23 の 3 項を R で再計算した値（`probtrace()` と中心差分、
   `iteminfo()`）と $|\hat\theta|\le10$ で $2.8\times10^{-8}$ 以内。それより外（3PL の平坦な裾での mirt の ML、V13 の欠測時の
   極値）では中心差分の精度が落ち、flexpyirt は NumPy での解析的な計算と一致する。**端から端まで**（flexpyirt 自身の推定値。
   mirt との差は EAP $5.6\times10^{-15}$、MAP $2.9\times10^{-6}$、ML $1.2\times10^{-5}$、WLE $2.6\times10^{-6}$ まで）:
   受験者の統計量は $2.0\times10^{-5}$ 以内、項目の統計量は $3.1\times10^{-5}$ 以内。**Rasch**: mirt の WLE 推定値で
   $l_z$・infit・outfit が `sirt::personfit.stat()` と $3.7\times10^{-13}$（相対）以内で一致（mirt と sirt の差は
-  $1.8\times10^{-15}$）。**mirt との既知の差**（DESIGN §20 の 5 項）: 受験者の `z_outfit` は $n^2$（回答項目数）を使うが
+  $1.8\times10^{-15}$）。**mirt との既知の差**（DESIGN §23 の 5 項）: 受験者の `z_outfit` は $n^2$（回答項目数）を使うが
   mirt の `personfit()` は $J^2$ を使い、mirt の `itemfit()` は項目の `z.outfit` で項目ごとの回答者数を行方向に再利用する。
   どちらも欠測があるときだけ効くので、参照値ではこれらの $z$ 値を mirt 自身の残差モーメント（`attr(m, "inoutfitreturn")`）
   から計算し直し、欠測のないデータでは mirt の値とも直接比べる。**$l_z^*$ には R パッケージの参照値がない**（`PerFit` は
@@ -963,6 +1053,53 @@
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
+- **M-step の非拘束尺度と `LogitNormalPrior`（V45、#15）**: DESIGN §15.47–§15.48。
+  1. *両方の M-step 尺度での内点解*: V3・V4・V5・V9（`tests/test_mirt_m2.py`: 対数尤度、項目と潜在分布のパラメタ。
+     V4 の焦点群の分散は $\log\sigma^2$ で動く）、V11（`tests/test_mirt_m3.py`: 3PL/4PL、$\operatorname{logit}g$・
+     $\operatorname{logit}u$、Oakes と Hessian の SE も）、V7（`tests/test_mirt_m3_priors.py`: MAP。`LogNormalPrior`
+     のついた傾きは $\log a$ で動く）、V14（`tests/test_mirt_m4_mirt.py`: 2–3 因子、相関は
+     $2\operatorname{atanh}\rho$ で動く）の mirt 照合を `BAEM(m_step_scale="unconstrained")` でも自然尺度と同じ
+     許容誤差で行い、すべて通る。`tests/test_m_step_scale.py` は、変換と Newton ステップの単体テスト（同じ内点の
+     最大点、境界へは内側から近づく、固定スロットは動かない、棄却されたステップは厳密に元の値）、シミュレーション
+     した 3PL の MAP（`tol=1e-8` で推定値は自然尺度と 1e-5 以内、対数事後は 1e-12、Oakes の共分散は相対 1e-4。
+     SQUAREM あり・なし）、焦点群の分散が自由な 2 群モデル、境界のケース（$g=0$ で生成した項目: 両尺度ともその項目で
+     $g<10^{-4}$ に終わって `HeywoodWarning` を出し、対数尤度は 1e-5 で一致）を加える。
+  2. *`LogitNormalPrior`*: mirt には自然尺度でこの密度を持つ事前分布がない（`g` への `norm` は mirt 内部の
+     $\operatorname{logit}g$ に Jacobian なしで作用し、flexMIRT の `Guessing : Normal` と同じ）ので、既定の
+     `mode_scale="natural"` には mirt の参照値はない。代わりに `tests/test_logitnormal_prior.py` で次を確かめる: `log_pdf` が `scipy.stats.norm` による
+     $\log\phi(\operatorname{logit}x;\mu,s)-\log x-\log(1-x)$ と 4 組の $(\mu,s)$ で一致（相対 1e-13）。
+     `scipy.integrate.quad` で密度の積分が 1（1e-10）、$\operatorname{logit}X$ の平均が $\mu$（1e-9）、分散が $s^2$
+     （相対 1e-9）。Core の `eval_log_prior` が `log_pdf` と一致し、使わないスロットの勾配は 0 で有限。シミュレーション
+     した 3PL（$J=8$、$N=1200$、$g$ に `LogitNormalPrior(-1.3863, 0.6)`、$d$ に `NormalPrior(0, 3)`、`tol=1e-10`）の
+     MAP が両方の M-step 尺度で、テスト内に式から書いた事前分布の勾配
+     $-1/g+1/(1-g)-(\operatorname{logit}g-\mu)/(s^2g(1-g))$ を使った $\ell(\eta)+\sum\log\pi$ の停留点であり
+     （勾配の最大絶対値は自然尺度 3e-8、非拘束尺度 3e-9。テストは 1e-6）、厳密な局所最大（Hessian が負定値）。
+     尤度の勾配は mirt で照合済みの周辺対数尤度のもの。同じテストで flexMIRT の logit 尺度の目的関数（Jacobian を
+     除いた核）を Newton 法で最大化すると、どの $g$ も `LogitNormalPrior` のときより $1/2$ に近く、差は最大 0.037
+     で、2 つの推定値が違うことを確かめる（DESIGN §15.48）。
+  3. *`LogitNormalPrior(..., mode_scale="logit")`（logit 尺度のモード、DESIGN §15.48）*: ここでは mirt が参照値。
+     mirt の `PRIOR = (..., g, norm, μ, s)` は内部の $\operatorname{logit}g$ に Jacobian なしでかかる正規事前分布。
+     `validation/r/m7_logit_norm_prior_reference.R` はシミュレーションした 3PL（$J=8$、$N=1200$、$g$ に
+     `norm(-1.3863, 0.6)`、$d$ に `norm(0, 3)`。NR、`TOL = 1e-10`、Oakes の SE）を推定し、R の中で mirt の
+     `logPrior` が $\sum\log\phi(\operatorname{logit}g)+\sum\log\phi(d)$ に一致すること（1e-9）と、mirt の推定値が
+     スクリプト内に書いた勾配で logit 尺度の目的関数の停留点であること（勾配の最大絶対値 2e-9）を確かめる。mirt は
+     $\operatorname{logit}g$ とその SE を出力するので、参照値には $g$ とデルタ法の
+     $\mathrm{SE}(g)=g(1-g)\,\mathrm{SE}(\operatorname{logit}g)$ を保存する。flexpyirt は両方の M-step 尺度で、mirt の
+     対数尤度と対数事後（テストは相対 1e-9。実測は絶対 4e-10 と 5e-12）、$a,d,g$（テストは 1e-6。実測 2e-8）、
+     $a,d,g$ の Oakes の SE（テストは相対 1e-5。実測 3e-8）に一致する。mirt とは独立に、2 の V45 のデータで、両方の
+     M-step 尺度の MAP が、テスト内に書いた勾配で $\ell+\sum\log\phi(\operatorname{logit}g;\mu,s)+\sum\log\pi(d)$ の
+     停留点であり（最大で自然尺度 2e-8、非拘束尺度 2e-9。テストは 1e-6）、厳密な局所最大であること、そこで
+     $\lambda=\operatorname{logit}g$ についての Newton 法で求めた flexMIRT のモードに一致し（5e-9。テストは 1e-7）、
+     対数事後も一致すること（1e-12。テストは 1e-8）、Hessian による SE がその独立な目的関数の logit 尺度の Hessian の
+     逆行列からのデルタ法の SE に一致すること（相対 7e-9。テストは 1e-6）、`"natural"` のモードとは $g$ で最大 0.037
+     違うことを確かめる。単体テストでは、`log_pdf` を $\operatorname{logit}x$ の `scipy.stats.norm.logpdf` と照合し
+     （1e-13）、Core のコード `PRIOR_LOGITNORMAL_LOGIT = 5` とその勾配、`mode_scale` の検証、JSON のキー（往復と、
+     ないときは `"natural"`）を確かめる。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。
 - **SE の内部整合**: Oakes の SE と、収束点での周辺対数尤度の直接 `jax.hessian` による SE が一致すること（小規模ケース）。
 - **不変性**: 項目の並べ替え、群ラベルの付け替え、パターン圧縮の有無で結果が変わらないこと。
+- **ユーザー定義の項目モデル（#86、DESIGN §20）**: `tests/test_custom_items.py` は公開の `ItemModel` / `ItemKernel`
+  プロトコルだけを使って 2PL と GRM を実装し直す。1 つの混合モデルで、組み込みの推定と $10^{-12}$ まで一致する
+  （対数尤度、反復回数、推定値、Oakes SE、表示用閾値とその SE、EAP/MAP/ML/WLE の得点、S-X2、M2、項目情報量）。
+  2 因子モデルは $10^{-5}$ まで一致する（初期値が違う）。これは拡張の仕組みの検証であり、新しいモデルの検証ではない。
+  組み込みでない例のモデル（GGUM など）は、検証済みとして示す前にそれ自身の mirt との照合が要る（GGUM には V44 を予約）。

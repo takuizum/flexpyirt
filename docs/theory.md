@@ -3,7 +3,8 @@
 English | [日本語](theory.ja.md)
 
 The ideas behind flexpyirt, in brief: what the models are, what is maximized, how the EM algorithm
-does it, and where standard errors, scores, fit statistics and linking constants come from. Each
+does it, and where standard errors, scores, fit statistics, linking constants, summed-score tables and dimensionality checks
+come from. Each
 section ends with a pointer to the [user guide](guide.md) section that shows the code. For full
 treatments see the references at the end (e.g. Baker & Kim, 2004; Chalmers, 2012).
 
@@ -19,6 +20,10 @@ treatments see the references at the end (e.g. Baker & Kim, 2004; Chalmers, 2012
 10. [Scoring respondents](#10-scoring-respondents)
 11. [Model fit and DIF](#11-model-fit-and-dif)
 12. [Scale linking](#12-scale-linking)
+13. [Bifactor and two-tier models](#13-bifactor-and-two-tier-models)
+14. [Sampling weights](#14-sampling-weights)
+15. [Summed scores, information and reliability](#15-summed-scores-information-and-reliability)
+16. [Local dependence and dimensionality](#16-local-dependence-and-dimensionality)
 
 **Notation.** Respondents $i=1,\dots,N$, items $j=1,\dots,J$, response $y_{ij}\in\{0,\dots,K_j-1\}$,
 latent trait $\theta$ (a vector $\boldsymbol\theta$ in multidimensional models), groups
@@ -55,12 +60,17 @@ approximates the normal ogive. flexpyirt (like mirt) uses no such constant; slop
 **Multidimensional models.** With $D$ factors, $z=\mathbf a^\top\boldsymbol\theta+d$ with a slope
 per factor ($a_1,\dots,a_D$), and $\boldsymbol\theta$ follows a multivariate normal distribution.
 In a *confirmatory* model each item loads only on the factors you declare; the other slopes are
-fixed at 0.
+fixed at 0. Bifactor and two-tier models are confirmatory models with a structure that allows many
+factors ([section 13](#13-bifactor-and-two-tier-models)).
 
 **Information.** The Fisher information of an item tells how precisely it measures at each
 $\theta$; for the 2PL it is $I_j(\theta)=a_j^2P_j(\theta)\{1-P_j(\theta)\}$, largest at
 $\theta=b_j$. The test information $I(\theta)=\sum_jI_j(\theta)$ appears in the WLE
-([section 10](#10-scoring-respondents)).
+([section 10](#10-scoring-respondents)) and in reliability ([section 15](#15-summed-scores-information-and-reliability)). With several factors the information is a matrix,
+$\mathbf I_j(\boldsymbol\theta)=\sum_kP_{jk}\,\nabla\log P_{jk}\,\nabla\log P_{jk}^\top$; for the
+multidimensional 2PL it is $P_j(1-P_j)\,\mathbf a_j\mathbf a_j^\top$, so an item informs only along
+its slope vector $\mathbf a_j$. The information in a direction $\mathbf u$ ($\|\mathbf u\|=1$) is
+$\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$ (Reckase & McKinley, 1991; Reckase, 2009).
 
 Guide: [section 3](guide.md#3-specifying-a-model).
 
@@ -270,7 +280,8 @@ $$\operatorname{Var}(\hat\eta)\approx I(\hat\eta)^{-1}\,B\,I(\hat\eta)^{-1},$$
 which reduces to $I^{-1}$ under the information equality. Under MAP the prior's curvature
 $-\partial^2\log\pi/\partial\eta\,\partial\eta^\top$ is added to $B$ as it is to $I$, so the three
 estimates still coincide for a correct model. The scores are exact (automatic differentiation of
-each response pattern's marginal likelihood). Respondents are assumed to be independent.
+each response pattern's marginal likelihood). Respondents are assumed to be independent; for
+sampling weights see [section 14](#14-sampling-weights).
 
 **Delta method.** For a function $b=h(\eta)$ such as $b=-d/a$,
 $\operatorname{Var}(\hat b)\approx\nabla h^\top\,\operatorname{Var}(\hat\eta)\,\nabla h$. flexpyirt uses
@@ -375,25 +386,234 @@ Lee, 2000), and the transformed items no longer have zero slopes where the sourc
 
 Guide: [section 15](guide.md#15-scale-linking).
 
+## 13. Bifactor and two-tier models
+
+**The models.** Tests are often built from item bundles (testlets): several questions about one
+reading passage, or items sharing a scenario. Responses within a bundle are then more alike than
+the main trait explains. The **bifactor model** gives every item a slope on one general factor
+$\theta_0$ and, if it belongs to a bundle, on one specific factor $\theta_s$:
+$$z_j=a_{j0}\theta_0+a_{js}\theta_{s(j)}+d_j ,$$
+with all factors independent $N(0,1)$. Items in no bundle load on $\theta_0$ only, and each
+specific factor needs at least two items. The **two-tier model** (Cai, 2010) replaces the
+general factor by $P$ primary factors $\boldsymbol\theta_0$ (flexpyirt allows $P=1$ or $2$) that
+may correlate with each other; the specific factors stay orthogonal to everything. A bifactor
+model is the two-tier model with one primary factor on which every item loads.
+
+**Dimension reduction.** With $S$ specific factors the model has $1+S$ dimensions, and a product
+quadrature grid with $n$ points per dimension has $n^{1+S}$ nodes, which is out of reach for more
+than two or three bundles. Because each item depends on $\theta_0$ and at most one $\theta_s$, and
+the specific factors are independent, the marginal likelihood factorizes given the general factor
+(Gibbons & Hedeker, 1992):
+$$L(\mathbf y_i)=\sum_g w^{(0)}_g\prod_{s=1}^{S}\Big[\sum_t w^{(s)}_t\prod_{j\in s}P_j(y_{ij}\mid\theta_g,\theta_t)\Big]\prod_{j\in s_\varnothing}P_j(y_{ij}\mid\theta_g),$$
+where $\{\theta_g\}$ and $\{\theta_t\}$ are one-dimensional grids with normalized weights
+$w^{(0)}$ and $w^{(s)}$, and $s_\varnothing$ is the set of general-only items. The cost per
+response pattern is $O(S\,n^2)$ instead of $O(n^{1+S})$. For a two-tier model the general node is
+replaced by a node of the $P$-dimensional primary grid, with multivariate normal weights that
+depend on the primary correlation, and the cost is $O(S\,n^{P+1})$ (Cai, 2010). Fewer points are
+needed per dimension than for a full product grid: the default is 31 for $P=1$ and 15 for $P=2$,
+as in mirt's `bfactor()`. flexpyirt fits both models for a single group.
+
+**EM and standard errors.** The posterior of a respondent factorizes in the same way, so the
+E-step gives each item expected counts on its own two-dimensional (general × specific) block grid,
+and the item-wise M-step of [section 4](#4-the-bockaitkin-em-algorithm) is unchanged. In a
+two-tier model the primary correlation is updated by maximizing the expected log weights of the
+primary grid, which keeps EM monotone. Standard errors come from the Hessian of the reduced
+marginal log-likelihood, or from Oakes' identity differentiated through the reduced E-step; both
+are exact by automatic differentiation. Respondents are scored by EAP on the factorized posterior.
+
+**Reading the result.** A specific factor absorbs the dependence within its bundle, so the
+general slopes are not inflated by it. Local-dependence statistics for a bifactor fit
+([section 16](#16-local-dependence-and-dimensionality)) test pairs *beyond* the specific factor: a
+bundle left out of the specification shows up as large positive residual association within it.
+
+Guide: [bifactor models](guide.md#bifactor-models), [two-tier models](guide.md#two-tier-models).
+
+## 14. Sampling weights
+
+In a survey, respondents may be sampled with unequal probabilities, and each carries a weight
+$w_i$ (roughly the number of population members it represents). flexpyirt then maximizes the
+**weighted marginal log-likelihood**, a pseudo-likelihood (Skinner, 1989):
+$$\ell_w(\eta)=\sum_iw_i\log L(\mathbf y_i;\eta)=\sum_pc_p\log L_p(\eta),\qquad c_p=\sum_{i:\,\mathbf y_i=p}w_i .$$
+Respondents with the same pattern are combined by summing their weights instead of counting them,
+so EM, multiple groups, FIPC and every latent distribution work unchanged. Weights are used as
+given (not rescaled): with integer weights the fit is exactly the fit to the data with row $i$
+repeated $w_i$ times (*frequency weights*). The log-likelihood is on the scale of the weights, and
+BIC uses $\log\sum_iw_i$ in place of $\log N$, as mirt does.
+
+**Standard errors.** The inverse of the information matrix $-\nabla^2\ell_w$ is the right
+covariance for frequency weights, but not for sampling weights. Under a sampling design the
+estimator's variance is the sandwich
+$$\operatorname{Var}(\hat\eta)\approx H^{-1}\Big(\sum_iw_i^2s_is_i^\top\Big)H^{-1},\qquad H=-\nabla^2\ell_w(\hat\eta),$$
+with $s_i$ the score of respondent $i$ (Binder, 1983), and with clustered samples the outer
+products are summed within clusters. These design-consistent standard errors are not implemented
+yet, so flexpyirt warns whenever weights are combined with standard errors. Item fit, $M_2$,
+local dependence and DIF assume unweighted counts and are not available for weighted fits.
+
+Guide: [sampling weights](guide.md#sampling-weights).
+
+## 15. Summed scores, information and reliability
+
+**Information.** For any item model the Fisher information about $\theta$ is
+$$I_j(\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\theta)\Big(\frac{\partial\log P_{jk}(\theta)}{\partial\theta}\Big)^2$$
+(Birnbaum, 1968; Samejima, 1969), which is $a_j^2P_j(1-P_j)$ for the 2PL. flexpyirt computes the
+derivative by automatic differentiation of each item model's category probabilities, so the same
+code serves every model. The test information $I(\theta)=\sum_jI_j(\theta)$ gives the
+conditional standard error $\mathrm{SE}(\theta)=I(\theta)^{-1/2}$ of an efficient estimate of
+$\theta$. With categories scored $0,\dots,K_j-1$, the **expected score**
+$E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ and the **test characteristic curve**
+$T(\theta)=\sum_jE_j(\theta)$ map $\theta$ to the scale of summed scores.
+
+**The summed-score distribution.** Given $\theta$ the item scores are independent, so the
+distribution of the summed score $S=\sum_jX_j$ is a convolution, computed by the
+**Lord–Wingersky recursion** (Lord & Wingersky, 1984; Thissen, Pommerich, Billeaud & Williams,
+1995, for polytomous items):
+$$L_0(0)=1,\qquad L_j(s)=\sum_kL_{j-1}(s-k)\,P_{jk}(\theta),\qquad s=0,\dots,\textstyle\sum_j(K_j-1).$$
+For dichotomous items this is the **Poisson-binomial distribution**, the distribution of a sum of
+independent Bernoulli variables with different success probabilities (González, Wiberg & von
+Davier, 2016). Every term of the recursion is non-negative, so it is accurate in relative terms
+even in the tails; a log-space version keeps probabilities smaller than the smallest double. The
+alternatives are the discrete Fourier transform of the characteristic function (Hong, 2013),
+exact up to an absolute error of about $10^{-16}$ and therefore unsuitable for tail
+probabilities, and, for dichotomous items, the normal, refined normal (Volkova, 1996) and Poisson
+(Le Cam, 1960) approximations.
+
+**Marginal reliability.** With error variance $1/I(\theta)$ at $\theta$, the conditional
+reliability of a score is $\sigma^2I(\theta)/\{\sigma^2I(\theta)+1\}$, and its expectation over the
+population is
+$$\bar\rho=\int\frac{\sigma^2I(\theta)}{\sigma^2I(\theta)+1}\,\phi(\theta;\mu,\sigma^2)\,d\theta$$
+(Green, Bock, Humphreys, Linn & Reckase, 1984; Thissen & Wainer, 2001). This form does not change
+under a linear change of the latent scale; with $\mu=0$, $\sigma^2=1$ it equals mirt's
+`marginal_rxx()`. The **empirical reliability** of a sample is
+$s^2_{\hat\theta}/(s^2_{\hat\theta}+\overline{\mathrm{SE}^2})$ from the EAP scores and their
+posterior SDs: the variance of the scores estimates the true-score variance and the mean posterior
+variance the error variance.
+
+**Summed-score EAP** (Thissen et al., 1995). When respondents should get the same score for the
+same summed score (score tables, reporting), the posterior given the summed score replaces the
+posterior given the pattern. With the latent weights $w_q$ of the fit,
+$$P(s)=\sum_qL(s\mid\theta_q)\,w_q,\qquad \hat\theta(s)=\frac{\sum_q\theta_q\,L(s\mid\theta_q)\,w_q}{P(s)},$$
+and the posterior SD likewise. $P(s)$ is the model-implied distribution of summed scores. A
+respondent with a missing response has no summed score on this scale and gets no score.
+
+Guide: [summed-score distribution](guide.md#summed-score-distribution),
+[information, expected score and reliability](guide.md#information-expected-score-and-reliability),
+[summed-score EAP](guide.md#summed-score-eap).
+
+## 16. Local dependence and dimensionality
+
+Unidimensional IRT assumes that one trait explains the association between items (local
+independence, [section 2](#2-marginal-likelihood)). Two different questions check this, and they
+are kept apart because one vote over both would be meaningless: **how many dimensions** the
+items need (an integer), and whether the data are **essentially unidimensional** (Stout, 1990),
+that is, whether one dominant trait remains after minor dependencies (a verdict or an index).
+
+**Polychoric correlations.** Pearson correlations of ordinal item scores are attenuated and
+depend on item difficulty, which can create spurious "difficulty factors". The polychoric
+correlation assumes that the responses to items $j$ and $j'$ come from cutting a bivariate normal
+pair at thresholds $\tau_{jk}$; it is the correlation $\rho$ of that pair (the tetrachoric
+correlation for two binary items). In the two-step method (Olsson, 1979) the thresholds come
+from the margins, $\hat\tau_{jk}=\Phi^{-1}(\hat P(Y_j\le k))$, and $\rho$ maximizes
+$\sum_{ab}n_{ab}\log\pi_{ab}(\rho)$, where $\pi_{ab}$ is the bivariate normal probability of the
+rectangle of cell $(a,b)$. Matrices estimated pair by pair need not be positive definite and are
+then smoothed through their eigenvalues.
+
+**How many dimensions.** These methods work on the (polychoric) correlation matrix:
+
+- **Parallel analysis** (Horn, 1965): retain the leading eigenvalues that exceed those of data
+  without common factors (normal data, or the observed data with each item permuted independently),
+  here at the 95th percentile (Glorfeld, 1995; Garrido, Abad & Ponsoda, 2013).
+- **Velicer's MAP** (Velicer, 1976; Velicer, Eaton & Fava, 2000): partial out $m$ components and
+  choose the $m$ that minimizes the average squared (or fourth-power) partial correlation.
+- **Empirical Kaiser criterion** (Braeken & van Assen, 2017): eigenvalues are compared with
+  reference values that account for sampling error and for the variance already explained.
+- **Hull method** (Lorenzo-Seva, Timmerman & Kiers, 2011): the factor solution at the elbow of the
+  convex hull of fit against degrees of freedom.
+- **Comparison data** (Ruscio & Roche, 2012): populations with $k$ factors that reproduce the
+  observed correlations and marginals are generated, and $k$ is increased while it reproduces the
+  observed eigenvalues significantly better.
+
+**Residual association in a fitted model.** These statistics look for pairs of items that remain
+associated after the model is fitted:
+
+- **Q3** (Yen, 1984): the correlation over respondents of the residuals
+  $d_{ij}=x_{ij}-E(X_j\mid\hat\theta_i)$ of two items. Because Q3 is slightly negative on average
+  even when the model holds, **Q3\*** subtracts the mean off-diagonal Q3 (Christensen, Makransky &
+  Horton, 2017).
+- **LD $X^2$ and $G^2$** (Chen & Thissen, 1997): the observed $K_i\times K_j$ table of a pair is
+  compared with the model-implied table $E_{ab}=n_{ij}\sum_qP_{ia}(\theta_q)P_{jb}(\theta_q)w_q$.
+  The signed Cramér's $V$ shows whether the pair is more (positive) or less associated than the
+  model predicts.
+- **Jackknife slope index** (Edwards, Houts & Cai, 2018): refit the model without item $j$; if
+  item $j$ is locally dependent with item $i$, the slope of $i$ drops, and
+  $(\hat a_i-\hat a_i^{(-j)})/\mathrm{SE}(\hat a_i^{(-j)})$ stands out. flexpyirt also offers
+  one-step and Newton approximations to the refit, accurate from about 15 items on.
+- **Model-based parallel analysis** (Drasgow & Lissak, 1983): the second eigenvalue of the
+  observed polychoric matrix is compared with its distribution in data simulated from the fitted
+  unidimensional model. Because the parameters come from the same data, the $p$-value is
+  conservative.
+
+**Conditional covariances.** Under essential unidimensionality, two items have covariance close
+to 0 among respondents with the same value of the trait. The nonparametric methods replace the
+trait by the summed score (Stout, 1987):
+
+- **DETECT** (Zhang & Stout, 1999; Zhang, 2007): for a partition of the items into clusters,
+  $\mathrm{DETECT}=100\cdot\overline{\delta_{ij}\,\widehat{\mathrm{Cov}}(X_i,X_j\mid S)}$ over item
+  pairs, with $\delta_{ij}=+1$ for pairs in the same cluster and $-1$ otherwise. It is large when
+  items in the same cluster covary positively and items in different clusters negatively; values
+  below about 0.2 indicate essential unidimensionality (Jang & Roussos, 2007). The exploratory
+  version finds the partition by clustering on one half of the sample and evaluates it on the
+  other half.
+- **DIMTEST** (Stout, 1987; Nandakumar & Stout, 1993): a test of essential unidimensionality that
+  compares the variance of an assessment subtest, within groups of equal score on the rest of the
+  test, with its value under unidimensionality; bias is removed with unidimensional data
+  resampled from the observed item response functions (Stout, Froelich & Gao, 2001). The test is
+  conservative (type I error below the nominal level in flexpyirt's simulations): a small
+  $p$-value is strong evidence of multidimensionality, a large one weak evidence for
+  unidimensionality.
+
+No single method is reliable on its own (Auerswald & Moshagen, 2019). `dimensionality()` runs
+several of each kind and reports a separate consensus for each question.
+
+Guide: [section 16](guide.md#16-polychoric-correlations), [section 17](guide.md#17-number-of-dimensions),
+[section 18](guide.md#18-local-dependence-and-the-dimensionality-report), [section 19](guide.md#19-detect).
+
 ## References
 
+- Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Baker, F. B., & Kim, S.-H. (2004). *Item Response Theory: Parameter Estimation Techniques* (2nd ed.). Marcel Dekker.
+- Binder, D. A. (1983). On the variances of asymptotically normal estimators from complex surveys. *International Statistical Review*, 51(3), 279–292.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores*. Addison-Wesley.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37, 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6, 431–444.
 - Bock, R. D., & Zimowski, M. F. (1997). Multiple group IRT. In W. J. van der Linden & R. K. Hambleton (Eds.), *Handbook of Modern Item Response Theory*. Springer.
+- Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
+- Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
+- Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
 - Dempster, A. P., Laird, N. M., & Rubin, D. B. (1977). Maximum likelihood from incomplete data via the EM algorithm. *JRSS B*, 39, 1–38.
+- Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
+- Edwards, M. C., Houts, C. R., & Cai, L. (2018). A diagnostic procedure to detect departures from local independence in item response theory models. *Psychological Methods*, 23(1), 138–149.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80, 27–38.
+- Garrido, L. E., Abad, F. J., & Ponsoda, V. (2013). A new look at Horn's parallel analysis with ordinal variables. *Psychological Methods*, 18(4), 454–474.
+- Gibbons, R. D., & Hedeker, D. R. (1992). Full-information item bi-factor analysis. *Psychometrika*, 57(3), 423–436.
+- Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
+- González, J., Wiberg, M., & von Davier, A. A. (2016). A note on the Poisson's binomial distribution in item response theory. *Applied Psychological Measurement*, 40(4), 302–310.
+- Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22, 144–149.
+- Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
+- Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
+- Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43, 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking* (3rd ed.). Springer.
+- Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
 - Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24, 115–138.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings". *Applied Psychological Measurement*, 8, 453–461.
+- Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Maydeu-Olivares, A., & Joe, H. (2005). Limited- and full-information estimation and goodness-of-fit testing in $2^n$ contingency tables. *Journal of the American Statistical Association*, 100, 1009–1020.
@@ -402,18 +622,35 @@ Guide: [section 15](guide.md#15-scale-linking).
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56, 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
+- Nandakumar, R., & Stout, W. (1993). Refinements of Stout's procedure for assessing latent trait unidimensionality. *Journal of Educational Statistics*, 18(1), 41–68.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25, 53–67.
-- Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37, 357–373.
+- Olsson, U. (1979). Maximum likelihood estimation of the polychoric correlation coefficient. *Psychometrika*, 44(4), 443–460.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24, 50–64.
+- Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37, 357–373.
 - Rasch, G. (1960). *Probabilistic Models for Some Intelligence and Attainment Tests*. Danish Institute for Educational Research.
+- Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Rubin, D. B. (1976). Inference and missing data. *Biometrika*, 63, 581–592.
+- Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Skinner, C. J. (1989). Domain means, regression and multivariate analysis. In C. J. Skinner, D. Holt & T. M. F. Smith (Eds.), *Analysis of Complex Surveys* (pp. 59–87). Wiley.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7, 201–210.
+- Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
+- Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.
+- Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
+- Thissen, D., & Wainer, H. (Eds.). (2001). *Test Scoring*. Lawrence Erlbaum Associates.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
+- Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scandinavian Journal of Statistics*, 35, 335–353.
+- Velicer, W. F. (1976). Determining the number of components from the matrix of partial correlations. *Psychometrika*, 41(3), 321–327.
+- Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
+- Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54, 427–450.
 - White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
+- Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.
+- Zhang, J., & Stout, W. (1999). The theoretical DETECT index of dimensionality and its application to approximate simple structure. *Psychometrika*, 64(2), 213–249.

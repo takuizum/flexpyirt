@@ -108,16 +108,19 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
    - [x] Two-tier models (`Model.with_two_tier()`, one or two correlated primary factors plus
      specific factors, single group, Oakes/Hessian SEs, EAP scoring; validated in V33 against mirt
      `bfactor(model2 = )`).
-2. [ ] Local dependence (Q3, LD-X², JSI) for multiple groups, non-Normal latent and
+2. [x] Local dependence (Q3, LD-X², JSI) for multiple groups, non-Normal latent and
    multidimensional / bifactor models (#81).
    - [x] `FitResult.local_dependence()` (Q3, Q3\*, LD-X², G²) for multiple groups, `EmpiricalHistogram` /
      `DavidianCurve` / `NormalMixture` latent distributions and confirmatory 2–3 factor models
      (validated in V26 against mirt `residuals()`; the mixture case given the density only).
    - [x] `FitResult.local_dependence()` for bifactor and two-tier models, with the expected tables on
      the reduced grids (validated in V38 against mirt `residuals()` on `bfactor()` fits).
-     Still open: JSI beyond single-group unidimensional Normal models (no definition for items
-     with several slopes and no reference in mirt).
-3. [ ] Item / test information, reliability and summed-score EAP (#82), on a public Lord–Wingersky /
+   - Not implemented (decided, #81): JSI beyond single-group unidimensional `Normal` models. JSI is
+     defined only for single-group unidimensional models; its multidimensional / multiple-group
+     extension has not been studied and there is no reference implementation (mirt's
+     `type = "JSI"` needs one factor). `jsi()` raises `SpecificationError` for these models
+     (DESIGN.md §16.17).
+3. [x] Item / test information, reliability and summed-score EAP (#82), on a public Lord–Wingersky /
    Poisson-binomial kernel (#83).
    - [x] Kernel (#83): `summed_score_distribution()`, the Lord–Wingersky recursion as a
      Poisson-binomial kernel in linear and log space, the DFT-CF method, and normal / refined normal /
@@ -129,7 +132,11 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
      against `iteminfo()`, `testinfo()`, `expected.item()` / `expected.test()`, `marginal_rxx()`,
      `empirical_rxx()` and `fscores(method = "EAPsum")` for 2PL, 3PL, GRM, GPCM, nominal, a
      mixed-format test and a two-group model.
-   - [ ] Multidimensional models: information matrix and directional information.
+   - [x] Multidimensional models (confirmatory 2–3 factors, bifactor, two-tier; single and multiple
+     groups): `information_matrix()`, directional information with `item_information(direction=)` /
+     `test_information(direction=)` (with the SE of the composite) and `expected_score()`; validated in
+     V43 against `iteminfo(multidim_matrix = TRUE)`, `iteminfo(degrees = )`, `testinfo(degrees = )` and
+     `expected.item()` / `expected.test()`.
 4. [ ] Sampling (survey) weights (#84).
    - [x] `fit(..., weights=...)`: weighted marginal likelihood with weighted pattern compression
      for EM, SQUAREM, multiple groups, missing data and FIPC; BIC with the sum of the weights;
@@ -145,7 +152,16 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and
   `SE.type = "sandwich"` / `"crossprod"`.
 
-## Field features (#103–#109)
+## Field features
+- [x] Plots (#103): `item_probabilities()`, `empirical_item_curve()` and `wright_map_table()` return
+  the numbers behind the figures; `flexpyirt.plotting` (`plot_item_curves` with observed proportions and
+  per-group curves for DIF, `plot_information`, `plot_expected_score`, `plot_wright_map`) draws them with
+  matplotlib from the optional extra `flexpyirt[plot]`. Unidimensional models, every item family, single
+  and multiple groups; validated in V48 against mirt `itemfit(return.tables = TRUE)`, `probtrace()`,
+  `coef(IRTpars = TRUE)` and TAM `tam.threshold()`.
+- [x] Common-item screening for linking and item parameter drift (#105; `screen_common_items()`,
+  `CommonItemScreeningResult`, `stack_screening_tables()`: robust z, displacement and
+  expected-score RMSD with iterative purification, unidimensional; validated in V50).
 - [x] Person fit and residual item fit (#108): `FitResult.person_fit()` ($l_z$, $l_z^*$, person
   infit / outfit with $z$ values) and `FitResult.item_fit(statistics=("infit", "outfit"))` for
   unidimensional models (every item model, missing data, multiple groups); validated in V53 against
@@ -155,5 +171,8 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 
 ## Ongoing
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).
-- [ ] Public extension API for user-defined item models, with docs examples (#86). New item models
-  (e.g. GGUM) are added as validated examples of this API rather than as built-ins.
+- [x] Public extension API for user-defined item models, with docs examples (#86): the
+  `ItemModel` / `ItemKernel` contract, `register_item_model` for JSON, and a 2PL worked example
+  in the guide (DESIGN §20); custom 2PL / GRM reproduce the built-ins to machine precision.
+- [ ] Validated examples of models that are not built in (e.g. GGUM against mirt
+  `itemtype = "ggum"`, V44). New item models are added this way rather than as built-ins.

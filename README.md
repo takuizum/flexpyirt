@@ -1,5 +1,11 @@
 # flexpyirt
 
+[![PyPI](https://img.shields.io/pypi/v/flexpyirt)](https://pypi.org/project/flexpyirt/)
+[![Python](https://img.shields.io/pypi/pyversions/flexpyirt)](https://pypi.org/project/flexpyirt/)
+[![CI](https://github.com/takuizum/flexpyirt/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/takuizum/flexpyirt/actions/workflows/ci.yml)
+[![Docs](https://github.com/takuizum/flexpyirt/actions/workflows/docs.yml/badge.svg?branch=main)](https://takuizum.github.io/flexpyirt/)
+[![License](https://img.shields.io/pypi/l/flexpyirt)](https://github.com/takuizum/flexpyirt/blob/main/LICENSE)
+
 English | [日本語](https://github.com/takuizum/flexpyirt/blob/main/README.ja.md)
 
 Item response theory (IRT) estimation in Python, built on JAX. At its core is marginal maximum
@@ -41,7 +47,8 @@ calibration and fixed item parameter calibration (FIPC).
 | Item fit | Orlando–Thissen S-X2 (`FitResult.item_fit()`, per group for multiple groups; also confirmatory 2–3 factor models, single group) with mirt's cell collapsing, df, RMSEA and p-values; item infit / outfit mean squares with $z$ values (`item_fit(statistics=("infit", "outfit"))`, unidimensional) | ✓ |
 | Person fit | $l_z$ and person infit / outfit with $z$ values at the EAP, MAP, ML or WLE estimate (`FitResult.person_fit()`; unidimensional, every item model, missing data, multiple groups) | ✓ |
 | Summed scores | Distribution of the summed score given the item category probabilities (`summed_score_distribution()`): Lord–Wingersky recursion (Poisson-binomial distribution for dichotomous items), also in log space, an FFT method, and normal / refined normal / Poisson approximations; works with `jit`, `vmap` and autodiff | ✓ |
-| Information and reliability | Item and test information for every item model by automatic differentiation (`item_information()`, `test_information()` with the conditional standard error), expected scores and the test characteristic curve (`expected_score()`), marginal and empirical reliability (`reliability()`), the summed-score EAP table (`summed_score_table()`) and `score(method="EAPsum")`; unidimensional models, single and multiple groups | ✓ |
+| Information and reliability | Item and test information for every item model by automatic differentiation (`item_information()`, `test_information()` with the conditional standard error), expected scores and the test characteristic curve (`expected_score()`), marginal and empirical reliability (`reliability()`), the summed-score EAP table (`summed_score_table()`) and `score(method="EAPsum")`, for unidimensional models (single and multiple groups); for confirmatory, bifactor and two-tier models the information matrix (`information_matrix()`), directional information (`item_information()` / `test_information()` with `direction=`) and expected scores | ✓ |
+| Plots | Item characteristic curves with observed proportions in bins of EAP $\theta$ (also per group, the DIF plot), item / test information with the standard error, the test characteristic curve and Wright maps (`flexpyirt.plotting`, matplotlib from `flexpyirt[plot]`); the numbers come from `item_probabilities()`, `empirical_item_curve()` and `wright_map_table()`, checked against mirt's `itemfit()` tables, `probtrace()` and TAM's `tam.threshold()`; unidimensional models | ✓ |
 | Limited-information fit | Maydeu-Olivares & Joe M2 / M2* (`FitResult.m2()`; unidimensional and confirmatory 2–3 factor models, single group) with df, p-value, RMSEA + CI, SRMSR and dichotomous TLI / CFI | ✓ |
 | DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | ✓ |
 | Scale linking | Differentiable characteristic-curve linking (`link()`, `LinkResult`: Haebara and Stocking–Lord, non-symmetric and symmetric, Ogasawara delta-method SEs, transformed items and $\theta$ scores; checked against independent R implementations for 2PL, 3PL, 4PL, GRM, GPCM, nominal and mixed-format common items, and for confirmatory two- and three-factor models with a diagonal, orthogonal or oblique transformation $\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta$) | ✓ |
@@ -49,6 +56,22 @@ calibration and fixed item parameter calibration (FIPC).
 | Number of dimensions | Parallel analysis (`parallel_analysis()`: polychoric or Pearson, PCA or SMC eigenvalues, permutation or normal reference data, quantile or mean rule), Velicer's MAP (`velicer_map()`, original and revised) the empirical Kaiser criterion (`empirical_kaiser()`), unrotated ULS / ML factor analysis (`efa()`), the Hull method (`hull()`) and comparison data (`comparison_data()`); checked against EFAtools, psych and EFA.dimensions. Provided by flexpyctt | ✓ |
 | Local dependence and unidimensionality | Q3, Q3\* and Chen & Thissen LD $X^2$ / $G^2$ (`FitResult.local_dependence()`, as mirt's `residuals()`), the jackknife slope index (`FitResult.jsi()`, as mirt, with faster approximations), model-based parallel analysis (`model_parallel_analysis()`, as ltm's `unidimTest`), confirmatory and exploratory DETECT (`detect()`, `exploratory_detect()`, as sirt), DIMTEST with bootstrap bias correction (`dimtest()`, checked by simulation), and a `dimensionality()` report that runs several methods with separate consensus lines. DETECT and DIMTEST are provided by flexpyctt | ✓ |
 | Identification checks | Unidentified specifications raise `IdentificationError` before fitting | — |
+
+## Not yet supported
+
+These are planned and tracked in the
+[roadmap](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/ROADMAP.md).
+
+- Davidian curves and normal mixtures in multiple-group models ([#75](https://github.com/takuizum/flexpyirt/issues/75))
+- $M_2$ for multiple groups, missing responses and MAP fits ([#76](https://github.com/takuizum/flexpyirt/issues/76)); $M_2$ and S-X2 for
+  bifactor, two-tier and multiple-group multidimensional models
+- Many-group fits with per-group latent distributions vmapped over groups ([#79](https://github.com/takuizum/flexpyirt/issues/79))
+- Information matrices and directional information for multidimensional models
+- Design-consistent standard errors for sampling weights: weighted and cluster-robust sandwich SEs
+  ([#85](https://github.com/takuizum/flexpyirt/issues/85)); item fit, $M_2$, local dependence and DIF for weighted fits
+- The jackknife slope index beyond single-group unidimensional models with a normal latent
+  distribution
+- A public extension API for user-defined item models ([#86](https://github.com/takuizum/flexpyirt/issues/86))
 
 ## Installation
 
@@ -67,7 +90,7 @@ equates score distributions (linear, equipercentile and kernel equating). It is 
 flexpyirt and is not installed with it: `pip install flexpyequate`
 ([documentation](https://takuizum.github.io/flexpyirt/equating/)).
 
-For polars input, install `flexpyirt[polars]`. For GPUs, install a CUDA build of `jax` first
+For polars input, install `flexpyirt[polars]`; for the plots (`flexpyirt.plotting`), `flexpyirt[plot]`. For GPUs, install a CUDA build of `jax` first
 (see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)).
 
 flexpyirt computes in **64-bit floating point**. The JAX setting belongs to you, so the library
@@ -157,6 +180,36 @@ CPU; [results on an Apple M5](https://github.com/takuizum/flexpyirt/blob/main/be
 warm CPU fits are faster than `mirt` in every tested case (`0.12×–0.60×` of `mirt` time) once
 JAX/XLA has compiled the model on the first call (a cold EM fit takes ~0.8–1.1 s); `mirt` is
 faster for a single cold fit without standard errors.
+
+## Comparison with other libraries
+
+What each library's own documentation states, as of 2026-11-25 (R
+[mirt](https://cran.r-project.org/package=mirt) 1.48; on PyPI
+[mirt](https://pypi.org/project/mirt/) 1.2.0, [IRTorch](https://pypi.org/project/irtorch/) 0.5.6,
+[py-irt](https://pypi.org/project/py-irt/) 0.8.3, [girth](https://pypi.org/project/girth/) 0.8.0).
+"—" means the documentation does not mention it, not that it is impossible. Corrections are
+welcome on [GitHub Issues](https://github.com/takuizum/flexpyirt/issues).
+
+| | flexpyirt | R mirt | mirt (Python) | IRTorch | py-irt | girth |
+|---|---|---|---|---|---|---|
+| Estimation | MML, Bock–Aitkin EM (SQUAREM) | EM, MH-RM, MCEM / QMCEM, SEM | EM (SQUAREM), MH-RM, MCEM / QMCEM, Gibbs, GVEM (Rust core) | MML and JML by gradient descent, (variational) autoencoders | variational inference (Pyro) | MML, JML, conditional ML |
+| Item models | Rasch, 2PL, 3PL, 4PL, GRM, GPCM, PCM, nominal | these and many more | these and more (5PL, rating scale, nested logit, GGUM, CDMs) | 1–3PL, GRM, GPCM, nominal, nested logit, spline / neural-network models | 1PL, 2PL, 4PL | Rasch, 1–3PL, GRM, PCM, GGUM |
+| Multiple groups, DIF | ✓ | ✓ | ✓ | — | — | — |
+| Fixed item parameter calibration | ✓ | ✓ | ✓ | — | — | — |
+| Characteristic-curve linking | ✓ Haebara, Stocking–Lord, with SEs; also multidimensional | — (separate packages) | Stocking–Lord | linking through anchor items (splines, neural networks) | — | — |
+| Latent density: histogram / Davidian / normal mixture | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | — | — | — | — |
+| Multidimensional | confirmatory 2–3 factors, bifactor, two-tier | exploratory and confirmatory, bifactor, two-tier | exploratory and confirmatory, bifactor | several latent variables | — | multidimensional 2PL and GRM |
+| Fit: $M_2$ / S-X2 / local dependence | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | — / — / Q3 | — | — |
+| Standard errors of item parameters | Oakes, Hessian (exact by autodiff), sandwich, cross-product | many, incl. Oakes, Louis, sandwich | Louis / Oakes, sandwich, cross-product, bootstrap | — | — | bootstrap |
+| Scoring | EAP, MAP, ML, WLE, plausible values, summed-score EAP | the same and more | EAP, MAP, ML, WLE, plausible values | ML, EAP, MAP, neural network | — | ML, MAP, EAP |
+| GPU | ✓ (JAX) | — | ✓ (PyTorch, optional) | ✓ (PyTorch) | — | — |
+| Checked numerically against R mirt | ✓ (cases V1–V40) | (reference) | — | — | — | — |
+| License | MIT | GPL (≥ 3) | MIT | MIT | MIT | MIT |
+
+flexpyirt's open items are tracked in the
+[roadmap](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/ROADMAP.md). Exploratory
+high-dimensional models, MH-RM / MCEM estimation and cognitive diagnosis models are out of scope for
+now.
 
 ## Documentation
 

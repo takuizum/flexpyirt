@@ -97,6 +97,9 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   $\dim\xi_j\le 5$ or so). Items of the same item model ("item family") are stacked and `vmap`ed.
   A backtracking line search guarantees that $Q_j$ increases (monotone, as a generalized EM). The
   M-step need not converge fully; a few Newton steps are enough.
+  The Newton runs on the natural scale with a bounded active set (§15.2) by default;
+  `BAEM(m_step_scale="unconstrained")` runs it on logit/log scales of the bounded coordinates
+  instead, with the same objective (§15.47).
 - Fixed parameters are not part of $\eta$ (they come from the ParameterTable as constants).
 - **Equality constraints across items** (e.g. one common $a$ for all items) break the
   decomposition. **Decision (M5, §16.1)**: items connected by shared `free_id`s form a component
@@ -216,6 +219,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   posterior than $\theta_2$, $\alpha$ is stepped back towards $-1$ up to a fixed number of halvings;
   if still unacceptable, $\theta_2$ is used directly, guaranteeing monotone log posterior
   (§15.11–§15.12, §15.17).
+  SQUAREM always works on the natural scale, whatever `m_step_scale` is (§15.47).
 - Both plain EM and SQUAREM run entirely on device in `lax.while_loop` (no Python iteration loop or
   host callbacks). Optional progress output with `jax.debug.callback` is left for later.
 
@@ -227,8 +231,13 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   a Jacobian term (the posterior mode on the natural scale; verified against R mirt 1.46's
   `LL.Priors`, where `expbeta` evaluates `dbeta(plogis(logit_g), a, b, log = TRUE)` with no logit
   Jacobian; see VALIDATION.md).
-- Even if optimization ran on a transformed scale, the objective is evaluated with the
-  natural-scale prior.
+- Even if optimization runs on a transformed scale (`BAEM(m_step_scale="unconstrained")`,
+  §15.47), the objective is evaluated with the natural-scale prior.
+- **Decision (#15, §15.48)**: `LogitNormalPrior(mean_logit, sd_logit)` is a fourth prior, a
+  distribution on $(0,1)$ with $\operatorname{logit}X\sim N(\mu,s^2)$. Its natural-scale density
+  contains the logit Jacobian because that is part of the density of $X$ itself, not a change
+  of optimization scale. `LogitNormalPrior(..., mode_scale="logit")` drops that Jacobian to give
+  the logit-metric posterior mode of flexMIRT and mirt (§15.48).
 - Fixed parameters ignore their priors; a parameter shared across groups (same `free_id`) is
   counted **once**. Priors on latent-distribution parameters are out of scope (`SpecificationError`).
 - Results report `loglik` (likelihood only) and `log_posterior` (equal to `loglik` without priors)
@@ -333,15 +342,19 @@ class ItemKernel(Protocol):
     n_categories: int
     slope_params: tuple[str, ...]
     intercept_params: tuple[str, ...]
-    irt_names: tuple[str, ...]  # display thresholds (empty for D > 1)
-    irt_dependency_indices: tuple[tuple[int, ...], ...]
 
     def with_factors(self, n_factors: int) -> ItemKernel: ...
-    def irt_thresholds(self, params: Array) -> Array: ...
     def log_prob(self, theta: Array, params: Array) -> Array: ...  # theta (Q, D) -> (Q, K)
+
+    # optional: display thresholds (empty for D > 1)
+    irt_names: tuple[str, ...]
+    irt_dependency_indices: tuple[tuple[int, ...], ...]
+
+    def irt_thresholds(self, params: Array) -> Array: ...
 ```
 The design goal: writing `log_prob` on `(Q, D)` nodes is enough for a new item kernel to get the
 E-step, M-step (autodiff Newton), Oakes/Hessian SEs, and EAP scoring for $D \in \{1, 2, 3\}$.
+This protocol, with `ItemModel`, is public: §20 fixes the contract for user-defined item models.
 
 ## 7. Item models (in stages)
 | Model | Internal parameters | Milestone |
@@ -514,6 +527,8 @@ data-independent shapes (§15.21).
    coordinate within $10^{-8}$ of a bound whose gradient points outwards is held for that step
    ($\varepsilon$-active set; Bertsekas, 1982) so a boundary asymptote does not block `a` and `d`
    from converging. The objective-ascent check still guarantees EM monotonicity.
+   `BAEM(m_step_scale="unconstrained")` replaces this box with logit/log coordinates (§15.47);
+   the default stays this active-set Newton.
 3. **Numerical stability at $g=0$ and $u=1$**: log-probabilities are computed as
    $$\log P_1 = \operatorname{logaddexp}\big(\log g,\ \log(u-g)+\log\sigma(z)\big),\qquad
    \log P_0 = \operatorname{logaddexp}\big(\log(1-u),\ \log(u-g)+\log\sigma(-z)\big)$$
@@ -1059,6 +1074,94 @@ data-independent shapes (§15.21).
     and in `LinkResult.A`/`B` (the linking constants of Kolen & Brennan, 2014), and the port of
     mirt's cell collapsing (`_itemfit.collapse_cells`) keeps mirt's local names so it can be
     compared line by line.
+47. **Optional unconstrained M-step scale (`BAEM(m_step_scale="unconstrained")`, #15, V45)**:
+    $\eta$, the ParameterTable, priors, standard errors and SQUAREM all stay on the natural scale
+    (§4.7, §15.2). Only the masked Newton of the M-step (`_newton.newton_ascent`, used by the
+    item-wise, coupled, latent and two-tier latent M-steps) can run on an unconstrained scale.
+    `BAEM.m_step_scale: Literal["natural", "unconstrained"]` defaults to `"natural"`, the bounded
+    active-set Newton of §15.2, so existing results do not change.
+    - **Which coordinates.** With `"unconstrained"`, each free coordinate of the M-step box
+      `(lower, upper)` (the table bounds intersected with the prior support, §15.16) is mapped by
+      $$z=\begin{cases}\operatorname{logit}\frac{x-l}{u-l}, & l,u\text{ finite},\\
+      \log(x-l), & \text{only } l \text{ finite},\\ \log(u-x), & \text{only } u \text{ finite},\\
+      x, & \text{unbounded},\end{cases}$$
+      with inverses $x=l+(u-l)\,\sigma(z)$, $x=l+e^{z}$, $x=u-e^{z}$. This gives logit($g$),
+      logit($u$), log($\sigma^2$) for latent variances (also the mixture `rvar_c`), and
+      $2\operatorname{atanh}(\rho)$ for MVN correlations in $(-1,1)$. The rule follows the bounds, not
+      the parameter name: slopes keep $(-\infty,\infty)$ and are **not** transformed (an
+      $\exp(a)$ scale would add the constraint $a>0$, while negative slopes are legitimate), but
+      a slope whose box is $(0,\infty)$ because of a `LogNormalPrior` or user-edited bounds is
+      optimized on $\log a$, which adds no constraint the box did not already impose.
+    - **Objective and step.** The Newton step maximizes $f(T^{-1}(z))$, where $f$ is the same
+      natural-scale objective (expected complete-data log-likelihood plus the natural-scale log
+      prior). Gradient and Hessian in $z$ come from autodiff through $T^{-1}$ (the chain rule; no
+      Jacobian term is added, because the objective is not a density in $z$). The step is the
+      same as §15.2 without the box: Newton direction on $z$, gradient fallback if it is not an
+      ascent direction, and halving $2^{-k}$ for $k<30$. A candidate is accepted iff its
+      natural-scale value $x=T^{-1}(z)$ lies strictly inside `(lower, upper)` on the free
+      coordinates (a saturated $\sigma(z)$ that rounds onto a bound is rejected), the objective
+      is finite, and $f(x_{\text{cand}})\ge f(x)$. The iterate is carried on the natural scale
+      and the comparison uses $f(x)$ itself, so a rejected step returns $x$ bit for bit and EM
+      stays monotone exactly as in §15.2.
+    - **Interior and boundary solutions.** $T$ is a monotone bijection of the open box, so
+      interior fixed points of EM are the same on both scales (only the path differs, because
+      the M-step is a partial Newton maximization). A boundary optimum cannot be reached:
+      $z\to\pm\infty$, the natural-scale change per iteration shrinks geometrically, and EM
+      stops by the $\max|\Delta\eta|<$ `tol` rule with the parameter close to but not at the
+      bound, often after many more iterations than the active-set Newton. `HeywoodWarning`
+      (§15.6) still uses the natural-scale distance $<10^{-4}$, so it fires only once the
+      parameter has drifted that close; a slow drift that is stopped earlier by `tol` can end
+      without the warning. That is why `"natural"` stays the default.
+    - **SQUAREM** (§15.11–§15.12) is unchanged: it extrapolates the natural-scale $\eta$ and
+      checks the same natural-scale bounds. `m_step_scale` only changes the EM map $F$ it calls.
+    - **Not changed**: the ParameterTable (`value`, `lower`, `upper`), standard errors (Oakes,
+      Hessian, cross-product and sandwich are all on natural $\eta$, so Wald intervals of $g$ are
+      not confined to $(0,1)$ by this option), priors, and the stopping rule. `BAEM` is saved in
+      the JSON (schema version 8 adds the `m_step_scale` key; versions $\le 7$ read as
+      `"natural"`).
+48. **Logit-normal prior (`LogitNormalPrior(mean_logit, sd_logit)`, #15, V45)**: a prior on a
+    parameter in $(0,1)$ (usually $g$ or $u$) under which $\operatorname{logit}X\sim
+    N(\mu,s^2)$ (Aitchison & Shen, 1980). On the natural scale, as every
+    prior in §4.7, its density includes the Jacobian of the logit:
+    $$\log\pi(x)=-\log x-\log(1-x)-\log s-\tfrac12\log(2\pi)-\frac{(\operatorname{logit}x-\mu)^2}{2s^2},\qquad 0<x<1,$$
+    and $-\infty$ outside $(0,1)$. The support is $(0,1)$, so it is intersected with the box like
+    `BetaPrior` (§15.16); the Core code is `PRIOR_LOGITNORMAL = 4` in `eval_log_prior`; a starting
+    value outside the box moves to the prior median $\sigma(\mu)$.
+    - **Relation to flexMIRT.** flexMIRT (Houts & Cai) estimates the 3PL lower asymptote on the
+      logit metric, $\lambda=\log[g/(1-g)]$, and its `Prior ..., Guessing : Normal(μ, s);` (e.g.
+      `Normal(-1.09, 0.5)` for $g\approx 1/4$) is a normal prior on $\lambda$. Its posterior mode
+      maximizes $\ell+\log\phi(\lambda;\mu,s)$ over $\lambda$, which is the mode over $g$ of
+      $\ell+\log\phi(\operatorname{logit}g;\mu,s)$ — the same normal kernel **without** the
+      $-\log g-\log(1-g)$ term. `LogitNormalPrior` is the proper density on $g$, so its natural-scale
+      MAP (§4.7) differs from flexMIRT's estimate by that term. The term grows towards both bounds,
+      so the `LogitNormalPrior` mode lies further from $1/2$ than flexMIRT's; the prior itself (as a
+      distribution of $g$) is the same.
+      R mirt's `norm` prior on `g` acts on mirt's internal logit($g$) and behaves like flexMIRT's.
+      `mode_scale="logit"` (below) reproduces that mode.
+    - **`mode_scale: Literal["natural", "logit"] = "natural"`** (keyword-only). `"natural"` is the
+      density above. `"logit"` drops the Jacobian and evaluates the normal log density of
+      $\lambda=\operatorname{logit}x$ at the natural-scale value,
+      $$\log\tilde\pi(x)=-\log s-\tfrac12\log(2\pi)-\frac{(\operatorname{logit}x-\mu)^2}{2s^2},\qquad 0<x<1,$$
+      ($-\infty$ outside). Because $\operatorname{logit}$ is a bijection of $(0,1)$ and no Jacobian
+      is added, $\arg\max_g[\ell+\log\tilde\pi]=\sigma(\arg\max_\lambda[\ell+\log\phi(\lambda;\mu,s)])$:
+      the MAP is flexMIRT's `Guessing : Normal(μ, s)` and mirt's `PRIOR = (..., g, norm, μ, s)`
+      estimate, and `log_posterior` equals their logit-metric log posterior (mirt's `logPrior` is
+      $\sum\log\phi(\operatorname{logit}g)$). $\log\tilde\pi$ is not a density of $x$ (it is the
+      density of $\lambda$); `log_pdf` returns it as the objective term, as for every prior (§4.7).
+      - Core: a separate code `PRIOR_LOGITNORMAL_LOGIT = 5` in `eval_log_prior` with the same two
+        parameters, so `PriorBlock` and the jit kernels are unchanged (branch-free double-`where`
+        like the other codes). Support, box intersection and start value ($\sigma(\mu)$, which is
+        also the logit-scale prior mode) are as for `"natural"`.
+      - Standard errors use the same objective on natural $\eta$, so they are consistent with it:
+        at a stationary point the natural-scale Hessian is $J^\top H_\lambda J$ with
+        $J=\operatorname{diag}(g(1-g))$, hence $\mathrm{SE}(g)=g(1-g)\,\mathrm{SE}(\lambda)$, the
+        delta-method SE of the logit-scale estimate. `m_step_scale` (§15.47) is independent: it
+        changes the Newton path, not the objective.
+      - JSON: the `"LogitNormalPrior"` object gains a `mode_scale` key within schema version 8,
+        written always and optional on read (absent → `"natural"`).
+    - The hyperparameters are validated like `LogNormalPrior` (`mean_logit` finite, `sd_logit`
+      positive and finite). JSON registers it as `"LogitNormalPrior"` with keys `mean_logit` and
+      `sd_logit` (schema version 8).
 
 ## 16. Implementation decisions (M5)
 1. **Equality constraints across items (`Model.equal_across_items`, shared `free_id`s)**:
@@ -1911,6 +2014,13 @@ data-independent shapes (§15.21).
     $\le1.2\times10^{-7}$). The tests also check the refit against `fit()` on the data without the
     item, the approximations against the refit on a 15-item data set (`"newton"` 1 step 0.03, 2
     steps 0.02, `"one_step"` 0.05) and the vmapped gradients against single ones.
+    **Scope (decided 2026-11-26, #81)**: JSI is defined only for single-group unidimensional
+    models (one slope per item; Edwards, Houts & Cai, 2018). Its multidimensional /
+    multiple-group extension (including bifactor and two-tier models) and its use with non-Normal
+    latent distributions have not been studied, and there is no reference implementation (mirt's
+    `type = "JSI"` needs one factor; see also item 11 and §17.3), so it is not implemented:
+    `jsi()` raises `SpecificationError` for multiple-group, multidimensional and non-`Normal`
+    latent models, with a message saying why.
 18. **Package split: `flexpyctt` and `flexpyequate` (decided 2026-11-25, issue #87)**: tools that need no fitted IRT
     model are released as separate, JAX-free distributions from this repository. flexpyirt keeps
     BA-EM estimation and everything that uses its result.
@@ -2397,9 +2507,9 @@ data-independent shapes (§15.21).
    **Measured accuracy and speed** are recorded in VALIDATION.md (V36).
 
 2. **Information, expected score, reliability and summed-score EAP (#82, V37)**:
-   **Scope.** Unidimensional models, single and multiple groups. Every function raises
-   `SpecificationError` for a multidimensional model (the information matrix and directional
-   information are a later change).
+   **Scope.** Unidimensional models, single and multiple groups. The information matrix and
+   directional information of multidimensional models are item 3; reliability and the
+   summed-score functions raise `SpecificationError` for a multidimensional model.
    **API (Decision, owner 2026-11-25).** Module-level functions that take the fit first, like
    `link()` and `dimensionality()`:
    `item_information(res, theta, *, group=None)`, `test_information(res, theta, *, group=None)`,
@@ -2487,6 +2597,79 @@ data-independent shapes (§15.21).
    **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
    **Measured agreement** is recorded in VALIDATION.md (V37).
 
+3. **Information matrix and directional information of multidimensional models (#82, V43)**:
+   **Scope.** Confirmatory models from `with_factors` (2–3 factors, any loading pattern
+   including cross-loadings), bifactor models (`with_bifactor`) and two-tier models
+   (`with_two_tier`), single and multiple groups. `item_information`, `test_information` and
+   `expected_score` accept them; the new `information_matrix` returns the matrix itself.
+   `reliability`, `summed_score_table` and `score(method="EAPsum")` stay unidimensional (a
+   multidimensional summed-score EAP and a marginal reliability of a composite are separate
+   questions without a mirt reference).
+   **Information matrix.** With $\boldsymbol\theta\in\mathbb R^D$, item $j$'s Fisher information
+   matrix and the test information matrix are
+   $$\mathbf I_j(\boldsymbol\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)^\top,\qquad
+     \mathbf I(\boldsymbol\theta)=\sum_j\mathbf I_j(\boldsymbol\theta)$$
+   (Reckase, 2009, ch. 5), from the same forward-mode autodiff of the item kernel's category
+   log-probabilities as item 2, now with respect to all $D$ coordinates (`jax.jacfwd` gives
+   the $K_j\times D$ Jacobian). For every built-in family $P_{jk}$ depends on
+   $\boldsymbol\theta$ only through $\mathbf a_j^\top\boldsymbol\theta$, so $\mathbf I_j=c_j(\boldsymbol\theta)\,\mathbf a_j\mathbf a_j^\top$
+   has rank 1; the code does not use this (user-defined kernels need not have it). For a
+   unidimensional model $D=1$ and the matrix is the scalar of item 2; there is one code path.
+   In bifactor and two-tier models the kernels are evaluated at the full $D$-vector; the
+   dimension reduction of §17 concerns only the integration over $\boldsymbol\theta$ and plays
+   no role here.
+   **Directional information.** Along a unit vector $\mathbf u$ ($\|\mathbf u\|=1$),
+   $$I_{j,\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u,\qquad
+     I_{\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$$
+   (Reckase & McKinley, 1991; Ackerman, 1994), the information about $\boldsymbol\theta$ when
+   it moves along $\mathbf u$. mirt's `iteminfo(..., degrees = )` / `testinfo(..., degrees = )`
+   take the angles $\alpha_m$ to the axes and use $u_m=\cos\alpha_m$ without normalizing;
+   flexpyirt takes the direction vector and **normalizes it**, so the two agree whenever the
+   angles are consistent ($\sum_m\cos^2\alpha_m=1$), and mirt's angles are
+   `direction=np.cos(np.radians(degrees))`.
+   **API (Decision, 2026-11-26).**
+   - `theta` of a multidimensional model is a `(T, D)` array-like, or a DataFrame whose columns
+     are exactly the factor names (in any order; reordered to the model's order); a 1-D array of
+     length $D$ is a single point. Unidimensional models keep the 1-D `theta` of item 2. The
+     result is indexed by a `MultiIndex` whose level names are the factor names (index name
+     `theta` for unidimensional models, as before).
+   - `item_information(res, theta, *, direction=None, group=None)` and
+     `test_information(res, theta, *, direction=None, group=None)`: for a multidimensional model
+     `direction` (1-D, length $D$, finite, non-zero; normalized) is **required**, because there
+     is no natural default direction (mirt also requires `degrees`); one column per item,
+     respectively the columns `information` and `se`. For a unidimensional model `direction`
+     must be `None`. One direction per call; several directions are several calls.
+   - `test_information`'s `se` is $\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$,
+     the asymptotic conditional standard error of the ML estimate of the composite
+     $\mathbf u^\top\boldsymbol\theta$, which reduces to $I(\theta)^{-1/2}$ for $D=1$. It is not
+     $I_{\mathbf u}^{-1/2}$, which would be the standard error if the coordinates orthogonal to
+     $\mathbf u$ were known; the two coincide only when $\mathbf u$ is an eigenvector of
+     $\mathbf I$. Where $\mathbf I(\boldsymbol\theta)$ is numerically singular (its smallest
+     eigenvalue is at most $D\varepsilon$ times its largest, $\varepsilon$ the double-precision
+     machine epsilon; e.g. fewer linearly independent slope vectors than factors), `se` is
+     $+\infty$, as for $I=0$ in one dimension. The item matrices are symmetrized,
+     $(\mathbf M+\mathbf M^\top)/2$, so that they are exactly symmetric. **This differs from
+     mirt**: mirt has no SE in `testinfo()`, but its `plot(type = "SE")` / `type = "infoSE"` for
+     two- and three-factor models draws $1/\sqrt{I_{\mathbf u}}$ (`1/sqrt(testinfo(x, Theta,
+     degrees = ))`), the conditional-on-the-other-coordinates value above. flexpyirt reports the
+     composite SE instead, because it is the standard error of an estimable quantity and equals
+     the unidimensional SE when $D=1$; $1/\sqrt{I_{\mathbf u}}$ is `1 / np.sqrt(information)`
+     of the same DataFrame. The reference inverts the sum of mirt's item information matrices
+     in R.
+   - `information_matrix(res, theta, *, item=None, group=None)` returns a NumPy array of shape
+     `(T, D, D)`: the test information matrix, or with `item=` (an item name) that item's matrix.
+     It is an array rather than a DataFrame because a $D\times D$ matrix per point has no flat
+     layout that is not awkward to index; rows and columns follow the fitted model's `Model.factor_names`.
+     Unidimensional models give `(T, 1, 1)`. This is mirt's
+     `iteminfo(..., multidim_matrix = TRUE)` (per point), summed over items for the test.
+   - `expected_score(res, theta, *, group=None)`: $E_j(\boldsymbol\theta)=\sum_kk\,P_{jk}(\boldsymbol\theta)$
+     and `total`, as in item 2 with the multidimensional `theta`; mirt's `expected.item()` /
+     `expected.test()` with a $D$-column `Theta`.
+   **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
+   **Measured agreement** is recorded in VALIDATION.md (V43).
+
 ## 19. Multidimensional scale linking (M6)
 
 1. **Linking of confirmatory multidimensional models (`link(..., transformation=)`, V40, #78)**:
@@ -2566,7 +2749,255 @@ data-independent shapes (§15.21).
    $\mathbf A$ and NaN otherwise (a rotated standard error needs the posterior covariance, which
    the score table does not carry).
 
-## 20. Person fit and residual item fit (#108)
+## 20. User-defined item models (#86)
+
+1. **Public contract.** `flexpyirt.items.ItemModel` and `flexpyirt.items.ItemKernel` (§6) are the
+   public extension point: an object that implements them can be put in a `Model` like a built-in
+   item model, and every part of the library that only evaluates `log_prob` works with it.
+   Instead of adding more built-in models, a model such as GGUM is written by the user.
+   - **`ItemModel`** (Spec layer; all members required): the class attribute `name` (a non-empty
+     string that is not a built-in name; shown in the `model` column and stored in JSON),
+     `kernel` (the kernel with `n_factors == 1`), `default_free()`, `start_values(item, rest)`
+     and `bounds()`. The last three describe the unidimensional parameter layout
+     `kernel.param_names`; in a model with $D$ factors the slope entry is used for each of the $D$
+     slopes. It should be a frozen dataclass (hashable, compared by value, like `Model`).
+   - **`ItemKernel`** (Core layer), required: `n_factors`, `with_factors(n_factors)`,
+     `param_names`, `n_categories` (≥ 2; categories are coded $0..K-1$), `slope_params`,
+     `intercept_params` and `log_prob(theta, params)`. The kernel must be hashable and compare
+     equal exactly when it describes the same function (a frozen dataclass does both): it is a
+     static argument of jit, and items with equal kernels form one family (§4.3).
+   - **Optional kernel members**: `irt_names`, `irt_dependency_indices` and
+     `irt_thresholds(params)`. With them, `FitResult.items` adds display thresholds with
+     delta-method SEs (§7, §15.18); without them it shows the internal parameters only. Internal
+     code reads them through `items.irt_names(kernel)`, `items.irt_dependency_indices(kernel)` and
+     `items.irt_thresholds(kernel, params)`, which return empty values for a kernel without them.
+     `slope_params` and `intercept_params` stay required (they decide the parameter layout and
+     the identification checks of §4.5; `intercept_params` may be empty).
+   - **Parameter layout**: `param_names[:n_factors]` are the slopes and equal `slope_params`
+     (every model has a slope: the multidimensional starting values, the scale of identification
+     checks, the Heywood check and the ML/WLE extreme-pattern rule all read it). The other
+     parameters follow in an order that does not depend on `n_factors`.
+   - **`log_prob(theta, params)`** receives the nodes as a `(Q, D)` float64 array on every code
+     path (the ML/WLE scoring helpers that passed a 1-D `theta` now reshape it to `(1, D)`) and
+     `params` as a float64 vector in `param_names` order, and returns the `(Q, n_categories)`
+     log-probabilities. It must be written with `jax.numpy` (traced by jit, differentiated
+     twice by autodiff for the Newton M-step and the SEs) and must not branch in Python on
+     parameter values. For parameters outside the model's domain it should return NaN, which the
+     M-step line search rejects (§15.3).
+2. **Checking the contract.** `Model.__post_init__` calls `items.check_item_model` for every item
+   whose model is not built in: a non-empty, non-built-in `name`; a hashable kernel with
+   `n_factors == 1`; unique `param_names`; exactly one slope, first; `intercept_params` among the
+   non-slope parameters; `n_categories >= 2`; `default_free()` and both bounds of length
+   `len(param_names)` with `lower < upper`. Errors are `SpecificationError` naming the item.
+   `log_prob` itself is not checked (its shape and values are only known when traced).
+3. **What works with a user-defined model.**
+
+   | Feature | Status |
+   |---|---|
+   | `fit` (EM, MAP with priors, fixed parameters, equality constraints, groups, weights, latent distributions) | Yes |
+   | Multidimensional, bifactor and two-tier models | Yes, through `kernel.with_factors` |
+   | Standard errors (every `se=` method) | Yes |
+   | `score`: EAP, MAP, PV, EAPsum | Yes |
+   | `score`: ML, WLE | Yes, but the all-lowest / all-highest pattern rule (§15.24) assumes that category $0$ is the lowest and $K-1$ the highest response for a positive slope; it is not meaningful for a non-monotone model |
+   | `item_fit`, `m2`, `local_dependence`, `jsi`, `dif`, information, expected score, reliability, summed scores | Yes (they evaluate `log_prob`; the item score is the category $0..K-1$) |
+   | Display thresholds in `FitResult.items` | Only with the optional kernel members |
+   | `Model.fix_from(parameterization="slope_intercept")` | Yes |
+   | `Model.fix_from(parameterization="irt")` | No (`SpecificationError`): the conversion from $b$ is model-specific |
+   | `link()` | No (`SpecificationError`): the scale transformation of the parameters (§16.5, §19) is model-specific |
+   | Free latent variance by default (§4.5) | Only for built-in `Rasch` / `PCM`; for a fixed-slope custom model use `Model.with_latent(Normal(free_var=True))` |
+   | `to_json` / `from_json` | After `register_item_model` (item 4) |
+
+4. **JSON (`register_item_model(cls, *, to_dict=None, from_dict=None)`).** A user-defined item
+   model is stored as `{"type": cls.name, **to_dict(model)}`, the same shape as the built-in
+   entries (§15.28), and rebuilt with `from_dict(fields)` (the object without `"type"`). The
+   defaults handle a dataclass whose `__init__` fields are `bool`, `int`, finite `float` or
+   `str`. The registry is per Python session (never `eval` or `pickle`): `to_json` of an
+   unregistered model and `from_json` of an unknown `"type"` raise `SpecificationError` naming
+   `register_item_model`. Registering a built-in name, or another class under a name already
+   taken (with a different `__qualname__`), is an error; a class with the same `__qualname__`
+   replaces the earlier registration (a re-run notebook cell). `from_dict` must return an
+   instance of the registered class with that `name`, and the rebuilt model is checked as in
+   item 2. No stored name changes, so `schema_version` stays 7: a file with a user-defined model
+   is read by a session that registered the class, and older flexpyirt versions report its
+   `"type"` as unknown.
+5. **Starting values in multidimensional models.** For a user-defined model, the non-slope
+   starting values are `start_values(item, rest)[1:]` with the rest score on all items (the
+   built-in effective-slope rule of §15.31 is model-specific). The slopes use the built-in rule
+   (factor-specific item–rest correlations), or `start_values(...)[0]` on every loaded factor
+   when the slope is fixed by default.
+6. **Verification.** `tests/test_custom_items.py` re-implements the 2PL (without display members)
+   and the GRM (with them) against the public protocol only. Fitted together in one mixed model,
+   they reproduce the built-in fit to $10^{-12}$: log-likelihood, iteration count, estimates,
+   Oakes SEs, display thresholds and their SEs, EAP/MAP/ML/WLE scores, S-X2, M2 and item
+   information. The multidimensional case agrees to $10^{-5}$ (different starting values, item
+   5). The tests also cover JSON registration, the contract checks and the unsupported features.
+   A user-defined model is as correct as its `log_prob`: flexpyirt verifies the machinery, not the
+   model. The guide's worked example is the 2PL re-implementation; a model not built in (such as
+   GGUM, Roberts, Donoghue & Laughlin, 2000) would be presented as validated only with its own
+   mirt comparison.
+
+## 21. Plots and the numbers behind them (#103, V48)
+
+1. **Where plotting lives (Decision, owner 2026-11-26: option A of #103).** A module
+   `flexpyirt.plotting` with matplotlib as the optional extra `flexpyirt[plot]`. matplotlib is
+   imported inside each plot function, never by `import flexpyirt` or
+   `import flexpyirt.plotting`; without it a plot function raises
+   `errors.MissingDependencyError` (a `FlexpyirtError` and an `ImportError`) naming the extra.
+   The numbers behind every figure come from public functions returning DataFrames, defined in
+   `flexpyirt.curves` and exported from `flexpyirt`; only those numbers are validated (V48). The
+   plot functions are thin: they call those functions, draw the columns, return matplotlib
+   objects and never call `plt.show()`. They are smoke-tested on the Agg back end (objects
+   created, plotted data equal to the DataFrames); there is no image comparison.
+   **Scope.** Unidimensional models, every item family, single and multiple groups, any latent
+   distribution. Interactive back ends, surfaces of multidimensional models, styling themes and
+   figures for flexpyctt / flexpyequate are left out. Nothing is stored in `FitResult`;
+   `schema_version` is unchanged.
+
+2. **Trace lines: `item_probabilities(res, theta, *, items=None, group=None)`.** The category
+   probabilities $P_{jk}(\theta)=\Pr(Y_j=k\mid\theta)$, $k=0,\dots,K_j-1$, from the item
+   kernels (`_information.category_probabilities`, a jitted kernel returning
+   $(G, T, J, K_{\max})$ padded with zeros). Long format: `item`, `category`, `theta`,
+   `probability` (one row per item, category and $\theta$, in that order). `group` is a group
+   name, as in `item_information()`; it is required for a multiple-group model. mirt:
+   `probtrace()`.
+
+3. **Empirical item curves: `empirical_item_curve(res, data, *, items=None, n_bins=10,
+   group=None, item_names=None)`.** For item $j$, the $n_j$ respondents who answered it are
+   sorted by their EAP score $\hat\theta_i$ (`score(method="EAP")` on the fitted grid; ties in
+   row order, a stable sort) and cut into $B$ consecutive bins: every bin gets
+   $\lfloor n_j/B\rfloor$ respondents and, of the remainder $c=n_j\bmod B$,
+   $\lfloor c/2\rfloor$ go to the first bin and $c-\lfloor c/2\rfloor$ to the last. This is
+   mirt's `itemfit()` rule (`group.bins`), equal-count bins of EAP $\theta$, the rule proposed
+   in #103. For bin $b$,
+   $$\bar\theta_b=\frac1{n_b}\sum_{i\in\mathcal B_b}\hat\theta_i,\qquad
+   O_{bk}=\frac1{n_b}\sum_{i\in\mathcal B_b}[y_{ij}=k],\qquad E_{bk}=P_{jk}(\bar\theta_b)$$
+   (Bock, 1972; Yen, 1981): the columns `theta`, `observed` and `expected`, with `n` $=n_b$,
+   `bin` $=1,\dots,B$ and `category`. $n_bO_{bk}$ and $n_bE_{bk}$ are the observed and expected
+   tables of mirt's `itemfit(fit_stats = "X2", return.tables = TRUE)` before its cell collapsing
+   (`mincell.X2`), and $(\bar\theta_b,O_{bk})$ the points of `itemfit(empirical.plot = )`.
+   Missing responses: a respondent enters the bins of the items they answered (mirt's `pick`).
+   A multiple-group model is binned within each group with that group's parameters (mirt's
+   per-group `itemfit()`); `group=` are the labels of the rows of `data`, as in `score()`, and
+   the result has a leading `group` column. An item (in a group) with fewer than `n_bins`
+   responses raises `SpecificationError` (mirt would form empty bins). Differences from mirt
+   left out on purpose: no cell collapsing and no $X^2$ (a fit statistic is a separate issue),
+   no Clopper–Pearson interval of `empirical.CI`, and `method` is EAP only (mirt's `method=`).
+
+4. **Item locations of the Wright map: `wright_map_table(res, data, *, group=None,
+   item_names=None, method="EAP")`.** Returns `WrightMapTable(persons, items)`, a named tuple of
+   two DataFrames. `persons` has `theta` from `score(method=method)` (`"EAP"`, `"MAP"` or
+   `"WLE"`, all finite) with `data`'s index. `items` has one row per item threshold: `item`,
+   `category` $k=1,\dots,K_j-1$ and `location`, the Thurstonian threshold
+   $$\tau_{jk}:\quad P(Y_j\ge k\mid\tau_{jk})=\sum_{c\ge k}P_{jc}(\tau_{jk})=\tfrac12$$
+   (Wright & Masters, 1982; Wu, Adams, Wilson & Haldane, 2007; TAM's `tam.threshold()`). It is
+   $b_j=-d_j/a_j$ for 2PL / Rasch and $b_{jk}$ for GRM items; for 3PL / 4PL items it is where
+   $P=1/2$ (not $b$, where $P=(g+u)/2$) and for GPCM / PCM items it differs from the step
+   difficulties. One definition for every family is why the issue's "`b` / Thurstonian
+   threshold" became the threshold alone. **Root finding**: $P(Y_j\ge k\mid\theta)$ is
+   evaluated on 4001 equispaced points of $[-20,20]$; the first sign change of
+   $P(Y_j\ge k\mid\theta)-1/2$ is refined by 64 bisection steps, all thresholds at once (one
+   kernel call per step). The function is increasing for every ordered family with $a>0$; for
+   nominal items (unordered categories) it is the first crossing in the data's category order;
+   without a crossing (e.g. a 3PL item with $g\ge1/2$) the location is NaN. In a
+   multiple-group model `items` holds every group's thresholds from that group's parameters
+   (a `group` column in both tables).
+
+5. **Plot functions** (`flexpyirt.plotting`; default $\theta$ grid: 161 points on $[-4,4]$,
+   `theta=` to change it).
+   - `plot_item_curves(res, items=None, *, data=None, group=None, n_bins=10, theta=None,
+     item_names=None, ax=None) -> Figure`: one panel per item (three per row). Dichotomous
+     items show $P_{j1}$, polytomous items every category. With `data` the points of
+     `empirical_item_curve()`. A multiple-group fit draws one curve per group in each panel
+     (colour by group, line style by category): the **DIF plot**. `ax=` draws one item into an
+     existing Axes (the figure of `ax` is returned). `group=` are row labels used with `data`;
+     the curves always cover every group.
+   - `plot_information(res, items=None, *, standard_error=False, group=None, theta=None,
+     ax=None) -> Axes`: `test_information()` (default) or `item_information()` of the given
+     items; `standard_error=True` adds `se` on `ax.twinx()`. `group` is a group name (default:
+     every group).
+   - `plot_expected_score(res, *, group=None, theta=None, ax=None) -> Axes`: column `total` of
+     `expected_score()`, one line per group by default.
+   - `plot_wright_map(res, data, *, group=None, item_names=None, method="EAP", n_bins=30) ->
+     Figure`: two axes sharing the $\theta$ axis, a horizontal histogram of `persons` and the
+     `items` thresholds as markers per item (overlaid per group).
+   **Functions, not `FitResult.plot_*()` methods**, as `item_information()` and `link()`: the
+   plotting dependency stays out of the result class.
+   **`group=` means** a group name in the functions of $\theta$ (`item_probabilities`,
+   `plot_information`, `plot_expected_score`, like `item_information`) and the labels of the
+   rows of `data` where `data` is taken (`empirical_item_curve`, `wright_map_table`,
+   `plot_item_curves`, `plot_wright_map`, like `reliability` and `score`).
+
+## 22. Common-item screening and item parameter drift (#105)
+
+1. **`screen_common_items()` (V50, #105)**: screens the common items of a unidimensional linking
+   (§16.5) for item parameter drift and repeats the linking without the items that moved. It is a
+   separate function, not an argument of `link()`: `link()` takes the anchor set as given, and the
+   screening calls `link()` once per purification step. Models: one-factor fits with the item
+   families `link()` accepts (2PL, Rasch, 3PL, 4PL, GRM, GPCM, PCM, nominal, mixed); multiple-group
+   fits through `source_group` / `target_group`. Multidimensional fits raise
+   `SpecificationError`.
+   **Per-item quantities** under the current linking $(A, B)$, with the source item transformed
+   to the target scale ($\xi_j^* $ of §16.5):
+   - slope ratio $\ell_j = \log|a_j^{*}| - \log|a_j^{\mathrm{tgt}}|$ (`log_ratio_a`), with
+     $a_j^* = a_j^{\mathrm{src}}/A$; NaN when a slope is 0;
+   - location difference $\delta_j = b_j^{*} - b_j^{\mathrm{tgt}}$ (`difference_b`, source minus
+     target), where the **location** $b_j$ of an item is its display difficulty $-d/a$ for 2PL /
+     Rasch / 3PL / 4PL, the mean of its display thresholds $\bar b_j = \frac{1}{K_j-1}\sum_k b_{jk}$
+     for GRM and GPCM / PCM (the step difficulties for GPCM), and $-d_{K-1}/((K-1)\,a)$ for the
+     nominal model (the crossing point of its first and last category curves, as in the Mean/Mean
+     start of §16.5). Every one of these transforms as $b^* = A\,b + B$, so
+     $\delta_j = A\,b_j^{\mathrm{src}} + B - b_j^{\mathrm{tgt}}$ (decision for #105 open question 4:
+     the mean threshold keeps one location per item, so a polytomous item is not counted
+     $K_j - 1$ times in the median and IQR);
+   - displacement $|\delta_j|$ (`displacement`);
+   - $\mathrm{RMSD}_j = \big\{\sum_q w_q^{(t)}\,[E_j^{*}(\theta_q) - E_j^{\mathrm{tgt}}(\theta_q)]^2\big\}^{1/2}$
+     (`rmsd`), the root mean squared difference of the expected item score curves
+     $E_j(\theta) = \sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)$ (category index as score, as in the
+     Stocking–Lord TCC of §16.5) on the target group's fitted grid $(\theta_q^{(t)}, w_q^{(t)})$ (the
+     default grid of `link()`). $E_j^*(\theta) = E_j^{\mathrm{src}}((\theta - B)/A)$. It compares two
+     model curves; it is not the observed-versus-model RMSD of item fit. It is on the item's score
+     scale ($0$ to $K_j - 1$) and is not divided by $K_j - 1$.
+   **Robust z** (Huynh & Meyer, 2010): for $x \in \{\ell, \delta\}$ over the common items $\mathcal C$,
+   $$z_j = \frac{x_j - \operatorname{median}_{i\in\mathcal C} x_i}{0.74\,\mathrm{IQR}_{i\in\mathcal C}(x_i)},$$
+   with the IQR from linearly interpolated quantiles (R `quantile(type = 7)`, NumPy's default
+   `linear`); $0.74 \approx 1/1.349$ makes $0.74\,\mathrm{IQR}$ a consistent estimate of a normal
+   standard deviation. The median and IQR are taken over **all** common items, removed ones
+   included, and only the differences are recomputed after each relinking: both are robust to the
+   drifted items by construction, whereas re-estimating them on the shrinking anchor set shrinks
+   the IQR and flags further items at every step (in the V50a simulation, with three planted
+   drifts among 12 common items, it removed 10 items before `min_items` stopped it). When the IQR is not positive (below $10^{-12}$, e.g. the slope ratios of Rasch items, which
+   are all $-\log A$), that z is NaN and does not flag. Huynh & Meyer compute the statistic on the
+   two calibrations' raw parameters; here it is computed after the linking, on $b^*$ and $a^*$. The
+   slope statistic is the same either way ($\log A$ shifts every $\ell_j$ equally), and the location
+   statistic is the same when $A = 1$ (Rasch); otherwise the transformed version keeps both
+   locations on the target scale, which is also the scale of the displacement.
+   **Statistic and flag.** `statistic="robust_z"`: $s_j = \max(|z_{a,j}|, |z_{b,j}|)$ (NaN entries
+   ignored), default threshold 1.645 (Huynh & Meyer, 2010); `"displacement"`: $s_j = |\delta_j|$,
+   default 0.3 logits; `"rmsd"`: $s_j = \mathrm{RMSD}_j$, default 0.1. An item is flagged when
+   $s_j > $ `threshold`. The defaults of displacement and RMSD are conventions agreed in #105, not
+   derived values; programmes set their own.
+   **Purification** (`purify=True`; iterative linking in the sense of Candell & Drasgow, 1988):
+   step 0 links on all common items. At each step the statistics are recomputed under the current
+   linking and anchor set; if no kept item is flagged the loop stops. Otherwise
+   `removal="largest"` removes the flagged item with the largest $s_j$ (ties: the first in item
+   order) and `removal="all"` removes every flagged item, in decreasing $s_j$; the linking is
+   repeated on the remaining items. Removals never take the anchor set below `min_items` (default
+   2): when no item can be removed the loop stops with a `ScreeningWarning`, and so it does when
+   `max_iter` removal steps are used while kept items are still flagged. `purify=False` computes the
+   statistics once, under the linking on all common items, and removes nothing.
+   **Result** (`CommonItemScreeningResult`): `table` (one row per common item under the final
+   linking: `item`, `target_item`, `model`, `a_source` / `b_source` (transformed), `a_target` /
+   `b_target`, `log_ratio_a`, `difference_b`, `displacement`, `robust_z_a`, `robust_z_b`, `rmsd`,
+   `statistic`, `flagged`, `kept`, `iteration_removed` (nullable integer)), `link` (final
+   `LinkResult`), `initial_link`, `kept_items`, `removed_items` (in removal order), `history` (one row
+   per step: `iteration`, `n_items`, `A`, `B`, `criterion`, `converged`, `removed`).
+   `stack_screening_tables({administration: result, ...})` stacks the tables of several
+   administrations screened against one base form, with an `administration` column first.
+   **Not included**: likelihood-ratio or Wald DIF tests inside one multiple-group fit
+   (`FitResult.dif()`, #104), robust linking criteria that down-weight instead of removing items,
+   linking error over chains, multidimensional screening.
+
+## 23. Person fit and residual item fit (#108)
 
 1. **Scope and API (V53, #108)**: `FitResult.person_fit(data, *, method="EAP", group=None,
    item_names=None, statistics=("lz", "infit", "outfit"))` returns one row per respondent with
@@ -2652,7 +3083,10 @@ data-independent shapes (§15.21).
    only). The $l_z^*$ entry is listed in the user documentation only if the owner accepts this
    validation (#108).
 
+
 ## References
+- Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
+- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -2668,6 +3102,7 @@ data-independent shapes (§15.21).
 - Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
 - Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
+- Candell, G. L., & Drasgow, F. (1988). An iterative procedure for linking metrics and assessing item bias in item response theory. *Applied Psychological Measurement*, 12(3), 253–260.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
@@ -2692,8 +3127,10 @@ data-independent shapes (§15.21).
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
+- Houts, C. R., & Cai, L. (n.d.). *flexMIRT user's manual: Flexible multilevel multidimensional item analysis and test scoring* (versions 3.5–3.7). Vector Psychometric Group.
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
+- Huynh, H., & Meyer, P. (2010). Use of robust z in detecting unstable items in item response theory models. *Practical Assessment, Research & Evaluation*, 15(2).
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
@@ -2727,7 +3164,9 @@ data-independent shapes (§15.21).
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
+- Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
@@ -2756,6 +3195,8 @@ data-independent shapes (§15.21).
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
 - Wright, B. D., & Masters, G. N. (1982). *Rating Scale Analysis*. MESA Press.
+- Wu, M. L., Adams, R. J., Wilson, M. R., & Haldane, S. A. (2007). *ACER ConQuest Version 2: Generalised Item Response Modelling Software*. Australian Council for Educational Research.
+- Yen, W. M. (1981). Using simulation results to choose a latent trait model. *Applied Psychological Measurement*, 5(2), 245–262.
 - Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.

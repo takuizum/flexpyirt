@@ -25,7 +25,8 @@ for the models and algorithms behind them, see [Theory](theory.md).
 17. [Number of dimensions](#17-number-of-dimensions)
 18. [Local dependence and the dimensionality report](#18-local-dependence-and-the-dimensionality-report)
 19. [DETECT](#19-detect)
-20. [Errors and warnings](#20-errors-and-warnings)
+20. [User-defined item models](#20-user-defined-item-models)
+21. [Errors and warnings](#21-errors-and-warnings)
 
 ## 1. Setup
 
@@ -131,7 +132,8 @@ logit scale; the interior ML estimates agree). Polytomous categories start at 0 
 data coded from 1, such as mirt's `Science`). `Nominal` has no display `b` columns: its
 categories are not ordered, so adjacent-category thresholds on the $\theta$ scale are not defined
 in general (they are singular when $\mathrm{ak}_k=\mathrm{ak}_{k-1}$), and mirt's
-`coef(m, IRTpars = TRUE)` reports Bock's zero-sum slopes and intercepts instead.
+`coef(m, IRTpars = TRUE)` reports Bock's zero-sum slopes and intercepts instead. A model that is
+not in the table can be written by the user ([section 20](#20-user-defined-item-models)).
 
 ```python
 theta3 = rng.normal(0, 1, 2000)
@@ -200,6 +202,16 @@ res = fit(
   variance, multiple groups, 3PL/4PL, or tight `tol`). It converges to the same fixed point with
   monotone `history["loglik"]` and far fewer EM evaluations. Plain EM (`squarem=False`) is the
   default.
+- **`m_step_scale="unconstrained"`** (default `"natural"`): runs the M-step's Newton steps on
+  $\operatorname{logit}$ / $\log$ scales of the parameters that have a bound — $g$ and $u$ on
+  $\operatorname{logit}$, latent variances on $\log$, factor correlations on
+  $2\operatorname{atanh}\rho$, and a slope only when a `LogNormalPrior` or an edited bound
+  restricts it to $(0, \infty)$. Unbounded parameters such as slopes are not transformed, so
+  negative slopes stay possible. The objective is the same, so an interior solution is the same as
+  with the default; the estimates, parameter table, priors and standard errors stay on the natural
+  scale. The difference is at a bound: the default stops exactly on it (e.g. $g=0$), while the
+  unconstrained scale only approaches it, sometimes after many more iterations. Both raise
+  `HeywoodWarning` once a parameter is within `1e-4` of its bound.
 - **`quadrature`**: the latent-variable grid. The default is 61 equally spaced points on
   $[-6, 6]$ (mirt's default). See [section 13](#13-choosing-the-quadrature-grid) for when to
   widen it.
@@ -394,8 +406,8 @@ the [reference](reference.md#summed_score_distribution) for details.
 `item_information(res, theta)` and `test_information(res, theta)` give the Fisher information of
 each item and of the whole test at the values `theta`, and `expected_score(res, theta)` gives the
 expected item scores and their sum, the test characteristic curve. They work for every item
-model of a unidimensional fit. Each returns a DataFrame indexed by `theta`, so `.plot()` draws the
-curves. `test_information` also has the conditional standard error `se` $=1/\sqrt{I(\theta)}$.
+model. Each returns a DataFrame indexed by `theta`, so `.plot()` draws the curves (multidimensional
+models: [section 14](#information-of-multidimensional-models)). `test_information` also has the conditional standard error `se` $=1/\sqrt{I(\theta)}$ (unidimensional models).
 
 `reliability(res)` returns the marginal reliability: the reliability
 $\sigma^2/(\sigma^2+1/I(\theta))$ of a score with error variance $1/I(\theta)$, averaged over the
@@ -424,6 +436,67 @@ print(reliability(res, df))  # with data: columns marginal, empirical
   $N(0, 1)$. For another mean or variance mirt's function does not use the fitted distribution;
   flexpyirt's value does, and it does not change when the latent scale is transformed linearly.
 - `reliability()` needs `Normal` latent distributions.
+
+### Plots
+
+`flexpyirt.plotting` draws the figures looked at in every analysis: item characteristic curves
+with observed proportions, information curves, the test characteristic curve and the
+item–person (Wright) map. It needs matplotlib, installed with `pip install "flexpyirt[plot]"`;
+without it `import flexpyirt` still works and the plot functions raise
+`MissingDependencyError`. The functions return matplotlib objects (save them with
+`fig.savefig(...)`) and never call `plt.show()`.
+
+Every number in a figure comes from a function that returns a DataFrame, so the figures can be
+redrawn with any other library:
+
+- `item_probabilities(res, theta)`: the category probabilities $P_{jk}(\theta)$ (mirt's
+  `probtrace()`), one row per item, category and `theta`.
+- `empirical_item_curve(res, data)`: respondents sorted by EAP $\theta$ and cut into `n_bins`
+  bins of equal size (as mirt's `itemfit()`); per bin and category the mean `theta`, the number
+  of respondents `n`, the `observed` proportion and the model's `expected` probability at that
+  mean.
+- `wright_map_table(res, data)`: `persons` (EAP scores) and `items` (for each item and category
+  $k\ge1$ the `location` where $P(Y\ge k\mid\theta)=1/2$, the Thurstonian threshold; $b$ for
+  2PL items).
+
+```python
+from flexpyirt import empirical_item_curve, item_probabilities, wright_map_table
+
+trace = item_probabilities(res, np.linspace(-3.0, 3.0, 7), items="q01")
+print(trace.head(3).round(3))  # item, category, theta, probability
+observed = empirical_item_curve(res, df, items=["q01"], n_bins=10)
+print(observed.head(4).round(3))  # item, bin, theta, n, category, observed, expected
+wright = wright_map_table(res, df)
+print(wright.items.head(3).round(3))  # item, category, location
+```
+
+```python
+from flexpyirt.plotting import (
+    plot_expected_score,
+    plot_information,
+    plot_item_curves,
+    plot_wright_map,
+)
+
+fig_curves = plot_item_curves(res, items[:3], data=df)  # one panel per item, observed points
+ax_information = plot_information(res, standard_error=True)  # test information and its SE
+ax_expected = plot_expected_score(res)  # test characteristic curve
+fig_wright = plot_wright_map(res, df)  # persons beside item locations
+```
+
+![Item characteristic curves with observed proportions](images/plots/item_curves.png)
+
+![Test information and standard error](images/plots/information.png)
+![Test characteristic curve](images/plots/expected_score.png)
+
+![Wright map](images/plots/wright_map.png)
+
+- `plot_item_curves` draws $P(Y=1\mid\theta)$ for dichotomous items and every category for
+  polytomous items; `ax=` draws a single item into existing axes.
+- `plot_information(res, items=[...])` draws item information instead of test information.
+- For a multiple-group model the curves of every group are drawn (see
+  [DIF](#differential-item-functioning-dif)); with `data`, pass `group=labels` as for
+  `score()`.
 
 ### Limited-information fit (M2)
 
@@ -792,6 +865,17 @@ dif_table = mg.dif(mg_df, group=group, items=items[6:9])
 print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
 ```
 
+`plot_item_curves` on a multiple-group fit draws each group's curve, with the observed
+proportions of each group when `data` and `group` are given: the DIF plot of an item.
+
+```python
+from flexpyirt.plotting import plot_item_curves
+
+fig_dif = plot_item_curves(mg, items[6:9], data=mg_df, group=group)
+```
+
+![Item characteristic curves per group (DIF plot)](images/plots/dif.png)
+
 ## 10. Fixed item parameter calibration (FIPC)
 
 Fix some items at the values of an already scaled item bank and estimate the new items and the
@@ -828,7 +912,7 @@ fipc_spec_irt = (
 ## 11. Priors and MAP estimation
 
 Attach prior distributions to item parameters with `Model.prior(*, param, dist, items=None)` to
-perform Bayes modal (MAP) estimation (Mislevy, 1986; Swaminathan & Gifford, 1986). Three
+perform Bayes modal (MAP) estimation (Mislevy, 1986; Swaminathan & Gifford, 1986). Four
 natural-scale priors are provided:
 
 | Class | Support | Typical use |
@@ -836,9 +920,21 @@ natural-scale priors are provided:
 | `NormalPrior(mean, sd)` | $(-\infty, \infty)$ | Intercepts `d` / `dk`, or slopes `a` |
 | `LogNormalPrior(mean_log, sd_log)` | $(0, \infty)$ | Slopes `a` ($\log a \sim N(\mu, s^2)$) |
 | `BetaPrior(a, b)` | $(0, 1)$ | 3PL / 4PL asymptotes `g` and `u` |
+| `LogitNormalPrior(mean_logit, sd_logit)` | $(0, 1)$ | 3PL / 4PL asymptotes ($\operatorname{logit} g \sim N(\mu, s^2)$) |
 
 Priors are evaluated directly on the **natural parameter scale** without a Jacobian term
-(matching R mirt's log-prior objective `LL.Priors`). In a multiple-group model, `.prior()`
+(matching R mirt's log-prior objective `LL.Priors`). `LogitNormalPrior` is the density of $g$
+when $\operatorname{logit} g$ is normal (Aitchison & Shen, 1980), so its formula contains
+$-\log g - \log(1 - g)$: that term is part of the density of $g$, not a change of scale. For
+example, `LogitNormalPrior(-1.0986, 0.5)` centers $g$ on $1/4$, the chance rate of four-option
+items. flexMIRT's `Guessing : Normal(mean, sd)` (and R mirt's `PRIOR = (..., g, norm, mean, sd)`)
+describes the same distribution of $g$ but maximizes the posterior over $\operatorname{logit} g$,
+which leaves that term out, so its estimates of $g$ typically lie somewhat closer to $1/2$. To
+reproduce those estimates, pass `mode_scale="logit"`:
+`LogitNormalPrior(-1.0986, 0.5, mode_scale="logit")` evaluates
+$\log\phi(\operatorname{logit} g; \mu, s)$ without the Jacobian, so the MAP estimate, the
+log posterior and the standard errors are those of the logit-metric objective (the SE of $g$
+is the delta-method SE $g(1-g)\,\mathrm{SE}(\operatorname{logit} g)$). In a multiple-group model, `.prior()`
 applies to every group, and a parameter shared across groups (same `free_id`) is counted **once**.
 Fixed parameters ignore their prior. Priors on latent-distribution parameters (`"mean"`, `"var"`)
 are not supported (`SpecificationError`).
@@ -883,7 +979,7 @@ print(table.head(4))
 | `value` | Starting value (the fixed value if not free) |
 | `free` | Whether the parameter is estimated |
 | `lower`, `upper` | Bounds; starting values must lie strictly inside |
-| `prior` | Prior object (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, or `None`; ignored if fixed) |
+| `prior` | Prior object (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior`, or `None`; ignored if fixed) |
 | `free_id` | Free-parameter number. **Rows with the same number are constrained to be equal.** Newly freed rows may keep `-1` (they get a number) |
 
 ```python
@@ -1028,6 +1124,41 @@ res_mg = fit(
 print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
 ```
 
+### Information of multidimensional models
+
+The information functions of section 5 also work for confirmatory, bifactor and two-tier models.
+With several factors the information about $\boldsymbol\theta$ is a matrix,
+$\mathbf I(\boldsymbol\theta)=\sum_j\sum_kP_{jk}\,\nabla\log P_{jk}\,\nabla\log P_{jk}^\top$, which
+`information_matrix(res, theta)` returns as an array of shape `(T, D, D)` (one item's with
+`item=`). `item_information` and `test_information` give the information in one direction
+$\mathbf u$ of the latent space, $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$ (Reckase &
+McKinley, 1991), so they need `direction=`, a vector with one entry per factor (it is scaled to
+length 1). `theta` is a `(T, D)` array or a DataFrame with the factor names as columns, and the
+results are indexed by the factor values. `expected_score` needs no direction.
+
+```python
+from flexpyirt import expected_score, information_matrix, item_information, test_information
+
+grid = pd.DataFrame({"F1": [-1.0, 0.0, 1.0], "F2": [0.0, 0.0, 0.5]})
+angle = np.radians(30.0)
+direction = [np.cos(angle), np.sin(angle)]  # 30 degrees from F1 (mirt: degrees = c(30, 60))
+print(item_information(res_mirt, grid, direction=direction).iloc[:, :3].round(3))
+print(test_information(res_mirt, grid, direction=direction).round(3))  # information, se
+print(information_matrix(res_mirt, grid)[0].round(3))  # 2 x 2 test information at (-1, 0)
+print(expected_score(res_mirt, grid)["total"].round(2))
+```
+
+- mirt's `degrees=` (the angle to each axis) corresponds to `direction=np.cos(np.radians(degrees))`
+  when the angles are consistent ($\sum_m\cos^2\alpha_m=1$); flexpyirt scales the direction to length
+  1, mirt does not.
+- `test_information`'s `se` is the standard error of the estimate of the combination
+  $\mathbf u^\top\boldsymbol\theta$, $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$, which is at least
+  $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ because the other directions are estimated too. It is
+  infinite where the information matrix is singular. mirt's `plot(type = "SE")` draws
+  $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ instead, `1 / np.sqrt` of the `information` column.
+- In bifactor and two-tier models `theta` has a column for every factor, general and specific.
+- Reliability and the summed-score functions are for unidimensional models only.
+
 ### Bifactor models
 
 `.with_bifactor(specific={...}, general="general")` declares one general factor on which every item
@@ -1169,6 +1300,55 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
   `Model.fix_from()`; Rasch/PCM items get slope $1/A$); `linked.transform_theta()` transforms
   scalars, arrays, Series, or scoring DataFrames (`theta`, `se`, and plausible values `pv1..`),
   treating $(A, B)$ as known (the transformed `se` excludes linking error).
+
+### Screening the common items
+
+Before a linking is trusted, the common items are checked for item parameter drift: an item whose
+parameters moved between the two calibrations (exposure, a changed context) is removed from the
+anchor set and the linking is repeated. `screen_common_items(source, target)` links with `link()`,
+transforms the source items and computes for every common item
+
+| `statistic` | Per item | Default `threshold` |
+|---|---|---|
+| `"robust_z"` (default) | $\max(\lvert z_a\rvert, \lvert z_b\rvert)$: robust z of the log slope ratios and of the location differences, $(x - \mathrm{median}) / (0.74\,\mathrm{IQR})$ over the common items (Huynh & Meyer, 2010) | 1.645 |
+| `"displacement"` | $\lvert b^* - b^{\mathrm{tgt}}\rvert$, the location difference after the transformation (logits) | 0.3 |
+| `"rmsd"` | root mean squared difference of the two expected item score curves, weighted by the target's latent distribution | 0.1 |
+
+The location $b$ is the difficulty of a dichotomous item and the mean of the thresholds of a GRM
+or GPCM item. With `purify=True` (default) the flagged item with the largest statistic is removed
+and the linking repeated until no kept item is flagged (`removal="all"` removes every flagged item
+per step; `min_items` and `max_iter` bound the loop and a `ScreeningWarning` says when they stop
+it):
+
+```python
+from flexpyirt import screen_common_items
+
+# A later administration in which the first common item became one logit harder.
+d_drift = d_new.copy()
+d_drift[0] -= a_new[0]
+drift_df = pd.DataFrame(
+    simulate_2pl(a_new, d_drift, rng.normal(0.5, 1.2, 800), rng), columns=new_items
+)
+drift_res = fit(Model.uniform(TwoPL(), items=new_items), drift_df, method=BAEM(squarem=True))
+
+screened = screen_common_items(drift_res, res, statistic="displacement")
+print(screened.removed_items)
+print(screened.history[["iteration", "n_items", "A", "B", "removed"]].round(3))
+print(screened.table[["item", "difference_b", "rmsd", "flagged", "kept"]].round(3))
+linked_screened = screened.link  # the LinkResult on the kept items
+```
+
+- `screened.table` has one row per common item under the final linking: transformed source and
+  target slopes and locations, `log_ratio_a`, `difference_b`, `displacement`, `robust_z_a`,
+  `robust_z_b`, `rmsd`, `flagged`, `kept` and `iteration_removed`. `history` gives $(A, B)$ and the
+  removed items at every step, and `initial_link` the linking on all common items.
+- The thresholds are conventions, not derived values; set them for your programme. Robust z with
+  few common items (fewer than about 8) has an unstable IQR.
+- For drift across several administrations, screen each against the base form and stack the
+  tables: `stack_screening_tables({"2025": screened_2025, "2026": screened_2026})`.
+- Unidimensional fits only. DIF tests inside one multiple-group fit are `FitResult.dif()`.
+  Validated against a base-R recomputation of the same rules on mirt calibrations (2PL and mixed
+  2PL + GRM + GPCM).
 
 ### Multidimensional models
 
@@ -1331,7 +1511,11 @@ print(report)
   look for pairs that stand out. The default re-estimates the model for every item, as mirt's
   `residuals(type = "JSI")`. `method="one_step"` skips the re-estimation (one Taylor step from
   the full model) and is far faster on long tests; it agrees closely with the default from about
-  15 items on, but not on short tests, where it warns.
+  15 items on, but not on short tests, where it warns. JSI is defined only for single-group
+  unidimensional models: its multidimensional / multiple-group extension has not been studied and
+  there is no reference implementation, so `jsi()` raises `SpecificationError` for
+  multiple-group, multidimensional (including bifactor and two-tier) and non-`Normal` latent
+  models. Use `local_dependence()` for those.
 - `model_parallel_analysis()` simulates data from the fitted model and asks whether the observed
   second eigenvalue is larger than the model produces (Drasgow & Lissak, 1983). Because the
   model was fitted to the same data the $p$-value is conservative: a small value is evidence of a
@@ -1373,7 +1557,112 @@ print(test.assessment_items, round(test.statistic, 3), round(test.p_value, 3))
   the rest. It is conservative, so a small $p$ is strong evidence of a second dimension and a
   large $p$ is only weak evidence for unidimensionality.
 
-## 20. Errors and warnings
+## 20. User-defined item models
+
+An item model that flexpyirt does not provide can be written in Python and used like a built-in
+one. You write two small classes against the protocols `ItemKernel` and `ItemModel` in
+`flexpyirt.items` (full contract in the [API reference](reference.md#user-defined-item-models)):
+
+- the **kernel** holds the response function: `log_prob(theta, params)` returns the
+  `(Q, n_categories)` log-probabilities at the nodes `theta` of shape `(Q, D)`, written with
+  `jax.numpy`. Gradients and Hessians come from automatic differentiation, so nothing else has to
+  be derived. It also names the parameters (`param_names`, with the `D` slopes first;
+  `slope_params`; `intercept_params`) and returns a copy for `D` factors (`with_factors`). It must
+  be hashable: a frozen dataclass.
+- the **item model** gives the `name` shown in the tables, the `kernel`, which parameters are free
+  by default, starting values from an item's responses and rest scores, and bounds.
+
+The example re-implements the 2PL, so the result can be checked against `TwoPL`.
+
+```python
+from dataclasses import dataclass
+from typing import ClassVar
+
+import jax.numpy as jnp
+
+from flexpyirt.items import register_item_model
+
+
+@dataclass(frozen=True)
+class LogisticKernel:
+    """The pure log-probability function of P(y = 1 | theta) = sigmoid(a'theta + d)."""
+
+    n_factors: int = 1
+    n_categories: ClassVar[int] = 2
+
+    def with_factors(self, n_factors):
+        return LogisticKernel(n_factors)
+
+    @property
+    def param_names(self):
+        if self.n_factors == 1:
+            return ("a", "d")
+        return (*(f"a{m}" for m in range(1, self.n_factors + 1)), "d")
+
+    @property
+    def slope_params(self):
+        return self.param_names[: self.n_factors]
+
+    @property
+    def intercept_params(self):
+        return ("d",)
+
+    def log_prob(self, theta, params):
+        z = theta @ params[: self.n_factors] + params[self.n_factors]  # theta: (Q, D)
+        return jnp.stack([jax.nn.log_sigmoid(-z), jax.nn.log_sigmoid(z)], axis=-1)
+
+
+@dataclass(frozen=True)
+class MyTwoPL:
+    """The item model: name, kernel, free pattern, starting values and bounds."""
+
+    name: ClassVar[str] = "My2PL"
+
+    @property
+    def kernel(self):
+        return LogisticKernel()
+
+    def default_free(self):
+        return (True, True)
+
+    def start_values(self, item, rest):
+        p = np.clip(item.mean(), 0.01, 0.99)
+        return np.array([1.0, np.log(p / (1.0 - p))])
+
+    def bounds(self):
+        return (-np.inf, -np.inf), (np.inf, np.inf)
+
+
+custom = fit(Model.uniform(MyTwoPL(), items=items), df, method=BAEM(tol=1e-6, squarem=True))
+print(custom.items.head(3))
+gap = (custom.parameters["estimate"] - res_sq.parameters["estimate"]).abs().max()
+print(f"largest difference from the built-in TwoPL: {gap:.1e}")
+```
+
+Both fits reach the same maximum; the small difference comes from the convergence tolerance and
+the different starting values. (The test suite checks that re-implementations of the 2PL and the
+GRM give the built-in estimates, standard errors and scores to machine precision.)
+
+Everything that evaluates the response function works with a user-defined model: standard errors,
+scoring, item fit, M2, information, multiple groups, priors and multidimensional models. `link()`
+and `fix_from(..., parameterization="irt")` need model-specific transformations and raise
+`SpecificationError`; ML and WLE scoring assume that the response categories increase with
+$\theta$. Display thresholds (`b` columns) appear only if the kernel defines the optional members
+`irt_names`, `irt_dependency_indices` and `irt_thresholds`.
+
+To save the fit as JSON, register the class first; register it again in a new session before
+loading the file.
+
+```python
+register_item_model(MyTwoPL)  # or use @register_item_model on the class
+restored = FitResult.from_json(custom.to_json())
+print(restored.items.equals(custom.items))
+```
+
+flexpyirt checks the machinery, not your model: a user-defined model is as correct as its
+`log_prob`. Check a new model against an independent implementation before relying on it.
+
+## 21. Errors and warnings
 
 | Type | When |
 |---|---|
@@ -1400,6 +1689,7 @@ except SpecificationError as e:
 
 ## References
 
+- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
@@ -1417,6 +1707,8 @@ except SpecificationError as e:
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
+- Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.

@@ -74,14 +74,16 @@
      V32 で mirt の `bfactor()` と照合済み）。
    - [x] two-tier モデル（`Model.with_two_tier()`、相関してよい主因子 1〜2 個と特殊因子、単一群、Oakes/Hessian SE、
      EAP スコアリング。V33 で mirt の `bfactor(model2 = )` と照合済み）。
-2. [ ] 局所依存（Q3, LD-X², JSI）を多母集団・正規以外の潜在分布・多次元 / 双因子モデルに広げる（#81）。
+2. [x] 局所依存（Q3, LD-X², JSI）を多母集団・正規以外の潜在分布・多次元 / 双因子モデルに広げる（#81）。
    - [x] `FitResult.local_dependence()`（Q3、Q3\*、LD-X²、G²）を多母集団、`EmpiricalHistogram` /
      `DavidianCurve` / `NormalMixture` の潜在分布、確認的な 2〜3 因子モデルに広げた（V26 で mirt の
      `residuals()` と照合。混合分布は密度を与えたときの統計量のみ）。
    - [x] 双因子・two-tier モデルの `FitResult.local_dependence()`。期待度数表は縮約した格子の上で求める
      （V38 で `bfactor()` の適合に対する mirt の `residuals()` と照合）。
-     未対応: 単一群・1 次元・正規分布以外の JSI（複数の傾きを持つ項目についての定義がなく、mirt にも参照値がない）。
-3. [ ] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
+   - 実装しない（決定済み、#81）: 単一群・1 次元・`Normal` 以外の JSI。JSI は単一群・1 次元のモデルについてのみ
+     定義されており、多次元・多母集団への拡張は研究されておらず、参照となる実装もない（mirt の `type = "JSI"` は
+     1 因子が必要）。これらのモデルでは `jsi()` は `SpecificationError` を出す（DESIGN.md §16.17）。
+3. [x] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
    カーネル（#83）の上に作る。
    - [x] カーネル（#83）: `summed_score_distribution()`。Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰
      （通常と対数空間）、DFT-CF 法、2 値項目用の正規・精密化正規・Poisson 近似。`jit` / `vmap` / 自動微分に対応。
@@ -91,7 +93,10 @@
      `FitResult.score(method="EAPsum")`。V37 で 2PL・3PL・GRM・GPCM・名義・混合形式のテスト・2 群モデルについて
      `iteminfo()`・`testinfo()`・`expected.item()` / `expected.test()`・`marginal_rxx()`・`empirical_rxx()`・
      `fscores(method = "EAPsum")` と照合済み。
-   - [ ] 多次元モデル: 情報行列と方向別の情報量。
+   - [x] 多次元モデル（確認的 2–3 因子、双因子、two-tier。単一群と多母集団）: `information_matrix()`、
+     `item_information(direction=)` / `test_information(direction=)` による方向別の情報量（合成値の SE つき）と
+     `expected_score()`。V43 で `iteminfo(multidim_matrix = TRUE)`・`iteminfo(degrees = )`・
+     `testinfo(degrees = )`・`expected.item()` / `expected.test()` と照合。
 4. [ ] 標本ウェイト（#84）。
    - [x] `fit(..., weights=...)`: ウェイトを足し合わせるパターン圧縮による重み付き周辺尤度（EM、SQUAREM、多群、
      欠測、FIPC）。BIC はウェイトの和を使う。Oakes / Hessian の SE は警告つき（度数ウェイトでのみ正しい）。
@@ -104,7 +109,14 @@
 - **受け入れ基準**: mirt の `bfactor()`、`residuals()`、`iteminfo()` / `testinfo()` / `marginal_rxx()` /
   `fscores(method = "EAPsum")`、`survey.weights`、`SE.type = "sandwich"` / `"crossprod"` との V 番号つき照合。
 
-## 現場向け機能（#103〜#109）
+## 現場向け機能
+- [x] 図（#103）: `item_probabilities()`、`empirical_item_curve()`、`wright_map_table()` が図の元になる数値を
+  返し、`flexpyirt.plotting`（観測比率と群ごとの曲線（DIF）つきの `plot_item_curves`、`plot_information`、
+  `plot_expected_score`、`plot_wright_map`）が任意依存 `flexpyirt[plot]` の matplotlib で描く。1 次元モデル、
+  全項目族、単一群・多母集団。V48 で mirt の `itemfit(return.tables = TRUE)`、`probtrace()`、
+  `coef(IRTpars = TRUE)` と TAM の `tam.threshold()` に照合。
+- [x] リンキングの共通項目の点検と項目パラメータドリフト（#105。`screen_common_items()`、
+  `CommonItemScreeningResult`、`stack_screening_tables()`: 頑健 z・変位・期待得点の RMSD と反復的な純化、1 次元。V50 で照合済み）。
 - [x] 受験者適合度と残差にもとづく項目適合度（#108）: `FitResult.person_fit()`（$l_z$、$l_z^*$、受験者の infit / outfit と
   $z$ 値）と `FitResult.item_fit(statistics=("infit", "outfit"))`。1 次元モデル（全項目モデル、欠測、多母集団）。
   V53 で mirt の `personfit()` / `itemfit(fit_stats = "infit")`、sirt の `personfit.stat()` と照合。$l_z^*$ は式の R での
@@ -112,5 +124,7 @@
 
 ## 継続的な作業
 - [ ] GitHub 上の最新の R mirt で照合し、参照値を定期的に確認する（#74）。
-- [ ] ユーザー定義の項目モデルの公開拡張 API と docs の例（#86）。新しい項目モデル（GGUM など）は本体に
-  組み込まず、この API の照合済みの例として追加する。
+- [x] ユーザー定義の項目モデルの公開拡張 API と docs の例（#86）: `ItemModel` / `ItemKernel` の契約、JSON 用の
+  `register_item_model`、ガイドの 2PL の実例（DESIGN §20）。2PL / GRM の再実装は組み込みと機械精度で一致する。
+- [ ] 組み込みでないモデルの照合済みの例（GGUM を mirt の `itemtype = "ggum"` と照合、V44 など）。新しい項目モデルは
+  本体に組み込まず、このように追加する。

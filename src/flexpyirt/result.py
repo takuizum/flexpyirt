@@ -35,7 +35,7 @@ from flexpyirt._compile import (
 from flexpyirt._json import dump_fit_result, load_fit_result
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
-from flexpyirt.items import ItemKernel
+from flexpyirt.items import ItemKernel, irt_dependency_indices, irt_names, irt_thresholds
 from flexpyirt.latent import (
     davidian_param_names,
     eh_moments,
@@ -127,11 +127,15 @@ def _mixture_derived(
 @cache
 def _irt_val_and_jac(kernel: ItemKernel) -> Callable[[Array], tuple[Array, Array]]:
     """Return a jitted ``(irt_thresholds, jacfwd(irt_thresholds))`` pair for ``kernel``."""
-    jac_fn = jax.jacfwd(kernel.irt_thresholds)
+
+    def thresholds(params: Array) -> Array:
+        return irt_thresholds(kernel, params)
+
+    jac_fn = jax.jacfwd(thresholds)
 
     @jax.jit
     def fn(params: Array) -> tuple[Array, Array]:
-        return kernel.irt_thresholds(params), jac_fn(params)
+        return thresholds(params), jac_fn(params)
 
     return fn
 
@@ -161,7 +165,7 @@ def _delta_irt_thresholds(
     b_ses = np.full(b_vals.shape, np.nan, dtype=float)
     if vcov is None:
         return b_vals, b_ses
-    for m, deps in enumerate(kernel.irt_dependency_indices):
+    for m, deps in enumerate(irt_dependency_indices(kernel)):
         active = [p for p in deps if fids[p] >= 0]
         if not active:
             continue
@@ -452,7 +456,7 @@ class FitResult:
         kernels = {name: self._model.item_kernel(m) for name, m in self._model.items}
         irt_cols = list(
             dict.fromkeys(
-                name for _, m in self._model.items for name in self._model.item_kernel(m).irt_names
+                name for _, m in self._model.items for name in irt_names(self._model.item_kernel(m))
             )
         )
         if irt_cols:
@@ -468,7 +472,7 @@ class FitResult:
                 xi = est_ord.loc[(grp, itm), p_names].to_numpy(dtype=float)
                 fids = fids_ord.loc[(grp, itm), p_names].to_numpy(dtype=int)
                 b_vals, b_ses = _delta_irt_thresholds(kernel, xi, fids, self.vcov)
-                for name, val, se_val in zip(kernel.irt_names, b_vals, b_ses, strict=True):
+                for name, val, se_val in zip(irt_names(kernel), b_vals, b_ses, strict=True):
                     b_data[name][row_idx] = val
                     b_data[f"{name}_se"][row_idx] = se_val
             for col, arr in b_data.items():
@@ -762,7 +766,7 @@ class FitResult:
         group: Any = None,
         item_names: list[str] | None = None,
     ) -> pd.DataFrame:
-        r"""Item fit statistics: Orlando–Thissen S-X2 and infit / outfit (DESIGN.md §15.40, §20).
+        r"""Item fit statistics: Orlando–Thissen S-X2 and infit / outfit (DESIGN.md §15.40, §23).
 
         ``statistics`` selects what is computed; the default is S-X2 only.
 
@@ -800,7 +804,7 @@ class FitResult:
             \mathrm{outfit}_j=\frac1{N_j}\sum_i\frac{r_{ij}^2}{W_{ij}},\qquad
             \mathrm{infit}_j=\frac{\sum_i r_{ij}^2}{\sum_i W_{ij}},
 
-        with the Wilson–Hilferty :math:`z` values of Wright & Masters (1982) (DESIGN.md §20).
+        with the Wilson–Hilferty :math:`z` values of Wright & Masters (1982) (DESIGN.md §23).
         They are computed for every item family (as mirt's ``itemfit(fit_stats = "infit")``);
         their reference distribution is derived for Rasch-family models, and for other models
         they are descriptive. Missing responses are skipped.
@@ -934,7 +938,7 @@ class FitResult:
         item_names: list[str] | None = None,
         statistics: PersonFitStatistic | Sequence[PersonFitStatistic] = ("lz", "infit", "outfit"),
     ) -> pd.DataFrame:
-        r"""Person fit: :math:`l_z`, :math:`l_z^*` and person infit / outfit (DESIGN.md §20).
+        r"""Person fit: :math:`l_z`, :math:`l_z^*` and person infit / outfit (DESIGN.md §23).
 
         Each respondent is scored by ``method`` (as :meth:`score`), and the statistics are
         evaluated at the estimate :math:`\hat\theta` over the answered items :math:`A`
@@ -1045,7 +1049,7 @@ class FitResult:
         item_names: list[str] | None,
         theta: np.ndarray | None = None,
     ) -> tuple[np.ndarray, dict[str, np.ndarray], np.ndarray, list[Any]]:
-        """Ability estimates and per-row person-fit quantities (DESIGN.md §20).
+        """Ability estimates and per-row person-fit quantities (DESIGN.md §23).
 
         Returns ``(theta, per_row, codes, group_names)``; ``per_row`` holds the arrays of
         :func:`_personfit.pattern_statistics` expanded to one entry per row of ``data``.
@@ -1088,7 +1092,7 @@ class FitResult:
     def _residual_item_fit(
         self, data: Any, *, method: ScoreMethod, group: Any, item_names: list[str] | None
     ) -> pd.DataFrame:
-        """Item infit / outfit table of :meth:`item_fit` (DESIGN.md §20)."""
+        """Item infit / outfit table of :meth:`item_fit` (DESIGN.md §23)."""
         _, per_row, codes, group_names = self._residual_rows(
             data, method=method, group=group, item_names=item_names
         )
@@ -1356,6 +1360,12 @@ class FitResult:
         sign of local dependence between the two. There is no fixed cutoff: look for values that
         stand out from the rest of the matrix.
 
+        JSI is defined only for single-group unidimensional models with a ``Normal`` latent
+        distribution. Its extension to multiple groups, multidimensional (including bifactor
+        and two-tier) models and non-Normal latent distributions has not been studied, and
+        there is no reference implementation to validate one against, so those models raise
+        ``SpecificationError``.
+
         Removing item :math:`j` is done by treating its responses as missing, so the latent
         distribution, constraints across items and priors of the remaining parameters stay as
         fitted. The three methods differ only in how :math:`\hat\eta^{(-j)}` is obtained, all
@@ -1411,7 +1421,19 @@ class FitResult:
 
         check_x64()
         self._require_unweighted("jsi()")
-        self._require_unidimensional_normal("jsi()")
+        model = self._model
+        if (
+            model.is_multidimensional
+            or model.is_multigroup
+            or model.is_empirical_histogram
+            or model.is_davidian
+            or model.is_mixture
+        ):
+            raise SpecificationError(
+                "jsi() is defined only for single-group unidimensional models with a Normal "
+                "latent distribution: its multiple-group / multidimensional extension has not "
+                "been studied and there is no reference implementation (DESIGN.md §16.17)."
+            )
         if method not in ("refit", "newton", "one_step"):
             raise SpecificationError(
                 f"Unknown method={method!r}; use 'refit', 'newton' or 'one_step'."

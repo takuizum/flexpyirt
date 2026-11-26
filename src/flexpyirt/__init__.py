@@ -11,6 +11,12 @@ from importlib.metadata import PackageNotFoundError, version
 
 from flexpyirt import errors
 from flexpyirt.correlation import PolychoricResult, polychoric
+from flexpyirt.curves import (
+    WrightMapTable,
+    empirical_item_curve,
+    item_probabilities,
+    wright_map_table,
+)
 from flexpyirt.dimensionality import (
     ComparisonDataResult,
     DetectResult,
@@ -40,6 +46,7 @@ from flexpyirt.dimensionality import (
 from flexpyirt.fit import fit
 from flexpyirt.information import (
     expected_score,
+    information_matrix,
     item_information,
     reliability,
     summed_score_table,
@@ -50,9 +57,14 @@ from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, Normal, NormalMi
 from flexpyirt.linking import LinkResult, link
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
-from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior
+from flexpyirt.priors import BetaPrior, LogitNormalPrior, LogNormalPrior, NormalPrior
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
+from flexpyirt.screening import (
+    CommonItemScreeningResult,
+    screen_common_items,
+    stack_screening_tables,
+)
 from flexpyirt.sumscore import summed_score_distribution
 
 try:
@@ -66,6 +78,7 @@ __all__ = [
     "GRM",
     "PCM",
     "BetaPrior",
+    "CommonItemScreeningResult",
     "ComparisonDataResult",
     "DavidianCurve",
     "DetectResult",
@@ -82,6 +95,7 @@ __all__ = [
     "LinkResult",
     "LocalDependenceResult",
     "LogNormalPrior",
+    "LogitNormalPrior",
     "MAPResult",
     "Model",
     "ModelParallelAnalysisResult",
@@ -95,26 +109,33 @@ __all__ = [
     "Rasch",
     "ThreePL",
     "TwoPL",
+    "WrightMapTable",
     "__version__",
     "comparison_data",
     "detect",
     "dimensionality",
     "dimtest",
     "efa",
+    "empirical_item_curve",
     "empirical_kaiser",
     "errors",
     "expected_score",
     "exploratory_detect",
     "fit",
     "hull",
+    "information_matrix",
     "item_information",
+    "item_probabilities",
     "link",
     "model_parallel_analysis",
     "parallel_analysis",
     "polychoric",
     "reliability",
+    "screen_common_items",
+    "stack_screening_tables",
     "summed_score_distribution",
     "summed_score_table",
     "test_information",
     "velicer_map",
+    "wright_map_table",
 ]

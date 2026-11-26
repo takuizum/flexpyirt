@@ -19,14 +19,15 @@ random numbers; flexpyirt's take a JAX PRNG `key`.
 Apart from the first one or two, arguments of public functions are keyword-only (after `*`).
 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
-- Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
+- Scale linking: [`link`](#link), [`LinkResult`](#linkresult), [`screen_common_items`](#screen_common_items), [`CommonItemScreeningResult`](#commonitemscreeningresult), [`stack_screening_tables`](#stack_screening_tables)
 - Correlations (flexpyctt): [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
-- Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
+- Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
+- Plots: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
 - Model: [`Model`](#model)
-- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
-- Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
+- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal), [user-defined item models](#user-defined-item-models)
+- Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior), [`LogitNormalPrior`](#logitnormalprior)
 - Latent distribution: [`Normal`](#normal)
 - Settings: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - Exceptions and warnings: [`flexpyirt.errors`](#flexpyirterrors)
@@ -177,7 +178,7 @@ $N_j$ respondents who answered item $j$, $\mathrm{outfit}_j=\frac1{N_j}\sum_i r_
 $\mathrm{infit}_j=\sum_i r_{ij}^2/\sum_i W_{ij}$, with $r_{ij}$ the residual of the item score
 $0,\dots,K_j-1$ at $\hat\theta_i$ and $W_{ij}$ its conditional variance, plus the Wilson–Hilferty
 $z$ values of Wright & Masters (1982) (see [`FitResult.person_fit`](#fitresultperson_fit) and
-DESIGN §20). Unidimensional models; missing responses are skipped; computed for every item model
+DESIGN §23). Unidimensional models; missing responses are skipped; computed for every item model
 as in mirt (descriptive outside the Rasch family).
 
 | Argument | Description |
@@ -207,7 +208,7 @@ person_fit(data, *, method="EAP", group=None, item_names=None,
 ```
 
 Person fit at each respondent's ability estimate ([guide section 5](guide.md#person-fit-and-infit--outfit),
-DESIGN §20). With $A$ the answered items and $P_{jk}=P_{jk}(\hat\theta)$:
+DESIGN §23). With $A$ the answered items and $P_{jk}=P_{jk}(\hat\theta)$:
 
 - `"lz"`: $l_z=(l_0-\mathrm E\,l_0)/\sqrt{\mathrm{Var}\,l_0}$ with $l_0=\sum_{j\in A}\log P_{jy_j}$,
   $\mathrm E\,l_0=\sum_j\sum_kP_{jk}\log P_{jk}$ (Drasgow, Levine & Williams, 1985; mirt's `Zh`).
@@ -339,8 +340,12 @@ they warn (`FlexpyirtWarning`), because removing one item changes the estimates 
 
 **Returns**: [`JSIResult`](#jsiresult)
 
-**Raises**: `PrecisionError`; `SpecificationError` for unsupported models, fewer than three
-items, invalid options, or `"one_step"` on a fit without `se="oakes"` or `se="hessian"`.
+JSI is defined only for single-group unidimensional models; its multidimensional /
+multiple-group extension has not been studied and there is no reference implementation, so it is
+not available for other models.
+
+**Raises**: `PrecisionError`; `SpecificationError` for multiple-group, multidimensional
+(including bifactor and two-tier) or non-`Normal` latent models, fewer than three items, invalid options, or `"one_step"` on a fit without `se="oakes"` or `se="hessian"`.
 
 **Warns**: `ConvergenceWarning` if a refit does not converge.
 
@@ -397,7 +402,8 @@ fields so every attribute round-trips bit-for-bit.
 **Returns**: `str` (the JSON text).
 
 **Raises**: `SpecificationError` if `indent` is invalid or the result contains an unregistered
-model/prior type.
+model/prior type (register a user-defined item model with
+[`register_item_model`](#flexpyirtitemsregister_item_model) first).
 
 #### `FitResult.from_json`
 
@@ -419,7 +425,8 @@ reproduces every attribute, `items`, `latent`, `summary()`, `_repr_html_()`, `ai
 
 **Raises**: `PrecisionError` if JAX 64-bit floating point is disabled; `SpecificationError` if the
 JSON is malformed or non-strict (e.g. bare `NaN`/`Infinity` literals), the format tag, schema
-version, or a registered type name is unknown, or internal consistency checks fail;
+version, or a registered type name is unknown (including a user-defined item model that has not
+been registered in this session), or internal consistency checks fail;
 `FileNotFoundError` if `source` points to a nonexistent file.
 
 ---
@@ -576,7 +583,7 @@ the items' starting values. Equivalent to giving the rows one `free_id` in an ed
 model.prior(*, param, dist, items=None) -> Model
 ```
 
-Attach a prior distribution `dist` (`NormalPrior`, `LogNormalPrior`, or `BetaPrior`) to internal parameter
+Attach a prior distribution `dist` (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, or `LogitNormalPrior`) to internal parameter
 `param` of the selected items across all groups (MAP estimation; [guide section 11](guide.md#11-priors-and-map-estimation)).
 Priors are evaluated on the natural parameter scale without a Jacobian term. Fixed parameters
 ignore their prior, and a parameter shared across groups (`free_id`) is counted once. Priors on
@@ -586,7 +593,7 @@ latent-distribution parameters (`"mean"`, `"var"`, `"phi_*"`, `"rmean_*"`, `"rva
 | Argument | Description |
 |---|---|
 | `param` | Internal item parameter name (`"a"`, `"d"`, `"g"`, `"u"`, `"d1"`, …) |
-| `dist` | `NormalPrior`, `LogNormalPrior`, or `BetaPrior` |
+| `dist` | `NormalPrior`, `LogNormalPrior`, `BetaPrior`, or `LogitNormalPrior` |
 | `items` | List of item names, a `str -> bool` function, or `None` for every item |
 
 #### `Model.parameter_table`
@@ -713,6 +720,72 @@ constraint; no display `b` / `bk` columns). Same as mirt's `itemtype = "nominal"
 $\mathrm{ak}_k=k$ reproduces `GPCM(n_categories)` identically (and with `n_categories = 2` there are no free `ak`
 parameters, so `Nominal(2)` equals `GPCM(2)` / `TwoPL`). Uses `NominalKernel(n_categories)`.
 
+### User-defined item models
+
+An item model that is not built in can be written against two protocols in `flexpyirt.items`
+and used in a `Model` like the classes above (see the [user guide](guide.md#20-user-defined-item-models)
+for a worked example). Items whose kernels compare equal are estimated together.
+
+**`flexpyirt.items.ItemKernel`** (the response function; must be hashable and compare by value:
+use a frozen dataclass)
+
+| Member | Required | Description |
+|---|---|---|
+| `n_factors` | yes | Number of latent factors $D$ |
+| `with_factors(n_factors)` | yes | A copy of the kernel for `n_factors` factors |
+| `param_names` | yes | Parameter names in order; the first $D$ are the slopes |
+| `n_categories` | yes | Number of categories $K \ge 2$ (responses coded `0..K-1`) |
+| `slope_params` | yes | The slopes, `param_names[:n_factors]` |
+| `intercept_params` | yes | Parameters that carry the location (used by the identification checks; may be empty) |
+| `log_prob(theta, params)` | yes | `(Q, K)` log-probabilities at nodes `theta` of shape `(Q, D)` for the parameter vector `params`; written with `jax.numpy`, differentiable twice; NaN outside the parameter domain |
+| `irt_names`, `irt_dependency_indices`, `irt_thresholds(params)` | no | Display thresholds added to `FitResult.items` with delta-method SEs: their names, the indices of the parameters each depends on, and their values |
+
+**`flexpyirt.items.ItemModel`** (the specification; use a frozen dataclass)
+
+| Member | Description |
+|---|---|
+| `name` | Class attribute: the name in the `model` column and in JSON (not a built-in name) |
+| `kernel` | The kernel with `n_factors == 1` |
+| `default_free()` | Whether each parameter is estimated by default |
+| `start_values(item, rest)` | Starting values from one item's observed responses and their rest scores |
+| `bounds()` | `(lower, upper)` tuples of parameter bounds |
+
+`default_free()`, `start_values()` and `bounds()` follow the unidimensional `param_names`; in a
+model with $D$ factors their slope entry applies to every slope. `Model` checks these rules when
+it is built (`SpecificationError`). Everything that evaluates `log_prob` works with a user-defined
+model: estimation, standard errors, scoring, item fit, M2, local dependence, DIF, information,
+summed scores, multiple groups, priors and multidimensional models. ML and WLE scoring assume
+that a higher category means a higher $\theta$ for a positive slope. Not available:
+`link()` and `Model.fix_from(..., parameterization="irt")` (`SpecificationError`), and the free
+latent variance that a model of only `Rasch` / `PCM` items gets by default (use
+`Model.with_latent(Normal(free_var=True))`).
+
+#### `flexpyirt.items.register_item_model`
+
+```text
+register_item_model(cls, *, to_dict=None, from_dict=None) -> cls
+```
+
+Register a user-defined item-model class so that `FitResult.to_json()` can save fits that use it
+and `FitResult.from_json()` can load them. The model is stored as
+`{"type": cls.name, **to_dict(model)}` and rebuilt with `from_dict(fields)`. By default the class
+must be a dataclass whose fields are `bool`, `int`, finite `float` or `str`. Registration lasts
+for the Python session: register the class again before loading in a new one. Can be used as a
+class decorator.
+
+| Argument | Type | Description |
+|---|---|---|
+| `cls` | type | The item-model class; `cls.name` is the JSON type name |
+| `to_dict` | callable, optional | `model -> dict` of JSON values (without `"type"`) |
+| `from_dict` | callable, optional | `dict -> model`, the inverse of `to_dict` (pass both or neither) |
+
+**Returns**: `cls`.
+
+**Raises**: `SpecificationError` if `cls.name` is missing or built in, another class is registered
+under the same name, only one of `to_dict` / `from_dict` is given, or the default encoding is used
+for a class that is not a dataclass. Without registration, `to_json()` raises
+`SpecificationError`.
+
 ---
 
 ## Priors
@@ -754,6 +827,26 @@ $\log\pi(x) = (a - 1)\log x + (b - 1)\log(1 - x) - \log B(a, b)$
 ($-\infty$ outside $(0, 1)$; Swaminathan & Gifford, 1986; mirt `expbeta` log-prior objective on
 the natural scale without a logit Jacobian). Requires positive finite `a` and `b`. Commonly used
 for 3PL/4PL asymptotes `g` and `u`.
+
+### `LogitNormalPrior`
+
+```text
+LogitNormalPrior(mean_logit, sd_logit, *, mode_scale="natural")
+```
+
+Logit-normal prior on $(0, 1)$ ($\operatorname{logit} X \sim N(\mu, s^2)$; Aitchison & Shen, 1980):
+$\log\pi(x) = -\log x - \log(1 - x) - \log s - \tfrac{1}{2}\log(2\pi) - \frac{(\operatorname{logit} x - \mu)^2}{2s^2}$
+($-\infty$ outside $(0, 1)$). The $-\log x - \log(1 - x)$ term belongs to the density of $X$
+itself. Requires finite `mean_logit` and positive finite `sd_logit`. Commonly used for 3PL/4PL
+asymptotes: `LogitNormalPrior(-1.0986, 0.5)` centers `g` on $1/4$. flexMIRT's
+`Guessing : Normal(mean, sd)` and mirt's `PRIOR = (..., g, norm, mean, sd)` are the same
+distribution but maximize the posterior over $\operatorname{logit} g$ (without that term), so
+their estimates differ slightly ([guide section 11](guide.md#11-priors-and-map-estimation)).
+
+| Argument | Description |
+|---|---|
+| `mean_logit`, `sd_logit` | Mean and standard deviation of $\operatorname{logit} X$ |
+| `mode_scale` | `"natural"` (default): the density above, natural-scale posterior mode. `"logit"`: the term $\log\phi(\operatorname{logit} x; \mu, s)$ without the Jacobian, giving flexMIRT's and mirt's logit-metric posterior mode, log posterior and (delta-method) SEs |
 
 ---
 
@@ -932,6 +1025,74 @@ Returned by `link()`. Immutable.
 | `items` | DataFrame | All source items transformed onto the target scale (`item`, `model`, `common`, internal slope–intercept parameters and display IRT thresholds `b` / `bk`); directly usable with `Model.fix_from()` |
 | `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | Transform source-scale ability scores via $\theta^* = A\theta + B$ (`theta` and all `pv1..` columns of a scoring DataFrame; `se` $\mapsto A\,\mathrm{se}$, excluding linking error). For $D > 1$ factors: the `theta_<factor>` / `pv<m>_<factor>` columns or an array whose last axis has length $D$; `se_<factor>` is rescaled under a diagonal $\mathbf A$ and NaN otherwise |
 | `summary(*, digits=4)` | str | Readable plain-text summary (Jupyter displays HTML via `_repr_html_()`) |
+
+### `screen_common_items`
+
+```text
+screen_common_items(source, target, *, items=None, method="stocking_lord", symmetric=False,
+                    statistic="robust_z", threshold=None, purify=True, removal="largest",
+                    min_items=2, max_iter=10, source_group=None,
+                    target_group=None) -> CommonItemScreeningResult
+```
+
+Screen the common items of a unidimensional linking for item parameter drift and link again
+without the items that moved ([guide section 15](guide.md#screening-the-common-items)). Each
+step links with [`link`](#link) on the current anchor set, transforms the source items
+($a^* = a/A$, location $b^* = A\,b + B$) and computes per common item the robust z of the log
+slope ratio and of the location difference, $(x - \mathrm{median}) / (0.74\,\mathrm{IQR})$ over
+all common items (Huynh & Meyer, 2010), the displacement $|b^* - b^{\mathrm{tgt}}|$ and the RMSD of
+the expected item score curves on the target's fitted grid. The location is the difficulty of a
+dichotomous item, the mean display threshold of a GRM / GPCM / PCM item and
+$-d_{K-1}/((K-1)a)$ of a nominal item. Items whose statistic exceeds `threshold` are flagged and,
+with `purify=True`, removed and the linking repeated (Candell & Drasgow, 1988). Validated against
+a base-R recomputation on mirt calibrations (2PL; mixed 2PL + GRM + GPCM).
+
+| Argument | Type | Description |
+|---|---|---|
+| `source`, `target` | `FitResult` | Unidimensional fits on the source (new) and target (base) scales |
+| `items` | iterable[str] / Mapping[str, str], optional | Common items, as in `link()` |
+| `method`, `symmetric` | | Linking criterion, passed to `link()` |
+| `statistic` | `"robust_z"` / `"displacement"` / `"rmsd"` | Screening statistic: $\max(\lvert z_a\rvert, \lvert z_b\rvert)$ (default), $\lvert b^* - b^{\mathrm{tgt}}\rvert$, or the expected-score RMSD |
+| `threshold` | float, optional | Flag when the statistic exceeds it (default 1.645, 0.3 or 0.1) |
+| `purify` | bool | Remove flagged items and relink (default `True`); `False` only reports |
+| `removal` | `"largest"` / `"all"` | Per step, remove the flagged item with the largest statistic (default; ties: first in item order) or every flagged item |
+| `min_items` | int | Smallest anchor set a removal may leave (default 2) |
+| `max_iter` | int | Maximum number of removal steps (default 10) |
+| `source_group`, `target_group` | str, optional | Group names for multiple-group fits |
+
+**Returns**: [`CommonItemScreeningResult`](#commonitemscreeningresult)
+
+**Raises**: `PrecisionError`, `SpecificationError` (non-`FitResult` or multidimensional input,
+invalid options, or anything `link()` rejects).
+
+**Warns**: `ScreeningWarning` when the loop stops with kept items still flagged (`max_iter` used
+up, or a removal would leave fewer than `min_items`); `ConvergenceWarning` from `link()`.
+
+### `CommonItemScreeningResult`
+
+Returned by `screen_common_items()`. Immutable.
+
+| Attribute / method | Type | Description |
+|---|---|---|
+| `table` | DataFrame | One row per common item under the final linking: `item`, `target_item`, `model`, `a_source`, `b_source` (transformed), `a_target`, `b_target`, `log_ratio_a`, `difference_b` ($b^* - b^{\mathrm{tgt}}$), `displacement`, `robust_z_a`, `robust_z_b`, `rmsd`, `statistic`, `flagged`, `kept`, `iteration_removed` (nullable integer) |
+| `link` | `LinkResult` | Linking on the kept items |
+| `initial_link` | `LinkResult` | Linking on all common items |
+| `kept_items`, `removed_items` | tuple[str, ...] | Source names of the kept items and of the removed items in removal order |
+| `flagged_items` | tuple[str, ...] | Items flagged under the final linking |
+| `history` | DataFrame | One row per step: `iteration`, `n_items`, `A`, `B`, `criterion`, `converged`, `removed` |
+| `statistic`, `threshold`, `removal`, `purify` | | The options used |
+| `summary(*, digits=4)` | str | Readable plain-text summary (Jupyter displays HTML via `_repr_html_()`) |
+
+### `stack_screening_tables`
+
+```text
+stack_screening_tables(results) -> DataFrame
+```
+
+Stack the `table`s of several administrations screened against one base form, from a mapping
+`{administration: CommonItemScreeningResult}`, with `administration` first and the final
+constants `A`, `B` after `model`. Raises `SpecificationError` for an empty mapping or a value that
+is not a screening result.
 
 ## Correlations
 
@@ -1305,40 +1466,81 @@ Runs several diagnostics and reports them side by side, with two separate consen
 
 ## Information and reliability
 
-Functions of a fitted unidimensional model ([guide section 5](guide.md#information-expected-score-and-reliability)).
-All raise `SpecificationError` for a multidimensional model.
+Functions of a fitted model ([guide section 5](guide.md#information-expected-score-and-reliability)).
+The information functions and `expected_score` work for unidimensional, confirmatory
+multidimensional, bifactor and two-tier models
+([guide section 14](guide.md#information-of-multidimensional-models)); `reliability` and the
+summed-score functions raise `SpecificationError` for a multidimensional model.
+
+For a model with $D$ factors, `theta` is an array of shape `(T, D)`, a DataFrame whose columns are
+exactly the factor names (in any order), or one point as a 1-D array of length $D$; results are
+indexed by a `MultiIndex` whose level names are the factor names. For a unidimensional model
+`theta` is a number or 1-D array and the index is named `theta`.
 
 ### `item_information`
 
 ```text
-item_information(res, theta, *, group=None) -> DataFrame
+item_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 Fisher information of every item at the latent trait values `theta`,
 $I_j(\theta)=\sum_kP_{jk}(\theta)\,(\partial\log P_{jk}(\theta)/\partial\theta)^2$ (Birnbaum, 1968;
 Samejima, 1969), computed for every item model by automatic differentiation. It is what mirt's
-`iteminfo()` returns.
+`iteminfo()` returns. For a multidimensional model it is the directional information
+$\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u$ along the unit vector
+$\mathbf u$ = `direction` / ‖`direction`‖, with the item information matrix of
+[`information_matrix`](#information_matrix) (Reckase & McKinley, 1991); mirt's
+`iteminfo(..., degrees = )` is `direction=np.cos(np.radians(degrees))` when
+$\sum_m\cos^2\alpha_m=1$ (mirt does not normalize the direction).
 
 | Argument | Type | Description |
 |---|---|---|
-| `res` | `FitResult` | A fitted unidimensional model |
-| `theta` | float / 1-D array | Latent trait values (finite) |
+| `res` | `FitResult` | A fitted model |
+| `theta` | float / array / DataFrame | Latent trait values (finite; see above) |
+| `direction` | 1-D array of length $D$, optional | Direction in the latent space, normalized to length 1; required for a multidimensional model, not allowed for a unidimensional one |
 | `group` | str, optional | Group name; required for a multiple-group model |
 
-**Returns**: `DataFrame` with one row per value of `theta` (the index, named `theta`) and one
-column per item.
+**Returns**: `DataFrame` with one row per point of `theta` and one column per item.
 
 ### `test_information`
 
 ```text
-test_information(res, theta, *, group=None) -> DataFrame
+test_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 Test information $I(\theta)=\sum_jI_j(\theta)$ and the conditional standard error
-$1/\sqrt{I(\theta)}$ (mirt's `testinfo()`). Arguments as for
-[`item_information`](#item_information).
+$1/\sqrt{I(\theta)}$ (mirt's `testinfo()`). For a multidimensional model, the directional test
+information $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$ (mirt's `testinfo(..., degrees = )`)
+and the standard error of the estimate of the composite $\mathbf u^\top\boldsymbol\theta$,
+$\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$, which equals $1/\sqrt{I(\theta)}$
+in one dimension. This is not mirt's `plot(type = "SE")`, which draws $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$
+(`1 / np.sqrt(information)`). Arguments as for [`item_information`](#item_information).
 
-**Returns**: `DataFrame` indexed by `theta` with the columns `information` and `se`.
+**Returns**: `DataFrame` indexed like [`item_information`](#item_information) with the columns
+`information` and `se` (infinite where the information is 0 or the information matrix is
+singular).
+
+### `information_matrix`
+
+```text
+information_matrix(res, theta, *, item=None, group=None) -> ndarray
+```
+
+Fisher information matrix
+$\mathbf I_j(\boldsymbol\theta)=\sum_kP_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}^\top$
+of one item, or the test information matrix $\sum_j\mathbf I_j$, at each point of `theta`
+(Reckase, 2009), by automatic differentiation. It is mirt's `iteminfo(..., multidim_matrix = TRUE)`
+(summed over items for the test).
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted model |
+| `theta` | float / array / DataFrame | Latent trait values (finite; see above) |
+| `item` | str, optional | Item name; by default the test information matrix |
+| `group` | str, optional | Group name; required for a multiple-group model |
+
+**Returns**: array of shape `(T, D, D)`, one symmetric positive semi-definite matrix per point,
+rows and columns in the order of the model's factors (`(T, 1, 1)` for a unidimensional model).
 
 ### `expected_score`
 
@@ -1348,11 +1550,11 @@ expected_score(res, theta, *, group=None) -> DataFrame
 
 Expected item scores $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ and the test characteristic curve
 $T(\theta)=\sum_jE_j(\theta)$, with categories scored $0,\dots,K_j-1$ as in the data (mirt's
-`expected.item()` and `expected.test()`). Arguments as for
-[`item_information`](#item_information).
+`expected.item()` and `expected.test()`); $\theta$ is a vector for a multidimensional model.
+Arguments `res`, `theta` and `group` as for [`item_information`](#item_information).
 
-**Returns**: `DataFrame` indexed by `theta` with one column per item and the column `total`. An
-item named `total` raises `SpecificationError`.
+**Returns**: `DataFrame` indexed like [`item_information`](#item_information) with one column per
+item and the column `total`. An item named `total` raises `SpecificationError`.
 
 ### `reliability`
 
@@ -1440,12 +1642,125 @@ approximation with `K != 2`.
 
 ---
 
+## Plots
+
+The numbers behind the figures ([guide section 5](guide.md#plots)) come from three functions
+that return DataFrames; `flexpyirt.plotting` draws them with matplotlib. All raise
+`SpecificationError` for a multidimensional model.
+
+### `item_probabilities`
+
+```text
+item_probabilities(res, theta, *, items=None, group=None) -> DataFrame
+```
+
+Category probabilities (trace lines) $P_{jk}(\theta)=\Pr(Y_j=k\mid\theta)$, $k=0,\dots,K_j-1$,
+of every item model (mirt's `probtrace()`).
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted unidimensional model |
+| `theta` | float / 1-D array | Latent trait values (finite) |
+| `items` | str / list[str], optional | Items to include (default: all) |
+| `group` | str, optional | Group name; required for a multiple-group model |
+
+**Returns**: `DataFrame` in long format, one row per item, category and `theta`: `item`,
+`category`, `theta`, `probability`.
+
+### `empirical_item_curve`
+
+```text
+empirical_item_curve(res, data, *, items=None, n_bins=10, group=None, item_names=None) -> DataFrame
+```
+
+Observed category proportions in bins of EAP $\theta$, beside the model (Bock, 1972; Yen, 1981).
+For each item, the respondents who answered it are sorted by EAP score (ties in row order) and
+cut into `n_bins` consecutive bins of $\lfloor n/B\rfloor$ respondents; of the remainder
+$c=n\bmod B$, $\lfloor c/2\rfloor$ go to the first bin and the rest to the last, as in mirt's
+`itemfit()`. Per bin $b$ and category $k$: the mean EAP $\bar\theta_b$, the proportion
+$O_{bk}$ of the bin's respondents in category $k$ and the model probability
+$E_{bk}=P_{jk}(\bar\theta_b)$. $n_bO_{bk}$ and $n_bE_{bk}$ are the tables of mirt's
+`itemfit(fit_stats = "X2", return.tables = TRUE)` without cell collapsing.
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted unidimensional model |
+| `data` | DataFrame / 2-D array | Responses on the fitted items (NaN is missing; a respondent enters the bins of the items they answered) |
+| `items` | str / list[str], optional | Items to include (default: all) |
+| `n_bins` | int | Number of bins (mirt's `group.bins`), default 10 |
+| `group` | array, optional | Group label of each row of `data` (required for a multiple-group model; bins are formed within each group) |
+| `item_names` | list[str], optional | Column names when `data` is an array |
+
+**Returns**: `DataFrame` with one row per item, bin and category: `item`, `bin` (1, ..., B),
+`theta`, `n`, `category`, `observed`, `expected` (and a leading `group` column for a
+multiple-group model).
+
+**Raises**: `SpecificationError` also for `n_bins` that is not a positive integer or an item (in a
+group) answered by fewer than `n_bins` respondents.
+
+### `wright_map_table`
+
+```text
+wright_map_table(res, data, *, group=None, item_names=None, method="EAP") -> WrightMapTable
+```
+
+Person scores and item locations of an item–person (Wright) map. Item locations are the
+Thurstonian thresholds: for $k=1,\dots,K_j-1$ the $\theta$ where
+$P(Y_j\ge k\mid\theta)=\sum_{c\ge k}P_{jc}(\theta)=1/2$ (Wright & Masters, 1982; TAM's
+`tam.threshold()`). They are $b$ for 2PL / Rasch items and $b_k$ for GRM items; for 3PL / 4PL
+items they are where the probability of a correct response is one half, and for GPCM / PCM items
+they differ from the step difficulties. Found on $[-20, 20]$ (first crossing, bisection); NaN
+without a crossing (e.g. a 3PL item with $g\ge1/2$). For nominal items the categories are taken
+in the data's order.
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted unidimensional model |
+| `data` | DataFrame / 2-D array | Responses on the fitted items |
+| `group` | array, optional | Group label of each row of `data` (required for a multiple-group model) |
+| `item_names` | list[str], optional | Column names when `data` is an array |
+| `method` | `"EAP"` / `"MAP"` / `"WLE"` | Scoring method of the persons, default `"EAP"` |
+
+**Returns**: [`WrightMapTable`](#wrightmaptable).
+
+### `WrightMapTable`
+
+A named tuple of two DataFrames (`persons, items = wright_map_table(...)` unpacks it).
+
+| Field | Description |
+|---|---|
+| `persons` | `theta` per respondent, with the index of `data` (and a leading `group` column for a multiple-group model) |
+| `items` | One row per item threshold: `item`, `category` ($1,\dots,K_j-1$), `location` (with a leading `group` column and every group's thresholds for a multiple-group model) |
+
+### `flexpyirt.plotting`
+
+```text
+plot_item_curves(res, items=None, *, data=None, group=None, n_bins=10, theta=None, item_names=None, ax=None) -> Figure
+plot_information(res, items=None, *, standard_error=False, group=None, theta=None, ax=None) -> Axes
+plot_expected_score(res, *, group=None, theta=None, ax=None) -> Axes
+plot_wright_map(res, data, *, group=None, item_names=None, method="EAP", n_bins=30) -> Figure
+```
+
+Import with `from flexpyirt.plotting import ...`. Needs matplotlib (`pip install
+"flexpyirt[plot]"`), imported when a function is called; without it the functions raise
+[`MissingDependencyError`](#missingdependencyerror). They return matplotlib objects and never call
+`plt.show()`. The default `theta` grid is 161 points on $[-4, 4]$.
+
+| Function | Draws | Numbers from |
+|---|---|---|
+| `plot_item_curves` | One panel per item: $P(Y=1\mid\theta)$ for dichotomous items, every category for polytomous items; the observed proportions as points when `data` is given; one curve per group for a multiple-group model (the DIF plot). `ax=` for a single item. `group=` are row labels used with `data` | [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve) |
+| `plot_information` | Test information, or the information of `items`; `standard_error=True` adds the SE on a second y axis (`ax.twinx()`). `group=` is a group name (default: every group) | [`test_information`](#test_information), [`item_information`](#item_information) |
+| `plot_expected_score` | Test characteristic curve, one line per group by default | [`expected_score`](#expected_score) (`total`) |
+| `plot_wright_map` | Horizontal histogram of the person scores (`n_bins` bins) beside the item thresholds, sharing the $\theta$ axis | [`wright_map_table`](#wright_map_table) |
+
+---
+
 ## Settings
 
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural")
 ```
 
 | Argument | Description |
@@ -1454,6 +1769,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 | `max_iter` | Maximum number of accepted iterations; reaching it gives a `ConvergenceWarning` |
 | `m_step_newton_steps` | Newton steps per M-step; no step decreases the expected log-likelihood |
 | `squarem` | Enable SQUAREM scheme S3 acceleration (Varadhan & Roland, 2008) with a monotonicity/feasibility safeguard (default `False`) |
+| `m_step_scale` | `"natural"` (default): M-step Newton on the natural scale with bounds, reaching boundary solutions exactly. `"unconstrained"`: Newton on $\operatorname{logit}$ / $\log$ scales of the parameters with a bound ($g$, $u$, latent variances, factor correlations, slopes bounded by a prior or an edited bound); unbounded parameters are not transformed. Same objective and interior solution; estimates, table, priors and SEs stay on the natural scale; a boundary solution is only approached ([guide section 4](guide.md#4-fitting)) |
 
 ### `Quadrature`
 
@@ -1506,6 +1822,11 @@ The scale is not identified, e.g. a focal group's mean or variance is estimated 
 or a single group's mean is estimated without fixed items. Raised before estimation. Subclass of
 `ValueError`.
 
+#### `MissingDependencyError`
+
+An optional dependency is not installed, e.g. matplotlib for `flexpyirt.plotting` (install
+`flexpyirt[plot]`). `import flexpyirt` never needs it. Subclass of `ImportError`.
+
 #### `PrecisionError`
 
 JAX's 64-bit floating point is disabled. Enable it with
@@ -1532,3 +1853,8 @@ deviation below half the grid spacing, or mean outside the grid, or two coincidi
 #### `NotPositiveDefiniteWarning`
 
 Emitted by `polychoric()` when the pairwise matrix is not positive definite and `smooth=True` smoothed it.
+
+#### `ScreeningWarning`
+
+Emitted by `screen_common_items()` when purification stops while kept anchor items are still
+flagged: `max_iter` removal steps were used, or a removal would leave fewer than `min_items` items.

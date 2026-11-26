@@ -10,7 +10,16 @@ from typing import Any, Literal
 import pandas as pd
 
 from flexpyirt.errors import SpecificationError
-from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, NominalKernel, Rasch
+from flexpyirt.items import (
+    PCM,
+    GPCMKernel,
+    ItemKernel,
+    ItemModel,
+    NominalKernel,
+    Rasch,
+    check_item_model,
+    is_builtin_item_model,
+)
 from flexpyirt.latent import (
     DavidianCurve,
     EmpiricalHistogram,
@@ -111,6 +120,8 @@ class Model:
         dup = sorted({n for n in names if names.count(n) > 1})
         if dup:
             raise SpecificationError(f"Duplicated item names: {dup}.")
+        for name, item_model in self.items:
+            check_item_model(name, item_model)
         if self.groups is not None:
             kinds = {type(dist) for _, dist in self.groups}
             for single_only in (DavidianCurve, NormalMixture):
@@ -363,6 +374,11 @@ class Model:
             row = rows[item]
             item_model = lookup[item]
             kernel = self.item_kernel(item_model)
+            if parameterization == "irt" and not is_builtin_item_model(item_model):
+                raise SpecificationError(
+                    f"parameterization='irt' is not supported for the user-defined item model "
+                    f"{item_model.name!r} of item {item!r}; use parameterization='slope_intercept'."
+                )
             if parameterization == "irt" and isinstance(kernel, NominalKernel):
                 raise SpecificationError(
                     f"parameterization='irt' is not supported for Nominal item {item!r}; "
@@ -887,7 +903,7 @@ class Model:
         param : str
             Internal item parameter name (e.g. ``"a"``, ``"a1"``, ``"d"``, ``"g"``, ``"u"``,
             ``"d1"``).
-        dist : NormalPrior, LogNormalPrior, or BetaPrior
+        dist : NormalPrior, LogNormalPrior, BetaPrior, or LogitNormalPrior
             Prior distribution on the natural parameter scale.
         items : iterable of str or callable, optional
             Items to attach the prior to (default: every item in the model).
@@ -895,7 +911,7 @@ class Model:
         if not isinstance(dist, PRIOR_TYPES):
             raise SpecificationError(
                 f"Unsupported prior distribution {dist!r}; "
-                "use NormalPrior, LogNormalPrior or BetaPrior."
+                "use NormalPrior, LogNormalPrior, BetaPrior or LogitNormalPrior."
             )
         latent_prefixes = ("mean_", "var_", "cor_", "phi_", "rmean_", "rvar_", "logit_")
         if param in ("mean", "var") or param.startswith(latent_prefixes):

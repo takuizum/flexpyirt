@@ -1,4 +1,4 @@
-r"""Person fit and residual-based item fit (Core layer, DESIGN.md §20).
+r"""Person fit and residual-based item fit (Core layer, DESIGN.md §23).
 
 Pure JAX kernels on :class:`~flexpyirt._core.CompiledProblem` pytrees, evaluated per unique
 response pattern at that pattern's ability estimate :math:`\hat\theta_p`: the standardized
@@ -53,7 +53,7 @@ def _item_moments(t: Array, p: Array, k: ItemKernel) -> tuple[Array, ...]:
     """Category probabilities and their log-derivatives of one item at the scalar ``t``."""
 
     def lp_fn(theta: Array) -> Array:
-        return k.log_prob(theta[None], p)[0]
+        return k.log_prob(jnp.reshape(theta, (1, 1)), p)[0]  # (Q, D) nodes (DESIGN.md §20)
 
     lp = lp_fn(t)
     dlp = jax.jacfwd(lp_fn)(t)
