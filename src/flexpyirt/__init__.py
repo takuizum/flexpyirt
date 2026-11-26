@@ -37,6 +37,7 @@ from flexpyirt.dimensionality import (
     parallel_analysis,
     velicer_map,
 )
+from flexpyirt.dif import DIFScreenResult, dif_effect_sizes, dif_screen
 from flexpyirt.fit import fit
 from flexpyirt.information import (
     expected_score,
@@ -67,6 +68,7 @@ __all__ = [
     "PCM",
     "BetaPrior",
     "ComparisonDataResult",
+    "DIFScreenResult",
     "DavidianCurve",
     "DetectResult",
     "DimensionalityResult",
@@ -98,6 +100,8 @@ __all__ = [
     "__version__",
     "comparison_data",
     "detect",
+    "dif_effect_sizes",
+    "dif_screen",
     "dimensionality",
     "dimtest",
     "efa",
