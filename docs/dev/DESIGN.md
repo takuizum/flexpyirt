@@ -2683,9 +2683,10 @@ data-independent shapes (§15.21).
      $-\nabla^2\ell_w(\hat\eta)$. For frequency weights that is the usual information. For
      sampling weights it is **not** a valid variance estimate: the design-consistent variance is
      the sandwich $H^{-1}\big(\sum_i w_i^2 s_i s_i^\top\big)H^{-1}$ (Binder, 1983), which comes
-     with the robust standard errors. Decision: the default stays `"oakes"` (the values equal
-     mirt's `SE.type = "Oakes"` with `survey.weights`, so they can be validated), and `fit()`
-     emits a `FlexpyirtWarning` whenever `weights` is given and `se` is not `None`.
+     with the robust standard errors (item 6). Decision: the default stays `"oakes"` (the values
+     equal mirt's `SE.type = "Oakes"` with `survey.weights`, so they can be validated), and `fit()`
+     emits a `FlexpyirtWarning` whenever `weights` is given and `se` is `"oakes"`, `"hessian"` or
+     `"crossprod"`; the warning names `se="sandwich"` as the design-based alternative (item 6).
    - **After the fit**: scoring (`score()`) depends only on the estimates and is unchanged.
      `link()` uses the estimates and `vcov` (its SEs inherit the caveat above). The data-based
      diagnostics have no validated weighted form (their statistics and reference distributions
@@ -2742,10 +2743,7 @@ data-independent shapes (§15.21).
    is evaluated by dimension reduction (`CompiledProblem.reduction`), while the score kernel
    below works on the node tables of the full grid. mirt does compute both types for `bfactor()`,
    so this is an implementation gap that can be validated later, not a missing reference.
-   With sampling weights (item 4) both options raise `SpecificationError`: $B$ built from the
-   weighted pattern counts is not the design-based estimator ($\sum_i w_i^2 s_i s_i^\top$), and
-   that version and the cluster-robust one (scores summed within clusters) are not implemented
-   yet (#85).
+   Sampling weights and the cluster-robust version are item 6.
    **Computation** (`_robust_se.py`, a separate Core module so that `_core.py` is untouched).
    `_fold_pattern_scores` evaluates the node tables $\log P_{gjqk}(\eta)$ and $\log w_{gq}(\eta)$
    once and linearizes them with `jax.vjp`. Patterns are processed in chunks by `lax.scan`: for a
@@ -2774,6 +2772,90 @@ data-independent shapes (§15.21).
    added in §16.4 and §16.7). mirt's `"sandwich.Louis"` is the same estimator with $H$ computed by
    Louis' (1982) formula instead of Oakes'; both formulas give the observed information, so it is
    not a separate option here.
+
+6. **Robust standard errors under sampling weights and clusters (`fit(..., weights=, cluster=, se="sandwich")`, V57, #84, #85)**:
+   **Weighted sandwich.** The weighted estimator of item 4 solves $\sum_i w_i s_i(\hat\eta)=0$
+   (plus the prior gradient for MAP), with $s_i=\nabla_\eta\log L_i(\hat\eta)$ the score of row
+   $i$. Its design-based (linearization) covariance is (Binder, 1983; Skinner, 1989; Asparouhov,
+   2005)
+   $$V_{\mathrm{sandwich}}=H_w^{-1}B_wH_w^{-1},\qquad
+     B_w=\sum_i w_i^2\,s_i s_i^\top-\nabla^2_\eta\log\pi(\hat\eta),\qquad
+     H_w=-\nabla^2_\eta\big[\ell_w(\hat\eta)+\log\pi(\hat\eta)\big].$$
+   Rows with the same pattern in the same group have the same score, so
+   $B_w=\sum_p c^{(2)}_p s_p s_p^\top-\nabla^2\log\pi$ with $c^{(2)}_p=\sum_{i:\,y_i=p}w_i^2$; with
+   $w_i=1$ this is item 5. Without priors, $V_{\mathrm{sandwich}}$ does not change when every
+   weight is multiplied by the same constant ($H_w$ scales by $k$, $B_w$ by $k^2$). The prior
+   curvature is added to the meat as in item 5 (mirt's convention; with priors the matrix depends
+   on the scale of the weights, like the MAP estimate itself, item 4).
+   **This is not mirt's weighted sandwich.** mirt 1.48 builds the middle matrix of
+   `SE.type = "sandwich"` (and `"crossprod"`) from the pattern frequencies `Data$Freq`, which
+   with `survey.weights` are the sums of the weights (`computeInfo` in `dpars.cpp`:
+   `add2outer(Igrad, grad, rs(g, pat))`), so its meat is $\sum_i w_i s_i s_i^\top$. That is the
+   frequency-weight cross-product: multiplying the weights by $k$ divides mirt's sandwich by $k$,
+   so it is not a design-based variance (mirt's own `estfun.AllModelClass` documentation says the
+   scores must be weighted by $\sqrt{w_i}$ to reproduce that matrix). Decision: follow Binder
+   (1983). The validation (V57) therefore checks (a) the weighted scores against mirt's
+   `SE.type = "crossprod"` with `survey.weights` (same definition as flexpyirt's, below) and
+   (b) the design-based sandwich and the cluster version against an R computation from mirt's
+   weighted Oakes covariance (the bread) and per-person scores by `numDeriv`.
+   **`crossprod` with weights.** `se="crossprod"` inverts
+   $\sum_p c_p s_p s_p^\top-\nabla^2\log\pi$ with $c_p=\sum_{i:\,y_i=p}w_i$ (mirt's definition).
+   Through the information equality this estimates the information of the weighted
+   log-likelihood, so, like `oakes` and `hessian`, it is a valid variance only for frequency
+   weights; it is allowed and emits the same `FlexpyirtWarning`. ($B_w^{-1}$ would be no variance
+   at all: it is the inverse of the variance of the weighted score, not the variance of
+   $\hat\eta$.)
+   **Cluster-robust sandwich.** `fit(..., cluster=labels)` takes one label per row (array-like
+   like `group=`: NumPy array, list, pandas / polars Series; any hashable labels; a column name
+   is not accepted; missing labels (NaN / None) raise `SpecificationError`). The scores of the
+   rows of a cluster (for example a school) are summed before the outer product:
+   $$u_c=\sum_{i\in c}w_i s_i,\qquad
+     B_{\mathrm{cl}}=\frac{G}{G-1}\sum_{c=1}^{G}u_c u_c^\top-\nabla^2_\eta\log\pi(\hat\eta),\qquad
+     V=H_w^{-1}B_{\mathrm{cl}}H_w^{-1},$$
+   with $w_i=1$ when `weights` is not given. This treats the clusters as independent primary
+   sampling units drawn with replacement in a single stratum (Binder, 1983; Williams, 2000).
+   **Small-sample factor: decision $G/(G-1)$.** It is the factor of the with-replacement
+   first-stage variance estimator (Binder, 1983; R's survey package, `svyrecvar`: $n_h/(n_h-1)$
+   within a stratum, one stratum here) and of Stata's `vce(cluster)` for maximum-likelihood
+   estimators; without it the estimator is biased downward by $(G-1)/G$, which matters with tens
+   of schools. The extra $(N-1)/(N-K)$ of the linear-regression version is not used. The scores
+   are not centred (as in item 5; $\sum_c u_c=0$ at an MLE). Consequence: with one row per
+   cluster, $B_{\mathrm{cl}}$ is $N/(N-1)$ times the unclustered $B_w$ (unit-tested), not equal to
+   it; the unclustered sandwich keeps no factor so that it stays equal to mirt's unweighted one.
+   **Scope.** Strata, finite-population corrections and multi-stage designs are not supported
+   (one stage, clusters as PSUs). Clusters may span the groups of a multiple-group model. At
+   least two clusters (after dropping zero-weight rows with their labels) are required, else
+   `SpecificationError`. `cluster=` without `weights=` is allowed. `cluster=` with any `se` other
+   than `"sandwich"` raises `SpecificationError` (no other method uses it). Not covered, as in
+   item 5: `DavidianCurve`, `NormalMixture`, bifactor and two-tier models (`SpecificationError`).
+   **Computation** (`_robust_se.py`). Unclustered: the meat uses a copy of `CompiledProblem` with
+   `counts` replaced by $c^{(2)}_p$ on the same patterns, and `score_cross_product`. Clustered:
+   the rows are compressed by (group, cluster, pattern) (`compress_patterns(..., cluster=)`, at
+   most $N$ rows, padded as in §4.1), the counts are weight sums, and
+   `score_cluster_cross_product` accumulates the `(G, n_free)` matrix $U$ with
+   `U.at[cluster].add(c_p s_p)` in the same pattern-chunked fold (`_fold_pattern_scores` now
+   chunks a per-pattern integer label with the counts), then returns $U^\top U$. A pattern that
+   occurs in several clusters is differentiated once per cluster, so the cost is at most that of
+   an uncompressed data set. $G$ is static for `jit` (one compilation per number of clusters).
+   **Default with weights: decision, still `"oakes"`.** `se` does not change its default
+   depending on another argument; `"oakes"` is the method validated against mirt's
+   `survey.weights` and the only one available for every latent distribution and bifactor /
+   two-tier models. The `FlexpyirtWarning` of item 4 now recommends `se="sandwich"` and is not
+   emitted for it. Left to the owner: default to `"sandwich"` whenever `weights` or `cluster` is
+   given.
+   **Result and JSON.** `FitResult._n_clusters` is the number of clusters (`None` without
+   `cluster=`), shown by `summary()` as `sandwich (cluster-robust, G clusters)`.
+   `schema_version` 9 adds the optional top-level key `n_clusters` (an integer $\ge2$, only with
+   `se_method` `"sandwich"`); it is rejected in files of version $\le8$, which still load. The
+   labels themselves are not stored (like the weights and the data). The consumers of `vcov`
+   (the `se` column, the delta-method display SEs, `link()`) use the chosen covariance without
+   change (item 5); `jsi(method="one_step")` still requires `oakes` or `hessian`.
+   **Validation (V57)**: `validation/r/v57_weighted_cluster_se_reference.R` (mirt 1.48,
+   `survey.weights`, TOL $=10^{-10}$): a 2PL with simulated schools (a school effect in $\theta$)
+   and unequal weights, and a two-group 2PL with anchors and clusters that span the groups; the
+   reference sandwiches are computed in R from mirt's Oakes covariance and per-person scores
+   (`numDeriv::jacobian` of the per-person marginal log-likelihood on mirt's grid, checked
+   against `estfun.AllModelClass`), summed by school for the cluster version.
 
 ## 18. Summed-score distribution kernel, information and reliability (M7)
 
@@ -3786,6 +3868,7 @@ data-independent shapes (§15.21).
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Akaike, H. (1974). A new look at the statistical model identification. *IEEE Transactions on Automatic Control*, 19(6), 716–723.
+- Asparouhov, T. (2005). Sampling weights in latent variable modeling. *Structural Equation Modeling*, 12(3), 411–434.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -3923,6 +4006,7 @@ data-independent shapes (§15.21).
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
+- Williams, R. L. (2000). A note on robust variance estimation for cluster-correlated data. *Biometrics*, 56(2), 645–646.
 - Wilks, S. S. (1938). The large-sample distribution of the likelihood ratio for testing composite hypotheses. *The Annals of Mathematical Statistics*, 9(1), 60–62.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.

@@ -1977,9 +1977,10 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    - **標準誤差**: `se="oakes"`（既定）と `se="hessian"` は $-\nabla^2\ell_w(\hat\eta)$ の逆行列を返す。度数
      ウェイトなら通常の情報行列である。標本ウェイトでは**正しい分散推定量ではない**。標本設計に整合する分散は
      サンドイッチ $H^{-1}\big(\sum_i w_i^2 s_i s_i^\top\big)H^{-1}$（Binder, 1983）で、ロバスト標準誤差として
-     別に実装する。決定: 既定は `"oakes"` のままとし（値は `survey.weights` を付けた mirt の
-     `SE.type = "Oakes"` と一致するので照合できる）、`weights` があり `se` が `None` でないとき `fit()` は
-     `FlexpyirtWarning` を出す。
+     実装する（項目 6）。決定: 既定は `"oakes"` のままとし（値は `survey.weights` を付けた mirt の
+     `SE.type = "Oakes"` と一致するので照合できる）、`weights` があり `se` が `"oakes"`・`"hessian"`・
+     `"crossprod"` のとき `fit()` は `FlexpyirtWarning` を出す。警告は標本設計に基づく代わりとして
+     `se="sandwich"`（項目 6）を挙げる。
    - **推定の後**: スコアリング（`score()`）は推定値だけに依存し、変わらない。`link()` は推定値と `vcov` を使う
      （その SE は上の注意を引き継ぐ）。データを使う診断にはウェイト付きの検証済みの形がない（統計量と参照分布が
      ウェイトなしの度数を前提とする）ので、`item_fit()`、`m2()`、`local_dependence()`、`jsi()`、`dif()`、
@@ -2026,9 +2027,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    `SpecificationError` を出す。これらの尤度は次元縮約（`CompiledProblem.reduction`）で評価するが、下の
    スコアのカーネルは全体のグリッド上の表を使うためである。mirt は `bfactor()` でどちらの種類も計算する
    ので、これは参照値がないのではなく実装が未対応なだけで、あとで照合できる。
-   標本ウェイト（項目 4）つきの推定では、どちらの選択肢も `SpecificationError` を出す。ウェイトを足した
-   パターン度数から作る $B$ は標本設計に基づく推定量（$\sum_i w_i^2 s_i s_i^\top$）ではなく、その版と
-   クラスタロバスト版（スコアをクラスタ内で合計する）は未実装である（#85）。
+   標本ウェイトとクラスタロバスト版は項目 6 で扱う。
    **計算**（`_robust_se.py`。`_core.py` を変更しないよう Core の別モジュールにした）。
    `_fold_pattern_scores` はノード上の表 $\log P_{gjqk}(\eta)$ と $\log w_{gq}(\eta)$ を 1 回だけ評価し、
    `jax.vjp` で線形化する。パターンは `lax.scan` でチャンクごとに処理する。チャンクの各パターンの対数尤度を
@@ -2052,6 +2051,77 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    上げない（§16.4・§16.7 で潜在分布の種類を追加したときと同じ）。mirt の `"sandwich.Louis"` は $H$ を
    Oakes ではなく Louis (1982) の式で計算するだけの同じ推定量で、どちらの式も観測情報行列を与えるので、
    別のオプションにはしない。
+
+6. **標本ウェイトとクラスタのもとでのロバスト標準誤差（`fit(..., weights=, cluster=, se="sandwich")`, V57, #84, #85）**:
+   **重み付きサンドイッチ。** 項目 4 の重み付き推定量は $\sum_i w_i s_i(\hat\eta)=0$（MAP では事前分布の
+   勾配を加える）を解く。$s_i=\nabla_\eta\log L_i(\hat\eta)$ は行 $i$ のスコア。標本設計に基づく
+   （線形化による）共分散は（Binder, 1983; Skinner, 1989; Asparouhov, 2005）
+   $$V_{\mathrm{sandwich}}=H_w^{-1}B_wH_w^{-1},\qquad
+     B_w=\sum_i w_i^2\,s_i s_i^\top-\nabla^2_\eta\log\pi(\hat\eta),\qquad
+     H_w=-\nabla^2_\eta\big[\ell_w(\hat\eta)+\log\pi(\hat\eta)\big].$$
+   同じ群で同じパターンの行はスコアが等しいので、$c^{(2)}_p=\sum_{i:\,y_i=p}w_i^2$ として
+   $B_w=\sum_p c^{(2)}_p s_p s_p^\top-\nabla^2\log\pi$。$w_i=1$ なら項目 5 に一致する。事前分布がなければ、
+   すべてのウェイトを同じ定数倍しても $V_{\mathrm{sandwich}}$ は変わらない（$H_w$ は $k$ 倍、$B_w$ は $k^2$ 倍）。
+   事前分布の曲率は項目 5 と同じく中央の行列に加える（mirt の規約。事前分布があると、MAP 推定値そのものと
+   同様に、行列はウェイトの尺度に依存する。項目 4）。
+   **mirt の重み付きサンドイッチとは異なる。** mirt 1.48 は `SE.type = "sandwich"`（と `"crossprod"`）の中央の
+   行列をパターン度数 `Data$Freq` から作り、`survey.weights` のときそれはウェイトの和である（`dpars.cpp` の
+   `computeInfo`: `add2outer(Igrad, grad, rs(g, pat))`）。したがって中央の行列は $\sum_i w_i s_i s_i^\top$
+   で、度数ウェイトのクロス積である。ウェイトを $k$ 倍すると mirt のサンドイッチは $1/k$ 倍になるので、
+   標本設計に基づく分散ではない（mirt の `estfun.AllModelClass` の説明自身が、その行列を再現するには
+   スコアに $\sqrt{w_i}$ を掛けるよう書いている）。決定: Binder (1983) に従う。そのため照合（V57）では、
+   (a) 重み付きのスコアを `survey.weights` 付きの mirt の `SE.type = "crossprod"`（下のとおり定義は
+   flexpyirt と同じ）と、(b) 標本設計に基づくサンドイッチとクラスタ版を、mirt の重み付き Oakes 共分散
+   （ブレッド）と `numDeriv` による個人ごとのスコアから R で計算した値と比べる。
+   **ウェイトつきの `crossprod`。** `se="crossprod"` は $c_p=\sum_{i:\,y_i=p}w_i$ として
+   $\sum_p c_p s_p s_p^\top-\nabla^2\log\pi$ の逆行列を返す（mirt の定義）。情報行列等式を通じて重み付き
+   対数尤度の情報行列を推定するので、`oakes`・`hessian` と同じく度数ウェイトのときだけ正しい分散であり、
+   使用は認めて同じ `FlexpyirtWarning` を出す（$B_w^{-1}$ は重み付きスコアの分散の逆行列で、$\hat\eta$ の
+   分散ではないので、そもそも分散にならない）。
+   **クラスタロバストなサンドイッチ。** `fit(..., cluster=labels)` は行ごとに 1 つのラベルを受け取る
+   （`group=` と同じく配列風: NumPy 配列、リスト、pandas / polars の Series。ラベルはハッシュ可能なら何でも
+   よい。列名は受け付けない。欠損ラベル（NaN / None）は `SpecificationError`）。クラスタ（たとえば学校）内の
+   行のスコアを合計してから外積を取る:
+   $$u_c=\sum_{i\in c}w_i s_i,\qquad
+     B_{\mathrm{cl}}=\frac{G}{G-1}\sum_{c=1}^{G}u_c u_c^\top-\nabla^2_\eta\log\pi(\hat\eta),\qquad
+     V=H_w^{-1}B_{\mathrm{cl}}H_w^{-1}$$
+   （`weights` がなければ $w_i=1$）。クラスタを、1 つの層から復元抽出された独立な第一次抽出単位として扱う
+   （Binder, 1983; Williams, 2000）。
+   **小標本補正: 決定 $G/(G-1)$。** 復元抽出の第一段の分散推定量の係数（Binder, 1983。R の survey
+   パッケージの `svyrecvar` は層ごとに $n_h/(n_h-1)$ で、ここでは層は 1 つ）であり、Stata の
+   最尤推定量に対する `vce(cluster)` の係数でもある。これがないと推定量は $(G-1)/G$ だけ下に偏り、学校数が
+   数十のときに効く。線形回帰版の $(N-1)/(N-K)$ は使わない。スコアは中心化しない（項目 5 と同じ。最尤推定値
+   では $\sum_c u_c=0$）。帰結: 1 クラスタ 1 行なら $B_{\mathrm{cl}}$ はクラスタなしの $B_w$ の $N/(N-1)$ 倍で
+   あり（単体テストで確認）、一致はしない。クラスタなしのサンドイッチには係数を付けず、ウェイトなしの mirt と
+   一致させたままにする。
+   **範囲。** 層、有限母集団修正、多段抽出には対応しない（1 段、クラスタが PSU）。多群モデルでクラスタが
+   群をまたいでもよい。クラスタは（ウェイト 0 の行をラベルごと除いたあとで）2 つ以上必要で、そうでなければ
+   `SpecificationError`。`weights=` なしの `cluster=` は認める。`se` が `"sandwich"` 以外で `cluster=` を
+   渡すと `SpecificationError`（ほかの方法はクラスタを使わない）。項目 5 と同じく、`DavidianCurve`、
+   `NormalMixture`、双因子・two-tier モデルは対象外（`SpecificationError`）。
+   **計算**（`_robust_se.py`）。クラスタなし: 同じパターンのまま `counts` を $c^{(2)}_p$ に置き換えた
+   `CompiledProblem` のコピーで `score_cross_product` を使う。クラスタあり: 行を（群、クラスタ、パターン）で
+   圧縮し（`compress_patterns(..., cluster=)`。高々 $N$ 行で、§4.1 と同じくパディングする）、度数は
+   ウェイトの和とする。`score_cluster_cross_product` は同じパターンのチャンク畳み込み
+   （`_fold_pattern_scores` は度数と一緒にパターンごとの整数ラベルもチャンクに分けるようにした）で
+   `(G, n_free)` の行列 $U$ を `U.at[cluster].add(c_p s_p)` で積み上げ、$U^\top U$ を返す。複数のクラスタに
+   現れるパターンはクラスタごとに 1 回ずつ微分するので、コストは高々圧縮しないデータと同じ。$G$ は `jit`
+   の静的引数（クラスタ数ごとに 1 回コンパイルする）。
+   **ウェイトつきの既定: 決定、`"oakes"` のまま。** `se` の既定をほかの引数によって変えない。`"oakes"` は
+   mirt の `survey.weights` と照合済みで、すべての潜在分布と双因子・two-tier モデルで使える唯一の方法である。
+   項目 4 の `FlexpyirtWarning` は `se="sandwich"` を勧めるようにし、`"sandwich"` では出さない。オーナーに
+   残す選択肢: `weights` か `cluster` があるときの既定を `"sandwich"` にする。
+   **結果と JSON。** `FitResult._n_clusters` はクラスタ数（`cluster=` なしでは `None`）で、`summary()` は
+   `sandwich (cluster-robust, G clusters)` と表示する。`schema_version` 9 で省略可能な最上位キー
+   `n_clusters`（2 以上の整数。`se_method` が `"sandwich"` のときだけ）を追加する。バージョン 8 以下の
+   ファイルでは拒否し、それらのファイルは引き続き読める。ラベルそのものは保存しない（ウェイトやデータと
+   同じ）。`vcov` を使う箇所（`se` 列、デルタ法の表示用 SE、`link()`）は変更なしで選んだ共分散を使う
+   （項目 5）。`jsi(method="one_step")` は引き続き `oakes` か `hessian` を要求する。
+   **照合（V57）**: `validation/r/v57_weighted_cluster_se_reference.R`（mirt 1.48、`survey.weights`、
+   TOL $=10^{-10}$）。学校を模した 2PL（$\theta$ に学校効果）で不均等なウェイト、および群をまたぐクラスタを
+   持つアンカーつき 2 群 2PL。参照値のサンドイッチは、mirt の Oakes 共分散と個人ごとのスコア（mirt の
+   グリッド上の個人ごとの周辺対数尤度の `numDeriv::jacobian`。`estfun.AllModelClass` と照合）から R で
+   計算し、クラスタ版では学校ごとに合計する。
 
 ## 18. 合計得点分布のカーネル、情報関数と信頼性（M7）
 
@@ -2860,6 +2930,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Akaike, H. (1974). A new look at the statistical model identification. *IEEE Transactions on Automatic Control*, 19(6), 716–723.
+- Asparouhov, T. (2005). Sampling weights in latent variable modeling. *Structural Equation Modeling*, 12(3), 411–434.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -2997,6 +3068,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
+- Williams, R. L. (2000). A note on robust variance estimation for cluster-correlated data. *Biometrics*, 56(2), 645–646.
 - Wilks, S. S. (1938). The large-sample distribution of the likelihood ratio for testing composite hypotheses. *The Annals of Mathematical Statistics*, 9(1), 60–62.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
