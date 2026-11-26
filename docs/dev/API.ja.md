@@ -148,6 +148,7 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 |---|---|---|
 | `Model` | frozen dataclass | 仕様全体。`uniform`, `from_items` で生成、`.fix`, `.fix_from`, `.prior`, `.equal_across_groups`, `.equal_across_items`, `.with_groups`, `.with_latent`, `.parameter_table` |
 | `Rasch`, `TwoPL`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`, `Nominal` | frozen dataclass（`ItemModel` を満たす） | 項目モデル |
+| `items.ItemModel`, `items.ItemKernel`, `items.register_item_model` | Protocol、関数 | ユーザー定義の項目モデルとその JSON 登録（DESIGN §20） |
 | `Normal`, `EmpiricalHistogram`, `DavidianCurve`, `NormalMixture` | frozen dataclass（`LatentDist` を満たす） | 潜在分布。`Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)`, `NormalMixture(n_components)` |
 | `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
 | `BAEM`, `Quadrature` | frozen dataclass | 推定設定 |
@@ -164,6 +165,8 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `detect`, `exploratory_detect` | 関数 | 確認的・探索的 DETECT。`DetectResult`, `ExploratoryDetectResult` を返す |
 | `model_parallel_analysis`, `dimensionality` | 関数 | `FitResult` のモデルに基づく平行分析と、まとめのレポート。`ModelParallelAnalysisResult`, `DimensionalityResult` を返す |
 | `item_information`, `test_information`, `expected_score` | 関数 | 1 次元の `FitResult` の、与えた `theta` での項目・テスト情報量（条件付き SE つき）と期待得点。`theta` をインデックスにした DataFrame を返す（DESIGN §18.2） |
+| `item_probabilities`, `empirical_item_curve`, `wright_map_table` | 関数 | 図の元になる数値: トレースライン（縦長の DataFrame）、EAP の $\theta$ の等人数区間ごとの観測カテゴリ比率とモデルの確率、Wright マップの受検者の推定値と項目のサーストン閾値（`WrightMapTable(persons, items)`）（DESIGN §21） |
+| `flexpyirt.plotting` | モジュール | `plot_item_curves`（観測比率つき。群ごとの曲線が DIF の図）、`plot_information`、`plot_expected_score`、`plot_wright_map`。matplotlib は任意依存 `flexpyirt[plot]` から遅延 import（なければ `MissingDependencyError`）（DESIGN §21） |
 | `reliability`, `summed_score_table` | 関数 | 周辺信頼性・経験的信頼性と、合計得点 EAP の表（`FitResult.score(method="EAPsum")` も）。DataFrame を返す |
 | `summed_score_distribution` | 関数 | カテゴリ確率に対する Lord–Wingersky / Poisson 二項分布のカーネル（DESIGN §18.1） |
 | `LocalDependenceResult` | frozen dataclass | `FitResult.local_dependence()` の戻り値（`pairs`, `q3`, `q3_mean`, `max_q3_star`） |

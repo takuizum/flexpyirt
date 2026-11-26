@@ -25,7 +25,8 @@ flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめ�
 17. [次元数](#17-次元数)
 18. [局所依存と次元性のレポート](#18-局所依存と次元性のレポート)
 19. [DETECT](#19-detect)
-20. [エラーと警告](#20-エラーと警告)
+20. [ユーザー定義の項目モデル](#20-ユーザー定義の項目モデル)
+21. [エラーと警告](#21-エラーと警告)
 
 ## 1. 準備
 
@@ -126,7 +127,8 @@ print(spec.item_names[:3], mixed.item_names)
 （mirt は logit 尺度で最適化するが、内点の最尤推定値は一致する）。多値項目のカテゴリは 0 始まり（mirt の
 `Science` のように 1 始まりのデータは 1 を引く）。`Nominal` には表示用の `b` 列がない。カテゴリに順序がない
 ため $\theta$ 尺度の隣接カテゴリ閾値は一般には定義できず（$\mathrm{ak}_k=\mathrm{ak}_{k-1}$ で特異になる）、mirt の
-`coef(m, IRTpars = TRUE)` も代わりに Bock のゼロ和の傾きと切片を返す。
+`coef(m, IRTpars = TRUE)` も代わりに Bock のゼロ和の傾きと切片を返す。表にないモデルはユーザーが書ける
+（[20 節](#20-ユーザー定義の項目モデル)）。
 
 ```python
 theta3 = rng.normal(0, 1, 2000)
@@ -360,6 +362,61 @@ print(reliability(res, df))  # データを渡すと列 marginal, empirical
   mirt の関数は推定された分布を使わない。flexpyirt の値は推定された分布を使い、潜在尺度を線形変換しても
   変わらない。
 - `reliability()` は潜在分布が `Normal` のときに使える。
+
+### 図
+
+`flexpyirt.plotting` は、毎回の分析で見る図を描く: 観測比率つきの項目特性曲線、情報関数、テスト特性
+曲線、項目–受検者（Wright）マップ。matplotlib が必要で、`pip install "flexpyirt[plot]"` で入る。
+入っていなくても `import flexpyirt` は動き、描画関数が `MissingDependencyError` を投げる。描画関数は
+matplotlib のオブジェクトを返し（`fig.savefig(...)` で保存できる）、`plt.show()` は呼ばない。
+
+図の数値はすべて DataFrame を返す関数から来るので、ほかのライブラリでも同じ図を描ける:
+
+- `item_probabilities(res, theta)`: カテゴリ確率 $P_{jk}(\theta)$（mirt の `probtrace()`）。項目・
+  カテゴリ・`theta` ごとに 1 行。
+- `empirical_item_curve(res, data)`: 回答者を EAP の $\theta$ で並べて `n_bins` 個の等人数区間に分け
+  （mirt の `itemfit()` と同じ）、区間・カテゴリごとに `theta` の平均、人数 `n`、観測比率 `observed`、
+  その平均でのモデルの確率 `expected` を返す。
+- `wright_map_table(res, data)`: `persons`（EAP 推定値）と `items`（項目とカテゴリ $k\ge1$ ごとに、
+  $P(Y\ge k\mid\theta)=1/2$ となる `location`。サーストン閾値で、2PL 項目では $b$）。
+
+```python
+from flexpyirt import empirical_item_curve, item_probabilities, wright_map_table
+
+trace = item_probabilities(res, np.linspace(-3.0, 3.0, 7), items="q01")
+print(trace.head(3).round(3))  # item, category, theta, probability
+observed = empirical_item_curve(res, df, items=["q01"], n_bins=10)
+print(observed.head(4).round(3))  # item, bin, theta, n, category, observed, expected
+wright = wright_map_table(res, df)
+print(wright.items.head(3).round(3))  # item, category, location
+```
+
+```python
+from flexpyirt.plotting import (
+    plot_expected_score,
+    plot_information,
+    plot_item_curves,
+    plot_wright_map,
+)
+
+fig_curves = plot_item_curves(res, items[:3], data=df)  # 項目ごとのパネル、観測比率の点
+ax_information = plot_information(res, standard_error=True)  # テスト情報量とその SE
+ax_expected = plot_expected_score(res)  # テスト特性曲線
+fig_wright = plot_wright_map(res, df)  # 受検者と項目位置を並べる
+```
+
+![観測比率つきの項目特性曲線](images/plots/item_curves.png)
+
+![テスト情報量と標準誤差](images/plots/information.png)
+![テスト特性曲線](images/plots/expected_score.png)
+
+![Wright マップ](images/plots/wright_map.png)
+
+- `plot_item_curves` は 2 値項目では $P(Y=1\mid\theta)$、多値項目では全カテゴリを描く。`ax=` を渡すと
+  1 項目を既存の Axes に描く。
+- `plot_information(res, items=[...])` はテスト情報量の代わりに項目情報量を描く。
+- 多群モデルでは全群の曲線を描く（[DIF](#特異項目機能dif) を参照）。`data` を渡すときは `score()` と
+  同じく `group=labels` も渡す。
 
 ### 限定情報の適合度（M2）
 
@@ -685,6 +742,17 @@ dif_table = mg.dif(mg_df, group=group, items=items[6:9])
 print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
 ```
 
+多群の推定結果に `plot_item_curves` を使うと群ごとの曲線を描き、`data` と `group` を渡せば群ごとの
+観測比率も描く。これが項目の DIF の図になる。
+
+```python
+from flexpyirt.plotting import plot_item_curves
+
+fig_dif = plot_item_curves(mg, items[6:9], data=mg_df, group=group)
+```
+
+![群ごとの項目特性曲線（DIF の図）](images/plots/dif.png)
+
 全項目をスクリーニングするには `dif_screen(spec, data, group=..., strategy=...)` を使う。モデルは `spec` から
 自動で作り（アンカーと制約は `anchor_items`・`items`・`params` で決まる）、アンカーを純化する。
 
@@ -705,17 +773,17 @@ print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, ad
 ```python
 from flexpyirt import dif_effect_sizes, dif_screen
 
-# アンカーでない 6 項目をスクリーニングする: アンカー q01–q06 から始め、他の各項目を Wald 検定し（1 ラウンドに
+# q07–q09 をスクリーニングする（他の項目はアンカー）: アンカー q01–q06 から始め、各項目を Wald 検定し（1 ラウンドに
 # 標準誤差つきの推定 1 回）、DIF のない項目を等値にし、検出された項目を検出結果が変わらなくなるまで
 # 検定し直す（mirt の DIF(scheme = "add_sequential")）。
 screen = dif_screen(
     Model.uniform(TwoPL(), items=items).with_groups(ref=Normal.standard(), focal=Normal.free()),
     mg_df,
     group=group,
+    items=items[6:9],
     anchor_items=anchors,
     strategy="sequential_constrain",
     test="wald",
-    quadrature=Quadrature.equispaced(81, bounds=(-8, 8)),
 )
 print(screen.table.round(4))  # item, x2, df, p, adj_p, flagged, converged
 print("flagged:", screen.flagged_items)
@@ -1211,7 +1279,10 @@ print(report)
   傾きが下がるので、そのペアは両方向に大きな値を持つ（`folded` は両方を足したもの）。決まったカットオフはないので、
   他より目立つペアを探す。既定では mirt の `residuals(type = "JSI")` と同じく、項目ごとにモデルを推定し直す。
   `method="one_step"` は推定し直さず（全項目モデルからの Taylor 近似 1 ステップ）、長いテストではずっと速い。15 項目
-  程度から既定の値とよく一致するが、短いテストでは一致せず、警告を出す。
+  程度から既定の値とよく一致するが、短いテストでは一致せず、警告を出す。JSI は単一群・1 次元のモデルについてのみ
+  定義されている。多次元・多母集団への拡張は研究されておらず、参照となる実装もないので、多母集団・多次元（双因子・
+  two-tier を含む）・`Normal` 以外の潜在分布のモデルでは `jsi()` は `SpecificationError` を出す。これらのモデルでは
+  `local_dependence()` を使う。
 - `model_parallel_analysis()` は推定したモデルからデータをシミュレーションし、観測された第 2 固有値がモデルの生む
   値より大きいかを調べる（Drasgow & Lissak, 1983）。モデルを同じデータに当てはめているので $p$ 値は保守的になる。
   小さい値は第 2 の次元の証拠になるが、大きい値（この例では 1）は一次元性の証明ではない。
@@ -1245,7 +1316,108 @@ print(test.assessment_items, round(test.statistic, 3), round(test.p_value, 3))
   3 分の 1 で検定用の部分テストを選び、残りで検定する。保守的なので、小さい $p$ は第 2 の次元の強い証拠だが、大きい
   $p$ は一次元性の弱い証拠にとどまる。
 
-## 20. エラーと警告
+## 20. ユーザー定義の項目モデル
+
+flexpyirt にない項目モデルも、Python で書けば組み込みのモデルと同じように使えます。`flexpyirt.items` の
+プロトコル `ItemKernel` と `ItemModel` に沿って小さなクラスを 2 つ書きます（契約の全体は
+[API リファレンス](reference.ja.md#ユーザー定義の項目モデル)）。
+
+- **カーネル**は反応関数を持ちます。`log_prob(theta, params)` は形 `(Q, D)` の節点 `theta` での
+  `(Q, n_categories)` の対数確率を `jax.numpy` で計算して返します。勾配とヘッセ行列は自動微分で求めるので、
+  ほかに導出するものはありません。パラメタの名前（`param_names`。`D` 個の傾きが先頭。`slope_params`、
+  `intercept_params`）と、`D` 因子用のコピーを返す `with_factors` も持ちます。ハッシュ可能であること
+  （frozen dataclass にする）。
+- **項目モデル**は、表に表示する `name`、`kernel`、既定で推定するパラメタ、項目の反応と残余得点からの初期値、
+  上下限を与えます。
+
+例では 2PL を実装し直すので、結果を `TwoPL` と照らし合わせられます。
+
+```python
+from dataclasses import dataclass
+from typing import ClassVar
+
+import jax.numpy as jnp
+
+from flexpyirt.items import register_item_model
+
+
+@dataclass(frozen=True)
+class LogisticKernel:
+    """The pure log-probability function of P(y = 1 | theta) = sigmoid(a'theta + d)."""
+
+    n_factors: int = 1
+    n_categories: ClassVar[int] = 2
+
+    def with_factors(self, n_factors):
+        return LogisticKernel(n_factors)
+
+    @property
+    def param_names(self):
+        if self.n_factors == 1:
+            return ("a", "d")
+        return (*(f"a{m}" for m in range(1, self.n_factors + 1)), "d")
+
+    @property
+    def slope_params(self):
+        return self.param_names[: self.n_factors]
+
+    @property
+    def intercept_params(self):
+        return ("d",)
+
+    def log_prob(self, theta, params):
+        z = theta @ params[: self.n_factors] + params[self.n_factors]  # theta: (Q, D)
+        return jnp.stack([jax.nn.log_sigmoid(-z), jax.nn.log_sigmoid(z)], axis=-1)
+
+
+@dataclass(frozen=True)
+class MyTwoPL:
+    """The item model: name, kernel, free pattern, starting values and bounds."""
+
+    name: ClassVar[str] = "My2PL"
+
+    @property
+    def kernel(self):
+        return LogisticKernel()
+
+    def default_free(self):
+        return (True, True)
+
+    def start_values(self, item, rest):
+        p = np.clip(item.mean(), 0.01, 0.99)
+        return np.array([1.0, np.log(p / (1.0 - p))])
+
+    def bounds(self):
+        return (-np.inf, -np.inf), (np.inf, np.inf)
+
+
+custom = fit(Model.uniform(MyTwoPL(), items=items), df, method=BAEM(tol=1e-6, squarem=True))
+print(custom.items.head(3))
+gap = (custom.parameters["estimate"] - res_sq.parameters["estimate"]).abs().max()
+print(f"largest difference from the built-in TwoPL: {gap:.1e}")
+```
+
+2 つの推定は同じ最大点に達します。わずかな差は収束判定と初期値の違いによるものです（テストでは、2PL と GRM の
+再実装が組み込みのモデルと推定値・標準誤差・得点まで機械精度で一致することを確かめています）。
+
+反応関数を評価する機能はすべてユーザー定義モデルで使えます。標準誤差、スコアリング、項目適合度、M2、情報量、
+多母集団、事前分布、多次元モデルなどです。`link()` と `fix_from(..., parameterization="irt")` はモデルごとの変換が
+必要なので `SpecificationError` を出します。ML と WLE のスコアリングは反応カテゴリが $\theta$ とともに上がることを
+仮定します。表示用の閾値（`b` 列）は、カーネルが任意のメンバ `irt_names`、`irt_dependency_indices`、
+`irt_thresholds` を定義したときだけ表示されます。
+
+推定結果を JSON に保存するには、先にクラスを登録します。新しいセッションでファイルを読むときも、その前に登録し直します。
+
+```python
+register_item_model(MyTwoPL)  # or use @register_item_model on the class
+restored = FitResult.from_json(custom.to_json())
+print(restored.items.equals(custom.items))
+```
+
+flexpyirt が確かめるのは仕組みであり、あなたのモデルではありません。ユーザー定義モデルの正しさは `log_prob` の
+正しさで決まります。新しいモデルは、頼る前に独立な実装と照らし合わせてください。
+
+## 21. エラーと警告
 
 | 種類 | いつ出るか |
 |---|---|

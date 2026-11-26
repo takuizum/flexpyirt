@@ -22,8 +22,9 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 - 次元数（`model_parallel_analysis` と `dimensionality` 以外は flexpyctt）: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) とその結果
 - 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
+- 図: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
 - モデル: [`Model`](#model)
-- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
+- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)、[ユーザー定義の項目モデル](#ユーザー定義の項目モデル)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
@@ -255,7 +256,10 @@ $$\mathrm{JSI}_{ji} = \frac{\hat a_i - \hat a_i^{(-j)}}{\mathrm{SE}(\hat a_i^{(-
 
 **戻り値**: [`JSIResult`](#jsiresult)
 
-**例外**: `PrecisionError`。対応しないモデル、項目が 3 つ未満、不正な指定、標準誤差のない推定結果での `"one_step"` は
+JSI は単一群・1 次元のモデルについてのみ定義されている。多次元・多母集団への拡張は研究されておらず、参照となる実装も
+ないので、ほかのモデルには使えない。
+
+**例外**: `PrecisionError`。多母集団・多次元（双因子・two-tier を含む）・`Normal` 以外の潜在分布のモデル、項目が 3 つ未満、不正な指定、標準誤差のない推定結果での `"one_step"` は
 `SpecificationError`。
 
 **警告**: 推定し直しが収束しなければ `ConvergenceWarning`。
@@ -315,7 +319,7 @@ float64 値は `repr` 厳密な JSON 数値として、非有限値（`NaN`, `+i
 
 **戻り値**: `str`（直列化された JSON 文字列）。
 
-**例外**: `indent` が不正、または未登録のモデル・事前分布型が含まれる場合に `SpecificationError`。
+**例外**: `indent` が不正、または未登録のモデル・事前分布型が含まれる場合に `SpecificationError`（ユーザー定義の項目モデルは先に [`register_item_model`](#flexpyirtitemsregister_item_model) で登録する）。
 
 #### `FitResult.from_json`
 
@@ -335,7 +339,8 @@ FitResult.from_json(source) -> FitResult
 **戻り値**: `FitResult`
 
 **例外**: JAX の 64 ビット浮動小数点が無効なら `PrecisionError`。不正・非厳格な JSON（生の `NaN`/`Infinity`
-リテラルなど）、未知の `format` タグ・スキーマ版・登録名、または内部整合性違反なら `SpecificationError`。存在しない
+リテラルなど）、未知の `format` タグ・スキーマ版・登録名（このセッションで登録していないユーザー定義の項目モデルを含む）、
+または内部整合性違反なら `SpecificationError`。存在しない
 ファイルパスなら `FileNotFoundError`。
 
 ---
@@ -602,6 +607,65 @@ $P(y=k\mid\theta)=\exp(a\,\mathrm{ak}_k\,\theta+d_k)/\sum_{c=0}^{K-1}\exp(a\,\ma
 mirt の `itemtype = "nominal"` と同じ。$\mathrm{ak}_k=k$ に固定すると `GPCM(n_categories)` と厳密に一致する
 （`n_categories = 2` では自由な `ak` パラメタがなく、`Nominal(2)` は `GPCM(2)` / `TwoPL` と一致する）。
 `NominalKernel(n_categories)` を用いる。
+
+### ユーザー定義の項目モデル
+
+組み込みにない項目モデルは、`flexpyirt.items` の 2 つのプロトコルに沿って書けば、上のクラスと同じように `Model`
+で使える（実例は[ユーザーガイド](guide.ja.md#20-ユーザー定義の項目モデル)）。カーネルが等しい項目はまとめて推定する。
+
+**`flexpyirt.items.ItemKernel`**（反応関数。ハッシュ可能で値で比較できること。frozen dataclass にする）
+
+| メンバ | 必須 | 説明 |
+|---|---|---|
+| `n_factors` | はい | 潜在因子の数 $D$ |
+| `with_factors(n_factors)` | はい | `n_factors` 因子用のカーネルのコピー |
+| `param_names` | はい | パラメタ名（順序つき）。先頭の $D$ 個が傾き |
+| `n_categories` | はい | カテゴリ数 $K \ge 2$（反応は `0..K-1` で符号化） |
+| `slope_params` | はい | 傾き。`param_names[:n_factors]` |
+| `intercept_params` | はい | 位置を担うパラメタ（識別チェックが使う。空でもよい） |
+| `log_prob(theta, params)` | はい | 形 `(Q, D)` の節点 `theta` とパラメタベクトル `params` での `(Q, K)` の対数確率。`jax.numpy` で書き、2 回微分できること。パラメタの定義域外では NaN |
+| `irt_names`、`irt_dependency_indices`、`irt_thresholds(params)` | いいえ | `FitResult.items` にデルタ法 SE 付きで加える表示用閾値。その名前、それぞれが依存するパラメタの添字、値 |
+
+**`flexpyirt.items.ItemModel`**（仕様。frozen dataclass にする）
+
+| メンバ | 説明 |
+|---|---|
+| `name` | クラス属性。`model` 列と JSON での名前（組み込みの名前は使えない） |
+| `kernel` | `n_factors == 1` のカーネル |
+| `default_free()` | 各パラメタを既定で推定するか |
+| `start_values(item, rest)` | 1 項目の観測された反応とその残余得点からの初期値 |
+| `bounds()` | パラメタの上下限の `(lower, upper)` タプル |
+
+`default_free()`・`start_values()`・`bounds()` は 1 次元の `param_names` に従い、$D$ 因子のモデルでは傾きの要素を
+すべての傾きに使う。`Model` は作るときにこれらの規則をチェックする（`SpecificationError`）。`log_prob` を評価する
+機能はすべてユーザー定義モデルで使える: 推定、標準誤差、スコアリング、項目適合度、M2、局所依存、DIF、情報量、
+合計得点、多母集団、事前分布、多次元モデル。ML と WLE のスコアリングは、傾きが正のとき高いカテゴリほど $\theta$
+が高いことを仮定する。使えないもの: `link()` と `Model.fix_from(..., parameterization="irt")`
+（`SpecificationError`）、および `Rasch` / `PCM` だけのモデルが既定で得る潜在分散の推定
+（`Model.with_latent(Normal(free_var=True))` を使う）。
+
+#### `flexpyirt.items.register_item_model`
+
+```text
+register_item_model(cls, *, to_dict=None, from_dict=None) -> cls
+```
+
+ユーザー定義の項目モデルのクラスを登録し、それを使った推定結果を `FitResult.to_json()` で保存し
+`FitResult.from_json()` で読めるようにする。モデルは `{"type": cls.name, **to_dict(model)}` として保存し、
+`from_dict(fields)` で復元する。既定では、フィールドが `bool`・`int`・有限の `float`・`str` の dataclass であること。
+登録は Python セッションの間だけ有効なので、新しいセッションでは読む前に登録し直す。クラスデコレータとしても使える。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `cls` | type | 項目モデルのクラス。`cls.name` が JSON での型名 |
+| `to_dict` | callable、任意 | `model -> dict`（JSON の値、`"type"` を除く） |
+| `from_dict` | callable、任意 | `dict -> model`。`to_dict` の逆（両方を渡すか、どちらも渡さない） |
+
+**戻り値**: `cls`。
+
+**例外**: `cls.name` がないか組み込みの名前のとき、同じ名前で別のクラスが登録済みのとき、`to_dict` / `from_dict`
+の片方だけを渡したとき、dataclass でないクラスに既定の符号化を使ったときに `SpecificationError`。登録しないと
+`to_json()` が `SpecificationError` を出す。
 
 ---
 
@@ -1368,6 +1432,114 @@ IRT モデルのカテゴリ確率。先頭の軸はバッチ軸。結果の形�
 
 ---
 
+## 図
+
+図の元になる数値（[ガイド 5 節](guide.ja.md#図)）は DataFrame を返す 3 つの関数で作り、
+`flexpyirt.plotting` がそれを matplotlib で描く。多次元モデルではどれも `SpecificationError`。
+
+### `item_probabilities`
+
+```text
+item_probabilities(res, theta, *, items=None, group=None) -> DataFrame
+```
+
+すべての項目モデルのカテゴリ確率（トレースライン）$P_{jk}(\theta)=\Pr(Y_j=k\mid\theta)$、
+$k=0,\dots,K_j-1$（mirt の `probtrace()`）。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みの 1 次元モデル |
+| `theta` | float / 1 次元配列 | 潜在特性の値（有限） |
+| `items` | str / list[str]（任意） | 含める項目（既定: すべて） |
+| `group` | str（任意） | 群名。多母集団モデルでは必須 |
+
+**戻り値**: 項目・カテゴリ・`theta` ごとに 1 行の縦長の `DataFrame`。列は `item`, `category`,
+`theta`, `probability`。
+
+### `empirical_item_curve`
+
+```text
+empirical_item_curve(res, data, *, items=None, n_bins=10, group=None, item_names=None) -> DataFrame
+```
+
+EAP の $\theta$ の区間ごとの観測カテゴリ比率と、モデルの確率（Bock, 1972; Yen, 1981）。項目ごとに、その
+項目に回答した回答者を EAP 推定値で並べ（同順位は行の順）、$\lfloor n/B\rfloor$ 人ずつの連続する
+`n_bins` 個の区間に分ける。余り $c=n\bmod B$ のうち $\lfloor c/2\rfloor$ 人は最初の区間に、残りは
+最後の区間に入れる（mirt の `itemfit()` と同じ）。区間 $b$ とカテゴリ $k$ ごとに、EAP の平均
+$\bar\theta_b$、区間の回答者のうちカテゴリ $k$ の割合 $O_{bk}$、モデルの確率
+$E_{bk}=P_{jk}(\bar\theta_b)$ を返す。$n_bO_{bk}$ と $n_bE_{bk}$ は mirt の
+`itemfit(fit_stats = "X2", return.tables = TRUE)` の表（セル併合なし）に当たる。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みの 1 次元モデル |
+| `data` | DataFrame / 2 次元配列 | 推定した項目への回答（NaN は欠測。回答者は回答した項目の区間にだけ入る） |
+| `items` | str / list[str]（任意） | 含める項目（既定: すべて） |
+| `n_bins` | int | 区間の数（mirt の `group.bins`）。既定 10 |
+| `group` | 配列（任意） | `data` の各行の群ラベル（多母集団モデルでは必須。区間は群ごとに作る） |
+| `item_names` | list[str]（任意） | `data` が配列のときの列名 |
+
+**戻り値**: 項目・区間・カテゴリごとに 1 行の `DataFrame`。列は `item`, `bin`（1, ..., B）, `theta`,
+`n`, `category`, `observed`, `expected`（多母集団モデルでは先頭に `group` 列）。
+
+**例外**: `n_bins` が正の整数でないとき、（ある群で）回答数が `n_bins` 未満の項目があるときも
+`SpecificationError`。
+
+### `wright_map_table`
+
+```text
+wright_map_table(res, data, *, group=None, item_names=None, method="EAP") -> WrightMapTable
+```
+
+項目–受検者（Wright）マップの受検者の推定値と項目の位置。項目の位置はサーストン閾値で、
+$k=1,\dots,K_j-1$ について $P(Y_j\ge k\mid\theta)=\sum_{c\ge k}P_{jc}(\theta)=1/2$ となる $\theta$
+（Wright & Masters, 1982; TAM の `tam.threshold()`）。2PL / Rasch 項目では $b$、GRM 項目では $b_k$ に
+等しい。3PL / 4PL 項目では正答確率が 1/2 になる点、GPCM / PCM 項目ではステップ困難度とは異なる値になる。
+$[-20, 20]$ で探し（最初の交点を二分法で詰める）、交点がなければ NaN（例: $g\ge1/2$ の 3PL 項目）。
+名義項目ではデータのカテゴリ順で数える。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みの 1 次元モデル |
+| `data` | DataFrame / 2 次元配列 | 推定した項目への回答 |
+| `group` | 配列（任意） | `data` の各行の群ラベル（多母集団モデルでは必須） |
+| `item_names` | list[str]（任意） | `data` が配列のときの列名 |
+| `method` | `"EAP"` / `"MAP"` / `"WLE"` | 受検者の推定法。既定 `"EAP"` |
+
+**戻り値**: [`WrightMapTable`](#wrightmaptable)。
+
+### `WrightMapTable`
+
+2 つの DataFrame の名前付きタプル（`persons, items = wright_map_table(...)` で分解できる）。
+
+| フィールド | 説明 |
+|---|---|
+| `persons` | 回答者ごとの `theta`。インデックスは `data` のもの（多母集団モデルでは先頭に `group` 列） |
+| `items` | 項目の閾値ごとに 1 行: `item`, `category`（$1,\dots,K_j-1$）, `location`（多母集団モデルでは先頭に `group` 列があり、全群の閾値を含む） |
+
+### `flexpyirt.plotting`
+
+```text
+plot_item_curves(res, items=None, *, data=None, group=None, n_bins=10, theta=None, item_names=None, ax=None) -> Figure
+plot_information(res, items=None, *, standard_error=False, group=None, theta=None, ax=None) -> Axes
+plot_expected_score(res, *, group=None, theta=None, ax=None) -> Axes
+plot_wright_map(res, data, *, group=None, item_names=None, method="EAP", n_bins=30) -> Figure
+```
+
+`from flexpyirt.plotting import ...` で使う。matplotlib（`pip install "flexpyirt[plot]"`）が必要で、
+関数を呼んだときに import する。入っていなければ [`MissingDependencyError`](#missingdependencyerror)
+を投げる。matplotlib のオブジェクトを返し、`plt.show()` は呼ばない。既定の `theta` 格子は
+$[-4, 4]$ の 161 点。
+
+| 関数 | 描くもの | 数値の出どころ |
+|---|---|---|
+| `plot_item_curves` | 項目ごとに 1 パネル: 2 値項目は $P(Y=1\mid\theta)$、多値項目は全カテゴリ。`data` があれば観測比率を点で描く。多母集団モデルでは群ごとに 1 本（DIF の図）。`ax=` は 1 項目のとき。`group=` は `data` と一緒に使う行ラベル | [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve) |
+| `plot_information` | テスト情報量、または `items` の情報量。`standard_error=True` で SE を第 2 の y 軸（`ax.twinx()`）に描く。`group=` は群名（既定: 全群） | [`test_information`](#test_information), [`item_information`](#item_information) |
+| `plot_expected_score` | テスト特性曲線。既定では群ごとに 1 本 | [`expected_score`](#expected_score)（`total`） |
+| `plot_wright_map` | 受検者の推定値の横向きヒストグラム（`n_bins` 区間）と項目の閾値を、$\theta$ 軸を共有して並べる | [`wright_map_table`](#wright_map_table) |
+
+---
+
 ## 設定
 
 ### `BAEM`
@@ -1425,6 +1597,11 @@ ParameterTable の不正な編集、群ラベルの不一致など。推定の�
 
 尺度が識別できない指定。例: アンカーなしで焦点群の平均・分散を推定、固定項目なしで単一群の平均を推定。
 推定の前に出る。`ValueError` を継承。
+
+#### `MissingDependencyError`
+
+任意依存が入っていない。例: `flexpyirt.plotting` の matplotlib（`flexpyirt[plot]` を入れる）。
+`import flexpyirt` には不要。`ImportError` を継承。
 
 #### `PrecisionError`
 

@@ -25,7 +25,8 @@ for the models and algorithms behind them, see [Theory](theory.md).
 17. [Number of dimensions](#17-number-of-dimensions)
 18. [Local dependence and the dimensionality report](#18-local-dependence-and-the-dimensionality-report)
 19. [DETECT](#19-detect)
-20. [Errors and warnings](#20-errors-and-warnings)
+20. [User-defined item models](#20-user-defined-item-models)
+21. [Errors and warnings](#21-errors-and-warnings)
 
 ## 1. Setup
 
@@ -131,7 +132,8 @@ logit scale; the interior ML estimates agree). Polytomous categories start at 0 
 data coded from 1, such as mirt's `Science`). `Nominal` has no display `b` columns: its
 categories are not ordered, so adjacent-category thresholds on the $\theta$ scale are not defined
 in general (they are singular when $\mathrm{ak}_k=\mathrm{ak}_{k-1}$), and mirt's
-`coef(m, IRTpars = TRUE)` reports Bock's zero-sum slopes and intercepts instead.
+`coef(m, IRTpars = TRUE)` reports Bock's zero-sum slopes and intercepts instead. A model that is
+not in the table can be written by the user ([section 20](#20-user-defined-item-models)).
 
 ```python
 theta3 = rng.normal(0, 1, 2000)
@@ -383,6 +385,67 @@ print(reliability(res, df))  # with data: columns marginal, empirical
   $N(0, 1)$. For another mean or variance mirt's function does not use the fitted distribution;
   flexpyirt's value does, and it does not change when the latent scale is transformed linearly.
 - `reliability()` needs `Normal` latent distributions.
+
+### Plots
+
+`flexpyirt.plotting` draws the figures looked at in every analysis: item characteristic curves
+with observed proportions, information curves, the test characteristic curve and the
+item–person (Wright) map. It needs matplotlib, installed with `pip install "flexpyirt[plot]"`;
+without it `import flexpyirt` still works and the plot functions raise
+`MissingDependencyError`. The functions return matplotlib objects (save them with
+`fig.savefig(...)`) and never call `plt.show()`.
+
+Every number in a figure comes from a function that returns a DataFrame, so the figures can be
+redrawn with any other library:
+
+- `item_probabilities(res, theta)`: the category probabilities $P_{jk}(\theta)$ (mirt's
+  `probtrace()`), one row per item, category and `theta`.
+- `empirical_item_curve(res, data)`: respondents sorted by EAP $\theta$ and cut into `n_bins`
+  bins of equal size (as mirt's `itemfit()`); per bin and category the mean `theta`, the number
+  of respondents `n`, the `observed` proportion and the model's `expected` probability at that
+  mean.
+- `wright_map_table(res, data)`: `persons` (EAP scores) and `items` (for each item and category
+  $k\ge1$ the `location` where $P(Y\ge k\mid\theta)=1/2$, the Thurstonian threshold; $b$ for
+  2PL items).
+
+```python
+from flexpyirt import empirical_item_curve, item_probabilities, wright_map_table
+
+trace = item_probabilities(res, np.linspace(-3.0, 3.0, 7), items="q01")
+print(trace.head(3).round(3))  # item, category, theta, probability
+observed = empirical_item_curve(res, df, items=["q01"], n_bins=10)
+print(observed.head(4).round(3))  # item, bin, theta, n, category, observed, expected
+wright = wright_map_table(res, df)
+print(wright.items.head(3).round(3))  # item, category, location
+```
+
+```python
+from flexpyirt.plotting import (
+    plot_expected_score,
+    plot_information,
+    plot_item_curves,
+    plot_wright_map,
+)
+
+fig_curves = plot_item_curves(res, items[:3], data=df)  # one panel per item, observed points
+ax_information = plot_information(res, standard_error=True)  # test information and its SE
+ax_expected = plot_expected_score(res)  # test characteristic curve
+fig_wright = plot_wright_map(res, df)  # persons beside item locations
+```
+
+![Item characteristic curves with observed proportions](images/plots/item_curves.png)
+
+![Test information and standard error](images/plots/information.png)
+![Test characteristic curve](images/plots/expected_score.png)
+
+![Wright map](images/plots/wright_map.png)
+
+- `plot_item_curves` draws $P(Y=1\mid\theta)$ for dichotomous items and every category for
+  polytomous items; `ax=` draws a single item into existing axes.
+- `plot_information(res, items=[...])` draws item information instead of test information.
+- For a multiple-group model the curves of every group are drawn (see
+  [DIF](#differential-item-functioning-dif)); with `data`, pass `group=labels` as for
+  `score()`.
 
 ### Limited-information fit (M2)
 
@@ -751,6 +814,17 @@ dif_table = mg.dif(mg_df, group=group, items=items[6:9])
 print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
 ```
 
+`plot_item_curves` on a multiple-group fit draws each group's curve, with the observed
+proportions of each group when `data` and `group` are given: the DIF plot of an item.
+
+```python
+from flexpyirt.plotting import plot_item_curves
+
+fig_dif = plot_item_curves(mg, items[6:9], data=mg_df, group=group)
+```
+
+![Item characteristic curves per group (DIF plot)](images/plots/dif.png)
+
 To screen every item, use `dif_screen(spec, data, group=..., strategy=...)`. It builds the models
 from `spec` itself (anchors and constraints come from `anchor_items`, `items` and `params`) and
 purifies the anchor set:
@@ -776,17 +850,17 @@ fit), and one test row (`level == "test"`) for the expected test score.
 ```python
 from flexpyirt import dif_effect_sizes, dif_screen
 
-# Screen the six non-anchor items: start from the anchors q01-q06, test every other item with a
+# Screen q07-q09 (the other items are anchors): start from the anchors q01-q06, test each item with a
 # Wald test (one fit with standard errors per round), constrain the items that show no DIF and
 # retest the flagged ones until the flags repeat (mirt's DIF(scheme = "add_sequential")).
 screen = dif_screen(
     Model.uniform(TwoPL(), items=items).with_groups(ref=Normal.standard(), focal=Normal.free()),
     mg_df,
     group=group,
+    items=items[6:9],
     anchor_items=anchors,
     strategy="sequential_constrain",
     test="wald",
-    quadrature=Quadrature.equispaced(81, bounds=(-8, 8)),
 )
 print(screen.table.round(4))  # item, x2, df, p, adj_p, flagged, converged
 print("flagged:", screen.flagged_items)
@@ -1335,7 +1409,11 @@ print(report)
   look for pairs that stand out. The default re-estimates the model for every item, as mirt's
   `residuals(type = "JSI")`. `method="one_step"` skips the re-estimation (one Taylor step from
   the full model) and is far faster on long tests; it agrees closely with the default from about
-  15 items on, but not on short tests, where it warns.
+  15 items on, but not on short tests, where it warns. JSI is defined only for single-group
+  unidimensional models: its multidimensional / multiple-group extension has not been studied and
+  there is no reference implementation, so `jsi()` raises `SpecificationError` for
+  multiple-group, multidimensional (including bifactor and two-tier) and non-`Normal` latent
+  models. Use `local_dependence()` for those.
 - `model_parallel_analysis()` simulates data from the fitted model and asks whether the observed
   second eigenvalue is larger than the model produces (Drasgow & Lissak, 1983). Because the
   model was fitted to the same data the $p$-value is conservative: a small value is evidence of a
@@ -1377,7 +1455,112 @@ print(test.assessment_items, round(test.statistic, 3), round(test.p_value, 3))
   the rest. It is conservative, so a small $p$ is strong evidence of a second dimension and a
   large $p$ is only weak evidence for unidimensionality.
 
-## 20. Errors and warnings
+## 20. User-defined item models
+
+An item model that flexpyirt does not provide can be written in Python and used like a built-in
+one. You write two small classes against the protocols `ItemKernel` and `ItemModel` in
+`flexpyirt.items` (full contract in the [API reference](reference.md#user-defined-item-models)):
+
+- the **kernel** holds the response function: `log_prob(theta, params)` returns the
+  `(Q, n_categories)` log-probabilities at the nodes `theta` of shape `(Q, D)`, written with
+  `jax.numpy`. Gradients and Hessians come from automatic differentiation, so nothing else has to
+  be derived. It also names the parameters (`param_names`, with the `D` slopes first;
+  `slope_params`; `intercept_params`) and returns a copy for `D` factors (`with_factors`). It must
+  be hashable: a frozen dataclass.
+- the **item model** gives the `name` shown in the tables, the `kernel`, which parameters are free
+  by default, starting values from an item's responses and rest scores, and bounds.
+
+The example re-implements the 2PL, so the result can be checked against `TwoPL`.
+
+```python
+from dataclasses import dataclass
+from typing import ClassVar
+
+import jax.numpy as jnp
+
+from flexpyirt.items import register_item_model
+
+
+@dataclass(frozen=True)
+class LogisticKernel:
+    """The pure log-probability function of P(y = 1 | theta) = sigmoid(a'theta + d)."""
+
+    n_factors: int = 1
+    n_categories: ClassVar[int] = 2
+
+    def with_factors(self, n_factors):
+        return LogisticKernel(n_factors)
+
+    @property
+    def param_names(self):
+        if self.n_factors == 1:
+            return ("a", "d")
+        return (*(f"a{m}" for m in range(1, self.n_factors + 1)), "d")
+
+    @property
+    def slope_params(self):
+        return self.param_names[: self.n_factors]
+
+    @property
+    def intercept_params(self):
+        return ("d",)
+
+    def log_prob(self, theta, params):
+        z = theta @ params[: self.n_factors] + params[self.n_factors]  # theta: (Q, D)
+        return jnp.stack([jax.nn.log_sigmoid(-z), jax.nn.log_sigmoid(z)], axis=-1)
+
+
+@dataclass(frozen=True)
+class MyTwoPL:
+    """The item model: name, kernel, free pattern, starting values and bounds."""
+
+    name: ClassVar[str] = "My2PL"
+
+    @property
+    def kernel(self):
+        return LogisticKernel()
+
+    def default_free(self):
+        return (True, True)
+
+    def start_values(self, item, rest):
+        p = np.clip(item.mean(), 0.01, 0.99)
+        return np.array([1.0, np.log(p / (1.0 - p))])
+
+    def bounds(self):
+        return (-np.inf, -np.inf), (np.inf, np.inf)
+
+
+custom = fit(Model.uniform(MyTwoPL(), items=items), df, method=BAEM(tol=1e-6, squarem=True))
+print(custom.items.head(3))
+gap = (custom.parameters["estimate"] - res_sq.parameters["estimate"]).abs().max()
+print(f"largest difference from the built-in TwoPL: {gap:.1e}")
+```
+
+Both fits reach the same maximum; the small difference comes from the convergence tolerance and
+the different starting values. (The test suite checks that re-implementations of the 2PL and the
+GRM give the built-in estimates, standard errors and scores to machine precision.)
+
+Everything that evaluates the response function works with a user-defined model: standard errors,
+scoring, item fit, M2, information, multiple groups, priors and multidimensional models. `link()`
+and `fix_from(..., parameterization="irt")` need model-specific transformations and raise
+`SpecificationError`; ML and WLE scoring assume that the response categories increase with
+$\theta$. Display thresholds (`b` columns) appear only if the kernel defines the optional members
+`irt_names`, `irt_dependency_indices` and `irt_thresholds`.
+
+To save the fit as JSON, register the class first; register it again in a new session before
+loading the file.
+
+```python
+register_item_model(MyTwoPL)  # or use @register_item_model on the class
+restored = FitResult.from_json(custom.to_json())
+print(restored.items.equals(custom.items))
+```
+
+flexpyirt checks the machinery, not your model: a user-defined model is as correct as its
+`log_prob`. Check a new model against an independent implementation before relying on it.
+
+## 21. Errors and warnings
 
 | Type | When |
 |---|---|

@@ -333,15 +333,19 @@ class ItemKernel(Protocol):
     n_categories: int
     slope_params: tuple[str, ...]
     intercept_params: tuple[str, ...]
-    irt_names: tuple[str, ...]  # display thresholds (empty for D > 1)
-    irt_dependency_indices: tuple[tuple[int, ...], ...]
 
     def with_factors(self, n_factors: int) -> ItemKernel: ...
-    def irt_thresholds(self, params: Array) -> Array: ...
     def log_prob(self, theta: Array, params: Array) -> Array: ...  # theta (Q, D) -> (Q, K)
+
+    # optional: display thresholds (empty for D > 1)
+    irt_names: tuple[str, ...]
+    irt_dependency_indices: tuple[tuple[int, ...], ...]
+
+    def irt_thresholds(self, params: Array) -> Array: ...
 ```
 The design goal: writing `log_prob` on `(Q, D)` nodes is enough for a new item kernel to get the
 E-step, M-step (autodiff Newton), Oakes/Hessian SEs, and EAP scoring for $D \in \{1, 2, 3\}$.
+This protocol, with `ItemModel`, is public: §20 fixes the contract for user-defined item models.
 
 ## 7. Item models (in stages)
 | Model | Internal parameters | Milestone |
@@ -1911,6 +1915,13 @@ data-independent shapes (§15.21).
     $\le1.2\times10^{-7}$). The tests also check the refit against `fit()` on the data without the
     item, the approximations against the refit on a 15-item data set (`"newton"` 1 step 0.03, 2
     steps 0.02, `"one_step"` 0.05) and the vmapped gradients against single ones.
+    **Scope (decided 2026-11-26, #81)**: JSI is defined only for single-group unidimensional
+    models (one slope per item; Edwards, Houts & Cai, 2018). Its multidimensional /
+    multiple-group extension (including bifactor and two-tier models) and its use with non-Normal
+    latent distributions have not been studied, and there is no reference implementation (mirt's
+    `type = "JSI"` needs one factor; see also item 11 and §17.3), so it is not implemented:
+    `jsi()` raises `SpecificationError` for multiple-group, multidimensional and non-`Normal`
+    latent models, with a message saying why.
 18. **Package split: `flexpyctt` and `flexpyequate` (decided 2026-11-25, issue #87)**: tools that need no fitted IRT
     model are released as separate, JAX-free distributions from this repository. flexpyirt keeps
     BA-EM estimation and everything that uses its result.
@@ -2646,6 +2657,184 @@ data-independent shapes (§15.21).
    $\mathbf A$ and NaN otherwise (a rotated standard error needs the posterior covariance, which
    the score table does not carry).
 
+## 20. User-defined item models (#86)
+
+1. **Public contract.** `flexpyirt.items.ItemModel` and `flexpyirt.items.ItemKernel` (§6) are the
+   public extension point: an object that implements them can be put in a `Model` like a built-in
+   item model, and every part of the library that only evaluates `log_prob` works with it.
+   Instead of adding more built-in models, a model such as GGUM is written by the user.
+   - **`ItemModel`** (Spec layer; all members required): the class attribute `name` (a non-empty
+     string that is not a built-in name; shown in the `model` column and stored in JSON),
+     `kernel` (the kernel with `n_factors == 1`), `default_free()`, `start_values(item, rest)`
+     and `bounds()`. The last three describe the unidimensional parameter layout
+     `kernel.param_names`; in a model with $D$ factors the slope entry is used for each of the $D$
+     slopes. It should be a frozen dataclass (hashable, compared by value, like `Model`).
+   - **`ItemKernel`** (Core layer), required: `n_factors`, `with_factors(n_factors)`,
+     `param_names`, `n_categories` (≥ 2; categories are coded $0..K-1$), `slope_params`,
+     `intercept_params` and `log_prob(theta, params)`. The kernel must be hashable and compare
+     equal exactly when it describes the same function (a frozen dataclass does both): it is a
+     static argument of jit, and items with equal kernels form one family (§4.3).
+   - **Optional kernel members**: `irt_names`, `irt_dependency_indices` and
+     `irt_thresholds(params)`. With them, `FitResult.items` adds display thresholds with
+     delta-method SEs (§7, §15.18); without them it shows the internal parameters only. Internal
+     code reads them through `items.irt_names(kernel)`, `items.irt_dependency_indices(kernel)` and
+     `items.irt_thresholds(kernel, params)`, which return empty values for a kernel without them.
+     `slope_params` and `intercept_params` stay required (they decide the parameter layout and
+     the identification checks of §4.5; `intercept_params` may be empty).
+   - **Parameter layout**: `param_names[:n_factors]` are the slopes and equal `slope_params`
+     (every model has a slope: the multidimensional starting values, the scale of identification
+     checks, the Heywood check and the ML/WLE extreme-pattern rule all read it). The other
+     parameters follow in an order that does not depend on `n_factors`.
+   - **`log_prob(theta, params)`** receives the nodes as a `(Q, D)` float64 array on every code
+     path (the ML/WLE scoring helpers that passed a 1-D `theta` now reshape it to `(1, D)`) and
+     `params` as a float64 vector in `param_names` order, and returns the `(Q, n_categories)`
+     log-probabilities. It must be written with `jax.numpy` (traced by jit, differentiated
+     twice by autodiff for the Newton M-step and the SEs) and must not branch in Python on
+     parameter values. For parameters outside the model's domain it should return NaN, which the
+     M-step line search rejects (§15.3).
+2. **Checking the contract.** `Model.__post_init__` calls `items.check_item_model` for every item
+   whose model is not built in: a non-empty, non-built-in `name`; a hashable kernel with
+   `n_factors == 1`; unique `param_names`; exactly one slope, first; `intercept_params` among the
+   non-slope parameters; `n_categories >= 2`; `default_free()` and both bounds of length
+   `len(param_names)` with `lower < upper`. Errors are `SpecificationError` naming the item.
+   `log_prob` itself is not checked (its shape and values are only known when traced).
+3. **What works with a user-defined model.**
+
+   | Feature | Status |
+   |---|---|
+   | `fit` (EM, MAP with priors, fixed parameters, equality constraints, groups, weights, latent distributions) | Yes |
+   | Multidimensional, bifactor and two-tier models | Yes, through `kernel.with_factors` |
+   | Standard errors (every `se=` method) | Yes |
+   | `score`: EAP, MAP, PV, EAPsum | Yes |
+   | `score`: ML, WLE | Yes, but the all-lowest / all-highest pattern rule (§15.24) assumes that category $0$ is the lowest and $K-1$ the highest response for a positive slope; it is not meaningful for a non-monotone model |
+   | `item_fit`, `m2`, `local_dependence`, `jsi`, `dif`, information, expected score, reliability, summed scores | Yes (they evaluate `log_prob`; the item score is the category $0..K-1$) |
+   | Display thresholds in `FitResult.items` | Only with the optional kernel members |
+   | `Model.fix_from(parameterization="slope_intercept")` | Yes |
+   | `Model.fix_from(parameterization="irt")` | No (`SpecificationError`): the conversion from $b$ is model-specific |
+   | `link()` | No (`SpecificationError`): the scale transformation of the parameters (§16.5, §19) is model-specific |
+   | Free latent variance by default (§4.5) | Only for built-in `Rasch` / `PCM`; for a fixed-slope custom model use `Model.with_latent(Normal(free_var=True))` |
+   | `to_json` / `from_json` | After `register_item_model` (item 4) |
+
+4. **JSON (`register_item_model(cls, *, to_dict=None, from_dict=None)`).** A user-defined item
+   model is stored as `{"type": cls.name, **to_dict(model)}`, the same shape as the built-in
+   entries (§15.28), and rebuilt with `from_dict(fields)` (the object without `"type"`). The
+   defaults handle a dataclass whose `__init__` fields are `bool`, `int`, finite `float` or
+   `str`. The registry is per Python session (never `eval` or `pickle`): `to_json` of an
+   unregistered model and `from_json` of an unknown `"type"` raise `SpecificationError` naming
+   `register_item_model`. Registering a built-in name, or another class under a name already
+   taken (with a different `__qualname__`), is an error; a class with the same `__qualname__`
+   replaces the earlier registration (a re-run notebook cell). `from_dict` must return an
+   instance of the registered class with that `name`, and the rebuilt model is checked as in
+   item 2. No stored name changes, so `schema_version` stays 7: a file with a user-defined model
+   is read by a session that registered the class, and older flexpyirt versions report its
+   `"type"` as unknown.
+5. **Starting values in multidimensional models.** For a user-defined model, the non-slope
+   starting values are `start_values(item, rest)[1:]` with the rest score on all items (the
+   built-in effective-slope rule of §15.31 is model-specific). The slopes use the built-in rule
+   (factor-specific item–rest correlations), or `start_values(...)[0]` on every loaded factor
+   when the slope is fixed by default.
+6. **Verification.** `tests/test_custom_items.py` re-implements the 2PL (without display members)
+   and the GRM (with them) against the public protocol only. Fitted together in one mixed model,
+   they reproduce the built-in fit to $10^{-12}$: log-likelihood, iteration count, estimates,
+   Oakes SEs, display thresholds and their SEs, EAP/MAP/ML/WLE scores, S-X2, M2 and item
+   information. The multidimensional case agrees to $10^{-5}$ (different starting values, item
+   5). The tests also cover JSON registration, the contract checks and the unsupported features.
+   A user-defined model is as correct as its `log_prob`: flexpyirt verifies the machinery, not the
+   model. The guide's worked example is the 2PL re-implementation; a model not built in (such as
+   GGUM, Roberts, Donoghue & Laughlin, 2000) would be presented as validated only with its own
+   mirt comparison.
+
+## 21. Plots and the numbers behind them (#103, V48)
+
+1. **Where plotting lives (Decision, owner 2026-11-26: option A of #103).** A module
+   `flexpyirt.plotting` with matplotlib as the optional extra `flexpyirt[plot]`. matplotlib is
+   imported inside each plot function, never by `import flexpyirt` or
+   `import flexpyirt.plotting`; without it a plot function raises
+   `errors.MissingDependencyError` (a `FlexpyirtError` and an `ImportError`) naming the extra.
+   The numbers behind every figure come from public functions returning DataFrames, defined in
+   `flexpyirt.curves` and exported from `flexpyirt`; only those numbers are validated (V48). The
+   plot functions are thin: they call those functions, draw the columns, return matplotlib
+   objects and never call `plt.show()`. They are smoke-tested on the Agg back end (objects
+   created, plotted data equal to the DataFrames); there is no image comparison.
+   **Scope.** Unidimensional models, every item family, single and multiple groups, any latent
+   distribution. Interactive back ends, surfaces of multidimensional models, styling themes and
+   figures for flexpyctt / flexpyequate are left out. Nothing is stored in `FitResult`;
+   `schema_version` is unchanged.
+
+2. **Trace lines: `item_probabilities(res, theta, *, items=None, group=None)`.** The category
+   probabilities $P_{jk}(\theta)=\Pr(Y_j=k\mid\theta)$, $k=0,\dots,K_j-1$, from the item
+   kernels (`_information.category_probabilities`, a jitted kernel returning
+   $(G, T, J, K_{\max})$ padded with zeros). Long format: `item`, `category`, `theta`,
+   `probability` (one row per item, category and $\theta$, in that order). `group` is a group
+   name, as in `item_information()`; it is required for a multiple-group model. mirt:
+   `probtrace()`.
+
+3. **Empirical item curves: `empirical_item_curve(res, data, *, items=None, n_bins=10,
+   group=None, item_names=None)`.** For item $j$, the $n_j$ respondents who answered it are
+   sorted by their EAP score $\hat\theta_i$ (`score(method="EAP")` on the fitted grid; ties in
+   row order, a stable sort) and cut into $B$ consecutive bins: every bin gets
+   $\lfloor n_j/B\rfloor$ respondents and, of the remainder $c=n_j\bmod B$,
+   $\lfloor c/2\rfloor$ go to the first bin and $c-\lfloor c/2\rfloor$ to the last. This is
+   mirt's `itemfit()` rule (`group.bins`), equal-count bins of EAP $\theta$, the rule proposed
+   in #103. For bin $b$,
+   $$\bar\theta_b=\frac1{n_b}\sum_{i\in\mathcal B_b}\hat\theta_i,\qquad
+   O_{bk}=\frac1{n_b}\sum_{i\in\mathcal B_b}[y_{ij}=k],\qquad E_{bk}=P_{jk}(\bar\theta_b)$$
+   (Bock, 1972; Yen, 1981): the columns `theta`, `observed` and `expected`, with `n` $=n_b$,
+   `bin` $=1,\dots,B$ and `category`. $n_bO_{bk}$ and $n_bE_{bk}$ are the observed and expected
+   tables of mirt's `itemfit(fit_stats = "X2", return.tables = TRUE)` before its cell collapsing
+   (`mincell.X2`), and $(\bar\theta_b,O_{bk})$ the points of `itemfit(empirical.plot = )`.
+   Missing responses: a respondent enters the bins of the items they answered (mirt's `pick`).
+   A multiple-group model is binned within each group with that group's parameters (mirt's
+   per-group `itemfit()`); `group=` are the labels of the rows of `data`, as in `score()`, and
+   the result has a leading `group` column. An item (in a group) with fewer than `n_bins`
+   responses raises `SpecificationError` (mirt would form empty bins). Differences from mirt
+   left out on purpose: no cell collapsing and no $X^2$ (a fit statistic is a separate issue),
+   no Clopper–Pearson interval of `empirical.CI`, and `method` is EAP only (mirt's `method=`).
+
+4. **Item locations of the Wright map: `wright_map_table(res, data, *, group=None,
+   item_names=None, method="EAP")`.** Returns `WrightMapTable(persons, items)`, a named tuple of
+   two DataFrames. `persons` has `theta` from `score(method=method)` (`"EAP"`, `"MAP"` or
+   `"WLE"`, all finite) with `data`'s index. `items` has one row per item threshold: `item`,
+   `category` $k=1,\dots,K_j-1$ and `location`, the Thurstonian threshold
+   $$\tau_{jk}:\quad P(Y_j\ge k\mid\tau_{jk})=\sum_{c\ge k}P_{jc}(\tau_{jk})=\tfrac12$$
+   (Wright & Masters, 1982; Wu, Adams, Wilson & Haldane, 2007; TAM's `tam.threshold()`). It is
+   $b_j=-d_j/a_j$ for 2PL / Rasch and $b_{jk}$ for GRM items; for 3PL / 4PL items it is where
+   $P=1/2$ (not $b$, where $P=(g+u)/2$) and for GPCM / PCM items it differs from the step
+   difficulties. One definition for every family is why the issue's "`b` / Thurstonian
+   threshold" became the threshold alone. **Root finding**: $P(Y_j\ge k\mid\theta)$ is
+   evaluated on 4001 equispaced points of $[-20,20]$; the first sign change of
+   $P(Y_j\ge k\mid\theta)-1/2$ is refined by 64 bisection steps, all thresholds at once (one
+   kernel call per step). The function is increasing for every ordered family with $a>0$; for
+   nominal items (unordered categories) it is the first crossing in the data's category order;
+   without a crossing (e.g. a 3PL item with $g\ge1/2$) the location is NaN. In a
+   multiple-group model `items` holds every group's thresholds from that group's parameters
+   (a `group` column in both tables).
+
+5. **Plot functions** (`flexpyirt.plotting`; default $\theta$ grid: 161 points on $[-4,4]$,
+   `theta=` to change it).
+   - `plot_item_curves(res, items=None, *, data=None, group=None, n_bins=10, theta=None,
+     item_names=None, ax=None) -> Figure`: one panel per item (three per row). Dichotomous
+     items show $P_{j1}$, polytomous items every category. With `data` the points of
+     `empirical_item_curve()`. A multiple-group fit draws one curve per group in each panel
+     (colour by group, line style by category): the **DIF plot**. `ax=` draws one item into an
+     existing Axes (the figure of `ax` is returned). `group=` are row labels used with `data`;
+     the curves always cover every group.
+   - `plot_information(res, items=None, *, standard_error=False, group=None, theta=None,
+     ax=None) -> Axes`: `test_information()` (default) or `item_information()` of the given
+     items; `standard_error=True` adds `se` on `ax.twinx()`. `group` is a group name (default:
+     every group).
+   - `plot_expected_score(res, *, group=None, theta=None, ax=None) -> Axes`: column `total` of
+     `expected_score()`, one line per group by default.
+   - `plot_wright_map(res, data, *, group=None, item_names=None, method="EAP", n_bins=30) ->
+     Figure`: two axes sharing the $\theta$ axis, a horizontal histogram of `persons` and the
+     `items` thresholds as markers per item (overlaid per group).
+   **Functions, not `FitResult.plot_*()` methods**, as `item_information()` and `link()`: the
+   plotting dependency stays out of the result class.
+   **`group=` means** a group name in the functions of $\theta$ (`item_probabilities`,
+   `plot_information`, `plot_expected_score`, like `item_information`) and the labels of the
+   rows of `data` where `data` is taken (`empirical_item_curve`, `wright_map_table`,
+   `plot_item_curves`, `plot_wright_map`, like `reliability` and `score`).
+
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -2728,6 +2917,7 @@ data-independent shapes (§15.21).
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
+- Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
@@ -2754,6 +2944,9 @@ data-independent shapes (§15.21).
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
+- Wright, B. D., & Masters, G. N. (1982). *Rating Scale Analysis*. MESA Press.
+- Wu, M. L., Adams, R. J., Wilson, M. R., & Haldane, S. A. (2007). *ACER ConQuest Version 2: Generalised Item Response Modelling Software*. Australian Council for Educational Research.
+- Yen, W. M. (1981). Using simulation results to choose a latent trait model. *Applied Psychological Measurement*, 5(2), 245–262.
 - Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.

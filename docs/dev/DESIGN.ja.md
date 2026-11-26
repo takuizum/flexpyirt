@@ -264,14 +264,18 @@ class ItemKernel(Protocol):
     n_categories: int
     slope_params: tuple[str, ...]
     intercept_params: tuple[str, ...]
-    irt_names: tuple[str, ...]  # 表示用閾値（D > 1 では空）
-    irt_dependency_indices: tuple[tuple[int, ...], ...]
 
     def with_factors(self, n_factors: int) -> ItemKernel: ...
-    def irt_thresholds(self, params: Array) -> Array: ...
     def log_prob(self, theta: Array, params: Array) -> Array: ...  # theta (Q, D) -> (Q, K)
+
+    # 任意: 表示用閾値（D > 1 では空）
+    irt_names: tuple[str, ...]
+    irt_dependency_indices: tuple[tuple[int, ...], ...]
+
+    def irt_thresholds(self, params: Array) -> Array: ...
 ```
 新しい項目カーネルは `(Q, D)` 節点に対する `log_prob` を書くだけで、$D \in \{1, 2, 3\}$ の E-step・M-step（自動微分 Newton）・Oakes/Hessian SE・EAP スコアリングがすべて動くことを設計目標にする。
+このプロトコルは `ItemModel` とともに公開で、ユーザー定義の項目モデルの契約は §20 で定める。
 
 ## 7. 対応する項目モデル（段階的）
 | モデル | 内部パラメタ | マイルストーン |
@@ -1357,6 +1361,10 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     含むシミュレーションの GPCM。推定し直した値は $10^{-5}$ で一致する（観測値 $\le1.2\times10^{-7}$）。テストでは
     ほかに、推定し直した値を項目を除いたデータへの `fit()` と、近似を 15 項目のデータで推定し直した値と（`"newton"`
     1 ステップ 0.03、2 ステップ 0.02、`"one_step"` 0.05）、vmap した勾配を 1 つずつの勾配と比べる。
+    **適用範囲（2026-11-26 決定、#81）**: JSI は単一群・1 次元のモデル（項目ごとに傾きが 1 つ）についてのみ定義されている
+    （Edwards, Houts & Cai, 2018）。多次元・多母集団への拡張（双因子・two-tier モデルを含む）や正規分布以外の潜在分布での
+    使い方は研究されておらず、参照となる実装もない（mirt の `type = "JSI"` は 1 因子が必要。11 項と §17.3 も参照）ので、
+    実装しない。`jsi()` は多母集団・多次元・`Normal` 以外の潜在分布のモデルで、理由を示す `SpecificationError` を出す。
 18. **パッケージの分割: `flexpyctt` と `flexpyequate`（2026-11-25 決定、issue #87）**: 推定済みの IRT モデルを使わない道具を、JAX に依存
     しない別の配布物としてこのリポジトリから公開する。flexpyirt は BA-EM による推定と、その結果を使う道具に絞る。
 
@@ -1962,6 +1970,149 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    対角の $\mathbf A$ では $A_m\,\mathrm{se}_m$、それ以外では NaN にする（回転後の標準誤差には事後共分散が必要だが、
    得点表はそれを持たない）。
 
+## 20. ユーザー定義の項目モデル（#86）
+
+1. **公開の契約。** `flexpyirt.items.ItemModel` と `flexpyirt.items.ItemKernel`（§6）を公開の拡張点とする。
+   これらを実装したオブジェクトは組み込みの項目モデルと同じように `Model` に入れられ、`log_prob` を評価するだけの機能はすべて動く。
+   組み込みのモデルを増やす代わりに、GGUM のようなモデルはユーザーが書く。
+   - **`ItemModel`**（Spec 層、すべて必須）: クラス属性 `name`（空でなく組み込みの名前と重ならない文字列。`model` 列に表示し JSON に保存する）、
+     `kernel`（`n_factors == 1` のカーネル）、`default_free()`、`start_values(item, rest)`、`bounds()`。
+     後の 3 つは 1 次元のパラメタ並び `kernel.param_names` を表し、$D$ 因子のモデルでは傾きの要素を $D$ 個の傾きそれぞれに使う。
+     frozen dataclass にする（`Model` と同じくハッシュ可能で値で比較する）。
+   - **`ItemKernel`**（Core 層）の必須メンバ: `n_factors`、`with_factors(n_factors)`、`param_names`、
+     `n_categories`（2 以上。カテゴリは $0..K-1$ で符号化）、`slope_params`、`intercept_params`、`log_prob(theta, params)`。
+     カーネルはハッシュ可能で、同じ関数を表すときに限り等しくなること（frozen dataclass なら両方を満たす）。
+     jit の静的引数であり、カーネルの等しい項目が 1 つのファミリーになる（§4.3）。
+   - **任意のカーネルメンバ**: `irt_names`、`irt_dependency_indices`、`irt_thresholds(params)`。
+     あれば `FitResult.items` にデルタ法 SE 付きの表示用閾値を加え（§7、§15.18）、なければ内部パラメタだけを表示する。
+     内部のコードは `items.irt_names(kernel)`、`items.irt_dependency_indices(kernel)`、`items.irt_thresholds(kernel, params)`
+     を通して読み、これらはメンバのないカーネルには空の値を返す。`slope_params` と `intercept_params` は必須のまま
+     （パラメタの並びと §4.5 の識別チェックを決めるため。`intercept_params` は空でもよい）。
+   - **パラメタの並び**: `param_names[:n_factors]` が傾きで、`slope_params` に等しい（どのモデルにも傾きがある。
+     多次元の初期値、識別チェック、Heywood チェック、ML/WLE の極端パターンの規則がこれを読む）。
+     ほかのパラメタは `n_factors` によらない順に続く。
+   - **`log_prob(theta, params)`** は、どの経路でも節点を `(Q, D)` の float64 配列で受け取り（1 次元の `theta` を渡していた
+     ML/WLE スコアリングの補助関数は `(1, D)` に整形するよう直した）、`params` を `param_names` 順の float64 ベクトルで受け取って、
+     `(Q, n_categories)` の対数確率を返す。`jax.numpy` で書き（jit でトレースされ、Newton の M-step と SE のために自動微分で
+     2 回微分される）、パラメタの値で Python の分岐をしないこと。モデルの定義域外のパラメタには NaN を返す。NaN は M-step の
+     直線探索が退ける（§15.3）。
+2. **契約のチェック。** `Model.__post_init__` は、組み込みでないモデルの項目ごとに `items.check_item_model` を呼ぶ:
+   空でなく組み込みでない `name`、`n_factors == 1` のハッシュ可能なカーネル、重複のない `param_names`、先頭にちょうど 1 つの傾き、
+   傾き以外のパラメタに含まれる `intercept_params`、`n_categories >= 2`、長さ `len(param_names)` で `lower < upper` の
+   `default_free()` と上下限。エラーは項目名を含む `SpecificationError`。`log_prob` 自体はチェックしない
+   （形と値はトレースして初めてわかる）。
+3. **ユーザー定義モデルで使える機能。**
+
+   | 機能 | 状態 |
+   |---|---|
+   | `fit`（EM、事前分布つき MAP、パラメタの固定、等値制約、多母集団、重み、潜在分布） | 使える |
+   | 多次元・bifactor・two-tier モデル | `kernel.with_factors` を通して使える |
+   | 標準誤差（すべての `se=`） | 使える |
+   | `score`: EAP、MAP、PV、EAPsum | 使える |
+   | `score`: ML、WLE | 使えるが、全最低・全最高パターンの規則（§15.24）は傾きが正のときカテゴリ $0$ が最低、$K-1$ が最高の反応であることを仮定する。単調でないモデルでは意味をなさない |
+   | `item_fit`、`m2`、`local_dependence`、`jsi`、`dif`、情報量、期待得点、信頼性、合計得点 | 使える（`log_prob` を評価する。項目得点はカテゴリ $0..K-1$） |
+   | `FitResult.items` の表示用閾値 | 任意のカーネルメンバがあるときだけ |
+   | `Model.fix_from(parameterization="slope_intercept")` | 使える |
+   | `Model.fix_from(parameterization="irt")` | 使えない（`SpecificationError`）。$b$ からの変換はモデルごとに違う |
+   | `link()` | 使えない（`SpecificationError`）。パラメタの尺度変換（§16.5、§19）はモデルごとに違う |
+   | 既定での潜在分散の推定（§4.5） | 組み込みの `Rasch` / `PCM` だけ。傾きを固定したユーザー定義モデルでは `Model.with_latent(Normal(free_var=True))` を使う |
+   | `to_json` / `from_json` | `register_item_model` の後（項目 4） |
+
+4. **JSON（`register_item_model(cls, *, to_dict=None, from_dict=None)`）。** ユーザー定義の項目モデルは
+   組み込みと同じ形（§15.28）の `{"type": cls.name, **to_dict(model)}` で保存し、`from_dict(fields)`（`"type"` を除いたオブジェクト）
+   で復元する。既定では、`__init__` のフィールドが `bool`・`int`・有限の `float`・`str` の dataclass を扱う。
+   レジストリは Python セッションごと（`eval` も `pickle` も使わない）で、登録していないモデルの `to_json` と未知の `"type"` の
+   `from_json` は `register_item_model` を名指しする `SpecificationError` を出す。組み込みの名前の登録と、すでに使われている名前への
+   （`__qualname__` の違う）別クラスの登録はエラー。`__qualname__` が同じクラスは前の登録を置き換える（ノートブックのセルの再実行）。
+   `from_dict` は登録したクラスのその `name` のインスタンスを返すこと。復元したモデルは項目 2 と同じくチェックする。
+   保存する名前は変わらないので `schema_version` は 7 のまま。ユーザー定義モデルを含むファイルはクラスを登録したセッションで読め、
+   古い flexpyirt はその `"type"` を未知として報告する。
+5. **多次元モデルの初期値。** ユーザー定義モデルでは、傾き以外の初期値を全項目の残余得点による `start_values(item, rest)[1:]` とする
+   （§15.31 の組み込みの実効傾きの規則はモデルごとに違う）。傾きは組み込みの規則（因子ごとの項目–残余相関）を使い、
+   既定で傾きが固定なら負荷するすべての因子に `start_values(...)[0]` を使う。
+6. **検証。** `tests/test_custom_items.py` は公開のプロトコルだけを使って 2PL（表示用メンバなし）と GRM（あり）を実装し直す。
+   1 つの混合モデルで推定すると、対数尤度・反復回数・推定値・Oakes SE・表示用閾値とその SE・EAP/MAP/ML/WLE の得点・S-X2・M2・
+   項目情報量が組み込みの推定と $10^{-12}$ まで一致する。多次元の場合は $10^{-5}$ まで一致する（初期値が違う、項目 5）。
+   JSON の登録、契約のチェック、使えない機能のテストも含む。ユーザー定義モデルの正しさは `log_prob` の正しさで決まる。
+   flexpyirt が検証するのは仕組みであり、モデルではない。ガイドの実例は 2PL の再実装で、組み込みでないモデル
+   （GGUM、Roberts, Donoghue & Laughlin, 2000 など）は、それ自身の mirt との照合があるときだけ検証済みとして示す。
+
+## 21. 図と、その元になる数値（#103、V48）
+
+1. **図の置き場所（決定、オーナー 2026-11-26: #103 の案 A）。** モジュール `flexpyirt.plotting` とし、
+   matplotlib は任意依存 `flexpyirt[plot]` にする。matplotlib は各描画関数の中で import し、
+   `import flexpyirt` や `import flexpyirt.plotting` では読み込まない。入っていなければ描画関数は
+   extra の名前を示す `errors.MissingDependencyError`（`FlexpyirtError` かつ `ImportError`）を投げる。
+   図の元になる数値はすべて DataFrame を返す公開関数で作る（`flexpyirt.curves` に定義し、`flexpyirt`
+   から公開）。照合するのはその数値だけ（V48）。描画関数は薄く、それらの関数を呼んで列を描き、
+   matplotlib のオブジェクトを返し、`plt.show()` は呼ばない。Agg バックエンドでのスモークテスト
+   （オブジェクトができること、描いたデータが DataFrame と等しいこと）だけで、画像比較はしない。
+   **範囲。** 1 次元モデル、全項目族、単群・多群、任意の潜在分布。対話的なバックエンド、多次元の曲面、
+   スタイルのテーマ、flexpyctt / flexpyequate の図は範囲外。`FitResult` には何も保存せず、
+   `schema_version` は変えない。
+
+2. **項目反応曲線（トレースライン）: `item_probabilities(res, theta, *, items=None, group=None)`。**
+   カテゴリ確率 $P_{jk}(\theta)=\Pr(Y_j=k\mid\theta)$、$k=0,\dots,K_j-1$ を項目カーネルから求める
+   （`_information.category_probabilities`。0 で埋めた $(G, T, J, K_{\max})$ を返す jit カーネル）。
+   縦長形式で列は `item`, `category`, `theta`, `probability`（項目・カテゴリ・$\theta$ の順に 1 行）。
+   `group` は `item_information()` と同じく群の名前で、多群モデルでは必須。mirt: `probtrace()`。
+
+3. **経験的項目曲線: `empirical_item_curve(res, data, *, items=None, n_bins=10, group=None,
+   item_names=None)`。** 項目 $j$ に回答した $n_j$ 人を EAP 推定値 $\hat\theta_i$（推定に使った格子での
+   `score(method="EAP")`。同順位は行の順、安定ソート）で並べ、連続する $B$ 個の区間に分ける。
+   各区間に $\lfloor n_j/B\rfloor$ 人を入れ、余り $c=n_j\bmod B$ のうち $\lfloor c/2\rfloor$ 人を最初の
+   区間に、$c-\lfloor c/2\rfloor$ 人を最後の区間に入れる。これは mirt の `itemfit()` の規則
+   （`group.bins`）で、#103 で提案した「EAP $\theta$ の等人数区間」である。区間 $b$ について
+   $$\bar\theta_b=\frac1{n_b}\sum_{i\in\mathcal B_b}\hat\theta_i,\qquad
+   O_{bk}=\frac1{n_b}\sum_{i\in\mathcal B_b}[y_{ij}=k],\qquad E_{bk}=P_{jk}(\bar\theta_b)$$
+   （Bock, 1972; Yen, 1981）。それぞれ列 `theta`, `observed`, `expected` で、ほかに `n` $=n_b$、
+   `bin` $=1,\dots,B$、`category`。$n_bO_{bk}$ と $n_bE_{bk}$ は mirt の
+   `itemfit(fit_stats = "X2", return.tables = TRUE)` の観測表・期待表（セル併合 `mincell.X2` の前）、
+   $(\bar\theta_b,O_{bk})$ は `itemfit(empirical.plot = )` の点に当たる。
+   欠測: 回答者は回答した項目の区間にだけ入る（mirt の `pick`）。多群モデルでは群ごとにその群の
+   パラメタで区間を作る（mirt の群ごとの `itemfit()`）。`group=` は `score()` と同じく `data` の各行の
+   群ラベルで、結果の先頭に `group` 列が付く。（ある群で）回答数が `n_bins` 未満の項目は
+   `SpecificationError`（mirt なら空の区間ができる）。意図して mirt と変えた点: セル併合と $X^2$ は
+   しない（適合度統計量は別 issue）、`empirical.CI` の Clopper–Pearson 区間は出さない、`method` は EAP
+   だけ（mirt の `method=`）。
+
+4. **Wright マップの項目位置: `wright_map_table(res, data, *, group=None, item_names=None,
+   method="EAP")`。** 2 つの DataFrame の名前付きタプル `WrightMapTable(persons, items)` を返す。
+   `persons` は `score(method=method)`（`"EAP"`, `"MAP"`, `"WLE"`。いずれも有限）の `theta` で、
+   インデックスは `data` のもの。`items` は項目の閾値ごとに 1 行で、`item`、`category`
+   $k=1,\dots,K_j-1$、`location`。`location` はサーストン閾値
+   $$\tau_{jk}:\quad P(Y_j\ge k\mid\tau_{jk})=\sum_{c\ge k}P_{jc}(\tau_{jk})=\tfrac12$$
+   （Wright & Masters, 1982; Wu, Adams, Wilson & Haldane, 2007; TAM の `tam.threshold()`）。2PL / Rasch
+   では $b_j=-d_j/a_j$、GRM では $b_{jk}$ に等しい。3PL / 4PL では $P=1/2$ となる点（$P=(g+u)/2$ と
+   なる $b$ ではない）、GPCM / PCM ではステップ困難度と異なる。すべての項目族で 1 つの定義にするため、
+   issue の「`b` / サーストン閾値」は閾値だけにした。**求根**: $P(Y_j\ge k\mid\theta)$ を $[-20,20]$ の
+   等間隔 4001 点で評価し、$P(Y_j\ge k\mid\theta)-1/2$ の最初の符号変化を二分法 64 回で詰める（全閾値を
+   まとめて、1 回あたりカーネル呼び出し 1 回）。$a>0$ の順序付き項目族ではこの関数は増加する。名義
+   項目（カテゴリに順序がない）ではデータのカテゴリ順での最初の交点、交点がなければ（例: $g\ge1/2$ の
+   3PL 項目）NaN。多群モデルでは `items` に各群のパラメタによる閾値を全群分入れる（両方の表に
+   `group` 列）。
+
+5. **描画関数**（`flexpyirt.plotting`。既定の $\theta$ 格子は $[-4,4]$ の 161 点で、`theta=` で変える）。
+   - `plot_item_curves(res, items=None, *, data=None, group=None, n_bins=10, theta=None,
+     item_names=None, ax=None) -> Figure`: 項目ごとに 1 パネル（1 行 3 個）。2 値項目は $P_{j1}$、
+     多値項目は全カテゴリ。`data` があれば `empirical_item_curve()` の点。多群の推定結果では各パネルに
+     群ごとの曲線を描く（色が群、線種がカテゴリ）。これが **DIF の図**。`ax=` は 1 項目を既存の Axes に
+     描く（`ax` の Figure を返す）。`group=` は `data` と一緒に使う行ラベルで、曲線は常に全群を描く。
+   - `plot_information(res, items=None, *, standard_error=False, group=None, theta=None, ax=None)
+     -> Axes`: `test_information()`（既定）または指定項目の `item_information()`。
+     `standard_error=True` で `se` を `ax.twinx()` に描く。`group` は群の名前（既定: 全群）。
+   - `plot_expected_score(res, *, group=None, theta=None, ax=None) -> Axes`: `expected_score()` の列
+     `total`。既定では群ごとに 1 本。
+   - `plot_wright_map(res, data, *, group=None, item_names=None, method="EAP", n_bins=30) ->
+     Figure`: $\theta$ 軸を共有する 2 つの Axes。`persons` の横向きヒストグラムと、`items` の閾値を
+     項目ごとの印で描く（群ごとに重ねる）。
+   **`FitResult.plot_*()` メソッドではなく関数**にした（`item_information()` や `link()` と同じ）。
+   描画の依存を結果クラスに持ち込まないため。
+   **`group=` の意味**は、$\theta$ の関数（`item_probabilities`, `plot_information`,
+   `plot_expected_score`。`item_information` と同じ）では群の名前、`data` を取る関数
+   （`empirical_item_curve`, `wright_map_table`, `plot_item_curves`, `plot_wright_map`。
+   `reliability` や `score` と同じ）では `data` の各行の群ラベル。
+
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -2044,6 +2195,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
+- Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
@@ -2070,6 +2222,9 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
+- Wright, B. D., & Masters, G. N. (1982). *Rating Scale Analysis*. MESA Press.
+- Wu, M. L., Adams, R. J., Wilson, M. R., & Haldane, S. A. (2007). *ACER ConQuest Version 2: Generalised Item Response Modelling Software*. Australian Council for Educational Research.
+- Yen, W. M. (1981). Using simulation results to choose a latent trait model. *Applied Psychological Measurement*, 5(2), 245–262.
 - Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.
