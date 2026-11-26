@@ -34,6 +34,7 @@ English | [日本語](VALIDATION.ja.md)
 | EFA implied $\Lambda\Lambda^\top$ / communalities; CAF, CFI, RMSEA; $\chi^2$; Hull fit / $st$ | 1e-4; 2e-4; 1e-4 (relative); 1e-5 / 1e-2 (relative) |
 | CD: PAF $\Lambda\Lambda^\top$; one-factor population from the same draws; rank-sum $p$; mean RMSE (retained $k$ / the rejected extra $k$) | 1e-12; exact; 1e-10 (relative); 15% / 60% (relative) |
 | DIMTEST (simulation study; small version in the tests): type I error at .05 / power | $\le 0.15$ of 20 / $\ge 8$ of 10 |
+| Observed-score DIF: MH / GMH statistics, $\hat\alpha_{MH}$, its log variance, Mantel statistic, cumulative odds ratio and its SE; logistic LRT, $\Delta R^2$, coefficients / SEs and Wald; flags and purification paths | 1e-10 (relative); 1e-8 / 1e-6 (relative); equal |
 | Cross-product / sandwich covariance at mirt's estimates (entries relative to $\sqrt{v_{ii}v_{jj}}$); parameters / SEs end-to-end | 1e-9 / 1e-6; 1e-6 / 1e-5 (relative) |
 
 ## Cases (by milestone)
@@ -80,6 +81,7 @@ English | [日本語](VALIDATION.ja.md)
 | V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
+| V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `packages/flexpyctt/validation/r/ctt_dif_reference.R` | — |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -1169,6 +1171,33 @@ English | [日本語](VALIDATION.ja.md)
   0.5–1.0% (conservative; the bootstrap removes the bias but $T$'s SD under the null is about 0.72)
   and the power 0.99–1.00. Rerun with `uv run python packages/flexpyctt/validation/simulation/dimtest_study.py`
   (about 4 minutes); the tests run 20 null and 10 alternative replications.
+- **Observed-score DIF (V47, flexpyctt, #102)**: references from difR 6.1.0 and base R,
+  committed in `packages/flexpyctt/tests/reference/v47_dif.json`. Measured agreement: MH
+  $\chi^2$, $\hat\alpha_{MH}$ and Phillips–Holland variance, GMH statistics (difGMH and
+  `mantelhaen.test()` on groups x categories x strata tables), Mantel statistics and odds ratios
+  to $10^{-10}$ relative (the computations are closed form); purification paths (`difPur`),
+  iteration counts, convergence flags and final flags equal. Logistic regression: `difLogistic()`
+  calls `glm()` with its default `epsilon = 1e-8`, which leaves the coefficients and statistics
+  up to $2\times10^{-4}$ (relative) from the MLE on these data, so the script replaces
+  `stats::glm.control` by one with `epsilon = 1e-14`; then LRT statistics, $\Delta R^2$ and
+  coefficients agree to $10^{-8}$ and SEs and Wald statistics to $10^{-6}$ (`glm()`'s `vcov()`
+  uses the IRLS weights of the previous iterate; the deviance criterion stops at a step of about
+  $\sqrt{\epsilon}$). Known differences, checked in the tests: (1) `mantelhaen.test()` drops the
+  continuity correction when $\lvert\sum A-\sum E(A)\rvert<1/2$ (difR and flexpyctt do not; three
+  items of the simulated set); (2) `difMantel.poly()` rounds its output (statistic to 3, odds
+  ratio to 4 decimals) and its purification removes a flagged item from its own matching
+  score, so Mantel's statistic and its purification path are recomputed in R with difR's rule
+  for the other methods, and `difMantel.poly()` is a rounded cross-check; (3)
+  `liu_agresti_ccor(se = "liu_agresti")` differentiates $T=\sum ad/N-\hat\psi\sum bc/N$ with
+  respect to the focal cumulative count as $a/N-\hat\psi b/N$ (the sign of $a/N$ is wrong) and
+  divides by $\sum bc/N$ instead of $\sum ad/N$, so its `SE_log_Psi` is neither
+  $SE(\ln\hat\psi)$ nor $SE(\hat\psi)$ (0.031 against a Monte Carlo SD of 0.0296 for $\psi=1.48$,
+  300 replications of $N=20000$ in three strata; 0.14 against the Phillips–Holland 0.36 on a
+  `verbal` item). The R script's `la_delta_se()` is the delta method written out (0.0291 in that
+  check, Phillips–Holland 0.0291); flexpyctt computes the same variance through the cumulative
+  weights $w_l=\sum_{j\ge l}g_j$. A Python test checks that for 0 / 1 items with large strata it is
+  within 1% of the Phillips–Holland SE. (4) `liu_agresti_ccor()` reports $1/\hat\psi$ of
+  flexpyctt (difR's orientation: above 1 favours the focal group).
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is

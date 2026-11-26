@@ -29,6 +29,7 @@
 | EFA の含意する $\Lambda\Lambda^\top$ / 共通性、CAF・CFI・RMSEA、$\chi^2$、Hull の適合度 / $st$ | 1e-4、2e-4、1e-4（相対）、1e-5 / 1e-2（相対） |
 | CD: 主因子法の $\Lambda\Lambda^\top$、同じ乱数による 1 因子の母集団、順位和の $p$、平均 RMSE（採用された $k$ / 棄却された追加の $k$） | 1e-12、厳密、1e-10（相対）、15% / 60%（相対） |
 | DIMTEST（シミュレーション研究。テストではその小さい版）: .05 での第 1 種の誤り / 検出力 | 20 回中 $\le 0.15$ / 10 回中 $\ge 8$ |
+| 観測得点による DIF: MH・一般化 MH の統計量、$\hat\alpha_{MH}$ とその対数の分散、Mantel の統計量、累積オッズ比とその標準誤差。ロジスティック回帰の尤度比統計量、$\Delta R^2$、係数／標準誤差と Wald。検出結果と純化の経過 | 1e-10（相対）。1e-8 / 1e-6（相対）。一致 |
 | mirt の推定値でのクロス積／サンドイッチの共分散（各要素を $\sqrt{v_{ii}v_{jj}}$ で割った差）。通しで当てはめたときのパラメタ／SE | 1e-9 / 1e-6、1e-6 / 1e-5（相対） |
 
 ## ケース一覧（マイルストーンと対応）
@@ -75,6 +76,7 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
+| V47 | 観測得点による DIF（flexpyctt、#102）: 連続修正の有無、Holm / BH、純化、利用者のアンカー、外部のマッチング変数を含む Mantel–Haenszel（`difR::verbal`、均一・不均一 DIF を入れたシミュレーションの 2PL）。3 群と名義カテゴリの一般化 MH（シミュレーションの段階反応）。Mantel 検定と Liu–Agresti のオッズ比。ロジスティック回帰（both / uniform / non-uniform、尤度比 / Wald、純化、アンカー、マッチング） | difR 6.1.0 の `difMH()`、`difGMH()`、`difLogistic()`、`difMantel.poly()`、`liu_agresti_ccor()`。`stats::mantelhaen.test()`。R での直接の実装: `packages/flexpyctt/validation/r/ctt_dif_reference.R` | — |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -939,6 +941,26 @@
   JSON の往復、拒否するケース。
 
 ## 照合以外の検証
+- **観測得点による DIF（V47、flexpyctt、#102）**: 参照値は difR 6.1.0 と base R によるもので、
+  `packages/flexpyctt/tests/reference/v47_dif.json` にコミットする。一致の程度: MH の $\chi^2$、$\hat\alpha_{MH}$ と
+  Phillips–Holland の分散、一般化 MH の統計量（difGMH と、群 x カテゴリ x 層の表への `mantelhaen.test()`）、Mantel の
+  統計量とオッズ比は相対 $10^{-10}$ まで（どれも閉じた式）。純化の経過（`difPur`）、反復回数、収束の判定、最終的な
+  検出結果は一致。ロジスティック回帰: `difLogistic()` は既定の `epsilon = 1e-8` で `glm()` を呼ぶので、このデータでは
+  係数と統計量が最尤推定値から相対 $2\times10^{-4}$ までずれる。そこでスクリプトは `stats::glm.control` を
+  `epsilon = 1e-14` のものに置き換える。すると尤度比統計量、$\Delta R^2$、係数は $10^{-8}$ まで、標準誤差と Wald
+  統計量は $10^{-6}$ まで一致する（`glm()` の `vcov()` は 1 つ前の反復の IRLS の重みを使い、逸脱度の基準は
+  $\sqrt{\epsilon}$ 程度のステップで止まる）。テストで確認している既知の差: (1) `mantelhaen.test()` は
+  $\lvert\sum A-\sum E(A)\rvert<1/2$ のとき連続修正を省く（difR と flexpyctt は省かない。シミュレーションのデータで
+  3 項目）。(2) `difMantel.poly()` は出力を丸め（統計量は小数 3 桁、オッズ比は 4 桁）、純化では検出された項目を
+  その項目自身のマッチング得点からも外す。そこで Mantel の統計量と純化の経過は、difR のほかの方法と同じ規則で R で
+  計算し直し、`difMantel.poly()` は丸めた値での照合にとどめる。(3) `liu_agresti_ccor(se = "liu_agresti")` は
+  $T=\sum ad/N-\hat\psi\sum bc/N$ の焦点群の累積度数による微分を $a/N-\hat\psi b/N$ としており（$a/N$ の符号が誤り）、
+  $\sum ad/N$ ではなく $\sum bc/N$ で割るので、その `SE_log_Psi` は $SE(\ln\hat\psi)$ でも $SE(\hat\psi)$ でもない
+  （$\psi=1.48$、3 層、$N=20000$ を 300 反復したモンテカルロの SD 0.0296 に対して 0.031。`verbal` のある項目で
+  Phillips–Holland の 0.36 に対して 0.14）。R スクリプトの `la_delta_se()` はデルタ法を書き下したもの（その確認で
+  0.0291、Phillips–Holland は 0.0291）。flexpyctt は同じ分散を累積の重み $w_l=\sum_{j\ge l}g_j$ で計算する。層が
+  大きい 0 / 1 項目では Phillips–Holland の標準誤差と 1% 以内で一致することを Python のテストで確認する。
+  (4) `liu_agresti_ccor()` は flexpyctt の $1/\hat\psi$ を返す（difR の向き: 1 より大きいと焦点群に有利）。
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。
 - **SE の内部整合**: Oakes の SE と、収束点での周辺対数尤度の直接 `jax.hessian` による SE が一致すること（小規模ケース）。
