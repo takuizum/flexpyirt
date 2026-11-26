@@ -3,7 +3,8 @@
 Walks two directories of reference JSON (``tests/reference/*.json``) leaf by leaf and reports every
 number that moved by more than the drift tolerance of its kind, every structural change (keys or
 array lengths added / removed, a number that became ``null`` or ``"Inf"``) and every file added or
-removed. ``meta`` blocks (versions, SHAs, iteration counts) are not compared.
+removed. ``meta`` blocks (versions, SHAs) and run diagnostics (timings, iteration counts, optimizer
+exit codes: keys matching ``seconds``, ``iterations``, ``nlm_code``) are not compared.
 
 Drift tolerances, from the tolerance table of VALIDATION.md (the strictest entry of each kind, so a
 change that could move a comparison test is always reported):
@@ -39,6 +40,7 @@ FIT_KEY = re.compile(
     r"loglik|log_lik|logpost|log_post|log_prior|logprior|aic|bic|(^|_)m2|deviance", re.IGNORECASE
 )
 SKIP_KEYS = {"meta"}
+NOISE_KEY = re.compile(r"seconds|iterations|nlm_code", re.IGNORECASE)
 
 SE_RTOL = 1e-3
 FIT_RTOL = 1e-6
@@ -84,7 +86,7 @@ def _tolerance(path: str) -> tuple[float, float, str]:
 def _compare(base: Any, new: Any, path: str, report: FileReport) -> None:
     if isinstance(base, dict) and isinstance(new, dict):
         for key in sorted(set(base) | set(new)):
-            if key in SKIP_KEYS:
+            if key in SKIP_KEYS or NOISE_KEY.search(key):
                 continue
             sub = f"{path}/{key}"
             if key not in new:

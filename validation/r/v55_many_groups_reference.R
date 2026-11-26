@@ -5,6 +5,7 @@
 # 2PL, G = 10 groups of unequal size (200..470), 15 items, anchors q01-q06 invariant,
 # q07-q15 free per group, focal means and variances free, 5% MCAR missing.
 # As in m2_reference.R: optimizer = "NR", accelerate = "none", TOL = 1e-10, 81 points on [-8, 8].
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -88,7 +89,7 @@ res <- list(
   meta = list(case = "v55_many_groups",
               description = paste("V55: 2PL, 10 groups (N = 200..470), anchors q01-q06,",
                                   "q07-q15 free per group, focal means/variances free, 5% missing"),
-              r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+              r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
               TOL = 1e-10, quadpts = quad$quadpts, theta_lim = quad$theta_lim,
               grid_check = range(m@Model$Theta),
               accelerate = "none", optimizer = "NR", SE_type = "Oakes",

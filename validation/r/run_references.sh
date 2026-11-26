@@ -18,7 +18,8 @@ STAGE1=(
   m5_local_dependence m5_mixture m5_nominal
   m7_bifactor m7_information m7_information_multidim m7_local_dependence_bifactor
   m7_logit_norm_prior m7_robust_se m7_sumscore m7_two_tier m7_weights
-  classification v48_plots v50_screening v51_irt_equating
+  m6_m2_groups_missing_map classification v48_plots v50_screening v51_irt_equating
+  v55_many_groups v56_multigroup_shapes
 )
 # Inputs: m4_scoring (v4, v9, v11), m4_mirt_map / m4_mirt_mlwle / m6_fit_multidim (v14_mirt2d),
 # m5_dif / m5_itemfit_multigroup (v4), m5_itemfit (v3, v5, v8, v11), m5_m2 (v1, v2, v11),

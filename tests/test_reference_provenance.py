@@ -105,9 +105,11 @@ def test_compare_references_tolerances(tmp_path: Path) -> None:
         "loglik": -1000.0,
         "params": {"q1": {"a": 1.0, "a_se": 0.1, "d": "Inf"}},
         "eap": [0.5, -0.5],
+        "mirt": {"seconds": [1.5], "iterations": 25, "nlm_code": 1},
     }
     new = json.loads(json.dumps(base))
     new["meta"] = {"mirt_version": "1.49", "mirt_sha": "b" * 40, "iterations": 12}
+    new["mirt"] = {"seconds": [3.0], "iterations": 41, "nlm_code": 2}  # run diagnostics: ignored
     new["loglik"] = -1000.0005  # 5e-7 relative: within 1e-6
     new["params"]["q1"]["a_se"] = 0.10005  # 5e-4 relative: within 1e-3
     new["eap"] = [0.500005, -0.5]  # 5e-6 absolute: within 1e-5
