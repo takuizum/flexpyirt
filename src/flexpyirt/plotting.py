@@ -174,8 +174,8 @@ def plot_item_curves(
             curves = item_probabilities(res, grid, items=item, group=g)
             n_categories = int(curves["category"].max()) + 1
             shown = [1] if n_categories == 2 else list(range(n_categories))
-            for k in shown:
-                color = colors[(g_pos if len(groups) > 1 else k) % len(colors)]
+            for k_pos, k in enumerate(shown):
+                color = colors[(g_pos if len(groups) > 1 else k_pos) % len(colors)]
                 curve = curves[curves["category"] == k]
                 label = ", ".join(
                     part
@@ -186,7 +186,7 @@ def plot_item_curves(
                     curve["theta"].to_numpy(),
                     curve["probability"].to_numpy(),
                     color=color,
-                    linestyle=["-", "--", ":", "-."][k % 4] if len(groups) > 1 else "-",
+                    linestyle=["-", "--", ":", "-."][k_pos % 4] if len(groups) > 1 else "-",
                     label=label or None,
                 )
                 if observed is not None:
