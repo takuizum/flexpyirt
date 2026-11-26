@@ -6,6 +6,13 @@ from importlib.metadata import PackageNotFoundError, version
 
 from flexpyctt import errors
 from flexpyctt.correlation import PolychoricResult, polychoric
+from flexpyctt.dif import (
+    DIFResult,
+    generalized_mantel_haenszel,
+    logistic_dif,
+    mantel,
+    mantel_haenszel,
+)
 from flexpyctt.dimensionality import (
     ComparisonDataResult,
     DetectResult,
@@ -44,6 +51,7 @@ except PackageNotFoundError:  # pragma: no cover - only when running from an unb
 __all__ = [
     "AlphaResult",
     "ComparisonDataResult",
+    "DIFResult",
     "DetectResult",
     "DimtestResult",
     "EFAResult",
@@ -65,8 +73,12 @@ __all__ = [
     "empirical_kaiser",
     "errors",
     "exploratory_detect",
+    "generalized_mantel_haenszel",
     "hull",
     "item_analysis",
+    "logistic_dif",
+    "mantel",
+    "mantel_haenszel",
     "parallel_analysis",
     "polychoric",
     "score_responses",

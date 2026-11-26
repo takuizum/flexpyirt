@@ -1,4 +1,4 @@
-"""Classical item analysis (DESIGN.md §16.20) against psych, ltm, polycor and base R (V46)."""
+"""Classical item analysis (DESIGN.md §16.21) against psych, ltm, polycor and base R (V46)."""
 
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ def test_item_statistics_match_psych(name: str, missing: str) -> None:
     if name in COMPLETE or missing == "listwise":
         _close(table["item_total"], ref["raw_r"], CLOSED_FORM)
     else:
-        # psych's raw.r uses rowSums(na.rm = TRUE) as the total (DESIGN.md §16.20).
+        # psych's raw.r uses rowSums(na.rm = TRUE) as the total (DESIGN.md §16.21).
         assert np.max(np.abs(table["item_total"] - ref["raw_r"])) > 1e-3
     values = _scores(case).to_numpy(dtype=np.float64)
     if missing == "listwise":

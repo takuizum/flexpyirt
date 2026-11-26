@@ -8,7 +8,9 @@ algorithms see [Theory](theory.md). The docstrings carry the same information pl
 and sources (`help(flexpyirt.fit)` and so on).
 
 **flexpyctt** holds the tools that need no fitted model: [correlations](#correlations), the
-model-free part of [number of dimensions](#number-of-dimensions) and [classical item analysis](#classical-item-analysis) (each entry below says which
+model-free part of [number of dimensions](#number-of-dimensions),
+[classical item analysis](#classical-item-analysis) and
+[observed-score DIF](#differential-item-functioning-observed-scores) (each entry below says which
 package it belongs to). It depends on NumPy, SciPy and pandas only, so it can be installed without
 JAX (`pip install flexpyctt`) and needs no 64-bit setting; installing flexpyirt installs it too.
 Import its functions with `from flexpyctt import ...`. flexpyirt re-exports them under the same
@@ -23,6 +25,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Correlations (flexpyctt): [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
 - Classical item analysis (flexpyctt): [`score_responses`](#score_responses), [`item_analysis`](#item_analysis), [`coefficient_alpha`](#coefficient_alpha), [`coefficient_omega`](#coefficient_omega), [`distractor_analysis`](#distractor_analysis) and their results
+- Observed-score DIF (flexpyctt): [`mantel_haenszel`](#mantel_haenszel), [`mantel`](#mantel), [`generalized_mantel_haenszel`](#generalized_mantel_haenszel), [`logistic_dif`](#logistic_dif), [`DIFResult`](#difresult)
 - Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - Plots: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
@@ -1527,6 +1530,126 @@ it) and `proportion_group_1` ... `proportion_group_<n_groups>`: the proportion c
 total-score groups from low to high, cut at the quantiles of $T$ as R's
 `cut(T, quantile(T, 0:G / G), include.lowest = TRUE)` (ties stay in one group). Raises
 `SpecificationError` when the quantiles are not distinct (use fewer groups).
+## Differential item functioning (observed scores)
+
+Package: flexpyctt (`from flexpyctt import mantel_haenszel, ...`). DIF screening without an IRT
+model: respondents are matched on an observed score and the groups are compared within each
+matching-score level. For DIF tests based on a fitted multiple-group model, see
+[`FitResult.dif`](#fitresult).
+
+Arguments shared by the four functions:
+
+| Argument | Default | Description |
+|---|---|---|
+| `data` | | Respondents x items (DataFrame or array). No missing values on the studied and matching items (drop those rows first) |
+| `group` | | Group label of each respondent |
+| `focal` | | Label of the focal group (`generalized_mantel_haenszel`: a list of labels). Every other respondent is in the reference group |
+| `items` | `None` | Items to test (default: all) |
+| `anchor_items` | `None` | Items whose total is the matching score (default: all). The studied item is always part of its own matching score |
+| `matching` | `None` | An external matching variable (one value per respondent) instead of the total score; not with `anchor_items` or `purify` |
+| `purify` | `False` | Purification: items flagged at one step leave the matching score of the next, until the flagged set repeats or `max_iter` is reached |
+| `max_iter` | `10` | Maximum number of purification iterations |
+| `p_adjust` | `"none"` | `"holm"` or `"BH"`: adjustment of the final p-values over the tested items. Purification uses unadjusted p-values |
+| `alpha` | `0.05` | Significance level for `flagged`, purification and the ETS classes |
+
+Each distinct matching-score value is a stratum (no thick matching).
+
+### `mantel_haenszel`
+
+```text
+mantel_haenszel(data, *, group, focal, items=None, anchor_items=None, matching=None,
+                purify=False, max_iter=10, p_adjust="none", alpha=0.05,
+                continuity_correction=True, classification="ets") -> DIFResult
+```
+
+Mantel–Haenszel test for 0 / 1 items and two groups (Holland & Thayer, 1988). With $A_k, B_k$
+the reference respondents answering correctly / incorrectly at matching score $k$, $C_k, D_k$
+the focal ones and $T_k$ the number of respondents at $k$:
+
+$$\chi^2_{MH}=\frac{\big(\lvert\sum_kA_k-\sum_kE(A_k)\rvert-\tfrac12\big)^2}{\sum_k\operatorname{Var}(A_k)},\qquad
+\hat\alpha_{MH}=\frac{\sum_kA_kD_k/T_k}{\sum_kB_kC_k/T_k},\qquad \Delta_{MH}=-2.35\ln\hat\alpha_{MH}.$$
+
+$\hat\alpha_{MH}>1$ ($\Delta_{MH}<0$) means the item favours the reference group. The SE of
+$\ln\hat\alpha_{MH}$ is Phillips & Holland's (1987). `continuity_correction=False` drops the
+$\tfrac12$. ETS classes (`classification="ets"`): **A** if $\lvert\Delta_{MH}\rvert<1$ or
+$\chi^2_{MH}$ is not significant (on `adj_p`, so B and C items are always `flagged`), **C** if
+$\lvert\Delta_{MH}\rvert\ge1.5$ and significantly greater than 1 by a one-sided test
+($(\lvert\Delta_{MH}\rvert-1)/SE>z_{1-\alpha}$, 1.645 at `alpha=0.05`), **B** otherwise;
+`classification="effect_size"` uses the thresholds 1 and 1.5 only (the codes difR prints).
+
+`table` columns: `item`, `chi2`, `odds_ratio`, `log_odds_ratio`, `log_odds_ratio_se`, `delta`,
+`delta_se`, `ets_class`, `p`, `adj_p`, `flagged`.
+
+### `mantel`
+
+```text
+mantel(data, *, group, focal, items=None, anchor_items=None, matching=None, purify=False,
+       max_iter=10, p_adjust="none", alpha=0.05) -> DIFResult
+```
+
+Mantel's (1963) test for ordered polytomous items and two groups: the sum of the focal group's
+item scores against its expectation given the matching score ($df=1$; for 0 / 1 items it is
+$\chi^2_{MH}$ without continuity correction). The effect size is the Liu & Agresti (1996)
+cumulative common odds ratio, oriented like $\hat\alpha_{MH}$ (above 1 favours the reference
+group; equal to $\hat\alpha_{MH}$ for 0 / 1 items), with Liu & Agresti's (1996, eq. 3) SE of
+its log, which is valid both with a few large strata and with many small ones (as total-score
+matching usually gives).
+
+`table` columns: `item`, `chi2`, `df`, `cumulative_odds_ratio`, `log_cumulative_odds_ratio`,
+`log_cumulative_odds_ratio_se`, `p`, `adj_p`, `flagged`.
+
+### `generalized_mantel_haenszel`
+
+```text
+generalized_mantel_haenszel(data, *, group, focal, items=None, anchor_items=None,
+                            matching=None, purify=False, max_iter=10, p_adjust="none",
+                            alpha=0.05) -> DIFResult
+```
+
+Generalized Mantel–Haenszel test (Somes, 1986; Penfield, 2001) for several focal groups
+(`focal` is a list) and / or unordered categories: in each stratum the groups x categories table
+is compared with its expectation given the margins, $df=(G-1)(C-1)$ for $G$ groups and $C$
+observed categories. With one focal group and 0 / 1 items it is $\chi^2_{MH}$ without continuity
+correction.
+
+`table` columns: `item`, `chi2`, `df`, `p`, `adj_p`, `flagged`.
+
+### `logistic_dif`
+
+```text
+logistic_dif(data, *, group, focal, items=None, anchor_items=None, matching=None,
+             purify=False, max_iter=10, p_adjust="none", alpha=0.05, kind="both",
+             test="likelihood_ratio") -> DIFResult
+```
+
+Logistic-regression DIF for 0 / 1 items and two groups (Swaminathan & Rogers, 1990). With $S$
+the matching score and $G$ the focal indicator, the models
+$\operatorname{logit}P(x=1)=\beta_0+\beta_1S$ $(M_0)$, $+\beta_2G$ $(M_1)$ and $+\beta_3SG$
+$(M_2)$ are fitted by maximum likelihood. `kind="both"` compares $M_0$ with $M_2$ ($df=2$),
+`"uniform"` $M_0$ with $M_1$, `"non_uniform"` $M_1$ with $M_2$ ($df=1$); `test` is
+`"likelihood_ratio"` or `"wald"` (on the added coefficients of the larger model). The effect
+size is the difference of Nagelkerke's $R^2$ (Zumbo, 1999), with classes A / B / C by Zumbo &
+Thomas (cut points 0.13, 0.26) and Jodoin & Gierl (0.035, 0.07) on $\Delta R^2$ alone. An
+external `matching` may be continuous.
+
+`table` columns: `item`, `chi2`, `df`, `delta_r2`, `zumbo_thomas_class`, `jodoin_gierl_class`,
+`group_coefficient`, `group_coefficient_se`, `interaction_coefficient`,
+`interaction_coefficient_se` (of $G$ and $SG$ in the larger model; NaN without such a term), `p`,
+`adj_p`, `flagged`. A `ConvergenceWarning` is issued when a regression does not converge (for
+example under separation).
+
+### `DIFResult`
+
+| Attribute | Type | Description |
+|---|---|---|
+| `table` | DataFrame | One row per tested item (columns above); `flagged` is `adj_p < alpha` |
+| `flagged_items` | list[str] | Items flagged in `table` |
+| `anchor_items` | list[str] | Items forming the matching score of the final step (empty with `matching`) |
+| `n_iter`, `converged` | int, bool | Purification iterations and whether the flagged set repeated (`ConvergenceWarning` otherwise) |
+| `flag_history` | DataFrame | Items flagged (unadjusted $p<$ `alpha`) at each step; row 0 is the first test |
+| `method` | str | `"mantel_haenszel"`, `"mantel"`, `"generalized_mantel_haenszel"` or `"logistic"` |
+
+---
 
 ## Information and reliability
 

@@ -2028,7 +2028,7 @@ data-independent shapes (§15.21).
     | Distribution | Scope | Depends on |
     |---|---|---|
     | `flexpyirt` | estimation; tools that take a `FitResult` (`local_dependence()`, `jsi()`, `model_parallel_analysis()`, `link()`, IRT equating); the `dimensionality()` report | JAX, `flexpyctt` |
-    | `flexpyctt` | model-free item and test analysis: `polychoric()`, `parallel_analysis()`, `velicer_map()`, `empirical_kaiser()`, `efa()`, `hull()`, `comparison_data()`, `detect()`, `exploratory_detect()`, `dimtest()`; later classical item analysis and Mantel–Haenszel DIF | NumPy, SciPy, pandas |
+    | `flexpyctt` | model-free item and test analysis: `polychoric()`, `parallel_analysis()`, `velicer_map()`, `empirical_kaiser()`, `efa()`, `hull()`, `comparison_data()`, `detect()`, `exploratory_detect()`, `dimtest()`; observed-score DIF (`mantel_haenszel()`, `mantel()`, `generalized_mantel_haenszel()`, `logistic_dif()`, §16.20); classical item analysis (`score_responses()`, `item_analysis()`, `coefficient_alpha()`, `coefficient_omega()`, `distractor_analysis()`, §16.21) | NumPy, SciPy, pandas |
     | `flexpyequate` | equating of score distributions only: mean, linear and equipercentile equating, the anchor-test methods, log-linear presmoothing, kernel equating (its own design document: `packages/flexpyequate/docs/DESIGN.md`) | NumPy, SciPy, pandas |
 
     **Layout**: a uv workspace. flexpyirt stays at the repository root (`pyproject.toml`,
@@ -2182,7 +2182,99 @@ data-independent shapes (§15.21).
     Unidimensional results are unchanged bit for bit (the same code path with $D=1$).
     **Validation (V39)**: mirt 1.48 on the four V14 models, see VALIDATION.md.
 
-20. **Classical item analysis (flexpyctt, #101, V46)**: `flexpyctt/item_analysis.py` (NumPy /
+20. **Observed-score DIF in flexpyctt (`mantel_haenszel()`, `mantel()`,
+    `generalized_mantel_haenszel()`, `logistic_dif()`, `DIFResult`; issue #102, V47)**: DIF
+    screening without an IRT model, in `flexpyctt.dif` (public layer: input checks, matching
+    scores, purification, tables) and `flexpyctt._dif` (NumPy kernels for one studied item). The
+    API is the one approved on #102, with the changes listed at the end.
+
+    **Common arguments.** `data`, keyword-only `group` (one label per row), `focal` (one label;
+    a list for the generalized test; every other row is the reference group, as difR's
+    `focal.name`), `items=None` (tested items), `anchor_items=None` (items whose total is the
+    matching score), `matching=None` (external matching variable; not with `anchor_items` or
+    `purify`), `purify=False`, `max_iter=10`, `p_adjust="none"` (`"holm"`, `"BH"`; R's
+    `p.adjust` on the finite p-values), `alpha=0.05`. **Matching**: the total of the anchor
+    items, plus the studied item when it is not an anchor (difR's rule); every distinct value is
+    a stratum (no thick matching). **Missing values** on the tested or anchor items raise
+    `SpecificationError` (owner decision 3 of #102: error, not silent row deletion; difR's
+    `rowSums(na.rm = TRUE)` would mix totals over different item sets).
+
+    **Purification** (difR `purify = TRUE`, `puriadjType = "simple"`): step 0 tests every item
+    on the given anchors; while the flagged set (unadjusted $p<\alpha$) is non-empty, the next
+    step uses the anchors minus the flagged tested items; it stops when the flagged set equals
+    the previous one (`converged=True`) or after `max_iter` steps (`ConvergenceWarning`; the table
+    is the last step, whose anchors exclude the items flagged one step earlier, as difR). Nothing
+    flagged at step 0 gives `n_iter=0`, `converged=True`. With user `anchor_items`, purification
+    removes flagged items from that set only (difR ignores `purify` when `anchor` is given; this
+    is the natural extension, tested against a direct call with the final anchors). The final
+    `flagged` is `adj_p < alpha`. `flag_history` keeps difR's `difPur` (one row per step).
+
+    **Mantel–Haenszel** (Mantel & Haenszel, 1959; Holland & Thayer, 1988): strata with
+    $T_k>1$; $\chi^2_{MH}=(\lvert\sum A-\sum E(A)\rvert-c)^2/\sum\operatorname{Var}(A)$ with
+    $c=1/2$ under `continuity_correction=True` **always** (Holland & Thayer, difR; R's
+    `mantelhaen.test()` sets $c=0$ when the difference is below $1/2$, which changes the statistic
+    of items without DIF only); $\hat\alpha_{MH}=\sum AD/T/\sum BC/T$ with $A,B$ the reference
+    right / wrong counts (so $\hat\alpha_{MH}>1$ favours the reference group); Phillips & Holland
+    (1987) variance of $\ln\hat\alpha_{MH}$; $\Delta_{MH}=-2.35\ln\hat\alpha_{MH}$,
+    $SE(\Delta)=2.35\,SE(\ln\hat\alpha)$. **ETS classes** (owner decision 2: the full rule by
+    default; Zieky, 1993; Zwick, 2012): A if $\lvert\Delta\rvert<1$ or $\chi^2_{MH}$ is not
+    significant ($p\ge\alpha$ on the `p_adjust`-adjusted p-value, the one `flagged` uses, so B
+    and C items are always flagged; without adjustment it is the plain $p$); C if
+    $\lvert\Delta\rvert\ge1.5$ and $(\lvert\Delta\rvert-1)/SE(\Delta)>z_{1-\alpha}$ (a one-sided
+    test that $\lvert\Delta\rvert>1$, 1.645 at $\alpha=0.05$; some authors use 1.96); B otherwise. `classification="effect_size"`: A $<1\le$ B $<1.5\le$ C
+    (difR's printed codes use right-closed intervals; only exact ties differ). A zero or infinite
+    $\hat\alpha_{MH}$ gives a `FlexpycttWarning` (difR's "sparse data" warning).
+
+    **Mantel** (1963) for ordered items: the focal score sum against its hypergeometric
+    expectation, $df=1$, item values as scores; equal to $\chi^2_{MH}$ without correction for 0 / 1
+    items. **Liu–Agresti** (1996) cumulative common odds ratio
+    $\hat\psi=\sum_k\sum_{j<L}b_{jk}c_{jk}/T_k\big/\sum_k\sum_{j<L}a_{jk}d_{jk}/T_k$ ($a,c$: reference
+    / focal counts at or below category $j$), **oriented as $\hat\alpha_{MH}$** (it reduces to
+    $\hat\alpha_{MH}$ for 0 / 1 items; difR's `liu_agresti_ccor()` reports the reciprocal). Its
+    SE is **Liu & Agresti's (1996) eq. 3**, which generalizes Robins, Breslow & Greenland (1986)
+    and is consistent both with a fixed number of large strata and with many sparse strata
+    ("dually consistent"). With the focal group as their row 1,
+    $\widehat{\operatorname{Var}}(\ln\hat\psi)=\sum_k\hat\xi_k\big/(\sum_k\sum_jb_{jk}c_{jk}/T_k)^2$,
+    $\hat\xi_k=\sum_j\hat\phi_{jjk}+2\sum_{j<s}\hat\phi_{jsk}$,
+    $\hat\phi_{jsk}=\frac{n_{Fk}n_{Rk}}{T_k^2}\{\hat\psi d_{sk}a_{jk}/n_{Fk}\,[1+(\hat\psi-1)a_{sk}/n_{Rk}]
+    +c_{jk}b_{sk}/n_{Rk}\,[\hat\psi-(\hat\psi-1)c_{sk}/n_{Fk}]\}$ ($j\le s$). Matching on a
+    total score gives many small strata, where a large-strata delta method
+    ($\operatorname{Var}(S-\hat\psi R)/S^2$ with plug-in multinomial variances, used before
+    review) is far too small: about 40% at four respondents per stratum. The estimator is not
+    invariant to reversing the category order; Liu & Agresti note that one can average the two
+    orderings and that the difference is trivial in practice. flexpyctt uses the categories in
+    increasing order as published, without averaging. difR's own SE is wrong (VALIDATION V47).
+
+    **Generalized MH** (Landis, Heyman & Koch, 1978; Somes, 1986; Penfield, 2001): per stratum
+    ($T_k>1$) the $G\times C$ table of groups x observed categories; observed focal counts for
+    categories $1..C-1$ against $T\,\mathbf p\otimes\mathbf q$, covariance
+    $T^2/(T-1)\,(D_p-pp^\top)\otimes(D_q-qq^\top)$ restricted to those cells; $df=(G-1)(C-1)$.
+    A singular summed covariance (a category or group absent from every informative stratum) is
+    handled with the pseudo-inverse and $df=$ rank, with a `FlexpycttWarning`. It serves both
+    several focal groups with 0 / 1 items (difR `difGMH()`) and nominal categories
+    (`mantelhaen.test()` on an $I\times J\times K$ table).
+
+    **Logistic regression** (Swaminathan & Rogers, 1990; Zumbo, 1999): models
+    $S$, $S+G$, $S+G+SG$ fitted by Newton–Raphson in NumPy (no new dependency), from
+    $\beta=0$, until the max relative step is below $10^{-12}$ (100 iterations at most; a
+    singular information matrix, as under separation, stops it with a `ConvergenceWarning` and a
+    pseudo-inverse covariance). LRT = difference of deviances; Wald on the added coefficients of
+    the larger model (difR's `criterion = "Wald"`). Nagelkerke $R^2$ with $N$ = rows, $\Delta R^2$
+    = larger minus smaller model. Zumbo–Thomas (0.13, 0.26) and Jodoin–Gierl (0.035, 0.07)
+    classes on $\Delta R^2$ only, as difR prints them (the published rules add significance,
+    which is the `flagged` column); unlike the ETS default, no significance is folded in because
+    the cut points were proposed as effect sizes to read next to the test.
+
+    **Changes from the API proposed on #102.** (1) `mantel()`: `cumulative_odds_ratio_se` became
+    `log_cumulative_odds_ratio_se`, next to a new `log_cumulative_odds_ratio`, because the SE is of
+    the log (as `log_odds_ratio_se` of `mantel_haenszel()`). (2) `mantel()`, `generalized_mantel_haenszel()`
+    and `logistic_dif()` have a `df` column (also for the fixed-$df$ methods, so tables of
+    different methods line up). (3) `DIFResult` also has `flag_history`, `method` and the property
+    `flagged_items`. (4) The logistic coefficient columns are named `group_coefficient`,
+    `group_coefficient_se`, `interaction_coefficient`, `interaction_coefficient_se`. (5) Owner
+    decision 4 (standardization, STD P-DIF): not included, as in the scope list of #102.
+    **Not in this PR**: ordinal logistic DIF (the second PR of #102).
+21. **Classical item analysis (flexpyctt, #101, V46)**: `flexpyctt/item_analysis.py` (NumPy /
     SciPy / pandas), re-exported by flexpyirt. The API is the one proposed in the issue and approved
     by the owner (2026-11-26): `score_responses()`, `item_analysis()`, `coefficient_alpha()`
     (`AlphaResult`), `coefficient_omega()` (`OmegaResult`), `distractor_analysis()`. The names do not
@@ -3094,6 +3186,7 @@ data-independent shapes (§15.21).
 - Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
+- Holland, P. W., & Thayer, D. T. (1988). Differential item performance and the Mantel–Haenszel procedure. In H. Wainer & H. I. Braun (Eds.), *Test Validity* (pp. 129–145). Erlbaum.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
@@ -3102,16 +3195,21 @@ data-independent shapes (§15.21).
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Huynh, H., & Meyer, P. (2010). Use of robust z in detecting unstable items in item response theory models. *Practical Assessment, Research & Evaluation*, 15(2).
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
+- Jodoin, M. G., & Gierl, M. J. (2001). Evaluating type I error and power rates using an effect size measure with the logistic regression procedure for DIF detection. *Applied Measurement in Education*, 14(4), 329–349.
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
+- Landis, J. R., Heyman, E. R., & Koch, G. G. (1978). Average partial association in three-way contingency tables: A review and discussion of alternative tests. *International Statistical Review*, 46(3), 237–254.
 - Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
 - Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24(2), 115–138.
+- Liu, I.-M., & Agresti, A. (1996). Mantel–Haenszel-type inference for cumulative odds ratios with a stratified ordinal response. *Biometrics*, 52(4), 1223–1234.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - MacCallum, R. C., Browne, M. W., & Sugawara, H. M. (1996). Power analysis and determination of sample size for covariance structure modeling. *Psychological Methods*, 1(2), 130–149.
+- Mantel, N. (1963). Chi-square tests with one degree of freedom: Extensions of the Mantel–Haenszel procedure. *Journal of the American Statistical Association*, 58(303), 690–700.
+- Mantel, N., & Haenszel, W. (1959). Statistical aspects of the analysis of data from retrospective studies of disease. *Journal of the National Cancer Institute*, 22(4), 719–748.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Maydeu-Olivares, A., & Joe, H. (2005). Limited- and full-information estimation and goodness-of-fit testing in $2^n$ contingency tables: A unified framework. *Journal of the American Statistical Association*, 100(471), 1009–1020.
 - Maydeu-Olivares, A., & Joe, H. (2006). Limited information goodness-of-fit testing in multidimensional contingency tables. *Psychometrika*, 71(4), 713–732.
@@ -3131,23 +3229,29 @@ data-independent shapes (§15.21).
 - Orlando, M., & Thissen, D. (2003). Further investigation of the performance of S-X2: An item fit index for use with dichotomous item response theory models. *Applied Psychological Measurement*, 27(4), 289–298.
 - Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37(4), 357–373.
 - Owen, D. B. (1956). Tables for computing bivariate normal probabilities. *The Annals of Mathematical Statistics*, 27(4), 1075–1090.
+- Penfield, R. D. (2001). Assessing differential item functioning among multiple groups: A comparison of three Mantel–Haenszel procedures. *Applied Measurement in Education*, 14(3), 235–259.
+- Penfield, R. D., & Algina, J. (2003). Applying the Liu–Agresti estimator of the cumulative common odds ratio to DIF detection in polytomous items. *Journal of Educational Measurement*, 40(4), 353–370.
+- Phillips, A., & Holland, P. W. (1987). Estimators of the variance of the Mantel–Haenszel log-odds-ratio estimate. *Biometrics*, 43(2), 425–431.
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
+- Robins, J., Breslow, N., & Greenland, S. (1986). Estimators of the Mantel–Haenszel variance consistent in both sparse data and large-strata limiting models. *Biometrics*, 42(2), 311–323.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Skinner, C. J. (1989). Domain means, regression and multivariate analysis. In C. J. Skinner, D. Holt & T. M. F. Smith (Eds.), *Analysis of Complex Surveys* (pp. 59–87). Wiley.
+- Somes, G. W. (1986). The generalized Mantel–Haenszel statistic. *The American Statistician*, 40(2), 106–108.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
 - Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
+- Swaminathan, H., & Rogers, H. J. (1990). Detecting differential item functioning using logistic regression procedures. *Journal of Educational Measurement*, 27(4), 361–370.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
@@ -3169,3 +3273,7 @@ data-independent shapes (§15.21).
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.
 - Zhang, J., & Stout, W. (1999). The theoretical DETECT index of dimensionality and its application to approximate simple structure. *Psychometrika*, 64(2), 213–249.
+- Zieky, M. (1993). Practical questions in the use of DIF statistics in test development. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 337–347). Erlbaum.
+- Zumbo, B. D. (1999). *A Handbook on the Theory and Methods of Differential Item Functioning (DIF): Logistic Regression Modeling as a Unitary Framework for Binary and Likert-Type (Ordinal) Item Scores*. Directorate of Human Resources Research and Evaluation, Department of National Defense (Canada).
+- Zumbo, B. D., & Thomas, D. R. (1997). *A Measure of Effect Size for a Model-Based Approach for Studying DIF*. Edgeworth Laboratory for Quantitative Behavioral Science, University of Northern British Columbia.
+- Zwick, R. (2012). A review of ETS differential item functioning assessment procedures: Flagging rules, minimum sample size requirements, and criterion refinement. *ETS Research Report Series*, 2012(1), i–30.

@@ -1,7 +1,8 @@
 """flexpyirt: Bock–Aitkin EM estimation for item response theory models, built on JAX.
 
-The model-free tools (``parallel_analysis``, ``efa``, ``item_analysis``, ...) are defined in
-flexpyctt and re-exported here; ``polychoric`` is flexpyirt's JAX implementation
+The model-free tools (``parallel_analysis``, ``efa``, ``detect``, ``item_analysis``,
+``mantel_haenszel``, ...) are defined in flexpyctt and re-exported here; ``polychoric`` is
+flexpyirt's JAX implementation
 (DESIGN.md §16.18).
 """
 
@@ -9,6 +10,13 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
+from flexpyctt.dif import (
+    DIFResult,
+    generalized_mantel_haenszel,
+    logistic_dif,
+    mantel,
+    mantel_haenszel,
+)
 from flexpyctt.item_analysis import (
     AlphaResult,
     OmegaResult,
@@ -90,6 +98,7 @@ __all__ = [
     "BetaPrior",
     "CommonItemScreeningResult",
     "ComparisonDataResult",
+    "DIFResult",
     "DavidianCurve",
     "DetectResult",
     "DimensionalityResult",
@@ -136,12 +145,16 @@ __all__ = [
     "expected_score",
     "exploratory_detect",
     "fit",
+    "generalized_mantel_haenszel",
     "hull",
     "information_matrix",
     "item_analysis",
     "item_information",
     "item_probabilities",
     "link",
+    "logistic_dif",
+    "mantel",
+    "mantel_haenszel",
     "model_parallel_analysis",
     "parallel_analysis",
     "polychoric",

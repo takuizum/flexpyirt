@@ -1,4 +1,4 @@
-"""Classical item analysis (DESIGN.md §16.20).
+"""Classical item analysis (DESIGN.md §16.21).
 
 Scoring with an answer key (:func:`score_responses`), item statistics (:func:`item_analysis`),
 coefficients alpha and omega (:func:`coefficient_alpha`, :func:`coefficient_omega`) and option
