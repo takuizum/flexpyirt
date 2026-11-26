@@ -4,7 +4,9 @@ Model-implied item-score moments and their Jacobian come from the fitted Core pr
 quadrature grid (the Jacobian by JAX forward-mode autodiff); the asymptotic covariance, SVD
 orthogonal complement, and fit indices run in NumPy / SciPy outside ``jit``. Nothing here depends
 on the number of factors: for a confirmatory multidimensional model the ``Q`` nodes are the
-product grid and the weights are multivariate normal (DESIGN.md §16.19).
+product grid and the weights are multivariate normal (DESIGN.md §16.19). Multiple groups, missing
+responses (pairwise-available margins with their exact covariance under MCAR) and MAP fits follow
+DESIGN.md §16.23.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from flexpyirt.errors import FlexpyirtWarning, SpecificationError
 
 __all__ = [
     "M2Result",
+    "SampleMargins",
     "ci_column_names",
     "conditional_moments",
     "m2_statistic",
@@ -32,6 +35,7 @@ __all__ = [
     "null_m2",
     "rmsea",
     "rmsea_ci",
+    "sample_margins",
 ]
 
 
@@ -45,9 +49,14 @@ class M2Result:
     rmsea: float
     rmsea_lower: float
     rmsea_upper: float
-    srmsr: float
+    srmsr_by_group: tuple[float, ...]
     tli: float
     cfi: float
+
+    @property
+    def srmsr(self) -> float:
+        """SRMSR of a single-group model (``NaN`` with several groups; see ``srmsr_by_group``)."""
+        return self.srmsr_by_group[0] if len(self.srmsr_by_group) == 1 else float("nan")
 
 
 def ci_column_names(ci: float) -> tuple[str, str]:
@@ -67,8 +76,8 @@ def _pairs(n_items: int) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(ii, dtype=int), np.asarray(jj, dtype=int)
 
 
-def conditional_moments(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
-    r"""Return ``(J, Q)`` conditional first and second moments of item scores.
+def conditional_moments(prob: CompiledProblem, eta: Array, group: int = 0) -> tuple[Array, Array]:
+    r"""Return ``(J, Q)`` conditional first and second moments of item scores in ``group``.
 
     .. math::
         m_{1,jq} = \sum_{k=0}^{K_j-1} k\,P_{jk}(\theta_q),\qquad
@@ -79,21 +88,21 @@ def conditional_moments(prob: CompiledProblem, eta: Array) -> tuple[Array, Array
     m1 = jnp.zeros((n_items, n_nodes), dtype=prob.nodes.dtype)
     m2 = jnp.zeros_like(m1)
     for fam, logp in zip(prob.families, _core._item_log_probs(prob, eta), strict=True):
-        p = jnp.exp(logp[0])  # (J_f, Q, K_f)
+        p = jnp.exp(logp[group])  # (J_f, Q, K_f)
         k = jnp.arange(fam.kernel.n_categories, dtype=p.dtype)
         m1 = m1.at[fam.columns, :].set(jnp.sum(p * k, axis=-1))
         m2 = m2.at[fam.columns, :].set(jnp.sum(p * k**2, axis=-1))
     return m1, m2
 
 
-def model_margins(prob: CompiledProblem, eta: Array) -> Array:
-    r"""Return ``(s,)`` model-implied means and cross-products of item scores.
+def model_margins(prob: CompiledProblem, eta: Array, group: int = 0) -> Array:
+    r"""Return ``(s,)`` model-implied means and cross-products of item scores in ``group``.
 
     Maydeu-Olivares & Joe (2005, 2006); mirt's ``M2*``: :math:`E[y_j]` for every item, then
     :math:`E[y_iy_j]` for :math:`i < j` in column-major order.
     """
-    m1, _ = conditional_moments(prob, eta)
-    w = jnp.exp(_core._latent_log_weights(prob, eta)[0])  # (Q,)
+    m1, _ = conditional_moments(prob, eta, group)
+    w = jnp.exp(_core._latent_log_weights(prob, eta)[group])  # (Q,)
     ii, jj = _pairs(int(m1.shape[0]))
     e1 = m1 @ w
     e2 = (m1[ii, :] * m1[jj, :]) @ w
@@ -257,6 +266,163 @@ def null_m2(y: np.ndarray) -> tuple[float, int]:
     return float(n_obs * np.sum(r_pairs**2)), df_null
 
 
+@dataclass(frozen=True)
+class SampleMargins:
+    r"""Pairwise-available sample margins of one group (DESIGN.md §16.23).
+
+    ``obs`` holds :math:`\hat p_a=N_a^{-1}\sum_n o_{na}y_{na}` for the :math:`J` items and
+    :math:`\binom J2` pairs, ``count`` the :math:`N_a`, ``joint`` the :math:`N_{ab}` (``None``
+    for complete data, where every entry is ``n_rows``), and ``cov`` the pairwise-available
+    item-score covariance used by SRMSR.
+    """
+
+    obs: np.ndarray
+    count: np.ndarray
+    joint: np.ndarray | None
+    cov: np.ndarray
+    n_rows: int
+
+
+def sample_margins(y: np.ndarray, item_names: Sequence[str] | None = None) -> SampleMargins:
+    r"""Return the pairwise-available margins of ``y`` (``(N, J)``, missing coded negative).
+
+    .. math::
+        N_a=\sum_n o_{na},\qquad \hat p_a=N_a^{-1}\sum_n o_{na}\,y_{na},\qquad
+        N_{ab}=\sum_n o_{na}\,o_{nb},
+
+    where :math:`o_{na}=1` when respondent :math:`n` answered every item of margin :math:`a`
+    and :math:`y_{na}` is the item score or the product of the two scores (DESIGN.md §16.23).
+
+    Raises
+    ------
+    SpecificationError
+        If an item or a pair of items has no respondent who answered it (``N_a = 0``).
+    """
+    n_rows, n_items = y.shape
+    names = list(item_names) if item_names is not None else [str(j) for j in range(n_items)]
+    ii, jj = _pairs(n_items)
+    seen = y >= 0
+    yz = np.where(seen, y, 0).astype(float)
+    ind = np.concatenate([seen, seen[:, ii] & seen[:, jj]], axis=1).astype(float)  # (N, s)
+    vals = np.concatenate([yz, yz[:, ii] * yz[:, jj]], axis=1)
+    count = ind.sum(axis=0)
+    empty = np.flatnonzero(count == 0)
+    if empty.size:
+        a = int(empty[0])
+        what = (
+            f"item {names[a]!r}"
+            if a < n_items
+            else f"items {names[int(ii[a - n_items])]!r} and {names[int(jj[a - n_items])]!r}"
+        )
+        raise SpecificationError(
+            f"M2 needs every item and every pair of items answered by at least one respondent "
+            f"(in each group); nobody answered {what}. Limited-information fit on second-order "
+            "margins is not defined for designs where items are never given together."
+        )
+    obs = vals.sum(axis=0) / count
+    complete = bool(seen.all())
+    joint = None if complete else ind.T @ ind
+    mean = obs[:n_items]
+    cov = np.empty((n_items, n_items), dtype=float)
+    cov[ii, jj] = obs[n_items:] - mean[ii] * mean[jj]
+    cov[jj, ii] = cov[ii, jj]
+    cov[np.diag_indices(n_items)] = (yz**2).sum(axis=0) / count[:n_items] - mean**2
+    return SampleMargins(obs=obs, count=count, joint=joint, cov=cov, n_rows=int(n_rows))
+
+
+def _residual_and_gamma(
+    sample: SampleMargins, margins: np.ndarray, xi: np.ndarray, mirt_convention: bool
+) -> tuple[np.ndarray, np.ndarray]:
+    r"""Return the scaled residual :math:`r_g` and its covariance :math:`\Gamma_g` (§16.23).
+
+    Default: :math:`r_g=\sqrt{N_g}(\hat p_g-\pi_g)` and
+    :math:`\Gamma_{g,ab}=N_g N_{ab}\,\Xi_{ab}/(N_aN_b)`, the exact covariance of
+    :math:`r_g` under MCAR (:math:`\Xi_2` itself for complete data). ``mirt_convention``
+    reproduces mirt 1.46.1: :math:`r_{g,a}=N_a(\hat p_a-\pi_a)/\sqrt{N_g}` with :math:`\Xi_2`.
+    """
+    n_g = float(sample.n_rows)
+    diff = sample.obs - margins
+    if mirt_convention:
+        return sample.count * diff / np.sqrt(n_g), xi
+    resid = np.sqrt(n_g) * diff
+    if sample.joint is None:
+        return resid, xi
+    gamma = xi * (n_g * sample.joint / np.outer(sample.count, sample.count))
+    return resid, 0.5 * (gamma + gamma.T)
+
+
+def _null_m2(
+    samples: Sequence[SampleMargins], n_items: int, mirt_convention: bool
+) -> tuple[float, int]:
+    r""":math:`M_2` of the dichotomous independence model with intercepts in every group.
+
+    The model has :math:`\pi_{g,j}=\hat p_{g,j}` (the available-case proportion, its MLE) and
+    :math:`\pi_{g,ij}=\hat p_{g,i}\hat p_{g,j}`; :math:`\Delta` has one block of :math:`J`
+    logit-intercept columns per group with
+    :math:`\partial\pi_j/\partial\tau_j=v_j=\hat p_j(1-\hat p_j)` and
+    :math:`\partial\pi_{ij}/\partial\tau_i=v_i\hat p_j`. With complete data this equals
+    :func:`null_m2` summed over groups. Returns ``(NaN, df)`` if :math:`\Delta` is
+    rank-deficient (an item without variance in some group).
+    """
+    ii, jj = _pairs(n_items)
+    s = samples[0].obs.size
+    n_groups = len(samples)
+    n_total = float(sum(smp.n_rows for smp in samples))
+    df_null = n_groups * (s - n_items)
+    if df_null <= 0:
+        return float("nan"), df_null
+    resids, gammas = [], []
+    delta = np.zeros((n_groups * s, n_groups * n_items), dtype=float)
+    for g, smp in enumerate(samples):
+        p = smp.obs[:n_items]
+        v = p * (1.0 - p)
+        e = np.concatenate([p, p[ii] * p[jj]])
+        xi = _xi(p[:, None], p[:, None], np.ones(1), e)
+        r, gam = _residual_and_gamma(smp, e, xi, mirt_convention)
+        resids.append(r)
+        gammas.append(gam)
+        blk = np.zeros((s, n_items), dtype=float)
+        blk[np.arange(n_items), np.arange(n_items)] = v
+        rows = n_items + np.arange(ii.size)
+        blk[rows, ii] = v[ii] * p[jj]
+        blk[rows, jj] = v[jj] * p[ii]
+        if not mirt_convention:
+            blk *= np.sqrt(smp.n_rows / n_total)
+        delta[g * s : (g + 1) * s, g * n_items : (g + 1) * n_items] = blk
+    comp, _ = _svd_complement(delta)
+    if comp is None:
+        return float("nan"), df_null
+    return _solve_quadratic_form(np.concatenate(resids), comp, _block_diag(gammas)), df_null
+
+
+def _block_diag(blocks: Sequence[np.ndarray]) -> np.ndarray:
+    """Block-diagonal matrix of square ``blocks``."""
+    size = sum(b.shape[0] for b in blocks)
+    out = np.zeros((size, size), dtype=float)
+    pos = 0
+    for b in blocks:
+        k = b.shape[0]
+        out[pos : pos + k, pos : pos + k] = b
+        pos += k
+    return out
+
+
+def _srmsr(sample: SampleMargins, margins: np.ndarray, m2: np.ndarray, w: np.ndarray) -> float:
+    """Root mean squared residual of item-score correlations (pairwise-available, as mirt)."""
+    n_items = sample.cov.shape[0]
+    ii, jj = _pairs(n_items)
+    mean_e = margins[:n_items]
+    cov_e = np.zeros((n_items, n_items), dtype=float)
+    cov_e[ii, jj] = margins[n_items:] - mean_e[ii] * mean_e[jj]
+    cov_e = cov_e + cov_e.T
+    cov_e[np.diag_indices(n_items)] = m2 @ w - mean_e**2
+    cov_o = sample.cov
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r_o = cov_o / np.sqrt(np.outer(np.diag(cov_o), np.diag(cov_o)))
+        r_e = cov_e / np.sqrt(np.outer(np.diag(cov_e), np.diag(cov_e)))
+    return float(np.sqrt(np.mean((r_o[ii, jj] - r_e[ii, jj]) ** 2)))
+
+
 def m2_statistic(
     prob: CompiledProblem,
     eta: Array,
@@ -264,43 +430,66 @@ def m2_statistic(
     *,
     n_params: int,
     n_categories: Sequence[int],
+    groups: np.ndarray | None = None,
+    item_names: Sequence[str] | None = None,
     level: float = 0.90,
     _latent_in_delta: bool = True,
+    _mirt_convention: bool = False,
 ) -> M2Result:
     r"""Compute the :math:`M_2` / :math:`M_2^*` statistic (Maydeu-Olivares & Joe, 2005, 2006).
 
     .. math::
-        M_2 = N\,(\hat p_2 - \pi_2)^\top C_2\,(\hat p_2 - \pi_2),\qquad
-        C_2 = \Delta_c (\Delta_c^\top \Xi_2 \Delta_c)^{-1} \Delta_c^\top,\qquad
-        df = s - q,
+        M_2 = r^\top \Delta_c (\Delta_c^\top \Gamma \Delta_c)^{-1} \Delta_c^\top r,\qquad
+        df = G\,s - q,
 
-    where :math:`\Delta_c` is an orthonormal basis for the orthogonal complement of
-    :math:`\Delta_2 = \partial\pi_2 / \partial\eta^\top` (shared parameters once), :math:`\Xi_2`
-    is the asymptotic covariance of :math:`\sqrt{N}(\hat p_2 - \pi_2)` under local independence,
-    :math:`s = J + \binom{J}{2}`, and :math:`q = \text{n\_params}`.
+    where :math:`r=(\sqrt{N_g}(\hat p_g - \pi_g))_g` stacks the residuals of the
+    :math:`G` groups, :math:`\Gamma=\operatorname{blockdiag}(\Gamma_g)` is their asymptotic
+    covariance (:math:`\Xi_2` of group :math:`g` under local independence; with missing
+    responses rescaled by :math:`N_gN_{ab}/(N_aN_b)`, DESIGN.md §16.23), :math:`\Delta_c` is an
+    orthonormal basis for the orthogonal complement of
+    :math:`\Delta^\ast=(\sqrt{N_g/N}\,\partial\pi_g/\partial\eta^\top)_g` (shared parameters
+    once), :math:`s = J + \binom{J}{2}`, and :math:`q = \text{n\_params}`. For one group with
+    complete data this is :math:`N\,e^\top\Delta_c(\Delta_c^\top\Xi_2\Delta_c)^{-1}\Delta_c^\top e`.
 
-    By default ``_latent_in_delta=True`` includes free latent parameters in :math:`\Delta_2`
-    (Maydeu-Olivares & Joe, 2005, 2006); setting ``_latent_in_delta=False`` drops them from
-    :math:`\Delta_2` while keeping them in ``df`` to match R mirt 1.46.1's convention.
+    ``groups`` holds each row's group code (default: all rows in group 0). By default
+    ``_latent_in_delta=True`` includes free latent parameters in :math:`\Delta`
+    (Maydeu-Olivares & Joe, 2005, 2006); ``_latent_in_delta=False`` drops them while keeping
+    them in ``df``, and ``_mirt_convention=True`` leaves the group rows of :math:`\Delta`
+    unscaled and uses mirt's missing-data weighting; together they reproduce R mirt 1.46.1
+    (validation only).
     """
-    margins = np.asarray(model_margins(prob, eta), dtype=float)
-    jac = np.asarray(jax.jacfwd(lambda e: model_margins(prob, e))(eta), dtype=float)
+    n_obs, n_items = y.shape
+    codes = np.zeros(n_obs, dtype=int) if groups is None else np.asarray(groups, dtype=int)
+    n_groups = int(np.asarray(_core._latent_log_weights(prob, eta)).shape[0])
+    samples = [sample_margins(y[codes == g], item_names) for g in range(n_groups)]
+
+    def all_margins(e: Array) -> Array:
+        return jnp.concatenate([model_margins(prob, e, g) for g in range(n_groups)])
+
+    margins_all = np.asarray(all_margins(eta), dtype=float)
+    jac = np.array(jax.jacfwd(all_margins)(eta), dtype=float)
     if not _latent_in_delta:
         lat_fids = {int(i) for i in np.asarray(prob.latent.free_index).ravel() if int(i) >= 0}
         if lat_fids:
             keep = [c for c in range(jac.shape[1]) if c not in lat_fids]
             jac = jac[:, keep]
+    s = margins_all.size // n_groups
+    log_w = np.asarray(_core._latent_log_weights(prob, eta), dtype=float)
 
-    m1, m2 = (np.asarray(a, dtype=float) for a in conditional_moments(prob, eta))
-    w = np.exp(np.asarray(_core._latent_log_weights(prob, eta)[0], dtype=float))
-    n_obs, n_items = y.shape
-    s = int(margins.shape[0])
-    ii, jj = _pairs(n_items)
+    resids, gammas, srmsr = [], [], []
+    for g, smp in enumerate(samples):
+        margins = margins_all[g * s : (g + 1) * s]
+        m1, m2 = (np.asarray(a, dtype=float) for a in conditional_moments(prob, eta, g))
+        w = np.exp(log_w[g])
+        xi = _xi(m1, m2, w, margins)
+        r, gam = _residual_and_gamma(smp, margins, xi, _mirt_convention)
+        resids.append(r)
+        gammas.append(gam)
+        if not _mirt_convention:
+            jac[g * s : (g + 1) * s] *= np.sqrt(smp.n_rows / n_obs)
+        srmsr.append(_srmsr(smp, margins, m2, w))
 
-    yf = y.astype(float)
-    obs = np.concatenate([yf.mean(axis=0), (yf[:, ii] * yf[:, jj]).mean(axis=0)])
-    resid = np.sqrt(float(n_obs)) * (obs - margins)
-    df = int(s - n_params)
+    df = int(n_groups * s - n_params)
     if df <= 0:
         warnings.warn(
             f"M2 has non-positive degrees of freedom (df={df}); the model is not locally "
@@ -322,20 +511,7 @@ def m2_statistic(
             )
             stat = float("nan")
         else:
-            xi = _xi(m1, m2, w, margins)
-            stat = _solve_quadratic_form(resid, comp, xi)
-
-    # SRMSR: root mean squared residual of item-score correlations.
-    mean_e = margins[:n_items]
-    cov_o = np.cov(yf, rowvar=False, bias=True)
-    cov_e = np.zeros((n_items, n_items), dtype=float)
-    cov_e[ii, jj] = margins[n_items:] - mean_e[ii] * mean_e[jj]
-    cov_e = cov_e + cov_e.T
-    cov_e[np.diag_indices(n_items)] = m2 @ w - mean_e**2
-    with np.errstate(divide="ignore", invalid="ignore"):
-        r_o = cov_o / np.sqrt(np.outer(np.diag(cov_o), np.diag(cov_o)))
-        r_e = cov_e / np.sqrt(np.outer(np.diag(cov_e), np.diag(cov_e)))
-    srmsr = float(np.sqrt(np.mean((r_o[ii, jj] - r_e[ii, jj]) ** 2)))
+            stat = _solve_quadratic_form(np.concatenate(resids), comp, _block_diag(gammas))
 
     if df > 0 and np.isfinite(stat):
         pval = float(stats.chi2.sf(stat, df))
@@ -349,7 +525,7 @@ def m2_statistic(
     tli_val = float("nan")
     cfi_val = float("nan")
     if df > 0 and np.isfinite(stat) and all(k == 2 for k in n_categories):
-        x2_null, df_null = null_m2(y)
+        x2_null, df_null = _null_m2(samples, n_items, _mirt_convention)
         if np.isfinite(x2_null) and df_null > 0:
             if x2_null > stat:
                 denom_tli = x2_null / df_null - 1.0
@@ -366,4 +542,4 @@ def m2_statistic(
                     stacklevel=3,
                 )
 
-    return M2Result(stat, df, pval, rmsea_val, lo, hi, srmsr, tli_val, cfi_val)
+    return M2Result(stat, df, pval, rmsea_val, lo, hi, tuple(srmsr), tli_val, cfi_val)
