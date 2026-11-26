@@ -57,7 +57,7 @@ LZ_STAR_THETA_MAX = 10.0
 """l_z* is compared with the R recomputation for |theta| <= 10 only (see the test)."""
 TOL_THETA = {"EAP": 1e-8, "MAP": 1e-5, "ML": 1e-4, "WLE": 1e-4}
 """Ability estimates vs mirt (V13 / V37 tolerances)."""
-TOL_END_TO_END = 1e-3
+TOL_END_TO_END = 1e-4
 """Absolute tolerance of the statistics with flexpyirt's own ability estimates."""
 
 

@@ -1954,14 +1954,17 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    $W_j=\sqrt{10^{-5}}$ とする（極端な $\hat\theta$ に対する mirt の保護）。多群モデルの項目統計量は群ごとに計算する
    （mirt の `multipleGroup` に対する `itemfit()` と同じ）。重み付きの推定結果はエラー（S-X2 と同じ）。
 5. **mirt との違いと照合**: (a) 受験者の `z_outfit` は平方根の中で $n^2$（回答項目数）を使う。mirt の
-   `personfit()` は $J^2$（全項目数）を使い絶対値を取るので、欠測のある行だけが異なる（`itemfit()` は回答者数を
-   正しく使っている）。(b) $\hat\theta$ が有限でない行（全項目が最低・最高カテゴリのパターンの ML、全欠測の行）は
+   `personfit()` は $J^2$（全項目数）を使い絶対値を取るので、欠測のある行だけが異なる。項目の `z_outfit` は項目ごとの
+   回答者数 $N_j$ を使う。mirt の `itemfit()` は長さ $J$ のベクトル `N` で `colSums((C / W^2) / N^2)` と書いており、R が
+   列方向ではなく行方向に再利用するので、項目ごとの回答者数が違う（欠測がある）と `z.outfit` がずれる（欠測がなければ
+   正しい）。(b) $\hat\theta$ が有限でない行（全項目が最低・最高カテゴリのパターンの ML、全欠測の行）は
    統計量を NaN にし、項目統計量からは除く。mirt は $\pm\infty$ を有限な推定値の最大・最小 $\pm0.1$ に置き換える。
    (c) mirt は $l_0$ で選ばれた確率が計算機イプシロン未満なら 1 に置き換えるが、flexpyirt は対数確率をそのまま使う。
-   V53 では $l_z$ と受験者の infit / outfit を mirt の `personfit()` と、受験者の $z_{\mathrm{out}}$ を mirt 自身の残差
-   モーメントに $n^2$ の式を当てた値と、項目の infit / outfit を `itemfit(fit_stats = "infit")` と、Rasch モデルの
+   V53 では $l_z$ と受験者の infit / outfit を mirt の `personfit()` と、受験者と項目の $z_{\mathrm{out}}$ を mirt 自身の残差
+   モーメントに上の式を当てた値（欠測のないデータでは mirt の値とも）と、項目の infit / outfit を `itemfit(fit_stats = "infit")` と、Rasch モデルの
    lz・infit・outfit を `sirt::personfit.stat()` と、$l_z^*$ を 3 項の式から R で再計算した値（`probtrace()` と中心差分、
-   `iteminfo()`）と比べる。$l_z^*$ を実装した R パッケージは手元にない（`PerFit::lzstar` はインストールできず、
+   `iteminfo()`。差分の精度が落ちる $|\hat\theta|>10$ は除く）と、単体テストの 2PL の閉じた式および帰無分布の
+   シミュレーションと比べる。$l_z^*$ を実装した R パッケージは手元にない（`PerFit::lzstar` はインストールできず、
    2 値項目しか扱わない）。$l_z^*$ は、この照合をオーナーが認めた場合にだけ利用者向け文書に載せる（#108）。
 
 ## 参考文献

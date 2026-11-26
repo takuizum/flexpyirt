@@ -30,6 +30,7 @@
 | CD: 主因子法の $\Lambda\Lambda^\top$、同じ乱数による 1 因子の母集団、順位和の $p$、平均 RMSE（採用された $k$ / 棄却された追加の $k$） | 1e-12、厳密、1e-10（相対）、15% / 60%（相対） |
 | DIMTEST（シミュレーション研究。テストではその小さい版）: .05 での第 1 種の誤り / 検出力 | 20 回中 $\le 0.15$ / 10 回中 $\ge 8$ |
 | mirt の推定値でのクロス積／サンドイッチの共分散（各要素を $\sqrt{v_{ii}v_{jj}}$ で割った差）。通しで当てはめたときのパラメタ／SE | 1e-9 / 1e-6、1e-6 / 1e-5（相対） |
+| mirt の $\theta$ での受験者・項目適合度（$l_z$、infit、outfit、$z$）、R で再計算した $l_z^*$、flexpyirt 自身の推定値での端から端まで | 1e-9（相対）、1e-7、1e-4 |
 
 ## ケース一覧（マイルストーンと対応）
 | ID | 内容 | mirt 側の呼び出し | MS |
@@ -75,6 +76,7 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
+| V53 | EAP・MAP・ML・WLE の推定値での受験者適合度（$l_z$、$l_z^*$、受験者の infit / outfit と $z$）と項目の infit / outfit。V37 のデータと推定値（2PL、8% 欠測の 2PL、3PL、GRM と GPCM $K=4$、名義 $K=4$、2PL + 3PL + GRM + GPCM + 名義の混在、2PL + GRM の 2 群）と Rasch での再推定 | `personfit(m, Theta = )`、`itemfit(m, fit_stats = "infit", Theta = )`、`sirt::personfit.stat()`、式から R で再計算した $l_z^*$ | — |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -937,6 +939,27 @@
   標本誤差の範囲で $B=H$（標準誤差は 3% 以内）、$B=H$ を強制するとサンドイッチが Oakes の共分散に
   一致すること、行を 2 倍にすると共分散が半分になること、`b_se` と `link()` が選んだ共分散を読むこと、
   JSON の往復、拒否するケース。
+
+- **受験者適合度と残差にもとづく項目適合度（V53、#108）**: DESIGN §20。V37 のデータと mirt の推定値を再利用する
+  （全パラメタ固定、$[-6, 6]$ の 61 点）。ケースと推定法（EAP・MAP・ML・WLE）ごとに、R スクリプトは mirt の
+  `fscores()`、全データでの `personfit(m, Theta = )`（最初の 300 個の一意なパターンを保存）と
+  `itemfit(m, fit_stats = "infit", Theta = )`（EAP・MAP・WLE。ML の無限大の推定値は mirt が置き換えるため除く）を計算する。
+  **mirt の $\theta$ で**（保存した推定値でカーネルを評価）: $l_z$・infit・outfit とその $z$ 値は 8 ケース・4 推定法の
+  すべてで $8.3\times10^{-9}$（相対）以内、$l_z^*$ は DESIGN §20 の 3 項を R で再計算した値（`probtrace()` と中心差分、
+  `iteminfo()`）と $|\hat\theta|\le10$ で $2.8\times10^{-8}$ 以内。それより外（3PL の平坦な裾での mirt の ML、V13 の欠測時の
+  極値）では中心差分の精度が落ち、flexpyirt は NumPy での解析的な計算と一致する。**端から端まで**（flexpyirt 自身の推定値。
+  mirt との差は EAP $5.6\times10^{-15}$、MAP $2.9\times10^{-6}$、ML $1.2\times10^{-5}$、WLE $2.6\times10^{-6}$ まで）:
+  受験者の統計量は $2.0\times10^{-5}$ 以内、項目の統計量は $3.1\times10^{-5}$ 以内。**Rasch**: mirt の WLE 推定値で
+  $l_z$・infit・outfit が `sirt::personfit.stat()` と $3.7\times10^{-13}$（相対）以内で一致（mirt と sirt の差は
+  $1.8\times10^{-15}$）。**mirt との既知の差**（DESIGN §20 の 5 項）: 受験者の `z_outfit` は $n^2$（回答項目数）を使うが
+  mirt の `personfit()` は $J^2$ を使い、mirt の `itemfit()` は項目の `z.outfit` で項目ごとの回答者数を行方向に再利用する。
+  どちらも欠測があるときだけ効くので、参照値ではこれらの $z$ 値を mirt 自身の残差モーメント（`attr(m, "inoutfitreturn")`）
+  から計算し直し、欠測のないデータでは mirt の値とも直接比べる。**$l_z^*$ には R パッケージの参照値がない**（`PerFit` は
+  ここではインストールできず、その `lzstar()` は 2 値項目のみ）。R での再計算に加え、`tests/test_person_fit.py` で
+  2PL での Snijders (2001) の閉じた式（ML・MAP・WLE、$10^{-10}$）と比べ、帰無分布をシミュレーションする（2PL、$J=20$、
+  $N=3000$、真のパラメタ）: ML と WLE で $l_z^*$ の平均は標本誤差の範囲で 0、SD は $[0.93, 1.07]$ に入り、$l_z$ の SD は
+  0.93 未満。これで $l_z^*$ を照合済みとしてよいかはオーナーが判断する（#108）。テスト:
+  `tests/test_mirt_v53_person_fit.py`、`tests/test_person_fit.py`。参照値の生成: `validation/r/person_fit_reference.R`。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

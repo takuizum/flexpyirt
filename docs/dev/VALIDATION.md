@@ -35,6 +35,7 @@ English | [日本語](VALIDATION.ja.md)
 | CD: PAF $\Lambda\Lambda^\top$; one-factor population from the same draws; rank-sum $p$; mean RMSE (retained $k$ / the rejected extra $k$) | 1e-12; exact; 1e-10 (relative); 15% / 60% (relative) |
 | DIMTEST (simulation study; small version in the tests): type I error at .05 / power | $\le 0.15$ of 20 / $\ge 8$ of 10 |
 | Cross-product / sandwich covariance at mirt's estimates (entries relative to $\sqrt{v_{ii}v_{jj}}$); parameters / SEs end-to-end | 1e-9 / 1e-6; 1e-6 / 1e-5 (relative) |
+| Person / item fit at mirt's $\theta$ ($l_z$, infit, outfit, $z$); $l_z^*$ vs the R recomputation; end-to-end with flexpyirt's own estimates | 1e-9 (relative); 1e-7; 1e-4 |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -80,6 +81,7 @@ English | [日本語](VALIDATION.ja.md)
 | V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
+| V53 | Person fit ($l_z$, $l_z^*$, person infit / outfit with $z$) and item infit / outfit at the EAP, MAP, ML and WLE estimates, on V37's data and estimates (2PL; 2PL with 8% missing; 3PL; GRM and GPCM $K=4$; nominal $K=4$; mixed 2PL + 3PL + GRM + GPCM + nominal; two groups 2PL + GRM) and a Rasch refit | `personfit(m, Theta = )`, `itemfit(m, fit_stats = "infit", Theta = )`; `sirt::personfit.stat()`; $l_z^*$ recomputed in R from the formulas | — |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -929,6 +931,36 @@ English | [日本語](VALIDATION.ja.md)
   local dependence, JSI, DIF and model-based parallel analysis raise an error for a weighted fit.
   Tests: `tests/test_mirt_m7_weights.py`. Reference generator:
   `validation/r/m7_weights_reference.R`.
+
+- **Person fit and residual item fit (V53, #108)**: DESIGN §20. The cases reuse V37's data and
+  mirt estimates (every parameter fixed, 61 points on $[-6, 6]$); per case and estimator (EAP,
+  MAP, ML, WLE) the R script computes mirt's `fscores()`, `personfit(m, Theta = )` on the full
+  data (stored for the first 300 unique patterns) and `itemfit(m, fit_stats = "infit", Theta = )`
+  (EAP, MAP and WLE; ML's infinite estimates are replaced by mirt). **At mirt's $\theta$** (the
+  kernel evaluated at the stored estimates): $l_z$, infit, outfit and their $z$ values agree to
+  $8.3\times10^{-9}$ (relative) over all eight cases and four estimators, and $l_z^*$ agrees with
+  the R recomputation of DESIGN §20 item 3 (`probtrace()` with central differences, `iteminfo()`)
+  to $2.8\times10^{-8}$ for $|\hat\theta|\le10$; beyond that (mirt's ML on 3PL flat tails and on
+  its missing-data extremes, V13) the central differences lose precision, and flexpyirt agrees
+  with an analytic NumPy evaluation instead. **End to end** (flexpyirt's own estimates, which
+  differ from mirt's by up to $5.6\times10^{-15}$ (EAP), $2.9\times10^{-6}$ (MAP),
+  $1.2\times10^{-5}$ (ML) and $2.6\times10^{-6}$ (WLE)): person statistics within
+  $2.0\times10^{-5}$, item statistics within $3.1\times10^{-5}$. **Rasch**: $l_z$, infit and outfit
+  agree with `sirt::personfit.stat()` to $3.7\times10^{-13}$ (relative) at mirt's WLE estimates
+  (mirt and sirt agree to $1.8\times10^{-15}$). **Known differences from mirt** (DESIGN §20
+  item 5): person `z_outfit` uses $n^2$ (answered items) where mirt's `personfit()` uses $J^2$,
+  and mirt's `itemfit()` recycles the per-item respondent count over rows in the item
+  `z.outfit`; both matter only with missing responses, so the references recompute these $z$
+  values from mirt's own residual moments (`attr(m, "inoutfitreturn")`), and on complete data
+  the tests also compare with mirt's values directly. **$l_z^*$ has no R package reference**
+  (`PerFit` could not be installed here, and its `lzstar()` covers dichotomous items only); in
+  addition to the R recomputation, `tests/test_person_fit.py` checks it against Snijders' (2001)
+  closed form for 2PL items (ML, MAP, WLE; $10^{-10}$) and simulates its null distribution (2PL,
+  $J=20$, $N=3000$, true parameters): $l_z^*$ has mean within sampling error of 0 and SD in
+  $[0.93, 1.07]$ for ML and WLE, while $l_z$ has SD below 0.93. Whether this suffices to list
+  $l_z^*$ as validated is the owner's decision (#108). Tests:
+  `tests/test_mirt_v53_person_fit.py`, `tests/test_person_fit.py`. Reference generator:
+  `validation/r/person_fit_reference.R`.
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)

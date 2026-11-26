@@ -2632,16 +2632,22 @@ data-independent shapes (§15.21).
    `itemfit()` on `multipleGroup` fits); weighted fits raise (as S-X2).
 5. **Differences from mirt and validation**: (a) person `z_outfit` uses $n^2$ (answered items)
    under the square root; mirt's `personfit()` uses $J^2$ (all items) and takes an absolute
-   value, which differs only for rows with missing responses (its `itemfit()` uses the
-   respondent count correctly). (b) A non-finite $\hat\theta$ (ML on an all-lowest or
+   value, which differs only for rows with missing responses. Item `z_outfit` uses each item's
+   respondent count $N_j$; mirt's `itemfit()` writes `colSums((C / W^2) / N^2)` with `N` a
+   length-$J$ vector, which R recycles down the rows instead of across the columns, so its
+   `z.outfit` is off when the items have different counts (missing responses) and right
+   otherwise. (b) A non-finite $\hat\theta$ (ML on an all-lowest or
    all-highest pattern, all-missing rows) gives NaN statistics and is skipped in item
    statistics; mirt replaces $\pm\infty$ by the most extreme finite estimate $\pm0.1$.
    (c) mirt sets a picked probability below machine epsilon to 1 in $l_0$; flexpyirt keeps the
    log-probability. V53 compares $l_z$ and person infit / outfit with mirt's `personfit()`,
-   person $z_{\mathrm{out}}$ with the $n^2$ formula on mirt's own residual moments, item
-   infit / outfit with `itemfit(fit_stats = "infit")`, lz, infit and outfit for a Rasch model
+   person and item $z_{\mathrm{out}}$ with the formulas above on mirt's own residual moments
+   (and with mirt's values on complete data), item infit / outfit with
+   `itemfit(fit_stats = "infit")`, lz, infit and outfit for a Rasch model
    with `sirt::personfit.stat()`, and $l_z^*$ with an R recomputation from the formulas of
-   item 3 (`probtrace()` with central differences, `iteminfo()`): no installed R package
+   item 3 (`probtrace()` with central differences, `iteminfo()`; compared for
+   $|\hat\theta|\le10$, beyond which the differences lose precision) and with a 2PL closed form
+   and a simulation of its null distribution in the unit tests: no installed R package
    implements $l_z^*$ (`PerFit::lzstar` could not be installed, and it covers dichotomous items
    only). The $l_z^*$ entry is listed in the user documentation only if the owner accepts this
    validation (#108).
