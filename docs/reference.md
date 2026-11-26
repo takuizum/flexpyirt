@@ -160,10 +160,14 @@ multidimensional model or a latent distribution other than `Normal`.
 #### `FitResult.item_fit`
 
 ```text
-item_fit(data, *, min_cell=1.0, group=None, item_names=None) -> DataFrame
+item_fit(data, *, statistics=("s_x2",), method="EAP", min_cell=1.0, group=None,
+         item_names=None) -> DataFrame
 ```
 
-Orlando–Thissen S-X2 item fit ([guide section 5](guide.md#item-fit-s-x2)). For each item,
+Item fit: Orlando–Thissen S-X2 (the default) and infit / outfit
+([guide section 5](guide.md#item-fit-s-x2)).
+
+**S-X2** (`"s_x2"`). For each item,
 observed and model-implied counts of each category at summed scores $1,\dots,S-1$ are compared;
 the expected counts use the Lord–Wingersky recursion with the item left out and the fitted latent
 weights on the fitted quadrature grid. Sparse cells are collapsed exactly as mirt's `itemfit()`
@@ -174,19 +178,68 @@ the multivariate-normal weights, and the free factor correlations count as laten
 
 | Argument | Description |
 |---|---|
-| `data` | Complete responses on the fitted items (typically the fitting data) |
-| `min_cell` | Minimum expected count per cell before collapsing (default `1.0`) |
-| `group` | Group labels (required for a multiple-group model; S-X2 is computed within each group) |
+**Infit / outfit** (`"infit"`, `"outfit"`): each respondent is scored by `method`, and over the
+$N_j$ respondents who answered item $j$, $\mathrm{outfit}_j=\frac1{N_j}\sum_i r_{ij}^2/W_{ij}$ and
+$\mathrm{infit}_j=\sum_i r_{ij}^2/\sum_i W_{ij}$, with $r_{ij}$ the residual of the item score
+$0,\dots,K_j-1$ at $\hat\theta_i$ and $W_{ij}$ its conditional variance, plus the Wilson–Hilferty
+$z$ values of Wright & Masters (1982) (see [`FitResult.person_fit`](#fitresultperson_fit) and
+DESIGN §25). Unidimensional models; missing responses are skipped; computed for every item model
+as in mirt (descriptive outside the Rasch family).
+
+| Argument | Description |
+|---|---|
+| `data` | Responses on the fitted items (typically the fitting data); S-X2 needs complete data |
+| `statistics` | Any of `"s_x2"`, `"infit"`, `"outfit"` (default `("s_x2",)`) |
+| `method` | Ability estimator for infit / outfit: `"EAP"` (default), `"MAP"`, `"ML"` or `"WLE"`; respondents with an infinite estimate are left out |
+| `min_cell` | Minimum expected count per S-X2 cell before collapsing (default `1.0`) |
+| `group` | Group labels (required for a multiple-group model; statistics are computed within each group) |
 | `item_names` | Column names when `data` is an array |
 
-**Returns**: `DataFrame` with columns `item`, `s_x2`, `df`, `rmsea`
-($\sqrt{\max(0, X^2/df-1)/(N-1)}$) and `p`; items whose collapsed table leaves `df <= 0` get
-`df = 0` and NaN statistics. A multiple-group model adds a leading `group` column (one row per
-group and item).
+**Returns**: `DataFrame` with column `item`, then `s_x2`, `df`, `rmsea`
+($\sqrt{\max(0, X^2/df-1)/(N-1)}$) and `p` for S-X2, `infit`, `z_infit` for infit and `outfit`,
+`z_outfit` for outfit; items whose collapsed S-X2 table leaves `df <= 0` get `df = 0` and NaN
+statistics. A multiple-group model adds a leading `group` column (one row per group and item).
 
-**Raises**: `SpecificationError` for bifactor, two-tier, multiple-group multidimensional,
-`EmpiricalHistogram`, `DavidianCurve`, or `NormalMixture` models, missing responses, an item with an unobserved category (within a group),
-or a non-positive `min_cell`.
+**Raises**: `SpecificationError` for unknown or empty `statistics`; for S-X2: bifactor, two-tier,
+multiple-group multidimensional, `EmpiricalHistogram`, `DavidianCurve`, or `NormalMixture`
+models, missing responses, an item with an unobserved category (within a group), or a
+non-positive `min_cell`; for infit / outfit: multidimensional models or another `method`.
+
+#### `FitResult.person_fit`
+
+```text
+person_fit(data, *, method="EAP", group=None, item_names=None,
+           statistics=("lz", "infit", "outfit")) -> DataFrame
+```
+
+Person fit at each respondent's ability estimate ([guide section 5](guide.md#person-fit-and-infit--outfit),
+DESIGN §25). With $A$ the answered items and $P_{jk}=P_{jk}(\hat\theta)$:
+
+- `"lz"`: $l_z=(l_0-\mathrm E\,l_0)/\sqrt{\mathrm{Var}\,l_0}$ with $l_0=\sum_{j\in A}\log P_{jy_j}$,
+  $\mathrm E\,l_0=\sum_j\sum_kP_{jk}\log P_{jk}$ (Drasgow, Levine & Williams, 1985; mirt's `Zh`).
+- `"lz_star"`: $l_z^*=(l_0-\mathrm E\,l_0+c\,r_0(\hat\theta))/\tau$ (Snijders, 2001; Sinharay, 2016),
+  with $c=\sum_j\sum_kP'_{jk}\log P_{jk}/\sum_jI_j$, $\tau^2=\mathrm{Var}\,l_0-2c\sum_j\sum_kP'_{jk}\log
+  P_{jk}+c^2\sum_jI_j$ and the estimator's term $r_0=0$ (ML), $-(\theta-\mu_g)/\sigma_g^2$ (MAP) or
+  $I'/(2I)$ (WLE). Not defined for EAP.
+- `"infit"` / `"outfit"`: $\sum_j r_j^2/\sum_j W_j$ and $\frac1n\sum_j r_j^2/W_j$ over the $n$ answered
+  items, with `z_infit` / `z_outfit` $=(\mathrm{MS}^{1/3}-1)(3/q)+q/3$ (Wright & Masters, 1982).
+
+| Argument | Description |
+|---|---|
+| `data` | Responses on the fitted items (NaN is missing) |
+| `method` | Ability estimator as in `score()`: `"EAP"` (default), `"MAP"`, `"ML"` or `"WLE"` |
+| `group` | Group labels (required for a multiple-group model) |
+| `item_names` | Column names when `data` is an array |
+| `statistics` | Any of `"lz"`, `"lz_star"`, `"infit"`, `"outfit"` (default `("lz", "infit", "outfit")`) |
+
+**Returns**: `DataFrame`, one row per respondent (index follows `data` when it is a DataFrame):
+`theta`, then `lz`, `lz_star`, `infit`, `z_infit`, `outfit`, `z_outfit` for the requested
+statistics, and `n_items` (answered items). Rows with a non-finite estimate (all missing; ML on an
+all-lowest or all-highest pattern) get NaN statistics.
+
+**Raises**: `SpecificationError` for unknown or empty `statistics`, a multidimensional model, a
+`method` other than EAP, MAP, ML or WLE (or one `score()` rejects for the model), or `"lz_star"`
+with `method="EAP"`.
 
 #### `FitResult.m2`
 

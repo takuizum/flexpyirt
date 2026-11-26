@@ -330,6 +330,47 @@ fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
 print(fit_table.round(3))
 ```
 
+### Person fit and infit / outfit
+
+`person_fit(data)` checks each respondent's response vector against the fitted model at the
+respondent's ability estimate (`method=` as in `score()`: `"EAP"`, `"MAP"`, `"ML"` or `"WLE"`;
+missing responses are skipped). It returns one row per respondent with `theta`, the requested
+statistics and `n_items` (answered items):
+
+- `lz`: the standardized log-likelihood $l_z$ (Drasgow, Levine & Williams, 1985; mirt's `Zh`).
+  Large negative values mean the responses are less likely than the model expects (guessing,
+  careless responding, items answered against their difficulty).
+- `lz_star`: $l_z^*$, corrected for using $\hat\theta$ instead of $\theta$ (Snijders, 2001;
+  Sinharay, 2016 for polytomous items), so that it is close to $N(0, 1)$ under the model; $l_z$
+  itself has a variance below 1 and is conservative. Needs `method="ML"`, `"MAP"` or `"WLE"`.
+  It is checked against an R recomputation of the formulas and a simulation of its null
+  distribution, as no R package at hand implements it.
+- `infit` / `outfit` with `z_infit` / `z_outfit`: information-weighted and unweighted mean
+  squares of the standardized residuals and their Wilson–Hilferty $z$ values (Wright & Masters,
+  1982). Values near 1 fit; well above 1 means unexpected responses (outfit is sensitive to
+  outliers on items far from $\hat\theta$), well below 1 means responses more predictable than
+  the model says. They are computed for every item model, as in mirt, but their reference
+  distribution is derived for Rasch-family models; for other models read them descriptively.
+
+`item_fit(data, statistics=...)` adds `"infit"` and `"outfit"` for items, computed over the
+respondents who answered each item (S-X2 stays the default; `"infit"` / `"outfit"` allow missing
+responses). In a multiple-group model pass `group=`: each respondent is evaluated with their own
+group's parameters, and item statistics are computed within each group.
+
+```python
+# A respondent who answers every item the opposite way is flagged.
+aberrant = df.copy()
+aberrant.iloc[0] = 1.0 - aberrant.iloc[0]
+pf = res.person_fit(aberrant, method="WLE", statistics=("lz", "lz_star", "infit", "outfit"))
+flagged = pf[pf["lz_star"] < -1.645]  # one-sided 5% test
+print(f"{len(flagged)} of {len(pf)} respondents flagged")
+print(pf.sort_values("lz_star").head().round(3))
+assert 0 in flagged.index
+
+item_table = res.item_fit(df, statistics=("s_x2", "infit", "outfit"), method="WLE")
+print(item_table.round(3))
+```
+
 ### Summed-score distribution
 
 `summed_score_distribution(probs)` gives the distribution of the summed score when the item scores

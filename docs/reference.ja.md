@@ -144,28 +144,74 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 #### `FitResult.item_fit`
 
 ```text
-item_fit(data, *, min_cell=1.0, group=None, item_names=None) -> DataFrame
+item_fit(data, *, statistics=("s_x2",), method="EAP", min_cell=1.0, group=None,
+         item_names=None) -> DataFrame
 ```
 
-Orlando–Thissen の S-X2 項目適合度（[ガイド 5 節](guide.ja.md#項目適合度s-x2)）。各項目について、合計得点
+項目適合度。Orlando–Thissen の S-X2（既定）と infit / outfit（[ガイド 5 節](guide.ja.md#項目適合度s-x2)）。
+
+**S-X2**（`"s_x2"`）。各項目について、合計得点
 $1,\dots,S-1$ ごとの各カテゴリの観測度数とモデルによる期待度数を比べる。期待度数は、その項目を除いた
 Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在分布の重みで計算する。度数の少ないセルは mirt の
 `itemfit()` と同じ方法でまとめ（`min_cell` は mirt の `mincell`）、$df_j$ = 残ったセル数 − 行数 − その項目の自由パラメタ数 −
 潜在分布の自由パラメタ数（mirt の約束）。確認的多次元モデル（`with_factors()`、単一群）では、推定時の直積格子の
 すべてのノードで再帰を回して多変量正規の重みで積分し、自由な因子間相関を潜在分布のパラメタとして数える。
 
+**infit / outfit**（`"infit"`・`"outfit"`）: 各受験者を `method` で推定し、項目 $j$ に回答した $N_j$ 人にわたって
+$\mathrm{outfit}_j=\frac1{N_j}\sum_i r_{ij}^2/W_{ij}$、$\mathrm{infit}_j=\sum_i r_{ij}^2/\sum_i W_{ij}$ とし、
+Wright & Masters (1982) の Wilson–Hilferty 変換の $z$ 値も返す。$r_{ij}$ は $\hat\theta_i$ での項目得点
+$0,\dots,K_j-1$ の残差、$W_{ij}$ はその条件付き分散（[`FitResult.person_fit`](#fitresultperson_fit)、DESIGN §25）。
+1 次元モデルのみ。欠測は飛ばす。mirt と同じく全項目モデルで計算する（Rasch 系以外では記述的な指標）。
+
 | 引数 | 説明 |
 |---|---|
-| `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
-| `min_cell` | まとめる前のセルあたり最小期待度数（既定 `1.0`） |
-| `group` | 群ラベル（多母集団モデルでは必須。群ごとに S-X2 を計算する） |
+| `data` | 推定した項目への反応（通常は推定に使ったデータ）。S-X2 は欠測のないデータが必要 |
+| `statistics` | `"s_x2"`・`"infit"`・`"outfit"` のいずれか（既定 `("s_x2",)`） |
+| `method` | infit / outfit の能力推定法: `"EAP"`（既定）・`"MAP"`・`"ML"`・`"WLE"`。推定値が無限大の受験者は除く |
+| `min_cell` | S-X2 のセルをまとめる前のセルあたり最小期待度数（既定 `1.0`） |
+| `group` | 群ラベル（多母集団モデルでは必須。群ごとに計算する） |
 | `item_names` | `data` が配列のときの列名 |
 
-**戻り値**: `item`, `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p` 列の `DataFrame`。まとめた結果
-`df <= 0` になる項目は `df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
+**戻り値**: `item` 列に続けて、S-X2 なら `s_x2`, `df`, `rmsea`（$\sqrt{\max(0, X^2/df-1)/(N-1)}$）, `p`、infit なら
+`infit`, `z_infit`、outfit なら `outfit`, `z_outfit` 列の `DataFrame`。S-X2 の表をまとめた結果 `df <= 0` になる項目は
+`df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
 
-**例外**: 双因子・two-tier・多母集団の多次元・`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある
-項目、正でない `min_cell` の場合に `SpecificationError`。
+**例外**: 不明または空の `statistics`。S-X2 では双因子・two-tier・多母集団の多次元・`EmpiricalHistogram`・
+`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある項目、正でない
+`min_cell`。infit / outfit では多次元モデルとそれ以外の `method`。いずれも `SpecificationError`。
+
+#### `FitResult.person_fit`
+
+```text
+person_fit(data, *, method="EAP", group=None, item_names=None,
+           statistics=("lz", "infit", "outfit")) -> DataFrame
+```
+
+各受験者の能力推定値での受験者適合度（[ガイド 5 節](guide.ja.md#受験者適合度と-infit--outfit)、DESIGN §25）。
+回答した項目を $A$、$P_{jk}=P_{jk}(\hat\theta)$ として:
+
+- `"lz"`: $l_z=(l_0-\mathrm E\,l_0)/\sqrt{\mathrm{Var}\,l_0}$、$l_0=\sum_{j\in A}\log P_{jy_j}$、
+  $\mathrm E\,l_0=\sum_j\sum_kP_{jk}\log P_{jk}$（Drasgow, Levine & Williams, 1985。mirt の `Zh`）。
+- `"lz_star"`: $l_z^*=(l_0-\mathrm E\,l_0+c\,r_0(\hat\theta))/\tau$（Snijders, 2001; Sinharay, 2016）。
+  $c=\sum_j\sum_kP'_{jk}\log P_{jk}/\sum_jI_j$、$\tau^2=\mathrm{Var}\,l_0-2c\sum_j\sum_kP'_{jk}\log
+  P_{jk}+c^2\sum_jI_j$、推定法の項 $r_0$ は ML で 0、MAP で $-(\theta-\mu_g)/\sigma_g^2$、WLE で $I'/(2I)$。EAP では定義しない。
+- `"infit"` / `"outfit"`: 回答した $n$ 項目にわたる $\sum_j r_j^2/\sum_j W_j$ と $\frac1n\sum_j r_j^2/W_j$。
+  `z_infit` / `z_outfit` $=(\mathrm{MS}^{1/3}-1)(3/q)+q/3$（Wright & Masters, 1982）。
+
+| 引数 | 説明 |
+|---|---|
+| `data` | 推定した項目への反応（NaN は欠測） |
+| `method` | `score()` と同じ能力推定法: `"EAP"`（既定）・`"MAP"`・`"ML"`・`"WLE"` |
+| `group` | 群ラベル（多母集団モデルでは必須） |
+| `item_names` | `data` が配列のときの列名 |
+| `statistics` | `"lz"`・`"lz_star"`・`"infit"`・`"outfit"` のいずれか（既定 `("lz", "infit", "outfit")`） |
+
+**戻り値**: 受験者 1 人 1 行の `DataFrame`（`data` が DataFrame ならインデックスを引き継ぐ）。`theta` に続けて、要求した
+統計量の `lz`・`lz_star`・`infit`・`z_infit`・`outfit`・`z_outfit` と `n_items`（回答した項目数）。推定値が有限でない行
+（全欠測、全項目が最低・最高カテゴリのパターンの ML）は統計量が NaN。
+
+**例外**: 不明または空の `statistics`、多次元モデル、EAP・MAP・ML・WLE 以外の `method`（またはそのモデルで `score()` が
+受け付けないもの）、`method="EAP"` での `"lz_star"` の場合に `SpecificationError`。
 
 #### `FitResult.m2`
 

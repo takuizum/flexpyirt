@@ -171,6 +171,12 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 - [x] Common-item screening for linking and item parameter drift (#105; `screen_common_items()`,
   `CommonItemScreeningResult`, `stack_screening_tables()`: robust z, displacement and
   expected-score RMSD with iterative purification, unidimensional; validated in V50).
+- [x] Person fit and residual item fit (#108): `FitResult.person_fit()` ($l_z$, $l_z^*$, person
+  infit / outfit with $z$ values) and `FitResult.item_fit(statistics=("infit", "outfit"))` for
+  unidimensional models (every item model, missing data, multiple groups); validated in V53 against
+  mirt `personfit()` / `itemfit(fit_stats = "infit")` and sirt `personfit.stat()`; $l_z^*$ against an
+  R recomputation of the formulas and a simulation of its null distribution (no R package
+  reference; pending the owner's acceptance).
 - [ ] Model-comparison table and simulation of responses (#109): `compare_fits()` (AIC, SABIC, HQ,
   BIC, likelihood-ratio tests; mirt's `anova()`) and `simulate_responses()` / `SimulatedData` (from
   a `FitResult` or a `Model` with an item bank; every item model, latent distribution and model

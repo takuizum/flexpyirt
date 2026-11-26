@@ -36,6 +36,7 @@ English | [日本語](VALIDATION.ja.md)
 | DIMTEST (simulation study; small version in the tests): type I error at .05 / power | $\le 0.15$ of 20 / $\ge 8$ of 10 |
 | Observed-score DIF: MH / GMH statistics, $\hat\alpha_{MH}$, its log variance, Mantel statistic, cumulative odds ratio and its SE; logistic LRT, $\Delta R^2$, coefficients / SEs and Wald; flags and purification paths | 1e-10 (relative); 1e-8 / 1e-6 (relative); equal |
 | Cross-product / sandwich covariance at mirt's estimates (entries relative to $\sqrt{v_{ii}v_{jj}}$); parameters / SEs end-to-end | 1e-9 / 1e-6; 1e-6 / 1e-5 (relative) |
+| Person / item fit at mirt's $\theta$ ($l_z$, infit, outfit, $z$); $l_z^*$ vs the R recomputation; end-to-end with flexpyirt's own estimates | 1e-9 (relative); 1e-7; 1e-4 |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -88,6 +89,7 @@ English | [日本語](VALIDATION.ja.md)
 | V50 | Common-item screening for linking (#105): robust z (Huynh & Meyer, 2010), displacement and RMSD of expected item score curves; removal order, linking constants at every purification step and the final item table (2PL; mixed 2PL + GRM + GPCM) | separate `mirt()` calibrations + base-R recomputation (`median()`, `quantile(type = 7)`, `expected.item()`, V20 linking); `equateIRT::dif.test` as a cross-check of the drifted items | field |
 | V51 | IRT true-score and observed-score equating and raw-to-scale tables (dichotomous: 20 + 20 items, 3PL + 2PL, with a link; polytomous: 4 GRM $K=4$ + 6 2PL vs 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL, with a link; populations new / old / synthetic $w_1=0.5$; scale table true score and EAPsum) | `equateIRT:::score_compute(method = "TSE" / "OSE")`, `SNSequate::irt.eq(method = "TS")`; mirt `expected.test()`, `probtrace()`, `testinfo()`, `fscores(method = "EAPsum", full.scores = FALSE)` with `uniroot()`, and `equate::equate(type = "equipercentile")` | #106 |
 | V52 | Classification accuracy and consistency for cut scores (#107): Lee (summed-score cuts) and Rudner ($\theta$ cuts), D and P approaches, one to three cuts, non-integer cuts, both cut-scale conversions (3PL $J=20$; GRM $K=4$, $J=10$; two-group 2PL $J=15$, focal mean and variance free) | cacIRT 1.4 `class.Lee()`, `Lee.poly.D()` / `Lee.poly.P()`, `Rud.D()` / `Rud.P()` with mirt's `testinfo()` SE; independent recomputation from mirt `probtrace()` / `expected.test()` / `testinfo()` (kappa, false positive / negative rates, per-category indices, tables) | field |
+| V53 | Person fit ($l_z$, $l_z^*$, person infit / outfit with $z$) and item infit / outfit at the EAP, MAP, ML and WLE estimates, on V37's data and estimates (2PL; 2PL with 8% missing; 3PL; GRM and GPCM $K=4$; nominal $K=4$; mixed 2PL + 3PL + GRM + GPCM + nominal; two groups 2PL + GRM) and a Rasch refit | `personfit(m, Theta = )`, `itemfit(m, fit_stats = "infit", Theta = )`; `sirt::personfit.stat()`; $l_z^*$ recomputed in R from the formulas | — |
 | V54 | Model-comparison table (Rasch vs 2PL vs 3PL on the V11a data; PCM vs GPCM on the V8b data; a fully invariant two-group 2PL vs the anchored model and vs the model with the last item free, V4 data) and simulation of responses (deterministic inversion for 2PL, Rasch, 3PL, 4PL, GRM, GPCM and nominal items, unidimensional and two-factor; distributional and recovery checks per latent distribution) | `anova(mod1, mod2, ...)`; `probtrace()` with the same $\theta$ and uniform numbers (random streams cannot match `simdata()`) | #109 |
 
 ## mirt settings and known differences (found in M1)
@@ -1172,6 +1174,35 @@ English | [日本語](VALIDATION.ja.md)
     `item_information()`, `summed_score_table()` and the formulas of DESIGN §23. EH, Davidian and
     mixture populations come from the same fitted grid as `link()` (`_fitted_grid`) and have no
     equating test of their own.
+- **Person fit and residual item fit (V53, #108)**: DESIGN §25. The cases reuse V37's data and
+  mirt estimates (every parameter fixed, 61 points on $[-6, 6]$); per case and estimator (EAP,
+  MAP, ML, WLE) the R script computes mirt's `fscores()`, `personfit(m, Theta = )` on the full
+  data (stored for the first 300 unique patterns) and `itemfit(m, fit_stats = "infit", Theta = )`
+  (EAP, MAP and WLE; ML's infinite estimates are replaced by mirt). **At mirt's $\theta$** (the
+  kernel evaluated at the stored estimates): $l_z$, infit, outfit and their $z$ values agree to
+  $8.3\times10^{-9}$ (relative) over all eight cases and four estimators, and $l_z^*$ agrees with
+  the R recomputation of DESIGN §25 item 3 (`probtrace()` with central differences, `iteminfo()`)
+  to $2.8\times10^{-8}$ for $|\hat\theta|\le10$; beyond that (mirt's ML on 3PL flat tails and on
+  its missing-data extremes, V13) the central differences lose precision, and flexpyirt agrees
+  with an analytic NumPy evaluation instead. **End to end** (flexpyirt's own estimates, which
+  differ from mirt's by up to $5.6\times10^{-15}$ (EAP), $2.9\times10^{-6}$ (MAP),
+  $1.2\times10^{-5}$ (ML) and $2.6\times10^{-6}$ (WLE)): person statistics within
+  $2.0\times10^{-5}$, item statistics within $3.1\times10^{-5}$. **Rasch**: $l_z$, infit and outfit
+  agree with `sirt::personfit.stat()` to $3.7\times10^{-13}$ (relative) at mirt's WLE estimates
+  (mirt and sirt agree to $1.8\times10^{-15}$). **Known differences from mirt** (DESIGN §25
+  item 5): person `z_outfit` uses $n^2$ (answered items) where mirt's `personfit()` uses $J^2$,
+  and mirt's `itemfit()` recycles the per-item respondent count over rows in the item
+  `z.outfit`; both matter only with missing responses, so the references recompute these $z$
+  values from mirt's own residual moments (`attr(m, "inoutfitreturn")`), and on complete data
+  the tests also compare with mirt's values directly. **$l_z^*$ has no R package reference**
+  (`PerFit` could not be installed here, and its `lzstar()` covers dichotomous items only); in
+  addition to the R recomputation, `tests/test_person_fit.py` checks it against Snijders' (2001)
+  closed form for 2PL items (ML, MAP, WLE; $10^{-10}$) and simulates its null distribution (2PL,
+  $J=20$, $N=3000$, true parameters): $l_z^*$ has mean within sampling error of 0 and SD in
+  $[0.93, 1.07]$ for ML and WLE, while $l_z$ has SD below 0.93. Whether this suffices to list
+  $l_z^*$ as validated is the owner's decision (#108). Tests:
+  `tests/test_mirt_v53_person_fit.py`, `tests/test_person_fit.py`. Reference generator:
+  `validation/r/person_fit_reference.R`.
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)

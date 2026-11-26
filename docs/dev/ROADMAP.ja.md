@@ -120,6 +120,10 @@
   `coef(IRTpars = TRUE)` と TAM の `tam.threshold()` に照合。
 - [x] リンキングの共通項目の点検と項目パラメータドリフト（#105。`screen_common_items()`、
   `CommonItemScreeningResult`、`stack_screening_tables()`: 頑健 z・変位・期待得点の RMSD と反復的な純化、1 次元。V50 で照合済み）。
+- [x] 受験者適合度と残差にもとづく項目適合度（#108）: `FitResult.person_fit()`（$l_z$、$l_z^*$、受験者の infit / outfit と
+  $z$ 値）と `FitResult.item_fit(statistics=("infit", "outfit"))`。1 次元モデル（全項目モデル、欠測、多母集団）。
+  V53 で mirt の `personfit()` / `itemfit(fit_stats = "infit")`、sirt の `personfit.stat()` と照合。$l_z^*$ は式の R での
+  再計算と帰無分布のシミュレーションで照合（R パッケージの参照値はない。オーナーの承認待ち）。
 - [ ] モデル比較表と回答データのシミュレーション（#109）: `compare_fits()`（AIC・SABIC・HQ・BIC・尤度比検定。
   mirt の `anova()`）と `simulate_responses()` / `SimulatedData`（`FitResult` または項目バンクを与えた `Model`
   から。全項目モデル・全潜在分布・全モデル構造。JAX のキー）。V54 で照合。照合テストが夜間 CI で通ったらチェックする。

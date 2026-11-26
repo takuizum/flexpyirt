@@ -31,6 +31,7 @@
 | DIMTEST（シミュレーション研究。テストではその小さい版）: .05 での第 1 種の誤り / 検出力 | 20 回中 $\le 0.15$ / 10 回中 $\ge 8$ |
 | 観測得点による DIF: MH・一般化 MH の統計量、$\hat\alpha_{MH}$ とその対数の分散、Mantel の統計量、累積オッズ比とその標準誤差。ロジスティック回帰の尤度比統計量、$\Delta R^2$、係数／標準誤差と Wald。検出結果と純化の経過 | 1e-10（相対）。1e-8 / 1e-6（相対）。一致 |
 | mirt の推定値でのクロス積／サンドイッチの共分散（各要素を $\sqrt{v_{ii}v_{jj}}$ で割った差）。通しで当てはめたときのパラメタ／SE | 1e-9 / 1e-6、1e-6 / 1e-5（相対） |
+| mirt の $\theta$ での受験者・項目適合度（$l_z$、infit、outfit、$z$）、R で再計算した $l_z^*$、flexpyirt 自身の推定値での端から端まで | 1e-9（相対）、1e-7、1e-4 |
 
 ## ケース一覧（マイルストーンと対応）
 | ID | 内容 | mirt 側の呼び出し | MS |
@@ -83,6 +84,7 @@
 | V50 | リンキングの共通項目の点検（#105）: 頑健 z（Huynh & Meyer, 2010）・変位・期待項目得点曲線の RMSD。除外の順序、純化の各段階のリンキング係数、最終の項目表（2PL、2PL + GRM + GPCM 混在） | 個別の `mirt()` 推定 + 素の R による再計算（`median()`、`quantile(type = 7)`、`expected.item()`、V20 のリンキング）。ドリフト項目の照合に `equateIRT::dif.test` | 現場向け |
 | V51 | IRT 真値等化・観測得点等化と素点-尺度得点変換表（2 値: 20 + 20 項目、3PL + 2PL、リンクあり。多値: 4 GRM $K=4$ + 6 2PL と 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL、リンクあり。母集団は新・旧・合成 $w_1=0.5$。変換表は真値と EAPsum） | `equateIRT:::score_compute(method = "TSE" / "OSE")`、`SNSequate::irt.eq(method = "TS")`。mirt の `expected.test()`・`probtrace()`・`testinfo()`・`fscores(method = "EAPsum", full.scores = FALSE)` と `uniroot()`、`equate::equate(type = "equipercentile")` | #106 |
 | V52 | カット得点による分類の正確さと一貫性（#107）: Lee（合計得点のカット）と Rudner（$\theta$ のカット）、D 法と P 法、カット 1〜3 個、整数でないカット、両方向のカット尺度の変換（3PL $J=20$、GRM $K=4$・$J=10$、2 群の 2PL $J=15$・焦点群の平均と分散は自由） | cacIRT 1.4 `class.Lee()`、`Lee.poly.D()` / `Lee.poly.P()`、mirt の `testinfo()` の SE を与えた `Rud.D()` / `Rud.P()`。mirt の `probtrace()` / `expected.test()` / `testinfo()` からの独立な再計算（κ、偽陽性・偽陰性率、カテゴリごとの指標、表） | field |
+| V53 | EAP・MAP・ML・WLE の推定値での受験者適合度（$l_z$、$l_z^*$、受験者の infit / outfit と $z$）と項目の infit / outfit。V37 のデータと推定値（2PL、8% 欠測の 2PL、3PL、GRM と GPCM $K=4$、名義 $K=4$、2PL + 3PL + GRM + GPCM + 名義の混在、2PL + GRM の 2 群）と Rasch での再推定 | `personfit(m, Theta = )`、`itemfit(m, fit_stats = "infit", Theta = )`、`sirt::personfit.stat()`、式から R で再計算した $l_z^*$ | — |
 | V54 | モデル比較表（V11a のデータで Rasch・2PL・3PL、V8b のデータで PCM・GPCM、V4 のデータで全項目不変の 2 群 2PL とアンカーのみのモデル・最後の項目だけ自由なモデル）と回答データのシミュレーション（2PL・Rasch・3PL・4PL・GRM・GPCM・名義反応の 1 次元と 2 因子での決定的な逆変換、潜在分布ごとの分布と復元の確認） | `anova(mod1, mod2, ...)`。同じ $\theta$ と一様乱数での `probtrace()`（乱数列は `simdata()` と一致させられない） | #109 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -1130,6 +1132,26 @@
     `tests/test_equating.py` で `expected_score()`・`item_information()`・`summed_score_table()` と DESIGN §23 の式に
     対して単体テストする。EH・Davidian・混合の母集団は `link()` と同じ推定格子（`_fitted_grid`）から作り、等化としての
     テストは別にない。
+- **受験者適合度と残差にもとづく項目適合度（V53、#108）**: DESIGN §25。V37 のデータと mirt の推定値を再利用する
+  （全パラメタ固定、$[-6, 6]$ の 61 点）。ケースと推定法（EAP・MAP・ML・WLE）ごとに、R スクリプトは mirt の
+  `fscores()`、全データでの `personfit(m, Theta = )`（最初の 300 個の一意なパターンを保存）と
+  `itemfit(m, fit_stats = "infit", Theta = )`（EAP・MAP・WLE。ML の無限大の推定値は mirt が置き換えるため除く）を計算する。
+  **mirt の $\theta$ で**（保存した推定値でカーネルを評価）: $l_z$・infit・outfit とその $z$ 値は 8 ケース・4 推定法の
+  すべてで $8.3\times10^{-9}$（相対）以内、$l_z^*$ は DESIGN §25 の 3 項を R で再計算した値（`probtrace()` と中心差分、
+  `iteminfo()`）と $|\hat\theta|\le10$ で $2.8\times10^{-8}$ 以内。それより外（3PL の平坦な裾での mirt の ML、V13 の欠測時の
+  極値）では中心差分の精度が落ち、flexpyirt は NumPy での解析的な計算と一致する。**端から端まで**（flexpyirt 自身の推定値。
+  mirt との差は EAP $5.6\times10^{-15}$、MAP $2.9\times10^{-6}$、ML $1.2\times10^{-5}$、WLE $2.6\times10^{-6}$ まで）:
+  受験者の統計量は $2.0\times10^{-5}$ 以内、項目の統計量は $3.1\times10^{-5}$ 以内。**Rasch**: mirt の WLE 推定値で
+  $l_z$・infit・outfit が `sirt::personfit.stat()` と $3.7\times10^{-13}$（相対）以内で一致（mirt と sirt の差は
+  $1.8\times10^{-15}$）。**mirt との既知の差**（DESIGN §25 の 5 項）: 受験者の `z_outfit` は $n^2$（回答項目数）を使うが
+  mirt の `personfit()` は $J^2$ を使い、mirt の `itemfit()` は項目の `z.outfit` で項目ごとの回答者数を行方向に再利用する。
+  どちらも欠測があるときだけ効くので、参照値ではこれらの $z$ 値を mirt 自身の残差モーメント（`attr(m, "inoutfitreturn")`）
+  から計算し直し、欠測のないデータでは mirt の値とも直接比べる。**$l_z^*$ には R パッケージの参照値がない**（`PerFit` は
+  ここではインストールできず、その `lzstar()` は 2 値項目のみ）。R での再計算に加え、`tests/test_person_fit.py` で
+  2PL での Snijders (2001) の閉じた式（ML・MAP・WLE、$10^{-10}$）と比べ、帰無分布をシミュレーションする（2PL、$J=20$、
+  $N=3000$、真のパラメタ）: ML と WLE で $l_z^*$ の平均は標本誤差の範囲で 0、SD は $[0.93, 1.07]$ に入り、$l_z$ の SD は
+  0.93 未満。これで $l_z^*$ を照合済みとしてよいかはオーナーが判断する（#108）。テスト:
+  `tests/test_mirt_v53_person_fit.py`、`tests/test_person_fit.py`。参照値の生成: `validation/r/person_fit_reference.R`。
 
 ## 照合以外の検証
 - **観測得点による DIF（V47、flexpyctt、#102）**: 参照値は difR 6.1.0 と base R によるもので、
