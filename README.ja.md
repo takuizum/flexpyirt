@@ -171,6 +171,34 @@ R `mirt`（既定設定、`TOL = 1e-4`、CPU・61 点求積）との実行時間
 warm の CPU 推定が `mirt` より速く（`mirt` 比 `0.12×–0.60×`）、標準誤差なしの 1 回限りの cold 推定では
 `mirt` の方が速い。
 
+## ほかのライブラリとの比較
+
+各ライブラリ自身のドキュメントに書かれている内容（2026-11-25 時点。R
+[mirt](https://cran.r-project.org/package=mirt) 1.48、PyPI の
+[mirt](https://pypi.org/project/mirt/) 1.2.0・[IRTorch](https://pypi.org/project/irtorch/) 0.5.6・
+[py-irt](https://pypi.org/project/py-irt/) 0.8.3・[girth](https://pypi.org/project/girth/) 0.8.0）。
+「—」はドキュメントに記載がないことを示し、できないとは限らない。誤りがあれば
+[GitHub Issues](https://github.com/takuizum/flexpyirt/issues) で知らせてほしい。
+
+| | flexpyirt | R mirt | mirt（Python） | IRTorch | py-irt | girth |
+|---|---|---|---|---|---|---|
+| 推定法 | MML、Bock–Aitkin EM（SQUAREM） | EM、MH-RM、MCEM / QMCEM、SEM | EM（SQUAREM）、MH-RM、MCEM / QMCEM、Gibbs、GVEM（Rust コア） | 勾配法による MML・JML、（変分）オートエンコーダ | 変分推論（Pyro） | MML、JML、条件付き最尤 |
+| 項目モデル | Rasch、2PL、3PL、4PL、GRM、GPCM、PCM、名義 | これらとほか多数 | これらとほか（5PL、評定尺度、nested logit、GGUM、CDM） | 1〜3PL、GRM、GPCM、名義、nested logit、スプライン・ニューラルネットのモデル | 1PL、2PL、4PL | Rasch、1〜3PL、GRM、PCM、GGUM |
+| 多母集団、DIF | ✓ | ✓ | ✓ | — | — | — |
+| 固定項目パラメタ推定（FIPC） | ✓ | ✓ | ✓ | — | — | — |
+| 特性曲線法リンキング | ✓ Haebara・Stocking–Lord、SE つき、多次元も | —（別パッケージ） | Stocking–Lord | アンカー項目によるリンキング（スプライン、ニューラルネット） | — | — |
+| 潜在分布: ヒストグラム / Davidian / 混合正規 | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | — | — | — | — |
+| 多次元 | 確認的 2〜3 因子、双因子、two-tier | 探索的・確認的、双因子、two-tier | 探索的・確認的、双因子 | 複数の潜在変数 | — | 多次元 2PL・GRM |
+| 適合度: $M_2$ / S-X2 / 局所依存 | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | — / — / Q3 | — | — |
+| 項目パラメタの標準誤差 | Oakes、Hessian（自動微分で厳密）、サンドイッチ、クロス積 | Oakes・Louis・サンドイッチなど多数 | Louis / Oakes、サンドイッチ、クロス積、ブートストラップ | — | — | ブートストラップ |
+| スコアリング | EAP、MAP、ML、WLE、plausible values、合計得点 EAP | 同じものとさらに多数 | EAP、MAP、ML、WLE、plausible values | ML、EAP、MAP、ニューラルネット | — | ML、MAP、EAP |
+| GPU | ✓（JAX） | — | ✓（PyTorch、任意） | ✓（PyTorch） | — | — |
+| R mirt との数値照合 | ✓（V1〜V40） | （参照元） | — | — | — | — |
+| ライセンス | MIT | GPL (≥ 3) | MIT | MIT | MIT | MIT |
+
+flexpyirt の未対応の項目は[ロードマップ](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/ROADMAP.ja.md)で
+管理している。探索的な高次元モデル、MH-RM / MCEM による推定、認知診断モデルは当面の対象外である。
+
 ## ドキュメント
 
 - [ユーザーガイド](https://takuizum.github.io/flexpyirt/ja/guide/) — モデルの指定、多母集団、FIPC、ParameterTable の編集、推定オプション
