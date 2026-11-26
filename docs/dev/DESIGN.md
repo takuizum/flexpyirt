@@ -439,7 +439,10 @@ data-independent shapes (§15.21).
 1. ~~**Identification for EH**~~ → **Decision (2026-11-21)**: standardize the reference group to
    mean 0 and variance 1 at every iteration (not under FIPC), implemented as a moment-constrained
    EH M-step (§4.4, §15.34).
-2. Many groups (e.g. school × grade). Keep the per-group latent distributions `vmap`-able.
+2. ~~Many groups (e.g. school × grade). Keep the per-group latent distributions `vmap`-able.~~
+   → **Decision (2026-11-26, #79)**: group-blocked pattern layout; the E-step is mapped over
+   fixed-size single-group blocks and the latent M-step stays `vmap`ped over the stacked
+   `(G, L)` latent parameters (§26).
 3. ~~Missing-data design~~ → exclusion under MAR only (§14.8, 2026-11-20).
 4. ~~Package name~~ → `flexpyirt` (2026-11-20).
 5. ~~How to implement the M-step with equality constraints across items (§4.3)~~ → joint
@@ -3570,6 +3573,76 @@ data-independent shapes (§15.21).
    implements $l_z^*$ (`PerFit::lzstar` could not be installed, and it covers dichotomous items
    only). The $l_z^*$ entry is listed in the user documentation only if the owner accepts this
    validation (#108).
+
+## 26. Many groups: the group-blocked E-step (#79)
+
+1. **Problem.** Before #79 the E-step evaluated every pattern under every group: the log joint was
+   `einsum("pjk,gjqk->pgq")` followed by selecting each pattern's own group, and the expected
+   counts were `einsum("pg,pjk,pq->gjkq")` with the group one-hot. Both cost
+   $O(P\,G\,J\,K\,Q)$ time and $O(P\,G\,Q)$ memory, $G$ times the work that is needed, and
+   Oakes' cross term (§15.20) unrolled a Python loop over the groups inside jit, so its compile
+   time and the number of pattern-chunk passes grew linearly in $G$. Each pattern belongs to
+   exactly one group; the latent parameters were already stacked as `(G, L)` and the latent
+   M-step was already one `vmap` over groups (§4.4, §14).
+2. **Decision: group blocks.** `compile_problem` splits each group's (real) pattern rows into
+   blocks of a common size $B$ and records them in a `GroupBlocks` pytree:
+   `rows (N_B, B)` (indices into the flat pattern arrays; padding slots hold the sentinel $P$),
+   `group (N_B,)` (the block's group) and `last (N_B,)` (whether the block is the last of its
+   group). Blocks are ordered group-major. The flat `(P, J)` pattern layout of
+   `CompiledProblem` is unchanged, so every caller outside the E-step (scoring, item fit,
+   person fit, M2, JSI, robust SEs) keeps working; the block index is derived data and is built
+   only in `compile_problem` (no code replaces `y`'s rows, `group` or `counts` of a compiled
+   problem). Padding slots read a zero-count, all-missing row, so they contribute nothing.
+   - **Block size**: $B\in\{8,16,\dots,1024\}$ minimizing
+     $\sum_g\lceil P_g/B\rceil B + 64\,N_B(B)$ (padded rows plus a per-block overhead of 64
+     rows), ties to the larger $B$; $N_B$ is then padded to a multiple of 8 with empty blocks
+     (sentinel rows, group 0, `last = False`). The total padding is at most $G(B-1)$ rows plus
+     the empty blocks.
+   - **When**: every non-reduced model with $G\ge2$. Single-group models ($G=1$) and bifactor /
+     two-tier models (§17.1, whose E-step is factorized over block grids) keep the flat path;
+     `CompiledProblem.blocks` is `None` there.
+3. **Blocked E-step.** For block $b$ with group $g=g(b)$ and rows $p\in b$,
+   $$\lambda_{pq}=\log w_{gq}+\sum_f\sum_{j,k}\mathbf 1[y_{pj}=k]\log P^{(g)}_{jkq},\qquad
+   h_{pq}=\mathrm{softmax}_q\lambda_{pq},$$
+   $$\bar n_{gq}=\sum_{b:g(b)=g}\sum_{p\in b}c_ph_{pq},\qquad
+   \bar r_{gjkq}=\sum_{b:g(b)=g}\sum_{p\in b}c_p h_{pq}\mathbf 1[y_{pj}=k].$$
+   The item tables $\log P^{(g)}_{jkq}$ `(G, J_f, Q, K_f)` and latent log weights `(G, Q)` are
+   computed once per E-step (unchanged); each block gathers its own group's slice and does one
+   `(B, J_f K_f) x (J_f K_f, Q)` product per family. The blocks are folded with `lax.scan`,
+   accumulating $\bar n$ and $\bar r$ in place at the block's group (`.at[g].add`), so peak
+   memory is $O(G J K Q + B J K Q)$ independent of $N_B$; the per-block posteriors
+   $h$ `(N_B, B, Q)` are scattered back to the flat `(P, Q)` rows (padding rows of the flat
+   layout, which are in no block, get $\lambda_{pq}=0$ and count 0). The marginal
+   log-likelihood, EAP, plausible values, the Hessian SE (autodiff through the scan) and the
+   E-step all go through this path. Cost: $O(N_B B\,J K Q)$ instead of $O(P G J K Q)$.
+   The sums run in a different order than the flat path, so results agree to rounding
+   ($\sim10^{-12}$ relative), not bit for bit (regression test in `tests/test_many_groups.py`).
+4. **Oakes' cross term** (§15.20) becomes one `lax.scan` over the blocks: each block adds its
+   category co-occurrences to the running group's $C_{q}$ `(Q, D, D)` and its
+   $\bar s_p\bar s_p^\top$ term to $T_2$; on the last block of a group (`last`) a `lax.cond`
+   adds $\sum_q L_{gq}^\top C_q L_{gq}$ to $T_1$ and resets $C$. The group's score tables are
+   gathered with the dynamic block group, so the traced program no longer depends on $G$
+   (compile time constant in $G$).
+5. **Latent distributions.** The latent parameters stay stacked `(G, L)` with `free_index`
+   `(G, L)`; the latent M-step, Oakes' own Hessian and the latent score tables are `vmap`ped
+   over groups. Every group shares one latent family and one static shape $L$ (§4.4, #75 for
+   Davidian / mixture per group); no Python loop over groups runs inside jit.
+6. **API.** `Model.with_groups()` also accepts one positional mapping
+   (`with_groups({"ref": Normal.standard()} | {s: Normal.free() for s in schools})`;
+   insertion order defines the groups and the first is the reference), so non-identifier group
+   labels and hundreds of groups need no `**` unpacking; anchors / invariance are declared once
+   with `equal_across_groups()` as before, and `FitResult.latent` is already one DataFrame row
+   per group.
+7. **Out of scope / limits (follow-ups).** (a) Group-specific item parameters for many groups:
+   each item's local vector has up to $G\,P_f$ slots and its Newton Hessian is dense
+   (§14.2), so fully non-invariant items scale as $O(G^2)$ per item; anchored designs with
+   invariant items are unaffected. (b) `se="crossprod"` / `"sandwich"` differentiate each
+   pattern with respect to every group's tables (§17.5), so their chunk size shrinks as $1/G$.
+   (c) Bifactor / two-tier multiple-group models keep the $G$-fold flat E-step.
+8. **Validation.** Regression: the blocked and flat paths agree on small $G$ (estimates,
+   log-likelihood, Oakes and Hessian SEs, EAP) to $10^{-10}$. V55: a 2PL with $G=10$ groups and
+   anchored invariant items against mirt `multipleGroup` (VALIDATION.md). Benchmarks for
+   $G=10,50,200$ in `benchmarks/` (compile time, warm time, peak memory) against mirt.
 
 ## References
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
