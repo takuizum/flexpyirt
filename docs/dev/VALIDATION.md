@@ -94,6 +94,7 @@ English | [日本語](VALIDATION.ja.md)
 | V52 | Classification accuracy and consistency for cut scores (#107): Lee (summed-score cuts) and Rudner ($\theta$ cuts), D and P approaches, one to three cuts, non-integer cuts, both cut-scale conversions (3PL $J=20$; GRM $K=4$, $J=10$; two-group 2PL $J=15$, focal mean and variance free) | cacIRT 1.4 `class.Lee()`, `Lee.poly.D()` / `Lee.poly.P()`, `Rud.D()` / `Rud.P()` with mirt's `testinfo()` SE; independent recomputation from mirt `probtrace()` / `expected.test()` / `testinfo()` (kappa, false positive / negative rates, per-category indices, tables) | field |
 | V53 | Person fit ($l_z$, $l_z^*$, person infit / outfit with $z$) and item infit / outfit at the EAP, MAP, ML and WLE estimates, on V37's data and estimates (2PL; 2PL with 8% missing; 3PL; GRM and GPCM $K=4$; nominal $K=4$; mixed 2PL + 3PL + GRM + GPCM + nominal; two groups 2PL + GRM) and a Rasch refit | `personfit(m, Theta = )`, `itemfit(m, fit_stats = "infit", Theta = )`; `sirt::personfit.stat()`; $l_z^*$ recomputed in R from the formulas | — |
 | V54 | Model-comparison table (Rasch vs 2PL vs 3PL on the V11a data; PCM vs GPCM on the V8b data; a fully invariant two-group 2PL vs the anchored model and vs the model with the last item free, V4 data) and simulation of responses (deterministic inversion for 2PL, Rasch, 3PL, 4PL, GRM, GPCM and nominal items, unidimensional and two-factor; distributional and recovery checks per latent distribution) | `anova(mod1, mod2, ...)`; `probtrace()` with the same $\theta$ and uniform numbers (random streams cannot match `simdata()`) | #109 |
+| V55 | Many groups with the group-blocked E-step: 2PL, 10 groups of unequal size (200–470), 15 items, anchors q01–q06 invariant, q07–q15 free per group, focal means and variances free, 5% MCAR missing; regression of the blocked against the flat E-step | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`, `fscores(extract.group(m, g), method = "EAP")`; the flat path for the regression | #79 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -1242,6 +1243,20 @@ English | [日本語](VALIDATION.ja.md)
   $l_z^*$ as validated is the owner's decision (#108). Tests:
   `tests/test_mirt_v53_person_fit.py`, `tests/test_person_fit.py`. Reference generator:
   `validation/r/person_fit_reference.R`.
+
+- **Many groups (V55, #79; DESIGN §26)**: `tests/test_mirt_v55_many_groups.py` (reference
+  `validation/r/v55_many_groups_reference.R`, mirt `optimizer = "NR"`, `accelerate = "none"`,
+  `TOL = 1e-10`, 81 points on $[-8, 8]$; mirt needed 2596 EM cycles and 20 minutes). With ten
+  groups flexpyirt takes the group-blocked E-step (checked). At `BAEM(tol=1e-9, squarem=True)`
+  (329 iterations): log-likelihood $1.5\times10^{-11}$ apart, all 318 item and latent
+  estimates within $5.6\times10^{-8}$, Oakes SEs within $5.7\times10^{-8}$ relative, EAP and its
+  SD within $4.5\times10^{-8}$ (tolerances $10^{-6}$ relative, $10^{-4}$, $10^{-3}$ relative,
+  $10^{-5}$). The blocked path against the flat path (every pattern under every group;
+  `tests/test_many_groups.py`, two and three groups, a GRM item and 5% missing): expected counts,
+  log-likelihood, EAP at a fixed parameter vector within $10^{-10}$, Oakes and Hessian
+  information within $10^{-9}$ (relative to the largest entry), Oakes sub-chunking of a block
+  identical; fitted estimates within $10^{-6}$ and SEs within $10^{-5}$ relative (the two paths
+  sum in a different order, so the EM iterates differ at rounding level).
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)

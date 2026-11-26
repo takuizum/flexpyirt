@@ -89,6 +89,7 @@
 | V52 | カット得点による分類の正確さと一貫性（#107）: Lee（合計得点のカット）と Rudner（$\theta$ のカット）、D 法と P 法、カット 1〜3 個、整数でないカット、両方向のカット尺度の変換（3PL $J=20$、GRM $K=4$・$J=10$、2 群の 2PL $J=15$・焦点群の平均と分散は自由） | cacIRT 1.4 `class.Lee()`、`Lee.poly.D()` / `Lee.poly.P()`、mirt の `testinfo()` の SE を与えた `Rud.D()` / `Rud.P()`。mirt の `probtrace()` / `expected.test()` / `testinfo()` からの独立な再計算（κ、偽陽性・偽陰性率、カテゴリごとの指標、表） | field |
 | V53 | EAP・MAP・ML・WLE の推定値での受験者適合度（$l_z$、$l_z^*$、受験者の infit / outfit と $z$）と項目の infit / outfit。V37 のデータと推定値（2PL、8% 欠測の 2PL、3PL、GRM と GPCM $K=4$、名義 $K=4$、2PL + 3PL + GRM + GPCM + 名義の混在、2PL + GRM の 2 群）と Rasch での再推定 | `personfit(m, Theta = )`、`itemfit(m, fit_stats = "infit", Theta = )`、`sirt::personfit.stat()`、式から R で再計算した $l_z^*$ | — |
 | V54 | モデル比較表（V11a のデータで Rasch・2PL・3PL、V8b のデータで PCM・GPCM、V4 のデータで全項目不変の 2 群 2PL とアンカーのみのモデル・最後の項目だけ自由なモデル）と回答データのシミュレーション（2PL・Rasch・3PL・4PL・GRM・GPCM・名義反応の 1 次元と 2 因子での決定的な逆変換、潜在分布ごとの分布と復元の確認） | `anova(mod1, mod2, ...)`。同じ $\theta$ と一様乱数での `probtrace()`（乱数列は `simdata()` と一致させられない） | #109 |
+| V55 | 群ブロック化した E-step での多数の群: 2PL、大きさの異なる 10 群（200–470）、15 項目、q01–q06 を不変なアンカー、q07–q15 は群ごとに自由、焦点群の平均・分散は自由、5% MCAR 欠測。ブロック化した E-step と平坦な E-step の回帰 | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`、`fscores(extract.group(m, g), method = "EAP")`。回帰は平坦な経路 | #79 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -1184,6 +1185,17 @@
   $N=3000$、真のパラメタ）: ML と WLE で $l_z^*$ の平均は標本誤差の範囲で 0、SD は $[0.93, 1.07]$ に入り、$l_z$ の SD は
   0.93 未満。これで $l_z^*$ を照合済みとしてよいかはオーナーが判断する（#108）。テスト:
   `tests/test_mirt_v53_person_fit.py`、`tests/test_person_fit.py`。参照値の生成: `validation/r/person_fit_reference.R`。
+
+- **多数の群（V55、#79、DESIGN §26）**: `tests/test_mirt_v55_many_groups.py`（参照値は
+  `validation/r/v55_many_groups_reference.R`。mirt は `optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、
+  $[-8, 8]$ の 81 点。mirt は 2596 回の EM サイクルと 20 分を要した）。10 群なので flexpyirt は群ブロック化した
+  E-step を通る（テストで確認）。`BAEM(tol=1e-9, squarem=True)`（329 反復）で、対数尤度の差 $1.5\times10^{-11}$、
+  項目と潜在分布の推定値 318 個すべてが $5.6\times10^{-8}$ 以内、Oakes の SE が相対 $5.7\times10^{-8}$ 以内、
+  EAP とその SD が $4.5\times10^{-8}$ 以内（許容誤差は相対 $10^{-6}$、$10^{-4}$、相対 $10^{-3}$、$10^{-5}$）。
+  ブロック化した経路と平坦な経路（すべてのパターンをすべての群で評価する。`tests/test_many_groups.py`、2 群と 3 群、
+  GRM 項目と 5% 欠測を含む）: 固定したパラメタでの期待度数・対数尤度・EAP が $10^{-10}$ 以内、Oakes と Hessian の
+  情報行列が（最大要素に対して）$10^{-9}$ 以内、ブロックを Oakes のサブチャンクに分けても同じ。推定結果は推定値
+  $10^{-6}$・SE 相対 $10^{-5}$ 以内（和の順序が違うので EM の反復は丸め誤差の水準で異なる）。
 
 ## 照合以外の検証
 - **古典的項目分析（V46、flexpyctt、#101）**:
