@@ -124,7 +124,8 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 ## 6.2 M2 で追加された範囲
 - 項目モデル `GRM(n_categories=K)`（カテゴリ $0..K-1$）。欠測（NaN, MAR）を受け付ける。
 - 多母集団: `Model.with_groups(ref=Normal.standard(), focal=Normal.free())`（最初が参照群。#79 以降は
-  位置引数のマッピング `with_groups({"ref": ..., "s01": ...})` も受け付け、多数の群や識別子でないラベルに使う）、
+  位置引数のマッピング `with_groups({"ref": ..., "s01": ...})` も受け付け、多数の群や識別子でないラベルに使う。#75 以降は
+  全群が同じ次数の `DavidianCurve` または同じ成分数の `NormalMixture` を使ってもよく、群ごとに形を持つ）、
   `.equal_across_groups(items=..., params=None)`、`fit(..., group=labels)`。`FitResult.items` は `group` 列つき、
   `score(data, group=labels)`。
 - FIPC: `Model.fix_from(bank, items=None, parameterization="slope_intercept" | "irt")` + `.with_latent(Normal.free())`。

@@ -96,6 +96,7 @@ English | [日本語](VALIDATION.ja.md)
 | V53 | Person fit ($l_z$, $l_z^*$, person infit / outfit with $z$) and item infit / outfit at the EAP, MAP, ML and WLE estimates, on V37's data and estimates (2PL; 2PL with 8% missing; 3PL; GRM and GPCM $K=4$; nominal $K=4$; mixed 2PL + 3PL + GRM + GPCM + nominal; two groups 2PL + GRM) and a Rasch refit | `personfit(m, Theta = )`, `itemfit(m, fit_stats = "infit", Theta = )`; `sirt::personfit.stat()`; $l_z^*$ recomputed in R from the formulas | — |
 | V54 | Model-comparison table (Rasch vs 2PL vs 3PL on the V11a data; PCM vs GPCM on the V8b data; a fully invariant two-group 2PL vs the anchored model and vs the model with the last item free, V4 data) and simulation of responses (deterministic inversion for 2PL, Rasch, 3PL, 4PL, GRM, GPCM and nominal items, unidimensional and two-factor; distributional and recovery checks per latent distribution) | `anova(mod1, mod2, ...)`; `probtrace()` with the same $\theta$ and uniform numbers (random streams cannot match `simdata()`) | #109 |
 | V55 | Many groups with the group-blocked E-step: 2PL, 10 groups of unequal size (200–470), 15 items, anchors q01–q06 invariant, q07–q15 free per group, focal means and variances free, 5% MCAR missing; regression of the blocked against the flat E-step | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`, `fscores(extract.group(m, g), method = "EAP")`; the flat path for the regression | #79 |
+| V56 | `DavidianCurve` and `NormalMixture` per group: (a) 2PL, three groups (bimodal, right-, left-skewed), `DavidianCurve(2)`, anchors q01–q06, 3% missing; (b) 2PL $J=15$, two groups, `NormalMixture(2)`, every item invariant; (c) FIPC, two groups, `DavidianCurve(2)`, every latent free. Estimates, R Hessian SEs, EAP, S-X2 per group | `multipleGroup(customGroup = createGroup(...))` with the standardized densities normalized on the grid (`dcurver::ddc`), Newton-polished on an independent R marginal log-likelihood; R Richardson-Hessian SEs; EAP in R; `itemfit(use_dentype_estimate = TRUE)` on single-group objects fixed at each group's estimates | #75 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -1303,6 +1304,33 @@ English | [日本語](VALIDATION.ja.md)
   information within $10^{-9}$ (relative to the largest entry), Oakes sub-chunking of a block
   identical; fitted estimates within $10^{-6}$ and SEs within $10^{-5}$ relative (the two paths
   sum in a different order, so the EM iterates differ at rounding level).
+
+- **Davidian curves and normal mixtures per group (V56, #75; DESIGN §27)**:
+  `tests/test_mirt_v56_multigroup_shapes.py` (reference `validation/r/v56_multigroup_shapes_reference.R`;
+  61 points on $[-6, 6]$). mirt's `multipleGroup()` refuses a Davidian group with a free mean and
+  variance and its `dentype = "mixture-k"` is a latent-class model, so, as in V19 and V22, mirt fits
+  flexpyirt's exact discretized model through `customGroup` (BFGS, `TOL = 1e-10`), and the solution
+  is polished by Newton steps on an independent R marginal log-likelihood (central differences,
+  Richardson Hessian; final max |grad| $\le 3\times10^{-6}$). The reference SEs are the inverse R
+  Hessian; mirt's Oakes SEs at the polished point are stored as evidence (they agree with the R
+  Hessian to $5\times10^{-4}$ relative). EAPs are computed in R from the polished parameters. S-X2
+  comes from `itemfit()` on a single-group mirt object per group with items and density fixed at
+  that group's estimates: it needs `use_dentype_estimate = TRUE`, otherwise mirt's S-X2 integrates
+  over a normal prior with the group's mean and variance (found while building V56; the values then
+  differ by ~3). Davidian and mixture likelihoods are multimodal in the shape (a case whose third
+  group was normal had several maxima and angle SEs of 16–19 and was replaced by a skewed group),
+  so the test starts each group's latent parameters at the reference rounded to two significant
+  digits. Results at `BAEM(tol=1e-10, squarem=True)`: log-likelihood within $2\times10^{-11}$
+  (relative $2\times10^{-15}$), every item and latent estimate within $1.1\times10^{-7}$, SEs within
+  $1.3\times10^{-4}$ relative of the R Hessian (largest for the focal mixture's `rmean_2`, whose
+  numerical Hessian is the least precise), EAP and its SD within $4.4\times10^{-8}$, S-X2 within
+  $4\times10^{-8}$ with $df$ equal to mirt's $df$ minus the item's and the group's free latent
+  parameters (mirt's fixed objects have none) — tolerances $10^{-8}$ relative, $10^{-4}$,
+  $10^{-3}$ relative, $10^{-5}$, $10^{-4}$. Internal checks (`tests/test_multigroup_latent_shapes.py`):
+  Oakes = Hessian SEs, a Davidian model with every `phi_*` fixed at 0 reproduces the two-group
+  `Normal` model to $10^{-8}$ in log-likelihood, `link()`'s default weights and EAP of an empty
+  pattern use each group's density, per-group mixture warnings, JSON round trip (schema 8), FIPC
+  from the anchored point.
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)

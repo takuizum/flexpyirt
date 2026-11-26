@@ -371,29 +371,36 @@ def _warn_mixture_degenerate(params: pd.DataFrame, spec: Model, quadrature: Quad
     variances both differ by less than ``MIXTURE_COLLAPSE_TOL`` (a collapsed mixture).
     """
     names = list(mixture_param_names(spec.mixture_components))
-    lat = params[params["item"] == LATENT_ITEM].set_index("param")["estimate"]
-    pi, means, variances = (
-        np.asarray(x, dtype=float)
-        for x in mixture_components(jnp.asarray(lat.loc[names].to_numpy(dtype=float)))
-    )
     nodes = np.sort(np.asarray(quadrature.nodes(), dtype=float))
     spacing = float(np.min(np.diff(nodes)))
     issues: list[str] = []
-    for c in range(len(pi)):
-        label = f"component {c + 1} (pi={pi[c]:.3g}, mean={means[c]:.4g}, var={variances[c]:.3g})"
-        if pi[c] < MIXTURE_MIN_WEIGHT:
-            issues.append(f"{label}: weight below {MIXTURE_MIN_WEIGHT}")
-        if not variances[c] >= (0.5 * spacing) ** 2:
-            issues.append(f"{label}: sd below half the grid spacing {spacing:.3g}")
-        if not nodes[0] <= means[c] <= nodes[-1]:
-            issues.append(f"{label}: mean outside the grid [{nodes[0]:g}, {nodes[-1]:g}]")
-    for c in range(len(pi)):
-        for c2 in range(c + 1, len(pi)):
-            if (
-                abs(means[c] - means[c2]) < MIXTURE_COLLAPSE_TOL
-                and abs(variances[c] - variances[c2]) < MIXTURE_COLLAPSE_TOL
-            ):
-                issues.append(f"components {c + 1} and {c2 + 1} coincide")
+    latent_rows = params[params["item"] == LATENT_ITEM]
+    for group_name, rows in latent_rows.groupby("group", sort=False):
+        # Each group's mixture is checked on its own (DESIGN.md §27).
+        where = f"group {group_name!r} " if spec.is_multigroup else ""
+        lat = rows.set_index("param")["estimate"]
+        pi, means, variances = (
+            np.asarray(x, dtype=float)
+            for x in mixture_components(jnp.asarray(lat.loc[names].to_numpy(dtype=float)))
+        )
+        for c in range(len(pi)):
+            label = (
+                f"{where}component {c + 1} "
+                f"(pi={pi[c]:.3g}, mean={means[c]:.4g}, var={variances[c]:.3g})"
+            )
+            if pi[c] < MIXTURE_MIN_WEIGHT:
+                issues.append(f"{label}: weight below {MIXTURE_MIN_WEIGHT}")
+            if not variances[c] >= (0.5 * spacing) ** 2:
+                issues.append(f"{label}: sd below half the grid spacing {spacing:.3g}")
+            if not nodes[0] <= means[c] <= nodes[-1]:
+                issues.append(f"{label}: mean outside the grid [{nodes[0]:g}, {nodes[-1]:g}]")
+        for c in range(len(pi)):
+            for c2 in range(c + 1, len(pi)):
+                if (
+                    abs(means[c] - means[c2]) < MIXTURE_COLLAPSE_TOL
+                    and abs(variances[c] - variances[c2]) < MIXTURE_COLLAPSE_TOL
+                ):
+                    issues.append(f"{where}components {c + 1} and {c2 + 1} coincide")
     if issues:
         warnings.warn(
             "Degenerate normal-mixture solution: "

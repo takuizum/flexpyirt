@@ -158,6 +158,8 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 `itemfit()` と同じ方法でまとめ（`min_cell` は mirt の `mincell`）、$df_j$ = 残ったセル数 − 行数 − その項目の自由パラメタ数 −
 潜在分布の自由パラメタ数（mirt の約束）。確認的多次元モデル（`with_factors()`、単一群）では、推定時の直積格子の
 すべてのノードで再帰を回して多変量正規の重みで積分し、自由な因子間相関を潜在分布のパラメタとして数える。
+`DavidianCurve`・`NormalMixture` の潜在分布では各群の推定した密度を重みに使い、自由な形のパラメタも潜在分布の
+パラメタとして数える（DESIGN §27）。`EmpiricalHistogram` は `SpecificationError`。
 
 **infit / outfit**（`"infit"`・`"outfit"`）: 各受験者を `method` で推定し、項目 $j$ に回答した $N_j$ 人にわたって
 $\mathrm{outfit}_j=\frac1{N_j}\sum_i r_{ij}^2/W_{ij}$、$\mathrm{infit}_j=\sum_i r_{ij}^2/\sum_i W_{ij}$ とし、
@@ -178,8 +180,8 @@ $0,\dots,K_j-1$ の残差、$W_{ij}$ はその条件付き分散（[`FitResult.p
 `infit`, `z_infit`、outfit なら `outfit`, `z_outfit` 列の `DataFrame`。S-X2 の表をまとめた結果 `df <= 0` になる項目は
 `df = 0` で統計量は NaN。多母集団モデルでは先頭に `group` 列がつく（群と項目ごとに 1 行）。
 
-**例外**: 不明または空の `statistics`。S-X2 では双因子・two-tier・多母集団の多次元・`EmpiricalHistogram`・
-`DavidianCurve`・`NormalMixture` のモデル、欠測を含むデータ、（群内で）観測されないカテゴリがある項目、正でない
+**例外**: 不明または空の `statistics`。S-X2 では双因子・two-tier・多母集団の多次元・`EmpiricalHistogram` のモデル、
+欠測を含むデータ、（群内で）観測されないカテゴリがある項目、正でない
 `min_cell`。infit / outfit では多次元モデルとそれ以外の `method`。いずれも `SpecificationError`。
 
 #### `FitResult.person_fit`
@@ -510,7 +512,8 @@ model.with_groups(groups=None, /, **latents) -> Model
 例: `model.with_groups(ref=Normal.standard(), focal=Normal.free())`。群は位置引数のマッピング 1 つでも渡せる
 （挿入順。キーは `str` に変換）。群が多いときや識別子でないラベルに使う:
 `model.with_groups({"ref": Normal.standard()} | {s: Normal.free() for s in schools})`。マッピングと
-キーワードの両方を渡すと `SpecificationError`。全群が同じ潜在分布の族（`Normal` か `EmpiricalHistogram`）を使う。
+キーワードの両方を渡すと `SpecificationError`。全群が同じ潜在分布の族（`Normal`・`EmpiricalHistogram`・同じ `degree` の
+`DavidianCurve`・同じ `n_components` の `NormalMixture`）を使う（DESIGN §27）。
 群が 2 つ以上のとき E-step は各群のパターンのブロック上で回る（DESIGN §26）。
 
 #### `Model.equal_across_groups`
@@ -841,7 +844,8 @@ DavidianCurve.free(degree, *, mean=0.0, var=1.0)
 による単位球面係数で $h_k(z;\boldsymbol\phi) = P_k(z;\boldsymbol\phi)^2\varphi(z)$ を構成し
 （$\boldsymbol\phi = \mathbf 0$ で非特異に $N(\mu,\sigma^2)$ を再現）、$h_k$ の厳密な連続モーメントで解析的に標準化することで
 任意の $\boldsymbol\phi$ について連続平均・分散が `mean`・`var` に一致する。求積重みは格子上で正規化するため EM は
-単調（非減少）で、自由な項目パラメタ・潜在パラメタすべてに対して厳密な Oakes / Hessian 標準誤差が得られる。単一群の 1 次元モデルのみ。
+単調（非減少）で、自由な項目パラメタ・潜在パラメタすべてに対して厳密な Oakes / Hessian 標準誤差が得られる。1 次元モデルで、
+1 群でも多群でもよい（全群が同じ `degree` の `DavidianCurve` で、群ごとに形を持つ。DESIGN §27）。
 Fisher 情報行列は $\boldsymbol\phi = \mathbf 0$ で `phi_1`・`phi_2` 方向（`degree=1` では `phi_1`）に特異なため、正規に近い
 特性では角度の標準誤差が信頼できず、`Normal` に対する尤度比検定は標準的でなく（AIC / BIC を使う）、局所最大が複数ありうる
 （[ガイド 8 節](guide.ja.md#davidian-曲線)）。
@@ -852,8 +856,9 @@ Fisher 情報行列は $\boldsymbol\phi = \mathbf 0$ で `phi_1`・`phi_2` 方�
 | `mean`, `var` | 連続平均と正の分散の値（自由推定時は初期値） |
 | `free_mean`, `free_var` | `mean`・`var` を推定するか（識別性の規則は `Normal` と同じ） |
 
-**例外**: `degree`・`mean`・`var`・フラグが不正、または `Model.with_groups()`・`Model.with_factors()` と組み合わせた場合に
-`SpecificationError`。`free_mean`・`free_var` に必要な固定切片・固定傾きがない場合は `IdentificationError`。
+**例外**: `degree`・`mean`・`var`・フラグが不正、`Model.with_factors()` と組み合わせた場合、または `Model.with_groups()` で
+別の族・次数と混ぜた場合に `SpecificationError`。`free_mean`・`free_var` に必要な固定切片・固定傾きがない場合は
+`IdentificationError`。
 
 ### `NormalMixture`
 
@@ -868,10 +873,10 @@ NormalMixture.free(n_components, *, mean=0.0, var=1.0, means=None, variances=Non
 $N(0,1)$、成分 $c \ge 2$ は素の平均 `rmean_c`・素の分散 `rvar_c`・ロジット `logit_c` $=\log(\pi_c/\pi_1)$ を持つ。
 混合を厳密なモーメントで解析的に標準化し、任意の形状で連続平均・分散が `mean`・`var` に一致する。各成分を格子上で
 正規化してから混合する。`FitResult.latent` は標準化した成分 `pi_c`・`mean_c`・`var_c` とデルタ法の SE を返す。
-Oakes / Hessian 標準誤差は項目パラメタと潜在分布パラメタの両方を含む。単一群の 1 次元モデルのみで、等間隔格子と
-Gauss–Hermite 格子に対応する。成分は交換可能（ラベルスイッチング）で、尤度に局所最大が複数ありうるので、いくつかの
-初期形状から推定し直して `loglik` が最も高いものを採る。`score(method="MAP")`・`item_fit()`・`m2()` は
-`SpecificationError`。
+Oakes / Hessian 標準誤差は項目パラメタと潜在分布パラメタの両方を含む。1 次元モデルで、1 群でも多群でもよい（全群が同じ
+`n_components` の `NormalMixture` で、群ごとに形を持つ。DESIGN §27）。等間隔格子と Gauss–Hermite 格子に対応する。
+成分は交換可能（ラベルスイッチング）で、尤度に局所最大が複数ありうるので、いくつかの初期形状から推定し直して `loglik` が
+最も高いものを採る。`score(method="MAP")`・`m2()` は `SpecificationError`。`item_fit()` は各群の推定した混合で積分する。
 
 | 引数 | 説明 |
 |---|---|
@@ -880,8 +885,8 @@ Gauss–Hermite 格子に対応する。成分は交換可能（ラベルスイ�
 | `free_mean`, `free_var` | `mean`・`var` を推定するか（識別性の規則は `Normal` と同じ） |
 | `means`, `variances`, `weights` | 長さ $k$ の初期形状（成分の平均、正の分散、和が 1 の正の重み）。任意のアフィン尺度でよい。既定は `(0, 1.5, -1.5, 3, -3, ...)`、すべて `1`、`1/k` |
 
-**例外**: `n_components`・`mean`・`var`・フラグ・初期形状が不正、または `Model.with_groups()`・`Model.with_factors()` と
-組み合わせた場合に `SpecificationError`。`free_mean`・`free_var` に必要な固定切片・固定傾きがない場合は
+**例外**: `n_components`・`mean`・`var`・フラグ・初期形状が不正、`Model.with_factors()` と組み合わせた場合、または
+`Model.with_groups()` で別の族・成分数と混ぜた場合に `SpecificationError`。`free_mean`・`free_var` に必要な固定切片・固定傾きがない場合は
 `IdentificationError`。
 
 ---

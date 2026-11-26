@@ -2807,7 +2807,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    サブチャンクは `lax.cond` で飛ばす）、トレースされるプログラムは $G$ に依存しない（コンパイル時間は $G$ によらず一定）。
 5. **潜在分布.** 潜在パラメタは `(G, L)`（`free_index` も `(G, L)`）に積んだまま。潜在分布の M-step、
    Oakes の自身の Hessian、潜在分布のスコア表は群上で `vmap` する。全群が 1 つの潜在分布の族と静的な形 $L$ を
-   共有する（§4.4。群ごとの Davidian / 混合は #75）。jit 内で群の Python ループは回らない。
+   共有する（§4.4。群ごとの Davidian / 混合は #75、§27）。jit 内で群の Python ループは回らない。
 6. **API.** `Model.with_groups()` は位置引数のマッピングも 1 つ受け取る
    （`with_groups({"ref": Normal.standard()} | {s: Normal.free() for s in schools})`。挿入順が群の順で、
    先頭が参照群）。識別子でない群ラベルや数百の群でも `**` 展開が要らない。アンカー・不変性は従来どおり
@@ -2821,6 +2821,40 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    Oakes と Hessian の SE、EAP）。V55: 不変なアンカー項目を持つ $G=10$ 群の 2PL を mirt `multipleGroup`
    と照合（VALIDATION.md）。`benchmarks/` で $G=10,50,200$ のベンチマーク（コンパイル時間、ウォーム時間、
    ピークメモリ）を mirt と比べる。
+
+## 27. 群ごとの Davidian 曲線と正規混合（#75）
+
+1. **範囲.** `DavidianCurve`（§4.4、§16.4）と `NormalMixture`（§4.4、§16.7）を `with_groups()` モデルの潜在分布として
+   使えるようにする。各群が自分の平均・分散・形（Davidian の角度 $\boldsymbol\phi_g$、混合の生の平均・生の分散・ロジット）を持ち、
+   項目パラメタはアンカーでつながった 1 組（FIPC では `fix_from()` で固定）。1 群のときと同じく、等間隔格子上の 1 次元モデルのみ。
+2. **モデルごとに 1 つの族（決定）.** 全群が同じクラスと同じ `degree`（Davidian）・`n_components`（混合）を使う。族や次数を
+   混ぜる（例: 参照群は `Normal`、焦点群は `DavidianCurve`）と `SpecificationError`。理由: 潜在ブロックは 1 つの静的な種類で
+   `(G, L)` に積まれており（§26.5）、混在には $L$ の群ごとのパディングと、全群で全族を評価する `lax.switch` が要る。また主な用途は
+   混在なしで実現できる: $\boldsymbol\phi=\mathbf 0$ の Davidian 曲線は正規密度**そのもの**なので、Davidian モデルの中で正規のままに
+   したい群は、パラメタ表（`table=`）でその群の `phi_*` 行を 0 に固定すれば格子上でちょうど $N(\mu_g,\sigma^2_g)$ になる。混合には
+   正規分布にちょうど一致する要素がない（成分の重みを 0 にする必要がある）ので、混合モデルの中の正規の群は提供しない。
+3. **識別.** `Normal` と同じ（§4.5、§14.5）。既定では参照群を標準化し（`mean = 0`・`var = 1` を固定、形は 1 群のときと同じく自由）、
+   各焦点群は `DavidianCurve(k, free_mean=True, free_var=True)` / `NormalMixture(k, free_mean=True, free_var=True)` で
+   `mean`・`var` を自由にし、同じアンカーのグラフで検査する（潜在分布の行はどの族でも `mean`・`var` という名前）。各群の形は
+   1 群のときと同じくその群のデータで識別される（§16.4・§16.7 の解析的な標準化が形と位置・尺度を分ける）。FIPC: `fix_from()` で
+   項目を固定し、全群が平均と分散を自由にしてよい。
+4. **コア.** 新しいものはない。`LatentBlock` は既に静的な `(davidian_degree, mixture_components)` とともに `(G, L)` のパラメタを持ち、
+   対数重み・潜在分布の M-step（$\sum_q\bar n_{gq}\log w_{gq}$ のマスク付き Newton）・Oakes の自身の Hessian・潜在分布のスコア表は
+   群上で `vmap` され、$G\ge2$ では E-step が群ブロック化される（§26）。EM は単調のままで、Oakes の恒等式も群ごとに厳密。
+5. **外側の層.** `FitResult.latent` は群ごとに 1 行（混合は群ごとの標準化した成分つき）。退化した混合の警告（§16.7）は群ごとに
+   行い、群名を示す。EAP・ML・WLE・PV の採点は受験者の群の密度を使う（MAP は使えないまま。§16.4、§16.7）。`item_fit()`
+   （S-X2、Orlando & Thissen, 2000）は Lord–Wingersky の期待度数表に各群の求積重み $w_{gq}$ を使い、重みしか要らないので、
+   1 群でも多群でも Davidian・混合モデルで使えるようにする（自由度からはその群の自由な潜在分布パラメタを形も含めて引く。
+   `Normal` と同じ）。既定の重みの `link()` は選んだ群の推定密度で積分する（変更なし）。`simulate_responses()` は各群の密度から
+   引く（変更なし）。JSON は 1 群のときと同じく群ごとの潜在分布の指定を保存するので形式は変わらない（`schema_version` は 8 のまま）。
+   SE: `oakes` と `hessian`。`crossprod` / `sandwich` は使えないまま（§17.5）。これらの族で引き続き使えないもの: `m2()`、
+   `information()`、`EAPsum`。
+6. **照合（V56）.** mirt の `multipleGroup()` は平均・分散が自由な群ごとの Davidian を持たず（"not currently supported"）、
+   `dentype = "mixture-k"` は潜在クラスモデルで、群ごとの混合密度ではない。V19・V22 が 1 群で行うのと同じく、V56 は格子上で
+   正規化した標準化密度（Davidian は `dcurver::ddc`、混合は各成分を格子上で正規化してから混ぜる）を
+   `multipleGroup(customGroup = createGroup(...))` に与えて厳密な離散化モデルを mirt で推定し、mirt の解を独立な R の周辺対数尤度
+   上の Newton ステップで磨き、R の Richardson Hessian による SE、mirt の Oakes SE、`probtrace()` から R で計算した EAP、
+   群の推定値で固定した同じ `customGroup` の 1 群 mirt オブジェクトでの `itemfit()` による群ごとの S-X2 を記録する。
 
 ## 参考文献
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.

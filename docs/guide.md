@@ -320,7 +320,8 @@ np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_nump
 `item_fit(data)` computes Orlando and Thissen's S-X2 for every item: observed versus model-implied
 counts of each response category at each summed score, with sparse cells collapsed exactly as
 mirt's `itemfit()` does (`min_cell=1` by default). It needs complete data, every response category
-observed, and `Normal` latent distributions. A confirmatory model with two or three factors
+observed, and a `Normal`, `DavidianCurve` or `NormalMixture` latent distribution (the expected
+counts integrate over the fitted density; not `EmpiricalHistogram`). A confirmatory model with two or three factors
 (`with_factors()`, single group) works too: the summed score is still the total over all items, and
 the expected counts integrate over the product grid of the fit. For a multiple-group
 model pass `group=`: S-X2 is computed within each group (as mirt does), with a leading `group`
@@ -847,8 +848,13 @@ print(dc.score(skew_df.iloc[:3], method="EAP").round(3))  # uses the fitted Davi
 
 - **Identification**: `mean` and `var` follow the same rules as `Normal` (fixed at `0` and `1` by
   default; pass `free_var=True` for Rasch/PCM, or `DavidianCurve.free(degree)` under FIPC).
-- **Scope**: single-group unidimensional models only (`with_groups()` and `with_factors()` raise
-  `SpecificationError`).
+- **Scope**: unidimensional models (`with_factors()` raises `SpecificationError`), with one group
+  or several: in `with_groups()` every group uses `DavidianCurve` with the same `degree`, each with
+  its own shape, and focal groups free their mean and variance as for `Normal`
+  (`with_groups(ref=DavidianCurve(2), focal=DavidianCurve(2, free_mean=True, free_var=True))`
+  with anchors, or every group free under FIPC; DESIGN §27). To keep a group normal, fix its
+  `phi_*` rows at 0 in the parameter table (a Davidian curve with all angles 0 is the normal
+  density); mixing `Normal` and `DavidianCurve` groups raises `SpecificationError`.
 - **Scoring**: `"EAP"` and `"PV"` use the fitted Davidian density; `"ML"` and `"WLE"` are
   likelihood-only; `"MAP"` raises `SpecificationError` because a Davidian density can be multimodal
   and vanish at real roots of $P_k$.
@@ -892,11 +898,13 @@ print(mix.score(bi_df.iloc[:3], method="EAP").round(3))  # uses the fitted mixtu
 ```
 
 - **Identification and scope**: as for `DavidianCurve` (`free_var=True` for Rasch/PCM,
-  `NormalMixture.free(k)` under FIPC; single-group unidimensional models only). Equispaced and
-  Gauss–Hermite grids are supported.
-- **Scoring**: `"EAP"` and `"PV"` use the fitted mixture, `"ML"` and `"WLE"` are likelihood-only,
-  and `"MAP"` raises `SpecificationError` (a mixture prior can be multimodal). `item_fit()` and
-  `m2()` are not available yet.
+  `NormalMixture.free(k)` under FIPC; unidimensional models). Several groups work as for
+  `DavidianCurve`: every group uses `NormalMixture` with the same `n_components` and its own shape
+  (DESIGN §27). Equispaced and Gauss–Hermite grids are supported.
+- **Scoring and fit**: `"EAP"` and `"PV"` use the fitted mixture, `"ML"` and `"WLE"` are
+  likelihood-only, and `"MAP"` raises `SpecificationError` (a mixture prior can be multimodal).
+  `item_fit()` (S-X2) integrates over each group's fitted mixture, as it does for `DavidianCurve`;
+  `m2()` is not available yet.
 - **Starting values, label switching, degenerate fits**: the components are exchangeable, so their
   numbering is arbitrary, and the likelihood can have several local maxima. Refit from a few
   starting shapes (`NormalMixture(2, means=[0, 2], variances=[1, 0.3], weights=[0.7, 0.3])`) and
