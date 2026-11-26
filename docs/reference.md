@@ -29,6 +29,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Plots: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
 - IRT equating: [`irt_equate`](#irt_equate), [`IRTEquatingResult`](#irtequatingresult), [`score_distribution`](#score_distribution), [`scale_table`](#scale_table)
 - Model comparison and simulation: [`compare_fits`](#compare_fits), [`simulate_responses`](#simulate_responses), [`SimulatedData`](#simulateddata)
+- Classification: [`classification_accuracy`](#classification_accuracy), [`ClassificationResult`](#classificationresult)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal), [user-defined item models](#user-defined-item-models)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior), [`LogitNormalPrior`](#logitnormalprior)
@@ -2006,6 +2007,70 @@ Import with `from flexpyirt.plotting import ...`. Needs matplotlib (`pip install
 | `plot_information` | Test information, or the information of `items`; `standard_error=True` adds the SE on a second y axis (`ax.twinx()`). `group=` is a group name (default: every group) | [`test_information`](#test_information), [`item_information`](#item_information) |
 | `plot_expected_score` | Test characteristic curve, one line per group by default | [`expected_score`](#expected_score) (`total`) |
 | `plot_wright_map` | Horizontal histogram of the person scores (`n_bins` bins) beside the item thresholds, sharing the $\theta$ axis | [`wright_map_table`](#wright_map_table) |
+
+---
+
+## Classification
+
+### `classification_accuracy`
+
+```text
+classification_accuracy(res, *, cut_scores, method="lee", scale=None, data=None, group=None,
+                        item_names=None, score_method="EAP") -> ClassificationResult
+```
+
+Classification accuracy and consistency of cut scores
+([guide section 7](guide.md#classification-accuracy-and-consistency); DESIGN.md §18.4). The cuts
+$c_1<\dots<c_C$ define the categories $h(v)=\#\{k: v\ge c_k\}=0,\dots,C$. At a true value
+$\theta$ each method gives the probabilities $P_h(\theta)$ of the observed categories and a true
+category $t(\theta)$:
+
+- `"lee"` (Lee, 2010): $P_h(\theta)=\sum_{s:\,h(s)=h}L(s\mid\theta)$ with the Lord–Wingersky
+  distribution of the summed score, $t(\theta)=h(\tau(\theta))$ with the expected summed score
+  $\tau$. A non-integer cut $c$ puts the scores $s\ge\lceil c\rceil$ above it.
+- `"rudner"` (Rudner, 2001, 2005): $P_h(\theta)=\Phi((c_{h+1}-\theta)/\mathrm{SE})-\Phi((c_h-\theta)/\mathrm{SE})$,
+  $\mathrm{SE}=I(\theta)^{-1/2}$, $t(\theta)=h(\theta)$.
+
+Over points $\theta_n$ with weights $w_n$ (the fitted quadrature and latent weights without `data`,
+the "D" approach; the respondents' estimates with weights $1/N$ with `data`, the "P" approach;
+Lathrop & Cheng, 2013), $A_{tk}=\sum_nw_n[t(\theta_n)=t]P_k(\theta_n)$ and
+$B_{hk}=\sum_nw_nP_h(\theta_n)P_k(\theta_n)$ give accuracy $\sum_hA_{hh}$, consistency
+$\sum_hB_{hh}$ and Cohen's kappa of consistency. These are cacIRT's `class.Lee()` / `class.Rud()`.
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted unidimensional model |
+| `cut_scores` | float / array | Strictly increasing cuts. On the summed score in $(0, S_{\max}]$, selecting different scores |
+| `method` | `"lee"` / `"rudner"` | Method (default `"lee"`) |
+| `scale` | `"summed_score"` / `"theta"`, optional | Scale of the cuts; default the method's own. Otherwise converted through the test characteristic curve ($\tau(c)$ for Lee, $\tau^{-1}(c)$ for Rudner) |
+| `data` | DataFrame / 2-D array, optional | Responses; averages over the respondents' estimates (P approach) |
+| `group` | array, optional | Group label of each row of `data` (required with `data` for a multiple-group model) |
+| `item_names` | list[str], optional | Column names when `data` is an array |
+| `score_method` | `"EAP"` / `"MAP"` / `"ML"` / `"WLE"` | Estimates of the P approach (default `"EAP"`); Rudner's SE is always $I(\hat\theta)^{-1/2}$ |
+
+**Returns**: [`ClassificationResult`](#classificationresult).
+
+**Raises**: `SpecificationError` for a multidimensional model, an unknown `method` / `scale` /
+`score_method`, invalid cuts, a summed-score cut outside the range of the test characteristic
+curve (Rudner), `group` / `item_names` / `score_method` without `data`, or a non-finite estimate
+in the P approach (ML on an extreme pattern).
+
+### `ClassificationResult`
+
+Frozen dataclass returned by [`classification_accuracy`](#classification_accuracy). In a
+multiple-group result every DataFrame has a leading `group` column (the two tables a
+`(group, category)` row index).
+
+| Attribute | Content |
+|---|---|
+| `method`, `scale`, `cut_scores`, `approach` | The settings (`approach` is `"D"` or `"P"`) |
+| `summary` | One row per group: `accuracy`, `consistency`, `kappa` (and `n` for the P approach) |
+| `by_category` | `category`, `true_proportion`, `proportion` (observed), `accuracy` (observed $=h$ given true $=h$), `consistency` (second $=h$ given first $=h$) |
+| `by_cut` | `cut` (and `summed_score_cut` / `theta_cut` when converted), `accuracy`, `consistency`, `kappa`, `false_positive` (true below, observed at or above), `false_negative` |
+| `conditional` | Per node (D) or respondent (P): `theta`, `weight`, `true_category`, `accuracy`, `consistency`, and `true_score` (Lee) or `se` (Rudner) |
+| `accuracy_table` | $A$: joint probabilities of the true (rows) and observed (columns) categories |
+| `consistency_table` | $B$: joint probabilities of the categories of two independent administrations |
+| `accuracy`, `consistency`, `kappa` | Floats of a single-group result (`SpecificationError` for a multiple-group result) |
 
 ---
 

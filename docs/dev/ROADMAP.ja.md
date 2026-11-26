@@ -123,6 +123,9 @@
 - [ ] モデル比較表と回答データのシミュレーション（#109）: `compare_fits()`（AIC・SABIC・HQ・BIC・尤度比検定。
   mirt の `anova()`）と `simulate_responses()` / `SimulatedData`（`FitResult` または項目バンクを与えた `Model`
   から。全項目モデル・全潜在分布・全モデル構造。JAX のキー）。V54 で照合。照合テストが夜間 CI で通ったらチェックする。
+- [x] カット得点による分類の正確さと一貫性（#107。`classification_accuracy()`、`ClassificationResult`: 合計得点上の
+  カットの Lee, 2010 と $\theta$ 上のカットの Rudner, 2001, 2005、D 法と P 法、κ、カットごとの偽陽性・偽陰性率。
+  1 次元モデル、単一群と多母集団。V52 で cacIRT と mirt からの再計算と照合）。
 
 ## 継続的な作業
 - [ ] GitHub 上の最新の R mirt で照合し、参照値を定期的に確認する（#74）。

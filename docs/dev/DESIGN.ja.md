@@ -2064,6 +2064,75 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    **`FitResult` に新しく保存するものはない。** `schema_version` は変えない。
    **一致の実測値**は VALIDATION.md（V43）に記録する。
 
+4. **カット得点による分類の正確さと一貫性（#107, V52）**:
+   **何を計算するか。** カット得点 $c_1<\dots<c_C$ のあるテストは受検者を $H=C+1$ 個の順序づいた
+   カテゴリ $h=0,\dots,C$ に分ける。値がカット以上ならそのカットより上なので、値 $v$ のカテゴリは
+   $h(v)=\#\{k: v\ge c_k\}$。1 回の実施と推定済みモデルから、観測されたカテゴリが真のカテゴリに一致する
+   確率を**分類の正確さ**（accuracy）、独立な平行測定 2 回のカテゴリが一致する確率を**分類の一貫性**
+   （consistency）として求める（Lee, 2010; Rudner, 2001, 2005）。
+   **条件つきカテゴリ確率。** 真の値 $\theta$ において:
+   - **Lee (2010)**（`method="lee"`、カットは合計得点上）。観測カテゴリは合計得点 $S$ で決まり、その
+     条件つき分布は項目 1 の Lord–Wingersky の尤度 $L(s\mid\theta)$（厳密な漸化式、全項目モデル）:
+     $P_h(\theta)=\sum_{s:\,h(s)=h}L(s\mid\theta)$。真のカテゴリは期待合計得点（真の得点）
+     $\tau(\theta)=\sum_j\sum_kk\,P_{jk}(\theta)$ のカテゴリ $t(\theta)=h(\tau(\theta))$。整数でない
+     カット $c$ では $s\ge\lceil c\rceil$ が上になる（cacIRT と同じ）。
+   - **Rudner (2001, 2005)**（`method="rudner"`、カットは $\theta$ 上）。推定値を
+     $\hat\theta\sim N(\theta,\mathrm{SE}(\theta)^2)$、$\mathrm{SE}(\theta)=I(\theta)^{-1/2}$（項目 2 の
+     テスト情報量）とし、
+     $P_h(\theta)=\Phi\big((c_{h+1}-\theta)/\mathrm{SE}\big)-\Phi\big((c_h-\theta)/\mathrm{SE}\big)$
+     （$c_0=-\infty$、$c_H=\infty$）。真のカテゴリは $t(\theta)=h(\theta)$。
+   **真の値についての積分。** 点 $\theta_n$ と重み $w_n$（$\sum_nw_n=1$）で:
+   - **D 法**（`data=None`; Lathrop & Cheng, 2013）: 推定に使った求積点と、その群の推定された潜在分布の
+     重み（EM が積分に使う重みなので潜在分布の種類を問わない。R の参照は `Normal` のみ）。
+   - **P 法**（`data` を与える）: 群の受検者の推定値 $\hat\theta_i$
+     （`score(data, method=score_method)`、既定 `"EAP"`）を真の値とみなし、重みは各 $1/N_g$。
+     Rudner の SE は採点の SE ではなく情報量からの $I(\hat\theta_i)^{-1/2}$（Rudner, 2005 と cacIRT に
+     同じ）。有限でない推定値（極端なパターンの ML）は `SpecificationError`。
+   **指標。** すべて 2 つの $H\times H$ 表から求める:
+   $$A_{tk}=\sum_nw_n\,[t(\theta_n)=t]\,P_k(\theta_n),\qquad
+   B_{hk}=\sum_nw_nP_h(\theta_n)P_k(\theta_n)$$
+   （（真, 観測）カテゴリの同時分布と、独立な 2 回の実施のカテゴリの同時分布）。正確さ
+   $\gamma=\sum_hA_{hh}$、一貫性 $\phi=\sum_hB_{hh}$、一貫性の Cohen (1960) の κ
+   $\kappa=(\phi-\phi_c)/(1-\phi_c)$、$\phi_c=\sum_hp_h^2$、$p_h=\sum_kB_{hk}$（Lee, 2010）。
+   $\theta_n$ での条件つき指標は $\gamma(\theta_n)=P_{t(\theta_n)}(\theta_n)$ と
+   $\phi(\theta_n)=\sum_hP_h(\theta_n)^2$。カテゴリ $h$ ごとに: `true_proportion` $\sum_kA_{hk}$、
+   `proportion` $p_h$、`accuracy` $A_{hh}/\sum_kA_{hk}$（真が $h$ のとき観測も $h$）、`consistency`
+   $B_{hh}/p_h$（1 回目が $h$ のとき 2 回目も $h$）。分母が 0 なら NaN。カット $c_k$ ごと（「$c_k$
+   未満」と「$c_k$ 以上」の 2 分割）: その 2 分割の正確さ・一貫性・κ（$A$ と $B$ のブロックの和）、
+   `false_positive` $\sum_{t<k\le h}A_{th}$（真は下、観測は上）、`false_negative`
+   $\sum_{h<k\le t}A_{th}$。カットが 1 つならカットごとの指標と全体の指標は一致する。これらは cacIRT の
+   "Marginal"（カットごと）と "Simultaneous"（全体）の指標。κ・偽陽性/偽陰性率・カテゴリごとの指標は
+   cacIRT になく、R での独立な再計算で照合する。
+   **尺度。** `scale=None` は方法の本来の尺度。`method="lee", scale="theta"` は各カットをテスト特性
+   曲線で写す（$c^S_k=\tau(c_k)$）。`method="rudner", scale="summed_score"` はその逆
+   （$c^\theta_k=\tau^{-1}(c_k)$、$[-40, 40]$ での二分法。$\tau$ が単調増加であること（名義反応以外の
+   項目モデルでは成り立つ）と $\tau(-40)<c_k<\tau(40)$ が必要）。多母集団モデルでは変換後のカットが
+   群で異なり、`by_cut` に出す（`summed_score_cut` / `theta_cut`）。
+   **離散化（D 法）。** D 法は求積点上、つまり EM が扱う離散の潜在分布で積分する（cacIRT も与えた
+   求積点で同じことをする）。一貫性は $\theta$ について滑らかで、61 点なら連続な潜在分布の積分と
+   $10^{-10}$ 程度で一致する。正確さは $t(\theta)$ が変わるところで跳ぶので、連続な積分との差は
+   求積点の間隔の程度になる（61 点・$[-6,6]$・5 項目のテストで最大 0.008、VALIDATION V52）。
+   EH を含むどの潜在分布も同じ扱いにするため、専用の細かい格子ではなく推定時の格子で報告する。
+   細かい `Quadrature` か P 法で対処する。
+   **カットの検査。** 有限で狭義単調増加。合計得点上では $0<c_k\le S_{\max}$ で、$\lceil c_k\rceil$ が
+   互いに異なること（同じなら観測カテゴリが空になる）。違反は `SpecificationError`。
+   **API（決定。オーナーが #107 の提案を承認）。**
+   `classification_accuracy(res, *, cut_scores, method="lee", scale=None, data=None, group=None,
+   item_names=None, score_method="EAP") -> ClassificationResult`。1 次元モデルのみ。
+   `ClassificationResult` は DataFrame `summary`（`accuracy`・`consistency`・`kappa`、群ごとに 1 行）、
+   `by_category`、`by_cut`、`conditional`（求積点または受検者ごと: `theta`・`weight`・
+   `true_category`・`accuracy`・`consistency`、Lee では `true_score`、Rudner では `se` も）、
+   `accuracy_table`（$A$、行が真・列が観測）と `consistency_table`（$B$）を持つ。多母集団の結果には
+   先頭に `group` 列（表は `(group, category)` の索引）がつく。float のプロパティ `accuracy`・
+   `consistency`・`kappa` は単一群の結果用で、それ以外では `SpecificationError`。多母集団モデルでは
+   群ごと（その群の項目パラメタと潜在分布）に指標を出す。`data` を与えたとき受検者のいない群は省く。
+   **カーネル。** `_classification.py` に純粋な JAX 関数（両方法のカテゴリ確率、表 $A$ と $B$）を置き、
+   派生する指標は小さな $H\times H$ 表から外側で NumPy で計算する。
+   **範囲外。** 観測得点だけを使うモデルを仮定しない方法（Livingston & Lewis, 1995; Hanson & Brennan,
+   1990）、合成得点、指標の標準誤差、多次元モデル。
+   **`FitResult` に新しく保存するものはない。** `schema_version` は変えない。
+   **一致の実測値**は VALIDATION.md（V52）に記録する。
+
 ## 19. 多次元尺度リンキング（M6）
 
 1. **確認的多次元モデルのリンキング（`link(..., transformation=)`、V40、#78）**:
@@ -2491,6 +2560,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
+- Cohen, J. (1960). A coefficient of agreement for nominal scales. *Educational and Psychological Measurement*, 20(1), 37–46.
 - Devroye, L. (1986). *Non-Uniform Random Variate Generation*. Springer.
 - Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
 - Drezner, Z., & Wesolowsky, G. O. (1990). On the computation of the bivariate normal integral. *Journal of Statistical Computation and Simulation*, 35(1–2), 101–107.
@@ -2508,6 +2578,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Hannan, E. J., & Quinn, B. G. (1979). The determination of the order of an autoregression. *JRSS B*, 41(2), 190–195.
+- Hanson, B. A., & Brennan, R. L. (1990). An investigation of classification consistency indexes estimated under alternative strong true score models. *Journal of Educational Measurement*, 27(4), 345–359.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holland, P. W., & Thayer, D. T. (1988). Differential item performance and the Mantel–Haenszel procedure. In H. Wainer & H. I. Braun (Eds.), *Test Validity* (pp. 129–145). Erlbaum.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
@@ -2524,9 +2595,12 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Landis, J. R., Heyman, E. R., & Koch, G. G. (1978). Average partial association in three-way contingency tables: A review and discussion of alternative tests. *International Statistical Review*, 46(3), 237–254.
+- Lathrop, Q. N., & Cheng, Y. (2013). Two approaches to estimation of classification accuracy rate under item response theory. *Applied Psychological Measurement*, 37(3), 226–241.
 - Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
+- Lee, W.-C. (2010). Classification consistency and accuracy for complex assessments using item response theory. *Journal of Educational Measurement*, 47(1), 1–17.
 - Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24(2), 115–138.
 - Liu, I.-M., & Agresti, A. (1996). Mantel–Haenszel-type inference for cumulative odds ratios with a stratified ordinal response. *Biometrics*, 52(4), 1223–1234.
+- Livingston, S. A., & Lewis, C. (1995). Estimating the consistency and accuracy of classifications based on test scores. *Journal of Educational Measurement*, 32(2), 179–197.
 - Lord, F. M. (1980). *Applications of Item Response Theory to Practical Testing Problems*. Lawrence Erlbaum.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
@@ -2566,6 +2640,8 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Robins, J., Breslow, N., & Greenland, S. (1986). Estimators of the Mantel–Haenszel variance consistent in both sparse data and large-strata limiting models. *Biometrics*, 42(2), 311–323.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
+- Rudner, L. M. (2001). Computing the expected proportions of misclassified examinees. *Practical Assessment, Research, and Evaluation*, 7, Article 14.
+- Rudner, L. M. (2005). Expected classification accuracy. *Practical Assessment, Research, and Evaluation*, 10, Article 13.
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.

@@ -87,6 +87,7 @@ English | [日本語](VALIDATION.ja.md)
 | V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
 | V50 | Common-item screening for linking (#105): robust z (Huynh & Meyer, 2010), displacement and RMSD of expected item score curves; removal order, linking constants at every purification step and the final item table (2PL; mixed 2PL + GRM + GPCM) | separate `mirt()` calibrations + base-R recomputation (`median()`, `quantile(type = 7)`, `expected.item()`, V20 linking); `equateIRT::dif.test` as a cross-check of the drifted items | field |
 | V51 | IRT true-score and observed-score equating and raw-to-scale tables (dichotomous: 20 + 20 items, 3PL + 2PL, with a link; polytomous: 4 GRM $K=4$ + 6 2PL vs 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL, with a link; populations new / old / synthetic $w_1=0.5$; scale table true score and EAPsum) | `equateIRT:::score_compute(method = "TSE" / "OSE")`, `SNSequate::irt.eq(method = "TS")`; mirt `expected.test()`, `probtrace()`, `testinfo()`, `fscores(method = "EAPsum", full.scores = FALSE)` with `uniroot()`, and `equate::equate(type = "equipercentile")` | #106 |
+| V52 | Classification accuracy and consistency for cut scores (#107): Lee (summed-score cuts) and Rudner ($\theta$ cuts), D and P approaches, one to three cuts, non-integer cuts, both cut-scale conversions (3PL $J=20$; GRM $K=4$, $J=10$; two-group 2PL $J=15$, focal mean and variance free) | cacIRT 1.4 `class.Lee()`, `Lee.poly.D()` / `Lee.poly.P()`, `Rud.D()` / `Rud.P()` with mirt's `testinfo()` SE; independent recomputation from mirt `probtrace()` / `expected.test()` / `testinfo()` (kappa, false positive / negative rates, per-category indices, tables) | field |
 | V54 | Model-comparison table (Rasch vs 2PL vs 3PL on the V11a data; PCM vs GPCM on the V8b data; a fully invariant two-group 2PL vs the anchored model and vs the model with the last item free, V4 data) and simulation of responses (deterministic inversion for 2PL, Rasch, 3PL, 4PL, GRM, GPCM and nominal items, unidimensional and two-factor; distributional and recovery checks per latent distribution) | `anova(mod1, mod2, ...)`; `probtrace()` with the same $\theta$ and uniform numbers (random streams cannot match `simdata()`) | #109 |
 
 ## mirt settings and known differences (found in M1)
@@ -741,6 +742,51 @@ English | [日本語](VALIDATION.ja.md)
   planted drifts among slightly perturbed items, the NaN robust z of Rasch slope ratios, the `items=`
   subset and `stack_screening_tables()`. The thresholds are conventions (DESIGN §22); V50 checks
   that the rules are computed as specified, not that the thresholds are good.
+- **Classification accuracy and consistency (V52, #107)**: DESIGN §18.4 in
+  `tests/test_r_classification.py` (slow tier; generator `validation/r/classification_reference.R`
+  → `tests/reference/v52_classification.json`, mirt 1.48, cacIRT 1.4, 61 points on $[-6, 6]$).
+  Each case's parameters go into a flexpyirt `FitResult` with every parameter fixed; mirt's EAP
+  scores are stored for the P approach. Cases: `threepl` (3PL, $J=20$, $N=3000$, generating
+  parameters fixed in mirt because a 3PL fit of this size did not converge), `grm` (GRM $K=4$,
+  $J=10$, $N=2000$, mirt estimates) and `twogroup` (2PL $J=15$, $N=1500$ per group, all items
+  invariant, focal mean and variance free). Runs: Lee with summed-score cuts 12, (8, 14),
+  (7.5, 13.2) and with $\theta$ cuts (−0.5, 0.8) converted by $\tau$; Rudner with $\theta$ cuts
+  0.3, (−0.5, 0.8) and with summed-score cuts (8, 14) converted by $\tau^{-1}$ (`uniroot` in R);
+  each with the D approach (fitted nodes and weights) and the P approach (mirt's EAP scores). Two
+  references per run:
+  - **cacIRT** (Lathrop, 2015): `class.Lee()` for the 3PL, `Lee.poly.D()` / `Lee.poly.P()` for
+    the GRM, and `Rud.D()` / `Rud.P()` with the SE $1/\sqrt{I(\theta)}$ from mirt's
+    `testinfo()`: "Simultaneous" (overall) and "Marginal" (per cut) accuracy and consistency and
+    the conditional values. `class.Rud()` is not used: cacIRT's `iif()` writes the 3PL
+    information with $(1-c^2)$ where Birnbaum's formula has $(1-c)^2$, so its SE is wrong
+    whenever $c>0$ (it is right for the 2PL). Largest differences: exact functions `1.2e-15`
+    (D) and `2.4e-15` (P); `Lee.poly.D()` `3.9e-12`, because cacIRT clips the category
+    probabilities to $[10^{-4}, 1-10^{-4}]$ before its recursion. cacIRT's `class.Lee()` puts a
+    true score equal to a cut below it in the D approach (`cut(right = TRUE)`) and above it in
+    the P approach; flexpyirt puts it above in both (no case hits a tie).
+  - **Recomputation in R** from mirt's `probtrace()`, `expected.test()` and `testinfo()` with a
+    Lord–Wingersky recursion written in the script: the tables $A$ and $B$, kappa, the per-cut
+    false positive / negative rates and the per-category indices (none of which cacIRT has), and
+    the conditional values. The script asserts that it reproduces cacIRT's exact functions to
+    $10^{-12}$. Largest differences: D `2.0e-14`, P `4.4e-15`; flexpyirt's EAP scores against
+    mirt's `7.8e-15`. Tolerances $10^{-12}$ (D, P, EAP) and $10^{-10}$ against `Lee.poly.D()`.
+  - **Without R** (`tests/test_classification.py`): brute-force enumeration of all 72 response
+    patterns of a mixed 2PL + 3PL + GRM $K=3$ + GPCM $K=3$ test with the item probabilities
+    written out in NumPy (tables, conditional values, kappa; `1e-14`), Rudner against
+    `scipy.stats.norm` with `test_information()`, identities between the indices (tables sum to
+    1, equal observed margins, accuracy + false positive + false negative = 1 per cut), the
+    scale conversions against `expected_score()`, multiple groups and the errors (fast tier).
+    Slow tier: a Monte Carlo simulation of two parallel administrations ($N=200\,000$,
+    $\theta\sim N(0,1)$) agrees with the D approach on a 2401-node grid within 4.5 Monte Carlo
+    SEs for accuracy, consistency and the accuracy table, for Lee and Rudner.
+  - **Discretization**: on the default 61-node grid the D approach's accuracy differs from the
+    continuous-latent value (2401 nodes) by up to `7.6e-3` (Lee, 5-item mixed test) and `2.5e-3`
+    (Rudner); consistency and kappa by `1e-9`. This is the jump of the conditional accuracy
+    where the true category changes (DESIGN §18.4), not an error of the implementation; cacIRT
+    gives the same value on the same grid.
+  - **Not validated**: `sirt::class.accuracy.rasch` (Rasch, cuts on $\theta$) was not used,
+    since cacIRT covers the same indices; latent distributions other than `Normal` (the code
+    path is the same weights; not compared with R).
 - **Bifactor models (V32, M7)**: two simulated cases in `tests/test_mirt_m7_bifactor.py` (plain
   EM and SQUAREM; generator `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`,
   mirt 1.46.1 `bfactor()`, `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`,

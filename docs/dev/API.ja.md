@@ -178,6 +178,7 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `summed_score_distribution` | 関数 | カテゴリ確率に対する Lord–Wingersky / Poisson 二項分布のカーネル（DESIGN §18.1） |
 | `compare_fits` | 関数 | 同じデータへの当てはめの比較表: `n_params`、`loglik`、AIC、SABIC、HQ、BIC と直前の行に対する尤度比検定（mirt の `anova()`。DESIGN §24.1） |
 | `simulate_responses`, `SimulatedData` | 関数、frozen dataclass | `FitResult` または `Model` + 項目バンクから JAX の `key` で回答データを生成する。`responses`、`theta`、`group` を返す（DESIGN §24.2） |
+| `classification_accuracy` | 関数 | カット得点による分類の正確さと一貫性（合計得点上の Lee, 2010、$\theta$ 上の Rudner, 2001, 2005。D 法と P 法）。1 次元の `FitResult` に対し `ClassificationResult`（`summary`、`by_category`、`by_cut`、`conditional`、`accuracy_table`、`consistency_table`。DESIGN §18.4）を返す |
 | `LocalDependenceResult` | frozen dataclass | `FitResult.local_dependence()` の戻り値（`pairs`, `q3`, `q3_mean`, `max_q3_star`） |
 | `JSIResult` | frozen dataclass | `FitResult.jsi()` の戻り値（`matrix`, `pairs`, `method`, `converged`） |
 

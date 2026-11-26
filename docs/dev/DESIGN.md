@@ -2763,6 +2763,91 @@ data-independent shapes (§15.21).
    **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
    **Measured agreement** is recorded in VALIDATION.md (V43).
 
+4. **Classification accuracy and consistency for cut scores (#107, V52)**:
+   **What it computes.** A test with cut scores $c_1<\dots<c_C$ sorts respondents into $H=C+1$
+   ordered categories $h=0,\dots,C$; a value at or above $c_k$ is above that cut, so
+   the category of a value $v$ is $h(v)=\#\{k: v\ge c_k\}$. From one administration and the
+   fitted model, **classification accuracy** is the probability that the observed category
+   equals the true category, and **classification consistency** the probability that two
+   independent parallel administrations give the same category (Lee, 2010; Rudner, 2001, 2005).
+   **Conditional category probabilities.** At a true value $\theta$:
+   - **Lee (2010)** (`method="lee"`, cuts on the summed score). The observed category comes from
+     the summed score $S$, whose conditional distribution is the Lord–Wingersky likelihood
+     $L(s\mid\theta)$ of item 1 (exact recursion, every item family):
+     $P_h(\theta)=\sum_{s:\,h(s)=h}L(s\mid\theta)$. The true category is that of the expected
+     summed score (true score) $\tau(\theta)=\sum_j\sum_kk\,P_{jk}(\theta)$, i.e.
+     $t(\theta)=h(\tau(\theta))$. A non-integer cut $c$ puts the scores $s\ge\lceil c\rceil$ above
+     it (as cacIRT does).
+   - **Rudner (2001, 2005)** (`method="rudner"`, cuts on $\theta$). The estimate is
+     $\hat\theta\sim N(\theta,\mathrm{SE}(\theta)^2)$ with $\mathrm{SE}(\theta)=I(\theta)^{-1/2}$
+     from the test information of item 2:
+     $P_h(\theta)=\Phi\big((c_{h+1}-\theta)/\mathrm{SE}\big)-\Phi\big((c_h-\theta)/\mathrm{SE}\big)$
+     with $c_0=-\infty$, $c_H=\infty$; the true category is $t(\theta)=h(\theta)$.
+   **Integration over the true values.** With points $\theta_n$ and weights $w_n$
+   ($\sum_nw_n=1$):
+   - **D method** (`data=None`; Lathrop & Cheng, 2013): the fitted quadrature nodes and the
+     fitted latent weights of the group (the weights the EM integrates with, so every latent
+     distribution works; the R reference covers `Normal`).
+   - **P method** (`data` given): the respondents' estimates $\hat\theta_i$ of the group
+     (`score(data, method=score_method)`, default `"EAP"`) as if they were true values, each with
+     weight $1/N_g$. For Rudner the SE is $I(\hat\theta_i)^{-1/2}$ from the information, not the
+     scoring SE (as Rudner, 2005, and cacIRT). Non-finite estimates (ML on extreme patterns)
+     raise `SpecificationError`.
+   **Indices.** All of them come from two $H\times H$ tables,
+   $$A_{tk}=\sum_nw_n\,[t(\theta_n)=t]\,P_k(\theta_n),\qquad
+   B_{hk}=\sum_nw_nP_h(\theta_n)P_k(\theta_n),$$
+   the joint distribution of (true, observed) category and of the categories of two independent
+   administrations. Accuracy $\gamma=\sum_hA_{hh}$, consistency $\phi=\sum_hB_{hh}$, and
+   Cohen's (1960) kappa for consistency $\kappa=(\phi-\phi_c)/(1-\phi_c)$,
+   $\phi_c=\sum_hp_h^2$, $p_h=\sum_kB_{hk}$ (Lee, 2010). Conditional indices at $\theta_n$ are
+   $\gamma(\theta_n)=P_{t(\theta_n)}(\theta_n)$ and $\phi(\theta_n)=\sum_hP_h(\theta_n)^2$.
+   Per category $h$: `true_proportion` $\sum_kA_{hk}$, `proportion` $p_h$, `accuracy`
+   $A_{hh}/\sum_kA_{hk}$ (observed $=h$ given true $=h$), `consistency` $B_{hh}/p_h$ (second
+   $=h$ given first $=h$); NaN where the denominator is 0. Per cut $c_k$ (the two-category
+   split "below $c_k$" / "at or above $c_k$"): accuracy, consistency and kappa of that
+   dichotomy (sums of the blocks of $A$ and $B$), `false_positive`
+   $\sum_{t<k\le h}A_{th}$ (true below, observed above) and `false_negative`
+   $\sum_{h<k\le t}A_{th}$. With one cut, the per-cut and overall indices coincide. These are
+   cacIRT's "Marginal" (per cut) and "Simultaneous" (overall) indices; kappa, false
+   positive/negative rates and the per-category indices are not in cacIRT and are checked by an
+   independent recomputation in R.
+   **Scales.** `scale=None` uses the method's own scale. `method="lee", scale="theta"` maps each
+   cut through the test characteristic curve, $c^S_k=\tau(c_k)$; `method="rudner",
+   scale="summed_score"` inverts it, $c^\theta_k=\tau^{-1}(c_k)$ by bisection on $[-40, 40]$
+   (requires $\tau$ to be increasing, which holds for every family except possibly nominal
+   items, and $\tau(-40)<c_k<\tau(40)$). In a multiple-group model the converted cuts differ by
+   group and are reported in `by_cut` (`summed_score_cut` / `theta_cut`).
+   **Discretization (D approach).** The D approach integrates over the quadrature grid, i.e.
+   over the discrete latent distribution the EM works with, as cacIRT does with the quadrature it
+   is given. Consistency is smooth in $\theta$ and agrees with the continuous-latent integral to
+   about $10^{-10}$ with 61 nodes; accuracy jumps where $t(\theta)$ changes, so it differs from
+   the continuous integral by up to the order of the node spacing (measured up to 0.008 for a
+   5-item test with 61 nodes on $[-6,6]$, VALIDATION V52). The value is reported on the fitted
+   grid, not on a dedicated finer grid, so that every latent distribution (EH included) is
+   handled the same way; a finer `Quadrature` or the P approach is the remedy.
+   **Validation of cuts.** Finite, strictly increasing; on the summed score
+   $0<c_k\le S_{\max}$ and the ceilings $\lceil c_k\rceil$ distinct (otherwise an observed
+   category is empty). Otherwise `SpecificationError`.
+   **API (Decision, owner approved the proposal in #107).**
+   `classification_accuracy(res, *, cut_scores, method="lee", scale=None, data=None, group=None,
+   item_names=None, score_method="EAP") -> ClassificationResult`, unidimensional models only.
+   `ClassificationResult` holds DataFrames `summary` (`accuracy`, `consistency`, `kappa`; one
+   row per group), `by_category`, `by_cut`, `conditional` (per node or respondent: `theta`,
+   `weight`, `true_category`, `accuracy`, `consistency`, plus `true_score` for Lee or `se` for
+   Rudner), `accuracy_table` ($A$, rows true, columns observed) and `consistency_table` ($B$);
+   a multiple-group result has a leading `group` column (a `(group, category)` index for the
+   tables). The float properties `accuracy`, `consistency` and `kappa` are for single-group
+   results and raise `SpecificationError` otherwise. Multiple-group fits give one set of
+   indices per group (the group's item parameters and latent distribution); with `data`, a group
+   without respondents is left out.
+   **Kernel.** `_classification.py` holds pure JAX functions (category probabilities for both
+   methods, the tables $A$ and $B$); the shell computes the derived indices from the small
+   $H\times H$ tables in NumPy.
+   **Left out.** Model-free observed-score methods (Livingston & Lewis, 1995; Hanson & Brennan,
+   1990), composite scores, standard errors of the indices, multidimensional models.
+   **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
+   **Measured agreement** is recorded in VALIDATION.md (V52).
+
 ## 19. Multidimensional scale linking (M6)
 
 1. **Linking of confirmatory multidimensional models (`link(..., transformation=)`, V40, #78)**:
@@ -3292,6 +3377,7 @@ data-independent shapes (§15.21).
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
+- Cohen, J. (1960). A coefficient of agreement for nominal scales. *Educational and Psychological Measurement*, 20(1), 37–46.
 - Devroye, L. (1986). *Non-Uniform Random Variate Generation*. Springer.
 - Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
 - Drezner, Z., & Wesolowsky, G. O. (1990). On the computation of the bivariate normal integral. *Journal of Statistical Computation and Simulation*, 35(1–2), 101–107.
@@ -3309,6 +3395,7 @@ data-independent shapes (§15.21).
 - Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Hannan, E. J., & Quinn, B. G. (1979). The determination of the order of an autoregression. *JRSS B*, 41(2), 190–195.
+- Hanson, B. A., & Brennan, R. L. (1990). An investigation of classification consistency indexes estimated under alternative strong true score models. *Journal of Educational Measurement*, 27(4), 345–359.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holland, P. W., & Thayer, D. T. (1988). Differential item performance and the Mantel–Haenszel procedure. In H. Wainer & H. I. Braun (Eds.), *Test Validity* (pp. 129–145). Erlbaum.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
@@ -3325,9 +3412,12 @@ data-independent shapes (§15.21).
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Landis, J. R., Heyman, E. R., & Koch, G. G. (1978). Average partial association in three-way contingency tables: A review and discussion of alternative tests. *International Statistical Review*, 46(3), 237–254.
+- Lathrop, Q. N., & Cheng, Y. (2013). Two approaches to estimation of classification accuracy rate under item response theory. *Applied Psychological Measurement*, 37(3), 226–241.
 - Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
+- Lee, W.-C. (2010). Classification consistency and accuracy for complex assessments using item response theory. *Journal of Educational Measurement*, 47(1), 1–17.
 - Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24(2), 115–138.
 - Liu, I.-M., & Agresti, A. (1996). Mantel–Haenszel-type inference for cumulative odds ratios with a stratified ordinal response. *Biometrics*, 52(4), 1223–1234.
+- Livingston, S. A., & Lewis, C. (1995). Estimating the consistency and accuracy of classifications based on test scores. *Journal of Educational Measurement*, 32(2), 179–197.
 - Lord, F. M. (1980). *Applications of Item Response Theory to Practical Testing Problems*. Lawrence Erlbaum.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
@@ -3367,6 +3457,8 @@ data-independent shapes (§15.21).
 - Robins, J., Breslow, N., & Greenland, S. (1986). Estimators of the Mantel–Haenszel variance consistent in both sparse data and large-strata limiting models. *Biometrics*, 42(2), 311–323.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
+- Rudner, L. M. (2001). Computing the expected proportions of misclassified examinees. *Practical Assessment, Research, and Evaluation*, 7, Article 14.
+- Rudner, L. M. (2005). Expected classification accuracy. *Practical Assessment, Research, and Evaluation*, 10, Article 13.
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.

@@ -175,6 +175,10 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   BIC, likelihood-ratio tests; mirt's `anova()`) and `simulate_responses()` / `SimulatedData` (from
   a `FitResult` or a `Model` with an item bank; every item model, latent distribution and model
   structure; JAX key). Validated in V54; checked once the comparison passes the nightly CI.
+- [x] Classification accuracy and consistency for cut scores (#107; `classification_accuracy()`,
+  `ClassificationResult`: Lee, 2010, on summed-score cuts and Rudner, 2001, 2005, on $\theta$
+  cuts, D and P approaches, kappa, per-cut false positive / negative rates, unidimensional models,
+  single and multiple groups; validated in V52 against cacIRT and a recomputation from mirt).
 
 ## Ongoing
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).

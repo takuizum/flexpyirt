@@ -17,6 +17,7 @@ from flexpyctt.dif import (
     mantel_haenszel,
 )
 from flexpyirt import errors
+from flexpyirt.classification import ClassificationResult, classification_accuracy
 from flexpyirt.comparison import compare_fits
 from flexpyirt.correlation import PolychoricResult, polychoric
 from flexpyirt.curves import (
@@ -88,6 +89,7 @@ __all__ = [
     "GRM",
     "PCM",
     "BetaPrior",
+    "ClassificationResult",
     "CommonItemScreeningResult",
     "ComparisonDataResult",
     "DIFResult",
@@ -124,6 +126,7 @@ __all__ = [
     "TwoPL",
     "WrightMapTable",
     "__version__",
+    "classification_accuracy",
     "compare_fits",
     "comparison_data",
     "detect",

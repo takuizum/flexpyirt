@@ -25,6 +25,7 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 - 図: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
 - IRT 等化: [`irt_equate`](#irt_equate), [`IRTEquatingResult`](#irtequatingresult), [`score_distribution`](#score_distribution), [`scale_table`](#scale_table)
 - モデル比較とシミュレーション: [`compare_fits`](#compare_fits), [`simulate_responses`](#simulate_responses), [`SimulatedData`](#simulateddata)
+- 分類: [`classification_accuracy`](#classification_accuracy), [`ClassificationResult`](#classificationresult)
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)、[ユーザー定義の項目モデル](#ユーザー定義の項目モデル)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior), [`LogitNormalPrior`](#logitnormalprior)
@@ -1824,6 +1825,64 @@ $[-4, 4]$ の 161 点。
 | `plot_information` | テスト情報量、または `items` の情報量。`standard_error=True` で SE を第 2 の y 軸（`ax.twinx()`）に描く。`group=` は群名（既定: 全群） | [`test_information`](#test_information), [`item_information`](#item_information) |
 | `plot_expected_score` | テスト特性曲線。既定では群ごとに 1 本 | [`expected_score`](#expected_score)（`total`） |
 | `plot_wright_map` | 受検者の推定値の横向きヒストグラム（`n_bins` 区間）と項目の閾値を、$\theta$ 軸を共有して並べる | [`wright_map_table`](#wright_map_table) |
+
+---
+
+## 分類
+
+### `classification_accuracy`
+
+```text
+classification_accuracy(res, *, cut_scores, method="lee", scale=None, data=None, group=None,
+                        item_names=None, score_method="EAP") -> ClassificationResult
+```
+
+カット得点による分類の正確さと一貫性（[ガイド 7 節](guide.ja.md#分類の正確さと一貫性)、DESIGN.md §18.4）。カット
+$c_1<\dots<c_C$ がカテゴリ $h(v)=\#\{k: v\ge c_k\}=0,\dots,C$ を決める。真の値 $\theta$ で、各方法は観測
+カテゴリの確率 $P_h(\theta)$ と真のカテゴリ $t(\theta)$ を与える:
+
+- `"lee"`（Lee, 2010）: $P_h(\theta)=\sum_{s:\,h(s)=h}L(s\mid\theta)$（合計得点の Lord–Wingersky の分布）、
+  期待合計得点 $\tau$ で $t(\theta)=h(\tau(\theta))$。整数でないカット $c$ では $s\ge\lceil c\rceil$ が上。
+- `"rudner"`（Rudner, 2001, 2005）: $P_h(\theta)=\Phi((c_{h+1}-\theta)/\mathrm{SE})-\Phi((c_h-\theta)/\mathrm{SE})$、
+  $\mathrm{SE}=I(\theta)^{-1/2}$、$t(\theta)=h(\theta)$。
+
+点 $\theta_n$ と重み $w_n$（`data` なしでは推定時の求積点と潜在分布の重み = D 法、`data` ありでは受検者の推定値と
+重み $1/N$ = P 法。Lathrop & Cheng, 2013）で $A_{tk}=\sum_nw_n[t(\theta_n)=t]P_k(\theta_n)$、
+$B_{hk}=\sum_nw_nP_h(\theta_n)P_k(\theta_n)$ とし、正確さ $\sum_hA_{hh}$、一貫性 $\sum_hB_{hh}$、一貫性の
+Cohen の κ を返す。cacIRT の `class.Lee()` / `class.Rud()` にあたる。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みの 1 次元モデル |
+| `cut_scores` | float / 配列 | 狭義単調増加のカット。合計得点上では $(0, S_{\max}]$ にあり、異なる得点を選ぶこと |
+| `method` | `"lee"` / `"rudner"` | 方法（既定 `"lee"`） |
+| `scale` | `"summed_score"` / `"theta"`、省略可 | カットの尺度。既定は方法の本来の尺度。違えばテスト特性曲線で変換する（Lee は $\tau(c)$、Rudner は $\tau^{-1}(c)$） |
+| `data` | DataFrame / 2 次元配列、省略可 | 反応。受検者の推定値で平均する（P 法） |
+| `group` | 配列、省略可 | `data` の各行の群ラベル（多母集団モデルで `data` を与えるときは必須） |
+| `item_names` | list[str]、省略可 | `data` が配列のときの列名 |
+| `score_method` | `"EAP"` / `"MAP"` / `"ML"` / `"WLE"` | P 法の推定値（既定 `"EAP"`）。Rudner の SE は常に $I(\hat\theta)^{-1/2}$ |
+
+**戻り値**: [`ClassificationResult`](#classificationresult)。
+
+**例外**: 多次元モデル、未知の `method` / `scale` / `score_method`、不正なカット、テスト特性曲線の範囲外の合計
+得点のカット（Rudner）、`data` なしの `group` / `item_names` / `score_method`、P 法での有限でない推定値（極端な
+パターンの ML）では `SpecificationError`。
+
+### `ClassificationResult`
+
+[`classification_accuracy`](#classification_accuracy) が返す frozen dataclass。多母集団の結果ではどの
+DataFrame にも先頭に `group` 列がつく（2 つの表は `(group, category)` の行索引）。
+
+| 属性 | 内容 |
+|---|---|
+| `method`, `scale`, `cut_scores`, `approach` | 設定（`approach` は `"D"` か `"P"`） |
+| `summary` | 群ごとに 1 行: `accuracy`、`consistency`、`kappa`（P 法では `n` も） |
+| `by_category` | `category`、`true_proportion`、`proportion`（観測）、`accuracy`（真が $h$ のとき観測も $h$）、`consistency`（1 回目が $h$ のとき 2 回目も $h$） |
+| `by_cut` | `cut`（変換したときは `summed_score_cut` / `theta_cut` も）、`accuracy`、`consistency`、`kappa`、`false_positive`（真は下、観測はカット以上）、`false_negative` |
+| `conditional` | 求積点（D）または受検者（P）ごと: `theta`、`weight`、`true_category`、`accuracy`、`consistency`、Lee では `true_score`、Rudner では `se` |
+| `accuracy_table` | $A$: 真（行）と観測（列）のカテゴリの同時確率 |
+| `consistency_table` | $B$: 独立な 2 回の実施のカテゴリの同時確率 |
+| `accuracy`, `consistency`, `kappa` | 単一群の結果の float（多母集団の結果では `SpecificationError`） |
 
 ---
 

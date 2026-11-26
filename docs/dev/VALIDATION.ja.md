@@ -82,6 +82,7 @@
 | V48 | mirt の推定値での図の数値（2PL $J=10$、$N=1003$。欠測 10% の 2PL。GRM $K=4$、$J=6$。2PL + 3PL + GPCM + 名義の混合 $J=10$。2 群の 2PL + GRM で焦点群の平均・分散を推定。TAM の GPCM $K=4$、$J=6$）: 経験的項目曲線、トレースライン、サーストン閾値 | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))`（群ごとは `extract.group()`）、`probtrace()`、`probtrace()` に対する `uniroot()`、`coef(IRTpars = TRUE)`。TAM `tam.threshold()` | #103 |
 | V50 | リンキングの共通項目の点検（#105）: 頑健 z（Huynh & Meyer, 2010）・変位・期待項目得点曲線の RMSD。除外の順序、純化の各段階のリンキング係数、最終の項目表（2PL、2PL + GRM + GPCM 混在） | 個別の `mirt()` 推定 + 素の R による再計算（`median()`、`quantile(type = 7)`、`expected.item()`、V20 のリンキング）。ドリフト項目の照合に `equateIRT::dif.test` | 現場向け |
 | V51 | IRT 真値等化・観測得点等化と素点-尺度得点変換表（2 値: 20 + 20 項目、3PL + 2PL、リンクあり。多値: 4 GRM $K=4$ + 6 2PL と 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL、リンクあり。母集団は新・旧・合成 $w_1=0.5$。変換表は真値と EAPsum） | `equateIRT:::score_compute(method = "TSE" / "OSE")`、`SNSequate::irt.eq(method = "TS")`。mirt の `expected.test()`・`probtrace()`・`testinfo()`・`fscores(method = "EAPsum", full.scores = FALSE)` と `uniroot()`、`equate::equate(type = "equipercentile")` | #106 |
+| V52 | カット得点による分類の正確さと一貫性（#107）: Lee（合計得点のカット）と Rudner（$\theta$ のカット）、D 法と P 法、カット 1〜3 個、整数でないカット、両方向のカット尺度の変換（3PL $J=20$、GRM $K=4$・$J=10$、2 群の 2PL $J=15$・焦点群の平均と分散は自由） | cacIRT 1.4 `class.Lee()`、`Lee.poly.D()` / `Lee.poly.P()`、mirt の `testinfo()` の SE を与えた `Rud.D()` / `Rud.P()`。mirt の `probtrace()` / `expected.test()` / `testinfo()` からの独立な再計算（κ、偽陽性・偽陰性率、カテゴリごとの指標、表） | field |
 | V54 | モデル比較表（V11a のデータで Rasch・2PL・3PL、V8b のデータで PCM・GPCM、V4 のデータで全項目不変の 2 群 2PL とアンカーのみのモデル・最後の項目だけ自由なモデル）と回答データのシミュレーション（2PL・Rasch・3PL・4PL・GRM・GPCM・名義反応の 1 次元と 2 因子での決定的な逆変換、潜在分布ごとの分布と復元の確認） | `anova(mod1, mod2, ...)`。同じ $\theta$ と一様乱数での `probtrace()`（乱数列は `simdata()` と一致させられない） | #109 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -575,6 +576,44 @@
   （拒否する）。外部の R リンキングパッケージは使っていない。単体テスト（全カーネル・全族での曲線の不変性、3 つの族の
   閉じた式、1 因子の規準が §16.5 に一致、有限差分の勾配、2・3 因子での既知の変換の厳密な再現、リンキングを解き直して確かめる
   デルタ法のヤコビアン、`transform_theta`、エラー）: `tests/test_m6_linking_multidim.py`。
+- **分類の正確さと一貫性（V52、#107）**: DESIGN §18.4 を `tests/test_r_classification.py`
+  （低速層。生成スクリプト `validation/r/classification_reference.R` →
+  `tests/reference/v52_classification.json`、mirt 1.48、cacIRT 1.4、$[-6, 6]$ 上 61 点）で照合する。
+  各ケースのパラメタを全パラメタ固定の flexpyirt `FitResult` に入れ、P 法のために mirt の EAP を
+  保存する。ケース: `threepl`（3PL、$J=20$、$N=3000$。この規模の 3PL の推定が収束しなかったので、
+  mirt でも生成値に固定）、`grm`（GRM $K=4$、$J=10$、$N=2000$、mirt の推定値）、`twogroup`
+  （2PL $J=15$、群ごとに $N=1500$、全項目不変、焦点群の平均と分散は自由）。実行: Lee は合計得点の
+  カット 12、(8, 14)、(7.5, 13.2) と、$\tau$ で変換する $\theta$ のカット (−0.5, 0.8)。Rudner は
+  $\theta$ のカット 0.3、(−0.5, 0.8) と、$\tau^{-1}$（R では `uniroot`）で変換する合計得点のカット
+  (8, 14)。それぞれ D 法（推定時の求積点と重み）と P 法（mirt の EAP）。参照は 1 回の実行に 2 つ:
+  - **cacIRT**（Lathrop, 2015）: 3PL は `class.Lee()`、GRM は `Lee.poly.D()` / `Lee.poly.P()`、
+    `Rud.D()` / `Rud.P()` には mirt の `testinfo()` からの SE $1/\sqrt{I(\theta)}$ を与える。
+    "Simultaneous"（全体）と "Marginal"（カットごと）の正確さ・一貫性、条件つきの値。`class.Rud()`
+    は使わない: cacIRT の `iif()` は 3PL の情報量で Birnbaum の式の $(1-c)^2$ を $(1-c^2)$ と書いて
+    おり、$c>0$ だと SE が誤る（2PL では正しい）。最大差: 厳密な関数とは `1.2e-15`（D）・`2.4e-15`
+    （P）。`Lee.poly.D()` とは `3.9e-12`（cacIRT が漸化式の前にカテゴリ確率を
+    $[10^{-4}, 1-10^{-4}]$ に切り詰めるため）。cacIRT の `class.Lee()` はカットに等しい真の得点を
+    D 法では下（`cut(right = TRUE)`）、P 法では上に入れる。flexpyirt はどちらも上（同点になる
+    ケースはない）。
+  - **R での再計算**: mirt の `probtrace()`・`expected.test()`・`testinfo()` とスクリプト内で書いた
+    Lord–Wingersky の漸化式から、表 $A$ と $B$、κ、カットごとの偽陽性・偽陰性率、カテゴリごとの
+    指標（いずれも cacIRT にない）と条件つきの値。スクリプトは cacIRT の厳密な関数を $10^{-12}$ で
+    再現することを確かめる。最大差: D `2.0e-14`、P `4.4e-15`。flexpyirt の EAP と mirt の EAP の差
+    `7.8e-15`。許容誤差は $10^{-12}$（D、P、EAP）、`Lee.poly.D()` とは $10^{-10}$。
+  - **R を使わない検査**（`tests/test_classification.py`）: 2PL + 3PL + GRM $K=3$ + GPCM $K=3$ の
+    混在テストの全 72 反応パターンの総当たり（項目の確率は NumPy で書き下す。表、条件つきの値、κ。
+    `1e-14`）、`test_information()` を使った `scipy.stats.norm` との Rudner の照合、指標間の恒等式
+    （表の和が 1、観測側の周辺が等しい、カットごとに正確さ + 偽陽性 + 偽陰性 = 1）、
+    `expected_score()` との尺度変換の照合、多母集団、エラー（高速層）。低速層: 平行測定 2 回の
+    モンテカルロ（$N=200\,000$、$\theta\sim N(0,1)$）が、2401 点の格子での D 法と正確さ・一貫性・
+    正確さの表について Lee と Rudner ともモンテカルロ SE の 4.5 倍以内で一致する。
+  - **離散化**: 既定の 61 点の格子では、D 法の正確さは連続な潜在分布での値（2401 点）と最大
+    `7.6e-3`（Lee、5 項目の混在テスト）・`2.5e-3`（Rudner）違う。一貫性と κ は `1e-9`。真の
+    カテゴリが変わるところで条件つきの正確さが跳ぶためで（DESIGN §18.4）、実装の誤差ではない。
+    同じ格子なら cacIRT も同じ値になる。
+  - **照合していないもの**: `sirt::class.accuracy.rasch`（Rasch、$\theta$ 上のカット）は cacIRT が
+    同じ指標を扱うので使っていない。`Normal` 以外の潜在分布（同じ重みのコード経路だが R とは
+    比べていない）。
 
 - **共通項目の点検（V50、#105）**: 頑健 z・変位・期待得点の RMSD を特性曲線リンキングと純化と組み合わせて実装した R パッケージは
   ないので、`validation/r/v50_screening_reference.R`（→ `tests/reference/v50_screening.json`、mirt 1.48、equateIRT 2.5.2）が
