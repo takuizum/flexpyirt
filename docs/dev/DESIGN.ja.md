@@ -1574,68 +1574,6 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     §17 のブロック構造に沿った計算が必要）、多母集団の多次元モデル（未照合。多母集団の $M_2$ は #76）。
     1 次元の結果はビット単位で変わらない（$D=1$ の同じコードパス）。
     **照合（V39）**: V14 の 4 モデルで mirt 1.48 と照合した。VALIDATION.md を参照。
-20. **DIF の分析手順: アンカーの純化つきスクリーニング、Wald 検定、効果量（#104、V49）**: Result 層での推定後の
-    処理（`dif.py`、`_dif.py`）。`jit` で動くのは推定し直しだけ。範囲: 1 次元の多母集団モデル（2 群以上、全項目モデル、
-    全潜在分布）、MLE のみ（事前分布なし）、標本ウェイトなし、仕様に項目間の等値制約がないこと。検定はすべて全群に
-    わたる総括検定。
-    - **Wald 検定（`FitResult.dif(..., test="wald")`）**: 検定する項目ごとに、推定値の自由パラメタ
-      $\boldsymbol\eta$ と `vcov` の $\mathbf V$ を使い、パラメタ $p$ の群間で異なる $m_p$ 個の `free_id`
-      $u_k$ の対比 $\eta_{p,u_1}-\eta_{p,u_k}$（$k=2..m_p$）計 $r=\sum_p(m_p-1)$ 行で $\mathbf L$ を作り、
-      $W=(\mathbf L\boldsymbol\eta)^\top(\mathbf L\mathbf V\mathbf L^\top)^{-1}
-      (\mathbf L\boldsymbol\eta)\sim\chi^2_r$（Wald, 1943; Lord, 1980）。mirt の `DIF(Wald = TRUE)` に相当。
-      推定し直さない。推定時に `se=` が必要。`scheme="add"` のみ（パラメタが群間で自由でなければならない）。
-      対比は flexpyirt の自然なパラメタ上でとるので、3PL/4PL の `g`/`u`（mirt はロジット尺度で検定する）では mirt と
-      値が違う。2PL・GRM・GPCM・Rasch・名義反応のパラメタは mirt と同じ。列は `item`、`x2`（統計量 $W$）、`df`、
-      `p`、`adj_p`。
-    - **`dif_screen(spec, data, *, group, items, anchor_items, strategy, test, params,
-      p_adjust="BH", alpha=0.05, max_iter=10, method, quadrature, se, item_names)`** はモデルを `spec` から自分で
-      作る（`spec` の `equal_across_groups()` は置き換える）。検定しない項目（`anchor_items` と `items` にない項目）の
-      全パラメタと、`params` 以外のパラメタは群間で等値。検定する項目の `params` は手順の状態に応じて等値（制約）か
-      群ごとに自由。自由な検定項目の集合を $F$ とすると、状態 $F$ での項目 $i$ の検定は $F\cup\{i\}$ と
-      $F\setminus\{i\}$ の比較（項目 $i$ 以外は $F$ のとおり）: 尤度比
-      $X^2=2(\ell_{F\cup\{i\}}-\ell_{F\setminus\{i\}})$、$df=k_{F\cup\{i\}}-k_{F\setminus\{i\}}$、または
-      $F\cup\{i\}$ の推定の Wald 統計量。推定は $F$ ごとにキャッシュし、推定し直しは現在のラウンドのモデルの推定値から
-      始める。各ラウンドで、検定する全項目の最新の $p$ を検定項目にわたって補正し（`p_adjust`、スクリーニングの既定は
-      `"BH"`）、$\tilde p<\alpha$ を検出とする。戦略（Candell & Drasgow, 1988; Kopf, Zeileis & Strobl, 2015; mirt の
-      `DIF()` の scheme）:
-      - `"all_others"`（mirt の完全不変モデルからの `scheme = "drop"`）: $F=\varnothing$ で 1 ラウンド。各項目を他の
-        全項目をアンカーとして検定する。
-      - `"sequential_free"`（`"drop_sequential"`）: 1 ラウンド目は `"all_others"` と同じ。以後、検出結果が変わる間
-        （最大 `max_iter` ラウンド）、$F$ = 検出された項目とし、検出されていない項目を $F$ に対して検定し直す（検出
-        された項目は最新の統計量のまま）。
-      - `"sequential_constrain"`（`"add_sequential"`）: 検定しないアンカー項目が 1 つ以上必要。1 ラウンド目は
-        $F$ = 全検定項目（アンカーだけ制約）で全項目を検定し、以後 $F$ = 検出された項目として、検出された項目を
-        $F$ に対して検定し直す。
-      あるラウンドが直前のラウンドと同じ検出結果を出したら収束（1 ラウンド目は開始時の $F$ と比べる）。`max_iter`
-      ラウンドで収束しなければ `ConvergenceWarning`。mirt の `max_run = r` は `max_iter = r - 1` に当たる。
-      結果の `DIFScreenResult` は `table`（検定項目ごとに 1 行: `item`、`x2`、`df`、`p`、`adj_p`、`flagged`、
-      `converged`）、`flagged_items`、`anchor_items`（検出されなかった全項目、モデルの順）、`history`（ラウンドと検定
-      項目ごとに 1 行: `round`、`item`、`retested`、`x2`、`df`、`p`、`adj_p`、`flagged`）、`fit`（最終モデル。
-      $F$ = 検出された項目、`se=` つき）、`n_rounds`、`converged` を持つ。`"all_others"` の表は 1 ラウンド目。逐次
-      戦略の表は最終的な $F$ に対する各項目の検定（純化したアンカーに対する各項目の検定。検出された項目は mirt の最終
-      出力と同じ）で、`adj_p` は表にわたって補正する。`flagged` は手順の判定。推定し直しが収束しなかったことは
-      `converged` に記録する（推定ごとの警告は出さない）。
-    - **`dif_effect_sizes(result, *, data=None, group=None, focal=None, items=None,
-      density="focal", item_names=None)`**（`result` は多母集団の `FitResult` か `DIFScreenResult`）: 各焦点群
-      $f$（既定は第 1 群 = 参照群 $r$ 以外の全群）と項目 $j$ について、期待項目得点
-      $E_{gj}(\theta)=\sum_kkP_{gjk}(\theta)$ の差 $D_j(\theta)=E_{fj}(\theta)-E_{rj}(\theta)$ を、推定時の格子
-      $\theta_q$ と焦点群（`density="reference"` なら参照群）の正規化した推定潜在分布の重み $w_q$ で積分する:
-      $\text{signed}_j=\sum_qw_qD_j(\theta_q)$、$\text{unsigned}_j=\sum_qw_q|D_j(\theta_q)|$（Chalmers, 2018;
-      mirt の `DRF(DIF = TRUE, best_fitting = TRUE)` の `sDIF` / `uDIF`）。`data` を渡すと、焦点群の $n$ 人の EAP
-      $\hat\theta_i$ での期待得点の標準化差（Meade, 2010; mirt の `empirical_ES()` の `ESSD`）
-      $\big(\overline{E_{fj}(\hat\theta)}-\overline{E_{rj}(\hat\theta)}\big)/\sqrt{(s^2_{f}+s^2_{r})/2}$（標本分散、
-      分母 $n-1$。同じ大きさの 2 標本の併合 SD）と、2 群それぞれの RMSD（`rmsd_reference`、`rmsd_focal`）も求める。
-      群の E-step の期待度数 $\bar r_{gjkq}$ から $\hat E_{gj}(\theta_q)=\sum_kk\bar r_{gjkq}/\sum_k\bar r_{gjkq}$
-      とし、$\mathrm{RMSD}_{gj}=\big(\sum_qw_{gq}(\hat E_{gj}(\theta_q)-E_{gj}(\theta_q))^2\big)^{1/2}$（期待得点の
-      形。2 値項目では von Davier, 2005、Köhler, Robitzsch & Hartig, 2020 のカテゴリ 1 の RMSD; mirt の
-      `RMSD_DIF(probfun = FALSE)`）。RMSD は各群のパラメタがその群に合うかを測るので、群間で等値な項目（不変・部分
-      不変モデル）の DIF を検出する。焦点群ごとにもう 1 行（`level="test"`、`item="test"`）で $D_j$ を `items`
-      にわたって合計する（符号つき・符号なしの DTF、mirt の `DRF(DIF = FALSE)`。期待テスト得点の標準化差、mirt の
-      `ETSSD`。RMSD は NaN）。列: `group`、`level`、`item`、`signed_difference`、`unsigned_difference`、`data` を
-      渡すと `expected_score_standardized_difference`、`rmsd_reference`、`rmsd_focal`。符号は焦点群 − 参照群
-      （mirt と同じ）。範囲外: mirt の DRF の既定の密度（データの事後期待度数）、DRF の抽出による検定と区間、焦点群
-      どうしの対比較、多次元モデル。
-
 20. **flexpyctt の観測得点による DIF（`mantel_haenszel()`、`mantel()`、
     `generalized_mantel_haenszel()`、`logistic_dif()`、`DIFResult`。issue #102、V47）**: IRT モデルを使わない DIF の
     検出。`flexpyctt.dif`（公開層: 入力の検査、マッチング得点、純化、表の組み立て）と `flexpyctt._dif`（検定する
@@ -1711,6 +1649,67 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     `group_coefficient_se`、`interaction_coefficient`、`interaction_coefficient_se`。(5) オーナー判断 4（標準化法、
     STD P-DIF）: #102 の範囲の一覧どおり含めない。**この PR に含めないもの**: 順序ロジスティック回帰による DIF（#102 の
     2 本目の PR）。
+22. **DIF の分析手順: アンカーの純化つきスクリーニング、Wald 検定、効果量（#104、V49）**: Result 層での推定後の
+    処理（`dif.py`、`_dif.py`）。`jit` で動くのは推定し直しだけ。範囲: 1 次元の多母集団モデル（2 群以上、全項目モデル、
+    全潜在分布）、MLE のみ（事前分布なし）、標本ウェイトなし、仕様に項目間の等値制約がないこと。検定はすべて全群に
+    わたる総括検定。
+    - **Wald 検定（`FitResult.dif(..., test="wald")`）**: 検定する項目ごとに、推定値の自由パラメタ
+      $\boldsymbol\eta$ と `vcov` の $\mathbf V$ を使い、パラメタ $p$ の群間で異なる $m_p$ 個の `free_id`
+      $u_k$ の対比 $\eta_{p,u_1}-\eta_{p,u_k}$（$k=2..m_p$）計 $r=\sum_p(m_p-1)$ 行で $\mathbf L$ を作り、
+      $W=(\mathbf L\boldsymbol\eta)^\top(\mathbf L\mathbf V\mathbf L^\top)^{-1}
+      (\mathbf L\boldsymbol\eta)\sim\chi^2_r$（Wald, 1943; Lord, 1980）。mirt の `DIF(Wald = TRUE)` に相当。
+      推定し直さない。推定時に `se=` が必要。`scheme="add"` のみ（パラメタが群間で自由でなければならない）。
+      対比は flexpyirt の自然なパラメタ上でとるので、3PL/4PL の `g`/`u`（mirt はロジット尺度で検定する）では mirt と
+      値が違う。2PL・GRM・GPCM・Rasch・名義反応のパラメタは mirt と同じ。列は `item`、`x2`（統計量 $W$）、`df`、
+      `p`、`adj_p`。
+    - **`dif_screen(spec, data, *, group, items, anchor_items, strategy, test, params,
+      p_adjust="BH", alpha=0.05, max_iter=10, method, quadrature, se, item_names)`** はモデルを `spec` から自分で
+      作る（`spec` の `equal_across_groups()` は置き換える）。検定しない項目（`anchor_items` と `items` にない項目）の
+      全パラメタと、`params` 以外のパラメタは群間で等値。検定する項目の `params` は手順の状態に応じて等値（制約）か
+      群ごとに自由。自由な検定項目の集合を $F$ とすると、状態 $F$ での項目 $i$ の検定は $F\cup\{i\}$ と
+      $F\setminus\{i\}$ の比較（項目 $i$ 以外は $F$ のとおり）: 尤度比
+      $X^2=2(\ell_{F\cup\{i\}}-\ell_{F\setminus\{i\}})$、$df=k_{F\cup\{i\}}-k_{F\setminus\{i\}}$、または
+      $F\cup\{i\}$ の推定の Wald 統計量。推定は $F$ ごとにキャッシュし、推定し直しは現在のラウンドのモデルの推定値から
+      始める。各ラウンドで、検定する全項目の最新の $p$ を検定項目にわたって補正し（`p_adjust`、スクリーニングの既定は
+      `"BH"`）、$\tilde p<\alpha$ を検出とする。戦略（Candell & Drasgow, 1988; Kopf, Zeileis & Strobl, 2015; mirt の
+      `DIF()` の scheme）:
+      - `"all_others"`（mirt の完全不変モデルからの `scheme = "drop"`）: $F=\varnothing$ で 1 ラウンド。各項目を他の
+        全項目をアンカーとして検定する。
+      - `"sequential_free"`（`"drop_sequential"`）: 1 ラウンド目は `"all_others"` と同じ。以後、検出結果が変わる間
+        （最大 `max_iter` ラウンド）、$F$ = 検出された項目とし、検出されていない項目を $F$ に対して検定し直す（検出
+        された項目は最新の統計量のまま）。
+      - `"sequential_constrain"`（`"add_sequential"`）: 検定しないアンカー項目が 1 つ以上必要。1 ラウンド目は
+        $F$ = 全検定項目（アンカーだけ制約）で全項目を検定し、以後 $F$ = 検出された項目として、検出された項目を
+        $F$ に対して検定し直す。
+      あるラウンドが直前のラウンドと同じ検出結果を出したら収束（1 ラウンド目は開始時の $F$ と比べる）。`max_iter`
+      ラウンドで収束しなければ `ConvergenceWarning`。mirt の `max_run = r` は `max_iter = r - 1` に当たる。
+      結果の `DIFScreenResult` は `table`（検定項目ごとに 1 行: `item`、`x2`、`df`、`p`、`adj_p`、`flagged`、
+      `converged`）、`flagged_items`、`anchor_items`（検出されなかった全項目、モデルの順）、`history`（ラウンドと検定
+      項目ごとに 1 行: `round`、`item`、`retested`、`x2`、`df`、`p`、`adj_p`、`flagged`）、`fit`（最終モデル。
+      $F$ = 検出された項目、`se=` つき）、`n_rounds`、`converged` を持つ。`"all_others"` の表は 1 ラウンド目。逐次
+      戦略の表は最終的な $F$ に対する各項目の検定（純化したアンカーに対する各項目の検定。検出された項目は mirt の最終
+      出力と同じ）で、`adj_p` は表にわたって補正する。`flagged` は手順の判定。推定し直しが収束しなかったことは
+      `converged` に記録する（推定ごとの警告は出さない）。
+    - **`dif_effect_sizes(result, *, data=None, group=None, focal=None, items=None,
+      density="focal", item_names=None)`**（`result` は多母集団の `FitResult` か `DIFScreenResult`）: 各焦点群
+      $f$（既定は第 1 群 = 参照群 $r$ 以外の全群）と項目 $j$ について、期待項目得点
+      $E_{gj}(\theta)=\sum_kkP_{gjk}(\theta)$ の差 $D_j(\theta)=E_{fj}(\theta)-E_{rj}(\theta)$ を、推定時の格子
+      $\theta_q$ と焦点群（`density="reference"` なら参照群）の正規化した推定潜在分布の重み $w_q$ で積分する:
+      $\text{signed}_j=\sum_qw_qD_j(\theta_q)$、$\text{unsigned}_j=\sum_qw_q|D_j(\theta_q)|$（Chalmers, 2018;
+      mirt の `DRF(DIF = TRUE, best_fitting = TRUE)` の `sDIF` / `uDIF`）。`data` を渡すと、焦点群の $n$ 人の EAP
+      $\hat\theta_i$ での期待得点の標準化差（Meade, 2010; mirt の `empirical_ES()` の `ESSD`）
+      $\big(\overline{E_{fj}(\hat\theta)}-\overline{E_{rj}(\hat\theta)}\big)/\sqrt{(s^2_{f}+s^2_{r})/2}$（標本分散、
+      分母 $n-1$。同じ大きさの 2 標本の併合 SD）と、2 群それぞれの RMSD（`rmsd_reference`、`rmsd_focal`）も求める。
+      群の E-step の期待度数 $\bar r_{gjkq}$ から $\hat E_{gj}(\theta_q)=\sum_kk\bar r_{gjkq}/\sum_k\bar r_{gjkq}$
+      とし、$\mathrm{RMSD}_{gj}=\big(\sum_qw_{gq}(\hat E_{gj}(\theta_q)-E_{gj}(\theta_q))^2\big)^{1/2}$（期待得点の
+      形。2 値項目では von Davier, 2005、Köhler, Robitzsch & Hartig, 2020 のカテゴリ 1 の RMSD; mirt の
+      `RMSD_DIF(probfun = FALSE)`）。RMSD は各群のパラメタがその群に合うかを測るので、群間で等値な項目（不変・部分
+      不変モデル）の DIF を検出する。焦点群ごとにもう 1 行（`level="test"`、`item="test"`）で $D_j$ を `items`
+      にわたって合計する（符号つき・符号なしの DTF、mirt の `DRF(DIF = FALSE)`。期待テスト得点の標準化差、mirt の
+      `ETSSD`。RMSD は NaN）。列: `group`、`level`、`item`、`signed_difference`、`unsigned_difference`、`data` を
+      渡すと `expected_score_standardized_difference`、`rmsd_reference`、`rmsd_focal`。符号は焦点群 − 参照群
+      （mirt と同じ）。範囲外: mirt の DRF の既定の密度（データの事後期待度数）、DRF の抽出による検定と区間、焦点群
+      どうしの対比較、多次元モデル。
 
 ## 17. 実装上の決定（M7）
 

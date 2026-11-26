@@ -1002,7 +1002,7 @@ English | [日本語](VALIDATION.ja.md)
     error paths; every plot function on the Agg back end with the plotted data equal to the
     DataFrames; `MissingDependencyError` when matplotlib cannot be imported. CI also runs
     `scripts/check_plotting_without_matplotlib.py` in an environment without matplotlib.
-- **DIF screening, Wald DIF tests and effect sizes (V49, #104)**: DESIGN §16.20 in
+- **DIF screening, Wald DIF tests and effect sizes (V49, #104)**: DESIGN §16.22 in
   `tests/test_mirt_m5_dif_screen.py` (slow tier, about 7 min; generator
   `validation/r/m5_dif_screen_reference.R` → `tests/reference/v49_dif_screen.json`, mirt 1.48;
   `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`, 81 points on $[-8,8]$ for every fit and
@@ -1036,7 +1036,7 @@ English | [日本語](VALIDATION.ja.md)
   - **mirt differences**: `DRF(den.type = "focal" / "reference")` stops in mirt 1.48
     (`add_std.DRF()` refers to an undefined `VAR`), so the generator calls `calc_DRFs()`, which
     computes `DRF()`'s point estimates. mirt's `DRF()` default density (`best_fitting = FALSE`) is
-    the posterior counts of the data, not reproduced (DESIGN §16.20). For the sequential schemes
+    the posterior counts of the data, not reproduced (DESIGN §16.22). For the sequential schemes
     mirt reports only the flagged items; `DIFScreenResult.table` has every tested item.
 - **Robust standard errors (V35, M7)**: `fit(se="crossprod" | "sandwich")` (DESIGN §17.5) against
   mirt 1.48 `SE.type = "crossprod"` / `"sandwich"`. The generator stores mirt's parameter table

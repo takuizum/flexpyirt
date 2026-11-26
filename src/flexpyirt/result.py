@@ -1680,7 +1680,7 @@ class FitResult:
             X^2 = 2\,(\ell_{\text{free}} - \ell_{\text{constrained}}),\qquad
             df = |k_{\text{base}} - k_{\text{new}}|,\qquad p = P(\chi^2_{df} > X^2).
 
-        With ``test="wald"`` (DESIGN.md §16.20; ``scheme="add"`` only), no refit: the
+        With ``test="wald"`` (DESIGN.md §16.22; ``scheme="add"`` only), no refit: the
         contrasts :math:`\mathbf L\boldsymbol\eta` between the item's parameters in the
         groups are tested with the covariance matrix :math:`\mathbf V` of this fit (Wald, 1943;
         Lord, 1980), as mirt's ``DIF(Wald = TRUE)``:

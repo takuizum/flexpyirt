@@ -1,4 +1,4 @@
-"""Unit tests for the DIF workflow: Wald tests, dif_screen() and dif_effect_sizes() (§16.20)."""
+"""Unit tests for the DIF workflow: Wald tests, dif_screen() and dif_effect_sizes() (§16.22)."""
 
 from __future__ import annotations
 

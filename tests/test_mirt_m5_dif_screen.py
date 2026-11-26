@@ -1,4 +1,4 @@
-"""V49: DIF screening, Wald DIF tests and DIF effect sizes vs R mirt (DESIGN.md §16.20).
+"""V49: DIF screening, Wald DIF tests and DIF effect sizes vs R mirt (DESIGN.md §16.22).
 
 Reference values come from ``validation/r/m5_dif_screen_reference.R``: mirt's ``DIF()`` with
 ``scheme = "drop"`` / ``"drop_sequential"`` / ``"add_sequential"`` (``seq_stat = 0.05``,

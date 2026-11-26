@@ -979,7 +979,7 @@ when `free_mean` or `free_var` lacks fixed intercepts or slopes.
 ## Differential item functioning (DIF)
 
 Unidimensional multiple-group models ([guide section 9](guide.md#differential-item-functioning-dif);
-DESIGN.md §16.20). Signs are focal minus reference; every test is an omnibus test across all groups.
+DESIGN.md §16.22). Signs are focal minus reference; every test is an omnibus test across all groups.
 
 ### `dif_screen`
 

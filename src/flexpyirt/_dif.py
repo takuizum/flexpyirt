@@ -1,4 +1,4 @@
-"""Multiple-group likelihood-ratio and Wald DIF tests (Result layer, DESIGN.md §16.2, §16.20).
+"""Multiple-group likelihood-ratio and Wald DIF tests (Result layer, DESIGN.md §16.2, §16.22).
 
 Post-fit Python orchestration: each likelihood-ratio test refits the model with one change to the
 parameter table (its parameters made equal across groups, or freed), and compares the two
@@ -165,7 +165,7 @@ def wald_statistic(
 def _wald_tests(
     result: FitResult, tested: list[str], params: Sequence[str] | None, p_adjust: PAdjust
 ) -> pd.DataFrame:
-    """Wald DIF tests of :meth:`FitResult.dif` with ``test="wald"`` (DESIGN.md §16.20)."""
+    """Wald DIF tests of :meth:`FitResult.dif` with ``test="wald"`` (DESIGN.md §16.22)."""
     if result.vcov is None:
         raise SpecificationError(
             "dif(test='wald') needs the covariance matrix of the estimates; fit with se= "

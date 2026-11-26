@@ -997,7 +997,7 @@
     DIF のある 2 群、エラーの経路。すべての描画関数を Agg バックエンドで描き、描いたデータが DataFrame と
     等しいこと。matplotlib を import できないときの `MissingDependencyError`。CI では matplotlib のない環境で
     `scripts/check_plotting_without_matplotlib.py` も実行する。
-- **DIF のスクリーニング、Wald 検定、効果量（V49、#104）**: DESIGN §16.20 を
+- **DIF のスクリーニング、Wald 検定、効果量（V49、#104）**: DESIGN §16.22 を
   `tests/test_mirt_m5_dif_screen.py` で照合する（slow tier、約 7 分。生成スクリプト
   `validation/r/m5_dif_screen_reference.R` → `tests/reference/v49_dif_screen.json`、mirt 1.48。すべての推定と
   推定し直しで `optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、$[-8,8]$ の 81 点。時間のかかる
@@ -1024,7 +1024,7 @@
     $10^{-8}$、$W$ 相対 $10^{-5}$、効果量 $10^{-12}$。
   - **mirt との違い**: mirt 1.48 の `DRF(den.type = "focal" / "reference")` は止まる（`add_std.DRF()` が未定義の
     `VAR` を参照する）ので、生成スクリプトは `DRF()` の点推定を計算する `calc_DRFs()` を呼ぶ。mirt の `DRF()` の
-    既定の密度（`best_fitting = FALSE`、データの事後期待度数）は再現しない（DESIGN §16.20）。逐次方式で mirt は
+    既定の密度（`best_fitting = FALSE`、データの事後期待度数）は再現しない（DESIGN §16.22）。逐次方式で mirt は
     検出された項目だけを返すが、`DIFScreenResult.table` は検定した全項目を持つ。
 - **標本ウェイト（V34、M7）**: mirt の `survey.weights`（mirt 1.48、`optimizer = "NR"`、`TOL = 1e-10`、
   `SE.type = "Oakes"`）。参照ファイルは行ごとのウェイトとともに元の行を保存するので、ウェイトを足し合わせる

@@ -1,6 +1,6 @@
 r"""DIF workflow for multiple-group models: screening, anchor purification and effect sizes.
 
-Result / Python shell layer (DESIGN.md §16.20). :func:`dif_screen` tests every item with one of
+Result / Python shell layer (DESIGN.md §16.22). :func:`dif_screen` tests every item with one of
 three anchor strategies and returns the final partially invariant fit; :func:`dif_effect_sizes`
 quantifies the differences of a fitted multiple-group model. Only the refits run in ``jit``.
 """
@@ -43,7 +43,7 @@ _latent_log_weights = jax.jit(_core._latent_log_weights)
 
 @dataclass(frozen=True)
 class DIFScreenResult:
-    """Result of :func:`dif_screen` (DESIGN.md §16.20).
+    """Result of :func:`dif_screen` (DESIGN.md §16.22).
 
     Attributes
     ----------
@@ -453,7 +453,7 @@ def _essd(focal: np.ndarray, reference: np.ndarray) -> float:
 def _rmsd(
     res: FitResult, y: np.ndarray, codes: np.ndarray, expected_nodes: np.ndarray
 ) -> np.ndarray:
-    r"""``(G, J)`` RMSD of every group and item (expected-score form, DESIGN.md §16.20).
+    r"""``(G, J)`` RMSD of every group and item (expected-score form, DESIGN.md §16.22).
 
     .. math::
         \mathrm{RMSD}_{gj}=\Big(\sum_qw_{gq}\big(\hat E_{gj}(\theta_q)-E_{gj}(\theta_q)\big)^2
@@ -491,7 +491,7 @@ def dif_effect_sizes(
     density: EffectDensity = "focal",
     item_names: list[str] | None = None,
 ) -> pd.DataFrame:
-    r"""DIF and DTF effect sizes of a fitted multiple-group model (DESIGN.md §16.20).
+    r"""DIF and DTF effect sizes of a fitted multiple-group model (DESIGN.md §16.22).
 
     For each focal group :math:`f` against the reference group :math:`r` (the first group) and
     item :math:`j`, with :math:`D_j(\theta)=E_{fj}(\theta)-E_{rj}(\theta)` the difference of
