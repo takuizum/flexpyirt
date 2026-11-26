@@ -1085,6 +1085,12 @@ class FitResult:
         sign of local dependence between the two. There is no fixed cutoff: look for values that
         stand out from the rest of the matrix.
 
+        JSI is defined only for single-group unidimensional models with a ``Normal`` latent
+        distribution. Its extension to multiple groups, multidimensional (including bifactor
+        and two-tier) models and non-Normal latent distributions has not been studied, and
+        there is no reference implementation to validate one against, so those models raise
+        ``SpecificationError``.
+
         Removing item :math:`j` is done by treating its responses as missing, so the latent
         distribution, constraints across items and priors of the remaining parameters stay as
         fitted. The three methods differ only in how :math:`\hat\eta^{(-j)}` is obtained, all
@@ -1140,7 +1146,19 @@ class FitResult:
 
         check_x64()
         self._require_unweighted("jsi()")
-        self._require_unidimensional_normal("jsi()")
+        model = self._model
+        if (
+            model.is_multidimensional
+            or model.is_multigroup
+            or model.is_empirical_histogram
+            or model.is_davidian
+            or model.is_mixture
+        ):
+            raise SpecificationError(
+                "jsi() is defined only for single-group unidimensional models with a Normal "
+                "latent distribution: its multiple-group / multidimensional extension has not "
+                "been studied and there is no reference implementation (DESIGN.md §16.17)."
+            )
         if method not in ("refit", "newton", "one_step"):
             raise SpecificationError(
                 f"Unknown method={method!r}; use 'refit', 'newton' or 'one_step'."

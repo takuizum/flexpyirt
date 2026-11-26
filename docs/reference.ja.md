@@ -254,7 +254,10 @@ $$\mathrm{JSI}_{ji} = \frac{\hat a_i - \hat a_i^{(-j)}}{\mathrm{SE}(\hat a_i^{(-
 
 **戻り値**: [`JSIResult`](#jsiresult)
 
-**例外**: `PrecisionError`。対応しないモデル、項目が 3 つ未満、不正な指定、標準誤差のない推定結果での `"one_step"` は
+JSI は単一群・1 次元のモデルについてのみ定義されている。多次元・多母集団への拡張は研究されておらず、参照となる実装も
+ないので、ほかのモデルには使えない。
+
+**例外**: `PrecisionError`。多母集団・多次元（双因子・two-tier を含む）・`Normal` 以外の潜在分布のモデル、項目が 3 つ未満、不正な指定、標準誤差のない推定結果での `"one_step"` は
 `SpecificationError`。
 
 **警告**: 推定し直しが収束しなければ `ConvergenceWarning`。

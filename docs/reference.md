@@ -286,8 +286,12 @@ they warn (`FlexpyirtWarning`), because removing one item changes the estimates 
 
 **Returns**: [`JSIResult`](#jsiresult)
 
-**Raises**: `PrecisionError`; `SpecificationError` for unsupported models, fewer than three
-items, invalid options, or `"one_step"` on a fit without `se="oakes"` or `se="hessian"`.
+JSI is defined only for single-group unidimensional models; its multidimensional /
+multiple-group extension has not been studied and there is no reference implementation, so it is
+not available for other models.
+
+**Raises**: `PrecisionError`; `SpecificationError` for multiple-group, multidimensional
+(including bifactor and two-tier) or non-`Normal` latent models, fewer than three items, invalid options, or `"one_step"` on a fit without `se="oakes"` or `se="hessian"`.
 
 **Warns**: `ConvergenceWarning` if a refit does not converge.
 
