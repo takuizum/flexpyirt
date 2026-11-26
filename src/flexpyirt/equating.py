@@ -170,19 +170,36 @@ def _build_form(
     )
 
 
+def _bucket(n: int) -> int:
+    """Return the padded length of ``n`` points: at least 1024 and a power of 2."""
+    return max(1024, 1 << max(n - 1, 0).bit_length())
+
+
+def _on_grid(fn: Any, form: Form, theta: np.ndarray) -> np.ndarray:
+    """Evaluate a jitted curve ``fn(form, theta)`` with ``theta`` padded to a bucket length.
+
+    Padding keeps the number of compilations per form small (one per bucket) when the curves are
+    evaluated at arrays of many different lengths.
+    """
+    n = theta.shape[0]
+    padded = np.zeros(_bucket(n), dtype=np.float64)
+    padded[:n] = theta
+    return np.asarray(fn(form, jnp.asarray(padded)), dtype=np.float64)[:n]
+
+
 def _asymptotes(spec: _FormSpec) -> tuple[float, float]:
     r"""Return :math:`(\tau_{\mathrm{lo}},\tau_{\mathrm{hi}})` of the form's TCC."""
     form = spec.form
-    own = jnp.asarray([-_ASYMPTOTE_THETA, _ASYMPTOTE_THETA], dtype=jnp.float64)
-    lo, hi = np.asarray(_tcc(form, form.slope * own + form.intercept), dtype=np.float64)
+    own = np.array([-_ASYMPTOTE_THETA, _ASYMPTOTE_THETA])
+    lo, hi = _on_grid(_tcc, form, float(form.slope) * own + float(form.intercept))
     return float(lo), float(hi)
 
 
 def _check_monotone(spec: _FormSpec, role: str) -> None:
     """Raise if the TCC decreases on the own-scale grid (true-score methods need it monotone)."""
     form = spec.form
-    theta = form.slope * jnp.asarray(_MONOTONE_GRID) + form.intercept
-    tau = np.asarray(_tcc(form, theta), dtype=np.float64)
+    theta = float(form.slope) * _MONOTONE_GRID + float(form.intercept)
+    tau = _on_grid(_tcc, form, theta)
     drop = float(np.max(tau[:-1] - tau[1:]))
     if drop > _MONOTONE_TOL * (1.0 + spec.max_score):
         raise SpecificationError(
@@ -208,8 +225,7 @@ def _true_score_theta(spec: _FormSpec, scores: np.ndarray, role: str) -> np.ndar
     centre = float(form.intercept)
     half = _START_BRACKET * float(form.slope)
     while True:
-        bounds = jnp.asarray([centre - half, centre + half], dtype=jnp.float64)
-        tau_lo, tau_hi = np.asarray(_tcc(form, bounds), dtype=np.float64)
+        tau_lo, tau_hi = _on_grid(_tcc, form, np.array([centre - half, centre + half]))
         if (tau_lo < targets.min() and tau_hi > targets.max()) or half >= _MAX_BRACKET:
             break
         half *= 2.0
@@ -244,7 +260,7 @@ def _tcc_values(spec: _FormSpec, theta: np.ndarray) -> np.ndarray:
     finite = np.isfinite(theta)
     out = np.full(theta.shape, np.nan)
     if np.any(finite):
-        out[finite] = np.asarray(_tcc(spec.form, jnp.asarray(theta[finite])), dtype=np.float64)
+        out[finite] = _on_grid(_tcc, spec.form, theta[finite])
     return out
 
 
@@ -370,6 +386,25 @@ def _true_score_equate(new: _FormSpec, old: _FormSpec) -> tuple[pd.DataFrame, tu
         equated[above] = float(old.max_score)
     table = pd.DataFrame({"score": scores.astype(np.int64), "theta": theta, "equated": equated})
     return table, (new_lo, new_hi, old_lo, old_hi)
+
+
+def _observed_score_equate(
+    new: _FormSpec, old: _FormSpec, weight: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return the equated scores and the two distributions in the synthetic population."""
+
+    def synthetic(spec: _FormSpec) -> np.ndarray:
+        parts = []
+        for w_pop, pop in ((weight, new), (1.0 - weight, old)):
+            if w_pop == 0.0:
+                continue
+            dist = _distribution(spec.form, jnp.asarray(pop.nodes), jnp.asarray(pop.weights))
+            parts.append(w_pop * np.asarray(dist, dtype=np.float64)[: spec.max_score + 1])
+        return np.asarray(np.sum(parts, axis=0), dtype=np.float64)
+
+    f_new = synthetic(new)
+    g_old = synthetic(old)
+    return _equating.equipercentile(f_new, g_old), f_new, g_old
 
 
 def irt_equate(
@@ -528,18 +563,7 @@ def irt_equate(
             old_range=(old_lo, old_hi),
         )
 
-    def mixed(spec: _FormSpec) -> np.ndarray:
-        parts = []
-        for w_pop, pop in ((weight, new_spec), (1.0 - weight, old_spec)):
-            if w_pop == 0.0:
-                continue
-            dist = _distribution(spec.form, jnp.asarray(pop.nodes), jnp.asarray(pop.weights))
-            parts.append(w_pop * np.asarray(dist, dtype=np.float64)[: spec.max_score + 1])
-        return np.asarray(np.sum(parts, axis=0), dtype=np.float64)
-
-    f_new = mixed(new_spec)
-    g_old = mixed(old_spec)
-    equated = _equating.equipercentile(f_new, g_old)
+    equated, f_new, g_old = _observed_score_equate(new_spec, old_spec, weight)
     new_lo, new_hi = _asymptotes(new_spec)
     old_lo, old_hi = _asymptotes(old_spec)
     return IRTEquatingResult(
@@ -616,6 +640,26 @@ def _check_number(value: Any, name: str, *, positive: bool = False) -> float:
     if positive and value <= 0:
         raise SpecificationError(f"{name} must be positive, got {value!r}.")
     return float(value)
+
+
+def _scale_theta(spec: _FormSpec, method: ScaleMethod) -> tuple[np.ndarray, np.ndarray]:
+    r"""Return :math:`\theta(x)` and its standard error for every summed score of the form."""
+    if method == "true_score":
+        _check_monotone(spec, "the form")
+        scores = np.arange(spec.max_score + 1, dtype=np.float64)
+        theta = _true_score_theta(spec, scores, "the form")
+        theta_se = np.full(theta.shape, np.nan)
+        finite = np.isfinite(theta)
+        if np.any(finite):
+            info = _on_grid(_information, spec.form, theta[finite])
+            with np.errstate(divide="ignore"):
+                theta_se[finite] = 1.0 / np.sqrt(info)
+        return theta, theta_se
+    _, eap, sd = _eap(spec.form, jnp.asarray(spec.nodes), jnp.asarray(spec.weights))
+    return (
+        np.asarray(eap, dtype=np.float64)[: spec.max_score + 1],
+        np.asarray(sd, dtype=np.float64)[: spec.max_score + 1],
+    )
 
 
 def scale_table(
@@ -701,19 +745,7 @@ def scale_table(
         res, _resolve_items(res, items, "items"), _resolve_group(res, group, "group")
     )
     scores = np.arange(spec.max_score + 1)
-    if method == "true_score":
-        _check_monotone(spec, "the form")
-        theta = _true_score_theta(spec, scores.astype(np.float64), "the form")
-        theta_se = np.full(theta.shape, np.nan)
-        finite = np.isfinite(theta)
-        if np.any(finite):
-            info = np.asarray(_information(spec.form, jnp.asarray(theta[finite])), dtype=np.float64)
-            with np.errstate(divide="ignore"):
-                theta_se[finite] = 1.0 / np.sqrt(info)
-    else:
-        _, eap, sd = _eap(spec.form, jnp.asarray(spec.nodes), jnp.asarray(spec.weights))
-        theta = np.asarray(eap, dtype=np.float64)[: spec.max_score + 1]
-        theta_se = np.asarray(sd, dtype=np.float64)[: spec.max_score + 1]
+    theta, theta_se = _scale_theta(spec, method)
     scale = np.clip(slope_value * theta + intercept_value, low, high)
     return pd.DataFrame(
         {

@@ -86,14 +86,17 @@ def form_probs(form: Form, theta: Array) -> Array:
     r"""Return the category probabilities :math:`P_{jk}(\theta)` of every item.
 
     ``theta`` has shape ``(T,)`` on the common scale; the result has shape ``(T, J, K_max)``,
-    items with fewer categories padded with zeros.
+    items with fewer categories padded with zeros. A NaN probability is set to 0: far in the
+    tails the graded kernel returns NaN for a category whose two cumulative probabilities round
+    to the same double, i.e. whose probability underflows (DESIGN.md §20.2).
     """
     own = (theta - form.intercept) / form.slope
     out = jnp.zeros((theta.shape[0], form.n_items, form.max_categories), dtype=theta.dtype)
     for fam in form.families:
 
         def per_item(p: Array, k: ItemKernel = fam.kernel) -> Array:
-            return jnp.exp(k.log_prob(own[:, None], p))  # (T, K_f)
+            prob = jnp.exp(k.log_prob(own[:, None], p))  # (T, K_f)
+            return jnp.where(jnp.isnan(prob), 0.0, prob)
 
         p_f = jax.vmap(per_item)(fam.params)  # (J_f, T, K_f)
         cols = jnp.asarray(fam.columns)
