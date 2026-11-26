@@ -276,17 +276,17 @@ def test_errors() -> None:
             fn(res, THETA2, direction=[np.nan, 1.0])
         with pytest.raises(SpecificationError, match="only used for multidimensional"):
             fn(uni, [0.0], direction=[1.0])
-    for fn in (information_matrix, expected_score):
+    for points_fn in (information_matrix, expected_score):
         with pytest.raises(SpecificationError, match=r"shape \(T, 2\)"):
-            fn(res, np.zeros((3, 3)))
+            points_fn(res, np.zeros((3, 3)))
         with pytest.raises(SpecificationError, match=r"shape \(T, 2\)"):
-            fn(res, np.zeros((0, 2)))
+            points_fn(res, np.zeros((0, 2)))
         with pytest.raises(SpecificationError, match="finite"):
-            fn(res, [[0.0, np.inf]])
+            points_fn(res, [[0.0, np.inf]])
         with pytest.raises(SpecificationError, match="factor columns"):
-            fn(res, pd.DataFrame(THETA2, columns=["f1", "g"]))
+            points_fn(res, pd.DataFrame(THETA2, columns=["f1", "g"]))
         with pytest.raises(SpecificationError, match="array of numbers"):
-            fn(res, [["a", "b"]])
+            points_fn(res, [["a", "b"]])
     with pytest.raises(SpecificationError, match="Unknown item"):
         information_matrix(res, THETA2, item="nope")
     with pytest.raises(SpecificationError, match="FitResult"):
