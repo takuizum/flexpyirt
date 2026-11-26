@@ -2039,7 +2039,7 @@ class FitResult:
         """Serialize this result to a strict JSON string, optionally writing it to ``path``.
 
         Writes plain, versioned RFC 8259 JSON (no ``pickle``) with top-level
-        ``"format": "flexpyirt.FitResult"``, ``"schema_version": 1``, and the ``flexpyirt``
+        ``"format": "flexpyirt.FitResult"``, the current ``"schema_version"``, and the ``flexpyirt``
         version (DESIGN.md §15.26–§15.28). Finite IEEE-754 float64 values are written as
         ``repr``-exact JSON numbers and non-finite values (``NaN``, ``+inf``, ``-inf``) are
         encoded explicitly as ``"NaN"``, ``"Infinity"``, and ``"-Infinity"`` in float-typed

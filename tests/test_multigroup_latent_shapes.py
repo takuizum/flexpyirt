@@ -31,6 +31,7 @@ from flexpyirt import (
 )
 from flexpyirt._compile import LATENT_ITEM, compile_problem, prepare
 from flexpyirt._core import _latent_log_weights
+from flexpyirt._json import SCHEMA_VERSION
 from flexpyirt.errors import HeywoodWarning, SpecificationError
 from flexpyirt.linking import _fitted_grid
 
@@ -172,7 +173,7 @@ def test_simulation_and_json_round_trip(tmp_path: Path) -> None:
         assert abs(theta.mean()[name] - latent.loc[name, "mean"]) < 0.06
     path = tmp_path / "fit.json"
     res.to_json(path)
-    assert json.loads(path.read_text())["schema_version"] == 8
+    assert json.loads(path.read_text())["schema_version"] == SCHEMA_VERSION
     back = FitResult.from_json(path)
     assert back._model == res._model
     pd.testing.assert_frame_equal(back.latent, res.latent)

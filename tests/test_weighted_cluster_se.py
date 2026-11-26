@@ -30,6 +30,7 @@ from flexpyirt import (
     fit,
 )
 from flexpyirt._compile import compile_problem, meat_patterns, prepare
+from flexpyirt._json import SCHEMA_VERSION
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
 
 TIGHT = BAEM(tol=1e-10, max_iter=20000)
@@ -359,7 +360,7 @@ def test_summary_and_json_keep_the_number_of_clusters() -> None:
     assert "sandwich (cluster-robust, 25 clusters)" in res.summary()
     assert "cluster-robust, 25 clusters" in res._repr_html_()
     payload = json.loads(res.to_json())
-    assert payload["schema_version"] == 9 and payload["n_clusters"] == 25
+    assert payload["schema_version"] == SCHEMA_VERSION and payload["n_clusters"] == 25
     back = FitResult.from_json(json.dumps(payload))
     assert back._n_clusters == 25 and back.se_method == "sandwich"
     assert back.vcov is not None and res.vcov is not None

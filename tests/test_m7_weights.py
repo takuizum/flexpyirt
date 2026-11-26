@@ -363,7 +363,7 @@ def test_json_round_trip_keeps_sum_of_weights(
 ) -> None:
     res, data, weights = weighted_result
     payload = json.loads(res.to_json())
-    assert payload["schema_version"] == SCHEMA_VERSION == 9
+    assert payload["schema_version"] == SCHEMA_VERSION
     assert payload["sum_weights"] == float(weights.sum())
     loaded = FitResult.from_json(json.dumps(payload))
     assert loaded._sum_weights == res._sum_weights
