@@ -2,11 +2,12 @@
 
 Implements the versioned plain-JSON format specified in DESIGN.md §15.26–§15.28:
 
-- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 7`` (versions 1
+- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 8`` (versions 1
   and 2, written before multidimensional models and across-item equalities were stored,
   version 3, written before the naming refactor of §15.46, version 4, written before bifactor
   models (§17.1), version 5, written before two-tier models (§17.2), and version 6, written
-  before sampling weights (§17.4), are still read), and
+  before sampling weights (§17.4), and version 7, written before ``BAEM.m_step_scale`` and
+  ``LogitNormalPrior`` (§15.47–§15.48), are still read), and
   ``"flexpyirt_version"``.
 - Strict RFC 8259 JSON (``allow_nan=False`` on write; rejecting ``parse_constant`` on read).
   Finite IEEE-754 float64 values use standard ``repr``-exact JSON numbers; non-finite values in
@@ -47,7 +48,7 @@ from flexpyirt.latent import (
 )
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
-from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior, Prior
+from flexpyirt.priors import BetaPrior, LogitNormalPrior, LogNormalPrior, NormalPrior, Prior
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
@@ -61,7 +62,7 @@ __all__ = [
 ]
 
 FORMAT_TAG = "flexpyirt.FitResult"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 """Schema version written by :func:`dump_fit_result`.
 
 2 adds the confirmatory factor structure, 3 across-item equalities, 4 renames the item-model
@@ -69,9 +70,10 @@ key ``n_cat`` to ``n_categories`` and the priors ``LogNormal(meanlog, sdlog)`` /
 ``LogNormalPrior(mean_log, sd_log)`` / ``BetaPrior`` (DESIGN.md §15.46), 5 adds the model key
 ``bifactor`` (DESIGN.md §17.1), 6 the model key ``n_primary_factors`` (DESIGN.md §17.2), and 7
 the optional top-level key ``sum_weights`` (the sum of the sampling weights; present only for a
-fit with ``weights=``, DESIGN.md §17.4).
+fit with ``weights=``, DESIGN.md §17.4), and 8 the method key ``m_step_scale`` (DESIGN.md §15.47;
+older files read as ``"natural"``) and the prior ``LogitNormalPrior`` (DESIGN.md §15.48).
 """
-SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7})
+SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7, 8})
 """Schema versions accepted by :func:`load_fit_result`; version 1 has no factor keys."""
 
 _LEGACY_PRIOR_TYPES = {"LogNormal": "LogNormalPrior", "Beta": "BetaPrior"}
@@ -539,6 +541,14 @@ def _serialize_beta_prior(prior: BetaPrior) -> dict[str, Any]:
     }
 
 
+def _serialize_logitnormal_prior(prior: LogitNormalPrior) -> dict[str, Any]:
+    return {
+        "type": "LogitNormalPrior",
+        "mean_logit": _encode_float(prior.mean_logit),
+        "sd_logit": _encode_float(prior.sd_logit),
+    }
+
+
 def _deserialize_normal_prior(obj: dict[str, Any], field_name: str) -> NormalPrior:
     _check_keys(obj, required={"type", "mean", "sd"}, field_name=field_name)
     return NormalPrior(
@@ -563,15 +573,27 @@ def _deserialize_beta_prior(obj: dict[str, Any], field_name: str) -> BetaPrior:
     )
 
 
+def _deserialize_logitnormal_prior(obj: dict[str, Any], field_name: str) -> LogitNormalPrior:
+    _check_keys(obj, required={"type", "mean_logit", "sd_logit"}, field_name=field_name)
+    return LogitNormalPrior(
+        mean_logit=_decode_float(
+            obj["mean_logit"], field_name=f"{field_name}.mean_logit", finite=True
+        ),
+        sd_logit=_decode_float(obj["sd_logit"], field_name=f"{field_name}.sd_logit", finite=True),
+    )
+
+
 _PRIOR_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
     NormalPrior: _serialize_normal_prior,
     LogNormalPrior: _serialize_lognormal_prior,
     BetaPrior: _serialize_beta_prior,
+    LogitNormalPrior: _serialize_logitnormal_prior,
 }
 _PRIOR_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], Prior]] = {
     "NormalPrior": _deserialize_normal_prior,
     "LogNormalPrior": _deserialize_lognormal_prior,
     "BetaPrior": _deserialize_beta_prior,
+    "LogitNormalPrior": _deserialize_logitnormal_prior,
 }
 
 
@@ -700,15 +722,20 @@ def _serialize_baem(method: BAEM) -> dict[str, Any]:
         "max_iter": int(method.max_iter),
         "m_step_newton_steps": int(method.m_step_newton_steps),
         "squarem": bool(method.squarem),
+        "m_step_scale": method.m_step_scale,
     }
 
 
-def _deserialize_baem(obj: dict[str, Any], field_name: str) -> BAEM:
-    _check_keys(
-        obj,
-        required={"type", "tol", "max_iter", "m_step_newton_steps", "squarem"},
-        field_name=field_name,
-    )
+def _deserialize_baem(
+    obj: dict[str, Any], field_name: str, schema_version: int = SCHEMA_VERSION
+) -> BAEM:
+    required = {"type", "tol", "max_iter", "m_step_newton_steps", "squarem"}
+    if schema_version >= 8:
+        required = required | {"m_step_scale"}
+    _check_keys(obj, required=required, field_name=field_name)
+    scale = "natural"
+    if schema_version >= 8:
+        scale = _require_str(obj["m_step_scale"], field_name=f"{field_name}.m_step_scale")
     return BAEM(
         tol=_decode_float(obj["tol"], field_name=f"{field_name}.tol", finite=True),
         max_iter=_require_int(
@@ -720,13 +747,14 @@ def _deserialize_baem(obj: dict[str, Any], field_name: str) -> BAEM:
             max_value=_INT32_MAX,
         ),
         squarem=_require_bool(obj["squarem"], field_name=f"{field_name}.squarem"),
+        m_step_scale=scale,  # type: ignore[arg-type]  # validated by BAEM
     )
 
 
 _METHOD_SERIALIZERS: dict[type[Any], Callable[[Any], dict[str, Any]]] = {
     BAEM: _serialize_baem,
 }
-_METHOD_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], BAEM]] = {
+_METHOD_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str, int], BAEM]] = {
     "BAEM": _deserialize_baem,
 }
 
@@ -741,7 +769,7 @@ def _serialize_method(method: BAEM) -> dict[str, Any]:
     return serializer(method)
 
 
-def _deserialize_method(raw: Any, *, field_name: str) -> BAEM:
+def _deserialize_method(raw: Any, *, field_name: str, schema_version: int = SCHEMA_VERSION) -> BAEM:
     """Deserialize an estimation method by its registered name."""
     obj = _require_dict(raw, field_name=field_name)
     if "type" not in obj:
@@ -753,7 +781,7 @@ def _deserialize_method(raw: Any, *, field_name: str) -> BAEM:
             f"Unknown estimation method type {kind!r} in {field_name}; "
             f"supported: {sorted(_METHOD_DESERIALIZERS)}."
         )
-    return loader(obj, field_name)
+    return loader(obj, field_name, schema_version)
 
 
 # --------------------------------------------------------------------------------------------
@@ -1538,7 +1566,7 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
         raise SpecificationError(
             "Unexpected key 'latent_weights' for a non-EmpiricalHistogram FitResult."
         )
-    method = _deserialize_method(obj["method"], field_name="method")
+    method = _deserialize_method(obj["method"], field_name="method", schema_version=schema_version)
     n_obs = _require_int(obj["n_obs"], field_name="n_obs", min_value=1, max_value=_INT64_MAX)
     se_method = obj["se_method"]
     if se_method not in _VALID_SE_METHODS:
