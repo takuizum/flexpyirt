@@ -76,6 +76,7 @@
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
 | V43 | 指定したパラメタでの多次元モデルの情報行列・方向別の情報量・期待得点（相関する 2 因子で 2PL・3PL・4PL・GRM・GPCM・名義の項目と交差負荷 4 項目。3 因子で 2PL・3PL・GRM・GPCM と交差負荷 2 項目。特殊因子 3 の双因子 2PL + GRM。相関する主因子 2 と特殊因子 2 の two-tier 2PL + GRM） | `pars =` と `TOL = NaN` で作った `mirt()` / `bfactor()` のオブジェクトでの `iteminfo(item, Theta, multidim_matrix = TRUE)`、`iteminfo(item, Theta, degrees = )`、`testinfo(m, Theta, degrees = )`、`expected.item()`、`expected.test()` | M7 |
+| V48 | mirt の推定値での図の数値（2PL $J=10$、$N=1003$。欠測 10% の 2PL。GRM $K=4$、$J=6$。2PL + 3PL + GPCM + 名義の混合 $J=10$。2 群の 2PL + GRM で焦点群の平均・分散を推定。TAM の GPCM $K=4$、$J=6$）: 経験的項目曲線、トレースライン、サーストン閾値 | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))`（群ごとは `extract.group()`）、`probtrace()`、`probtrace()` に対する `uniroot()`、`coef(IRTpars = TRUE)`。TAM `tam.threshold()` | #103 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -892,6 +893,37 @@
     数値的に特異な行列で SE が無限大。双因子モデルで各項目の行列が一般因子と自分の特殊因子の外で 0。多母集団モデルで
     群ごとのパラメタを使う。1 次元の `information_matrix` がスカラーの情報量。`theta` の形（配列、因子名で引く
     DataFrame、1 点）とエラーの経路。
+- **図の数値（V48、#103）**: DESIGN §21 を `tests/test_mirt_v48_plots.py` で照合する（slow tier、約 20 秒。
+  生成スクリプト `validation/r/v48_plots_reference.R` → `tests/reference/v48_plots.json`、mirt 1.48、TAM 4.3-25、
+  $[-6, 6]$ の 61 点）。V37 と同じく mirt がすべてのモデルを推定し（`TOL = 1e-8`、収束）、その推定値をすべて固定した
+  `FitResult` に入れる。区間は回答者の順序に依存するので、データは行ごとに保存する（ユニークなパターンと各行の
+  パターン番号）。ケース: `twopl`（$J=10$、$N=1003$。余り 3 のため最初の区間に 1 人、最後の区間に 2 人多い）、
+  `twopl_missing`（$N=1200$、10% MCAR。区間は項目ごとにその項目に回答した回答者で作る）、`grm`（$K=4$、
+  $J=6$、$N=1500$）、`mixed`（2PL 3、3PL 3、GPCM $K=4$ 2、名義 $K=3$ 2。$N=3000$）、`twogroup`（2PL 5 + GRM
+  $K=4$ 3、全項目を等値、群あたり $N=805$、焦点群の平均・分散を推定）、`gpcm_tam`（TAM 自身の GPCM 推定）。
+  全ケースでの最大差:
+  - **EAP 推定値**（区間の入力）と `fscores(method = "EAP")`: `7.1e-15`（許容 $10^{-9}$）。
+  - **`empirical_item_curve()`** と `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10,
+    mincell.X2 = 0, Theta = eap)`（項目ごと。mirt は 1 回の呼び出しで 1 項目の表を返す。`mincell.X2 = 0` で
+    セル併合を止める。`multipleGroup` の推定結果は拒否されるので、群ごとに `extract.group()` とその群の
+    `Theta` の行で呼ぶ。mirt 自身の群ごとの `itemfit()` も同じことをしている）: 区間の人数は mirt の行和と
+    完全に一致、観測比率も一致（`0`）、期待確率 `4.6e-15`（許容 $10^{-9}$）、区間平均と mirt のラベル
+    （小数 4 桁に丸めてある）`5.0e-5`（丸めの分。許容 $5\times10^{-5}$）。期待表は
+    $N\,P(\bar\theta_b)$ なので、区間平均も全精度で確かめている。
+  - **`item_probabilities()`** と $\theta\in\{-6,-4,-3.5,\dots,4,6\}$ での `probtrace()`: `2.9e-15`
+    （許容 $10^{-12}$）。
+  - **`wright_map_table()` の項目位置** と、$[-20, 20]$ での $\sum_{c\ge k}$`probtrace()`$-1/2$ の
+    `uniroot(tol = 1e-13)`: `2.1e-14`。`coef(IRTpars = TRUE)` の $b$（2PL）・$b_k$（GRM）と: `1.1e-14`
+    （許容 $10^{-9}$）。3PL 項目の閾値は当然 $b$ より小さい。TAM 自身の GPCM 推定値（傾きと切片は `B` と
+    `AXsi` から読む）での `tam.threshold()` と: `8.4e-5`。TAM の二分法は区間が $10^{-4}$ を下回ると止まる
+    （許容 $10^{-4}$）。
+  - **照合していないもの**: mirt の $X^2$ / $G^2$ とセル併合、`empirical.plot` の Clopper–Pearson 区間
+    （計算しない）、図そのもの。
+  - **単体テスト・スモークテスト**（`tests/test_plotting.py`、fast tier）: mirt の区間の人数の規則、欠測の
+    ある区間の総当たりでの再計算、閾値の閉形式（2PL の $-d/a$、GRM の $-d_k/a$、交点のある・ない 3PL 項目）、
+    DIF のある 2 群、エラーの経路。すべての描画関数を Agg バックエンドで描き、描いたデータが DataFrame と
+    等しいこと。matplotlib を import できないときの `MissingDependencyError`。CI では matplotlib のない環境で
+    `scripts/check_plotting_without_matplotlib.py` も実行する。
 - **標本ウェイト（V34、M7）**: mirt の `survey.weights`（mirt 1.48、`optimizer = "NR"`、`TOL = 1e-10`、
   `SE.type = "Oakes"`）。参照ファイルは行ごとのウェイトとともに元の行を保存するので、ウェイトを足し合わせる
   パターン圧縮も比較の対象になる。V34a: シミュレーションの 2PL（$J=10$、$N=1000$）、合計点と関係する対数正規
