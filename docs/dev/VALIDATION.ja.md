@@ -81,7 +81,9 @@
 | V47 | 観測得点による DIF（flexpyctt、#102）: 連続修正の有無、Holm / BH、純化、利用者のアンカー、外部のマッチング変数を含む Mantel–Haenszel（`difR::verbal`、均一・不均一 DIF を入れたシミュレーションの 2PL）。3 群と名義カテゴリの一般化 MH（シミュレーションの段階反応）。Mantel 検定と Liu–Agresti のオッズ比。ロジスティック回帰（both / uniform / non-uniform、尤度比 / Wald、純化、アンカー、マッチング） | difR 6.1.0 の `difMH()`、`difGMH()`、`difLogistic()`、`difMantel.poly()`、`liu_agresti_ccor()`。`stats::mantelhaen.test()`。R での直接の実装: `packages/flexpyctt/validation/r/ctt_dif_reference.R`。Liu & Agresti（1996、表 1）の計算例 | — |
 | V48 | mirt の推定値での図の数値（2PL $J=10$、$N=1003$。欠測 10% の 2PL。GRM $K=4$、$J=6$。2PL + 3PL + GPCM + 名義の混合 $J=10$。2 群の 2PL + GRM で焦点群の平均・分散を推定。TAM の GPCM $K=4$、$J=6$）: 経験的項目曲線、トレースライン、サーストン閾値 | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))`（群ごとは `extract.group()`）、`probtrace()`、`probtrace()` に対する `uniroot()`、`coef(IRTpars = TRUE)`。TAM `tam.threshold()` | #103 |
 | V50 | リンキングの共通項目の点検（#105）: 頑健 z（Huynh & Meyer, 2010）・変位・期待項目得点曲線の RMSD。除外の順序、純化の各段階のリンキング係数、最終の項目表（2PL、2PL + GRM + GPCM 混在） | 個別の `mirt()` 推定 + 素の R による再計算（`median()`、`quantile(type = 7)`、`expected.item()`、V20 のリンキング）。ドリフト項目の照合に `equateIRT::dif.test` | 現場向け |
+| V51 | IRT 真値等化・観測得点等化と素点-尺度得点変換表（2 値: 20 + 20 項目、3PL + 2PL、リンクあり。多値: 4 GRM $K=4$ + 6 2PL と 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL、リンクあり。母集団は新・旧・合成 $w_1=0.5$。変換表は真値と EAPsum） | `equateIRT:::score_compute(method = "TSE" / "OSE")`、`SNSequate::irt.eq(method = "TS")`。mirt の `expected.test()`・`probtrace()`・`testinfo()`・`fscores(method = "EAPsum", full.scores = FALSE)` と `uniroot()`、`equate::equate(type = "equipercentile")` | #106 |
 | V52 | カット得点による分類の正確さと一貫性（#107）: Lee（合計得点のカット）と Rudner（$\theta$ のカット）、D 法と P 法、カット 1〜3 個、整数でないカット、両方向のカット尺度の変換（3PL $J=20$、GRM $K=4$・$J=10$、2 群の 2PL $J=15$・焦点群の平均と分散は自由） | cacIRT 1.4 `class.Lee()`、`Lee.poly.D()` / `Lee.poly.P()`、mirt の `testinfo()` の SE を与えた `Rud.D()` / `Rud.P()`。mirt の `probtrace()` / `expected.test()` / `testinfo()` からの独立な再計算（κ、偽陽性・偽陰性率、カテゴリごとの指標、表） | field |
+| V54 | モデル比較表（V11a のデータで Rasch・2PL・3PL、V8b のデータで PCM・GPCM、V4 のデータで全項目不変の 2 群 2PL とアンカーのみのモデル・最後の項目だけ自由なモデル）と回答データのシミュレーション（2PL・Rasch・3PL・4PL・GRM・GPCM・名義反応の 1 次元と 2 因子での決定的な逆変換、潜在分布ごとの分布と復元の確認） | `anova(mod1, mod2, ...)`。同じ $\theta$ と一様乱数での `probtrace()`（乱数列は `simdata()` と一致させられない） | #109 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -1068,6 +1070,66 @@
   標本誤差の範囲で $B=H$（標準誤差は 3% 以内）、$B=H$ を強制するとサンドイッチが Oakes の共分散に
   一致すること、行を 2 倍にすると共分散が半分になること、`b_se` と `link()` が選んだ共分散を読むこと、
   JSON の往復、拒否するケース。
+- **モデル比較と回答データのシミュレーション（V54、#109、DESIGN §24）**:
+  - **`compare_fits()` と `anova()`**: 各モデルを mirt（`optimizer = "NR"`、`accelerate = "none"`、
+    `TOL = 1e-10`）と flexpyirt（`BAEM(tol=1e-9)`）で同じグリッドを使って推定し、表全体を比べる: V11a の
+    データ（$[-6, 6]$ の 61 点）で Rasch / 2PL / 3PL、V8b のデータで PCM / GPCM、V4 のデータ（$[-8, 8]$ の
+    81 点）で全項目不変の 2 群 2PL（焦点群の平均と分散は自由）とアンカー q01–q05 のみのモデル、最後の項目だけ
+    群間で自由なモデル（$p=0.188$ なので、0 から離れた $p$ 値も確かめる）。`n_params` は mirt の `nest` と
+    厳密に一致し、対数尤度と 4 つの情報量規準は $5\times10^{-11}$、$X^2$ は $1.4\times10^{-11}$、$p$ は
+    $7\times10^{-13}$ で一致する（許容誤差は絶対値で $10^{-7}$、$10^{-7}$、$10^{-9}$）。mirt は
+    $p<10^{-16}$ で $p=0$ を表示する（`1 - pchisq()`）。flexpyirt は上側確率を返す。
+  - **`simulate_responses()` の決定的な部分**: 乱数列は R と一致させられない（`simdata()` は R の乱数生成器を
+    使う）ので、参照値は項目パラメタ・$\theta$・一様乱数を固定して作る。9 項目（Rasch、2PL ×2、3PL、4PL、
+    graded $K=3,4$、GPCM $K=4$、採点係数が自由な名義反応 $K=4$）を 400 個の $\theta$（$\pm6$、$\pm3$、0 を含む）
+    で、2 因子モデル（2PL、graded $K=3$、3PL。交差負荷の項目 1 つ）を 300 点で評価し、flexpyirt の
+    カテゴリ確率は `probtrace()` と $10^{-12}$ で一致し、R で $x=\#\{k<K-1: u>F_k\}$ により得た回答を
+    厳密に再現する。
+  - **`simulate_responses()` の分布の確認**（モンテカルロ、$|z|<4.5$）: 6 万人分の生成データ（Rasch・2PL・
+    3PL・4PL・GRM・GPCM・名義反応の混在、$N(0.3, 1.4)$）と 2 群（3 万人と 4 万人）のカテゴリ比率と合計得点の
+    分布が、モデルが導く周辺分布（同じカーネルと Lord–Wingersky 再帰（V36）の 81 点 Gauss–Hermite 求積）と
+    一致する。潜在特性は指定した共分散を持つ（2 因子、特殊因子 2 つの双因子。同じ特殊因子の項目どうしは相関が
+    高い）。`NormalMixture` と推定した `DavidianCurve` からの値は厳密な累積分布関数に対する
+    Kolmogorov–Smirnov 検定（0.1% 水準）を通り、推定した `EmpiricalHistogram` からの値はグリッドの点で、
+    頻度が推定された重みと一致する。
+  - **復元**: 混在形式のテストで 2 万人分の生成データに `fit()` を当てはめると、すべての項目パラメタが生成値から
+    4.5 SE 以内、各群 8000 人の 2 群の当てはめで焦点群の平均と分散（0.5、1.3）が 4.5 SE 以内に戻る。`FitResult`
+    と、その推定値を与えた `Model` は同じキーから同一のデータを作り、データは `key` から再現できる。
+  テスト: `tests/test_mirt_v54_compare_fits.py`、`tests/test_v54_simulate.py`。参照値の生成:
+  `validation/r/v54_compare_simulate_reference.R`。
+
+- **IRT 等化と素点-尺度得点変換表（V51、#106）**: DESIGN §23 を `tests/test_r_equating.py` で照合
+  （生成スクリプト `validation/r/v51_irt_equating_reference.R` → `tests/reference/v51_irt_equating.json`。
+  mirt 1.48、equateIRT 2.5.2、SNSequate 1.3.5、equate 2.0.9）。パラメタは推定しない: 項目パラメタは R で決めて保存し、
+  潜在分布は $[-6,6]$ の等間隔 61 点上の $N(0,1)$、リンクは $\theta_Y=A\theta_X+B$（2 値 $A=1.15$, $B=-0.25$、
+  多値 $A=0.9$, $B=0.3$）。速いテスト層は保存したパラメタから直接フォームを作り、カーネルと変換の規則を確かめる。
+  遅い層は同じ値に固定した推定結果で `irt_equate()`・`score_distribution()`・`scale_table()` を通して全比較を繰り返す。
+  最大差:
+  - **2 値の真値等化**（20 + 20 項目、3PL はそれぞれ 12・9 項目、$\sum c=2.317$・$1.477$）: 曲線の値域内の得点は
+    equateIRT 自身の Newton 解（`score_compute`。$|\Delta\theta|<10^{-6}$ で止まり誤差は約 $10^{-12}$）と比べて、
+    等化得点 `2.4e-12`、$\theta$ `1.2e-12`（許容 $10^{-9}$）。全得点で SNSequate と比べて、$\sum c$ 以下の
+    Kolen & Brennan の補間と最高点は `2.4e-15`（許容 $10^{-11}$）。値域内は SNSequate が使う `uniroot()` の既定許容値
+    による `1.2e-4`（許容 $10^{-3}$。補助的な確認）。
+  - **2 値の観測得点等化**: 両母集団に同じ節点と重みを与えた equateIRT の OSE、$w_1=1$, $0$, $0.5$: `5.7e-14`
+    （許容 $10^{-11}$）。
+  - **多値・混合形式の真値等化**（新: 4 GRM $K=4$ + 6 2PL、最高点 18。旧: 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL、
+    最高点 20、$\sum c=0.795$）: 多値フォームの IRT 等化を行う R パッケージはないので、新フォームの `expected.test()` を
+    `uniroot(tol = 1e-13)` で解き、旧フォームの `expected.test()` を $A\theta+B$ で評価した参照を作った:
+    $\theta$ `5.5e-13`、等化得点 `9.3e-13`（許容 $10^{-9}$）。
+  - **モデル上の分布**: `probtrace()` 上の R の Lord–Wingersky 再帰は、R 内で mirt の
+    `fscores(method = "EAPsum", full.scores = FALSE)` の `expected` / $N$ と $10^{-12}$ で一致。flexpyirt の分布は
+    どの母集団でも両者と相対 `5.6e-15`（許容は相対 $10^{-11}$）。
+  - **多値の観測得点等化**: 2 つの合成分布に対する `equate::equate(type = "equipercentile")`: `4.5e-9`。equate は
+    パーセンタイル順位と累積分布を小数 10 桁に丸める（`equate:::equip`）ので、得点では約 $10^{-10}/g(y)$
+    （許容 $10^{-8}$）。同じ分布で flexpyequate の等パーセンタイル等化とは `2.5e-14` で一致し、単体テストでは
+    確率 0 を含む乱数の分布で両者を $10^{-12}$ で比べる。
+  - **旧多値フォームの素点-尺度得点変換表**（slope 10、intercept 50、境界 25 と 75、整数に丸め）: 真値
+    （`expected.test()` の `uniroot()` による $\theta$、SE は $1/\sqrt{\texttt{testinfo}}$）: $\theta$ `2.3e-12`、SE 相対
+    `1.2e-12`。EAPsum（mirt `fscores`）: $\theta$ `5.6e-15`、SE 相対 `1.6e-15`。丸めた尺度得点は一致。
+  - **R で照合していないもの**: 4PL の上側漸近線の補間、多母集団のフォームと母集団、リンクは
+    `tests/test_equating.py` で `expected_score()`・`item_information()`・`summed_score_table()` と DESIGN §23 の式に
+    対して単体テストする。EH・Davidian・混合の母集団は `link()` と同じ推定格子（`_fitted_grid`）から作り、等化としての
+    テストは別にない。
 
 ## 照合以外の検証
 - **観測得点による DIF（V47、flexpyctt、#102）**: 参照値は difR 6.1.0 と base R によるもので、

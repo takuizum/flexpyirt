@@ -476,6 +476,59 @@ m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi
 print(m2_table.round(3))
 ```
 
+### Comparing models (AIC, BIC, likelihood-ratio tests)
+
+`compare_fits()` puts several fits of the same data in one table, ordered from the most
+restricted model to the least restricted: `n_params`, `loglik`, AIC, sample-size adjusted BIC
+(`sabic`), Hannan–Quinn (`hq`) and BIC, and for each row after the first the likelihood-ratio test
+against the row before (`x2`, `df`, `p`). It is mirt's `anova(mod1, mod2, ...)`.
+
+```python
+from flexpyirt import compare_fits
+
+res_rasch = fit(Model.uniform(Rasch(), items=items), df, se=None)
+table = compare_fits(res_rasch, res, names=["Rasch", "2PL"])
+print(table.round(3))  # model, n_params, loglik, aic, sabic, hq, bic, x2, df, p
+```
+
+- The likelihood-ratio test is valid only when each model is nested in the next one and the
+  restriction is not on the boundary of the parameter space. flexpyirt cannot check either: a
+  variance fixed at 0, a mixture with fewer components or a `DavidianCurve` against a `Normal`
+  latent distribution is not tested correctly by $\chi^2_{df}$. Use the information criteria
+  there.
+- Fits with different numbers of respondents raise `SpecificationError`. A row whose number of
+  parameters does not increase (`p` is NaN), a log-likelihood that decreases while parameters
+  are added, and fits with priors give a `FlexpyirtWarning`.
+
+### Simulating responses
+
+`simulate_responses()` draws response data from a fitted model, or from a model whose item
+parameters you give, for power studies, recovery checks and teaching. Random numbers come from an
+explicit JAX key, so the same key gives the same data.
+
+```python
+from flexpyirt import simulate_responses
+
+sim = simulate_responses(res, n_obs=2000, key=jax.random.key(1))
+print(sim.responses.head())  # one int column per item, ready for fit()
+print(sim.theta[:5])  # the respondents' latent traits
+refit = fit(spec, sim.responses, se=None)
+
+bank = pd.DataFrame({"item": items, "a": a_true, "d": d_true})
+sim_true = simulate_responses(spec, parameters=bank, n_obs=1000, key=jax.random.key(2))
+```
+
+- Abilities are drawn from the fitted latent distribution of each group (`Normal` with one or
+  more factors, `NormalMixture`, `DavidianCurve`, or the `EmpiricalHistogram`'s grid points), or
+  taken from `theta=`. For a multiple-group model `n_obs` is per group (or a mapping
+  `{"ref": 500, "focal": 800}`), and `sim.group` holds the labels to pass as `fit(..., group=)`.
+- From a `Model`, `parameters` is an item bank as for
+  [`Model.fix_from()`](#10-fixed-item-parameter-calibration-fipc) (slope–intercept columns) with
+  every item parameter; the latent distribution is the specification's (`Normal(mean=, var=)`,
+  or a `NormalMixture`'s `means`, `variances`, `weights`).
+- Every response is observed. To mimic a test design or missing data, set entries of
+  `sim.responses` to NaN.
+
 ## 6. Standard errors
 
 - **`se="oakes"`** (default): the observed information from Oakes' (1999) identity. The second
@@ -1388,6 +1441,54 @@ linked_screened = screened.link  # the LinkResult on the kept items
 - Unidimensional fits only. DIF tests inside one multiple-group fit are `FitResult.dif()`.
   Validated against a base-R recomputation of the same rules on mirt calibrations (2PL and mixed
   2PL + GRM + GPCM).
+
+### Equating and raw-to-scale tables
+
+Once two forms are on one scale (here with `linked_sl`; FIPC or a concurrent calibration need no
+link), `irt_equate(new, old)` converts every summed score of the new form to the summed-score
+scale of the old form (Kolen & Brennan, 2014, §6.5–6.6):
+
+- `method="true_score"` (default): solve $\tau_X(\theta)=x$ on the new form's test characteristic
+  curve and report $\tau_Y(\theta)$. Scores at or below the sum of the lower asymptotes (3PL /
+  4PL guessing) and at or above the sum of the upper asymptotes are equated by the linear
+  interpolation of Kolen & Brennan; their `theta` is $-\infty$ / $+\infty$.
+- `method="observed_score"`: the model-implied summed-score distributions of both forms
+  (Lord–Wingersky recursion over the fitted latent distribution) in the population `"new"`,
+  `"old"` or `"synthetic"` (with `synthetic_weight=` for the new form's population), equated
+  by the equipercentile method.
+
+`score_distribution()` returns the model-implied distribution of a form, and `scale_table()`
+maps each summed score to a reporting scale $\text{slope}\cdot\theta+\text{intercept}$, clipped
+to `[lowest, highest]` and rounded, with $\theta$ from the test characteristic curve
+(`"true_score"`) or the summed-score EAP (`"EAPsum"`).
+
+```python
+from flexpyirt import irt_equate, scale_table, score_distribution
+
+true_eq = irt_equate(src_res, res, link=linked_sl)
+print(true_eq.table.head().round(3))  # score, theta (base scale), equated
+observed_eq = irt_equate(
+    src_res,
+    res,
+    method="observed_score",
+    link=linked_sl,
+    population="synthetic",
+    synthetic_weight=0.5,
+)
+print(observed_eq.table.head().round(3))
+print(score_distribution(res).head().round(4))
+
+raw_to_scale = scale_table(res, slope=10.0, intercept=50.0, lowest=20.0, highest=80.0)
+print(raw_to_scale.round(2).head())
+```
+
+- With one fit holding both forms, pass it twice with `new_items=` / `old_items=` (and
+  `new_group=` / `old_group=` for a multiple-group fit).
+- True-score methods need test characteristic curves that do not decrease (no negative slopes,
+  no nominal items whose expected score falls); observed-score equating has no such condition.
+- Standard errors of equated scores are not available yet. Validated against equateIRT and
+  SNSequate (dichotomous items) and against references built from mirt and the equate package
+  (polytomous and mixed formats).
 
 ### Multidimensional models
 

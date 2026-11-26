@@ -23,6 +23,8 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 - 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - 図: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
+- IRT 等化: [`irt_equate`](#irt_equate), [`IRTEquatingResult`](#irtequatingresult), [`score_distribution`](#score_distribution), [`scale_table`](#scale_table)
+- モデル比較とシミュレーション: [`compare_fits`](#compare_fits), [`simulate_responses`](#simulate_responses), [`SimulatedData`](#simulateddata)
 - 分類: [`classification_accuracy`](#classification_accuracy), [`ClassificationResult`](#classificationresult)
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)、[ユーザー定義の項目モデル](#ユーザー定義の項目モデル)
@@ -1548,6 +1550,173 @@ IRT モデルのカテゴリ確率。先頭の軸はバッチ軸。結果の形�
 `log=True` は対数確率を返す。`"recursion"` では再帰そのものを対数空間で行い、0 にアンダーフローするはずの裾の確率も
 保つ（そのぶん遅い）。他の方法では結果の対数をとる。形が合わない、`method` が未知、`K != 2` で近似を指定した、の
 いずれかで `SpecificationError`。
+
+## IRT 等化
+
+### `irt_equate`
+
+```text
+irt_equate(new, old, *, method="true_score", new_items=None, old_items=None, link=None,
+           new_group=None, old_group=None, population="new", synthetic_weight=None)
+           -> IRTEquatingResult
+```
+
+2 つのフォームが同じ $\theta$ 尺度に乗ったあと、新フォームのすべての合計得点 $x=0,\dots,X$ を旧フォームの合計得点の
+尺度に等化する（[ガイド 15 節](guide.ja.md#等化と素点-尺度得点変換表)）。共通尺度は旧フォームの尺度で、`link=` が
+あれば新フォームの項目は $(\theta-B)/A$ で評価する。1 次元モデル、全項目モデル、単一群・多母集団。
+
+- `"true_score"`（Lord, 1980; Kolen & Brennan, 2014, §6.5）: テスト特性曲線
+  $\tau(\theta)=\sum_j\sum_kk\,P_{jk}(\theta)$ について $\tau_X(\theta_x)=x$ を安全化 Newton 法で解き、
+  $e_Y(x)=\tau_Y(\theta_x)$。下側漸近線の和以下の得点は $(0,0)$ と $(\tau_X^{\mathrm{lo}},\tau_Y^{\mathrm{lo}})$ の間、
+  上側漸近線の和以上の得点は $(\tau_X^{\mathrm{hi}},\tau_Y^{\mathrm{hi}})$ と両フォームの最高点の間の線形補間で等化し、
+  その `theta` は $-\infty$ / $+\infty$。
+- `"observed_score"`（Lord & Wingersky, 1984; Kolen & Brennan, 2014, §6.6）: 合成母集団
+  $w_1\cdot\text{new}+(1-w_1)\cdot\text{old}$ での両フォームのモデル上の合計得点分布（各推定潜在分布上の
+  Lord–Wingersky 再帰）を、Kolen & Brennan（2014, 2 章）の等パーセンタイル法で等化する。
+
+equateIRT・SNSequate（2 値の 3PL / 2PL）と、mirt と equate パッケージから組み立てた参照（GRM・GPCM・3PL・2PL）で
+照合済み。等化得点の標準誤差はない。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `new` | `FitResult` | 新フォーム $X$ を含む 1 次元の推定結果 |
+| `old` | `FitResult` | 旧フォーム $Y$ を含む 1 次元の推定結果（`new` と同じでもよい） |
+| `method` | `"true_score"` / `"observed_score"` | 等化の方法（既定 `"true_score"`） |
+| `new_items`, `old_items` | list[str]（任意） | 各フォームの項目（既定は推定結果の全項目） |
+| `link` | `LinkResult`（任意） | `link(new, old)`: `new` の尺度を `old` の尺度へ写す（1 次元。群は `new_group` / `old_group` と一致すること） |
+| `new_group`, `old_group` | str（任意） | 各フォームのパラメタと母集団の群。多母集団では必須 |
+| `population` | `"new"` / `"old"` / `"synthetic"` | 観測得点等化の母集団: $w_1=1$、$w_1=0$、$w_1=$ `synthetic_weight`（既定 `"new"`。観測得点等化のみ） |
+| `synthetic_weight` | float（任意） | 新フォームの母集団の重み $w_1\in[0,1]$。`population="synthetic"` では必須、それ以外では指定不可 |
+
+**戻り値**: [`IRTEquatingResult`](#irtequatingresult)
+
+**例外**: `PrecisionError`（JAX の 64 ビットが無効）、`SpecificationError`（多次元の推定結果、未知・重複した項目、
+群の指定漏れ・未知の群、これらの群の間の 1 次元 `LinkResult` でないか新フォームの項目を含まない `link`、不正な
+`population` / `synthetic_weight`、真値の方法で減少するテスト特性曲線）、`ConvergenceWarning`（真値の解法が収束しない）。
+
+### `IRTEquatingResult`
+
+| 属性 | 説明 |
+|---|---|
+| `table` | `DataFrame`: `score`（新フォーム、$0..X$）、`equated`（旧フォームの合計得点の尺度）、真値の方法では `theta`（旧フォームの尺度。漸近線の外では $\pm\infty$） |
+| `method` | `"true_score"` / `"observed_score"` |
+| `new_items`, `old_items` | 2 つのフォームの項目 |
+| `new_range`, `old_range` | 2 つのテスト特性曲線の下側・上側漸近値 $(\tau^{\mathrm{lo}},\tau^{\mathrm{hi}})$ |
+| `population`, `synthetic_weight` | 観測得点等化の母集団と $w_1$（真値の方法では `None`） |
+| `new_distribution`, `old_distribution` | `DataFrame`（`score`, `probability`）: 合成母集団でのモデル上の分布（観測得点等化のみ。それ以外は `None`） |
+
+メソッド: `summary(*, digits=4)`、`str()`、Jupyter での HTML 表示。
+
+### `score_distribution`
+
+```text
+score_distribution(res, *, items=None, group=None) -> DataFrame
+```
+
+フォームのモデル上の合計得点分布 $f(x)=\sum_qL(x\mid\theta_q)w_q$（項目の Lord–Wingersky 尤度を群の推定潜在分布で
+積分したもの。潜在分布の種類は問わない）。`Normal` の推定結果の全項目なら
+[`summed_score_table`](#summed_score_table) の `probability` 列と一致する。列は `score`, `probability`。
+多母集団では `group` が必須。
+
+### `scale_table`
+
+```text
+scale_table(res, *, slope, intercept, method="true_score", items=None, group=None,
+            lowest=None, highest=None, n_digits=0) -> DataFrame
+```
+
+素点-尺度得点変換表: フォームの各合計得点 $x$ に $\theta(x)$ とその標準誤差、尺度得点
+$\min\{\max\{\text{slope}\cdot\theta+\text{intercept},\text{lowest}\},\text{highest}\}$ を与える。
+
+| `method` | $\theta(x)$ | 標準誤差 |
+|---|---|---|
+| `"true_score"`（既定） | フォームのテスト特性曲線で $\tau(\theta)=x$ を解く。下側・上側漸近値以下・以上では $-\infty$ / $+\infty$ | フォームの項目のテスト情報量による $I(\theta)^{-1/2}$（$\theta$ が無限大のところは NaN） |
+| `"EAPsum"` | 群の推定潜在分布の下での合計得点 EAP | 事後標準偏差 |
+
+`slope` は正。指定のない側の境界は適用しない（無限大の $\theta$ は無限大の尺度得点になる）。列は `score`, `theta`,
+`theta_se`, `scale_score`, `scale_score_se`（$\text{slope}\cdot$`theta_se`。切らない）, `scale_score_rounded`（NumPy の
+`round` で `n_digits` 桁。偶数丸め）。多次元モデル、未知の項目・群、正でない `slope`、`lowest >= highest`、負の
+`n_digits`、真値の方法で減少するテスト特性曲線のいずれかで `SpecificationError`。
+
+---
+
+## モデル比較とシミュレーション
+
+### `compare_fits`
+
+```text
+compare_fits(*results, names=None) -> DataFrame
+```
+
+同じデータへの 2 つ以上の当てはめを、最も制約の強いモデルから弱いモデルの順に並べ、情報量規準と尤度比検定を
+まとめる（[ガイド 5 節](guide.ja.md#モデルの比較aicbic尤度比検定)）。$\ell$ を周辺対数尤度、$k$ を自由パラメタ数、
+$N$ を回答者数（重み付きの当てはめでは重みの和）として、$\mathrm{AIC}=-2\ell+2k$（Akaike, 1974）、
+$\mathrm{SABIC}=-2\ell+k\log\frac{N+2}{24}$（Sclove, 1987）、$\mathrm{HQ}=-2\ell+2k\log\log N$（Hannan & Quinn,
+1979）、$\mathrm{BIC}=-2\ell+k\log N$（Schwarz, 1978）。2 行目以降は直前の行と
+$X^2=2(\ell_m-\ell_{m-1})$、自由度 $\mathit{df}=k_m-k_{m-1}$ で検定する（Wilks, 1938）。mirt の
+`anova(mod1, mod2, ...)` に当たる。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `*results` | `FitResult` | 同じ回答への 2 つ以上の当てはめ。制約の強いものから |
+| `names` | list[str]、省略可 | `model` 列のラベル（既定は `model1`, `model2`, ...） |
+
+**戻り値**: 当てはめごとに 1 行の `DataFrame`: `model`, `n_params`, `loglik`, `aic`, `sabic`, `hq`, `bic`,
+`x2`, `df`, `p`。1 行目の `x2`・`df`・`p` は NaN。`df <= 0` のとき `p` は NaN。
+
+**例外**: 当てはめが 2 つ未満、`FitResult` でない引数、`names` が当てはめごとに異なる 1 つのラベルでない、回答者数が
+異なる、のいずれかで `SpecificationError`。
+
+**警告**: パラメタ数が増えない、パラメタを増やしたのに対数尤度が下がる、事前分布のある当てはめがある、のいずれかで
+`FlexpyirtWarning`。
+
+入れ子関係は確かめられないので利用者の責任。境界の補正（分散を 0 に固定、混合成分を減らす、`DavidianCurve` 対
+`Normal`）はしない。
+
+### `simulate_responses`
+
+```text
+simulate_responses(source, *, n_obs=None, key, parameters=None, theta=None, group=None)
+    -> SimulatedData
+```
+
+推定済みのモデル、または項目パラメタを与えた `Model` から項目反応を生成する
+（[ガイド 5 節](guide.ja.md#回答データのシミュレーション)）。各回答者の $\boldsymbol\theta_i$ を所属する群の潜在分布から
+引き（または `theta` から取り）、各回答を一様乱数の逆変換
+$X_{ij}=\min\{k: u_{ij}\le\sum_{c\le k}P_{jc}(\boldsymbol\theta_i)\}$ で引く（Devroye, 1986）。潜在特性は、
+`Normal` は推定された平均・分散・相関、`NormalMixture` は成分ごと、`DavidianCurve` は連続密度（細かいグリッド上の
+累積分布関数の逆変換）、`EmpiricalHistogram` は求積点を推定された重みで（推定どおりの離散分布）引く。すべての項目
+モデルとモデルの構造（1 次元、`with_factors`、双因子、two-tier、多母集団）に対応する。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `source` | `FitResult` / `Model` | 当てはめ（その推定値を使う）または仕様 |
+| `n_obs` | int / dict[str, int]、省略可 | 回答者数。多母集団モデルでは群ごとの人数、または群 → 人数の対応。`theta` を与えないときは必須 |
+| `key` | `jax.Array` | JAX の PRNG キー（`jax.random.key(0)`）。同じキーからは同じデータ |
+| `parameters` | DataFrame、省略可 | `Model` のとき（必須）: `Model.fix_from()` と同じ傾き・切片表現の項目バンクで、すべての項目パラメタを含む |
+| `theta` | 配列、省略可 | 生成の代わりに使う潜在特性: 1 因子は `(N,)`、それ以外は `(N, D)` |
+| `group` | 配列、省略可 | 多母集団モデルで `theta` を与えるとき: 各行の群ラベル |
+
+`Model` から生成するときの潜在分布は仕様のもの: `Normal` の `mean` と `var`（因子間相関 0）、または
+`NormalMixture` の `means`・`variances`・`weights`。`EmpiricalHistogram` と `DavidianCurve` は推定前に形がないので
+`theta` が要る。
+
+**戻り値**: [`SimulatedData`](#simulateddata)。
+
+**例外**: 64 ビットの JAX でないと `PrecisionError`。`key`・`n_obs`・`theta`・`group`・`parameters` が不正
+（たとえばバンクに項目パラメタが足りない）だと `SpecificationError`。
+
+欠測は生成しない。テストデザインや欠測の機構には `responses` の要素を NaN にする。
+
+### `SimulatedData`
+
+[`simulate_responses`](#simulate_responses) が返す frozen dataclass。
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `responses` | DataFrame | 項目ごとの `int64` の列（モデルの項目名）、コード `0..K-1`。`fit()` に渡せる |
+| `theta` | ndarray | 潜在特性。1 因子は `(N,)`、それ以外は `(N, D)` |
+| `group` | ndarray または None | 各行の群ラベル（多母集団モデル）。それ以外は `None` |
 
 ---
 

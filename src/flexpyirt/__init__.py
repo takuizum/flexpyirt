@@ -18,6 +18,7 @@ from flexpyctt.dif import (
 )
 from flexpyirt import errors
 from flexpyirt.classification import ClassificationResult, classification_accuracy
+from flexpyirt.comparison import compare_fits
 from flexpyirt.correlation import PolychoricResult, polychoric
 from flexpyirt.curves import (
     WrightMapTable,
@@ -51,6 +52,7 @@ from flexpyirt.dimensionality import (
     parallel_analysis,
     velicer_map,
 )
+from flexpyirt.equating import IRTEquatingResult, irt_equate, scale_table, score_distribution
 from flexpyirt.fit import fit
 from flexpyirt.information import (
     expected_score,
@@ -73,6 +75,7 @@ from flexpyirt.screening import (
     screen_common_items,
     stack_screening_tables,
 )
+from flexpyirt.simulate import SimulatedData, simulate_responses
 from flexpyirt.sumscore import summed_score_distribution
 
 try:
@@ -101,6 +104,7 @@ __all__ = [
     "FitResult",
     "FourPL",
     "HullResult",
+    "IRTEquatingResult",
     "JSIResult",
     "LinkResult",
     "LocalDependenceResult",
@@ -117,11 +121,13 @@ __all__ = [
     "PolychoricResult",
     "Quadrature",
     "Rasch",
+    "SimulatedData",
     "ThreePL",
     "TwoPL",
     "WrightMapTable",
     "__version__",
     "classification_accuracy",
+    "compare_fits",
     "comparison_data",
     "detect",
     "dimensionality",
@@ -136,6 +142,7 @@ __all__ = [
     "generalized_mantel_haenszel",
     "hull",
     "information_matrix",
+    "irt_equate",
     "item_information",
     "item_probabilities",
     "link",
@@ -146,7 +153,10 @@ __all__ = [
     "parallel_analysis",
     "polychoric",
     "reliability",
+    "scale_table",
+    "score_distribution",
     "screen_common_items",
+    "simulate_responses",
     "stack_screening_tables",
     "summed_score_distribution",
     "summed_score_table",

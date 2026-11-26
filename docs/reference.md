@@ -27,6 +27,8 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - Plots: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
+- IRT equating: [`irt_equate`](#irt_equate), [`IRTEquatingResult`](#irtequatingresult), [`score_distribution`](#score_distribution), [`scale_table`](#scale_table)
+- Model comparison and simulation: [`compare_fits`](#compare_fits), [`simulate_responses`](#simulate_responses), [`SimulatedData`](#simulateddata)
 - Classification: [`classification_accuracy`](#classification_accuracy), [`ClassificationResult`](#classificationresult)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal), [user-defined item models](#user-defined-item-models)
@@ -1710,6 +1712,188 @@ function works inside `jax.jit` and `jax.vmap` and can be differentiated; values
 tail probabilities that would underflow to 0 (it is slower); for the other methods the logarithm
 of the result is taken. Raises `SpecificationError` for a wrong shape, an unknown `method`, or an
 approximation with `K != 2`.
+
+## IRT equating
+
+### `irt_equate`
+
+```text
+irt_equate(new, old, *, method="true_score", new_items=None, old_items=None, link=None,
+           new_group=None, old_group=None, population="new", synthetic_weight=None)
+           -> IRTEquatingResult
+```
+
+Equate every summed score $x=0,\dots,X$ of a new form to the summed-score scale of an old form
+once both are on one $\theta$ scale ([guide section 15](guide.md#equating-and-raw-to-scale-tables)).
+The common scale is the old form's; with `link=` the new form's items are evaluated at
+$(\theta-B)/A$. Unidimensional models, every item model, single and multiple groups.
+
+- `"true_score"` (Lord, 1980; Kolen & Brennan, 2014, §6.5): $e_Y(x)=\tau_Y(\theta_x)$ with
+  $\tau_X(\theta_x)=x$ on the test characteristic curves $\tau(\theta)=\sum_j\sum_kk\,P_{jk}(\theta)$,
+  solved by safeguarded Newton. Scores at or below the sum of the lower asymptotes are equated
+  linearly between $(0,0)$ and $(\tau_X^{\mathrm{lo}},\tau_Y^{\mathrm{lo}})$, and scores at or above
+  the sum of the upper asymptotes linearly between $(\tau_X^{\mathrm{hi}},\tau_Y^{\mathrm{hi}})$ and
+  the two maximum scores; their `theta` is $-\infty$ / $+\infty$.
+- `"observed_score"` (Lord & Wingersky, 1984; Kolen & Brennan, 2014, §6.6): the model-implied
+  summed-score distributions of both forms in the synthetic population
+  $w_1\cdot\text{new}+(1-w_1)\cdot\text{old}$ (Lord–Wingersky recursion over each fitted latent
+  distribution), equated by the equipercentile method of Kolen & Brennan (2014, ch. 2).
+
+Validated against equateIRT and SNSequate (dichotomous 3PL / 2PL) and against references built
+from mirt and the equate package (GRM, GPCM, 3PL, 2PL). Standard errors of equated scores are
+not available.
+
+| Argument | Type | Description |
+|---|---|---|
+| `new` | `FitResult` | Unidimensional fit containing the new form $X$ |
+| `old` | `FitResult` | Unidimensional fit containing the old form $Y$ (may be `new`) |
+| `method` | `"true_score"` / `"observed_score"` | Equating method (default `"true_score"`) |
+| `new_items`, `old_items` | list[str], optional | Items of each form (default: all items of the fit) |
+| `link` | `LinkResult`, optional | `link(new, old)`: maps the scale of `new` onto that of `old` (unidimensional; its groups must be `new_group` / `old_group`) |
+| `new_group`, `old_group` | str, optional | Group of each form's parameters and population; required for a multiple-group fit |
+| `population` | `"new"` / `"old"` / `"synthetic"` | Population of observed-score equating: $w_1=1$, $w_1=0$ or $w_1=$ `synthetic_weight` (default `"new"`; observed-score method only) |
+| `synthetic_weight` | float, optional | Weight $w_1\in[0,1]$ of the new form's population; required with `population="synthetic"` and not allowed otherwise |
+
+**Returns**: [`IRTEquatingResult`](#irtequatingresult)
+
+**Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (multidimensional fit,
+unknown or duplicated items, missing or unknown group, a `link` that is not a unidimensional
+`LinkResult` between these groups or lacks the new form's items, invalid `population` /
+`synthetic_weight`, or, for the true-score method, a test characteristic curve that decreases),
+`ConvergenceWarning` (the true-score solver did not converge).
+
+### `IRTEquatingResult`
+
+| Attribute | Description |
+|---|---|
+| `table` | `DataFrame`: `score` (new form, $0..X$), `equated` (on the old form's summed-score scale) and, for the true-score method, `theta` (on the old form's scale; $\pm\infty$ beyond the asymptotes) |
+| `method` | `"true_score"` / `"observed_score"` |
+| `new_items`, `old_items` | Items of the two forms |
+| `new_range`, `old_range` | Lower and upper asymptotes $(\tau^{\mathrm{lo}},\tau^{\mathrm{hi}})$ of the two test characteristic curves |
+| `population`, `synthetic_weight` | Population and $w_1$ of observed-score equating (`None` for the true-score method) |
+| `new_distribution`, `old_distribution` | `DataFrame`s `score`, `probability`: the model-implied distributions in the synthetic population (observed-score method; `None` otherwise) |
+
+Methods: `summary(*, digits=4)`, `str()`, and an HTML view in Jupyter.
+
+### `score_distribution`
+
+```text
+score_distribution(res, *, items=None, group=None) -> DataFrame
+```
+
+The model-implied summed-score distribution $f(x)=\sum_qL(x\mid\theta_q)w_q$ of a form (the
+Lord–Wingersky likelihood of its items over the group's fitted latent distribution, any latent
+family). For all items of a `Normal` fit it is the `probability` column of
+[`summed_score_table`](#summed_score_table). Columns `score`, `probability`. `group` is required
+for a multiple-group fit.
+
+### `scale_table`
+
+```text
+scale_table(res, *, slope, intercept, method="true_score", items=None, group=None,
+            lowest=None, highest=None, n_digits=0) -> DataFrame
+```
+
+A raw-to-scale table: each summed score $x$ of a form gets $\theta(x)$, its standard error, and
+the scale score $\min\{\max\{\text{slope}\cdot\theta+\text{intercept},\text{lowest}\},\text{highest}\}$.
+
+| `method` | $\theta(x)$ | Standard error |
+|---|---|---|
+| `"true_score"` (default) | solves $\tau(\theta)=x$ on the form's test characteristic curve; $-\infty$ / $+\infty$ at or beyond its lower / upper asymptote | $I(\theta)^{-1/2}$ from the test information of the form's items (NaN where $\theta$ is infinite) |
+| `"EAPsum"` | summed-score EAP under the group's fitted latent distribution | posterior SD |
+
+`slope` must be positive; a missing bound is not applied (so an infinite $\theta$ gives an
+infinite scale score). Columns `score`, `theta`, `theta_se`, `scale_score`, `scale_score_se`
+($\text{slope}\cdot$`theta_se`, not clipped) and `scale_score_rounded` (NumPy `round` to
+`n_digits`, half to even). Raises `SpecificationError` for a multidimensional model, unknown
+items or group, a non-positive `slope`, `lowest >= highest`, a negative `n_digits`, or (true
+score) a decreasing test characteristic curve.
+
+---
+
+## Model comparison and simulation
+
+### `compare_fits`
+
+```text
+compare_fits(*results, names=None) -> DataFrame
+```
+
+Information criteria and likelihood-ratio tests for two or more fits of the same data, ordered
+from the most restricted model to the least restricted ([guide section 5](guide.md#comparing-models-aic-bic-likelihood-ratio-tests)).
+With $\ell$ the marginal log-likelihood, $k$ the number of free parameters and $N$ the number of
+respondents (the sum of the weights for a weighted fit):
+$\mathrm{AIC}=-2\ell+2k$ (Akaike, 1974), $\mathrm{SABIC}=-2\ell+k\log\frac{N+2}{24}$ (Sclove,
+1987), $\mathrm{HQ}=-2\ell+2k\log\log N$ (Hannan & Quinn, 1979), $\mathrm{BIC}=-2\ell+k\log N$
+(Schwarz, 1978). Each row after the first is tested against the previous one by
+$X^2=2(\ell_m-\ell_{m-1})$ on $\mathit{df}=k_m-k_{m-1}$ degrees of freedom (Wilks, 1938). This is
+mirt's `anova(mod1, mod2, ...)`.
+
+| Argument | Type | Description |
+|---|---|---|
+| `*results` | `FitResult` | Two or more fits of the same responses, most restricted first |
+| `names` | list[str], optional | Labels for the `model` column (default `model1`, `model2`, ...) |
+
+**Returns**: `DataFrame` with one row per fit: `model`, `n_params`, `loglik`, `aic`, `sabic`,
+`hq`, `bic`, `x2`, `df`, `p`. `x2`, `df` and `p` are NaN in the first row; `p` is NaN when
+`df <= 0`.
+
+**Raises**: `SpecificationError` for fewer than two fits, an argument that is not a `FitResult`,
+`names` that are not one distinct label per fit, or fits with different numbers of respondents.
+
+**Warns**: `FlexpyirtWarning` when the number of parameters does not increase, when the
+log-likelihood decreases while parameters are added, or when a fit has priors.
+
+Nesting cannot be checked and is the caller's responsibility; no boundary correction is made
+(a variance fixed at 0, fewer mixture components, `DavidianCurve` against `Normal`).
+
+### `simulate_responses`
+
+```text
+simulate_responses(source, *, n_obs=None, key, parameters=None, theta=None, group=None)
+    -> SimulatedData
+```
+
+Simulated item responses from a fitted model or from a `Model` with given item parameters
+([guide section 5](guide.md#simulating-responses)). Each respondent's $\boldsymbol\theta_i$ is
+drawn from their group's latent distribution (or taken from `theta`), and each response by
+inversion of a uniform number, $X_{ij}=\min\{k: u_{ij}\le\sum_{c\le k}P_{jc}(\boldsymbol\theta_i)\}$
+(Devroye, 1986). Latent draws: `Normal` with the fitted means, variances and correlations;
+`NormalMixture` by component; `DavidianCurve` from its continuous density (inverse CDF on a fine
+grid); `EmpiricalHistogram` at the quadrature nodes with the fitted weights (a discrete
+distribution, as fitted). Every item model and every model structure (unidimensional,
+`with_factors`, bifactor, two-tier, multiple groups) is supported.
+
+| Argument | Type | Description |
+|---|---|---|
+| `source` | `FitResult` / `Model` | A fit (its estimates are used) or a specification |
+| `n_obs` | int / dict[str, int], optional | Number of respondents; per group for a multiple-group model, or a mapping group → number. Required unless `theta` is given |
+| `key` | `jax.Array` | JAX PRNG key (`jax.random.key(0)`); the same key gives the same data |
+| `parameters` | DataFrame, optional | With a `Model` (required): an item bank as for `Model.fix_from()` in the slope–intercept parameterization, with every item parameter |
+| `theta` | array, optional | Latent traits to use instead of draws: `(N,)` for one factor, `(N, D)` otherwise |
+| `group` | array, optional | With `theta` for a multiple-group model: the group label of each row |
+
+From a `Model`, the latent distribution is the specification's: a `Normal`'s `mean` and `var`
+(factor correlations 0) or a `NormalMixture`'s `means`, `variances` and `weights`.
+`EmpiricalHistogram` and `DavidianCurve` have no shape before fitting, so they need `theta`.
+
+**Returns**: [`SimulatedData`](#simulateddata).
+
+**Raises**: `PrecisionError` without 64-bit JAX; `SpecificationError` for an invalid `key`,
+`n_obs`, `theta`, `group` or `parameters` (for example an item parameter missing from the bank).
+
+Missing responses are not simulated: set entries of `responses` to NaN for a test design or a
+missing-data mechanism.
+
+### `SimulatedData`
+
+Frozen dataclass returned by [`simulate_responses`](#simulate_responses).
+
+| Attribute | Type | Description |
+|---|---|---|
+| `responses` | DataFrame | One `int64` column per item (the model's item names), codes `0..K-1`; accepted by `fit()` |
+| `theta` | ndarray | Latent traits, `(N,)` for one factor or `(N, D)` |
+| `group` | ndarray or None | Group label of each row (multiple-group model), else `None` |
 
 ---
 

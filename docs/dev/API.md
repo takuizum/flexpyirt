@@ -170,6 +170,9 @@ one (DESIGN.md §16.18).
 | `screen_common_items` | function | Common-item screening for linking and item parameter drift (robust z, displacement, expected-score RMSD; iterative purification with `link()`); returns a `CommonItemScreeningResult` |
 | `CommonItemScreeningResult` | class | Screening result (`table`, `link`, `initial_link`, `kept_items`, `removed_items`, `history`, `flagged_items`, `summary`) |
 | `stack_screening_tables` | function | Stacks the screening tables of several administrations with an `administration` column |
+| `irt_equate` | function | IRT true-score / observed-score equating of the summed scores of a new form to an old form on one scale (or through a `LinkResult`); returns an `IRTEquatingResult` (`table`, `new_distribution`, `old_distribution`, `summary`) |
+| `score_distribution` | function | Model-implied summed-score distribution of a form (items, group) in its fitted population |
+| `scale_table` | function | Raw-to-scale table: $\theta$ per summed score (true score or EAPsum), its SE, and a clipped, rounded linear scale score |
 | `polychoric` | function | Polychoric / tetrachoric correlation matrix (two-step ML, smoothing); returns a `PolychoricResult` |
 | `parallel_analysis`, `velicer_map`, `empirical_kaiser` | function | Number-of-dimensions diagnostics; return `ParallelAnalysisResult`, `MAPResult`, `EmpiricalKaiserResult` (frozen dataclasses with `n_factors`) |
 | `comparison_data` | function | Comparison-data method (Ruscio & Roche, 2012); returns `ComparisonDataResult` |
@@ -184,6 +187,8 @@ one (DESIGN.md §16.18).
 | `flexpyirt.plotting` | module | `plot_item_curves` (with observed proportions; one curve per group = DIF plot), `plot_information`, `plot_expected_score`, `plot_wright_map`; matplotlib from the optional extra `flexpyirt[plot]`, imported lazily (`MissingDependencyError` without it) (DESIGN §21) |
 | `reliability`, `summed_score_table` | function | Marginal and empirical reliability; the summed-score EAP table (also `FitResult.score(method="EAPsum")`). Return DataFrames |
 | `summed_score_distribution` | function | Lord–Wingersky / Poisson-binomial kernel on category probabilities (DESIGN §18.1) |
+| `compare_fits` | function | Model-comparison table over fits of the same data: `n_params`, `loglik`, AIC, SABIC, HQ, BIC and likelihood-ratio tests against the previous row (mirt's `anova()`; DESIGN §24.1) |
+| `simulate_responses`, `SimulatedData` | function, frozen dataclass | Simulated responses from a `FitResult` or a `Model` + item bank, with a JAX `key`; returns `responses`, `theta`, `group` (DESIGN §24.2) |
 | `classification_accuracy` | function | Classification accuracy and consistency of cut scores (Lee, 2010, on the summed score; Rudner, 2001, 2005, on $\theta$; D and P approaches) for a unidimensional `FitResult`; returns a `ClassificationResult` (`summary`, `by_category`, `by_cut`, `conditional`, `accuracy_table`, `consistency_table`; DESIGN §18.4) |
 | `LocalDependenceResult` | frozen dataclass | Returned by `FitResult.local_dependence()` (`pairs`, `q3`, `q3_mean`, `max_q3_star`) |
 | `JSIResult` | frozen dataclass | Returned by `FitResult.jsi()` (`matrix`, `pairs`, `method`, `converged`) |
