@@ -192,19 +192,19 @@ def test_ensemble_without_fit_has_only_the_detect_row() -> None:
     assert "question B" in res.summary()
 
 
-def test_ensemble_marks_m2_unavailable_with_missing_data() -> None:
+def test_ensemble_with_missing_data_keeps_m2() -> None:
     data = _lsat7().copy()
     data.iloc[::25, 2] = np.nan
     res_fit = fit(Model.uniform(TwoPL(), items=list(data.columns)), data, se=None)
     res = dimensionality(data, key=jax.random.key(2), fit=res_fit, n_replications=5)
     row = res.unidimensionality.set_index("method").loc["M2 RMSEA"]
-    assert row["supports_unidimensionality"] is None
-    assert "not available" in row["detail"]
-    assert res.results["m2"] is None
+    assert isinstance(row["supports_unidimensionality"], bool)
+    assert res.results["m2"] is not None
+    assert row["statistic"] == pytest.approx(float(res_fit.m2(data)["rmsea"].iloc[0]))
     assert res.results["exploratory_detect"] is None
     assert res.results["comparison_data"] is None
     assert res.results["dimtest"] is None
-    assert res.n_unidimensionality_methods == 2
+    assert res.n_unidimensionality_methods == 3
 
 
 @pytest.mark.parametrize(

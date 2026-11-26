@@ -233,7 +233,5 @@ def test_unsupported_multidimensional_structures_are_rejected() -> None:
         with pytest.raises(SpecificationError, match="bifactor, two-tier or multiple-group"):
             reduced.item_fit(df)
     grouped = dataclasses.replace(res, _model=multigroup)
-    with pytest.raises(SpecificationError, match="single-group"):
-        grouped.m2(df)
     with pytest.raises(SpecificationError, match="multiple-group multidimensional"):
         grouped.item_fit(df, group=np.tile(["ref", "focal"], len(df) // 2))

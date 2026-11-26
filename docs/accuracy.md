@@ -201,7 +201,14 @@ small or absent in typical use, but you may see them when comparing the two prog
   items, where mirt 1.46's are inaccurate. For these models flexpyirt is compared with an exact R
   computation, and its $M_2$ differs from mirt's (by 5–11% in the tested 3PL and GPCM cases). TLI and
   CFI are reported for dichotomous models only, because the independence null model is
-  rank-deficient for polytomous items.
+  rank-deficient for polytomous items. For multiple groups, flexpyirt weights each group's rows
+  of the derivative matrix by $\sqrt{N_g/N}$ (mirt does not; 0.4–2.6% in the tested cases, which
+  also have free latent parameters). With missing responses flexpyirt uses the exact covariance of
+  the pairwise-available margins under MCAR, while mirt rescales the residuals by the number of
+  respondents per margin, which is only approximately right (6–18% in the tested cases). For both,
+  flexpyirt is compared with an independent R computation of its formulas, and R code with mirt's
+  conventions reproduces mirt's `M2()`; a simulation confirms that flexpyirt's statistic follows
+  its reference $\chi^2$ distribution with MCAR missing responses.
 - **Multidimensional ML scoring.** When one dimension of an ML estimate diverges, flexpyirt reports
   $\pm\infty$ with SE NaN, whereas mirt can stop near its bound ($|\theta|\approx20$) with SE 0.
 

@@ -109,6 +109,7 @@ English | [日本語](VALIDATION.ja.md)
 | V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
+| V42 | $M_2^*$ for multiple groups, missing data and MAP fits (two-group 2PL with unequal groups and anchors, complete and 15% MCAR; two-group GRM $K=3$; two-group two-factor 2PL; single-group 2PL with 20% MCAR; 2PL MAP) | `M2(m, quadpts =, theta_lim =)` on `multipleGroup()` / `mirt()` fits at mirt's estimates, plus an independent R computation of DESIGN §16.20 and R code with mirt's conventions | M6 |
 | V43 | Information matrix, directional information and expected scores of multidimensional models at chosen parameters (two correlated factors with 2PL, 3PL, 4PL, GRM, GPCM and nominal items and four cross-loadings; three factors with 2PL, 3PL, GRM and GPCM and two cross-loadings; bifactor 2PL + GRM with three specific factors; two-tier 2PL + GRM with two correlated primary factors and two specific factors) | `iteminfo(item, Theta, multidim_matrix = TRUE)`, `iteminfo(item, Theta, degrees = )`, `testinfo(m, Theta, degrees = )`, `expected.item()`, `expected.test()` on `mirt()` / `bfactor()` objects built with `pars =` and `TOL = NaN` | M7 |
 | V45 | Optional unconstrained M-step scale (`BAEM(m_step_scale="unconstrained")`) on the V3, V4, V5, V7, V9, V11 and V14 cases; `LogitNormalPrior` (`"natural"`: no mirt equivalent, independent numerical check; `mode_scale="logit"`: mirt `norm` on `g`) | the existing references of those cases; SciPy (`stats.norm`, `integrate.quad`) and a stationarity condition written from the formula; `v45_3pl_logit_norm_map.json` (mirt) and the flexMIRT logit-metric mode computed in the test | #15 |
 | V46 | Classical item analysis (flexpyctt): keyed scoring, alpha (pairwise and listwise), item statistics, point-biserial / biserial / polyserial correlations, omega total (Pearson and polychoric), option analysis; simulated 10-item multiple-choice (complete, 5% MCAR) and 6-item 0–4 data (complete, 6% MCAR) | none (not mirt): psych `alpha()`, `score.multiple.choice()`, `responseFrequency()`, `polyserial()`, `biserial()`, `fa()`, `omega(nfactors = 1)`; ltm `cronbach.alpha()`, `biserial.cor()`; polycor `polyserial(ML = FALSE)`; lavaan `lavCor()`; base R for option statistics | flexpyctt |
@@ -435,11 +436,56 @@ English | [日本語](VALIDATION.ja.md)
     central-difference item derivatives (step $10^{-6}$, error $\sim10^{-10}$) shift $M_2$ by
     `4e-6` relative, so the R reference uses mirt's analytic `dP` for the item columns (correct
     for 2PL and graded items) and flexpyirt uses autodiff.
-  - **Not validated**: multiple-group multidimensional models (the V21 configurations; they
-    raise `SpecificationError`, as do bifactor and two-tier models), 3PL / GPCM / nominal items
+  - **Not validated**: S-X2 for multiple-group multidimensional models (the V21 configurations;
+    it raises `SpecificationError`, as do both statistics for bifactor and two-tier models;
+    $M_2$ for multiple groups is V42), 3PL / GPCM / nominal items
     in a multidimensional model (the item kernels are those validated in V18 / V15 and the unit
     tests cover a mixed 2PL + GRM model, but there is no mirt comparison), and grids other than
     mirt's defaults.
+- **$M_2^*$ for multiple groups, missing data and MAP fits (V42, M6, #76; DESIGN §16.23)**: six
+  simulated cases fitted by mirt 1.46.1 (`multipleGroup()` / `mirt()`, `TOL = 1e-10`, $[-6,6]$
+  with 61 points, 31 per dimension for two factors; `validation/r/m6_m2_groups_missing_map_reference.R`
+  → `tests/reference/v42_m2_groups_missing_map.json`): `twogroup_2pl` (2PL, $J=6$, 700 / 300,
+  items 1–3 equal across groups, focal mean and variance free), `twogroup_2pl_missing` (the same
+  with 15% MCAR), `twogroup_grm` (GRM $K=3$, $J=5$, 500 / 500, all items equal),
+  `twogroup_2d` (two-factor 2PL, $J=8$, 600 / 400, all items equal, focal means, variances and
+  correlation free), `missing_2pl` (2PL, $J=7$, $N=800$, 20% MCAR) and `map_2pl` (2PL, $J=6$,
+  $N=250$, `lnorm(0, 0.5)` on $a$ and `norm(0, 2)` on $d$). mirt's `M2()` is the raw reference.
+  The R script also computes `exact`, the formulas of DESIGN §16.23 written independently in R
+  (central-difference $\Delta$ over every free parameter with the group rows scaled by
+  $\sqrt{N_g/N}$, mirt's `buildXi2els` per group rescaled by $N_gN_{ab}/(N_aN_b)$, the
+  multiple-group independence model), and the same code with mirt's conventions, which must
+  reproduce mirt's raw $M_2$ (asserted in R). Tests: `tests/test_mirt_m6_m2_groups.py` (slow tier)
+  and unit tests in `tests/test_m5_m2.py`.
+  - **At mirt's estimates**, flexpyirt's default agrees with `exact` to `5.5e-10` (relative) in
+    every dichotomous case and `3.8e-7` for the GRM (the central-difference error of the R
+    reference, as in V39), with identical $df$, TLI / CFI to `1.1e-10`, and SRMSR per group equal
+    to mirt's to `7.8e-15`. With `_mirt_convention=True` and `_latent_in_delta=False` flexpyirt
+    reproduces mirt's raw $M_2$ to `1.8e-14`, and its TLI / CFI to `9.4e-8` (mirt fits the null
+    model by EM).
+  - **Refitted** by flexpyirt, the log-likelihood (log-posterior for MAP) agrees with mirt's to
+    `6.1e-10` and $M_2$ with `exact` to `3.0e-5` (the estimates agree to about `1e-5`).
+  - **mirt versus the exact statistic**: mirt is `0.45%` and `0.37%` larger for `twogroup_2pl`
+    and `twogroup_2d` (group rows unscaled, latent columns dropped), `2.6%` for `twogroup_grm`
+    (latent columns), `5.8%` and `18.3%` for `missing_2pl` and `twogroup_2pl_missing` (the
+    `N.ratio` weighting), and identical for `map_2pl` (mirt ignores the prior, as flexpyirt does).
+  - **Calibration by simulation** (not a mirt comparison; scratch scripts, summarized here and in
+    the slow unit test `test_m2_with_mcar_missing_follows_chi2_at_true_parameters`): 2PL, $J=6$,
+    $N=600$, 1000 replications at the true parameters ($df=21$): with 30% MCAR on every item the
+    exact statistic has mean `20.86 ± 0.21`, variance `42.9` (42) and 5.3% rejections at .05
+    (KS $p=0.84$), mirt's weighting mean `19.12` (KS $p=10^{-12}$); with uneven MCAR rates
+    (0, 0, 10, 40, 60, 70%) `20.86 ± 0.21`, 5.6% (KS $p=0.12$) against mirt's `19.90` with
+    variance `59.6` (KS $p=10^{-14}$). With estimated parameters ($df=9$, 400 replications unless noted):
+    complete data `9.22 ± 0.22` (6.0% rejections, KS $p=0.63$); 30% MCAR `9.04 ± 0.20`, 4.8%
+    (KS $p=0.61$), mirt's weighting `8.94`; uneven rates `9.19 ± 0.22`, 6.0% (KS $p=0.64$) against
+    mirt's `7.17`, 1.5% (KS $p=5\times10^{-17}$); uneven rates with $N=2000$ (300 replications)
+    `8.92 ± 0.24`, 4.7% (KS $p=0.82$) against mirt's `6.81` with no rejection (KS $p=4\times10^{-14}$).
+    Two groups of 900 / 150 with all items equal and the focal mean and variance free (400
+    replications, $df=28$): mean `28.17`, 5.5% rejections (KS $p=0.29$); mirt's convention
+    `26.72` (KS $p=0.004$).
+  - **Not validated**: multiple-group `DavidianCurve` models (raise), polytomous null models (TLI /
+    CFI stay `NaN`, §16.3), and MAR mechanisms that are not MCAR (the statistic has no reference
+    distribution there; documented).
 - **Confirmatory 2–3 dimensional MIRT (V14, M4)**: four simulated cases are validated in
   `tests/test_mirt_m4_mirt.py` (with both plain EM and SQUAREM; reference generator
   `validation/r/m4_mirt_reference.R` → `tests/reference/v14_mirt2d.json`, `accelerate = "none"`,

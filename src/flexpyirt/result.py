@@ -1539,6 +1539,7 @@ class FitResult:
         self,
         data: Any,
         *,
+        group: Any = None,
         item_names: list[str] | None = None,
         ci: float = 0.90,
     ) -> pd.DataFrame:
@@ -1571,10 +1572,34 @@ class FitResult:
         of :math:`\Delta_2` while counting them in ``df``, so its value is slightly larger for
         models with free correlations.)
 
+        **Multiple groups** (DESIGN.md §16.23): the residuals
+        :math:`\sqrt{N_g}(\hat p_g-\pi_g)` of the :math:`G` groups are stacked, their covariance
+        is block-diagonal, the rows of group :math:`g` in :math:`\Delta_2` are scaled by
+        :math:`\sqrt{N_g/N}` (a parameter equal across groups is one column), and
+        :math:`df = G(J+\binom J2) - q`, as mirt's ``M2()`` on a ``multipleGroup`` fit. RMSEA
+        uses the total :math:`N` and SRMSR is reported per group. mirt leaves the group rows
+        unscaled, so its value differs when parameters are equal across groups of unequal size.
+
+        **Missing responses**: each margin is the mean over the respondents who answered the
+        item (or both items of the pair), and :math:`\Xi_2` is rescaled to the exact covariance
+        of these pairwise-available means, :math:`N N_{ab}\Xi_{ab}/(N_aN_b)`, where
+        :math:`N_{ab}` counts the respondents who answered every item of both margins. The
+        reference :math:`\chi^2` holds when responses are missing completely at random (MCAR);
+        under MAR that is not MCAR the available-case margins are biased and the test is not
+        valid. Every item pair must have been answered together by someone.
+
+        **MAP fits** (priors): the statistic is evaluated at the MAP estimates with every free
+        parameter counted in :math:`q`, as mirt does. Its :math:`\chi^2` reference only needs
+        :math:`\sqrt N`-consistent estimates, which priors preserve; with a strong prior on a
+        weakly identified parameter the test is conservative in finite samples, and a parameter
+        identified only by its prior makes :math:`\Delta_2` rank-deficient (``NaN`` result).
+
         Parameters
         ----------
         data : DataFrame or array-like
-            Complete responses on the fitted items (typically the fitting data).
+            Responses on the fitted items (typically the fitting data); missing as NaN.
+        group : array-like, optional
+            Group labels (required for a multiple-group model).
         item_names : list of str, optional
             Column names when ``data`` is an array.
         ci : float, default 0.90
@@ -1585,19 +1610,22 @@ class FitResult:
         -------
         DataFrame
             One-row DataFrame with columns ``m2``, ``df``, ``p``, ``rmsea``, ``rmsea_<lo>``,
-            ``rmsea_<hi>``, ``srmsr``, ``tli``, ``cfi``. When ``df <= 0`` or :math:`\Delta_2` is
-            rank-deficient (the model is not locally identified from first- and second-order
-            moments), a :class:`FlexpyirtWarning` is emitted and ``m2``, ``p``, RMSEA, its CI,
-            ``tli`` and ``cfi`` are ``NaN`` (``df`` and ``srmsr`` remain finite).
+            ``rmsea_<hi>``, ``srmsr``, ``tli``, ``cfi`` (for a multiple-group model ``srmsr`` is
+            replaced by one ``srmsr_<group>`` column per group). When ``df <= 0`` or
+            :math:`\Delta_2` is rank-deficient (the model is not locally identified from first-
+            and second-order moments), a :class:`FlexpyirtWarning` is emitted and ``m2``,
+            ``p``, RMSEA, its CI, ``tli`` and ``cfi`` are ``NaN`` (``df`` and ``srmsr`` remain
+            finite).
 
         Raises
         ------
         PrecisionError
             If JAX is not configured for 64-bit floating point.
         SpecificationError
-            For bifactor, two-tier, multiple-group, ``EmpiricalHistogram``, ``NormalMixture``, or
-            MAP (with priors) models, missing responses, invalid ``ci``, or fewer than 2 items or
-            respondents.
+            For bifactor, two-tier, ``EmpiricalHistogram`` or ``NormalMixture`` models, a
+            multiple-group ``DavidianCurve`` model, weighted fits, invalid ``ci`` or group
+            labels, fewer than 2 items or than 2 respondents in a group, or an item or item pair
+            that nobody answered (in some group).
         """
         check_x64()
         self._require_unweighted("m2()")
@@ -1607,28 +1635,28 @@ class FitResult:
                 "m2() does not support bifactor or two-tier models yet (with_factors() models "
                 "are supported)."
             )
-        if model.is_multigroup or model.is_empirical_histogram or model.is_mixture:
+        if (
+            model.is_empirical_histogram
+            or model.is_mixture
+            or (model.is_multigroup and model.is_davidian)
+        ):
             raise SpecificationError(
-                "m2() supports single-group models with a Normal latent distribution only."
-            )
-        if self._has_priors:
-            raise SpecificationError(
-                "m2() requires an MLE fit without priors (MAP fits are not supported)."
+                "m2() supports Normal latent distributions (and single-group DavidianCurve) only."
             )
         if isinstance(ci, bool) or not isinstance(ci, (int, float)) or not (0.0 < float(ci) < 1.0):
             raise SpecificationError(f"ci must be strictly between 0 and 1, got {ci!r}.")
         ci_f = float(ci)
         y = coerce_responses(data, model, item_names=item_names)
-        if (y < 0).any():
-            raise SpecificationError(
-                "m2() requires complete data; M2 is not defined with missing responses."
-            )
-        if y.shape[0] < 2:
-            raise SpecificationError("m2() requires at least 2 respondents.")
         if y.shape[1] < 2:
             raise SpecificationError("m2() requires at least 2 items.")
+        codes, group_names = coerce_groups(group, model, y.shape[0], require_all=True)
+        sizes = np.bincount(codes, minlength=len(group_names))
+        if (sizes < 2).any():
+            where = (
+                f" in group {group_names[int(np.argmin(sizes))]!r}" if model.is_multigroup else ""
+            )
+            raise SpecificationError(f"m2() requires at least 2 respondents{where}.")
 
-        codes, _ = coerce_groups(None, model, y.shape[0], require_all=False)
         compiled = compile_problem(model, y, codes, self.parameters, self._quadrature)
         n_categories = [m.kernel.n_categories for _, m in model.items]
         res = _m2.m2_statistic(
@@ -1637,9 +1665,16 @@ class FitResult:
             y,
             n_params=self.n_params,
             n_categories=n_categories,
+            groups=codes,
+            item_names=[name for name, _ in model.items],
             level=ci_f,
         )
         lo_col, hi_col = _m2.ci_column_names(ci_f)
+        srmsr_cols = (
+            {f"srmsr_{g}": v for g, v in zip(group_names, res.srmsr_by_group, strict=True)}
+            if model.is_multigroup
+            else {"srmsr": res.srmsr}
+        )
         return pd.DataFrame(
             [
                 {
@@ -1649,7 +1684,7 @@ class FitResult:
                     "rmsea": res.rmsea,
                     lo_col: res.rmsea_lower,
                     hi_col: res.rmsea_upper,
-                    "srmsr": res.srmsr,
+                    **srmsr_cols,
                     "tli": res.tli,
                     "cfi": res.cfi,
                 }
