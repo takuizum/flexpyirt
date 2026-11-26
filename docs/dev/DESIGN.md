@@ -2566,6 +2566,106 @@ data-independent shapes (§15.21).
    $\mathbf A$ and NaN otherwise (a rotated standard error needs the posterior covariance, which
    the score table does not carry).
 
+## 20. IRT true-score and observed-score equating, raw-to-scale tables (#106)
+
+1. **Scope and API (Decision, owner 2026-11-26: the API and scope proposed in #106)**:
+   unidimensional models, every item family, single- and multiple-group fits.
+   - `irt_equate(new, old, *, method="true_score", new_items=None, old_items=None, link=None,
+     new_group=None, old_group=None, population="new", synthetic_weight=None)` →
+     `IRTEquatingResult` converts every summed score $x=0,\dots,X_{\max}$ of the new form $X$ to
+     the scale of summed scores on the old form $Y$. `new` and `old` are `FitResult`s whose
+     $\theta$ scales coincide (FIPC, a concurrent calibration, or the same fit with
+     `new_items` / `old_items` naming the items of each form), or `link=` is a `LinkResult` that
+     maps the scale of `new` onto that of `old`, $\theta_Y = A\theta_X + B$ (§16.5). The common
+     scale is always the old form's. `link` must be unidimensional and its source and target
+     groups must be `new_group` and `old_group`.
+   - `score_distribution(res, *, items=None, group=None)` → DataFrame `score`, `probability`:
+     the model-implied summed-score distribution of a form in the fitted population of a group.
+   - `scale_table(res, *, slope, intercept, method="true_score", items=None, group=None,
+     lowest=None, highest=None, n_digits=0)` → DataFrame `score`, `theta`, `theta_se`,
+     `scale_score`, `scale_score_se`, `scale_score_rounded`.
+   **Deviation from the #106 sketch.** `synthetic_weight` defaults to `None` and is allowed (and
+   required) only with `population="synthetic"`; `population="new"` / `"old"` are the weights 1
+   and 0. One argument then never silently overrides the other.
+   **Left out** (follow-ups): standard errors of equated scores (delta method through `vcov`),
+   kernel smoothing of the model-implied distributions, nonlinear scale transformations,
+   multidimensional models.
+
+2. **Form curves on the common scale**: each form is a set of items with kernel parameters
+   $\xi_j$ of one group of one fit. With a link, the new form's items are evaluated on their own
+   scale at $\theta_X=(\theta-B)/A$, so $P^{X}_{jk}(\theta)=P_{jk}((\theta-B)/A;\xi_j)$; this is
+   exactly the transformed item of §16.5 for every kernel, without transforming parameters.
+   The test characteristic curve (TCC) is
+   $$\tau(\theta)=\sum_j\sum_{k=0}^{K_j-1}k\,P_{jk}(\theta),$$
+   categories scored $0,\dots,K_j-1$ as in `expected_score()`. Its asymptotes
+   $\tau_{\mathrm{lo}}=\lim_{\theta\to-\infty}\tau$ and $\tau_{\mathrm{hi}}=\lim_{\theta\to\infty}\tau$
+   (the sums of the lower and upper asymptotes $g_j$, $u_j$ of 3PL/4PL items, 0 and $K_j-1$ for
+   the others) are evaluated at $\theta_X=\mp10^{8}$, where every kernel has reached its limit in
+   double precision unless a slope is below about $10^{-6}$. True-score methods need a
+   non-decreasing TCC: it is checked on 801 points of $[-20,20]$ (own scale) and a decrease of
+   more than $10^{-10}(1+X_{\max})$ raises `SpecificationError` (negative slopes, nominal items
+   whose expected score is not monotone).
+
+3. **True-score equating (Lord, 1980; Kolen & Brennan, 2014, §6.5)**: for
+   $\tau^X_{\mathrm{lo}}<x<\tau^X_{\mathrm{hi}}$, solve $\tau^X(\theta_x)=x$ and set
+   $e_Y(x)=\tau^Y(\theta_x)$. **Solver**: safeguarded Newton (Newton–bisection) on all scores at
+   once inside one `jit`-ed `lax.while_loop`; the bracket starts at $[-10,10]$ on the common
+   scale and is doubled (in Python, up to $|\theta|=10^{6}$) until it holds every root;
+   $\tau'$ comes from `jax.jvp`. A Newton step that leaves the bracket, or a non-positive
+   derivative, is replaced by bisection. Stop when every $|\tau^X(\theta)-x|\le10^{-13}(1+X_{\max})$
+   or the bracket is narrower than $10^{-14}(1+|\theta|)$ (at most 300 iterations; not
+   converging raises `ConvergenceWarning`).
+   **Scores outside the range of the TCC** (Kolen & Brennan, 2014, §6.5, eq. 6.27 and the
+   procedure for the highest score): no $\theta$ solves the equation, and the scores are
+   equated by linear interpolation between the points $(0,0)$,
+   $(\tau^X_{\mathrm{lo}},\tau^Y_{\mathrm{lo}})$ and, at the top,
+   $(\tau^X_{\mathrm{hi}},\tau^Y_{\mathrm{hi}})$, $(X_{\max},Y_{\max})$:
+   $$e_Y(x)=x\,\frac{\tau^Y_{\mathrm{lo}}}{\tau^X_{\mathrm{lo}}}\ (0\le x\le\tau^X_{\mathrm{lo}}),\qquad
+   e_Y(x)=\tau^Y_{\mathrm{hi}}+(x-\tau^X_{\mathrm{hi}})\frac{Y_{\max}-\tau^Y_{\mathrm{hi}}}{X_{\max}-\tau^X_{\mathrm{hi}}}\ (\tau^X_{\mathrm{hi}}\le x\le X_{\max}).$$
+   When $\tau^X_{\mathrm{lo}}=0$ (no lower asymptotes) only $x=0$ is in the first range and maps to
+   0; when $\tau^X_{\mathrm{hi}}=X_{\max}$ only $x=X_{\max}$ maps to $Y_{\max}$. The `theta`
+   column is $-\infty$ for $x\le\tau^X_{\mathrm{lo}}$ and $+\infty$ for $x\ge\tau^X_{\mathrm{hi}}$
+   (the limits of $\theta_x$; for $x$ strictly beyond an asymptote there is no solution).
+
+4. **Observed-score equating (Lord & Wingersky, 1984; Kolen & Brennan, 2014, §6.6)**:
+   **Populations.** The new population is the fitted latent distribution of `new_group` in `new`
+   (nodes and weights as `link()` uses them: Normal, EH, Davidian or mixture, `_fitted_grid`),
+   with nodes mapped to the common scale by $A\theta+B$ when a link is given; the old population
+   is that of `old_group` in `old`. The synthetic population is
+   $w_1\cdot\text{new}+(1-w_1)\cdot\text{old}$ with $w_1$ = 1, 0 or `synthetic_weight`
+   (Braun & Holland, 1982).
+   **Distributions.** For each form and population, $f(x)=\sum_qL(x\mid\theta_q)w_q$ with the
+   Lord–Wingersky likelihood of §18.1 (the existing kernel `summed_score_distribution`,
+   `method="recursion"`); in the synthetic population
+   $f_s(x)=w_1f_1(x)+(1-w_1)f_2(x)$, the same for $g_s(y)$.
+   **Equipercentile step (Decision for #106 owner question 2: option (b))**: flexpyirt keeps
+   its own percentile-rank functions for integer scores, tested against flexpyequate
+   (`flexpyequate.equate(method="equipercentile")`, a development dependency only). With
+   $F$, $G$ the cumulative distributions, $P(x)=F(x-1)+f(x)/2$, and
+   $$e_Y(x)=Q^{-1}(P(x)),\quad Q^{-1}_U(p)=\frac{p-G(y_U-1)}{g(y_U)}+y_U-\tfrac12,\ y_U=\min\{y:G(y)>p\},$$
+   $Q^{-1}_L(p)=\frac{p-G(y_L)}{g(y_L+1)}+y_L+\tfrac12$, $y_L=\max\{y:G(y)<p\}$, and
+   $Q^{-1}=(Q^{-1}_U+Q^{-1}_L)/2$ (Kolen & Brennan, 2014, ch. 2; the two coincide unless some
+   $g(y)=0$). This is what flexpyequate, `equate::equate(type = "equipercentile")` and
+   equateIRT's OSE compute. A dependency on flexpyequate (option (a)) was not taken because
+   flexpyirt would then pull in a second distribution for about 30 lines of NumPy, and
+   flexpyequate's design forbids the reverse direction anyway.
+
+5. **Raw-to-scale tables**: `method="true_score"`: $\theta(x)$ as in point 3 on the fit's own
+   scale ($\pm\infty$ outside the TCC's range), `theta_se` $=I(\theta)^{-1/2}$ with the test
+   information of the form's items (§18.2; NaN where $\theta$ is infinite).
+   `method="EAPsum"`: the summed-score EAP and posterior SD of §18.2 computed for the form's items
+   under the group's fitted latent distribution (any latent family; equals
+   `summed_score_table()` for a whole Normal form). Then
+   `scale_score` $=\mathrm{clip}(\text{slope}\cdot\theta+\text{intercept},\text{lowest},\text{highest})$
+   (slope $>0$; a missing bound is not applied, so infinite $\theta$ gives $\pm\infty$),
+   `scale_score_se` $=\text{slope}\cdot$`theta_se` (not clipped), and `scale_score_rounded` is
+   NumPy's `round(scale_score, n_digits)` (half to even; ties do not occur in practice).
+
+6. **Layers**: `_equating.py` (Core, pure JAX: form category probabilities, TCC and its
+   derivative, information, the Newton–bisection solver, summed-score distributions and EAPs on
+   a grid; NumPy: the equipercentile functions) and `equating.py` (shell: validation, forms from
+   fits, the K&B boundary rules, DataFrames, `IRTEquatingResult`). Validated in V51.
+
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -2581,6 +2681,7 @@ data-independent shapes (§15.21).
 - Bollen, K. A. (1989). *Structural Equations with Latent Variables*. Wiley.
 - Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
+- Braun, H. I., & Holland, P. W. (1982). Observed-score test equating: A mathematical analysis of some ETS equating procedures. In P. W. Holland & D. B. Rubin (Eds.), *Test Equating* (pp. 9–49). Academic Press.
 - Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
@@ -2614,6 +2715,7 @@ data-independent shapes (§15.21).
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
 - Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24(2), 115–138.
+- Lord, F. M. (1980). *Applications of Item Response Theory to Practical Testing Problems*. Lawrence Erlbaum.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -2638,6 +2740,7 @@ data-independent shapes (§15.21).
 - Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37(4), 357–373.
 - Owen, D. B. (1956). Tables for computing bivariate normal probabilities. *The Annals of Mathematical Statistics*, 27(4), 1075–1090.
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
+- Press, W. H., Teukolsky, S. A., Vetterling, W. T., & Flannery, B. P. (2007). *Numerical Recipes: The Art of Scientific Computing* (3rd ed.). Cambridge University Press.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.

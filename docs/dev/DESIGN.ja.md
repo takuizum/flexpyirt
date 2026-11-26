@@ -1901,6 +1901,92 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    対角の $\mathbf A$ では $A_m\,\mathrm{se}_m$、それ以外では NaN にする（回転後の標準誤差には事後共分散が必要だが、
    得点表はそれを持たない）。
 
+## 20. IRT 真値等化・観測得点等化と素点-尺度得点変換表（#106）
+
+1. **範囲と API（決定、オーナー 2026-11-26: #106 で提案した API と範囲）**:
+   1 次元モデル、全項目モデル、単一群・多母集団。
+   - `irt_equate(new, old, *, method="true_score", new_items=None, old_items=None, link=None,
+     new_group=None, old_group=None, population="new", synthetic_weight=None)` →
+     `IRTEquatingResult` は新フォーム $X$ のすべての合計得点 $x=0,\dots,X_{\max}$ を旧フォーム $Y$ の
+     合計得点の尺度に変換する。`new` と `old` は $\theta$ 尺度が一致している `FitResult`（FIPC、同時推定、
+     または同じ推定結果を `new_items` / `old_items` で 2 つのフォームに分けたもの）か、`link=` に
+     `new` の尺度を `old` の尺度へ写す `LinkResult`（$\theta_Y = A\theta_X + B$、§16.5）を渡す。
+     共通尺度は常に旧フォームの尺度。`link` は 1 次元で、その source / target の群が
+     `new_group` / `old_group` と一致しなければならない。
+   - `score_distribution(res, *, items=None, group=None)` → DataFrame `score`, `probability`:
+     ある群の推定母集団におけるフォームのモデル上の合計得点分布。
+   - `scale_table(res, *, slope, intercept, method="true_score", items=None, group=None,
+     lowest=None, highest=None, n_digits=0)` → DataFrame `score`, `theta`, `theta_se`,
+     `scale_score`, `scale_score_se`, `scale_score_rounded`。
+   **#106 の案からの変更。** `synthetic_weight` の既定値は `None` で、`population="synthetic"` の
+   ときだけ指定できる（必須）。`population="new"` / `"old"` は重み 1 / 0。一方の引数が他方を黙って
+   上書きすることがない。
+   **範囲外**（後続 issue）: 等化得点の標準誤差（`vcov` を通したデルタ法）、モデル上の分布のカーネル平滑化、
+   非線形の尺度変換、多次元モデル。
+
+2. **共通尺度上のフォームの曲線**: フォームは 1 つの推定結果の 1 つの群の、カーネルパラメタ $\xi_j$ を
+   持つ項目の集まり。リンクがあるとき、新フォームの項目は自分の尺度の $\theta_X=(\theta-B)/A$ で評価する。
+   つまり $P^{X}_{jk}(\theta)=P_{jk}((\theta-B)/A;\xi_j)$ で、パラメタを変換しなくても全カーネルで
+   §16.5 の変換後の項目そのものになる。テスト特性曲線（TCC）は
+   $$\tau(\theta)=\sum_j\sum_{k=0}^{K_j-1}k\,P_{jk}(\theta)$$
+   （カテゴリは `expected_score()` と同じく $0,\dots,K_j-1$ で得点化）。漸近値
+   $\tau_{\mathrm{lo}}=\lim_{\theta\to-\infty}\tau$、$\tau_{\mathrm{hi}}=\lim_{\theta\to\infty}\tau$
+   （3PL/4PL 項目の下側・上側漸近線 $g_j$, $u_j$ の和、他の項目は 0 と $K_j-1$）は $\theta_X=\mp10^{8}$ で
+   評価する。傾きが約 $10^{-6}$ 未満でない限り、倍精度ではどのカーネルもそこで極限に達している。
+   真値の方法は TCC が単調非減少であることを要する。$[-20,20]$（自尺度）の 801 点で確かめ、
+   $10^{-10}(1+X_{\max})$ を超えて減少すれば `SpecificationError`（負の傾き、期待得点が単調でない名義項目）。
+
+3. **真値等化（Lord, 1980; Kolen & Brennan, 2014, §6.5）**:
+   $\tau^X_{\mathrm{lo}}<x<\tau^X_{\mathrm{hi}}$ について $\tau^X(\theta_x)=x$ を解き、$e_Y(x)=\tau^Y(\theta_x)$。
+   **解法**: 全得点を 1 つの `jit` した `lax.while_loop` でまとめて解く安全化 Newton 法（Newton–二分法）。
+   区間は共通尺度で $[-10,10]$ から始め、すべての根を含むまで（Python 側で $|\theta|=10^{6}$ まで）倍にする。
+   $\tau'$ は `jax.jvp`。区間を出る Newton ステップや非正の導関数は二分に置き換える。
+   すべての $|\tau^X(\theta)-x|\le10^{-13}(1+X_{\max})$ か区間幅が $10^{-14}(1+|\theta|)$ 未満で停止
+   （最大 300 反復。収束しなければ `ConvergenceWarning`）。
+   **TCC の値域外の得点**（Kolen & Brennan, 2014, §6.5, 式 6.27 と最高点の扱い）: 方程式を満たす
+   $\theta$ がないので、点 $(0,0)$ と $(\tau^X_{\mathrm{lo}},\tau^Y_{\mathrm{lo}})$、上側では
+   $(\tau^X_{\mathrm{hi}},\tau^Y_{\mathrm{hi}})$ と $(X_{\max},Y_{\max})$ の間の線形補間で等化する:
+   $$e_Y(x)=x\,\frac{\tau^Y_{\mathrm{lo}}}{\tau^X_{\mathrm{lo}}}\ (0\le x\le\tau^X_{\mathrm{lo}}),\qquad
+   e_Y(x)=\tau^Y_{\mathrm{hi}}+(x-\tau^X_{\mathrm{hi}})\frac{Y_{\max}-\tau^Y_{\mathrm{hi}}}{X_{\max}-\tau^X_{\mathrm{hi}}}\ (\tau^X_{\mathrm{hi}}\le x\le X_{\max}).$$
+   $\tau^X_{\mathrm{lo}}=0$（下側漸近線なし）のときは $x=0$ だけが前者に入り 0 に写る。
+   $\tau^X_{\mathrm{hi}}=X_{\max}$ のときは $x=X_{\max}$ だけが $Y_{\max}$ に写る。`theta` 列は
+   $x\le\tau^X_{\mathrm{lo}}$ で $-\infty$、$x\ge\tau^X_{\mathrm{hi}}$ で $+\infty$（$\theta_x$ の極限。漸近値を
+   厳密に越える $x$ には解がない）。
+
+4. **観測得点等化（Lord & Wingersky, 1984; Kolen & Brennan, 2014, §6.6）**:
+   **母集団。** 新母集団は `new` の `new_group` の推定潜在分布（`link()` と同じ節点と重み:
+   Normal、EH、Davidian、混合。`_fitted_grid`）で、リンクがあれば節点を $A\theta+B$ で共通尺度へ写す。
+   旧母集団は `old` の `old_group` のもの。合成母集団は $w_1\cdot\text{new}+(1-w_1)\cdot\text{old}$、
+   $w_1$ は 1、0 または `synthetic_weight`（Braun & Holland, 1982）。
+   **分布。** 各フォーム・各母集団で $f(x)=\sum_qL(x\mid\theta_q)w_q$（§18.1 の Lord–Wingersky 尤度。
+   既存カーネル `summed_score_distribution`、`method="recursion"`）。合成母集団では
+   $f_s(x)=w_1f_1(x)+(1-w_1)f_2(x)$、$g_s(y)$ も同様。
+   **等パーセンタイルの計算（#106 のオーナー判断 2 への決定: 案 (b)）**: flexpyirt は整数得点用の
+   パーセンタイル順位関数を自前で持ち、flexpyequate（開発依存のみ）の
+   `flexpyequate.equate(method="equipercentile")` と照合して検査する。累積分布を $F$, $G$ として
+   $P(x)=F(x-1)+f(x)/2$、
+   $$e_Y(x)=Q^{-1}(P(x)),\quad Q^{-1}_U(p)=\frac{p-G(y_U-1)}{g(y_U)}+y_U-\tfrac12,\ y_U=\min\{y:G(y)>p\},$$
+   $Q^{-1}_L(p)=\frac{p-G(y_L)}{g(y_L+1)}+y_L+\tfrac12$、$y_L=\max\{y:G(y)<p\}$、
+   $Q^{-1}=(Q^{-1}_U+Q^{-1}_L)/2$（Kolen & Brennan, 2014, 2 章。ある $g(y)=0$ でない限り両者は一致）。
+   flexpyequate、`equate::equate(type = "equipercentile")`、equateIRT の OSE と同じ計算。
+   flexpyequate への依存（案 (a)）は採らなかった。NumPy 約 30 行のために 2 つ目の配布物を引き込むことに
+   なり、逆向きの依存は flexpyequate の設計がもともと禁じている。
+
+5. **素点-尺度得点変換表**: `method="true_score"`: $\theta(x)$ は 3 と同じく推定結果自身の尺度で求める
+   （TCC の値域外は $\pm\infty$）。`theta_se` $=I(\theta)^{-1/2}$（フォームの項目のテスト情報量、§18.2。
+   $\theta$ が無限大のところは NaN）。
+   `method="EAPsum"`: §18.2 の合計得点 EAP と事後 SD を、フォームの項目について群の推定潜在分布の下で
+   計算する（潜在分布の種類は問わない。Normal で全項目なら `summed_score_table()` と一致）。そのうえで
+   `scale_score` $=\mathrm{clip}(\text{slope}\cdot\theta+\text{intercept},\text{lowest},\text{highest})$
+   （slope $>0$。指定のない側は切らないので、無限大の $\theta$ は $\pm\infty$ になる）、
+   `scale_score_se` $=\text{slope}\cdot$`theta_se`（切らない）、`scale_score_rounded` は NumPy の
+   `round(scale_score, n_digits)`（偶数丸め。実際上ちょうど .5 にはならない）。
+
+6. **層**: `_equating.py`（Core、純粋 JAX: フォームのカテゴリ確率、TCC とその導関数、情報量、
+   Newton–二分法、格子上の合計得点分布と EAP。NumPy: 等パーセンタイル関数）と `equating.py`（シェル:
+   検証、推定結果からのフォーム構築、Kolen–Brennan の境界の規則、DataFrame、`IRTEquatingResult`）。
+   V51 で照合。
+
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -1916,6 +2002,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Bollen, K. A. (1989). *Structural Equations with Latent Variables*. Wiley.
 - Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
+- Braun, H. I., & Holland, P. W. (1982). Observed-score test equating: A mathematical analysis of some ETS equating procedures. In P. W. Holland & D. B. Rubin (Eds.), *Test Equating* (pp. 9–49). Academic Press.
 - Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
@@ -1949,6 +2036,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
 - Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24(2), 115–138.
+- Lord, F. M. (1980). *Applications of Item Response Theory to Practical Testing Problems*. Lawrence Erlbaum.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -1973,6 +2061,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37(4), 357–373.
 - Owen, D. B. (1956). Tables for computing bivariate normal probabilities. *The Annals of Mathematical Statistics*, 27(4), 1075–1090.
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
+- Press, W. H., Teukolsky, S. A., Vetterling, W. T., & Flannery, B. P. (2007). *Numerical Recipes: The Art of Scientific Computing* (3rd ed.). Cambridge University Press.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
