@@ -461,10 +461,24 @@ BIC uses $\log\sum_iw_i$ in place of $\log N$, as mirt does.
 covariance for frequency weights, but not for sampling weights. Under a sampling design the
 estimator's variance is the sandwich
 $$\operatorname{Var}(\hat\eta)\approx H^{-1}\Big(\sum_iw_i^2s_is_i^\top\Big)H^{-1},\qquad H=-\nabla^2\ell_w(\hat\eta),$$
-with $s_i$ the score of respondent $i$ (Binder, 1983), and with clustered samples the outer
-products are summed within clusters. These design-consistent standard errors are not implemented
-yet, so flexpyirt warns whenever weights are combined with standard errors. Item fit, $M_2$,
-local dependence and DIF assume unweighted counts and are not available for weighted fits.
+with $s_i$ the score of respondent $i$ (Binder, 1983; Skinner, 1989; Asparouhov, 2005); this is
+`se="sandwich"`. Multiplying every weight by the same constant scales $H$ by $k$ and the middle
+matrix by $k^2$, so the covariance does not depend on the scale of the weights. (R mirt's
+`SE.type = "sandwich"` with `survey.weights` uses $\sum_iw_is_is_i^\top$ in the middle, the
+frequency-weight version, which shrinks as the weights grow.) The other methods estimate
+$H^{-1}$, which is valid for frequency weights only, and flexpyirt warns when they are used with
+weights.
+
+**Clustered samples.** When respondents are sampled in clusters (students within schools),
+their scores are correlated within a cluster. The cluster-robust sandwich sums the weighted
+scores within each of the $G$ clusters before forming the outer products,
+$$u_c=\sum_{i\in c}w_is_i,\qquad
+  \operatorname{Var}(\hat\eta)\approx H^{-1}\Big(\frac{G}{G-1}\sum_{c=1}^{G}u_cu_c^\top\Big)H^{-1}$$
+(Binder, 1983; Williams, 2000). The factor $G/(G-1)$ is the usual small-sample correction of the
+with-replacement estimator of the variance of a total over primary sampling units; it matters when
+there are only a few dozen clusters. The approximation needs the number of clusters, not only the
+number of respondents, to be large. Item fit, $M_2$, local dependence and DIF assume unweighted
+counts and are not available for weighted fits.
 
 Guide: [sampling weights](guide.md#sampling-weights).
 
@@ -596,6 +610,7 @@ Guide: [section 16](guide.md#16-polychoric-correlations), [section 17](guide.md#
 
 ## References
 
+- Asparouhov, T. (2005). Sampling weights in latent variable modeling. *Structural Equation Modeling*, 12(3), 411–434.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Baker, F. B., & Kim, S.-H. (2004). *Item Response Theory: Parameter Estimation Techniques* (2nd ed.). Marcel Dekker.
 - Binder, D. A. (1983). On the variances of asymptotically normal estimators from complex surveys. *International Statistical Review*, 51(3), 279–292.
@@ -670,6 +685,7 @@ Guide: [section 16](guide.md#16-polychoric-correlations), [section 17](guide.md#
 - Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54, 427–450.
 - White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
+- Williams, R. L. (2000). A note on robust variance estimation for cluster-correlated data. *Biometrics*, 56(2), 645–646.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.

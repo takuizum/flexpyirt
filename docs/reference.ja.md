@@ -43,7 +43,7 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 
 ```text
 fit(spec, data, *, group=None, table=None, item_names=None, method=None,
-    quadrature=None, se="oakes", weights=None) -> FitResult
+    quadrature=None, se="oakes", weights=None, cluster=None) -> FitResult
 ```
 
 Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は Bayes modal / MAP 推定。Bock & Aitkin, 1981）。
@@ -57,8 +57,9 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 | `item_names` | list[str], 任意 | `data` が配列のときの列名 |
 | `method` | `BAEM`, 任意 | EM の設定（既定 `BAEM()`） |
 | `quadrature` | `Quadrature`, 任意 | 求積格子（既定: 1 因子は 61 点、2 因子は各軸 31 点、3 因子は各軸 15 点、いずれも $[-6, 6]$） |
-| `se` | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / `None` | 標準誤差の計算方法: 観測情報行列の逆行列（`"oakes"`・`"hessian"`）、パターンごとのスコアのクロス積の逆行列（`"crossprod"`。mirt の `SE.type = "crossprod"`）、ロバストなサンドイッチ共分散（`"sandwich"`。mirt の `SE.type = "sandwich"`）。どれも MAP 時は事前分布の Hessian を含む。`"sandwich"`・`"crossprod"` は `DavidianCurve`・`NormalMixture`、双因子・two-tier モデル、`weights` との併用では `SpecificationError`。`None` なら計算しない |
-| `weights` | 配列（長さ = 行数）, 任意 | 標本ウェイト。有限で非負の数（mirt の `survey.weights`）。推定値は $\sum_i w_i\log L_i$ を最大化する。ウェイトは与えられたまま使う（再スケールしない）。ウェイト 0 の行は無視する。整数ウェイトは行の繰り返しと同じ。このとき `se="oakes"` / `"hessian"` は重み付き情報行列の逆行列で、度数ウェイトでのみ正しく、標本ウェイトでは正しくない（`FlexpyirtWarning` で知らせる） |
+| `se` | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / `None` | 標準誤差の計算方法: 観測情報行列の逆行列（`"oakes"`・`"hessian"`）、パターンごとのスコアのクロス積の逆行列（`"crossprod"`。mirt の `SE.type = "crossprod"`）、ロバストなサンドイッチ共分散（`"sandwich"`。mirt の `SE.type = "sandwich"`）。どれも MAP 時は事前分布の Hessian を含む。`weights` があるとき、`"sandwich"` は標本設計に基づく共分散 $H^{-1}(\sum_i w_i^2 s_i s_i^\top)H^{-1}$、`"crossprod"` は（mirt と同じく）$\sum_i w_i s_i s_i^\top$ を使う。`"sandwich"`・`"crossprod"` は `DavidianCurve`・`NormalMixture`、双因子・two-tier モデルでは `SpecificationError`。`None` なら計算しない |
+| `weights` | 配列（長さ = 行数）, 任意 | 標本ウェイト。有限で非負の数（mirt の `survey.weights`）。推定値は $\sum_i w_i\log L_i$ を最大化する。ウェイトは与えられたまま使う（再スケールしない）。ウェイト 0 の行は無視する。整数ウェイトは行の繰り返しと同じ。このとき `se="oakes"` / `"hessian"` / `"crossprod"` は重み付き情報行列の逆行列を推定し、度数ウェイトでのみ正しく、標本ウェイトでは正しくない（`FlexpyirtWarning` で知らせる）。`se="sandwich"` を使う |
+| `cluster` | 配列（長さ = 行数）, 任意 | 各行のクラスタのラベル（学校など）。ハッシュ可能な値なら何でもよい。クラスタロバストなサンドイッチに使う（`se="sandwich"` のときだけ。それ以外は `SpecificationError`）。重み付きスコアをクラスタ内で合計し、中央の行列を $\frac{G}{G-1}\sum_c u_c u_c^\top$ とする。クラスタは 2 つ以上必要 |
 
 **戻り値**: [`FitResult`](#fitresult)
 
@@ -367,7 +368,7 @@ to_json(path=None, *, indent=2) -> str
 
 推定結果を厳格な RFC 8259 JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定されたときは
 UTF-8 ファイルにも書き出す。`pickle` を使わないバージョン付き JSON 形式で、最上位に
-`"format": "flexpyirt.FitResult"`、`"schema_version": 7`（version 1–6 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
+`"format": "flexpyirt.FitResult"`、`"schema_version": 9`（version 1–8 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
 float64 値は `repr` 厳密な JSON 数値として、非有限値（`NaN`, `+inf`, `-inf`）は浮動小数点型フィールドに
 `"NaN"`, `"Infinity"`, `"-Infinity"` として明示的に符号化するため、すべての属性がビット単位で正確に往復する。
 

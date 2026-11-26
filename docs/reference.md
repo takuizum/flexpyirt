@@ -48,7 +48,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 
 ```text
 fit(spec, data, *, group=None, table=None, item_names=None, method=None,
-    quadrature=None, se="oakes", weights=None) -> FitResult
+    quadrature=None, se="oakes", weights=None, cluster=None) -> FitResult
 ```
 
 Marginal maximum likelihood (or Bayes modal / MAP when priors are attached) estimation with the
@@ -63,8 +63,9 @@ Bock–Aitkin EM algorithm (Bock & Aitkin, 1981).
 | `item_names` | list[str], optional | Column names when `data` is an array |
 | `method` | `BAEM`, optional | EM settings (default `BAEM()`) |
 | `quadrature` | `Quadrature`, optional | Quadrature grid (default: 61 points on $[-6, 6]$ for 1 factor, 31 per dimension for 2 factors, 15 per dimension for 3 factors) |
-| `se` | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / `None` | Standard-error method: the inverse observed information (`"oakes"`, `"hessian"`), the inverse cross-product of the per-pattern scores (`"crossprod"`, mirt `SE.type = "crossprod"`) or the robust sandwich covariance (`"sandwich"`, mirt `SE.type = "sandwich"`). All include the prior Hessian under MAP. `"sandwich"` and `"crossprod"` raise `SpecificationError` with `DavidianCurve` or `NormalMixture`, for bifactor and two-tier models, and together with `weights`. `None` skips it |
-| `weights` | array (one number per row), optional | Sampling (survey) weights, finite and non-negative (mirt's `survey.weights`). The estimates maximize $\sum_i w_i\log L_i$. Weights are used as given (not rescaled); rows with weight 0 are ignored; integer weights are the same as repeating rows. `se="oakes"` / `"hessian"` then invert the weighted information, which is valid for frequency weights only, not for sampling weights (a `FlexpyirtWarning` says so) |
+| `se` | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / `None` | Standard-error method: the inverse observed information (`"oakes"`, `"hessian"`), the inverse cross-product of the per-pattern scores (`"crossprod"`, mirt `SE.type = "crossprod"`) or the robust sandwich covariance (`"sandwich"`, mirt `SE.type = "sandwich"`). All include the prior Hessian under MAP. With `weights`, `"sandwich"` is the design-based covariance $H^{-1}(\sum_i w_i^2 s_i s_i^\top)H^{-1}$ and `"crossprod"` uses $\sum_i w_i s_i s_i^\top$ (as mirt). `"sandwich"` and `"crossprod"` raise `SpecificationError` with `DavidianCurve` or `NormalMixture` and for bifactor and two-tier models. `None` skips it |
+| `weights` | array (one number per row), optional | Sampling (survey) weights, finite and non-negative (mirt's `survey.weights`). The estimates maximize $\sum_i w_i\log L_i$. Weights are used as given (not rescaled); rows with weight 0 are ignored; integer weights are the same as repeating rows. `se="oakes"` / `"hessian"` / `"crossprod"` then estimate the inverse weighted information, which is valid for frequency weights only, not for sampling weights (a `FlexpyirtWarning` says so); use `se="sandwich"` |
+| `cluster` | array (one label per row), optional | Cluster label of each row (for example the school), any hashable values, for the cluster-robust sandwich (`se="sandwich"` only, else `SpecificationError`). The weighted scores are summed within clusters and the middle matrix is $\frac{G}{G-1}\sum_c u_c u_c^\top$; at least two clusters are required |
 
 **Returns**: [`FitResult`](#fitresult)
 
@@ -416,7 +417,7 @@ to_json(path=None, *, indent=2) -> str
 
 Serialize the fitted result to a strict RFC 8259 JSON string, and also write it (UTF-8) to `path`
 (`str` or `os.PathLike`) when `path` is given. Uses plain, versioned JSON (no `pickle`) with
-top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 7` (files with versions 1–6 are
+top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 9` (files with versions 1–8 are
 still read), and `"flexpyirt_version"`. Multidimensional results store their factor structure.
 Finite float64 values are written as `repr`-exact JSON numbers and non-finite values (`NaN`,
 `+inf`, `-inf`) are encoded explicitly as `"NaN"`, `"Infinity"`, and `"-Infinity"` in float-typed

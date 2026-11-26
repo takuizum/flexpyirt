@@ -247,10 +247,26 @@ print(res_w.loglik, res_w.bic)
 - The weights are used as given. `loglik`, `aic` and `bic` are on the scale of the weights, and
   `bic` uses the logarithm of the sum of the weights in place of $\log N$. Rescale the weights to
   sum to the number of rows if you want values comparable with an unweighted fit.
-- **Standard errors**: `se="oakes"` and `se="hessian"` invert the information of the weighted
-  log-likelihood. That is correct for frequency weights (repeated rows) but **not a valid variance
-  estimate under sampling weights**; `fit()` warns (`FlexpyirtWarning`) when `weights` is used
-  with either. Pass `se=None` unless your weights are frequencies.
+- **Standard errors**: use `se="sandwich"` with sampling weights. It is the design-based
+  (linearization) covariance $H^{-1}\big(\sum_i w_i^2 s_i s_i^\top\big)H^{-1}$ (Binder, 1983),
+  and it does not change when all weights are multiplied by the same number. `se="oakes"`
+  (the default), `"hessian"` and `"crossprod"` estimate the inverse information of the weighted
+  log-likelihood: correct for frequency weights (repeated rows) but **not a valid variance
+  estimate under sampling weights**, so `fit()` warns (`FlexpyirtWarning`) when `weights` is
+  used with them.
+- **Clustered samples** (students sampled within schools): add `cluster=` with one label per row
+  (the school). The scores are summed within each cluster before the cross-product, with the
+  small-sample factor $G/(G-1)$ for $G$ clusters, so the standard errors account for the
+  correlation of respondents in the same school. It needs `se="sandwich"` and at least two
+  clusters, works with or without `weights`, and clusters may span the groups of a
+  multiple-group model. Strata and finite-population corrections are not supported.
+
+```python
+schools = np.repeat(np.arange(40), len(df) // 40 + 1)[: len(df)]  # one label per row
+res_cl = fit(spec, df, weights=sampling_weights, cluster=schools, se="sandwich")
+print(res_cl.summary())  # "SE method: sandwich (cluster-robust, 40 clusters)"
+```
+
 - Scoring (`res_w.score(...)`) works as usual. `item_fit()`, `m2()`, `local_dependence()`,
   `jsi()`, `dif()` and `model_parallel_analysis()` are not available for a weighted fit and raise
   `SpecificationError`.
@@ -638,8 +654,9 @@ print((res_sw.parameters["se"] / res.parameters["se"]).describe())  # near 1 if 
 - With `EmpiricalHistogram`, the histogram is held at its estimate, as for the other methods.
 - Not available with `DavidianCurve` or `NormalMixture`, or for bifactor and two-tier models
   (`SpecificationError`).
-- Respondents are treated as independent; sampling weights and clustered samples are not handled,
-  and a fit with `weights=` raises `SpecificationError` for both options.
+- Respondents are treated as independent unless you pass `cluster=`. With `weights=`,
+  `"sandwich"` is the design-based covariance and `"crossprod"` is valid for frequency weights
+  only (see [sampling weights](#sampling-weights)).
 - `"sandwich"` and `"crossprod"` need more distinct response patterns than free parameters, and
   are noisier than `"oakes"` in small samples.
 

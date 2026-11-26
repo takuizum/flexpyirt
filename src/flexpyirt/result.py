@@ -337,7 +337,9 @@ class FitResult:
     A fit with sampling weights (``fit(..., weights=...)``) keeps the sum of the weights
     :math:`W=\sum_i w_i`; BIC then uses :math:`\log W` in place of :math:`\log N` (as mirt does
     with ``survey.weights``; DESIGN.md §17.4), and the data-based diagnostics (``item_fit``,
-    ``m2``, ``local_dependence``, ``jsi``, ``dif``) raise ``SpecificationError``.
+    ``m2``, ``local_dependence``, ``jsi``, ``dif``) raise ``SpecificationError``. A fit with
+    ``fit(..., cluster=..., se="sandwich")`` keeps the number of clusters, shown by ``summary()``
+    (DESIGN.md §17.6).
     """
 
     parameters: pd.DataFrame
@@ -357,8 +359,17 @@ class FitResult:
     _method: BAEM = field(default_factory=BAEM, repr=False)
     _eh_weights: np.ndarray | None = field(default=None, repr=False)
     _sum_weights: float | None = field(default=None, repr=False)
+    _n_clusters: int | None = field(default=None, repr=False)
 
     # ---- summaries ---------------------------------------------------------------------------
+
+    def _se_label(self) -> str:
+        """Return the standard-error method shown by ``summary()`` (with the clusters, §17.6)."""
+        if self.se_method is None:
+            return "None"
+        if self._n_clusters is not None:
+            return f"{self.se_method} (cluster-robust, {self._n_clusters} clusters)"
+        return self.se_method
 
     @property
     def _has_priors(self) -> bool:
@@ -1867,7 +1878,7 @@ class FitResult:
         if isinstance(digits, bool) or not isinstance(digits, int) or digits < 0:
             raise SpecificationError(f"digits must be a non-negative integer, got {digits!r}.")
         est_kind = "MAP, priors active" if self._has_priors else "MMLE"
-        se_label = "None" if self.se_method is None else self.se_method
+        se_label = self._se_label()
         quad_label = self._quadrature_label()
         aic_val = self._aic_value()
         bic_val = self._bic_value()
@@ -1949,7 +1960,7 @@ class FitResult:
         """Return an HTML rendering of the summary for Jupyter notebooks (no external assets)."""
         digits = 4
         est_kind = "MAP, priors active" if self._has_priors else "MMLE"
-        se_label = "None" if self.se_method is None else self.se_method
+        se_label = self._se_label()
         quad_label = self._quadrature_label()
 
         meta_rows = [
@@ -2028,7 +2039,7 @@ class FitResult:
         """Serialize this result to a strict JSON string, optionally writing it to ``path``.
 
         Writes plain, versioned RFC 8259 JSON (no ``pickle``) with top-level
-        ``"format": "flexpyirt.FitResult"``, ``"schema_version": 1``, and the ``flexpyirt``
+        ``"format": "flexpyirt.FitResult"``, the current ``"schema_version"``, and the ``flexpyirt``
         version (DESIGN.md §15.26–§15.28). Finite IEEE-754 float64 values are written as
         ``repr``-exact JSON numbers and non-finite values (``NaN``, ``+inf``, ``-inf``) are
         encoded explicitly as ``"NaN"``, ``"Infinity"``, and ``"-Infinity"`` in float-typed

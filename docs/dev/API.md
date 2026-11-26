@@ -109,6 +109,8 @@ res = fit(
     se="oakes",  # "oakes" | "hessian" | "crossprod" | "sandwich" | None
     verbose=False,
 )
+# Sampling weights and clustered samples (students within schools): design-based sandwich SEs.
+res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
 res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_change)
 ```
 

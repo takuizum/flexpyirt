@@ -162,11 +162,16 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
      Oakes / Hessian SEs with a warning (valid for frequency weights only); validated in V34
      against mirt's `survey.weights` (2PL, GRM, two groups, FIPC, bifactor). Design-consistent SEs come with
      #85; item fit, M2, local dependence, JSI and DIF raise an error for weighted fits.
+   - [ ] Design-based standard errors: `fit(..., weights=, se="sandwich")` with
+     $\sum_iw_i^2s_is_i^\top$ (DESIGN §17.6); validated in V57 (tick once the nightly CI passes).
 5. [ ] Robust standard errors: sandwich and cross-product (#85).
    - [x] Without sampling weights: `fit(se="sandwich" | "crossprod")` for single and multiple groups,
      FIPC, EH, 2–3 factors and priors (not with Davidian curves, normal mixtures, bifactor or two-tier models); validated in V35
-     against mirt `SE.type = "sandwich"` / `"crossprod"`. Weighted and cluster-robust versions still
-     open.
+     against mirt `SE.type = "sandwich"` / `"crossprod"`.
+   - [ ] With sampling weights and clusters: weighted sandwich, `crossprod` with weights (mirt's
+     definition, frequency-weight warning) and the cluster-robust sandwich `fit(..., cluster=)` with
+     $G/(G-1)$ (DESIGN §17.6); validated in V57 against R references built from mirt's weighted
+     Oakes covariance and numDeriv person scores (tick once the nightly CI passes).
 - **Acceptance**: V-numbered comparisons with mirt `bfactor()`, `residuals()`, `iteminfo()` /
   `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and
   `SE.type = "sandwich"` / `"crossprod"`.

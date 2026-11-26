@@ -380,10 +380,21 @@ $$\ell_w(\eta)=\sum_iw_i\log L(\mathbf y_i;\eta)=\sum_pc_p\log L_p(\eta),\qquad 
 **標準誤差.** 情報行列 $-\nabla^2\ell_w$ の逆行列は、度数ウェイトでは正しい共分散だが、抽出ウェイトでは
 正しくない。抽出デザインのもとでの推定量の分散はサンドイッチ
 $$\operatorname{Var}(\hat\eta)\approx H^{-1}\Big(\sum_iw_i^2s_is_i^\top\Big)H^{-1},\qquad H=-\nabla^2\ell_w(\hat\eta)$$
-である（$s_i$ は受検者 $i$ のスコア; Binder, 1983）。クラスター抽出では外積をクラスター内で合計する。
-このデザインに基づく標準誤差はまだ実装していないので、ウェイトと標準誤差を一緒に求めると flexpyirt は
-警告を出す。項目適合度・$M_2$・局所依存・DIF は重みのない度数を前提とするので、ウェイト付きの推定結果には
-使えない。
+である（$s_i$ は受検者 $i$ のスコア; Binder, 1983; Skinner, 1989; Asparouhov, 2005）。これが
+`se="sandwich"` である。すべてのウェイトを同じ定数 $k$ 倍すると $H$ は $k$ 倍、中央の行列は $k^2$ 倍になるので、
+共分散はウェイトの尺度によらない（R mirt の `survey.weights` つき `SE.type = "sandwich"` は中央に
+度数ウェイト版の $\sum_iw_is_is_i^\top$ を使い、ウェイトが大きいほど小さくなる）。ほかの方法は $H^{-1}$ を
+推定し、度数ウェイトでのみ正しいので、ウェイトと一緒に使うと flexpyirt は警告を出す。
+
+**クラスター抽出.** 受検者がクラスター単位（学校の中の生徒など）で抽出されると、同じクラスター内の
+スコアは相関する。クラスターロバストなサンドイッチは、$G$ 個のクラスターそれぞれで重み付きスコアを
+合計してから外積を取る:
+$$u_c=\sum_{i\in c}w_is_i,\qquad
+  \operatorname{Var}(\hat\eta)\approx H^{-1}\Big(\frac{G}{G-1}\sum_{c=1}^{G}u_cu_c^\top\Big)H^{-1}$$
+（Binder, 1983; Williams, 2000）。係数 $G/(G-1)$ は、第一次抽出単位の合計の分散を復元抽出として推定する
+ときの通常の小標本補正で、クラスターが数十しかないときに効く。この近似には受検者数だけでなくクラスター数も
+大きいことが必要である。項目適合度・$M_2$・局所依存・DIF は重みのない度数を前提とするので、ウェイト付きの
+推定結果には使えない。
 
 ガイド: [標本ウェイト](guide.ja.md#標本ウェイト)。
 
@@ -489,6 +500,7 @@ $\sum_{ab}n_{ab}\log\pi_{ab}(\rho)$ を最大化する。$\pi_{ab}$ はセル $(
 
 ## 参考文献
 
+- Asparouhov, T. (2005). Sampling weights in latent variable modeling. *Structural Equation Modeling*, 12(3), 411–434.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Baker, F. B., & Kim, S.-H. (2004). *Item Response Theory: Parameter Estimation Techniques* (2nd ed.). Marcel Dekker.
 - Binder, D. A. (1983). On the variances of asymptotically normal estimators from complex surveys. *International Statistical Review*, 51(3), 279–292.
@@ -563,6 +575,7 @@ $\sum_{ab}n_{ab}\log\pi_{ab}(\rho)$ を最大化する。$\pi_{ab}$ はセル $(
 - Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54, 427–450.
 - White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
+- Williams, R. L. (2000). A note on robust variance estimation for cluster-correlated data. *Biometrics*, 56(2), 645–646.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.

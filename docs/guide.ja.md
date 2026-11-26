@@ -232,9 +232,23 @@ print(res_w.loglik, res_w.bic)
   併用できる）。ウェイト 0 の行は無視する。整数ウェイトは、行をその回数だけ繰り返した結果と同じになる。
 - ウェイトは与えられたまま使う。`loglik`・`aic`・`bic` はウェイトの尺度に従い、`bic` は $\log N$ の代わりに
   ウェイトの和の対数を使う。ウェイトなしの推定と比べたい場合は、合計が行数になるようにウェイトを調整する。
-- **標準誤差**: `se="oakes"` と `se="hessian"` は重み付き対数尤度の情報行列の逆行列を返す。度数ウェイト
-  （行の繰り返し）では正しいが、**標本ウェイトのもとでは正しい分散推定量ではない**。`weights` とともに
-  どちらかを使うと `fit()` は警告（`FlexpyirtWarning`）を出す。ウェイトが度数でなければ `se=None` を渡す。
+- **標準誤差**: 標本ウェイトでは `se="sandwich"` を使う。標本設計に基づく（線形化による）共分散
+  $H^{-1}\big(\sum_i w_i^2 s_i s_i^\top\big)H^{-1}$（Binder, 1983）で、すべてのウェイトを同じ数倍しても
+  変わらない。`se="oakes"`（既定）・`"hessian"`・`"crossprod"` は重み付き対数尤度の情報行列の逆行列を
+  推定する。度数ウェイト（行の繰り返し）では正しいが、**標本ウェイトのもとでは正しい分散推定量ではない**
+  ので、`weights` とともに使うと `fit()` は警告（`FlexpyirtWarning`）を出す。
+- **クラスタ抽出**（学校の中から生徒を抽出するなど）: 行ごとに 1 つのラベル（学校）を `cluster=` に渡す。
+  クロス積を取る前にスコアをクラスタ内で合計し、クラスタ数 $G$ に対する小標本補正 $G/(G-1)$ を掛けるので、
+  同じ学校の受検者の相関を考慮した標準誤差になる。`se="sandwich"` と 2 つ以上のクラスタが必要で、
+  `weights` の有無によらず使え、多母集団モデルの群をまたぐクラスタでもよい。層と有限母集団修正には
+  対応しない。
+
+```python
+schools = np.repeat(np.arange(40), len(df) // 40 + 1)[: len(df)]  # 行ごとのラベル
+res_cl = fit(spec, df, weights=sampling_weights, cluster=schools, se="sandwich")
+print(res_cl.summary())  # "SE method: sandwich (cluster-robust, 40 clusters)"
+```
+
 - スコアリング（`res_w.score(...)`）はふだんどおり使える。`item_fit()`、`m2()`、`local_dependence()`、
   `jsi()`、`dif()`、`model_parallel_analysis()` はウェイト付きの推定結果には使えず、`SpecificationError` を出す。
 
@@ -575,8 +589,8 @@ print((res_sw.parameters["se"] / res.parameters["se"]).describe())  # モデル�
 - 事前分布があるときは、情報行列と同じように事前分布の曲率をクロス積にも加える。
 - `EmpiricalHistogram` では、ほかの方法と同じくヒストグラムを推定値に固定する。
 - `DavidianCurve`・`NormalMixture`、双因子・two-tier モデルでは使えない（`SpecificationError`）。
-- 受検者は互いに独立として扱う。標本ウェイトやクラスタ抽出には対応しておらず、`weights=` と併用すると
-  どちらも `SpecificationError` になる。
+- `cluster=` を渡さなければ受検者は互いに独立として扱う。`weights=` があるとき、`"sandwich"` は標本設計に
+  基づく共分散、`"crossprod"` は度数ウェイトでのみ正しい（[標本ウェイト](#標本ウェイト)を参照）。
 - `"sandwich"` と `"crossprod"` には、自由パラメタ数より多い異なる応答パターンが必要。小標本では
   `"oakes"` よりばらつきが大きい。
 
