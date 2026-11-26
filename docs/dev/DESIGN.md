@@ -2466,9 +2466,9 @@ data-independent shapes (§15.21).
    **Measured accuracy and speed** are recorded in VALIDATION.md (V36).
 
 2. **Information, expected score, reliability and summed-score EAP (#82, V37)**:
-   **Scope.** Unidimensional models, single and multiple groups. Every function raises
-   `SpecificationError` for a multidimensional model (the information matrix and directional
-   information are a later change).
+   **Scope.** Unidimensional models, single and multiple groups. The information matrix and
+   directional information of multidimensional models are item 3; reliability and the
+   summed-score functions raise `SpecificationError` for a multidimensional model.
    **API (Decision, owner 2026-11-25).** Module-level functions that take the fit first, like
    `link()` and `dimensionality()`:
    `item_information(res, theta, *, group=None)`, `test_information(res, theta, *, group=None)`,
@@ -2555,6 +2555,79 @@ data-independent shapes (§15.21).
    for a fitted non-Normal density, and mirt's EAPsum uses a normal prior by default).
    **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
    **Measured agreement** is recorded in VALIDATION.md (V37).
+
+3. **Information matrix and directional information of multidimensional models (#82, V43)**:
+   **Scope.** Confirmatory models from `with_factors` (2–3 factors, any loading pattern
+   including cross-loadings), bifactor models (`with_bifactor`) and two-tier models
+   (`with_two_tier`), single and multiple groups. `item_information`, `test_information` and
+   `expected_score` accept them; the new `information_matrix` returns the matrix itself.
+   `reliability`, `summed_score_table` and `score(method="EAPsum")` stay unidimensional (a
+   multidimensional summed-score EAP and a marginal reliability of a composite are separate
+   questions without a mirt reference).
+   **Information matrix.** With $\boldsymbol\theta\in\mathbb R^D$, item $j$'s Fisher information
+   matrix and the test information matrix are
+   $$\mathbf I_j(\boldsymbol\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)^\top,\qquad
+     \mathbf I(\boldsymbol\theta)=\sum_j\mathbf I_j(\boldsymbol\theta)$$
+   (Reckase, 2009, ch. 5), from the same forward-mode autodiff of the item kernel's category
+   log-probabilities as item 2, now with respect to all $D$ coordinates (`jax.jacfwd` gives
+   the $K_j\times D$ Jacobian). For every built-in family $P_{jk}$ depends on
+   $\boldsymbol\theta$ only through $\mathbf a_j^\top\boldsymbol\theta$, so $\mathbf I_j=c_j(\boldsymbol\theta)\,\mathbf a_j\mathbf a_j^\top$
+   has rank 1; the code does not use this (user-defined kernels need not have it). For a
+   unidimensional model $D=1$ and the matrix is the scalar of item 2; there is one code path.
+   In bifactor and two-tier models the kernels are evaluated at the full $D$-vector; the
+   dimension reduction of §17 concerns only the integration over $\boldsymbol\theta$ and plays
+   no role here.
+   **Directional information.** Along a unit vector $\mathbf u$ ($\|\mathbf u\|=1$),
+   $$I_{j,\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u,\qquad
+     I_{\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$$
+   (Reckase & McKinley, 1991; Ackerman, 1994), the information about $\boldsymbol\theta$ when
+   it moves along $\mathbf u$. mirt's `iteminfo(..., degrees = )` / `testinfo(..., degrees = )`
+   take the angles $\alpha_m$ to the axes and use $u_m=\cos\alpha_m$ without normalizing;
+   flexpyirt takes the direction vector and **normalizes it**, so the two agree whenever the
+   angles are consistent ($\sum_m\cos^2\alpha_m=1$), and mirt's angles are
+   `direction=np.cos(np.radians(degrees))`.
+   **API (Decision, 2026-11-26).**
+   - `theta` of a multidimensional model is a `(T, D)` array-like, or a DataFrame whose columns
+     are exactly the factor names (in any order; reordered to the model's order); a 1-D array of
+     length $D$ is a single point. Unidimensional models keep the 1-D `theta` of item 2. The
+     result is indexed by a `MultiIndex` whose level names are the factor names (index name
+     `theta` for unidimensional models, as before).
+   - `item_information(res, theta, *, direction=None, group=None)` and
+     `test_information(res, theta, *, direction=None, group=None)`: for a multidimensional model
+     `direction` (1-D, length $D$, finite, non-zero; normalized) is **required**, because there
+     is no natural default direction (mirt also requires `degrees`); one column per item,
+     respectively the columns `information` and `se`. For a unidimensional model `direction`
+     must be `None`. One direction per call; several directions are several calls.
+   - `test_information`'s `se` is $\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$,
+     the asymptotic conditional standard error of the ML estimate of the composite
+     $\mathbf u^\top\boldsymbol\theta$, which reduces to $I(\theta)^{-1/2}$ for $D=1$. It is not
+     $I_{\mathbf u}^{-1/2}$, which would be the standard error if the coordinates orthogonal to
+     $\mathbf u$ were known; the two coincide only when $\mathbf u$ is an eigenvector of
+     $\mathbf I$. Where $\mathbf I(\boldsymbol\theta)$ is numerically singular (its smallest
+     eigenvalue is at most $D\varepsilon$ times its largest, $\varepsilon$ the double-precision
+     machine epsilon; e.g. fewer linearly independent slope vectors than factors), `se` is
+     $+\infty$, as for $I=0$ in one dimension. The item matrices are symmetrized,
+     $(\mathbf M+\mathbf M^\top)/2$, so that they are exactly symmetric. **This differs from
+     mirt**: mirt has no SE in `testinfo()`, but its `plot(type = "SE")` / `type = "infoSE"` for
+     two- and three-factor models draws $1/\sqrt{I_{\mathbf u}}$ (`1/sqrt(testinfo(x, Theta,
+     degrees = ))`), the conditional-on-the-other-coordinates value above. flexpyirt reports the
+     composite SE instead, because it is the standard error of an estimable quantity and equals
+     the unidimensional SE when $D=1$; $1/\sqrt{I_{\mathbf u}}$ is `1 / np.sqrt(information)`
+     of the same DataFrame. The reference inverts the sum of mirt's item information matrices
+     in R.
+   - `information_matrix(res, theta, *, item=None, group=None)` returns a NumPy array of shape
+     `(T, D, D)`: the test information matrix, or with `item=` (an item name) that item's matrix.
+     It is an array rather than a DataFrame because a $D\times D$ matrix per point has no flat
+     layout that is not awkward to index; rows and columns follow the fitted model's `Model.factor_names`.
+     Unidimensional models give `(T, 1, 1)`. This is mirt's
+     `iteminfo(..., multidim_matrix = TRUE)` (per point), summed over items for the test.
+   - `expected_score(res, theta, *, group=None)`: $E_j(\boldsymbol\theta)=\sum_kk\,P_{jk}(\boldsymbol\theta)$
+     and `total`, as in item 2 with the multidimensional `theta`; mirt's `expected.item()` /
+     `expected.test()` with a $D$-column `Theta`.
+   **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
+   **Measured agreement** is recorded in VALIDATION.md (V43).
 
 ## 19. Multidimensional scale linking (M6)
 
@@ -2722,7 +2795,99 @@ data-independent shapes (§15.21).
    GGUM, Roberts, Donoghue & Laughlin, 2000) would be presented as validated only with its own
    mirt comparison.
 
+## 21. Plots and the numbers behind them (#103, V48)
+
+1. **Where plotting lives (Decision, owner 2026-11-26: option A of #103).** A module
+   `flexpyirt.plotting` with matplotlib as the optional extra `flexpyirt[plot]`. matplotlib is
+   imported inside each plot function, never by `import flexpyirt` or
+   `import flexpyirt.plotting`; without it a plot function raises
+   `errors.MissingDependencyError` (a `FlexpyirtError` and an `ImportError`) naming the extra.
+   The numbers behind every figure come from public functions returning DataFrames, defined in
+   `flexpyirt.curves` and exported from `flexpyirt`; only those numbers are validated (V48). The
+   plot functions are thin: they call those functions, draw the columns, return matplotlib
+   objects and never call `plt.show()`. They are smoke-tested on the Agg back end (objects
+   created, plotted data equal to the DataFrames); there is no image comparison.
+   **Scope.** Unidimensional models, every item family, single and multiple groups, any latent
+   distribution. Interactive back ends, surfaces of multidimensional models, styling themes and
+   figures for flexpyctt / flexpyequate are left out. Nothing is stored in `FitResult`;
+   `schema_version` is unchanged.
+
+2. **Trace lines: `item_probabilities(res, theta, *, items=None, group=None)`.** The category
+   probabilities $P_{jk}(\theta)=\Pr(Y_j=k\mid\theta)$, $k=0,\dots,K_j-1$, from the item
+   kernels (`_information.category_probabilities`, a jitted kernel returning
+   $(G, T, J, K_{\max})$ padded with zeros). Long format: `item`, `category`, `theta`,
+   `probability` (one row per item, category and $\theta$, in that order). `group` is a group
+   name, as in `item_information()`; it is required for a multiple-group model. mirt:
+   `probtrace()`.
+
+3. **Empirical item curves: `empirical_item_curve(res, data, *, items=None, n_bins=10,
+   group=None, item_names=None)`.** For item $j$, the $n_j$ respondents who answered it are
+   sorted by their EAP score $\hat\theta_i$ (`score(method="EAP")` on the fitted grid; ties in
+   row order, a stable sort) and cut into $B$ consecutive bins: every bin gets
+   $\lfloor n_j/B\rfloor$ respondents and, of the remainder $c=n_j\bmod B$,
+   $\lfloor c/2\rfloor$ go to the first bin and $c-\lfloor c/2\rfloor$ to the last. This is
+   mirt's `itemfit()` rule (`group.bins`), equal-count bins of EAP $\theta$, the rule proposed
+   in #103. For bin $b$,
+   $$\bar\theta_b=\frac1{n_b}\sum_{i\in\mathcal B_b}\hat\theta_i,\qquad
+   O_{bk}=\frac1{n_b}\sum_{i\in\mathcal B_b}[y_{ij}=k],\qquad E_{bk}=P_{jk}(\bar\theta_b)$$
+   (Bock, 1972; Yen, 1981): the columns `theta`, `observed` and `expected`, with `n` $=n_b$,
+   `bin` $=1,\dots,B$ and `category`. $n_bO_{bk}$ and $n_bE_{bk}$ are the observed and expected
+   tables of mirt's `itemfit(fit_stats = "X2", return.tables = TRUE)` before its cell collapsing
+   (`mincell.X2`), and $(\bar\theta_b,O_{bk})$ the points of `itemfit(empirical.plot = )`.
+   Missing responses: a respondent enters the bins of the items they answered (mirt's `pick`).
+   A multiple-group model is binned within each group with that group's parameters (mirt's
+   per-group `itemfit()`); `group=` are the labels of the rows of `data`, as in `score()`, and
+   the result has a leading `group` column. An item (in a group) with fewer than `n_bins`
+   responses raises `SpecificationError` (mirt would form empty bins). Differences from mirt
+   left out on purpose: no cell collapsing and no $X^2$ (a fit statistic is a separate issue),
+   no Clopper–Pearson interval of `empirical.CI`, and `method` is EAP only (mirt's `method=`).
+
+4. **Item locations of the Wright map: `wright_map_table(res, data, *, group=None,
+   item_names=None, method="EAP")`.** Returns `WrightMapTable(persons, items)`, a named tuple of
+   two DataFrames. `persons` has `theta` from `score(method=method)` (`"EAP"`, `"MAP"` or
+   `"WLE"`, all finite) with `data`'s index. `items` has one row per item threshold: `item`,
+   `category` $k=1,\dots,K_j-1$ and `location`, the Thurstonian threshold
+   $$\tau_{jk}:\quad P(Y_j\ge k\mid\tau_{jk})=\sum_{c\ge k}P_{jc}(\tau_{jk})=\tfrac12$$
+   (Wright & Masters, 1982; Wu, Adams, Wilson & Haldane, 2007; TAM's `tam.threshold()`). It is
+   $b_j=-d_j/a_j$ for 2PL / Rasch and $b_{jk}$ for GRM items; for 3PL / 4PL items it is where
+   $P=1/2$ (not $b$, where $P=(g+u)/2$) and for GPCM / PCM items it differs from the step
+   difficulties. One definition for every family is why the issue's "`b` / Thurstonian
+   threshold" became the threshold alone. **Root finding**: $P(Y_j\ge k\mid\theta)$ is
+   evaluated on 4001 equispaced points of $[-20,20]$; the first sign change of
+   $P(Y_j\ge k\mid\theta)-1/2$ is refined by 64 bisection steps, all thresholds at once (one
+   kernel call per step). The function is increasing for every ordered family with $a>0$; for
+   nominal items (unordered categories) it is the first crossing in the data's category order;
+   without a crossing (e.g. a 3PL item with $g\ge1/2$) the location is NaN. In a
+   multiple-group model `items` holds every group's thresholds from that group's parameters
+   (a `group` column in both tables).
+
+5. **Plot functions** (`flexpyirt.plotting`; default $\theta$ grid: 161 points on $[-4,4]$,
+   `theta=` to change it).
+   - `plot_item_curves(res, items=None, *, data=None, group=None, n_bins=10, theta=None,
+     item_names=None, ax=None) -> Figure`: one panel per item (three per row). Dichotomous
+     items show $P_{j1}$, polytomous items every category. With `data` the points of
+     `empirical_item_curve()`. A multiple-group fit draws one curve per group in each panel
+     (colour by group, line style by category): the **DIF plot**. `ax=` draws one item into an
+     existing Axes (the figure of `ax` is returned). `group=` are row labels used with `data`;
+     the curves always cover every group.
+   - `plot_information(res, items=None, *, standard_error=False, group=None, theta=None,
+     ax=None) -> Axes`: `test_information()` (default) or `item_information()` of the given
+     items; `standard_error=True` adds `se` on `ax.twinx()`. `group` is a group name (default:
+     every group).
+   - `plot_expected_score(res, *, group=None, theta=None, ax=None) -> Axes`: column `total` of
+     `expected_score()`, one line per group by default.
+   - `plot_wright_map(res, data, *, group=None, item_names=None, method="EAP", n_bins=30) ->
+     Figure`: two axes sharing the $\theta$ axis, a horizontal histogram of `persons` and the
+     `items` thresholds as markers per item (overlaid per group).
+   **Functions, not `FitResult.plot_*()` methods**, as `item_information()` and `link()`: the
+   plotting dependency stays out of the result class.
+   **`group=` means** a group name in the functions of $\theta$ (`item_probabilities`,
+   `plot_information`, `plot_expected_score`, like `item_information`) and the labels of the
+   rows of `data` where `data` is taken (`empirical_item_curve`, `wright_map_table`,
+   `plot_item_curves`, `plot_wright_map`, like `reliability` and `score`).
+
 ## References
+- Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -2796,6 +2961,7 @@ data-independent shapes (§15.21).
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
@@ -2823,6 +2989,9 @@ data-independent shapes (§15.21).
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
+- Wright, B. D., & Masters, G. N. (1982). *Rating Scale Analysis*. MESA Press.
+- Wu, M. L., Adams, R. J., Wilson, M. R., & Haldane, S. A. (2007). *ACER ConQuest Version 2: Generalised Item Response Modelling Software*. Australian Council for Educational Research.
+- Yen, W. M. (1981). Using simulation results to choose a latent trait model. *Applied Psychological Measurement*, 5(2), 245–262.
 - Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.

@@ -24,7 +24,7 @@ DETECT、DIMTEST、古典的項目分析）のための、対になるパッケ�
 等化、カーネル等化）を行う。flexpyirt とは独立で、flexpyirt をインストールしても入らない
 （`pip install flexpyequate`）。[得点の等化](equating.ja.md)を参照。
 
-polars の DataFrame を使う場合は `flexpyirt[polars]`。GPU を使う場合は、先に CUDA 版の `jax` を入れる
+polars の DataFrame を使う場合は `flexpyirt[polars]`、図（`flexpyirt.plotting`）を描く場合は `flexpyirt[plot]`。GPU を使う場合は、先に CUDA 版の `jax` を入れる
 （[JAX のインストール手順](https://docs.jax.dev/en/latest/installation.html)）。
 
 flexpyirt は **64 bit 浮動小数点**で計算する。JAX の設定はユーザーのものなのでライブラリは変更しない。

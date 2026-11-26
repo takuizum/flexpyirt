@@ -83,7 +83,7 @@
    - 実装しない（決定済み、#81）: 単一群・1 次元・`Normal` 以外の JSI。JSI は単一群・1 次元のモデルについてのみ
      定義されており、多次元・多母集団への拡張は研究されておらず、参照となる実装もない（mirt の `type = "JSI"` は
      1 因子が必要）。これらのモデルでは `jsi()` は `SpecificationError` を出す（DESIGN.md §16.17）。
-3. [ ] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
+3. [x] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
    カーネル（#83）の上に作る。
    - [x] カーネル（#83）: `summed_score_distribution()`。Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰
      （通常と対数空間）、DFT-CF 法、2 値項目用の正規・精密化正規・Poisson 近似。`jit` / `vmap` / 自動微分に対応。
@@ -93,7 +93,10 @@
      `FitResult.score(method="EAPsum")`。V37 で 2PL・3PL・GRM・GPCM・名義・混合形式のテスト・2 群モデルについて
      `iteminfo()`・`testinfo()`・`expected.item()` / `expected.test()`・`marginal_rxx()`・`empirical_rxx()`・
      `fscores(method = "EAPsum")` と照合済み。
-   - [ ] 多次元モデル: 情報行列と方向別の情報量。
+   - [x] 多次元モデル（確認的 2–3 因子、双因子、two-tier。単一群と多母集団）: `information_matrix()`、
+     `item_information(direction=)` / `test_information(direction=)` による方向別の情報量（合成値の SE つき）と
+     `expected_score()`。V43 で `iteminfo(multidim_matrix = TRUE)`・`iteminfo(degrees = )`・
+     `testinfo(degrees = )`・`expected.item()` / `expected.test()` と照合。
 4. [ ] 標本ウェイト（#84）。
    - [x] `fit(..., weights=...)`: ウェイトを足し合わせるパターン圧縮による重み付き周辺尤度（EM、SQUAREM、多群、
      欠測、FIPC）。BIC はウェイトの和を使う。Oakes / Hessian の SE は警告つき（度数ウェイトでのみ正しい）。
@@ -105,6 +108,13 @@
      ウェイト付き・クラスタロバスト版は未実装。
 - **受け入れ基準**: mirt の `bfactor()`、`residuals()`、`iteminfo()` / `testinfo()` / `marginal_rxx()` /
   `fscores(method = "EAPsum")`、`survey.weights`、`SE.type = "sandwich"` / `"crossprod"` との V 番号つき照合。
+
+## 現場向け機能
+- [x] 図（#103）: `item_probabilities()`、`empirical_item_curve()`、`wright_map_table()` が図の元になる数値を
+  返し、`flexpyirt.plotting`（観測比率と群ごとの曲線（DIF）つきの `plot_item_curves`、`plot_information`、
+  `plot_expected_score`、`plot_wright_map`）が任意依存 `flexpyirt[plot]` の matplotlib で描く。1 次元モデル、
+  全項目族、単一群・多母集団。V48 で mirt の `itemfit(return.tables = TRUE)`、`probtrace()`、
+  `coef(IRTpars = TRUE)` と TAM の `tam.threshold()` に照合。
 
 ## 継続的な作業
 - [ ] GitHub 上の最新の R mirt で照合し、参照値を定期的に確認する（#74）。

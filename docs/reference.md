@@ -23,8 +23,9 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Correlations (flexpyctt): [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
 - Classical item analysis (flexpyctt): [`score_responses`](#score_responses), [`item_analysis`](#item_analysis), [`coefficient_alpha`](#coefficient_alpha), [`coefficient_omega`](#coefficient_omega), [`distractor_analysis`](#distractor_analysis) and their results
-- Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
+- Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
+- Plots: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal), [user-defined item models](#user-defined-item-models)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -1441,40 +1442,81 @@ total-score groups from low to high, cut at the quantiles of $T$ as R's
 
 ## Information and reliability
 
-Functions of a fitted unidimensional model ([guide section 5](guide.md#information-expected-score-and-reliability)).
-All raise `SpecificationError` for a multidimensional model.
+Functions of a fitted model ([guide section 5](guide.md#information-expected-score-and-reliability)).
+The information functions and `expected_score` work for unidimensional, confirmatory
+multidimensional, bifactor and two-tier models
+([guide section 14](guide.md#information-of-multidimensional-models)); `reliability` and the
+summed-score functions raise `SpecificationError` for a multidimensional model.
+
+For a model with $D$ factors, `theta` is an array of shape `(T, D)`, a DataFrame whose columns are
+exactly the factor names (in any order), or one point as a 1-D array of length $D$; results are
+indexed by a `MultiIndex` whose level names are the factor names. For a unidimensional model
+`theta` is a number or 1-D array and the index is named `theta`.
 
 ### `item_information`
 
 ```text
-item_information(res, theta, *, group=None) -> DataFrame
+item_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 Fisher information of every item at the latent trait values `theta`,
 $I_j(\theta)=\sum_kP_{jk}(\theta)\,(\partial\log P_{jk}(\theta)/\partial\theta)^2$ (Birnbaum, 1968;
 Samejima, 1969), computed for every item model by automatic differentiation. It is what mirt's
-`iteminfo()` returns.
+`iteminfo()` returns. For a multidimensional model it is the directional information
+$\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u$ along the unit vector
+$\mathbf u$ = `direction` / ‖`direction`‖, with the item information matrix of
+[`information_matrix`](#information_matrix) (Reckase & McKinley, 1991); mirt's
+`iteminfo(..., degrees = )` is `direction=np.cos(np.radians(degrees))` when
+$\sum_m\cos^2\alpha_m=1$ (mirt does not normalize the direction).
 
 | Argument | Type | Description |
 |---|---|---|
-| `res` | `FitResult` | A fitted unidimensional model |
-| `theta` | float / 1-D array | Latent trait values (finite) |
+| `res` | `FitResult` | A fitted model |
+| `theta` | float / array / DataFrame | Latent trait values (finite; see above) |
+| `direction` | 1-D array of length $D$, optional | Direction in the latent space, normalized to length 1; required for a multidimensional model, not allowed for a unidimensional one |
 | `group` | str, optional | Group name; required for a multiple-group model |
 
-**Returns**: `DataFrame` with one row per value of `theta` (the index, named `theta`) and one
-column per item.
+**Returns**: `DataFrame` with one row per point of `theta` and one column per item.
 
 ### `test_information`
 
 ```text
-test_information(res, theta, *, group=None) -> DataFrame
+test_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 Test information $I(\theta)=\sum_jI_j(\theta)$ and the conditional standard error
-$1/\sqrt{I(\theta)}$ (mirt's `testinfo()`). Arguments as for
-[`item_information`](#item_information).
+$1/\sqrt{I(\theta)}$ (mirt's `testinfo()`). For a multidimensional model, the directional test
+information $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$ (mirt's `testinfo(..., degrees = )`)
+and the standard error of the estimate of the composite $\mathbf u^\top\boldsymbol\theta$,
+$\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$, which equals $1/\sqrt{I(\theta)}$
+in one dimension. This is not mirt's `plot(type = "SE")`, which draws $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$
+(`1 / np.sqrt(information)`). Arguments as for [`item_information`](#item_information).
 
-**Returns**: `DataFrame` indexed by `theta` with the columns `information` and `se`.
+**Returns**: `DataFrame` indexed like [`item_information`](#item_information) with the columns
+`information` and `se` (infinite where the information is 0 or the information matrix is
+singular).
+
+### `information_matrix`
+
+```text
+information_matrix(res, theta, *, item=None, group=None) -> ndarray
+```
+
+Fisher information matrix
+$\mathbf I_j(\boldsymbol\theta)=\sum_kP_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}^\top$
+of one item, or the test information matrix $\sum_j\mathbf I_j$, at each point of `theta`
+(Reckase, 2009), by automatic differentiation. It is mirt's `iteminfo(..., multidim_matrix = TRUE)`
+(summed over items for the test).
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted model |
+| `theta` | float / array / DataFrame | Latent trait values (finite; see above) |
+| `item` | str, optional | Item name; by default the test information matrix |
+| `group` | str, optional | Group name; required for a multiple-group model |
+
+**Returns**: array of shape `(T, D, D)`, one symmetric positive semi-definite matrix per point,
+rows and columns in the order of the model's factors (`(T, 1, 1)` for a unidimensional model).
 
 ### `expected_score`
 
@@ -1484,11 +1526,11 @@ expected_score(res, theta, *, group=None) -> DataFrame
 
 Expected item scores $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ and the test characteristic curve
 $T(\theta)=\sum_jE_j(\theta)$, with categories scored $0,\dots,K_j-1$ as in the data (mirt's
-`expected.item()` and `expected.test()`). Arguments as for
-[`item_information`](#item_information).
+`expected.item()` and `expected.test()`); $\theta$ is a vector for a multidimensional model.
+Arguments `res`, `theta` and `group` as for [`item_information`](#item_information).
 
-**Returns**: `DataFrame` indexed by `theta` with one column per item and the column `total`. An
-item named `total` raises `SpecificationError`.
+**Returns**: `DataFrame` indexed like [`item_information`](#item_information) with one column per
+item and the column `total`. An item named `total` raises `SpecificationError`.
 
 ### `reliability`
 
@@ -1576,6 +1618,119 @@ approximation with `K != 2`.
 
 ---
 
+## Plots
+
+The numbers behind the figures ([guide section 5](guide.md#plots)) come from three functions
+that return DataFrames; `flexpyirt.plotting` draws them with matplotlib. All raise
+`SpecificationError` for a multidimensional model.
+
+### `item_probabilities`
+
+```text
+item_probabilities(res, theta, *, items=None, group=None) -> DataFrame
+```
+
+Category probabilities (trace lines) $P_{jk}(\theta)=\Pr(Y_j=k\mid\theta)$, $k=0,\dots,K_j-1$,
+of every item model (mirt's `probtrace()`).
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted unidimensional model |
+| `theta` | float / 1-D array | Latent trait values (finite) |
+| `items` | str / list[str], optional | Items to include (default: all) |
+| `group` | str, optional | Group name; required for a multiple-group model |
+
+**Returns**: `DataFrame` in long format, one row per item, category and `theta`: `item`,
+`category`, `theta`, `probability`.
+
+### `empirical_item_curve`
+
+```text
+empirical_item_curve(res, data, *, items=None, n_bins=10, group=None, item_names=None) -> DataFrame
+```
+
+Observed category proportions in bins of EAP $\theta$, beside the model (Bock, 1972; Yen, 1981).
+For each item, the respondents who answered it are sorted by EAP score (ties in row order) and
+cut into `n_bins` consecutive bins of $\lfloor n/B\rfloor$ respondents; of the remainder
+$c=n\bmod B$, $\lfloor c/2\rfloor$ go to the first bin and the rest to the last, as in mirt's
+`itemfit()`. Per bin $b$ and category $k$: the mean EAP $\bar\theta_b$, the proportion
+$O_{bk}$ of the bin's respondents in category $k$ and the model probability
+$E_{bk}=P_{jk}(\bar\theta_b)$. $n_bO_{bk}$ and $n_bE_{bk}$ are the tables of mirt's
+`itemfit(fit_stats = "X2", return.tables = TRUE)` without cell collapsing.
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted unidimensional model |
+| `data` | DataFrame / 2-D array | Responses on the fitted items (NaN is missing; a respondent enters the bins of the items they answered) |
+| `items` | str / list[str], optional | Items to include (default: all) |
+| `n_bins` | int | Number of bins (mirt's `group.bins`), default 10 |
+| `group` | array, optional | Group label of each row of `data` (required for a multiple-group model; bins are formed within each group) |
+| `item_names` | list[str], optional | Column names when `data` is an array |
+
+**Returns**: `DataFrame` with one row per item, bin and category: `item`, `bin` (1, ..., B),
+`theta`, `n`, `category`, `observed`, `expected` (and a leading `group` column for a
+multiple-group model).
+
+**Raises**: `SpecificationError` also for `n_bins` that is not a positive integer or an item (in a
+group) answered by fewer than `n_bins` respondents.
+
+### `wright_map_table`
+
+```text
+wright_map_table(res, data, *, group=None, item_names=None, method="EAP") -> WrightMapTable
+```
+
+Person scores and item locations of an item–person (Wright) map. Item locations are the
+Thurstonian thresholds: for $k=1,\dots,K_j-1$ the $\theta$ where
+$P(Y_j\ge k\mid\theta)=\sum_{c\ge k}P_{jc}(\theta)=1/2$ (Wright & Masters, 1982; TAM's
+`tam.threshold()`). They are $b$ for 2PL / Rasch items and $b_k$ for GRM items; for 3PL / 4PL
+items they are where the probability of a correct response is one half, and for GPCM / PCM items
+they differ from the step difficulties. Found on $[-20, 20]$ (first crossing, bisection); NaN
+without a crossing (e.g. a 3PL item with $g\ge1/2$). For nominal items the categories are taken
+in the data's order.
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted unidimensional model |
+| `data` | DataFrame / 2-D array | Responses on the fitted items |
+| `group` | array, optional | Group label of each row of `data` (required for a multiple-group model) |
+| `item_names` | list[str], optional | Column names when `data` is an array |
+| `method` | `"EAP"` / `"MAP"` / `"WLE"` | Scoring method of the persons, default `"EAP"` |
+
+**Returns**: [`WrightMapTable`](#wrightmaptable).
+
+### `WrightMapTable`
+
+A named tuple of two DataFrames (`persons, items = wright_map_table(...)` unpacks it).
+
+| Field | Description |
+|---|---|
+| `persons` | `theta` per respondent, with the index of `data` (and a leading `group` column for a multiple-group model) |
+| `items` | One row per item threshold: `item`, `category` ($1,\dots,K_j-1$), `location` (with a leading `group` column and every group's thresholds for a multiple-group model) |
+
+### `flexpyirt.plotting`
+
+```text
+plot_item_curves(res, items=None, *, data=None, group=None, n_bins=10, theta=None, item_names=None, ax=None) -> Figure
+plot_information(res, items=None, *, standard_error=False, group=None, theta=None, ax=None) -> Axes
+plot_expected_score(res, *, group=None, theta=None, ax=None) -> Axes
+plot_wright_map(res, data, *, group=None, item_names=None, method="EAP", n_bins=30) -> Figure
+```
+
+Import with `from flexpyirt.plotting import ...`. Needs matplotlib (`pip install
+"flexpyirt[plot]"`), imported when a function is called; without it the functions raise
+[`MissingDependencyError`](#missingdependencyerror). They return matplotlib objects and never call
+`plt.show()`. The default `theta` grid is 161 points on $[-4, 4]$.
+
+| Function | Draws | Numbers from |
+|---|---|---|
+| `plot_item_curves` | One panel per item: $P(Y=1\mid\theta)$ for dichotomous items, every category for polytomous items; the observed proportions as points when `data` is given; one curve per group for a multiple-group model (the DIF plot). `ax=` for a single item. `group=` are row labels used with `data` | [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve) |
+| `plot_information` | Test information, or the information of `items`; `standard_error=True` adds the SE on a second y axis (`ax.twinx()`). `group=` is a group name (default: every group) | [`test_information`](#test_information), [`item_information`](#item_information) |
+| `plot_expected_score` | Test characteristic curve, one line per group by default | [`expected_score`](#expected_score) (`total`) |
+| `plot_wright_map` | Horizontal histogram of the person scores (`n_bins` bins) beside the item thresholds, sharing the $\theta$ axis | [`wright_map_table`](#wright_map_table) |
+
+---
+
 ## Settings
 
 ### `BAEM`
@@ -1641,6 +1796,11 @@ labels and so on. Raised before estimation. Subclass of `ValueError`.
 The scale is not identified, e.g. a focal group's mean or variance is estimated without anchors,
 or a single group's mean is estimated without fixed items. Raised before estimation. Subclass of
 `ValueError`.
+
+#### `MissingDependencyError`
+
+An optional dependency is not installed, e.g. matplotlib for `flexpyirt.plotting` (install
+`flexpyirt[plot]`). `import flexpyirt` never needs it. Subclass of `ImportError`.
 
 #### `PrecisionError`
 

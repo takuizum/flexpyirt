@@ -356,8 +356,8 @@ the [reference](reference.md#summed_score_distribution) for details.
 `item_information(res, theta)` and `test_information(res, theta)` give the Fisher information of
 each item and of the whole test at the values `theta`, and `expected_score(res, theta)` gives the
 expected item scores and their sum, the test characteristic curve. They work for every item
-model of a unidimensional fit. Each returns a DataFrame indexed by `theta`, so `.plot()` draws the
-curves. `test_information` also has the conditional standard error `se` $=1/\sqrt{I(\theta)}$.
+model. Each returns a DataFrame indexed by `theta`, so `.plot()` draws the curves (multidimensional
+models: [section 14](#information-of-multidimensional-models)). `test_information` also has the conditional standard error `se` $=1/\sqrt{I(\theta)}$ (unidimensional models).
 
 `reliability(res)` returns the marginal reliability: the reliability
 $\sigma^2/(\sigma^2+1/I(\theta))$ of a score with error variance $1/I(\theta)$, averaged over the
@@ -386,6 +386,67 @@ print(reliability(res, df))  # with data: columns marginal, empirical
   $N(0, 1)$. For another mean or variance mirt's function does not use the fitted distribution;
   flexpyirt's value does, and it does not change when the latent scale is transformed linearly.
 - `reliability()` needs `Normal` latent distributions.
+
+### Plots
+
+`flexpyirt.plotting` draws the figures looked at in every analysis: item characteristic curves
+with observed proportions, information curves, the test characteristic curve and the
+item–person (Wright) map. It needs matplotlib, installed with `pip install "flexpyirt[plot]"`;
+without it `import flexpyirt` still works and the plot functions raise
+`MissingDependencyError`. The functions return matplotlib objects (save them with
+`fig.savefig(...)`) and never call `plt.show()`.
+
+Every number in a figure comes from a function that returns a DataFrame, so the figures can be
+redrawn with any other library:
+
+- `item_probabilities(res, theta)`: the category probabilities $P_{jk}(\theta)$ (mirt's
+  `probtrace()`), one row per item, category and `theta`.
+- `empirical_item_curve(res, data)`: respondents sorted by EAP $\theta$ and cut into `n_bins`
+  bins of equal size (as mirt's `itemfit()`); per bin and category the mean `theta`, the number
+  of respondents `n`, the `observed` proportion and the model's `expected` probability at that
+  mean.
+- `wright_map_table(res, data)`: `persons` (EAP scores) and `items` (for each item and category
+  $k\ge1$ the `location` where $P(Y\ge k\mid\theta)=1/2$, the Thurstonian threshold; $b$ for
+  2PL items).
+
+```python
+from flexpyirt import empirical_item_curve, item_probabilities, wright_map_table
+
+trace = item_probabilities(res, np.linspace(-3.0, 3.0, 7), items="q01")
+print(trace.head(3).round(3))  # item, category, theta, probability
+observed = empirical_item_curve(res, df, items=["q01"], n_bins=10)
+print(observed.head(4).round(3))  # item, bin, theta, n, category, observed, expected
+wright = wright_map_table(res, df)
+print(wright.items.head(3).round(3))  # item, category, location
+```
+
+```python
+from flexpyirt.plotting import (
+    plot_expected_score,
+    plot_information,
+    plot_item_curves,
+    plot_wright_map,
+)
+
+fig_curves = plot_item_curves(res, items[:3], data=df)  # one panel per item, observed points
+ax_information = plot_information(res, standard_error=True)  # test information and its SE
+ax_expected = plot_expected_score(res)  # test characteristic curve
+fig_wright = plot_wright_map(res, df)  # persons beside item locations
+```
+
+![Item characteristic curves with observed proportions](images/plots/item_curves.png)
+
+![Test information and standard error](images/plots/information.png)
+![Test characteristic curve](images/plots/expected_score.png)
+
+![Wright map](images/plots/wright_map.png)
+
+- `plot_item_curves` draws $P(Y=1\mid\theta)$ for dichotomous items and every category for
+  polytomous items; `ax=` draws a single item into existing axes.
+- `plot_information(res, items=[...])` draws item information instead of test information.
+- For a multiple-group model the curves of every group are drawn (see
+  [DIF](#differential-item-functioning-dif)); with `data`, pass `group=labels` as for
+  `score()`.
 
 ### Limited-information fit (M2)
 
@@ -754,6 +815,17 @@ dif_table = mg.dif(mg_df, group=group, items=items[6:9])
 print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
 ```
 
+`plot_item_curves` on a multiple-group fit draws each group's curve, with the observed
+proportions of each group when `data` and `group` are given: the DIF plot of an item.
+
+```python
+from flexpyirt.plotting import plot_item_curves
+
+fig_dif = plot_item_curves(mg, items[6:9], data=mg_df, group=group)
+```
+
+![Item characteristic curves per group (DIF plot)](images/plots/dif.png)
+
 ## 10. Fixed item parameter calibration (FIPC)
 
 Fix some items at the values of an already scaled item bank and estimate the new items and the
@@ -989,6 +1061,41 @@ res_mg = fit(
 )
 print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
 ```
+
+### Information of multidimensional models
+
+The information functions of section 5 also work for confirmatory, bifactor and two-tier models.
+With several factors the information about $\boldsymbol\theta$ is a matrix,
+$\mathbf I(\boldsymbol\theta)=\sum_j\sum_kP_{jk}\,\nabla\log P_{jk}\,\nabla\log P_{jk}^\top$, which
+`information_matrix(res, theta)` returns as an array of shape `(T, D, D)` (one item's with
+`item=`). `item_information` and `test_information` give the information in one direction
+$\mathbf u$ of the latent space, $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$ (Reckase &
+McKinley, 1991), so they need `direction=`, a vector with one entry per factor (it is scaled to
+length 1). `theta` is a `(T, D)` array or a DataFrame with the factor names as columns, and the
+results are indexed by the factor values. `expected_score` needs no direction.
+
+```python
+from flexpyirt import expected_score, information_matrix, item_information, test_information
+
+grid = pd.DataFrame({"F1": [-1.0, 0.0, 1.0], "F2": [0.0, 0.0, 0.5]})
+angle = np.radians(30.0)
+direction = [np.cos(angle), np.sin(angle)]  # 30 degrees from F1 (mirt: degrees = c(30, 60))
+print(item_information(res_mirt, grid, direction=direction).iloc[:, :3].round(3))
+print(test_information(res_mirt, grid, direction=direction).round(3))  # information, se
+print(information_matrix(res_mirt, grid)[0].round(3))  # 2 x 2 test information at (-1, 0)
+print(expected_score(res_mirt, grid)["total"].round(2))
+```
+
+- mirt's `degrees=` (the angle to each axis) corresponds to `direction=np.cos(np.radians(degrees))`
+  when the angles are consistent ($\sum_m\cos^2\alpha_m=1$); flexpyirt scales the direction to length
+  1, mirt does not.
+- `test_information`'s `se` is the standard error of the estimate of the combination
+  $\mathbf u^\top\boldsymbol\theta$, $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$, which is at least
+  $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ because the other directions are estimated too. It is
+  infinite where the information matrix is singular. mirt's `plot(type = "SE")` draws
+  $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ instead, `1 / np.sqrt` of the `information` column.
+- In bifactor and two-tier models `theta` has a column for every factor, general and specific.
+- Reliability and the summed-score functions are for unidimensional models only.
 
 ### Bifactor models
 
@@ -1540,6 +1647,8 @@ except SpecificationError as e:
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
+- Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.

@@ -54,6 +54,7 @@ $10^{-8}$ 程度）。
 | 混合正規 | 全項目を不変にした `multipleGroup(..., dentype = "mixture-k")` と、R の独立な実装 |
 | S-X2 項目適合度 | `itemfit(m, fit_stats = "S_X2")` |
 | 項目・テスト情報量、期待得点 | mirt の推定値での `iteminfo()`・`testinfo()`・`expected.item()`・`expected.test()`（2PL、3PL、GRM、GPCM、名義、混合形式、2 群）。相対 $10^{-9}$ まで |
+| 多次元の情報量 | すべての項目モデルと交差負荷を含む 2 因子・3 因子モデル、双因子モデル、two-tier モデルの情報行列（`iteminfo(..., multidim_matrix = TRUE)`）、方向別の項目・テスト情報量（`degrees =` を渡した `iteminfo()` / `testinfo()`）と期待得点。相対 $10^{-10}$ まで |
 | 信頼性 | `marginal_rxx()`（積分の許容誤差を厳しくした再計算とも照合。平均・分散が 0・1 でない群は、標準化した等価モデルで照合）と `empirical_rxx()`。$10^{-10}$ まで |
 | 合計得点による EAP | `fscores(m, method = "EAPsum")` の表と受検者ごとの得点（欠測のある反応パターンが `NA` になる点も含む）。$10^{-9}$ まで |
 | $M_2$ / $M_2^*$ | `M2(m)`。mirt と異なる場合は R による厳密な計算（下記参照） |

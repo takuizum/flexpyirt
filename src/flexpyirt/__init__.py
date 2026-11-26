@@ -20,6 +20,12 @@ from flexpyctt.item_analysis import (
 )
 from flexpyirt import errors
 from flexpyirt.correlation import PolychoricResult, polychoric
+from flexpyirt.curves import (
+    WrightMapTable,
+    empirical_item_curve,
+    item_probabilities,
+    wright_map_table,
+)
 from flexpyirt.dimensionality import (
     ComparisonDataResult,
     DetectResult,
@@ -49,6 +55,7 @@ from flexpyirt.dimensionality import (
 from flexpyirt.fit import fit
 from flexpyirt.information import (
     expected_score,
+    information_matrix,
     item_information,
     reliability,
     summed_score_table,
@@ -106,6 +113,7 @@ __all__ = [
     "Rasch",
     "ThreePL",
     "TwoPL",
+    "WrightMapTable",
     "__version__",
     "coefficient_alpha",
     "coefficient_omega",
@@ -115,14 +123,17 @@ __all__ = [
     "dimtest",
     "distractor_analysis",
     "efa",
+    "empirical_item_curve",
     "empirical_kaiser",
     "errors",
     "expected_score",
     "exploratory_detect",
     "fit",
     "hull",
+    "information_matrix",
     "item_analysis",
     "item_information",
+    "item_probabilities",
     "link",
     "model_parallel_analysis",
     "parallel_analysis",
@@ -133,4 +144,5 @@ __all__ = [
     "summed_score_table",
     "test_information",
     "velicer_map",
+    "wright_map_table",
 ]
