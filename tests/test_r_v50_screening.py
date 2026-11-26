@@ -2,7 +2,7 @@
 
 Reference values come from ``validation/r/v50_screening_reference.R`` ->
 ``tests/reference/v50_screening.json``. No R package implements these statistics with
-characteristic-curve linking, so the R script recomputes the rules of DESIGN.md §21 in base R:
+characteristic-curve linking, so the R script recomputes the rules of DESIGN.md §22 in base R:
 each form is calibrated with mirt (``optimizer="NR"``, ``TOL=1e-10``, 61 nodes on [-6, 6], latent
 N(0, 1)), the linking is the V20 base-R Stocking–Lord / Haebara, and the locations, robust z
 (``median``, ``quantile(type = 7)``), displacement, expected-score RMSD (``expected.item()``) and

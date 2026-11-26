@@ -1,4 +1,4 @@
-"""Unit tests of common-item screening (DESIGN.md §21; the R comparison is test_r_v50_screening)."""
+"""Unit tests of common-item screening (DESIGN.md §22; the R comparison is test_r_v50_screening)."""
 
 from __future__ import annotations
 

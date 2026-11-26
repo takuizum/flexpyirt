@@ -26,6 +26,7 @@ __all__ = [
     "FlexpyirtWarning",
     "HeywoodWarning",
     "IdentificationError",
+    "MissingDependencyError",
     "NotPositiveDefiniteWarning",
     "PrecisionError",
     "ScreeningWarning",
@@ -48,6 +49,14 @@ class IdentificationError(FlexpyirtError, ValueError):
     """
 
 
+class MissingDependencyError(FlexpyirtError, ImportError):
+    """An optional dependency needed by the called function is not installed.
+
+    Example: a function of :mod:`flexpyirt.plotting` without matplotlib (install
+    ``flexpyirt[plot]``). ``import flexpyirt`` never needs the optional dependencies.
+    """
+
+
 class PrecisionError(FlexpyirtError, RuntimeError):
     """64-bit floating point is not enabled in JAX.
 
@@ -60,5 +69,5 @@ class ScreeningWarning(FlexpyirtWarning):
     """Common-item purification stopped while kept anchor items were still flagged.
 
     Emitted by :func:`flexpyirt.screen_common_items` when ``max_iter`` removal steps are used up or
-    a removal would take the anchor set below ``min_items`` (DESIGN.md §21).
+    a removal would take the anchor set below ``min_items`` (DESIGN.md §22).
     """

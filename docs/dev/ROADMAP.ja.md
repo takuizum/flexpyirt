@@ -107,6 +107,11 @@
   `fscores(method = "EAPsum")`、`survey.weights`、`SE.type = "sandwich"` / `"crossprod"` との V 番号つき照合。
 
 ## 現場向け機能
+- [x] 図（#103）: `item_probabilities()`、`empirical_item_curve()`、`wright_map_table()` が図の元になる数値を
+  返し、`flexpyirt.plotting`（観測比率と群ごとの曲線（DIF）つきの `plot_item_curves`、`plot_information`、
+  `plot_expected_score`、`plot_wright_map`）が任意依存 `flexpyirt[plot]` の matplotlib で描く。1 次元モデル、
+  全項目族、単一群・多母集団。V48 で mirt の `itemfit(return.tables = TRUE)`、`probtrace()`、
+  `coef(IRTpars = TRUE)` と TAM の `tam.threshold()` に照合。
 - [x] リンキングの共通項目の点検と項目パラメータドリフト（#105。`screen_common_items()`、
   `CommonItemScreeningResult`、`stack_screening_tables()`: 頑健 z・変位・期待得点の RMSD と反復的な純化、1 次元。V50 で照合済み）。
 

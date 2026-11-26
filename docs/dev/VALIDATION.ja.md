@@ -75,6 +75,7 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
+| V48 | mirt の推定値での図の数値（2PL $J=10$、$N=1003$。欠測 10% の 2PL。GRM $K=4$、$J=6$。2PL + 3PL + GPCM + 名義の混合 $J=10$。2 群の 2PL + GRM で焦点群の平均・分散を推定。TAM の GPCM $K=4$、$J=6$）: 経験的項目曲線、トレースライン、サーストン閾値 | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))`（群ごとは `extract.group()`）、`probtrace()`、`probtrace()` に対する `uniroot()`、`coef(IRTpars = TRUE)`。TAM `tam.threshold()` | #103 |
 | V50 | リンキングの共通項目の点検（#105）: 頑健 z（Huynh & Meyer, 2010）・変位・期待項目得点曲線の RMSD。除外の順序、純化の各段階のリンキング係数、最終の項目表（2PL、2PL + GRM + GPCM 混在） | 個別の `mirt()` 推定 + 素の R による再計算（`median()`、`quantile(type = 7)`、`expected.item()`、V20 のリンキング）。ドリフト項目の照合に `equateIRT::dif.test` | 現場向け |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -571,7 +572,7 @@
 
 - **共通項目の点検（V50、#105）**: 頑健 z・変位・期待得点の RMSD を特性曲線リンキングと純化と組み合わせて実装した R パッケージは
   ないので、`validation/r/v50_screening_reference.R`（→ `tests/reference/v50_screening.json`、mirt 1.48、equateIRT 2.5.2）が
-  DESIGN §21 の規則を素の R で計算し直す。各フォームを `mirt`（`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、
+  DESIGN §22 の規則を素の R で計算し直す。各フォームを `mirt`（`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、
   $[-6, 6]$ 上 61 節点、潜在分布 $N(0, 1)$）で推定し、各アンカー集合のリンキングは V20 の素の R の Stocking–Lord / Haebara
   （`max |grad| < 1e-9` を確認）。位置、`log_ratio_a`、頑健 z（`median()`、`quantile(type = 7)`、`IQR()`）、変位、
   `target` の格子上の `expected.item()` 曲線の RMSD は式どおりに計算し、純化のループも同じ除外規則で書き下す。
@@ -591,7 +592,7 @@
   許容誤差: $(A, B)$ `1e-9`、規準値は相対 `1e-7`、項目ごとの量 `1e-9`、頑健 z `1e-8`。**独立にのみ確認したもの**
   （`tests/test_screening.py` の単体テスト）: 4PL と名義項目の位置（すべてのカーネルで $b^* = A\,b + B$）、移した `source`
   曲線の直接評価との RMSD の一致、ドリフトのない項目での $(A, B)$ の厳密な回復、わずかに揺らした項目に仕込んだドリフトの除外、Rasch の傾きの比の頑健 z が
-  NaN になること、`items=` による部分集合、`stack_screening_tables()`。閾値は慣行であり（DESIGN §21）、V50 が確かめるのは
+  NaN になること、`items=` による部分集合、`stack_screening_tables()`。閾値は慣行であり（DESIGN §22）、V50 が確かめるのは
   規則が仕様どおりに計算されることで、閾値のよさではない。
 
 - **混合正規潜在分布（V22、M5）**: flexpyirt の `NormalMixture`（DESIGN §16.7）は形状に mirt のクラスのパラメタ化を
@@ -887,6 +888,37 @@
     求めた期待得点、6 項目の混合テストの全 288 反応パターンの総当たりによる合計得点の表（$10^{-12}$）、
     全期待値の法則、潜在尺度の線形変換に対する周辺信頼性の不変性（$10^{-13}$）、信頼性の範囲と、
     シミュレーションデータでの周辺・経験的信頼性の近さ、エラーの経路。
+- **図の数値（V48、#103）**: DESIGN §21 を `tests/test_mirt_v48_plots.py` で照合する（slow tier、約 20 秒。
+  生成スクリプト `validation/r/v48_plots_reference.R` → `tests/reference/v48_plots.json`、mirt 1.48、TAM 4.3-25、
+  $[-6, 6]$ の 61 点）。V37 と同じく mirt がすべてのモデルを推定し（`TOL = 1e-8`、収束）、その推定値をすべて固定した
+  `FitResult` に入れる。区間は回答者の順序に依存するので、データは行ごとに保存する（ユニークなパターンと各行の
+  パターン番号）。ケース: `twopl`（$J=10$、$N=1003$。余り 3 のため最初の区間に 1 人、最後の区間に 2 人多い）、
+  `twopl_missing`（$N=1200$、10% MCAR。区間は項目ごとにその項目に回答した回答者で作る）、`grm`（$K=4$、
+  $J=6$、$N=1500$）、`mixed`（2PL 3、3PL 3、GPCM $K=4$ 2、名義 $K=3$ 2。$N=3000$）、`twogroup`（2PL 5 + GRM
+  $K=4$ 3、全項目を等値、群あたり $N=805$、焦点群の平均・分散を推定）、`gpcm_tam`（TAM 自身の GPCM 推定）。
+  全ケースでの最大差:
+  - **EAP 推定値**（区間の入力）と `fscores(method = "EAP")`: `7.1e-15`（許容 $10^{-9}$）。
+  - **`empirical_item_curve()`** と `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10,
+    mincell.X2 = 0, Theta = eap)`（項目ごと。mirt は 1 回の呼び出しで 1 項目の表を返す。`mincell.X2 = 0` で
+    セル併合を止める。`multipleGroup` の推定結果は拒否されるので、群ごとに `extract.group()` とその群の
+    `Theta` の行で呼ぶ。mirt 自身の群ごとの `itemfit()` も同じことをしている）: 区間の人数は mirt の行和と
+    完全に一致、観測比率も一致（`0`）、期待確率 `4.6e-15`（許容 $10^{-9}$）、区間平均と mirt のラベル
+    （小数 4 桁に丸めてある）`5.0e-5`（丸めの分。許容 $5\times10^{-5}$）。期待表は
+    $N\,P(\bar\theta_b)$ なので、区間平均も全精度で確かめている。
+  - **`item_probabilities()`** と $\theta\in\{-6,-4,-3.5,\dots,4,6\}$ での `probtrace()`: `2.9e-15`
+    （許容 $10^{-12}$）。
+  - **`wright_map_table()` の項目位置** と、$[-20, 20]$ での $\sum_{c\ge k}$`probtrace()`$-1/2$ の
+    `uniroot(tol = 1e-13)`: `2.1e-14`。`coef(IRTpars = TRUE)` の $b$（2PL）・$b_k$（GRM）と: `1.1e-14`
+    （許容 $10^{-9}$）。3PL 項目の閾値は当然 $b$ より小さい。TAM 自身の GPCM 推定値（傾きと切片は `B` と
+    `AXsi` から読む）での `tam.threshold()` と: `8.4e-5`。TAM の二分法は区間が $10^{-4}$ を下回ると止まる
+    （許容 $10^{-4}$）。
+  - **照合していないもの**: mirt の $X^2$ / $G^2$ とセル併合、`empirical.plot` の Clopper–Pearson 区間
+    （計算しない）、図そのもの。
+  - **単体テスト・スモークテスト**（`tests/test_plotting.py`、fast tier）: mirt の区間の人数の規則、欠測の
+    ある区間の総当たりでの再計算、閾値の閉形式（2PL の $-d/a$、GRM の $-d_k/a$、交点のある・ない 3PL 項目）、
+    DIF のある 2 群、エラーの経路。すべての描画関数を Agg バックエンドで描き、描いたデータが DataFrame と
+    等しいこと。matplotlib を import できないときの `MissingDependencyError`。CI では matplotlib のない環境で
+    `scripts/check_plotting_without_matplotlib.py` も実行する。
 - **標本ウェイト（V34、M7）**: mirt の `survey.weights`（mirt 1.48、`optimizer = "NR"`、`TOL = 1e-10`、
   `SE.type = "Oakes"`）。参照ファイルは行ごとのウェイトとともに元の行を保存するので、ウェイトを足し合わせる
   パターン圧縮も比較の対象になる。V34a: シミュレーションの 2PL（$J=10$、$N=1000$）、合計点と関係する対数正規
