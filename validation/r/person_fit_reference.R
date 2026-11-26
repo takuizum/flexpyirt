@@ -1,4 +1,4 @@
-# Person fit and residual item fit reference values (VALIDATION.md V53, DESIGN.md §23) from R.
+# Person fit and residual item fit reference values (VALIDATION.md V53, DESIGN.md §25) from R.
 # Run from the repository root:  Rscript validation/r/person_fit_reference.R
 # Writes tests/reference/v53_person_fit.json. CI does not run R; the JSON is committed.
 #
@@ -11,7 +11,7 @@
 #   - z_outfit with q^2 = |sum(C / W^2) / n^2 - 1 / n| over the n answered items (Wright & Masters,
 #     1982), from mirt's own residual moments (attr "inoutfitreturn"). mirt's personfit() divides
 #     by J^2 (all items) instead of n^2 under the square root, which differs only for rows with
-#     missing responses (DESIGN.md §23).
+#     missing responses (DESIGN.md §25).
 #   - l_z* (Snijders, 2001; Sinharay, 2016) recomputed here from the formulas: category
 #     probabilities from mirt's probtrace(), their theta derivatives by central differences
 #     (h = 1e-5), item information from mirt's iteminfo() and its derivative (WLE) by central

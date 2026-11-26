@@ -2244,7 +2244,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    **含めないもの**: 1 つの多群推定の中での尤度比・Wald の DIF 検定（`FitResult.dif()`、#104）、項目を外さずに重みを下げる
    頑健なリンキング基準、連鎖リンキングの誤差、多次元の点検。
 
-## 23. 受験者適合度と残差にもとづく項目適合度（#108）
+## 25. 受験者適合度と残差にもとづく項目適合度（#108）
 
 1. **範囲と API（V53、#108）**: `FitResult.person_fit(data, *, method="EAP", group=None,
    item_names=None, statistics=("lz", "infit", "outfit"))` は受験者 1 人 1 行で、`theta`、要求した統計量

@@ -1,4 +1,4 @@
-r"""Person fit and residual-based item fit (Core layer, DESIGN.md §23).
+r"""Person fit and residual-based item fit (Core layer, DESIGN.md §25).
 
 Pure JAX kernels on :class:`~flexpyirt._core.CompiledProblem` pytrees, evaluated per unique
 response pattern at that pattern's ability estimate :math:`\hat\theta_p`: the standardized

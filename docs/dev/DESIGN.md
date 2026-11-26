@@ -2997,7 +2997,7 @@ data-independent shapes (§15.21).
    (`FitResult.dif()`, #104), robust linking criteria that down-weight instead of removing items,
    linking error over chains, multidimensional screening.
 
-## 23. Person fit and residual item fit (#108)
+## 25. Person fit and residual item fit (#108)
 
 1. **Scope and API (V53, #108)**: `FitResult.person_fit(data, *, method="EAP", group=None,
    item_names=None, statistics=("lz", "infit", "outfit"))` returns one row per respondent with

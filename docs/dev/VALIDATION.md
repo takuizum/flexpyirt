@@ -1048,14 +1048,14 @@ English | [日本語](VALIDATION.ja.md)
   Tests: `tests/test_mirt_m7_weights.py`. Reference generator:
   `validation/r/m7_weights_reference.R`.
 
-- **Person fit and residual item fit (V53, #108)**: DESIGN §23. The cases reuse V37's data and
+- **Person fit and residual item fit (V53, #108)**: DESIGN §25. The cases reuse V37's data and
   mirt estimates (every parameter fixed, 61 points on $[-6, 6]$); per case and estimator (EAP,
   MAP, ML, WLE) the R script computes mirt's `fscores()`, `personfit(m, Theta = )` on the full
   data (stored for the first 300 unique patterns) and `itemfit(m, fit_stats = "infit", Theta = )`
   (EAP, MAP and WLE; ML's infinite estimates are replaced by mirt). **At mirt's $\theta$** (the
   kernel evaluated at the stored estimates): $l_z$, infit, outfit and their $z$ values agree to
   $8.3\times10^{-9}$ (relative) over all eight cases and four estimators, and $l_z^*$ agrees with
-  the R recomputation of DESIGN §23 item 3 (`probtrace()` with central differences, `iteminfo()`)
+  the R recomputation of DESIGN §25 item 3 (`probtrace()` with central differences, `iteminfo()`)
   to $2.8\times10^{-8}$ for $|\hat\theta|\le10$; beyond that (mirt's ML on 3PL flat tails and on
   its missing-data extremes, V13) the central differences lose precision, and flexpyirt agrees
   with an analytic NumPy evaluation instead. **End to end** (flexpyirt's own estimates, which
@@ -1063,7 +1063,7 @@ English | [日本語](VALIDATION.ja.md)
   $1.2\times10^{-5}$ (ML) and $2.6\times10^{-6}$ (WLE)): person statistics within
   $2.0\times10^{-5}$, item statistics within $3.1\times10^{-5}$. **Rasch**: $l_z$, infit and outfit
   agree with `sirt::personfit.stat()` to $3.7\times10^{-13}$ (relative) at mirt's WLE estimates
-  (mirt and sirt agree to $1.8\times10^{-15}$). **Known differences from mirt** (DESIGN §23
+  (mirt and sirt agree to $1.8\times10^{-15}$). **Known differences from mirt** (DESIGN §25
   item 5): person `z_outfit` uses $n^2$ (answered items) where mirt's `personfit()` uses $J^2$,
   and mirt's `itemfit()` recycles the per-item respondent count over rows in the item
   `z.outfit`; both matter only with missing responses, so the references recompute these $z$

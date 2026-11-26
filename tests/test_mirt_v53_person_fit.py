@@ -1,4 +1,4 @@
-"""V53: person fit (l_z, l_z*, infit / outfit) and item infit / outfit vs R (DESIGN.md §23).
+"""V53: person fit (l_z, l_z*, infit / outfit) and item infit / outfit vs R (DESIGN.md §25).
 
 Reference values come from ``validation/r/person_fit_reference.R`` on V37's data and mirt
 estimates (2PL, 2PL with 8% missing, 3PL, GRM, GPCM, nominal, mixed format, two groups) plus a

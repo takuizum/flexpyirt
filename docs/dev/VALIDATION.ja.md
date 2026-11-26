@@ -1030,18 +1030,18 @@
   一致すること、行を 2 倍にすると共分散が半分になること、`b_se` と `link()` が選んだ共分散を読むこと、
   JSON の往復、拒否するケース。
 
-- **受験者適合度と残差にもとづく項目適合度（V53、#108）**: DESIGN §23。V37 のデータと mirt の推定値を再利用する
+- **受験者適合度と残差にもとづく項目適合度（V53、#108）**: DESIGN §25。V37 のデータと mirt の推定値を再利用する
   （全パラメタ固定、$[-6, 6]$ の 61 点）。ケースと推定法（EAP・MAP・ML・WLE）ごとに、R スクリプトは mirt の
   `fscores()`、全データでの `personfit(m, Theta = )`（最初の 300 個の一意なパターンを保存）と
   `itemfit(m, fit_stats = "infit", Theta = )`（EAP・MAP・WLE。ML の無限大の推定値は mirt が置き換えるため除く）を計算する。
   **mirt の $\theta$ で**（保存した推定値でカーネルを評価）: $l_z$・infit・outfit とその $z$ 値は 8 ケース・4 推定法の
-  すべてで $8.3\times10^{-9}$（相対）以内、$l_z^*$ は DESIGN §23 の 3 項を R で再計算した値（`probtrace()` と中心差分、
+  すべてで $8.3\times10^{-9}$（相対）以内、$l_z^*$ は DESIGN §25 の 3 項を R で再計算した値（`probtrace()` と中心差分、
   `iteminfo()`）と $|\hat\theta|\le10$ で $2.8\times10^{-8}$ 以内。それより外（3PL の平坦な裾での mirt の ML、V13 の欠測時の
   極値）では中心差分の精度が落ち、flexpyirt は NumPy での解析的な計算と一致する。**端から端まで**（flexpyirt 自身の推定値。
   mirt との差は EAP $5.6\times10^{-15}$、MAP $2.9\times10^{-6}$、ML $1.2\times10^{-5}$、WLE $2.6\times10^{-6}$ まで）:
   受験者の統計量は $2.0\times10^{-5}$ 以内、項目の統計量は $3.1\times10^{-5}$ 以内。**Rasch**: mirt の WLE 推定値で
   $l_z$・infit・outfit が `sirt::personfit.stat()` と $3.7\times10^{-13}$（相対）以内で一致（mirt と sirt の差は
-  $1.8\times10^{-15}$）。**mirt との既知の差**（DESIGN §23 の 5 項）: 受験者の `z_outfit` は $n^2$（回答項目数）を使うが
+  $1.8\times10^{-15}$）。**mirt との既知の差**（DESIGN §25 の 5 項）: 受験者の `z_outfit` は $n^2$（回答項目数）を使うが
   mirt の `personfit()` は $J^2$ を使い、mirt の `itemfit()` は項目の `z.outfit` で項目ごとの回答者数を行方向に再利用する。
   どちらも欠測があるときだけ効くので、参照値ではこれらの $z$ 値を mirt 自身の残差モーメント（`attr(m, "inoutfitreturn")`）
   から計算し直し、欠測のないデータでは mirt の値とも直接比べる。**$l_z^*$ には R パッケージの参照値がない**（`PerFit` は

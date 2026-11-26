@@ -1,4 +1,4 @@
-"""Person fit and residual item fit: unit tests and the l_z* null distribution (DESIGN.md §23).
+"""Person fit and residual item fit: unit tests and the l_z* null distribution (DESIGN.md §25).
 
 The comparison with R (mirt ``personfit()`` / ``itemfit()``, sirt, the R recomputation of l_z*)
 is in ``test_mirt_v53_person_fit.py``. Here: closed forms for 2PL items computed independently in
@@ -45,7 +45,7 @@ def _true_model_fit(n: int = 400, seed: int = 0, missing: float = 0.05) -> FitRe
 
 
 def _floored(var: np.ndarray) -> np.ndarray:
-    """mirt's guard: W = sqrt(1e-5) where W^2 < 1e-5 (DESIGN.md §23)."""
+    """mirt's guard: W = sqrt(1e-5) where W^2 < 1e-5 (DESIGN.md §25)."""
     return np.where(var**2 < 1e-5, np.sqrt(1e-5), var)
 
 

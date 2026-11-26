@@ -766,7 +766,7 @@ class FitResult:
         group: Any = None,
         item_names: list[str] | None = None,
     ) -> pd.DataFrame:
-        r"""Item fit statistics: Orlando–Thissen S-X2 and infit / outfit (DESIGN.md §15.40, §23).
+        r"""Item fit statistics: Orlando–Thissen S-X2 and infit / outfit (DESIGN.md §15.40, §25).
 
         ``statistics`` selects what is computed; the default is S-X2 only.
 
@@ -804,7 +804,7 @@ class FitResult:
             \mathrm{outfit}_j=\frac1{N_j}\sum_i\frac{r_{ij}^2}{W_{ij}},\qquad
             \mathrm{infit}_j=\frac{\sum_i r_{ij}^2}{\sum_i W_{ij}},
 
-        with the Wilson–Hilferty :math:`z` values of Wright & Masters (1982) (DESIGN.md §23).
+        with the Wilson–Hilferty :math:`z` values of Wright & Masters (1982) (DESIGN.md §25).
         They are computed for every item family (as mirt's ``itemfit(fit_stats = "infit")``);
         their reference distribution is derived for Rasch-family models, and for other models
         they are descriptive. Missing responses are skipped.
@@ -938,7 +938,7 @@ class FitResult:
         item_names: list[str] | None = None,
         statistics: PersonFitStatistic | Sequence[PersonFitStatistic] = ("lz", "infit", "outfit"),
     ) -> pd.DataFrame:
-        r"""Person fit: :math:`l_z`, :math:`l_z^*` and person infit / outfit (DESIGN.md §23).
+        r"""Person fit: :math:`l_z`, :math:`l_z^*` and person infit / outfit (DESIGN.md §25).
 
         Each respondent is scored by ``method`` (as :meth:`score`), and the statistics are
         evaluated at the estimate :math:`\hat\theta` over the answered items :math:`A`
@@ -1049,7 +1049,7 @@ class FitResult:
         item_names: list[str] | None,
         theta: np.ndarray | None = None,
     ) -> tuple[np.ndarray, dict[str, np.ndarray], np.ndarray, list[Any]]:
-        """Ability estimates and per-row person-fit quantities (DESIGN.md §23).
+        """Ability estimates and per-row person-fit quantities (DESIGN.md §25).
 
         Returns ``(theta, per_row, codes, group_names)``; ``per_row`` holds the arrays of
         :func:`_personfit.pattern_statistics` expanded to one entry per row of ``data``.
@@ -1092,7 +1092,7 @@ class FitResult:
     def _residual_item_fit(
         self, data: Any, *, method: ScoreMethod, group: Any, item_names: list[str] | None
     ) -> pd.DataFrame:
-        """Item infit / outfit table of :meth:`item_fit` (DESIGN.md §23)."""
+        """Item infit / outfit table of :meth:`item_fit` (DESIGN.md §25)."""
         _, per_row, codes, group_names = self._residual_rows(
             data, method=method, group=group, item_names=item_names
         )

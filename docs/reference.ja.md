@@ -156,7 +156,7 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 **infit / outfit**（`"infit"`・`"outfit"`）: 各受験者を `method` で推定し、項目 $j$ に回答した $N_j$ 人にわたって
 $\mathrm{outfit}_j=\frac1{N_j}\sum_i r_{ij}^2/W_{ij}$、$\mathrm{infit}_j=\sum_i r_{ij}^2/\sum_i W_{ij}$ とし、
 Wright & Masters (1982) の Wilson–Hilferty 変換の $z$ 値も返す。$r_{ij}$ は $\hat\theta_i$ での項目得点
-$0,\dots,K_j-1$ の残差、$W_{ij}$ はその条件付き分散（[`FitResult.person_fit`](#fitresultperson_fit)、DESIGN §23）。
+$0,\dots,K_j-1$ の残差、$W_{ij}$ はその条件付き分散（[`FitResult.person_fit`](#fitresultperson_fit)、DESIGN §25）。
 1 次元モデルのみ。欠測は飛ばす。mirt と同じく全項目モデルで計算する（Rasch 系以外では記述的な指標）。
 
 | 引数 | 説明 |
@@ -183,7 +183,7 @@ person_fit(data, *, method="EAP", group=None, item_names=None,
            statistics=("lz", "infit", "outfit")) -> DataFrame
 ```
 
-各受験者の能力推定値での受験者適合度（[ガイド 5 節](guide.ja.md#受験者適合度と-infit--outfit)、DESIGN §23）。
+各受験者の能力推定値での受験者適合度（[ガイド 5 節](guide.ja.md#受験者適合度と-infit--outfit)、DESIGN §25）。
 回答した項目を $A$、$P_{jk}=P_{jk}(\hat\theta)$ として:
 
 - `"lz"`: $l_z=(l_0-\mathrm E\,l_0)/\sqrt{\mathrm{Var}\,l_0}$、$l_0=\sum_{j\in A}\log P_{jy_j}$、

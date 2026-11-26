@@ -178,7 +178,7 @@ $N_j$ respondents who answered item $j$, $\mathrm{outfit}_j=\frac1{N_j}\sum_i r_
 $\mathrm{infit}_j=\sum_i r_{ij}^2/\sum_i W_{ij}$, with $r_{ij}$ the residual of the item score
 $0,\dots,K_j-1$ at $\hat\theta_i$ and $W_{ij}$ its conditional variance, plus the Wilson–Hilferty
 $z$ values of Wright & Masters (1982) (see [`FitResult.person_fit`](#fitresultperson_fit) and
-DESIGN §23). Unidimensional models; missing responses are skipped; computed for every item model
+DESIGN §25). Unidimensional models; missing responses are skipped; computed for every item model
 as in mirt (descriptive outside the Rasch family).
 
 | Argument | Description |
@@ -208,7 +208,7 @@ person_fit(data, *, method="EAP", group=None, item_names=None,
 ```
 
 Person fit at each respondent's ability estimate ([guide section 5](guide.md#person-fit-and-infit--outfit),
-DESIGN §23). With $A$ the answered items and $P_{jk}=P_{jk}(\hat\theta)$:
+DESIGN §25). With $A$ the answered items and $P_{jk}=P_{jk}(\hat\theta)$:
 
 - `"lz"`: $l_z=(l_0-\mathrm E\,l_0)/\sqrt{\mathrm{Var}\,l_0}$ with $l_0=\sum_{j\in A}\log P_{jy_j}$,
   $\mathrm E\,l_0=\sum_j\sum_kP_{jk}\log P_{jk}$ (Drasgow, Levine & Williams, 1985; mirt's `Zh`).
