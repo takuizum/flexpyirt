@@ -281,8 +281,7 @@ def build_group_blocks(pattern_groups: np.ndarray, n_groups: int, n_rows: int) -
 
     ``pattern_groups`` are the groups of the real (unpadded) pattern rows ``0..n_real-1``;
     ``n_rows`` is the padded number of rows ``P``, used as the sentinel row index. The block
-    size minimizes the padded rows plus a per-block overhead; the number of blocks is padded to a
-    multiple of 8 with empty blocks.
+    size minimizes the padded rows plus a per-block overhead.
     """
     sizes = np.bincount(pattern_groups, minlength=n_groups)
 
@@ -302,10 +301,6 @@ def build_group_blocks(pattern_groups: np.ndarray, n_groups: int, n_rows: int) -
         rows.extend(padded.reshape(n_blocks, block))
         groups.extend([g] * n_blocks)
         last.extend([False] * (n_blocks - 1) + [True] * (n_blocks > 0))
-    n_pad = (-len(rows)) % 8
-    rows.extend([np.full(block, n_rows, dtype=np.int32)] * n_pad)
-    groups.extend([0] * n_pad)
-    last.extend([False] * n_pad)
     return GroupBlocks(
         rows=jnp.asarray(np.stack(rows), dtype=jnp.int32),
         group=jnp.asarray(groups, dtype=jnp.int32),

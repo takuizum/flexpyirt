@@ -10,6 +10,7 @@
 # Run from the repository root:
 #   Rscript benchmarks/run_mirt.R
 #   Rscript benchmarks/run_mirt.R --quick
+#   Rscript benchmarks/run_mirt.R --quick --cases manygroups_2pl_g50 --algos default
 
 suppressMessages({
   library(mirt)
@@ -23,6 +24,7 @@ parse_args <- function(args) {
     cases = character(0),
     quick = FALSE,
     many_groups = FALSE,
+    algos = c("default", "nr_none"),
     repeats = NA_integer_,
     tol = 1e-4,
     ncycles = 2000L,
@@ -36,6 +38,14 @@ parse_args <- function(args) {
       cfg$data_dir <- args[i + 1L]; i <- i + 2L
     } else if (flag == "--out") {
       cfg$out <- args[i + 1L]; i <- i + 2L
+    } else if (flag == "--algos") {
+      i <- i + 1L
+      vals <- character(0)
+      while (i <= length(args) && !startsWith(args[i], "--")) {
+        vals <- c(vals, args[i]); i <- i + 1L
+      }
+      stopifnot(all(vals %in% c("default", "nr_none")))
+      cfg$algos <- vals
     } else if (flag == "--many-groups") {
       cfg$many_groups <- TRUE; i <- i + 1L
     } else if (flag == "--quick") {
@@ -184,7 +194,7 @@ for (case_info in selected) {
 
   for (se_name in c("none", "oakes")) {
     se_flag <- (se_name == "oakes")
-    for (algo in c("default", "nr_none")) {
+    for (algo in cfg$algos) {
       elapsed_vec <- numeric(cfg$repeats)
       last <- NULL
       for (r in seq_len(cfg$repeats)) {

@@ -1682,28 +1682,40 @@ def _oakes_tables(prob: CompiledProblem, eta: Array, counts: ExpectedCounts) -> 
     )
 
 
+def _oakes_flat_tables(tabs: _OakesTables) -> list[Array]:
+    """Per family, the score tables reshaped to ``(G, Q, J_f K_f S_f)`` for the chunk products."""
+    out = []
+    for _, d_lp in tabs.fam_d:
+        n_groups, _, _, n_nodes, _ = d_lp.shape
+        out.append(jnp.transpose(d_lp, (0, 3, 1, 2, 4)).reshape(n_groups, n_nodes, -1))
+    return out
+
+
 def _oakes_chunk_terms(
     tabs: _OakesTables,
     eta: Array,
-    g: Array | int,
+    d_flats_g: list[Array],
+    dlw_g: Array,
+    lfids_g: Array,
     y_c: Array,
     c_c: Array,
     h_c: Array,
 ) -> tuple[Array, Array]:
-    """Category co-occurrences ``(Q, D, D)`` and the ``T_2`` term of one chunk of group ``g``.
+    """Category co-occurrences ``(Q, D, D)`` and the ``T_2`` term of one chunk of one group.
 
-    ``c_c`` must already be zero outside group ``g`` (and on padding rows).
+    ``d_flats_g``, ``dlw_g`` and ``lfids_g`` are that group's slices of
+    :func:`_oakes_flat_tables`, ``tabs.d_logw`` and ``tabs.lat_fids``; ``c_c`` must already be
+    zero outside the group (and on padding rows).
     """
     n_free = eta.shape[0]
     B = y_c.shape[0]
     wg = c_c[:, None] * h_c  # (B, Q)
     x_parts = [jnp.ones((B, 1), dtype=eta.dtype)]
     s_bar = jnp.zeros((B, n_free), dtype=eta.dtype)
-    for (fam, d_lp), fids in zip(tabs.fam_d, tabs.fam_fids, strict=True):
+    for (fam, _), fids, d_flat in zip(tabs.fam_d, tabs.fam_fids, d_flats_g, strict=True):
         K_f = fam.kernel.n_categories
         J_f = fam.columns.shape[0]
         S_f = fam.slot_free_index.shape[1]
-        d_flat = jnp.transpose(d_lp[g], (2, 0, 1, 3)).reshape(h_c.shape[1], -1)
         y_f = y_c[:, fam.columns]
         oh = jax.nn.one_hot(y_f, K_f, dtype=eta.dtype)
         x_parts.append(oh.reshape(B, J_f * K_f))
@@ -1714,7 +1726,7 @@ def _oakes_chunk_terms(
         s_bar = s_bar.at[:, fids.ravel()].add(picked.reshape(B, -1), mode="drop")
     x_c = jnp.concatenate(x_parts, axis=1)  # (B, D)
     c_gq = jax.vmap(lambda wq: (x_c * wq[:, None]).T @ x_c, in_axes=1)(wg)
-    s_bar = s_bar.at[:, tabs.lat_fids[g]].add(h_c @ tabs.d_logw[g], mode="drop")
+    s_bar = s_bar.at[:, lfids_g].add(h_c @ dlw_g, mode="drop")
     t2_g = (s_bar * c_c[:, None]).T @ s_bar
     return c_gq, t2_g
 
@@ -1806,12 +1818,15 @@ def _oakes_cross_hessian(
     h_chunks = h_pad.reshape(n_chunks, B, Q)
 
     h_cross = jnp.zeros((n_free, n_free), dtype=eta.dtype)
+    d_flats = _oakes_flat_tables(tabs)
     for g in range(G):  # G is small here: many groups take the blocked path (§26)
+        d_flats_g = [d[g] for d in d_flats]
 
         def scan_body(
             acc: tuple[Array, Array],
             xs: tuple[Array, Array, Array, Array],
             g_idx: int = g,
+            tables_g: list[Array] = d_flats_g,
         ) -> tuple[tuple[Array, Array], None]:
             c_acc, t2_acc = acc
             y_c, g_c, c_c, h_c = xs
@@ -1819,7 +1834,9 @@ def _oakes_cross_hessian(
 
             def do_chunk(_unused: None) -> tuple[Array, Array]:
                 cg = jnp.where(mask_g, c_c, 0.0)
-                c_gq, t2_g = _oakes_chunk_terms(tabs, eta, g_idx, y_c, cg, h_c)
+                c_gq, t2_g = _oakes_chunk_terms(
+                    tabs, eta, tables_g, tabs.d_logw[g_idx], tabs.lat_fids[g_idx], y_c, cg, h_c
+                )
                 return c_acc + c_gq, t2_acc + t2_g
 
             next_acc: tuple[Array, Array] = jax.lax.cond(
@@ -1861,18 +1878,32 @@ def _oakes_cross_hessian_blocked(
     n_sub = B // sub
     zero_c = jnp.zeros((Q, D, D), dtype=eta.dtype)
     zero_t = jnp.zeros((n_free, n_free), dtype=eta.dtype)
+    d_flats = _oakes_flat_tables(tabs)
 
     def body(
         carry: tuple[Array, Array, Array], xs: tuple[Array, Array, Array]
     ) -> tuple[tuple[Array, Array, Array], None]:
         c_acc, t1_acc, t2_acc = carry
         rows, g, last = xs
+        # The group's tables are gathered once per block, not per sub-chunk.
+        d_flats_g = [d[g] for d in d_flats]
+        dlw_g = tabs.d_logw[g]
+        lfids_g = tabs.lat_fids[g]
 
         def sub_body(acc: tuple[Array, Array], sub_rows: Array) -> tuple[tuple[Array, Array], None]:
-            c_gq, t2_g = _oakes_chunk_terms(
-                tabs, eta, g, y_pad[sub_rows], c_pad[sub_rows], h_pad[sub_rows]
+            c_c = c_pad[sub_rows]
+
+            def do_chunk(state: tuple[Array, Array]) -> tuple[Array, Array]:
+                c_gq, t2_g = _oakes_chunk_terms(
+                    tabs, eta, d_flats_g, dlw_g, lfids_g, y_pad[sub_rows], c_c, h_pad[sub_rows]
+                )
+                return state[0] + c_gq, state[1] + t2_g
+
+            # Sub-chunks of padding rows only (count 0) are skipped.
+            out: tuple[Array, Array] = jax.lax.cond(
+                jnp.any(c_c > 0), do_chunk, lambda state: state, acc
             )
-            return (acc[0] + c_gq, acc[1] + t2_g), None
+            return out, None
 
         (c_acc, t2_acc), _ = jax.lax.scan(sub_body, (c_acc, t2_acc), rows.reshape(n_sub, sub))
 

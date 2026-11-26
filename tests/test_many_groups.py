@@ -136,7 +136,6 @@ def test_build_group_blocks_layout() -> None:
     rows = np.asarray(blk.rows)
     grp = np.asarray(blk.group)
     last = np.asarray(blk.last)
-    assert rows.shape[0] % 8 == 0
     real = rows[rows < n_rows]
     np.testing.assert_array_equal(np.sort(real), np.arange(groups.size))  # each row once
     for b in range(rows.shape[0]):

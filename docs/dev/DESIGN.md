@@ -3681,9 +3681,8 @@ data-independent shapes (§15.21).
    problem). Padding slots read a zero-count, all-missing row, so they contribute nothing.
    - **Block size**: $B\in\{8,16,\dots,1024\}$ minimizing
      $\sum_g\lceil P_g/B\rceil B + 64\,N_B(B)$ (padded rows plus a per-block overhead of 64
-     rows), ties to the larger $B$; $N_B$ is then padded to a multiple of 8 with empty blocks
-     (sentinel rows, group 0, `last = False`). The total padding is at most $G(B-1)$ rows plus
-     the empty blocks.
+     rows), ties to the larger $B$. The total padding is at most $G(B-1)$ rows. (Padding $N_B$
+     to a multiple of 8 was tried and dropped: with two groups it tripled the E-step work.)
    - **When**: every non-reduced model with $G\ge2$. Single-group models ($G=1$) and bifactor /
      two-tier models (§17.1, whose E-step is factorized over block grids) keep the flat path;
      `CompiledProblem.blocks` is `None` there.
@@ -3707,8 +3706,9 @@ data-independent shapes (§15.21).
    category co-occurrences to the running group's $C_{q}$ `(Q, D, D)` and its
    $\bar s_p\bar s_p^\top$ term to $T_2$; on the last block of a group (`last`) a `lax.cond`
    adds $\sum_q L_{gq}^\top C_q L_{gq}$ to $T_1$ and resets $C$. The group's score tables are
-   gathered with the dynamic block group, so the traced program no longer depends on $G$
-   (compile time constant in $G$).
+   gathered with the dynamic block group once per block (sub-chunks of a block reuse them, and
+   sub-chunks of padding rows only are skipped by `lax.cond`), so the traced program no longer
+   depends on $G$ (compile time constant in $G$).
 5. **Latent distributions.** The latent parameters stay stacked `(G, L)` with `free_index`
    `(G, L)`; the latent M-step, Oakes' own Hessian and the latent score tables are `vmap`ped
    over groups. Every group shares one latent family and one static shape $L$ (§4.4, #75 for
