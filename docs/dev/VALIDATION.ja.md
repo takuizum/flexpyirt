@@ -75,6 +75,7 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
+| V54 | モデル比較表（V11a のデータで Rasch・2PL・3PL、V8b のデータで PCM・GPCM、V4 のデータで全項目不変の 2 群 2PL とアンカーのみのモデル・最後の項目だけ自由なモデル）と回答データのシミュレーション（2PL・Rasch・3PL・4PL・GRM・GPCM・名義反応の 1 次元と 2 因子での決定的な逆変換、潜在分布ごとの分布と復元の確認） | `anova(mod1, mod2, ...)`。同じ $\theta$ と一様乱数での `probtrace()`（乱数列は `simdata()` と一致させられない） | #109 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -937,6 +938,33 @@
   標本誤差の範囲で $B=H$（標準誤差は 3% 以内）、$B=H$ を強制するとサンドイッチが Oakes の共分散に
   一致すること、行を 2 倍にすると共分散が半分になること、`b_se` と `link()` が選んだ共分散を読むこと、
   JSON の往復、拒否するケース。
+- **モデル比較と回答データのシミュレーション（V54、#109、DESIGN §20）**:
+  - **`compare_fits()` と `anova()`**: 各モデルを mirt（`optimizer = "NR"`、`accelerate = "none"`、
+    `TOL = 1e-10`）と flexpyirt（`BAEM(tol=1e-9)`）で同じグリッドを使って推定し、表全体を比べる: V11a の
+    データ（$[-6, 6]$ の 61 点）で Rasch / 2PL / 3PL、V8b のデータで PCM / GPCM、V4 のデータ（$[-8, 8]$ の
+    81 点）で全項目不変の 2 群 2PL（焦点群の平均と分散は自由）とアンカー q01–q05 のみのモデル、最後の項目だけ
+    群間で自由なモデル（$p=0.188$ なので、0 から離れた $p$ 値も確かめる）。`n_params` は mirt の `nest` と
+    厳密に一致し、対数尤度と 4 つの情報量規準は $5\times10^{-11}$、$X^2$ は $1.4\times10^{-11}$、$p$ は
+    $7\times10^{-13}$ で一致する（許容誤差は絶対値で $10^{-7}$、$10^{-7}$、$10^{-9}$）。mirt は
+    $p<10^{-16}$ で $p=0$ を表示する（`1 - pchisq()`）。flexpyirt は上側確率を返す。
+  - **`simulate_responses()` の決定的な部分**: 乱数列は R と一致させられない（`simdata()` は R の乱数生成器を
+    使う）ので、参照値は項目パラメタ・$\theta$・一様乱数を固定して作る。9 項目（Rasch、2PL ×2、3PL、4PL、
+    graded $K=3,4$、GPCM $K=4$、採点係数が自由な名義反応 $K=4$）を 400 個の $\theta$（$\pm6$、$\pm3$、0 を含む）
+    で、2 因子モデル（2PL、graded $K=3$、3PL。交差負荷の項目 1 つ）を 300 点で評価し、flexpyirt の
+    カテゴリ確率は `probtrace()` と $10^{-12}$ で一致し、R で $x=\#\{k<K-1: u>F_k\}$ により得た回答を
+    厳密に再現する。
+  - **`simulate_responses()` の分布の確認**（モンテカルロ、$|z|<4.5$）: 6 万人分の生成データ（Rasch・2PL・
+    3PL・4PL・GRM・GPCM・名義反応の混在、$N(0.3, 1.4)$）と 2 群（3 万人と 4 万人）のカテゴリ比率と合計得点の
+    分布が、モデルが導く周辺分布（同じカーネルと Lord–Wingersky 再帰（V36）の 81 点 Gauss–Hermite 求積）と
+    一致する。潜在特性は指定した共分散を持つ（2 因子、特殊因子 2 つの双因子。同じ特殊因子の項目どうしは相関が
+    高い）。`NormalMixture` と推定した `DavidianCurve` からの値は厳密な累積分布関数に対する
+    Kolmogorov–Smirnov 検定（0.1% 水準）を通り、推定した `EmpiricalHistogram` からの値はグリッドの点で、
+    頻度が推定された重みと一致する。
+  - **復元**: 混在形式のテストで 2 万人分の生成データに `fit()` を当てはめると、すべての項目パラメタが生成値から
+    4.5 SE 以内、各群 8000 人の 2 群の当てはめで焦点群の平均と分散（0.5、1.3）が 4.5 SE 以内に戻る。`FitResult`
+    と、その推定値を与えた `Model` は同じキーから同一のデータを作り、データは `key` から再現できる。
+  テスト: `tests/test_mirt_v54_compare_fits.py`、`tests/test_v54_simulate.py`。参照値の生成:
+  `validation/r/v54_compare_simulate_reference.R`。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

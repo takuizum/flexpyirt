@@ -21,6 +21,7 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 - 次元数（`model_parallel_analysis` と `dimensionality` 以外は flexpyctt）: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) とその結果
 - 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
+- モデル比較とシミュレーション: [`compare_fits`](#compare_fits), [`simulate_responses`](#simulate_responses), [`SimulatedData`](#simulateddata)
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -1256,6 +1257,86 @@ IRT モデルのカテゴリ確率。先頭の軸はバッチ軸。結果の形�
 `log=True` は対数確率を返す。`"recursion"` では再帰そのものを対数空間で行い、0 にアンダーフローするはずの裾の確率も
 保つ（そのぶん遅い）。他の方法では結果の対数をとる。形が合わない、`method` が未知、`K != 2` で近似を指定した、の
 いずれかで `SpecificationError`。
+
+---
+
+## モデル比較とシミュレーション
+
+### `compare_fits`
+
+```text
+compare_fits(*results, names=None) -> DataFrame
+```
+
+同じデータへの 2 つ以上の当てはめを、最も制約の強いモデルから弱いモデルの順に並べ、情報量規準と尤度比検定を
+まとめる（[ガイド 5 節](guide.ja.md#モデルの比較aicbic尤度比検定)）。$\ell$ を周辺対数尤度、$k$ を自由パラメタ数、
+$N$ を回答者数（重み付きの当てはめでは重みの和）として、$\mathrm{AIC}=-2\ell+2k$（Akaike, 1974）、
+$\mathrm{SABIC}=-2\ell+k\log\frac{N+2}{24}$（Sclove, 1987）、$\mathrm{HQ}=-2\ell+2k\log\log N$（Hannan & Quinn,
+1979）、$\mathrm{BIC}=-2\ell+k\log N$（Schwarz, 1978）。2 行目以降は直前の行と
+$X^2=2(\ell_m-\ell_{m-1})$、自由度 $\mathit{df}=k_m-k_{m-1}$ で検定する（Wilks, 1938）。mirt の
+`anova(mod1, mod2, ...)` に当たる。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `*results` | `FitResult` | 同じ回答への 2 つ以上の当てはめ。制約の強いものから |
+| `names` | list[str]、省略可 | `model` 列のラベル（既定は `model1`, `model2`, ...） |
+
+**戻り値**: 当てはめごとに 1 行の `DataFrame`: `model`, `n_params`, `loglik`, `aic`, `sabic`, `hq`, `bic`,
+`x2`, `df`, `p`。1 行目の `x2`・`df`・`p` は NaN。`df <= 0` のとき `p` は NaN。
+
+**例外**: 当てはめが 2 つ未満、`FitResult` でない引数、`names` が当てはめごとに異なる 1 つのラベルでない、回答者数が
+異なる、のいずれかで `SpecificationError`。
+
+**警告**: パラメタ数が増えない、パラメタを増やしたのに対数尤度が下がる、事前分布のある当てはめがある、のいずれかで
+`FlexpyirtWarning`。
+
+入れ子関係は確かめられないので利用者の責任。境界の補正（分散を 0 に固定、混合成分を減らす、`DavidianCurve` 対
+`Normal`）はしない。
+
+### `simulate_responses`
+
+```text
+simulate_responses(source, *, n_obs=None, key, parameters=None, theta=None, group=None)
+    -> SimulatedData
+```
+
+推定済みのモデル、または項目パラメタを与えた `Model` から項目反応を生成する
+（[ガイド 5 節](guide.ja.md#回答データのシミュレーション)）。各回答者の $\boldsymbol\theta_i$ を所属する群の潜在分布から
+引き（または `theta` から取り）、各回答を一様乱数の逆変換
+$X_{ij}=\min\{k: u_{ij}\le\sum_{c\le k}P_{jc}(\boldsymbol\theta_i)\}$ で引く（Devroye, 1986）。潜在特性は、
+`Normal` は推定された平均・分散・相関、`NormalMixture` は成分ごと、`DavidianCurve` は連続密度（細かいグリッド上の
+累積分布関数の逆変換）、`EmpiricalHistogram` は求積点を推定された重みで（推定どおりの離散分布）引く。すべての項目
+モデルとモデルの構造（1 次元、`with_factors`、双因子、two-tier、多母集団）に対応する。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `source` | `FitResult` / `Model` | 当てはめ（その推定値を使う）または仕様 |
+| `n_obs` | int / dict[str, int]、省略可 | 回答者数。多母集団モデルでは群ごとの人数、または群 → 人数の対応。`theta` を与えないときは必須 |
+| `key` | `jax.Array` | JAX の PRNG キー（`jax.random.key(0)`）。同じキーからは同じデータ |
+| `parameters` | DataFrame、省略可 | `Model` のとき（必須）: `Model.fix_from()` と同じ傾き・切片表現の項目バンクで、すべての項目パラメタを含む |
+| `theta` | 配列、省略可 | 生成の代わりに使う潜在特性: 1 因子は `(N,)`、それ以外は `(N, D)` |
+| `group` | 配列、省略可 | 多母集団モデルで `theta` を与えるとき: 各行の群ラベル |
+
+`Model` から生成するときの潜在分布は仕様のもの: `Normal` の `mean` と `var`（因子間相関 0）、または
+`NormalMixture` の `means`・`variances`・`weights`。`EmpiricalHistogram` と `DavidianCurve` は推定前に形がないので
+`theta` が要る。
+
+**戻り値**: [`SimulatedData`](#simulateddata)。
+
+**例外**: 64 ビットの JAX でないと `PrecisionError`。`key`・`n_obs`・`theta`・`group`・`parameters` が不正
+（たとえばバンクに項目パラメタが足りない）だと `SpecificationError`。
+
+欠測は生成しない。テストデザインや欠測の機構には `responses` の要素を NaN にする。
+
+### `SimulatedData`
+
+[`simulate_responses`](#simulate_responses) が返す frozen dataclass。
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `responses` | DataFrame | 項目ごとの `int64` の列（モデルの項目名）、コード `0..K-1`。`fit()` に渡せる |
+| `theta` | ndarray | 潜在特性。1 因子は `(N,)`、それ以外は `(N, D)` |
+| `group` | ndarray または None | 各行の群ラベル（多母集団モデル）。それ以外は `None` |
 
 ---
 

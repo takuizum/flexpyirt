@@ -145,6 +145,12 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and
   `SE.type = "sandwich"` / `"crossprod"`.
 
+## Field tools (#103–#109)
+- [ ] Model-comparison table and simulation of responses (#109): `compare_fits()` (AIC, SABIC, HQ,
+  BIC, likelihood-ratio tests; mirt's `anova()`) and `simulate_responses()` / `SimulatedData` (from
+  a `FitResult` or a `Model` with an item bank; every item model, latent distribution and model
+  structure; JAX key). Validated in V54; checked once the comparison passes the nightly CI.
+
 ## Ongoing
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).
 - [ ] Public extension API for user-defined item models, with docs examples (#86). New item models

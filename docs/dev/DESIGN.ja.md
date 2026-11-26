@@ -1901,7 +1901,62 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    対角の $\mathbf A$ では $A_m\,\mathrm{se}_m$、それ以外では NaN にする（回転後の標準誤差には事後共分散が必要だが、
    得点表はそれを持たない）。
 
+## 20. モデル比較と回答データのシミュレーション（#109）
+
+1. **モデル比較表（`compare_fits()`、V54）**: `compare_fits(*results, names=None)` は同じ回答への
+   2 つ以上の `FitResult` を、最も制約の強いモデルから弱いモデルの順に受け取り、当てはめごとに 1 行を返す:
+   `model`, `n_params`, `loglik`, `aic`, `sabic`, `hq`, `bic`、および直前の行に対する `x2`, `df`, `p`。
+   $\ell$ を周辺対数尤度、$k$ = `n_params`（EH の重みを含む、§4.8）、$N$ を回答者数（重み付きの当てはめでは
+   `bic` と同じく重みの和、§17.4）として
+   $$\mathrm{AIC}=-2\ell+2k,\quad\mathrm{SABIC}=-2\ell+k\log\tfrac{N+2}{24},\quad
+   \mathrm{HQ}=-2\ell+2k\log\log N,\quad\mathrm{BIC}=-2\ell+k\log N$$
+   （Akaike, 1974; Sclove, 1987; Hannan & Quinn, 1979; Schwarz, 1978）、
+   $X^2_m=2(\ell_m-\ell_{m-1})$、$\mathit{df}_m=k_m-k_{m-1}$、$p_m=\Pr(\chi^2_{\mathit{df}_m}>X^2_m)$
+   （Wilks, 1938）。mirt の `anova(mod1, mod2, ...)` に当たる。情報量規準は `FitResult.dif()`（§16.2）と
+   `_dif.information_criteria` を共有し、列の順も `dif()` に合わせる（`aic, sabic, hq, bic`）。
+   **検査。** 当てはめが 2 つ未満、`FitResult` 以外の引数、`names` が当てはめごとに異なる 1 つのラベルでない、
+   $N$ が異なる（データそのものは比べない）場合は `SpecificationError`。$\mathit{df}\le0$（このとき $p$ は NaN。
+   制約の強い順に並んでいない）、パラメタを増やしたのに $X^2<0$（入れ子でない組か局所最大。$p$ は $X^2=0$ で
+   計算し 1）、事前分布のある当てはめ（`FitResult.aic` と同じ）は、mirt と同じくエラーではなく
+   `FlexpyirtWarning`。**検査しないこと。** 入れ子関係は 2 つの当てはめからは確かめられず、境界の補正もしない
+   （分散を 0 に固定、混合成分を減らす、`DavidianCurve` 対 `Normal`、§16.4）。どちらも利用者の責任とし、
+   docstring に書く。`df` は欠測を持てる整数列（`Int64`）で、1 行目は NaN。
+2. **回答データのシミュレーション（`simulate_responses()`、V54）**: `simulate_responses(source, *,
+   n_obs=None, key, parameters=None, theta=None, group=None)` は `SimulatedData`（`responses`: 項目名の列と
+   `int64` のコード $0..K-1$ の DataFrame で `fit()` にそのまま渡せる、`theta`: $(N,)$ か $(N,D)$、
+   `group`: ラベルか `None`）を返す。乱数は明示した JAX の PRNG キーから取る（`score(method="PV")` と同じ）。
+   キーを $\boldsymbol\theta$ 用（さらに群ごとに分割）と $N\times J$ 個の一様乱数用に分けるので、`key` から
+   再現できる。**回答。** 推定に使うカーネルそのもの（`_core._item_log_probs` を jit したもの。グリッドを
+   引いた点に置き換え、bifactor / two-tier の次元縮約を外す。`FitResult._group_traces` と同じ）による
+   カテゴリ確率 $P_{jk}(\boldsymbol\theta_i)$ から、一様乱数 1 つの逆変換で各回答を引く:
+   $$X_{ij}=\min\{k:\ u_{ij}\le F_{jk}(\boldsymbol\theta_i)\}=\#\{k<K_j-1:\ u_{ij}>F_{jk}\},\qquad
+   F_{jk}=\textstyle\sum_{c\le k}P_{jc}$$
+   （Devroye, 1986, §III.2）。最後の累積確率とは比べないので、$\sum_cP_{jc}$ の丸め誤差で $K_j-1$ を超える
+   カテゴリが出ることはない。**潜在特性の生成**（群ごと、推定された／指定された分布から）:
+   - `Normal`: $\boldsymbol\mu+\mathbf L\mathbf z$、$\mathbf{LL}^\top=\boldsymbol\Sigma$ は `mean_m`,
+     `var_m`, `cor_ij` から作る（表にない相関は 0: bifactor の因子、two-tier の特殊因子）。
+   - `NormalMixture`: 成分 $c\sim\mathrm{Cat}(\boldsymbol\pi)$ を引き、`mixture_components` の標準化された
+     成分（§16.7）の $N(\mu_c,\sigma_c^2)$ から引く。期待値で平均 $\mu$、分散 $\sigma^2$ に厳密に一致する。
+   - `DavidianCurve`: §16.4 の連続密度 $f_k$。$h_k(z)=P_k(z)^2\varphi(z)$ の累積分布関数（$[-12,12]$ 上の
+     24 001 点の台形則、線形補間。打ち切られる質量は $k\le10$ で $10^{-16}$ 未満）の逆変換で $z$ を引き、
+     $\theta=\mu+\sigma(z-\mu_Z)/\sigma_Z$ とする。
+   - `EmpiricalHistogram`: 求積点を推定された重みで引く。推定された分布はこの離散分布そのもの（§4.4）なので、
+     値はグリッド上の点だけになる。ビン内でずらすと推定していない分布から引くことになる。
+   尤度は連続密度をグリッド上で正規化したもの（§4.4）を使うが、既定のグリッドでは差はモンテカルロ誤差より
+   はるかに小さい。**生成元。** `FitResult` はその推定値（`parameters["estimate"]`, `_eta`, `_eh_weights`）を
+   使う。`Model` には `parameters`（`Model.fix_from()` と同じ傾き・切片表現の項目バンクで、すべての項目
+   パラメタを含む。自由な項目パラメタが残ると `SpecificationError`）が必要。表は全カテゴリを含むダミーの
+   回答で `build_table` から作り、潜在分布の値は仕様のもの（`Normal` の mean / var、因子間相関 0、
+   `NormalMixture` の開始時の形）。`EmpiricalHistogram` と `DavidianCurve` は推定前に形がないので、
+   `theta` を与えない限りエラー。**人数。** `n_obs` は整数（多母集団では群ごと）か群→人数の対応
+   （書かない群は 0 人）。行は群の順に並ぶ。`theta`（1 因子は $(N,)$ / $(N,1)$、それ以外は $(N,D)$）を
+   与えるときは `n_obs` を省き、多母集団モデルでは行ごとの `group=` ラベルが要る。**範囲外**（#109）:
+   欠測の機構とテストデザイン（利用者が `responses` をマスクする）、復元研究の実行枠組み、適合度統計量の
+   パラメトリックブートストラップ、適応型テスト。`FitResult._simulate_responses`（1 次元 `Normal`。
+   モデルに基づく平行分析で使う、§16.11）は、乱数列と検証済みの結果を変えないためそのまま残す。
+
 ## 参考文献
+- Akaike, H. (1974). A new look at the statistical model identification. *IEEE Transactions on Automatic Control*, 19(6), 716–723.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -1921,6 +1976,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
+- Devroye, L. (1986). *Non-Uniform Random Variate Generation*. Springer.
 - Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
 - Drezner, Z., & Wesolowsky, G. O. (1990). On the computation of the bivariate normal integral. *Journal of Statistical Computation and Simulation*, 35(1–2), 101–107.
 - Edwards, M. C., Houts, C. R., & Cai, L. (2018). A diagnostic procedure to detect departures from local independence in item response theory models. *Psychological Methods*, 23(1), 138–149.
@@ -1936,6 +1992,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Goretzko, D., & Bühner, M. (2020). One model to rule them all? Using machine learning algorithms to determine the number of factors in exploratory factor analysis. *Psychological Methods*, 25(6), 776–786.
 - Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
+- Hannan, E. J., & Quinn, B. G. (1979). The determination of the order of an autoregression. *JRSS B*, 41(2), 190–195.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
@@ -1981,6 +2038,8 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Schwarz, G. (1978). Estimating the dimension of a model. *The Annals of Statistics*, 6(2), 461–464.
+- Sclove, S. L. (1987). Application of model-selection criteria to some problems in multivariate analysis. *Psychometrika*, 52(3), 333–343.
 - Skinner, C. J. (1989). Domain means, regression and multivariate analysis. In C. J. Skinner, D. Holt & T. M. F. Smith (Eds.), *Analysis of Complex Surveys* (pp. 59–87). Wiley.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
@@ -1998,6 +2057,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
+- Wilks, S. S. (1938). The large-sample distribution of the likelihood ratio for testing composite hypotheses. *The Annals of Mathematical Statistics*, 9(1), 60–62.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
