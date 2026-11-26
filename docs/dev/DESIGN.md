@@ -1122,9 +1122,9 @@ data-independent shapes (§15.21).
    item-score moments — the $J$ item means $E[y_j]$ and $\binom{J}{2}$ cross-products
    $E[y_iy_j]$ ($i < j$, in column-major pair order, matching mirt's default `M2(type = "M2*")`;
    for dichotomous items this is exactly $M_2$) — for single-group, complete-data
-   MLE fits with a `Normal` latent distribution (multiple-group, bifactor / two-tier,
-   `EmpiricalHistogram`, missing-data, or MAP fits raise `SpecificationError`; confirmatory
-   multidimensional models on a product grid are covered by §16.19).
+   MLE fits with a `Normal` latent distribution (bifactor / two-tier and `EmpiricalHistogram`
+   fits raise `SpecificationError`; confirmatory multidimensional models on a product grid are
+   covered by §16.19, and multiple groups, missing data and MAP fits by §16.20).
    With sample margins $\hat p_2$, model-implied margins $\pi_2(\hat\eta)$ integrated on the fitted
    quadrature grid with the normalized normal weights, asymptotic covariance $\Xi_2$ of
    $\sqrt{N}(\hat p_2-\pi_2)$ under local independence (using conditional first and second moments
@@ -2067,10 +2067,96 @@ data-independent shapes (§15.21).
     grid of the fit, so a fit made with another `quadpts` or `theta_lim` must pass them again in
     R (flexpyirt always uses the grid of the fit).
     **Not supported** (each `SpecificationError`): bifactor and two-tier models (their
-    reduced E-step has no joint grid; the statistics need the block structure of §17), and
-    multiple-group multidimensional models (not validated; $M_2$ for multiple groups is #76).
+    reduced E-step has no joint grid; the statistics need the block structure of §17), and,
+    for S-X2, multiple-group multidimensional models (not validated; $M_2$ handles them, §16.20).
     Unidimensional results are unchanged bit for bit (the same code path with $D=1$).
     **Validation (V39)**: mirt 1.48 on the four V14 models, see VALIDATION.md.
+20. **$M_2$ / $M_2^*$ for multiple groups, missing data and MAP fits (M6, #76, V42)**:
+    `FitResult.m2(data, *, group=None, item_names=None, ci=0.90)` extends §16.3 / §16.19 to
+    multiple-group models (unidimensional or confirmatory multidimensional, `Normal` latent
+    distributions), to responses with missing values, and to fits with priors. All three rest on
+    one property of the statistic: with $\Delta_c$ an orthonormal basis of
+    $\operatorname{col}(\Delta)^\perp$, $\Delta_c^\top\{\hat p-\pi(\hat\eta)\}
+    =\Delta_c^\top\{\hat p-\pi(\eta_0)\}+O_p(N^{-1})$ for **any** $\sqrt N$-consistent
+    $\hat\eta$, so the null distribution depends only on the asymptotic covariance of the sample
+    margins $\hat p$, never on that of $\hat\eta$ (Maydeu-Olivares & Joe, 2005, 2006).
+    **What mirt 1.46.1 does** (read from the source of `M2()`): (i) on a `MultipleGroupClass` it
+    computes margins, $\Xi_2$ and $\Delta$ per group, stacks the residuals
+    $\sqrt{N_g}(\hat p_g-\pi_g)$, makes $\Xi$ and $\Delta$ block-diagonal over groups, sums the
+    columns of parameters constrained equal across groups, and uses $df=G\,s-q$ and
+    RMSEA with the total $N$; SRMSR is reported per group; (ii) the `impute` argument of earlier
+    versions is gone (`impute <- 0` in the body): with missing values every margin is the mean
+    over the respondents who answered the item (pair), $N_a$ of them, and the statistic is
+    $\sum_{a,b}(N_a/\sqrt{N})\,d_a\,C_{ab}\,(N_b/\sqrt N)\,d_b$ with $d=\hat p-\pi$ and $C$ the
+    complete-data $C_2$ (the `N.ratio` rescaling), which is not the inverse covariance of these
+    residuals; (iii) priors are ignored: the statistic is evaluated at the MAP estimates with
+    every free parameter counted in $df$.
+    **Multiple groups.** With $N=\sum_gN_g$ and $\rho_g=N_g/N$, the stacked residual
+    $r=(\sqrt{N_g}\{\hat p_g-\pi_g(\hat\eta)\})_g$ has
+    $r\approx(\sqrt{N_g}\{\hat p_g-\pi_g(\eta_0)\})_g-\Delta^\ast\sqrt N(\hat\eta-\eta_0)$ with
+    $\Delta^\ast=(\sqrt{\rho_g}\,\Delta_g)_g$, the rows of group $g$ scaled by $\sqrt{\rho_g}$,
+    and covariance $\Gamma=\operatorname{blockdiag}(\Gamma_g)$ (groups independent). flexpyirt
+    computes
+    $$M_2=r^\top\Delta_c^\ast(\Delta_c^{\ast\top}\Gamma\Delta_c^\ast)^{-1}\Delta_c^{\ast\top}r,\qquad
+      df=G\,s-q,$$
+    with $\Delta_c^\ast$ the complement of $\operatorname{col}(\Delta^\ast)$ and the columns of
+    $\Delta=\partial(\pi_1,\dots,\pi_G)/\partial\eta^\top$ from one `jax.jacfwd` over the shared
+    free vector (a parameter equal across groups is one column, as for §16.1). This equals the
+    usual form $N e^\top\Delta_c(\Delta_c^\top\Gamma_N\Delta_c)^{-1}\Delta_c^\top e$ with
+    $\Gamma_N=\operatorname{blockdiag}(\Xi_g/\rho_g)$. The row scaling changes the column space
+    only for a column shared by groups of different sizes: mirt omits it, so its value differs
+    from flexpyirt's when parameters are equal across groups of unequal size (and, as in §16.3,
+    when the latent mean / variance / correlation of a group is free, since mirt drops those
+    columns). The private `_mirt_convention=True` of `_m2.m2_statistic` reproduces mirt's
+    $\Delta$ (unscaled rows; no latent columns is `_latent_in_delta=False`) and its missing-data
+    weighting, for validation only. RMSEA uses the total $N$; `srmsr` is reported per group (`srmsr_<group>` columns, as
+    mirt's `SRMSR.<group>`); the independence model for TLI / CFI has its own intercepts in every
+    group (mirt's `computeNullModel(group =)`), so $df_{\text{null}}=G\binom J2$ and, for complete
+    data, $M_{2,\text{null}}=\sum_gN_g\sum_{i<j}r_{g,ij}^2$.
+    **Missing data: pairwise-available margins with their exact covariance under MCAR.** With
+    $o_{na}=1$ when respondent $n$ answered every item of margin $a$ (an item or a pair),
+    $N_a=\sum_no_{na}$, $\hat p_a=N_a^{-1}\sum_no_{na}y_{na}$ and
+    $N_{ab}=\sum_no_{na}o_{nb}$ (respondents who answered every item of $a\cup b$; the matrix
+    $O^\top O$). If the responses are independent of the missingness pattern (MCAR), then
+    conditionally on the patterns $\hat p$ is unbiased for $\pi$ and
+    $$\operatorname{Cov}(\hat p_a,\hat p_b)=\frac{N_{ab}}{N_aN_b}\,\Xi_{ab},\qquad
+      \Gamma_{ab}=N\,\frac{N_{ab}}{N_aN_b}\,\Xi_{ab}$$
+    for $\sqrt N(\hat p-\pi)$, exactly (each respondent contributes $\Xi_{ab}$ to the
+    covariance of the two sums when it observes both margins). The FIML estimate $\hat\eta$ is
+    consistent under MAR $\supseteq$ MCAR, so by the property above
+    $M_2=N e^\top\Delta_c(\Delta_c^\top\Gamma\Delta_c)^{-1}\Delta_c^\top e$ is asymptotically
+    $\chi^2_{s-q}$ under MCAR; with complete data $N_{ab}=N_a=N$ and §16.3 is recovered. Under
+    MAR that is not MCAR the available-case margins are biased for $\pi$ and the statistic has
+    no reference distribution; this is documented, not detected. Alternatives considered: the
+    multiple imputation of earlier mirt versions (imputed $\theta$ and responses, statistics
+    averaged over draws) has no $\chi^2$ reference for the averaged statistic and adds Monte
+    Carlo error; mirt 1.46.1's `N.ratio` weighting above is not the inverse covariance of the
+    residuals; model-based expected margins (replacing missing responses by their conditional
+    expectations) leave the covariance of the resulting $\hat p$ dependent on $\hat\eta$. A margin
+    nobody observed ($N_a=0$, e.g. two items never given together in a booklet design) has no
+    estimate, and `m2()` raises `SpecificationError` naming the pair: limited-information fit
+    on second-order margins is not defined for such designs. SRMSR follows mirt: the
+    pairwise-available covariance $\sum_no_{n,ij}y_{ni}y_{nj}/N_{ij}-\hat p_i\hat p_j$ (with
+    $\hat p_i$ the item's available-case mean) converted to a correlation. The null model is
+    the independence model with intercepts at the available-case means (its FIML estimate),
+    and its $M_2$ uses the same $\Gamma$ (closed form no longer applies). RMSEA uses the number
+    of rows $N$.
+    **MAP fits.** Priors leave $\hat\eta$ $\sqrt N$-consistent (the log-prior is $O(1)$ against an
+    $O(N)$ log-likelihood), so by the property above $M_2$ keeps its $\chi^2_{s-q}$ reference;
+    flexpyirt evaluates it at the MAP estimates with $q=$ `n_params` (every free parameter,
+    whether or not it has a prior), exactly what mirt does. In finite samples a strong prior
+    that keeps a weakly identified parameter (for example a 3PL lower asymptote) near its prior
+    mean removes less than one degree of freedom, so the test is then conservative; and a
+    parameter identified only by its prior makes $\Delta$ rank-deficient, which gives the
+    `NaN` + warning of §16.3. The docstring says both.
+    **Still not supported** (`SpecificationError`): `EmpiricalHistogram` and `NormalMixture`
+    latent distributions, multiple-group `DavidianCurve` models, bifactor / two-tier models,
+    weighted fits (§17.4).
+    **Validation (V42)**: mirt 1.46.1 `M2()` at mirt's estimates for two-group 2PL with unequal
+    groups and anchor items, two-group GRM, two-group two-factor 2PL, single-group and
+    two-group 2PL with MCAR missing values, and 2PL MAP fits; `_mirt_convention=True`
+    reproduces mirt's raw output, and the default is compared with an independent R computation
+    of the formulas above (see VALIDATION.md).
 
 ## 17. Implementation decisions (M7)
 

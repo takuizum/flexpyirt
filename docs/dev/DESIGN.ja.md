@@ -749,9 +749,9 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    `FitResult.m2(data, *, item_names=None, ci=0.90)` は、Maydeu-Olivares & Joe (2005, 2006) に基づく
    項目得点の 1 次・2 次モーメント — $J$ 個の項目平均 $E[y_j]$ と $\binom{J}{2}$ 個の交差積 $E[y_iy_j]$
    （$i < j$、列優先のペア順で mirt の既定 `M2(type = "M2*")` と同じ。2 値項目では厳密に $M_2$）— による
-   限定情報の適合度統計量を計算する。対象は単一母集団・欠測なし・`Normal` 潜在分布の MLE 推定のみ
-   （多母集団・双因子 / two-tier・`EmpiricalHistogram`・欠測データ・MAP 推定は `SpecificationError`。直積格子上の
-   確認的多次元モデルは §16.19）。
+   限定情報の適合度統計量を計算する。対象は単一母集団・欠測なし・`Normal` 潜在分布の MLE 推定
+   （双因子 / two-tier・`EmpiricalHistogram` は `SpecificationError`。直積格子上の確認的多次元モデルは §16.19、
+   多母集団・欠測データ・MAP 推定は §16.20）。
    標本周辺モーメント $\hat p_2$、推定時の求積格子と正規化した正規重みの上で積分したモデル周辺モーメント
    $\pi_2(\hat\eta)$、局所独立のもとでの $\sqrt{N}(\hat p_2-\pi_2)$ の漸近共分散 $\Xi_2$
    （条件付き 1 次・2 次モーメント $m_{1,jq}=\sum_k kP_{jk}(\theta_q)$、$m_{2,jq}=\sum_k k^2P_{jk}(\theta_q)$ から構成）、
@@ -1484,9 +1484,71 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     `Quadrature.default()` の既定と同じだが、mirt の `itemfit()` と `M2()` は推定時の格子を読まないので、別の
     `quadpts` や `theta_lim` で推定したときは R 側で改めて渡す必要がある（flexpyirt は常に推定時の格子を使う）。
     **未対応**（いずれも `SpecificationError`）: 双因子モデルと two-tier モデル（次元縮約した E-step には同時格子がなく、
-    §17 のブロック構造に沿った計算が必要）、多母集団の多次元モデル（未照合。多母集団の $M_2$ は #76）。
+    §17 のブロック構造に沿った計算が必要）、S-X2 については多母集団の多次元モデル（未照合。$M_2$ は §16.20 で対応）。
     1 次元の結果はビット単位で変わらない（$D=1$ の同じコードパス）。
     **照合（V39）**: V14 の 4 モデルで mirt 1.48 と照合した。VALIDATION.md を参照。
+20. **多母集団・欠測データ・MAP 推定の $M_2$ / $M_2^*$（M6、#76、V42）**:
+    `FitResult.m2(data, *, group=None, item_names=None, ci=0.90)` は §16.3 / §16.19 を、多母集団モデル
+    （1 次元または確認的多次元、`Normal` 潜在分布）、欠測を含む反応、事前分布つきの推定に広げる。3 つとも統計量の
+    1 つの性質に基づく: $\Delta_c$ を $\operatorname{col}(\Delta)^\perp$ の正規直交基底とすると、**任意の**
+    $\sqrt N$ 一致推定量 $\hat\eta$ について $\Delta_c^\top\{\hat p-\pi(\hat\eta)\}
+    =\Delta_c^\top\{\hat p-\pi(\eta_0)\}+O_p(N^{-1})$ なので、帰無分布は標本周辺 $\hat p$ の漸近共分散だけで決まり、
+    $\hat\eta$ の共分散にはよらない（Maydeu-Olivares & Joe, 2005, 2006）。
+    **mirt 1.46.1 の扱い**（`M2()` のソースから）: (i) `MultipleGroupClass` では群ごとに周辺・$\Xi_2$・$\Delta$ を計算し、
+    残差 $\sqrt{N_g}(\hat p_g-\pi_g)$ を縦に並べ、$\Xi$ と $\Delta$ を群についてブロック対角にし、群間で等値制約した
+    パラメタの列を足し合わせ、$df=G\,s-q$、RMSEA は全体の $N$ を使う。SRMSR は群ごと。(ii) 以前の版の `impute`
+    引数はなくなった（本体で `impute <- 0`）。欠測があると各周辺はその項目（ペア）に答えた $N_a$ 人の平均で、統計量は
+    $d=\hat p-\pi$、欠測なしの $C_2$ を $C$ として $\sum_{a,b}(N_a/\sqrt N)\,d_a\,C_{ab}\,(N_b/\sqrt N)\,d_b$
+    （`N.ratio` による再尺度化）。これはこの残差の共分散の逆行列ではない。(iii) 事前分布は無視し、MAP 推定値で計算して
+    自由パラメタはすべて $df$ から引く。
+    **多母集団.** $N=\sum_gN_g$、$\rho_g=N_g/N$ とすると、並べた残差
+    $r=(\sqrt{N_g}\{\hat p_g-\pi_g(\hat\eta)\})_g$ は
+    $r\approx(\sqrt{N_g}\{\hat p_g-\pi_g(\eta_0)\})_g-\Delta^\ast\sqrt N(\hat\eta-\eta_0)$、
+    $\Delta^\ast=(\sqrt{\rho_g}\,\Delta_g)_g$（群 $g$ の行を $\sqrt{\rho_g}$ 倍）で、共分散は
+    $\Gamma=\operatorname{blockdiag}(\Gamma_g)$（群は独立）。flexpyirt は
+    $$M_2=r^\top\Delta_c^\ast(\Delta_c^{\ast\top}\Gamma\Delta_c^\ast)^{-1}\Delta_c^{\ast\top}r,\qquad
+      df=G\,s-q$$
+    を計算する。$\Delta_c^\ast$ は $\operatorname{col}(\Delta^\ast)$ の補空間、
+    $\Delta=\partial(\pi_1,\dots,\pi_G)/\partial\eta^\top$ の列は共有の自由ベクトルについての 1 回の `jax.jacfwd` から得る
+    （群間で等しいパラメタは 1 列。§16.1 と同じ）。これは通常の形
+    $N e^\top\Delta_c(\Delta_c^\top\Gamma_N\Delta_c)^{-1}\Delta_c^\top e$、$\Gamma_N=\operatorname{blockdiag}(\Xi_g/\rho_g)$ に
+    等しい。行の重みで列空間が変わるのは、大きさの異なる群が共有する列だけである。mirt はこの重みを付けないので、
+    大きさの異なる群のあいだでパラメタを等しくしたとき（および §16.3 と同じく、群の潜在分布の平均・分散・相関が自由な
+    とき。mirt はその列を落とす）に値が flexpyirt と異なる。`_m2.m2_statistic` の非公開引数 `_mirt_convention=True` は
+    mirt の $\Delta$（行の重みなし。潜在分布の列なしは `_latent_in_delta=False`）と欠測時の重み付けを再現する（照合専用）。
+    RMSEA は全体の $N$ を使い、`srmsr` は群ごとに返す（mirt の `SRMSR.<群>` に対応する `srmsr_<群>` の列）。TLI / CFI
+    の独立モデルは群ごとに切片を持つ（mirt の `computeNullModel(group =)`）ので $df_{\text{null}}=G\binom J2$、
+    欠測がなければ $M_{2,\text{null}}=\sum_gN_g\sum_{i<j}r_{g,ij}^2$。
+    **欠測データ: ペアごとに利用可能な周辺と、MCAR のもとでのその厳密な共分散.** 回答者 $n$ が周辺 $a$（項目または
+    ペア）のすべての項目に答えたとき $o_{na}=1$ とし、$N_a=\sum_no_{na}$、$\hat p_a=N_a^{-1}\sum_no_{na}y_{na}$、
+    $N_{ab}=\sum_no_{na}o_{nb}$（$a\cup b$ のすべての項目に答えた人数。行列 $O^\top O$）とする。反応が欠測パターンと
+    独立（MCAR）なら、パターンで条件付けて $\hat p$ は $\pi$ の不偏推定量で、
+    $$\operatorname{Cov}(\hat p_a,\hat p_b)=\frac{N_{ab}}{N_aN_b}\,\Xi_{ab},\qquad
+      \Gamma_{ab}=N\,\frac{N_{ab}}{N_aN_b}\,\Xi_{ab}$$
+    が $\sqrt N(\hat p-\pi)$ について厳密に成り立つ（両方の周辺を観測した回答者だけが、2 つの和の共分散に $\Xi_{ab}$ を
+    1 つずつ加える）。FIML 推定量 $\hat\eta$ は MAR $\supseteq$ MCAR のもとで一致するので、上の性質から
+    $M_2=N e^\top\Delta_c(\Delta_c^\top\Gamma\Delta_c)^{-1}\Delta_c^\top e$ は MCAR のもとで漸近的に $\chi^2_{s-q}$。
+    欠測がなければ $N_{ab}=N_a=N$ で §16.3 に戻る。MCAR でない MAR では利用可能ケースの周辺が $\pi$ に対して偏り、
+    統計量に参照分布はない（文書に書き、検出はしない）。検討した代案: 以前の mirt の多重代入（$\theta$ と反応を代入し、
+    統計量を代入ごとに平均）は平均した統計量に $\chi^2$ の参照分布がなく、モンテカルロ誤差も加わる。mirt 1.46.1 の
+    `N.ratio` の重み付けは上のとおり残差の共分散の逆行列ではない。モデルに基づく期待周辺（欠測した反応を条件付き期待値で
+    置き換える）は、得られる $\hat p$ の共分散が $\hat\eta$ に依存する。誰も観測していない周辺（$N_a=0$。たとえば
+    冊子設計で一緒に出題されない 2 項目）は推定できないので、`m2()` はそのペアを示して `SpecificationError` を出す:
+    そうした設計では 2 次の周辺による限定情報の適合度は定義されない。SRMSR は mirt に合わせ、ペアごとに利用可能な共分散
+    $\sum_no_{n,ij}y_{ni}y_{nj}/N_{ij}-\hat p_i\hat p_j$（$\hat p_i$ は項目の利用可能ケース平均）を相関に直す。
+    帰無モデルは切片を利用可能ケースの平均に置いた独立モデル（その FIML 推定値）で、その $M_2$ も同じ $\Gamma$ を使う
+    （閉形式は使えない）。RMSEA は行数 $N$ を使う。
+    **MAP 推定.** 事前分布があっても $\hat\eta$ は $\sqrt N$ 一致（対数事前分布は $O(1)$、対数尤度は $O(N)$）なので、
+    上の性質から $M_2$ の参照分布 $\chi^2_{s-q}$ は保たれる。flexpyirt は MAP 推定値で計算し、$q=$ `n_params`
+    （事前分布の有無によらずすべての自由パラメタ）とする。mirt と同じである。有限標本では、弱くしか識別されない
+    パラメタ（3PL の下側漸近線など）を事前分布の平均の近くに留める強い事前分布は自由度を 1 より少なくしか減らさないので、
+    検定は保守的になる。また事前分布だけで識別されるパラメタがあると $\Delta$ がランク落ちし、§16.3 の `NaN` + 警告になる。
+    どちらも docstring に書く。
+    **未対応**（`SpecificationError`）: `EmpiricalHistogram`・`NormalMixture` の潜在分布、多母集団の `DavidianCurve`、
+    双因子 / two-tier モデル、ウェイト付きの推定（§17.4）。
+    **照合（V42）**: mirt 1.46.1 の `M2()` を mirt の推定値で、大きさの異なる 2 群とアンカー項目の 2PL、2 群の GRM、
+    2 群の 2 因子 2PL、MCAR の欠測を含む単一群・2 群の 2PL、2PL の MAP 推定で照合する。`_mirt_convention=True` は
+    mirt の生の出力を再現し、既定の値は上の式を R で独立に計算した値と比べる（VALIDATION.md を参照）。
 
 ## 17. 実装上の決定（M7）
 
