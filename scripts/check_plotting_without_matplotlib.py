@@ -15,7 +15,7 @@ from typing import Any
 
 import jax
 
-jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", True)  # type: ignore[no-untyped-call]
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
