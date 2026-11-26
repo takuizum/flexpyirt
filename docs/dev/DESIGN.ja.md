@@ -183,6 +183,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - **決定（#15、§15.48）**: 4 つ目の事前分布 `LogitNormalPrior(mean_logit, sd_logit)` を追加する。
   $\operatorname{logit}X\sim N(\mu,s^2)$ となる $(0,1)$ 上の分布。自然尺度の密度に logit の Jacobian が入るのは、
   それが $X$ 自体の密度の一部だからで、最適化の尺度を変えるのではない。
+  `LogitNormalPrior(..., mode_scale="logit")` はこの Jacobian を除き、flexMIRT と mirt の logit 尺度の事後モードを与える（§15.48）。
 - 固定パラメタは事前分布を無視し、群間で共有するパラメタ（同じ `free_id`）の事前分布は **1 回だけ**数える。
   潜在分布パラメタへの事前分布は対象外（`SpecificationError`）。
 - 結果には `loglik`（尤度のみ）と `log_posterior`（事前分布なしでは `loglik` と同値）を分けて返し、`history` も
@@ -765,7 +766,25 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
       その自然尺度の MAP（§4.7）は flexMIRT の推定値とこの項の分だけ違う。この項は両端に向かって大きくなるので、
       `LogitNormalPrior` の最頻値は flexMIRT のものより $1/2$ から遠い。事前分布そのもの（$g$ の分布として）は
       同じ。R mirt の `g` への `norm` 事前分布も mirt 内部の logit($g$) に作用し、flexMIRT と同じふるまいになる。
-      flexMIRT や mirt の logit 尺度のモードを再現することはここでは扱わない。
+      下の `mode_scale="logit"` でこのモードを再現できる。
+    - **`mode_scale: Literal["natural", "logit"] = "natural"`**（キーワード専用）。`"natural"` は上の密度。
+      `"logit"` は Jacobian を除き、$\lambda=\operatorname{logit}x$ の正規対数密度を自然尺度の値で評価する:
+      $$\log\tilde\pi(x)=-\log s-\tfrac12\log(2\pi)-\frac{(\operatorname{logit}x-\mu)^2}{2s^2},\qquad 0<x<1,$$
+      （外では $-\infty$）。$\operatorname{logit}$ は $(0,1)$ の一対一変換で Jacobian を足さないので、
+      $\arg\max_g[\ell+\log\tilde\pi]=\sigma(\arg\max_\lambda[\ell+\log\phi(\lambda;\mu,s)])$ となる。
+      つまり MAP は flexMIRT の `Guessing : Normal(μ, s)` と mirt の `PRIOR = (..., g, norm, μ, s)` の推定値で、
+      `log_posterior` はそれらの logit 尺度の対数事後（mirt の `logPrior` は $\sum\log\phi(\operatorname{logit}g)$）に
+      一致する。$\log\tilde\pi$ は $x$ の密度ではない（$\lambda$ の密度）。`log_pdf` は、ほかの事前分布と同じく
+      目的関数の項としてこれを返す（§4.7）。
+      - Core: `eval_log_prior` に別コード `PRIOR_LOGITNORMAL_LOGIT = 5` を設け、同じ 2 つのパラメタを使う。
+        `PriorBlock` と jit カーネルは変えない（ほかのコードと同じ分岐なしの二重 `where`）。台、箱との交わり、
+        初期値（$\sigma(\mu)$。logit 尺度の事前分布の最頻値でもある）は `"natural"` と同じ。
+      - 標準誤差は同じ目的関数を自然尺度の $\eta$ で微分するので、目的関数と整合する。停留点では自然尺度の
+        Hessian は $J=\operatorname{diag}(g(1-g))$ として $J^\top H_\lambda J$ なので、
+        $\mathrm{SE}(g)=g(1-g)\,\mathrm{SE}(\lambda)$、すなわち logit 尺度の推定値のデルタ法 SE になる。
+        `m_step_scale`（§15.47）とは独立で、あちらは Newton の経路を変えるだけで目的関数は変えない。
+      - JSON: `"LogitNormalPrior"` オブジェクトにスキーマ版 8 の中で `mode_scale` キーを加える。書き出しでは常に
+        書き、読み込みでは省略可（ないときは `"natural"`）。
     - 超パラメタは `LogNormalPrior` と同じく検証する（`mean_logit` は有限、`sd_logit` は正で有限）。JSON では
       キー `mean_logit`・`sd_logit` を持つ `"LogitNormalPrior"` として登録する（スキーマ版 8）。
 

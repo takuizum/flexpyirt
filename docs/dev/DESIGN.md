@@ -236,7 +236,8 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - **Decision (#15, §15.48)**: `LogitNormalPrior(mean_logit, sd_logit)` is a fourth prior, a
   distribution on $(0,1)$ with $\operatorname{logit}X\sim N(\mu,s^2)$. Its natural-scale density
   contains the logit Jacobian because that is part of the density of $X$ itself, not a change
-  of optimization scale.
+  of optimization scale. `LogitNormalPrior(..., mode_scale="logit")` drops that Jacobian to give
+  the logit-metric posterior mode of flexMIRT and mirt (§15.48).
 - Fixed parameters ignore their priors; a parameter shared across groups (same `free_id`) is
   counted **once**. Priors on latent-distribution parameters are out of scope (`SpecificationError`).
 - Results report `loglik` (likelihood only) and `log_posterior` (equal to `loglik` without priors)
@@ -1132,7 +1133,28 @@ data-independent shapes (§15.21).
       so the `LogitNormalPrior` mode lies further from $1/2$ than flexMIRT's; the prior itself (as a
       distribution of $g$) is the same.
       R mirt's `norm` prior on `g` acts on mirt's internal logit($g$) and behaves like flexMIRT's.
-      Reproducing flexMIRT's or mirt's logit-scale mode is out of scope here.
+      `mode_scale="logit"` (below) reproduces that mode.
+    - **`mode_scale: Literal["natural", "logit"] = "natural"`** (keyword-only). `"natural"` is the
+      density above. `"logit"` drops the Jacobian and evaluates the normal log density of
+      $\lambda=\operatorname{logit}x$ at the natural-scale value,
+      $$\log\tilde\pi(x)=-\log s-\tfrac12\log(2\pi)-\frac{(\operatorname{logit}x-\mu)^2}{2s^2},\qquad 0<x<1,$$
+      ($-\infty$ outside). Because $\operatorname{logit}$ is a bijection of $(0,1)$ and no Jacobian
+      is added, $\arg\max_g[\ell+\log\tilde\pi]=\sigma(\arg\max_\lambda[\ell+\log\phi(\lambda;\mu,s)])$:
+      the MAP is flexMIRT's `Guessing : Normal(μ, s)` and mirt's `PRIOR = (..., g, norm, μ, s)`
+      estimate, and `log_posterior` equals their logit-metric log posterior (mirt's `logPrior` is
+      $\sum\log\phi(\operatorname{logit}g)$). $\log\tilde\pi$ is not a density of $x$ (it is the
+      density of $\lambda$); `log_pdf` returns it as the objective term, as for every prior (§4.7).
+      - Core: a separate code `PRIOR_LOGITNORMAL_LOGIT = 5` in `eval_log_prior` with the same two
+        parameters, so `PriorBlock` and the jit kernels are unchanged (branch-free double-`where`
+        like the other codes). Support, box intersection and start value ($\sigma(\mu)$, which is
+        also the logit-scale prior mode) are as for `"natural"`.
+      - Standard errors use the same objective on natural $\eta$, so they are consistent with it:
+        at a stationary point the natural-scale Hessian is $J^\top H_\lambda J$ with
+        $J=\operatorname{diag}(g(1-g))$, hence $\mathrm{SE}(g)=g(1-g)\,\mathrm{SE}(\lambda)$, the
+        delta-method SE of the logit-scale estimate. `m_step_scale` (§15.47) is independent: it
+        changes the Newton path, not the objective.
+      - JSON: the `"LogitNormalPrior"` object gains a `mode_scale` key within schema version 8,
+        written always and optional on read (absent → `"natural"`).
     - The hyperparameters are validated like `LogNormalPrior` (`mean_logit` finite, `sd_logit`
       positive and finite). JSON registers it as `"LogitNormalPrior"` with keys `mean_logit` and
       `sd_logit` (schema version 8).
