@@ -1366,8 +1366,9 @@ $$\chi^2_{MH}=\frac{\big(\lvert\sum_kA_k-\sum_kE(A_k)\rvert-\tfrac12\big)^2}{\su
 $\hat\alpha_{MH}>1$ ($\Delta_{MH}<0$) means the item favours the reference group. The SE of
 $\ln\hat\alpha_{MH}$ is Phillips & Holland's (1987). `continuity_correction=False` drops the
 $\tfrac12$. ETS classes (`classification="ets"`): **A** if $\lvert\Delta_{MH}\rvert<1$ or
-$\chi^2_{MH}$ is not significant, **C** if $\lvert\Delta_{MH}\rvert\ge1.5$ and significantly
-greater than 1 ($(\lvert\Delta_{MH}\rvert-1)/SE>z_{1-\alpha}$), **B** otherwise;
+$\chi^2_{MH}$ is not significant (on `adj_p`, so B and C items are always `flagged`), **C** if
+$\lvert\Delta_{MH}\rvert\ge1.5$ and significantly greater than 1 by a one-sided test
+($(\lvert\Delta_{MH}\rvert-1)/SE>z_{1-\alpha}$, 1.645 at `alpha=0.05`), **B** otherwise;
 `classification="effect_size"` uses the thresholds 1 and 1.5 only (the codes difR prints).
 
 `table` columns: `item`, `chi2`, `odds_ratio`, `log_odds_ratio`, `log_odds_ratio_se`, `delta`,
@@ -1384,8 +1385,9 @@ Mantel's (1963) test for ordered polytomous items and two groups: the sum of the
 item scores against its expectation given the matching score ($df=1$; for 0 / 1 items it is
 $\chi^2_{MH}$ without continuity correction). The effect size is the Liu & Agresti (1996)
 cumulative common odds ratio, oriented like $\hat\alpha_{MH}$ (above 1 favours the reference
-group; equal to $\hat\alpha_{MH}$ for 0 / 1 items), with the delta-method SE of its log (large
-strata).
+group; equal to $\hat\alpha_{MH}$ for 0 / 1 items), with Liu & Agresti's (1996, eq. 3) SE of
+its log, which is valid both with a few large strata and with many small ones (as total-score
+matching usually gives).
 
 `table` columns: `item`, `chi2`, `df`, `cumulative_odds_ratio`, `log_cumulative_odds_ratio`,
 `log_cumulative_odds_ratio_se`, `p`, `adj_p`, `flagged`.

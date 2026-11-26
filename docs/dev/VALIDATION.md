@@ -81,7 +81,7 @@ English | [日本語](VALIDATION.ja.md)
 | V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
-| V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `packages/flexpyctt/validation/r/ctt_dif_reference.R` | — |
+| V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `packages/flexpyctt/validation/r/ctt_dif_reference.R`; the worked example of Liu & Agresti (1996, Table 1) | — |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -1193,10 +1193,16 @@ English | [日本語](VALIDATION.ja.md)
   divides by $\sum bc/N$ instead of $\sum ad/N$, so its `SE_log_Psi` is neither
   $SE(\ln\hat\psi)$ nor $SE(\hat\psi)$ (0.031 against a Monte Carlo SD of 0.0296 for $\psi=1.48$,
   300 replications of $N=20000$ in three strata; 0.14 against the Phillips–Holland 0.36 on a
-  `verbal` item). The R script's `la_delta_se()` is the delta method written out (0.0291 in that
-  check, Phillips–Holland 0.0291); flexpyctt computes the same variance through the cumulative
-  weights $w_l=\sum_{j\ge l}g_j$. A Python test checks that for 0 / 1 items with large strata it is
-  within 1% of the Phillips–Holland SE. (4) `liu_agresti_ccor()` reports $1/\hat\psi$ of
+  `verbal` item). flexpyctt and the R script's `la_eq3()` use instead Liu & Agresti's (1996)
+  eq. 3, which stays valid with many small strata (DESIGN §16.20). Its R implementation, written
+  in the paper's notation and independently of the Python one, reproduces the paper's worked
+  example (Table 1, 28 centres: $\ln\hat\theta=-1.153$, SE .571), and the Python tests check
+  the same published values, Mantel's 4.84 included. A plug-in delta method (used before
+  review; 0.0291 against the Monte Carlo 0.0296 with large strata) gives 0.375 there and is about
+  40% too small with four respondents per stratum. A Python Monte Carlo test (150 strata of 4
+  and of 10 respondents, a four-category proportional-odds item, 400 replications) checks that
+  the mean eq. 3 SE is within 10% of the Monte Carlo SD of $\ln\hat\psi$, and another checks
+  that for 0 / 1 items with large strata it is within 1% of the Phillips–Holland SE. (4) `liu_agresti_ccor()` reports $1/\hat\psi$ of
   flexpyctt (difR's orientation: above 1 favours the focal group).
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.

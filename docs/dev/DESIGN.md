@@ -2118,9 +2118,11 @@ data-independent shapes (§15.21).
     right / wrong counts (so $\hat\alpha_{MH}>1$ favours the reference group); Phillips & Holland
     (1987) variance of $\ln\hat\alpha_{MH}$; $\Delta_{MH}=-2.35\ln\hat\alpha_{MH}$,
     $SE(\Delta)=2.35\,SE(\ln\hat\alpha)$. **ETS classes** (owner decision 2: the full rule by
-    default; Zieky, 1993; Zwick, 2012): A if $\lvert\Delta\rvert<1$ or $p\ge\alpha$ (unadjusted
-    $\chi^2_{MH}$); C if $\lvert\Delta\rvert\ge1.5$ and $(\lvert\Delta\rvert-1)/SE(\Delta)>
-    z_{1-\alpha}$; B otherwise. `classification="effect_size"`: A $<1\le$ B $<1.5\le$ C
+    default; Zieky, 1993; Zwick, 2012): A if $\lvert\Delta\rvert<1$ or $\chi^2_{MH}$ is not
+    significant ($p\ge\alpha$ on the `p_adjust`-adjusted p-value, the one `flagged` uses, so B
+    and C items are always flagged; without adjustment it is the plain $p$); C if
+    $\lvert\Delta\rvert\ge1.5$ and $(\lvert\Delta\rvert-1)/SE(\Delta)>z_{1-\alpha}$ (a one-sided
+    test that $\lvert\Delta\rvert>1$, 1.645 at $\alpha=0.05$; some authors use 1.96); B otherwise. `classification="effect_size"`: A $<1\le$ B $<1.5\le$ C
     (difR's printed codes use right-closed intervals; only exact ties differ). A zero or infinite
     $\hat\alpha_{MH}$ gives a `FlexpycttWarning` (difR's "sparse data" warning).
 
@@ -2130,11 +2132,19 @@ data-independent shapes (§15.21).
     $\hat\psi=\sum_k\sum_{j<L}b_{jk}c_{jk}/T_k\big/\sum_k\sum_{j<L}a_{jk}d_{jk}/T_k$ ($a,c$: reference
     / focal counts at or below category $j$), **oriented as $\hat\alpha_{MH}$** (it reduces to
     $\hat\alpha_{MH}$ for 0 / 1 items; difR's `liu_agresti_ccor()` reports the reciprocal). Its
-    SE is the delta method for $\ln\hat\psi$ under independent multinomials per group and
-    stratum: $\operatorname{Var}(S-\hat\psi R)/S^2$ with $S=\sum bc/T$, $R=\sum ad/T$; the
-    variance of $\sum_jg_ja_j$ is computed as $n(\sum_l\pi_lw_l^2-(\sum_l\pi_lw_l)^2)$ with
-    $w_l=\sum_{j\ge l}g_j$. It assumes large strata; Liu & Agresti's dually consistent
-    estimator is not implemented. difR's own SE is wrong (VALIDATION V47).
+    SE is **Liu & Agresti's (1996) eq. 3**, which generalizes Robins, Breslow & Greenland (1986)
+    and is consistent both with a fixed number of large strata and with many sparse strata
+    ("dually consistent"). With the focal group as their row 1,
+    $\widehat{\operatorname{Var}}(\ln\hat\psi)=\sum_k\hat\xi_k\big/(\sum_k\sum_jb_{jk}c_{jk}/T_k)^2$,
+    $\hat\xi_k=\sum_j\hat\phi_{jjk}+2\sum_{j<s}\hat\phi_{jsk}$,
+    $\hat\phi_{jsk}=\frac{n_{Fk}n_{Rk}}{T_k^2}\{\hat\psi d_{sk}a_{jk}/n_{Fk}\,[1+(\hat\psi-1)a_{sk}/n_{Rk}]
+    +c_{jk}b_{sk}/n_{Rk}\,[\hat\psi-(\hat\psi-1)c_{sk}/n_{Fk}]\}$ ($j\le s$). Matching on a
+    total score gives many small strata, where a large-strata delta method
+    ($\operatorname{Var}(S-\hat\psi R)/S^2$ with plug-in multinomial variances, used before
+    review) is far too small: about 40% at four respondents per stratum. The estimator is not
+    invariant to reversing the category order; Liu & Agresti note that one can average the two
+    orderings and that the difference is trivial in practice. flexpyctt uses the categories in
+    increasing order as published, without averaging. difR's own SE is wrong (VALIDATION V47).
 
     **Generalized MH** (Landis, Heyman & Koch, 1978; Somes, 1986; Penfield, 2001): per stratum
     ($T_k>1$) the $G\times C$ table of groups x observed categories; observed focal counts for
@@ -2832,6 +2842,7 @@ data-independent shapes (§15.21).
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
+- Robins, J., Breslow, N., & Greenland, S. (1986). Estimators of the Mantel–Haenszel variance consistent in both sparse data and large-strata limiting models. *Biometrics*, 42(2), 311–323.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.

@@ -1239,8 +1239,9 @@ $$\chi^2_{MH}=\frac{\big(\lvert\sum_kA_k-\sum_kE(A_k)\rvert-\tfrac12\big)^2}{\su
 
 $\hat\alpha_{MH}>1$（$\Delta_{MH}<0$）は項目が参照群に有利であることを表す。$\ln\hat\alpha_{MH}$ の標準誤差は
 Phillips & Holland (1987) による。`continuity_correction=False` で $\tfrac12$ を引かない。ETS 分類
-（`classification="ets"`）: $\lvert\Delta_{MH}\rvert<1$ または $\chi^2_{MH}$ が有意でなければ **A**、
-$\lvert\Delta_{MH}\rvert\ge1.5$ かつ 1 より有意に大きければ（$(\lvert\Delta_{MH}\rvert-1)/SE>z_{1-\alpha}$）**C**、
+（`classification="ets"`）: $\lvert\Delta_{MH}\rvert<1$ または $\chi^2_{MH}$ が有意でなければ（`adj_p` で判定するので、
+B と C の項目は必ず `flagged`）**A**、$\lvert\Delta_{MH}\rvert\ge1.5$ かつ片側検定で 1 より有意に大きければ
+（$(\lvert\Delta_{MH}\rvert-1)/SE>z_{1-\alpha}$。`alpha=0.05` で 1.645）**C**、
 それ以外は **B**。`classification="effect_size"` は閾値 1 と 1.5 だけを使う（difR が表示する分類）。
 
 `table` の列: `item`, `chi2`, `odds_ratio`, `log_odds_ratio`, `log_odds_ratio_se`, `delta`, `delta_se`,
@@ -1256,7 +1257,8 @@ mantel(data, *, group, focal, items=None, anchor_items=None, matching=None, puri
 順序のある多値項目・2 群の Mantel (1963) の検定。焦点群の項目得点の和を、マッチング得点を与えたときの期待値と
 比べる（$df=1$。0 / 1 項目では連続修正なしの $\chi^2_{MH}$ に等しい）。効果量は Liu & Agresti (1996) の累積共通
 オッズ比で、$\hat\alpha_{MH}$ と同じ向き（1 より大きいと参照群に有利。0 / 1 項目では $\hat\alpha_{MH}$ に等しい）に
-し、その対数のデルタ法による標準誤差（層が大きいときの近似）をつける。
+し、その対数の Liu & Agresti (1996) の式 (3) による標準誤差をつける。層が少数で大きくても、（合計得点でマッチング
+したときのように）小さな層が多数あっても妥当な推定量である。
 
 `table` の列: `item`, `chi2`, `df`, `cumulative_odds_ratio`, `log_cumulative_odds_ratio`,
 `log_cumulative_odds_ratio_se`, `p`, `adj_p`, `flagged`。

@@ -6,7 +6,8 @@ anchors, an external matching variable), ``stats::mantelhaen.test()`` (2 x 2 x K
 categories x K), ``difGMH()``, ``difLogistic()`` (both / uniform / non-uniform, LRT / Wald,
 purification with BH, anchors, matching), ``difMantel.poly()`` (rounded), ``liu_agresti_ccor()``
 (the odds ratio) and direct R implementations of Mantel's statistic, its purification path and
-the delta-method SE of the log cumulative odds ratio.
+Liu & Agresti's (1996, eq. 3) SE of the log cumulative odds ratio. The worked example of Liu &
+Agresti (1996, Table 1) is checked against the values printed in the paper.
 """
 
 from __future__ import annotations
@@ -201,6 +202,18 @@ def test_ets_classes() -> None:
     assert list(thresholds) == list(np.where(size < 1.0, "A", np.where(size < 1.5, "B", "C")))
 
 
+def test_ets_classes_use_adjusted_p() -> None:
+    # B and C items are always flagged: the significance condition uses adj_p, like flagged.
+    case = _case(_reference()["mantel_haenszel"]["cases"], "sim_2pl")
+    plain = mantel_haenszel(_frame(case), group=case["group"], focal=case["focal"]).table
+    holm = mantel_haenszel(
+        _frame(case), group=case["group"], focal=case["focal"], p_adjust="holm"
+    ).table
+    assert (holm.loc[holm["ets_class"] != "A", "flagged"]).all()
+    lost = (plain["ets_class"] != "A") & (holm["adj_p"] >= 0.05)
+    assert (holm.loc[lost, "ets_class"] == "A").all()
+
+
 # ---------------------------------------------------------------------------------------------
 # Generalized Mantel–Haenszel
 # ---------------------------------------------------------------------------------------------
@@ -333,6 +346,61 @@ def test_liu_agresti_se_close_to_phillips_holland_with_large_strata() -> None:
     assert m["log_cumulative_odds_ratio_se"][0] == pytest.approx(
         mh["log_odds_ratio_se"][0], rel=0.01
     )
+
+
+# Liu & Agresti (1996), Table 1: 28 centres; per centre placebo (better, unchanged, worse) then
+# active. The paper (p. 1226) reports log(theta) = -1.153 with SE .571 (placebo as row 1, so here
+# placebo is the focal group) and Mantel's statistic 4.84 (P = .028).
+ASTHMA = [
+    (0, 2, 1, 1, 1, 0), (0, 1, 0, 1, 1, 0), (1, 1, 0, 0, 1, 0), (1, 0, 0, 1, 1, 0),
+    (1, 0, 0, 1, 0, 0), (1, 0, 0, 2, 1, 0), (0, 1, 0, 2, 1, 0), (0, 0, 1, 0, 1, 0),
+    (1, 1, 0, 1, 1, 0), (0, 2, 0, 1, 0, 0), (2, 0, 0, 1, 0, 1), (0, 1, 0, 1, 0, 0),
+    (1, 0, 0, 1, 0, 0), (0, 1, 0, 2, 0, 0), (1, 0, 0, 1, 0, 0), (0, 1, 0, 1, 0, 0),
+    (0, 2, 0, 1, 1, 0), (0, 1, 0, 1, 0, 0), (1, 0, 0, 1, 0, 0), (1, 0, 0, 1, 0, 0),
+    (0, 3, 0, 0, 1, 0), (0, 2, 0, 1, 0, 0), (1, 0, 0, 1, 0, 0), (1, 1, 0, 1, 0, 0),
+    (1, 0, 0, 1, 0, 0), (0, 1, 1, 1, 0, 0), (0, 1, 0, 0, 2, 0), (1, 0, 0, 1, 1, 0),
+]  # fmt: skip
+
+
+def test_liu_agresti_matches_published_example() -> None:
+    response, group, centre = [], [], []
+    for k, row in enumerate(ASTHMA):
+        for label, counts in (("placebo", row[:3]), ("active", row[3:])):
+            for category, count in enumerate(counts):
+                response += [category] * count
+                group += [label] * count
+                centre += [k] * count
+    data = pd.DataFrame({"response": response}, dtype=float)
+    t = mantel(data, group=group, focal="placebo", matching=centre).table
+    assert t["log_cumulative_odds_ratio"][0] == pytest.approx(-1.153, abs=5e-4)
+    assert t["log_cumulative_odds_ratio_se"][0] == pytest.approx(0.571, abs=5e-4)
+    assert t["chi2"][0] == pytest.approx(4.84, abs=5e-3)
+    assert t["p"][0] == pytest.approx(0.028, abs=5e-4)
+
+
+@pytest.mark.parametrize("stratum_size", [4, 10])
+def test_liu_agresti_se_is_valid_with_small_strata(stratum_size: int) -> None:
+    # Many sparse strata (Liu & Agresti's sparse asymptotics): the SE must match the Monte
+    # Carlo SD of ln(psi). A large-strata delta method is ~40% too small at stratum size 4.
+    rng = np.random.default_rng(102 + stratum_size)
+    n_strata, n_rep = 150, 400
+    stratum = np.repeat(np.arange(n_strata), stratum_size)
+    level = np.linspace(-2.0, 2.0, n_strata)[stratum]
+    cuts = np.array([-1.0, 0.0, 1.0])
+    log_psi, se = [], []
+    for _ in range(n_rep):
+        g = rng.integers(0, 2, stratum.size)
+        # Proportional odds: the focal group scores lower (DIF against it, psi > 1).
+        eta = level - 0.4 * g
+        latent = eta + rng.logistic(size=stratum.size)
+        x = (latent[:, None] > cuts).sum(axis=1).astype(float)
+        t = mantel(pd.DataFrame({"x": x}), group=g, focal=1, matching=stratum).table
+        log_psi.append(t["log_cumulative_odds_ratio"][0])
+        se.append(t["log_cumulative_odds_ratio_se"][0])
+    mc_sd = float(np.std(log_psi, ddof=1))
+    # The Monte Carlo SD itself has a relative SE of about 1 / sqrt(2 * 400) = 3.5%.
+    assert np.mean(se) == pytest.approx(mc_sd, rel=0.1)
+    assert np.mean(log_psi) == pytest.approx(0.4, abs=0.05)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -535,3 +603,21 @@ def test_separation_warns() -> None:
         warnings.simplefilter("ignore", RuntimeWarning)
         with pytest.warns(ConvergenceWarning, match="separation"):
             logistic_dif(data, group=g, focal=1, items=["y"])
+
+
+def test_wald_under_separation_gives_nan_and_warns_once() -> None:
+    rng = np.random.default_rng(1)
+    n = 200
+    g = rng.integers(0, 2, n)
+    anchor = rng.integers(0, 2, (n, 4)).astype(float)
+    y = g.astype(float)  # perfectly predicted by group
+    data = pd.DataFrame(np.column_stack([y, anchor]), columns=["y", "a", "b", "c", "d"])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        res = logistic_dif(data, group=g, focal=1, test="wald", purify=True, max_iter=5)
+    separation = [w for w in caught if issubclass(w.category, ConvergenceWarning)]
+    separation = [w for w in separation if "separation" in str(w.message)]
+    assert len(separation) == 1  # once, not at every purification step
+    assert "'y'" in str(separation[0].message)
+    row = res.table.set_index("item").loc["y"]
+    assert np.isnan(row["chi2"]) and np.isnan(row["p"])  # NaN, not a LinAlgError

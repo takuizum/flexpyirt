@@ -351,9 +351,11 @@ def mantel_haenszel(
     (:math:`\Delta_{MH}<0`) means the item favours the reference group. The standard error of
     :math:`\ln\hat\alpha_{MH}` is Phillips & Holland's (1987); :math:`SE(\Delta_{MH})=2.35\,
     SE(\ln\hat\alpha_{MH})`. ETS classes (Zieky, 1993; Zwick, 2012): **A** if
-    :math:`\lvert\Delta_{MH}\rvert<1` or :math:`\chi^2_{MH}` is not significant at ``alpha``;
-    **C** if :math:`\lvert\Delta_{MH}\rvert\ge1.5` and significantly above 1
-    (:math:`(\lvert\Delta_{MH}\rvert-1)/SE>z_{1-\alpha}`); **B** otherwise.
+    :math:`\lvert\Delta_{MH}\rvert<1` or :math:`\chi^2_{MH}` is not significant at ``alpha``
+    (on the ``p_adjust``-adjusted p-value, so that B and C items are always ``flagged``);
+    **C** if :math:`\lvert\Delta_{MH}\rvert\ge1.5` and significantly above 1 by a one-sided
+    test (:math:`(\lvert\Delta_{MH}\rvert-1)/SE>z_{1-\alpha}`, 1.645 at ``alpha=0.05``);
+    **B** otherwise.
     ``classification="effect_size"`` uses the thresholds only (A < 1 ≤ B < 1.5 ≤ C), the codes
     difR prints. difR: ``difMH()``.
 
@@ -384,7 +386,8 @@ def mantel_haenszel(
         Hochberg, 1995). Purification uses unadjusted p-values (difR's ``puriadjType =
         "simple"``).
     alpha : float, default 0.05
-        Significance level for ``flagged``, purification and the ETS classes.
+        Significance level for ``flagged``, purification and the ETS classes (whose significance
+        condition uses the adjusted p-value, like ``flagged``).
     continuity_correction : bool, default True
         Subtract 1/2 from :math:`\lvert\sum A-\sum E(A)\rvert` (Holland & Thayer, 1988; difR).
         ``stats::mantelhaen.test`` skips the correction when the difference is below 1/2.
@@ -459,7 +462,9 @@ def mantel_haenszel(
         "log_odds_ratio_se": log_se,
         "delta": delta,
         "delta_se": delta_se,
-        "ets_class": _ets_class(delta, delta_se, stats["p"], alpha, classification),
+        "ets_class": _ets_class(
+            delta, delta_se, _dif.adjust_p(stats["p"], p_adjust), alpha, classification
+        ),
     }
     return _result(prep, columns, run, p_adjust=p_adjust, alpha=alpha, method="mantel_haenszel")
 
@@ -495,9 +500,11 @@ def mantel(
     statistic without continuity correction. The effect size is the Liu & Agresti (1996)
     cumulative common odds ratio :math:`\hat\psi` (Penfield & Algina, 2003), oriented as
     :math:`\hat\alpha_{MH}` (values above 1 favour the reference group; it reduces to
-    :math:`\hat\alpha_{MH}` for 0 / 1 items), with the delta-method standard error of
-    :math:`\ln\hat\psi` (large strata). difR: ``difMantel.poly()``, ``liu_agresti_ccor()``
-    (which report :math:`1/\hat\psi`).
+    :math:`\hat\alpha_{MH}` for 0 / 1 items), with Liu & Agresti's (1996, eq. 3) standard
+    error of :math:`\ln\hat\psi`, which stays valid with many small strata (sparse matching
+    scores) as well as with a few large ones. difR: ``difMantel.poly()``, ``liu_agresti_ccor()``
+    (which report :math:`1/\hat\psi`; difR's own standard error is not used, see
+    VALIDATION.md V47).
 
     Parameters
     ----------
@@ -634,21 +641,21 @@ def generalized_mantel_haenszel(
         expected_df = np.array(
             [(prep.n_groups - 1) * (np.unique(prep.values[:, j]).size - 1) for j in prep.tested]
         )
-        short = [
-            prep.names[j] for j, d, e in zip(prep.tested, df, expected_df, strict=True) if 0 < d < e
-        ]
-        if short:
-            warnings.warn(
-                f"The covariance matrix is singular for {short}; a generalized inverse was used "
-                "and df is its rank.",
-                FlexpycttWarning,
-                stacklevel=4,
-            )
+        singular = (df > 0) & (df < expected_df)
         with np.errstate(invalid="ignore"):
             p = np.where(df > 0, _dif.chi2_sf(chi2, np.maximum(df, 1)), np.nan)
-        return {"chi2": chi2, "df": df, "p": p}
+        return {"chi2": chi2, "df": df, "p": p, "singular": singular}
 
     run = _run(prep, statistic, purify=purify, max_iter=max_iter, alpha=alpha)
+    # Warn once, about the final step only (not at every purification step).
+    short = [prep.names[j] for j, bad in zip(prep.tested, run[0]["singular"], strict=True) if bad]
+    if short:
+        warnings.warn(
+            f"The covariance matrix is singular for {short}; a generalized inverse was used and "
+            "df is its rank.",
+            FlexpycttWarning,
+            stacklevel=2,
+        )
     columns = {"chi2": run[0]["chi2"], "df": run[0]["df"]}
     return _result(
         prep, columns, run, p_adjust=p_adjust, alpha=alpha, method="generalized_mantel_haenszel"
@@ -752,16 +759,16 @@ def logistic_dif(
     tested_terms = {"uniform": [2], "non_uniform": [3], "both": [2, 3]}[kind]
 
     def statistic(anchors: np.ndarray) -> dict[str, np.ndarray]:
-        out: dict[str, list[float]] = {k: [] for k in ("chi2", "r2", "bg", "sg", "bi", "si")}
-        unconverged = []
+        out: dict[str, list[float]] = {
+            k: [] for k in ("chi2", "r2", "bg", "sg", "bi", "si", "unconverged")
+        }
         for j in prep.tested:
             y = prep.values[:, j]
             s = _matching_score(prep, j, anchors)
             full = np.column_stack([np.ones(n_obs), s, g, s * g])
             b1, v1, dev1, ok1 = _dif.logistic_fit(y, full[:, large])
             _, _, dev0, ok0 = _dif.logistic_fit(y, full[:, small])
-            if not (ok0 and ok1):
-                unconverged.append(prep.names[j])
+            out["unconverged"].append(float(not (ok0 and ok1)))
             mean = float(y.mean())
             null_dev = (
                 0.0
@@ -778,25 +785,35 @@ def logistic_dif(
             else:
                 pos = [large.index(t) for t in tested_terms]
                 coef = b1[pos]
-                stat = float(coef @ np.linalg.solve(v1[np.ix_(pos, pos)], coef))
+                try:
+                    stat = float(coef @ np.linalg.solve(v1[np.ix_(pos, pos)], coef))
+                except np.linalg.LinAlgError:
+                    # Singular covariance block (separation): no Wald statistic.
+                    stat = np.nan
+                    out["unconverged"][-1] = 1.0
             out["chi2"].append(stat)
             out["r2"].append(r2(dev1) - r2(dev0) if null_dev > 0 else np.nan)
             out["bg"].append(b1[2])
             out["sg"].append(np.sqrt(v1[2, 2]))
             out["bi"].append(b1[3] if 3 in large else np.nan)
             out["si"].append(np.sqrt(v1[3, 3]) if 3 in large else np.nan)
-        if unconverged:
-            warnings.warn(
-                f"Logistic regression did not converge for {unconverged} (separation?).",
-                ConvergenceWarning,
-                stacklevel=4,
-            )
         res = {k: np.array(v, dtype=np.float64) for k, v in out.items()}
         res["p"] = _dif.chi2_sf(res["chi2"], df)
         return res
 
     run = _run(prep, statistic, purify=purify, max_iter=max_iter, alpha=alpha)
     stats = run[0]
+    # Warn once, about the final step only (not at every purification step).
+    unconverged = [
+        prep.names[j] for j, bad in zip(prep.tested, stats["unconverged"], strict=True) if bad
+    ]
+    if unconverged:
+        warnings.warn(
+            f"Logistic regression did not converge for {unconverged} (separation?); their "
+            "statistics may be unreliable or NaN.",
+            ConvergenceWarning,
+            stacklevel=2,
+        )
     columns: dict[str, np.ndarray | list[str | None]] = {
         "chi2": stats["chi2"],
         "df": np.full(prep.tested.size, df, dtype=np.int64),

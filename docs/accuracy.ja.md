@@ -193,9 +193,10 @@ mirt で推定したモデルとの単純な比較ではないケースの許容
   flexpyirt は一致する。
 - **difR の Liu–Agresti オッズ比の標準誤差。** difR 6.1 の `liu_agresti_ccor()`（`difMantel.poly()` が使う）が
   `SE_log_Psi` として返すデルタ法の値は、焦点群の度数による微分の符号が誤っており、割る和も違うため、
-  $\ln\hat\psi$ の標準誤差でも $\hat\psi$ の標準誤差でもない。flexpyctt の `mantel()` は正しいデルタ法の標準誤差を
-  使う。層が大きい 0 / 1 項目では Phillips & Holland による Mantel–Haenszel の標準誤差や、シミュレーションでの
-  $\ln\hat\psi$ のばらつきと一致する。オッズ比そのものは一致する（逆数として。difR の $\hat\psi$ は 1 より大きいと
+  $\ln\hat\psi$ の標準誤差でも $\hat\psi$ の標準誤差でもない。flexpyctt の `mantel()` は Liu & Agresti（1996）自身の
+  分散の推定量（式 (3)）を使う。マッチング得点で小さな層が多数できても妥当な推定量である。論文の計算例（SE .571）を
+  再現し、1 層 4〜10 人のシミュレーションでの $\ln\hat\psi$ のばらつきと一致し、層が大きい 0 / 1 項目では Phillips &
+  Holland による Mantel–Haenszel の標準誤差と一致する。オッズ比そのものは一致する（逆数として。difR の $\hat\psi$ は 1 より大きいと
   焦点群に有利）。
 - **`mantelhaen.test()` の連続修正。** R の `mantelhaen.test()` は $\lvert\sum A-\sum E(A)\rvert<\tfrac12$ のとき
   $\tfrac12$ の修正を省く。difR、Holland & Thayer (1988)、flexpyctt は常に修正するので、そのような項目（DIF の

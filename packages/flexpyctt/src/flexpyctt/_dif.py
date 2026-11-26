@@ -147,27 +147,38 @@ def mantel_item(x: np.ndarray, member: np.ndarray, score: np.ndarray) -> float:
 
 
 def liu_agresti_item(x: np.ndarray, member: np.ndarray, score: np.ndarray) -> tuple[float, float]:
-    r"""Liu–Agresti (1996) cumulative common odds ratio and the delta-method SE of its log.
+    r"""Liu–Agresti (1996) cumulative common odds ratio and the standard error of its log.
 
     With the categories :math:`y_1<\dots<y_L` of the item and, in stratum :math:`k` and for
     :math:`j<L`, :math:`a_{jk}` / :math:`c_{jk}` the reference / focal counts with
-    :math:`x\le y_j`, :math:`b_{jk}=n_{Rk}-a_{jk}`, :math:`d_{jk}=n_{Fk}-c_{jk}`:
+    :math:`x\le y_j`, :math:`b_{jk}=n_{Rk}-a_{jk}`, :math:`d_{jk}=n_{Fk}-c_{jk}` (Liu & Agresti's
+    eq. 2 with the focal group as their row 1, so :math:`X^*_{1jk}=c_{jk}`, :math:`X^*_{2jk}=
+    a_{jk}`, :math:`n_{1k}=n_{Fk}`, :math:`n_{2k}=n_{Rk}`):
 
     .. math::
         \hat\psi=\frac{\sum_k\sum_jb_{jk}c_{jk}/T_k}{\sum_k\sum_ja_{jk}d_{jk}/T_k},
 
     oriented so that it reduces to :math:`\hat\alpha_{MH}` for 0 / 1 items (values above 1
     favour the reference group; difR's ``liu_agresti_ccor`` reports :math:`1/\hat\psi`). The
-    standard error of :math:`\ln\hat\psi` is the delta method under independent multinomial
-    sampling of each group within each stratum: with :math:`S=\sum b c/T`, :math:`R=\sum a d/T`,
+    variance of :math:`\ln\hat\psi` is Liu & Agresti's (1996) eq. 3, which generalizes Robins,
+    Breslow & Greenland (1986) and is consistent both with a fixed number of large strata and
+    with many sparse strata:
 
     .. math::
-        \operatorname{Var}(\ln\hat\psi)\approx\frac{\operatorname{Var}(S-\hat\psi R)}{S^2},\quad
-        \frac{\partial(S-\hat\psi R)}{\partial c_{jk}}=\frac{b_{jk}+\hat\psi a_{jk}}{T_k},\quad
-        \frac{\partial(S-\hat\psi R)}{\partial a_{jk}}=-\frac{c_{jk}+\hat\psi d_{jk}}{T_k},
+        \widehat{\operatorname{Var}}(\ln\hat\psi)=
+        \frac{\sum_k\hat\xi_k}{\big(\sum_k\sum_jb_{jk}c_{jk}/T_k\big)^2},\quad
+        \hat\xi_k=\sum_j\hat\phi_{jjk}+2\sum_{j<s}\hat\phi_{jsk},
 
-    and :math:`\operatorname{Cov}` of the cumulative counts from
-    :math:`n_{gk}(\operatorname{diag}\pi_{gk}-\pi_{gk}\pi_{gk}^\top)`. It assumes large strata.
+    .. math::
+        \hat\phi_{jsk}=\frac{n_{Fk}n_{Rk}}{T_k^2}\Big\{
+        \frac{\hat\psi\,d_{sk}a_{jk}}{n_{Fk}}\Big[1+(\hat\psi-1)\frac{a_{sk}}{n_{Rk}}\Big]
+        +\frac{c_{jk}b_{sk}}{n_{Rk}}\Big[\hat\psi-(\hat\psi-1)\frac{c_{sk}}{n_{Fk}}\Big]\Big\}
+        \quad(j\le s).
+
+    (Liu & Agresti's denominator :math:`\hat\theta^2(\sum S)^2` equals the one above.) For
+    0 / 1 items it is a different dually consistent estimator from the Robins–Breslow–Greenland
+    (= Phillips–Holland) variance of :func:`mantel_haenszel_item`; the two agree closely except in
+    very small samples. Strata without both groups add nothing and are dropped.
     """
     cats = np.unique(x)
     n_cat = cats.size
@@ -184,28 +195,26 @@ def liu_agresti_item(x: np.ndarray, member: np.ndarray, score: np.ndarray) -> tu
     n_foc = foc_counts.sum(axis=1)
     keep = (n_ref > 0) & (n_foc > 0)
     ref_counts, foc_counts = ref_counts[keep], foc_counts[keep]
-    n_ref, n_foc = n_ref[keep], n_foc[keep]
-    total = (n_ref + n_foc)[:, None]
+    n_ref, n_foc = n_ref[keep][:, None], n_foc[keep][:, None]
+    total = n_ref + n_foc
     a = np.cumsum(ref_counts, axis=1)[:, :-1]
     c = np.cumsum(foc_counts, axis=1)[:, :-1]
-    b = n_ref[:, None] - a
-    d = n_foc[:, None] - c
+    b = n_ref - a
+    d = n_foc - c
     s_sum = float(np.sum(b * c / total))
     r_sum = float(np.sum(a * d / total))
     if s_sum <= 0 or r_sum <= 0:
         return (s_sum / r_sum if r_sum > 0 else np.nan), np.nan
     psi = s_sum / r_sum
-    grad_a = -(c + psi * d) / total  # (K, L-1)
-    grad_c = (b + psi * a) / total
-    # Var(sum_j g_j a_j) with a_j = sum_{l<=j} n_l and multinomial cell counts n_l:
-    # sum_j g_j a_j = sum_l w_l n_l with w_l = sum_{j>=l} g_j (w_L = 0).
-    var = 0.0
-    for grad, counts, n in ((grad_a, ref_counts, n_ref), (grad_c, foc_counts, n_foc)):
-        tail_sums = np.cumsum(grad[:, ::-1], axis=1)[:, ::-1]
-        weights = np.concatenate([tail_sums, np.zeros((grad.shape[0], 1))], axis=1)
-        prob = counts / n[:, None]
-        mean_w = np.sum(prob * weights, axis=1)
-        var += float(np.sum(n * (np.sum(prob * weights**2, axis=1) - mean_w**2)))
+    # phi[k, j, s]: the j index enters through a_j, c_j and the s index through a_s .. d_s.
+    first = (psi * a / n_foc)[:, :, None] * (d * (1.0 + (psi - 1.0) * a / n_ref))[:, None, :]
+    second = (c / n_ref)[:, :, None] * (b * (psi - (psi - 1.0) * c / n_foc))[:, None, :]
+    phi = (n_foc * n_ref / total**2)[:, :, None] * (first + second)
+    # xi_k = sum_j phi_jj + 2 sum_{j<s} phi_js: weight 1 on the diagonal, 2 above it.
+    weight = np.triu(np.full((n_cat - 1, n_cat - 1), 2.0), k=1) + np.eye(n_cat - 1)
+    var = float(np.sum(phi * weight))
+    if not var > 0:
+        return psi, np.nan
     return psi, float(np.sqrt(var) / s_sum)
 
 

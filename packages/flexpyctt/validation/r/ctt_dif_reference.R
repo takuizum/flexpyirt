@@ -12,9 +12,8 @@
 # rounded cross-check. liu_agresti_ccor gives the cumulative odds ratio; its "liu_agresti" SE is
 # not used: its gradient with respect to the focal cumulative count has the wrong sign for the
 # a/N term and it divides by sum(b c / N) instead of sum(a d / N), so it is neither SE(log psi)
-# nor SE(psi). la_delta_se() below is the delta-method SE of log psi under product-multinomial
-# sampling within strata (the estimator liu_agresti_ccor intends); a Monte Carlo check is in
-# VALIDATION.md V47.
+# nor SE(psi). la_eq3() below is Liu & Agresti's (1996) eq. 3, the variance estimator that is
+# consistent with large and with sparse strata, checked against the paper's worked example.
 suppressMessages({
   library(difR)
   library(jsonlite)
@@ -234,42 +233,58 @@ mantel_stat <- function(y, member, item, anchor) {
   (s_f - e_f)^2 / v_f
 }
 
-la_delta_se <- function(x, member, score) {
+# Liu & Agresti (1996), eq. 2 and eq. 3, in the paper's notation: row 1 is the focal group,
+# row 2 the reference group, X*_ijk the cumulative counts (categories in increasing order).
+# Eq. 3 is invariant to swapping the rows, so SE(log theta) is also SE(log psi) of difR's
+# orientation (psi = 1 / theta).
+la_eq3 <- function(x, member, score) {
   cats <- sort(unique(x))
   L <- length(cats)
-  U <- matrix(t(sapply(seq_len(L - 1), function(j) as.numeric(seq_len(L) <= j))), L - 1, L)
-  num <- den <- 0
-  pieces <- list()
+  tabs <- list()
   for (s in sort(unique(score))) {
     r <- score == s
-    n1 <- sum(r & member == 0)
-    n2 <- sum(r & member == 1)
+    n1 <- sum(r & member == 1)
+    n2 <- sum(r & member == 0)
     if (n1 == 0 || n2 == 0) next
-    t1 <- sapply(cats, function(v) sum(r & member == 0 & x == v))
-    t2 <- sapply(cats, function(v) sum(r & member == 1 & x == v))
-    N <- n1 + n2
-    a <- cumsum(t1)[-L]
-    c_ <- cumsum(t2)[-L]
-    b <- n1 - a
-    d <- n2 - c_
-    num <- num + sum(a * d / N)
-    den <- den + sum(b * c_ / N)
-    pieces[[length(pieces) + 1]] <- list(t1 = t1, t2 = t2, a = a, b = b, c = c_, d = d, N = N,
-                                         n1 = n1, n2 = n2)
+    X1 <- cumsum(sapply(cats, function(v) sum(r & member == 1 & x == v)))[-L]
+    X2 <- cumsum(sapply(cats, function(v) sum(r & member == 0 & x == v)))[-L]
+    tabs[[length(tabs) + 1]] <- list(n1 = n1, n2 = n2, N = n1 + n2, X1 = X1, X2 = X2)
   }
-  psi <- num / den
-  v <- 0
-  for (p in pieces) {
-    p1 <- p$t1 / p$n1
-    p2 <- p$t2 / p$n2
-    S1 <- p$n1 * (diag(p1, L) - outer(p1, p1))
-    S2 <- p$n2 * (diag(p2, L) - outer(p2, p2))
-    g1 <- (p$d + psi * p$c) / p$N   # d T / d a_j,  T = sum(a d / N) - psi sum(b c / N)
-    g2 <- -(p$a + psi * p$b) / p$N  # d T / d c_j
-    v <- v + drop(t(g1) %*% U %*% S1 %*% t(U) %*% g1 + t(g2) %*% U %*% S2 %*% t(U) %*% g2)
+  R <- sum(sapply(tabs, function(t) sum(t$X1 * (t$n2 - t$X2) / t$N)))
+  S <- sum(sapply(tabs, function(t) sum((t$n1 - t$X1) * t$X2 / t$N)))
+  theta <- R / S
+  phi <- function(t, j, s) {
+    t$n1 * t$n2 / t$N^2 * (
+      theta * (t$n1 - t$X1[s]) * t$X2[j] / t$n1 * (1 + (theta - 1) * t$X2[s] / t$n2) +
+        t$X1[j] * (t$n2 - t$X2[s]) / t$n2 * (theta - (theta - 1) * t$X1[s] / t$n1))
   }
-  c(psi = psi, se_log = sqrt(v) / num)
+  xi <- 0
+  for (t in tabs) {
+    for (j in seq_len(L - 1)) {
+      xi <- xi + phi(t, j, j)
+      if (j < L - 1) for (s in (j + 1):(L - 1)) xi <- xi + 2 * phi(t, j, s)
+    }
+  }
+  c(theta = theta, se_log = sqrt(xi / (theta^2 * S^2)))
 }
+
+# Check against the worked example of Liu & Agresti (1996, Table 1 and p. 1226): 28 centres,
+# placebo (row 1) / active, responses better < unchanged < worse; log(theta) = -1.153 with
+# SE .571, Mantel's statistic 4.84.
+asthma <- matrix(c(
+  0,2,1, 1,1,0,  0,1,0, 1,1,0,  1,1,0, 0,1,0,  1,0,0, 1,1,0,  1,0,0, 1,0,0,  1,0,0, 2,1,0,
+  0,1,0, 2,1,0,  0,0,1, 0,1,0,  1,1,0, 1,1,0,  0,2,0, 1,0,0,  2,0,0, 1,0,1,  0,1,0, 1,0,0,
+  1,0,0, 1,0,0,  0,1,0, 2,0,0,  1,0,0, 1,0,0,  0,1,0, 1,0,0,  0,2,0, 1,1,0,  0,1,0, 1,0,0,
+  1,0,0, 1,0,0,  1,0,0, 1,0,0,  0,3,0, 0,1,0,  0,2,0, 1,0,0,  1,0,0, 1,0,0,  1,1,0, 1,0,0,
+  1,0,0, 1,0,0,  0,1,1, 1,0,0,  0,1,0, 0,2,0,  1,0,0, 1,1,0), ncol = 6, byrow = TRUE)
+asthma_long <- do.call(rbind, lapply(seq_len(nrow(asthma)), function(k) {
+  do.call(rbind, lapply(1:2, function(i) {
+    cnt <- asthma[k, (3 * (i - 1) + 1):(3 * i)]
+    cbind(x = rep(0:2, cnt), member = rep(as.integer(i == 1), sum(cnt)), score = rep(k, sum(cnt)))
+  }))
+}))
+asthma_la <- la_eq3(asthma_long[, "x"], asthma_long[, "member"], asthma_long[, "score"])
+stopifnot(abs(log(asthma_la[["theta"]]) + 1.153) < 5e-4, abs(asthma_la[["se_log"]] - 0.571) < 5e-4)
 
 mantel_run <- function(y, member, anchor) {
   out <- lapply(seq_len(ncol(y)), function(j) {
@@ -277,8 +292,8 @@ mantel_run <- function(y, member, anchor) {
     score <- rowSums(y[, union(anchor, j), drop = FALSE])
     la <- liu_agresti_ccor(y[, j], factor(member, levels = c(0, 1)), strata = score,
                            se = "naive")
-    own <- la_delta_se(y[, j], member, score)
-    stopifnot(abs(own[["psi"]] / la[["Psi_hat"]] - 1) < 1e-12)
+    own <- la_eq3(y[, j], member, score)
+    stopifnot(abs(own[["theta"]] * la[["Psi_hat"]] - 1) < 1e-12)
     list(chi2 = chi2, p = pchisq(chi2, 1, lower.tail = FALSE), psi = unname(la["Psi_hat"]),
          se_log_psi = own[["se_log"]])
   })

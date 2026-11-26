@@ -1524,8 +1524,10 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     ない項目の統計量だけが変わる）。$\hat\alpha_{MH}=\sum AD/T/\sum BC/T$ で $A,B$ は参照群の正答・誤答数（したがって
     $\hat\alpha_{MH}>1$ は参照群に有利）。$\ln\hat\alpha_{MH}$ の分散は Phillips & Holland (1987)。
     $\Delta_{MH}=-2.35\ln\hat\alpha_{MH}$、$SE(\Delta)=2.35\,SE(\ln\hat\alpha)$。**ETS 分類**（オーナー判断 2: 既定は
-    本来の規則。Zieky, 1993; Zwick, 2012）: $\lvert\Delta\rvert<1$ または $p\ge\alpha$（補正前の $\chi^2_{MH}$）なら A、
-    $\lvert\Delta\rvert\ge1.5$ かつ $(\lvert\Delta\rvert-1)/SE(\Delta)>z_{1-\alpha}$ なら C、それ以外は B。
+    本来の規則。Zieky, 1993; Zwick, 2012）: $\lvert\Delta\rvert<1$ または $\chi^2_{MH}$ が有意でない（`p_adjust` で
+    調整した p 値、つまり `flagged` と同じ値で $p\ge\alpha$。B と C の項目は必ず検出される。調整しなければ通常の $p$）なら A、
+    $\lvert\Delta\rvert\ge1.5$ かつ $(\lvert\Delta\rvert-1)/SE(\Delta)>z_{1-\alpha}$（$\lvert\Delta\rvert>1$ の片側検定。
+    $\alpha=0.05$ で 1.645。1.96 を使う文献もある）なら C、それ以外は B。
     `classification="effect_size"`: A $<1\le$ B $<1.5\le$ C（difR が表示する分類は右閉区間で、ちょうど境界の値だけが
     異なる）。$\hat\alpha_{MH}$ が 0 または無限大なら `FlexpycttWarning`（difR の "sparse data" の警告）。
 
@@ -1533,10 +1535,17 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     0 / 1 項目では連続修正なしの $\chi^2_{MH}$ に等しい。**Liu–Agresti**（1996）の累積共通オッズ比
     $\hat\psi=\sum_k\sum_{j<L}b_{jk}c_{jk}/T_k\big/\sum_k\sum_{j<L}a_{jk}d_{jk}/T_k$（$a,c$: カテゴリ $j$ 以下の参照群・
     焦点群の人数）は **$\hat\alpha_{MH}$ と同じ向き**にする（0 / 1 項目では $\hat\alpha_{MH}$ になる。difR の
-    `liu_agresti_ccor()` はその逆数を返す）。標準誤差は、群・層ごとに独立な多項分布の下での $\ln\hat\psi$ のデルタ法:
-    $S=\sum bc/T$、$R=\sum ad/T$ として $\operatorname{Var}(S-\hat\psi R)/S^2$。$\sum_jg_ja_j$ の分散は
-    $w_l=\sum_{j\ge l}g_j$ として $n(\sum_l\pi_lw_l^2-(\sum_l\pi_lw_l)^2)$ で計算する。層が大きいことを前提にする。
-    Liu & Agresti の、層が多い場合にも一致する推定量は実装しない。difR 自身の標準誤差は誤っている（VALIDATION V47）。
+    `liu_agresti_ccor()` はその逆数を返す）。標準誤差は **Liu & Agresti（1996）の式 (3)**。Robins, Breslow & Greenland
+    (1986) を一般化したもので、大きな層が一定数ある場合にも、小さな層が多数ある場合にも一致する（dually consistent）。
+    焦点群を彼らの第 1 行として
+    $\widehat{\operatorname{Var}}(\ln\hat\psi)=\sum_k\hat\xi_k\big/(\sum_k\sum_jb_{jk}c_{jk}/T_k)^2$、
+    $\hat\xi_k=\sum_j\hat\phi_{jjk}+2\sum_{j<s}\hat\phi_{jsk}$、
+    $\hat\phi_{jsk}=\frac{n_{Fk}n_{Rk}}{T_k^2}\{\hat\psi d_{sk}a_{jk}/n_{Fk}\,[1+(\hat\psi-1)a_{sk}/n_{Rk}]
+    +c_{jk}b_{sk}/n_{Rk}\,[\hat\psi-(\hat\psi-1)c_{sk}/n_{Fk}]\}$（$j\le s$）。合計得点でマッチングすると小さな層が
+    多数でき、層が大きいことを前提にしたデルタ法（多項分布の分散に推定値を代入した $\operatorname{Var}(S-\hat\psi R)/S^2$。
+    レビュー前の実装）はそこで大きく過小になる（1 層 4 人で約 40%）。この推定量はカテゴリの順序を逆にすると値が変わる。
+    Liu & Agresti は両方の順序の平均をとれるとし、実際の差はわずかだと述べている。flexpyctt は論文どおりカテゴリを
+    昇順に並べ、平均はとらない。difR 自身の標準誤差は誤っている（VALIDATION V47）。
 
     **一般化 MH**（Landis, Heyman & Koch, 1978; Somes, 1986; Penfield, 2001）: 層（$T_k>1$）ごとの群 x 観測カテゴリの
     $G\times C$ 表。カテゴリ $1..C-1$ の焦点群の度数を $T\,\mathbf p\otimes\mathbf q$ と比べ、共分散はそれらのセルに
@@ -2128,6 +2137,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
+- Robins, J., Breslow, N., & Greenland, S. (1986). Estimators of the Mantel–Haenszel variance consistent in both sparse data and large-strata limiting models. *Biometrics*, 42(2), 311–323.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.

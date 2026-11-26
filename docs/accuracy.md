@@ -212,9 +212,11 @@ The complete validation plan, with every case, mirt call and measured difference
 - **Standard error of the Liu–Agresti odds ratio in difR.** difR 6.1's `liu_agresti_ccor()`
   (used by `difMantel.poly()`) reports as `SE_log_Psi` a delta-method value whose derivative with
   respect to the focal counts has a sign error and which is divided by the wrong sum, so it is
-  neither the SE of $\ln\hat\psi$ nor of $\hat\psi$. flexpyctt's `mantel()` uses the correct
-  delta-method SE; for 0 / 1 items with large strata it agrees with the Mantel–Haenszel SE of
-  Phillips & Holland, and with the spread of $\ln\hat\psi$ in simulations. The odds ratio itself
+  neither the SE of $\ln\hat\psi$ nor of $\hat\psi$. flexpyctt's `mantel()` uses Liu & Agresti's
+  (1996) own variance estimator (their eq. 3), which stays valid when the matching score makes
+  many small strata. It reproduces the paper's worked example (SE .571), matches the spread of
+  $\ln\hat\psi$ in simulations with four to ten respondents per stratum, and for 0 / 1 items with
+  large strata agrees with the Mantel–Haenszel SE of Phillips & Holland. The odds ratio itself
   agrees (as its reciprocal: difR's $\hat\psi$ above 1 favours the focal group).
 - **Continuity correction in `mantelhaen.test()`.** R's `mantelhaen.test()` omits the
   correction of $\tfrac12$ when $\lvert\sum A-\sum E(A)\rvert<\tfrac12$; difR, Holland & Thayer
