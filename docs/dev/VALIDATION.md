@@ -930,7 +930,7 @@ English | [日本語](VALIDATION.ja.md)
   local dependence, JSI, DIF and model-based parallel analysis raise an error for a weighted fit.
   Tests: `tests/test_mirt_m7_weights.py`. Reference generator:
   `validation/r/m7_weights_reference.R`.
-- **Model comparison and simulation of responses (V54, #109; DESIGN §20)**:
+- **Model comparison and simulation of responses (V54, #109; DESIGN §21)**:
   - **`compare_fits()` against `anova()`**: every model is fitted by mirt (`optimizer = "NR"`,
     `accelerate = "none"`, `TOL = 1e-10`) and by flexpyirt (`BAEM(tol=1e-9)`) on the same grid,
     and the whole table is compared: Rasch / 2PL / 3PL on the V11a data (61 points on
@@ -1212,3 +1212,10 @@ English | [日本語](VALIDATION.ja.md)
   marginal log-likelihood at the converged point (small cases).
 - **Invariance**: results do not change with item reordering, group relabelling, or with or
   without pattern compression.
+- **User-defined item models (#86, DESIGN §20)**: `tests/test_custom_items.py` re-implements the
+  2PL and the GRM against the public `ItemModel` / `ItemKernel` protocols only. In one mixed model
+  they reproduce the built-in fit to $10^{-12}$ (log-likelihood, iteration count, estimates, Oakes
+  SEs, display thresholds and SEs, EAP/MAP/ML/WLE scores, S-X2, M2, item information); a
+  two-factor model agrees to $10^{-5}$ (different starting values). This checks the extension
+  machinery, not a new model: an example model that is not built in (e.g. GGUM) needs its own
+  mirt comparison (V44 is reserved for GGUM) before it is presented as validated.

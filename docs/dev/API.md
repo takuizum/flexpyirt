@@ -159,6 +159,7 @@ one (DESIGN.md §16.18).
 |---|---|---|
 | `Model` | frozen dataclass | The whole specification. Built with `uniform`, `from_items`; `.fix`, `.fix_from`, `.prior`, `.equal_across_groups`, `.equal_across_items`, `.with_groups`, `.with_latent`, `.parameter_table` |
 | `Rasch`, `TwoPL`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`, `Nominal` | frozen dataclass (satisfies `ItemModel`) | Item models |
+| `items.ItemModel`, `items.ItemKernel`, `items.register_item_model` | Protocols, function | User-defined item models and their JSON registration (DESIGN §20) |
 | `Normal`, `EmpiricalHistogram`, `DavidianCurve`, `NormalMixture` | frozen dataclass (satisfies `LatentDist`) | Latent distributions. `Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)`, `NormalMixture(n_components)` |
 | `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
@@ -176,8 +177,8 @@ one (DESIGN.md §16.18).
 | `item_information`, `test_information`, `expected_score` | function | Item / test information (with the conditional SE) and expected scores of a unidimensional `FitResult` at given `theta`; return DataFrames indexed by `theta` (DESIGN §18.2) |
 | `reliability`, `summed_score_table` | function | Marginal and empirical reliability; the summed-score EAP table (also `FitResult.score(method="EAPsum")`). Return DataFrames |
 | `summed_score_distribution` | function | Lord–Wingersky / Poisson-binomial kernel on category probabilities (DESIGN §18.1) |
-| `compare_fits` | function | Model-comparison table over fits of the same data: `n_params`, `loglik`, AIC, SABIC, HQ, BIC and likelihood-ratio tests against the previous row (mirt's `anova()`; DESIGN §20.1) |
-| `simulate_responses`, `SimulatedData` | function, frozen dataclass | Simulated responses from a `FitResult` or a `Model` + item bank, with a JAX `key`; returns `responses`, `theta`, `group` (DESIGN §20.2) |
+| `compare_fits` | function | Model-comparison table over fits of the same data: `n_params`, `loglik`, AIC, SABIC, HQ, BIC and likelihood-ratio tests against the previous row (mirt's `anova()`; DESIGN §21.1) |
+| `simulate_responses`, `SimulatedData` | function, frozen dataclass | Simulated responses from a `FitResult` or a `Model` + item bank, with a JAX `key`; returns `responses`, `theta`, `group` (DESIGN §21.2) |
 | `LocalDependenceResult` | frozen dataclass | Returned by `FitResult.local_dependence()` (`pairs`, `q3`, `q3_mean`, `max_q3_star`) |
 | `JSIResult` | frozen dataclass | Returned by `FitResult.jsi()` (`matrix`, `pairs`, `method`, `converged`) |
 | `PolychoricResult` | frozen dataclass | `correlation`, `unsmoothed_correlation`, `thresholds`, `categories`, `n_obs`, per-pair `converged` / `at_boundary` / `zero_cell_corrected`, `smoothed`, `min_eigenvalue` |
