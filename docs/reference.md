@@ -566,12 +566,17 @@ Set the latent distribution of a single-group model to a `Normal`, `EmpiricalHis
 #### `Model.with_groups`
 
 ```text
-model.with_groups(**latents) -> Model
+model.with_groups(groups=None, /, **latents) -> Model
 ```
 
 Make a multiple-group model. Keyword order defines the groups, and **the first group is the
 reference group**. At least two groups. Example:
-`model.with_groups(ref=Normal.standard(), focal=Normal.free())`.
+`model.with_groups(ref=Normal.standard(), focal=Normal.free())`. The groups can instead be one
+positional mapping (insertion order; keys are converted to `str`), for many groups or labels that
+are not identifiers: `model.with_groups({"ref": Normal.standard()} | {s: Normal.free() for s in
+schools})`. Passing both a mapping and keywords raises `SpecificationError`. Every group uses the
+same latent family (`Normal` or `EmpiricalHistogram`). With two or more groups the E-step runs over
+blocks of each group's patterns (DESIGN §26).
 
 #### `Model.equal_across_groups`
 

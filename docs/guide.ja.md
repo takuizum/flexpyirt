@@ -847,6 +847,26 @@ mg_scores = mg.score(mg_df.iloc[[0, -1]], group=["ref", "focal"])
 print(mg_scores)
 ```
 
+### 多数の群
+
+数十〜数百の群（学校、学校 × 学年）では、`with_groups()` に群を 1 つのマッピングで渡す。挿入順が群の順で、
+先頭が参照群。群ラベルは Python の識別子でなくてよく、アンカーは全群に対して 1 回宣言すればよい:
+
+```python
+schools = [f"school_{k:03d}" for k in range(1, 101)]
+many_spec = (
+    Model.uniform(TwoPL(), items=items)
+    .with_groups({"school_000": Normal.standard()} | {s: Normal.free() for s in schools})
+    .equal_across_groups(items=None)  # 全項目を不変に: 尺度は 1 つ、学校ごとに平均・分散
+)
+print(len(many_spec.resolved_groups()))
+```
+
+群が 2 つ以上のとき E-step は各群の反応パターンのブロック上で回るので、計算量は受験者数 × 群数ではなく
+受験者数に比例し、コンパイル時間は群の数によらない（DESIGN §26。10・50・200 群のベンチマークは
+`benchmarks/`）。`mg.latent` は群ごとに 1 行。多数の群で群ごとに異なる項目パラメタ（`equal_across_groups()`
+なし）と `se="crossprod"` / `"sandwich"` は、今も群の数に応じて重くなる。
+
 ### 特異項目機能（DIF）
 
 `dif(data, group=..., items=...)` は多母集団の尤度比検定を行う（項目ごとに 1 回推定し直す）。`scheme="add"`

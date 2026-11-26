@@ -940,6 +940,29 @@ mg_scores = mg.score(mg_df.iloc[[0, -1]], group=["ref", "focal"])
 print(mg_scores)
 ```
 
+### Many groups
+
+For dozens or hundreds of groups (schools, school × grade), pass the groups to `with_groups()` as
+one mapping; its insertion order defines the groups and the first is the reference group. Group
+labels then need not be Python identifiers, and the anchors are declared once for every group:
+
+```python
+schools = [f"school_{k:03d}" for k in range(1, 101)]
+many_spec = (
+    Model.uniform(TwoPL(), items=items)
+    .with_groups({"school_000": Normal.standard()} | {s: Normal.free() for s in schools})
+    .equal_across_groups(items=None)  # every item invariant: one scale, a mean/variance per school
+)
+print(len(many_spec.resolved_groups()))
+```
+
+With two or more groups the E-step runs over blocks of each group's response patterns, so its cost
+grows with the number of respondents rather than with respondents × groups, and the compile time
+does not grow with the number of groups (DESIGN §26; benchmarks for 10, 50 and 200 groups in
+`benchmarks/`). `mg.latent` has one row per group. Items whose parameters differ across many
+groups (no `equal_across_groups()`) and `se="crossprod"` / `"sandwich"` still scale with the number
+of groups.
+
 ### Differential item functioning (DIF)
 
 `dif(data, group=..., items=...)` runs multiple-group likelihood-ratio tests, one refit per item.
