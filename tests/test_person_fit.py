@@ -134,6 +134,7 @@ def test_item_fit_matches_2pl_closed_form() -> None:
     )
 
 
+@pytest.mark.slow
 def test_lz_star_null_distribution_is_standard_normal() -> None:
     """Under the model l_z* has mean ~0 and SD ~1 (ML and WLE); l_z at theta-hat has SD < 1."""
     n = 3000
@@ -183,6 +184,7 @@ def test_person_fit_columns_and_index() -> None:
     assert row["n_items"] == 0 and np.isnan(row["lz"]) and np.isnan(row["infit"])
 
 
+@pytest.mark.slow
 def test_multigroup_grm_runs_per_group() -> None:
     rng = np.random.default_rng(5)
     n, items = 600, [f"g{j}" for j in range(6)]
