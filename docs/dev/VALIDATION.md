@@ -1046,7 +1046,7 @@ English | [日本語](VALIDATION.ja.md)
   local dependence, JSI, DIF and model-based parallel analysis raise an error for a weighted fit.
   Tests: `tests/test_mirt_m7_weights.py`. Reference generator:
   `validation/r/m7_weights_reference.R`.
-- **Model comparison and simulation of responses (V54, #109; DESIGN §23)**:
+- **Model comparison and simulation of responses (V54, #109; DESIGN §24)**:
   - **`compare_fits()` against `anova()`**: every model is fitted by mirt (`optimizer = "NR"`,
     `accelerate = "none"`, `TOL = 1e-10`) and by flexpyirt (`BAEM(tol=1e-9)`) on the same grid,
     and the whole table is compared: Rasch / 2PL / 3PL on the V11a data (61 points on

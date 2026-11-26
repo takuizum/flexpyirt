@@ -3001,7 +3001,7 @@ data-independent shapes (§15.21).
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 
-## 23. Model comparison and simulation of responses (#109)
+## 24. Model comparison and simulation of responses (#109)
 
 1. **Model-comparison table (`compare_fits()`, V54)**: `compare_fits(*results, names=None)` takes
    two or more `FitResult`s of the same responses, ordered from the most restricted model to the

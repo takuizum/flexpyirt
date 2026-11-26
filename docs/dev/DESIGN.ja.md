@@ -2248,7 +2248,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 
-## 23. モデル比較と回答データのシミュレーション（#109）
+## 24. モデル比較と回答データのシミュレーション（#109）
 
 1. **モデル比較表（`compare_fits()`、V54）**: `compare_fits(*results, names=None)` は同じ回答への
    2 つ以上の `FitResult` を、最も制約の強いモデルから弱いモデルの順に受け取り、当てはめごとに 1 行を返す:

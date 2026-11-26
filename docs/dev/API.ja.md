@@ -172,8 +172,8 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `flexpyirt.plotting` | モジュール | `plot_item_curves`（観測比率つき。群ごとの曲線が DIF の図）、`plot_information`、`plot_expected_score`、`plot_wright_map`。matplotlib は任意依存 `flexpyirt[plot]` から遅延 import（なければ `MissingDependencyError`）（DESIGN §21） |
 | `reliability`, `summed_score_table` | 関数 | 周辺信頼性・経験的信頼性と、合計得点 EAP の表（`FitResult.score(method="EAPsum")` も）。DataFrame を返す |
 | `summed_score_distribution` | 関数 | カテゴリ確率に対する Lord–Wingersky / Poisson 二項分布のカーネル（DESIGN §18.1） |
-| `compare_fits` | 関数 | 同じデータへの当てはめの比較表: `n_params`、`loglik`、AIC、SABIC、HQ、BIC と直前の行に対する尤度比検定（mirt の `anova()`。DESIGN §23.1） |
-| `simulate_responses`, `SimulatedData` | 関数、frozen dataclass | `FitResult` または `Model` + 項目バンクから JAX の `key` で回答データを生成する。`responses`、`theta`、`group` を返す（DESIGN §23.2） |
+| `compare_fits` | 関数 | 同じデータへの当てはめの比較表: `n_params`、`loglik`、AIC、SABIC、HQ、BIC と直前の行に対する尤度比検定（mirt の `anova()`。DESIGN §24.1） |
+| `simulate_responses`, `SimulatedData` | 関数、frozen dataclass | `FitResult` または `Model` + 項目バンクから JAX の `key` で回答データを生成する。`responses`、`theta`、`group` を返す（DESIGN §24.2） |
 | `LocalDependenceResult` | frozen dataclass | `FitResult.local_dependence()` の戻り値（`pairs`, `q3`, `q3_mean`, `max_q3_star`） |
 | `JSIResult` | frozen dataclass | `FitResult.jsi()` の戻り値（`matrix`, `pairs`, `method`, `converged`） |
 
