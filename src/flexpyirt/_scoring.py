@@ -65,7 +65,7 @@ def _pattern_loglik(
     xi_list: tuple[Array, ...],
 ) -> Array:
     r"""Log-likelihood :math:`\log L(\theta\mid y_p)` for one pattern, dropping missing items."""
-    t1 = theta[None]
+    t1 = jnp.reshape(theta, (1, -1))  # (1, D): kernels always receive (Q, D) nodes (§20)
     total = jnp.zeros((), dtype=theta.dtype)
     for fam, xi in zip(families, xi_list, strict=True):
         y_f = y_p[fam.columns]  # (J_f,)
@@ -101,7 +101,7 @@ def _pattern_info(
 
         def _item_info(p: Array, k: ItemKernel = fam.kernel) -> Array:
             def lp_fn(t: Array) -> Array:
-                return k.log_prob(t[None], p)[0]
+                return k.log_prob(jnp.reshape(t, (1, 1)), p)[0]
 
             lp = lp_fn(theta)
             dlp = jax.jacfwd(lp_fn)(theta)

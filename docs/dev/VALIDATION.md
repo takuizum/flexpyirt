@@ -931,7 +931,7 @@ English | [日本語](VALIDATION.ja.md)
   Tests: `tests/test_mirt_m7_weights.py`. Reference generator:
   `validation/r/m7_weights_reference.R`.
 
-- **IRT equating and raw-to-scale tables (V51, #106)**: DESIGN §20 in `tests/test_r_equating.py`
+- **IRT equating and raw-to-scale tables (V51, #106)**: DESIGN §21 in `tests/test_r_equating.py`
   (generator `validation/r/v51_irt_equating_reference.R` → `tests/reference/v51_irt_equating.json`;
   mirt 1.48, equateIRT 2.5.2, SNSequate 1.3.5, equate 2.0.9). No parameters are estimated: the
   item parameters are chosen in R and stored, the latent distributions are $N(0,1)$ on 61
@@ -970,7 +970,7 @@ English | [日本語](VALIDATION.ja.md)
     `fscores`): $\theta$ `5.6e-15`, SE `1.6e-15` relative; the rounded scale scores are equal.
   - **Not covered by R**: the 4PL upper-asymptote interpolation, multiple-group forms and
     populations, and links are unit-tested (`tests/test_equating.py`) against `expected_score()`,
-    `item_information()`, `summed_score_table()` and the formulas of DESIGN §20. EH, Davidian and
+    `item_information()`, `summed_score_table()` and the formulas of DESIGN §21. EH, Davidian and
     mixture populations come from the same fitted grid as `link()` (`_fitted_grid`) and have no
     equating test of their own.
 
@@ -1221,3 +1221,10 @@ English | [日本語](VALIDATION.ja.md)
   marginal log-likelihood at the converged point (small cases).
 - **Invariance**: results do not change with item reordering, group relabelling, or with or
   without pattern compression.
+- **User-defined item models (#86, DESIGN §20)**: `tests/test_custom_items.py` re-implements the
+  2PL and the GRM against the public `ItemModel` / `ItemKernel` protocols only. In one mixed model
+  they reproduce the built-in fit to $10^{-12}$ (log-likelihood, iteration count, estimates, Oakes
+  SEs, display thresholds and SEs, EAP/MAP/ML/WLE scores, S-X2, M2, item information); a
+  two-factor model agrees to $10^{-5}$ (different starting values). This checks the extension
+  machinery, not a new model: an example model that is not built in (e.g. GGUM) needs its own
+  mirt comparison (V44 is reserved for GGUM) before it is presented as validated.

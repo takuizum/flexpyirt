@@ -939,7 +939,7 @@
   一致すること、行を 2 倍にすると共分散が半分になること、`b_se` と `link()` が選んだ共分散を読むこと、
   JSON の往復、拒否するケース。
 
-- **IRT 等化と素点-尺度得点変換表（V51、#106）**: DESIGN §20 を `tests/test_r_equating.py` で照合
+- **IRT 等化と素点-尺度得点変換表（V51、#106）**: DESIGN §21 を `tests/test_r_equating.py` で照合
   （生成スクリプト `validation/r/v51_irt_equating_reference.R` → `tests/reference/v51_irt_equating.json`。
   mirt 1.48、equateIRT 2.5.2、SNSequate 1.3.5、equate 2.0.9）。パラメタは推定しない: 項目パラメタは R で決めて保存し、
   潜在分布は $[-6,6]$ の等間隔 61 点上の $N(0,1)$、リンクは $\theta_Y=A\theta_X+B$（2 値 $A=1.15$, $B=-0.25$、
@@ -968,7 +968,7 @@
     （`expected.test()` の `uniroot()` による $\theta$、SE は $1/\sqrt{\texttt{testinfo}}$）: $\theta$ `2.3e-12`、SE 相対
     `1.2e-12`。EAPsum（mirt `fscores`）: $\theta$ `5.6e-15`、SE 相対 `1.6e-15`。丸めた尺度得点は一致。
   - **R で照合していないもの**: 4PL の上側漸近線の補間、多母集団のフォームと母集団、リンクは
-    `tests/test_equating.py` で `expected_score()`・`item_information()`・`summed_score_table()` と DESIGN §20 の式に
+    `tests/test_equating.py` で `expected_score()`・`item_information()`・`summed_score_table()` と DESIGN §21 の式に
     対して単体テストする。EH・Davidian・混合の母集団は `link()` と同じ推定格子（`_fitted_grid`）から作り、等化としての
     テストは別にない。
 
@@ -977,3 +977,8 @@
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。
 - **SE の内部整合**: Oakes の SE と、収束点での周辺対数尤度の直接 `jax.hessian` による SE が一致すること（小規模ケース）。
 - **不変性**: 項目の並べ替え、群ラベルの付け替え、パターン圧縮の有無で結果が変わらないこと。
+- **ユーザー定義の項目モデル（#86、DESIGN §20）**: `tests/test_custom_items.py` は公開の `ItemModel` / `ItemKernel`
+  プロトコルだけを使って 2PL と GRM を実装し直す。1 つの混合モデルで、組み込みの推定と $10^{-12}$ まで一致する
+  （対数尤度、反復回数、推定値、Oakes SE、表示用閾値とその SE、EAP/MAP/ML/WLE の得点、S-X2、M2、項目情報量）。
+  2 因子モデルは $10^{-5}$ まで一致する（初期値が違う）。これは拡張の仕組みの検証であり、新しいモデルの検証ではない。
+  組み込みでない例のモデル（GGUM など）は、検証済みとして示す前にそれ自身の mirt との照合が要る（GGUM には V44 を予約）。

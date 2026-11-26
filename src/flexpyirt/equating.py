@@ -1,4 +1,4 @@
-r"""IRT true-score and observed-score equating and raw-to-scale tables (DESIGN.md §20).
+r"""IRT true-score and observed-score equating and raw-to-scale tables (DESIGN.md §21).
 
 Result / Python shell layer. :func:`irt_equate` converts the summed scores of a new form to the
 summed-score scale of an old form once both are on one :math:`\theta` scale (Lord, 1980; Lord &
@@ -47,7 +47,7 @@ ScaleMethod = Literal["true_score", "EAPsum"]
 """Methods of :func:`scale_table`."""
 
 _ASYMPTOTE_THETA = 1e8
-r"""Own-scale :math:`|\theta|` at which the TCC's asymptotes are evaluated (DESIGN.md §20.2)."""
+r"""Own-scale :math:`|\theta|` at which the TCC's asymptotes are evaluated (DESIGN.md §21.2)."""
 _MONOTONE_GRID = np.linspace(-20.0, 20.0, 801)
 """Own-scale grid on which true-score methods check that the TCC does not decrease."""
 _MONOTONE_TOL = 1e-10
@@ -213,7 +213,7 @@ def _true_score_theta(spec: _FormSpec, scores: np.ndarray, role: str) -> np.ndar
     r"""Solve :math:`\tau(\theta)=x` on the common scale for scores strictly inside the TCC's range.
 
     Scores at or below the lower asymptote get :math:`-\infty`, scores at or above the upper one
-    :math:`+\infty` (DESIGN.md §20.3).
+    :math:`+\infty` (DESIGN.md §21.3).
     """
     lo_asym, hi_asym = _asymptotes(spec)
     theta = np.where(scores <= lo_asym, -np.inf, np.inf)
@@ -426,7 +426,7 @@ def irt_equate(
     calibration (the same fit twice, with ``new_items`` / ``old_items``), or a ``link`` that
     maps the scale of ``new`` onto that of ``old``, :math:`\theta_Y=A\theta_X+B`. The common
     scale is the old form's; with a link the new form's items are evaluated at
-    :math:`(\theta-B)/A` (DESIGN.md §20).
+    :math:`(\theta-B)/A` (DESIGN.md §21).
 
     **True-score equating** (Lord, 1980; Kolen & Brennan, 2014, §6.5). With the test
     characteristic curves :math:`\tau_X(\theta)=\sum_j\sum_kk\,P_{jk}(\theta)` of the two forms,
