@@ -18,7 +18,7 @@ pip install flexpyirt  # or: uv add flexpyirt
 ```
 
 Installing flexpyirt also installs **flexpyctt**, its companion package for analyses that need no
-fitted model (polychoric correlations, number of dimensions, DETECT, DIMTEST). flexpyctt depends
+fitted model (polychoric correlations, number of dimensions, DETECT, DIMTEST, observed-score DIF). flexpyctt depends
 on NumPy, SciPy and pandas only; install it alone with `pip install flexpyctt` where JAX is not
 wanted.
 

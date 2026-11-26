@@ -74,10 +74,11 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | Comparison data | EFAtools' `CD()`: the same population from the same random draws, the same rank-sum tests and the same suggested numbers |
 | DIMTEST | No implementation outside the stand-alone DIMPACK exists, so it is checked by simulation: type I error 0.5–1% at the 5% level (conservative) and power 99–100% against two dimensions correlated 0.7–0.8 |
 | DETECT (confirmatory, exploratory) | sirt's `conf.detect(use_sum_score = TRUE, smooth = FALSE)` and `expl.detect(use_sum_score = TRUE)` with the same split: conditional covariances, indices, partitions, to $10^{-12}$ |
+| Observed-score DIF (Mantel–Haenszel, Mantel, generalized MH, logistic regression) | difR's `difMH()`, `difGMH()` and `difLogistic()` (statistics, odds ratios and their variances, $\Delta R^2$, coefficients, purification paths and flags) and R's `mantelhaen.test()`: to $10^{-10}$, logistic regression to $10^{-8}$ (standard errors and Wald statistics $10^{-6}$); Mantel's statistic and the cumulative odds ratio against `difMantel.poly()` / `liu_agresti_ccor()` and a direct R implementation |
 | Scale linking (Haebara, Stocking–Lord; unidimensional and confirmatory multidimensional models) | independent R implementations of the criteria using mirt's response functions (mirt itself has no characteristic-curve linking) |
 
 Polychoric correlations, parallel analysis, MAP, the empirical Kaiser criterion, factor analysis,
-the Hull method, comparison data, DETECT and DIMTEST are functions of the companion package
+the Hull method, comparison data, DETECT, DIMTEST and observed-score DIF are functions of the companion package
 flexpyctt (NumPy / SciPy, no JAX). flexpyirt's own `polychoric()` is a JAX implementation of the
 same estimator: it passes the same checks, and the two agree to $10^{-9}$ on every check case.
 
@@ -138,7 +139,24 @@ The complete validation plan, with every case, mirt call and measured difference
   so the "rest score" groups are not rest-score groups and the indices differ (DETECT 6.73
   instead of 1.60 on one test case). With `smooth = FALSE`, and in `expl.detect()`, sirt and
   flexpyirt agree.
+- **Standard error of the Liu–Agresti odds ratio in difR.** difR 6.1's `liu_agresti_ccor()`
+  (used by `difMantel.poly()`) reports as `SE_log_Psi` a delta-method value whose derivative with
+  respect to the focal counts has a sign error and which is divided by the wrong sum, so it is
+  neither the SE of $\ln\hat\psi$ nor of $\hat\psi$. flexpyctt's `mantel()` uses the correct
+  delta-method SE; for 0 / 1 items with large strata it agrees with the Mantel–Haenszel SE of
+  Phillips & Holland, and with the spread of $\ln\hat\psi$ in simulations. The odds ratio itself
+  agrees (as its reciprocal: difR's $\hat\psi$ above 1 favours the focal group).
+- **Continuity correction in `mantelhaen.test()`.** R's `mantelhaen.test()` omits the
+  correction of $\tfrac12$ when $\lvert\sum A-\sum E(A)\rvert<\tfrac12$; difR, Holland & Thayer
+  (1988) and flexpyctt always apply it, so the corrected $\chi^2_{MH}$ of such an item (one with no
+  DIF) differs from `mantelhaen.test()`.
+- **Purification in difR's `difMantel.poly()`.** It removes a flagged item from its own matching
+  score as well; flexpyctt keeps the studied item in its matching score for every method, as
+  difR's other functions do.
 
 ## References
 
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Holland, P. W., & Thayer, D. T. (1988). Differential item performance and the Mantel–Haenszel procedure. In H. Wainer & H. I. Braun (Eds.), *Test Validity* (pp. 129–145). Erlbaum.
+- Liu, I.-M., & Agresti, A. (1996). Mantel–Haenszel-type inference for cumulative odds ratios with a stratified ordinal response. *Biometrics*, 52(4), 1223–1234.
+- Phillips, A., & Holland, P. W. (1987). Estimators of the variance of the Mantel–Haenszel log-odds-ratio estimate. *Biometrics*, 43(2), 425–431.
