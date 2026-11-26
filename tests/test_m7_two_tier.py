@@ -425,7 +425,7 @@ def test_fit_converges_and_squarem_agrees() -> None:
 def test_json_round_trip_and_summary() -> None:
     res = _fitted(False)
     payload = json.loads(res.to_json())
-    assert payload["schema_version"] == 6
+    assert payload["schema_version"] >= 6  # n_primary_factors since version 6
     assert payload["model"]["n_primary_factors"] == 2 and payload["model"]["bifactor"] is False
     loaded = FitResult.from_json(json.dumps(payload))
     assert loaded._model == res._model
