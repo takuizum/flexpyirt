@@ -2566,6 +2566,86 @@ data-independent shapes (§15.21).
    $\mathbf A$ and NaN otherwise (a rotated standard error needs the posterior covariance, which
    the score table does not carry).
 
+## 20. Person fit and residual item fit (#108)
+
+1. **Scope and API (V53, #108)**: `FitResult.person_fit(data, *, method="EAP", group=None,
+   item_names=None, statistics=("lz", "infit", "outfit"))` returns one row per respondent with
+   `theta`, the requested statistics (`lz`, `lz_star`, `infit`, `z_infit`, `outfit`, `z_outfit`)
+   and `n_items` (answered items). `FitResult.item_fit(data, *, statistics=("s_x2",),
+   method="EAP", ...)` gains `"infit"` and `"outfit"`; the default stays S-X2 (§15.40), so
+   existing calls do not change, and the residual columns are merged onto the S-X2 table when
+   both are requested. Unidimensional models (one or several groups, every item family, any
+   latent distribution `score()` supports for the chosen estimator); missing responses are
+   skipped. `method` is the ability estimator of `score()` restricted to the point estimators
+   EAP, MAP, ML and WLE (PV and EAPsum raise). Every statistic is evaluated at the respondent's
+   estimate $\hat\theta$ with the respondent's group's item parameters. Owner decisions taken
+   in #108: a method on `FitResult` (as `item_fit()`), `statistics=` on `item_fit()` rather than
+   a separate method, infit / outfit allowed for every item family (as mirt; their reference
+   distribution is derived for Rasch-family models, so for other models they are descriptive
+   and the guide says so), and $l_z^*$ validated by an R recomputation (item 5).
+   Out of scope: nonparametric person fit (U3, $H^T$, caution indices), CUSUM, resampling
+   p-values, TAM's marginal infit / outfit, multidimensional models.
+   **Layers.** `_personfit.pattern_statistics` (jit, `vmap` over the unique patterns of the
+   compiled problem) returns per pattern $l_z$, $l_z^*$, the number of answered items and the
+   per-item residual moments $r_{pj}^2$, $W_{pj}$, $C_{pj}$ (NaN for unanswered items);
+   derivatives in $\theta$ come from JAX autodiff (`jacfwd` of each kernel's `log_prob`).
+   `_personfit.mean_square` forms the mean squares and $z$ values in NumPy along the item axis
+   (persons) or the person axis (items, within each group).
+2. **$l_z$ (Drasgow, Levine & Williams, 1985)**: with $A$ the answered items and
+   $P_{jk}=P_{jk}(\hat\theta)$,
+   $$l_0=\sum_{j\in A}\log P_{jy_j},\qquad
+   \mathrm E(l_0)=\sum_{j\in A}\sum_k P_{jk}\log P_{jk},\qquad
+   \mathrm{Var}(l_0)=\sum_{j\in A}\Big[\sum_k P_{jk}(\log P_{jk})^2-\Big(\sum_k P_{jk}\log
+   P_{jk}\Big)^2\Big],$$
+   $l_z=(l_0-\mathrm E(l_0))/\sqrt{\mathrm{Var}(l_0)}$, the polytomous form of mirt's `Zh`
+   (mirt writes the variance as $\sum_{k\ne k'}P_kP_{k'}\log P_k\log(P_k/P_{k'})$, the same
+   quantity). Terms with $P_{jk}=0$ contribute 0.
+3. **$l_z^*$ (Snijders, 2001; polytomous items: Sinharay, 2016)**: $l_z$ evaluated at
+   $\hat\theta$ instead of $\theta$ has variance below 1. Write
+   $l_0-\mathrm E(l_0)=\sum_j a_j$ with $a_j=\log P_{jy_j}-\sum_k P_{jk}\log P_{jk}$ (mean 0) and
+   let the estimator solve $\sum_j b_j(\theta)+r_0(\theta)=0$ with $b_j=\partial\log
+   P_{jy_j}/\partial\theta$. A first-order expansion of $\sum_j a_j(\hat\theta)$ around $\theta$,
+   with $\mathrm E[\partial a_j/\partial\theta]=-\mathrm{Cov}(a_j,b_j)=-\sum_k P'_{jk}\log P_{jk}$
+   and $\hat\theta-\theta\approx(\sum_j b_j+r_0)/\sum_j I_j$, gives
+   $$l_z^*=\frac{l_0-\mathrm E(l_0)+c\,r_0(\hat\theta)}{\tau},\quad
+   c=\frac{\sum_j\sum_k P'_{jk}\log P_{jk}}{\sum_j I_j},\quad
+   \tau^2=\sum_j\Big[\mathrm{Var}(a_j)-2c\sum_k P'_{jk}\log P_{jk}+c^2I_j\Big],$$
+   all at $\hat\theta$, with $I_j=\sum_k P'^2_{jk}/P_{jk}$. For dichotomous items this is
+   Snijders' $l_z^*$ with $w_j=\log(P_j/Q_j)$ and $r_j=P'_j/(P_jQ_j)$. The estimator's term is
+   $r_0=0$ for ML, $r_0=-(\theta-\mu_g)/\sigma_g^2$ for MAP (the group's normal prior, §15.22)
+   and $r_0=I'(\theta)/(2I(\theta))$ for WLE — flexpyirt's WLE maximizes $\log L+\tfrac12\log I$
+   (§15.24), so its $r_0$ uses $I'=\partial I/\partial\theta$, which equals Warm's
+   $\sum_jP'_jP''_j/(P_jQ_j)$ for 1PL / 2PL items but not for 3PL / 4PL. EAP has no estimating
+   equation of this form, so `"lz_star"` with `method="EAP"` raises.
+4. **Residuals, infit and outfit (Wright & Masters, 1982)**: with category scores
+   $0,\dots,K_j-1$, $E_j=\sum_k kP_{jk}$, $r_j=y_j-E_j$, $W_j=\sum_k(k-E_j)^2P_{jk}$ and
+   $C_j=\sum_k(k-E_j)^4P_{jk}$, over the $n$ answered items of a respondent (or the $N_j$
+   respondents who answered item $j$):
+   $$\mathrm{outfit}=\frac1n\sum\frac{r^2}{W},\quad
+   q_{\mathrm{out}}^2=\frac1{n^2}\sum\frac{C}{W^2}-\frac1n,\qquad
+   \mathrm{infit}=\frac{\sum r^2}{\sum W},\quad
+   q_{\mathrm{in}}^2=\frac{\sum(C-W^2)}{(\sum W)^2},$$
+   $q$ capped at 1.4142 and $z=(\mathrm{MS}^{1/3}-1)(3/q)+q/3$ (Wilson–Hilferty). Category
+   scores $0,\dots,K_j-1$ are used for every family, nominal included (as mirt). $W_j$ is
+   floored at $\sqrt{10^{-5}}$ whenever $W_j^2<10^{-5}$ (mirt's guard at extreme $\hat\theta$).
+   Item statistics are computed within each group in a multiple-group model (as mirt's
+   `itemfit()` on `multipleGroup` fits); weighted fits raise (as S-X2).
+5. **Differences from mirt and validation**: (a) person `z_outfit` uses $n^2$ (answered items)
+   under the square root; mirt's `personfit()` uses $J^2$ (all items) and takes an absolute
+   value, which differs only for rows with missing responses (its `itemfit()` uses the
+   respondent count correctly). (b) A non-finite $\hat\theta$ (ML on an all-lowest or
+   all-highest pattern, all-missing rows) gives NaN statistics and is skipped in item
+   statistics; mirt replaces $\pm\infty$ by the most extreme finite estimate $\pm0.1$.
+   (c) mirt sets a picked probability below machine epsilon to 1 in $l_0$; flexpyirt keeps the
+   log-probability. V53 compares $l_z$ and person infit / outfit with mirt's `personfit()`,
+   person $z_{\mathrm{out}}$ with the $n^2$ formula on mirt's own residual moments, item
+   infit / outfit with `itemfit(fit_stats = "infit")`, lz, infit and outfit for a Rasch model
+   with `sirt::personfit.stat()`, and $l_z^*$ with an R recomputation from the formulas of
+   item 3 (`probtrace()` with central differences, `iteminfo()`): no installed R package
+   implements $l_z^*$ (`PerFit::lzstar` could not be installed, and it covers dichotomous items
+   only). The $l_z^*$ entry is listed in the user documentation only if the owner accepts this
+   validation (#108).
+
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -2587,6 +2667,7 @@ data-independent shapes (§15.21).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
 - Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
+- Drasgow, F., Levine, M. V., & Williams, E. A. (1985). Appropriateness measurement with polychotomous item response models and standardized indices. *British Journal of Mathematical and Statistical Psychology*, 38(1), 67–86.
 - Drezner, Z., & Wesolowsky, G. O. (1990). On the computation of the bivariate normal integral. *Journal of Statistical Computation and Simulation*, 35(1–2), 101–107.
 - Edwards, M. C., Houts, C. R., & Cai, L. (2018). A diagnostic procedure to detect departures from local independence in item response theory models. *Psychological Methods*, 23(1), 138–149.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
@@ -2646,7 +2727,9 @@ data-independent shapes (§15.21).
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Sinharay, S. (2016). Asymptotically correct standardization of person-fit statistics beyond dichotomous items. *Psychometrika*, 81(4), 992–1013.
 - Skinner, C. J. (1989). Domain means, regression and multivariate analysis. In C. J. Skinner, D. Holt & T. M. F. Smith (Eds.), *Analysis of Complex Surveys* (pp. 59–87). Wiley.
+- Snijders, T. A. B. (2001). Asymptotic null distribution of person fit statistics with estimated person parameter. *Psychometrika*, 66(3), 331–342.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
 - Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.
@@ -2666,6 +2749,7 @@ data-independent shapes (§15.21).
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
+- Wright, B. D., & Masters, G. N. (1982). *Rating Scale Analysis*. MESA Press.
 - Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.

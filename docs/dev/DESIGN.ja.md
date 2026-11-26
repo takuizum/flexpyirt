@@ -1901,6 +1901,69 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    対角の $\mathbf A$ では $A_m\,\mathrm{se}_m$、それ以外では NaN にする（回転後の標準誤差には事後共分散が必要だが、
    得点表はそれを持たない）。
 
+## 20. 受験者適合度と残差にもとづく項目適合度（#108）
+
+1. **範囲と API（V53、#108）**: `FitResult.person_fit(data, *, method="EAP", group=None,
+   item_names=None, statistics=("lz", "infit", "outfit"))` は受験者 1 人 1 行で、`theta`、要求した統計量
+   （`lz`・`lz_star`・`infit`・`z_infit`・`outfit`・`z_outfit`）と `n_items`（回答した項目数）を返す。
+   `FitResult.item_fit(data, *, statistics=("s_x2",), method="EAP", ...)` に `"infit"` と `"outfit"` を加える。
+   既定は S-X2（§15.40）のままなので既存の呼び出しは変わらず、両方を要求すると残差の列を S-X2 の表に結合する。
+   対象は 1 次元モデル（1 群・多群、全項目族、選んだ推定法で `score()` が受け付ける潜在分布）で、欠測は飛ばす。
+   `method` は `score()` の能力推定法のうち点推定の EAP・MAP・ML・WLE に限る（PV と EAPsum はエラー）。
+   どの統計量も受験者の推定値 $\hat\theta$ で、その受験者の群の項目パラメータを使って評価する。
+   #108 で決めたこと: `FitResult` のメソッドにする（`item_fit()` と同じ）、別メソッドではなく `item_fit()` に
+   `statistics=` を足す、infit / outfit は全項目族で計算する（mirt と同じ。参照分布は Rasch 系モデルで導かれたもので、
+   それ以外では記述的な指標であることをガイドに書く）、$l_z^*$ は R での再計算で照合する（5 項）。
+   範囲外: ノンパラメトリックな受験者適合度（U3、$H^T$、caution index）、CUSUM、リサンプリングの p 値、
+   TAM の周辺版 infit / outfit、多次元モデル。
+   **層。** `_personfit.pattern_statistics`（jit、コンパイル済み問題の一意なパターンに `vmap`）がパターンごとに
+   $l_z$・$l_z^*$・回答項目数と項目ごとの残差モーメント $r_{pj}^2$・$W_{pj}$・$C_{pj}$（未回答は NaN）を返す。
+   $\theta$ による微分は JAX の自動微分（各カーネルの `log_prob` の `jacfwd`）。`_personfit.mean_square` が
+   NumPy で項目方向（受験者）または受験者方向（項目、群ごと）に平均平方と $z$ 値を作る。
+2. **$l_z$（Drasgow, Levine & Williams, 1985）**: 回答した項目を $A$、$P_{jk}=P_{jk}(\hat\theta)$ として
+   $$l_0=\sum_{j\in A}\log P_{jy_j},\qquad
+   \mathrm E(l_0)=\sum_{j\in A}\sum_k P_{jk}\log P_{jk},\qquad
+   \mathrm{Var}(l_0)=\sum_{j\in A}\Big[\sum_k P_{jk}(\log P_{jk})^2-\Big(\sum_k P_{jk}\log
+   P_{jk}\Big)^2\Big],$$
+   $l_z=(l_0-\mathrm E(l_0))/\sqrt{\mathrm{Var}(l_0)}$。mirt の `Zh` の多値版である（mirt は分散を
+   $\sum_{k\ne k'}P_kP_{k'}\log P_k\log(P_k/P_{k'})$ と書くが同じ量）。$P_{jk}=0$ の項は 0 とする。
+3. **$l_z^*$（Snijders, 2001; 多値項目は Sinharay, 2016）**: $\theta$ の代わりに $\hat\theta$ で評価した $l_z$ は
+   分散が 1 より小さい。$l_0-\mathrm E(l_0)=\sum_j a_j$、$a_j=\log P_{jy_j}-\sum_k P_{jk}\log P_{jk}$（平均 0）とし、
+   推定量が $\sum_j b_j(\theta)+r_0(\theta)=0$（$b_j=\partial\log P_{jy_j}/\partial\theta$）を解くとする。
+   $\sum_j a_j(\hat\theta)$ を $\theta$ のまわりで 1 次展開し、
+   $\mathrm E[\partial a_j/\partial\theta]=-\mathrm{Cov}(a_j,b_j)=-\sum_k P'_{jk}\log P_{jk}$ と
+   $\hat\theta-\theta\approx(\sum_j b_j+r_0)/\sum_j I_j$ を使うと
+   $$l_z^*=\frac{l_0-\mathrm E(l_0)+c\,r_0(\hat\theta)}{\tau},\quad
+   c=\frac{\sum_j\sum_k P'_{jk}\log P_{jk}}{\sum_j I_j},\quad
+   \tau^2=\sum_j\Big[\mathrm{Var}(a_j)-2c\sum_k P'_{jk}\log P_{jk}+c^2I_j\Big]$$
+   を得る（すべて $\hat\theta$ で評価、$I_j=\sum_k P'^2_{jk}/P_{jk}$）。2 値項目では $w_j=\log(P_j/Q_j)$、
+   $r_j=P'_j/(P_jQ_j)$ とした Snijders の $l_z^*$ に一致する。推定法の項は ML で $r_0=0$、MAP で
+   $r_0=-(\theta-\mu_g)/\sigma_g^2$（群の正規事前分布、§15.22）、WLE で $r_0=I'(\theta)/(2I(\theta))$。
+   flexpyirt の WLE は $\log L+\tfrac12\log I$ を最大化する（§15.24）ので $r_0$ は $I'=\partial I/\partial\theta$ を使う。
+   これは 1PL / 2PL では Warm の $\sum_jP'_jP''_j/(P_jQ_j)$ と等しいが、3PL / 4PL では異なる。
+   EAP にはこの形の推定方程式がないので、`method="EAP"` で `"lz_star"` を要求するとエラーにする。
+4. **残差・infit・outfit（Wright & Masters, 1982）**: カテゴリ得点 $0,\dots,K_j-1$ について
+   $E_j=\sum_k kP_{jk}$、$r_j=y_j-E_j$、$W_j=\sum_k(k-E_j)^2P_{jk}$、$C_j=\sum_k(k-E_j)^4P_{jk}$ とし、
+   受験者が回答した $n$ 項目（または項目 $j$ に回答した $N_j$ 人）にわたって
+   $$\mathrm{outfit}=\frac1n\sum\frac{r^2}{W},\quad
+   q_{\mathrm{out}}^2=\frac1{n^2}\sum\frac{C}{W^2}-\frac1n,\qquad
+   \mathrm{infit}=\frac{\sum r^2}{\sum W},\quad
+   q_{\mathrm{in}}^2=\frac{\sum(C-W^2)}{(\sum W)^2}$$
+   とする。$q$ の上限は 1.4142、$z=(\mathrm{MS}^{1/3}-1)(3/q)+q/3$（Wilson–Hilferty 変換）。
+   カテゴリ得点 $0,\dots,K_j-1$ は名義反応モデルを含む全項目族で使う（mirt と同じ）。$W_j^2<10^{-5}$ のときは
+   $W_j=\sqrt{10^{-5}}$ とする（極端な $\hat\theta$ に対する mirt の保護）。多群モデルの項目統計量は群ごとに計算する
+   （mirt の `multipleGroup` に対する `itemfit()` と同じ）。重み付きの推定結果はエラー（S-X2 と同じ）。
+5. **mirt との違いと照合**: (a) 受験者の `z_outfit` は平方根の中で $n^2$（回答項目数）を使う。mirt の
+   `personfit()` は $J^2$（全項目数）を使い絶対値を取るので、欠測のある行だけが異なる（`itemfit()` は回答者数を
+   正しく使っている）。(b) $\hat\theta$ が有限でない行（全項目が最低・最高カテゴリのパターンの ML、全欠測の行）は
+   統計量を NaN にし、項目統計量からは除く。mirt は $\pm\infty$ を有限な推定値の最大・最小 $\pm0.1$ に置き換える。
+   (c) mirt は $l_0$ で選ばれた確率が計算機イプシロン未満なら 1 に置き換えるが、flexpyirt は対数確率をそのまま使う。
+   V53 では $l_z$ と受験者の infit / outfit を mirt の `personfit()` と、受験者の $z_{\mathrm{out}}$ を mirt 自身の残差
+   モーメントに $n^2$ の式を当てた値と、項目の infit / outfit を `itemfit(fit_stats = "infit")` と、Rasch モデルの
+   lz・infit・outfit を `sirt::personfit.stat()` と、$l_z^*$ を 3 項の式から R で再計算した値（`probtrace()` と中心差分、
+   `iteminfo()`）と比べる。$l_z^*$ を実装した R パッケージは手元にない（`PerFit::lzstar` はインストールできず、
+   2 値項目しか扱わない）。$l_z^*$ は、この照合をオーナーが認めた場合にだけ利用者向け文書に載せる（#108）。
+
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -1922,6 +1985,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
 - Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
+- Drasgow, F., Levine, M. V., & Williams, E. A. (1985). Appropriateness measurement with polychotomous item response models and standardized indices. *British Journal of Mathematical and Statistical Psychology*, 38(1), 67–86.
 - Drezner, Z., & Wesolowsky, G. O. (1990). On the computation of the bivariate normal integral. *Journal of Statistical Computation and Simulation*, 35(1–2), 101–107.
 - Edwards, M. C., Houts, C. R., & Cai, L. (2018). A diagnostic procedure to detect departures from local independence in item response theory models. *Psychological Methods*, 23(1), 138–149.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
@@ -1981,7 +2045,9 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Sinharay, S. (2016). Asymptotically correct standardization of person-fit statistics beyond dichotomous items. *Psychometrika*, 81(4), 992–1013.
 - Skinner, C. J. (1989). Domain means, regression and multivariate analysis. In C. J. Skinner, D. Holt & T. M. F. Smith (Eds.), *Analysis of Complex Surveys* (pp. 59–87). Wiley.
+- Snijders, T. A. B. (2001). Asymptotic null distribution of person fit statistics with estimated person parameter. *Psychometrika*, 66(3), 331–342.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
 - Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.
@@ -2001,6 +2067,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Wothke, W. (1993). Nonpositive definite matrices in structural modeling. In K. A. Bollen & J. S. Long (Eds.), *Testing Structural Equation Models* (pp. 256–293). Sage.
+- Wright, B. D., & Masters, G. N. (1982). *Rating Scale Analysis*. MESA Press.
 - Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.

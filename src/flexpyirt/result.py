@@ -1036,12 +1036,20 @@ class FitResult:
         return pd.DataFrame(out, index=index)
 
     def _residual_rows(
-        self, data: Any, *, method: ScoreMethod, group: Any, item_names: list[str] | None
+        self,
+        data: Any,
+        *,
+        method: ScoreMethod,
+        group: Any,
+        item_names: list[str] | None,
+        theta: np.ndarray | None = None,
     ) -> tuple[np.ndarray, dict[str, np.ndarray], np.ndarray, list[Any]]:
         """Ability estimates and per-row person-fit quantities (DESIGN.md §20).
 
         Returns ``(theta, per_row, codes, group_names)``; ``per_row`` holds the arrays of
         :func:`_personfit.pattern_statistics` expanded to one entry per row of ``data``.
+        ``theta`` (one value per row; rows with equal responses and group must share it)
+        replaces the ``method`` estimates, which then only choose the :math:`l_z^*` term.
         """
         model = self._model
         if model.is_multidimensional:
@@ -1053,9 +1061,11 @@ class FitResult:
                 f"Person and residual item fit need a point estimate of theta; method must be "
                 f"one of {_RESIDUAL_FIT_METHODS}, got {method!r}."
             )
-        theta = self.score(data, method=method, group=group, item_names=item_names)[
-            "theta"
-        ].to_numpy()
+        if theta is None:
+            theta = self.score(data, method=method, group=group, item_names=item_names)[
+                "theta"
+            ].to_numpy()
+        theta = np.asarray(theta, dtype=np.float64)
         y = coerce_responses(data, model, item_names=item_names)
         codes, group_names = coerce_groups(group, model, y.shape[0], require_all=False)
         compiled = compile_problem(
