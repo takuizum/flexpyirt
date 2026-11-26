@@ -1,4 +1,4 @@
-r"""Simulation of response data from a fitted or a fully specified model (DESIGN.md §22.2).
+r"""Simulation of response data from a fitted or a fully specified model (DESIGN.md §23.2).
 
 Respondent :math:`i` of group :math:`g` gets :math:`\boldsymbol\theta_i` drawn from the group's
 latent distribution (or given), and each response is drawn from the item's category

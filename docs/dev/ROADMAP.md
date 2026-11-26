@@ -159,6 +159,9 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   matplotlib from the optional extra `flexpyirt[plot]`. Unidimensional models, every item family, single
   and multiple groups; validated in V48 against mirt `itemfit(return.tables = TRUE)`, `probtrace()`,
   `coef(IRTpars = TRUE)` and TAM `tam.threshold()`.
+- [x] Common-item screening for linking and item parameter drift (#105; `screen_common_items()`,
+  `CommonItemScreeningResult`, `stack_screening_tables()`: robust z, displacement and
+  expected-score RMSD with iterative purification, unidimensional; validated in V50).
 - [ ] Model-comparison table and simulation of responses (#109): `compare_fits()` (AIC, SABIC, HQ,
   BIC, likelihood-ratio tests; mirt's `anova()`) and `simulate_responses()` / `SimulatedData` (from
   a `FitResult` or a `Model` with an item bank; every item model, latent distribution and model

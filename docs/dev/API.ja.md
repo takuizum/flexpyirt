@@ -156,6 +156,9 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `FitResult` | クラス | 結果（`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`） |
 | `link` | 関数 | 微分可能な IRT 尺度リンキング（Haebara・Stocking–Lord の非対称・対称版。多次元モデルでは `transformation=` で対角・直交・斜交の $\mathbf A$ を選ぶ）。`LinkResult` を返す |
 | `LinkResult` | クラス | 尺度リンキング結果（`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `transformation`, `items`, `transform_theta`, `summary`） |
+| `screen_common_items` | 関数 | リンキングの共通項目の点検と項目パラメータドリフト（頑健 z・変位・期待得点の RMSD。`link()` による反復的な純化）。`CommonItemScreeningResult` を返す |
+| `CommonItemScreeningResult` | クラス | 点検の結果（`table`, `link`, `initial_link`, `kept_items`, `removed_items`, `history`, `flagged_items`, `summary`） |
+| `stack_screening_tables` | 関数 | 複数の実施回の点検の表を `administration` 列を付けて積む |
 | `polychoric` | 関数 | ポリコリック・テトラコリック相関行列（2 段階の最尤法、平滑化）。`PolychoricResult` を返す |
 | `parallel_analysis`, `velicer_map`, `empirical_kaiser` | 関数 | 次元数の診断。`ParallelAnalysisResult`, `MAPResult`, `EmpiricalKaiserResult`（`n_factors` を持つ frozen dataclass）を返す |
 | `comparison_data` | 関数 | 比較データ法（Ruscio & Roche, 2012）。`ComparisonDataResult` を返す |
@@ -169,8 +172,8 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `flexpyirt.plotting` | モジュール | `plot_item_curves`（観測比率つき。群ごとの曲線が DIF の図）、`plot_information`、`plot_expected_score`、`plot_wright_map`。matplotlib は任意依存 `flexpyirt[plot]` から遅延 import（なければ `MissingDependencyError`）（DESIGN §21） |
 | `reliability`, `summed_score_table` | 関数 | 周辺信頼性・経験的信頼性と、合計得点 EAP の表（`FitResult.score(method="EAPsum")` も）。DataFrame を返す |
 | `summed_score_distribution` | 関数 | カテゴリ確率に対する Lord–Wingersky / Poisson 二項分布のカーネル（DESIGN §18.1） |
-| `compare_fits` | 関数 | 同じデータへの当てはめの比較表: `n_params`、`loglik`、AIC、SABIC、HQ、BIC と直前の行に対する尤度比検定（mirt の `anova()`。DESIGN §22.1） |
-| `simulate_responses`, `SimulatedData` | 関数、frozen dataclass | `FitResult` または `Model` + 項目バンクから JAX の `key` で回答データを生成する。`responses`、`theta`、`group` を返す（DESIGN §22.2） |
+| `compare_fits` | 関数 | 同じデータへの当てはめの比較表: `n_params`、`loglik`、AIC、SABIC、HQ、BIC と直前の行に対する尤度比検定（mirt の `anova()`。DESIGN §23.1） |
+| `simulate_responses`, `SimulatedData` | 関数、frozen dataclass | `FitResult` または `Model` + 項目バンクから JAX の `key` で回答データを生成する。`responses`、`theta`、`group` を返す（DESIGN §23.2） |
 | `LocalDependenceResult` | frozen dataclass | `FitResult.local_dependence()` の戻り値（`pairs`, `q3`, `q3_mean`, `max_q3_star`） |
 | `JSIResult` | frozen dataclass | `FitResult.jsi()` の戻り値（`matrix`, `pairs`, `method`, `converged`） |
 
