@@ -2604,12 +2604,16 @@ data-independent shapes (§15.21).
    double precision unless a slope is below about $10^{-6}$. True-score methods need a
    non-decreasing TCC: it is checked on 801 points of $[-20,20]$ (own scale) and a decrease of
    more than $10^{-10}(1+X_{\max})$ raises `SpecificationError` (negative slopes, nominal items
-   whose expected score is not monotone).
+   whose expected score is not monotone). Far in the tails the graded kernel returns NaN for a
+   category whose two cumulative probabilities round to the same double (`log1mexp(0)`); there
+   the probability has underflowed, and the form's category probabilities set NaN to 0. Curves
+   are evaluated on θ arrays padded to a power of 2 of at least 1024 points, so a form compiles
+   each curve once whatever the number of scores.
 
 3. **True-score equating (Lord, 1980; Kolen & Brennan, 2014, §6.5)**: for
    $\tau^X_{\mathrm{lo}}<x<\tau^X_{\mathrm{hi}}$, solve $\tau^X(\theta_x)=x$ and set
    $e_Y(x)=\tau^Y(\theta_x)$. **Solver**: safeguarded Newton (Newton–bisection) on all scores at
-   once inside one `jit`-ed `lax.while_loop`; the bracket starts at $[-10,10]$ on the common
+   once inside one `jit`-ed `lax.while_loop`; the bracket starts at $[-10,10]$ on the form's own
    scale and is doubled (in Python, up to $|\theta|=10^{6}$) until it holds every root;
    $\tau'$ comes from `jax.jvp`. A Newton step that leaves the bracket, or a non-positive
    derivative, is replaced by bisection. Stop when every $|\tau^X(\theta)-x|\le10^{-13}(1+X_{\max})$

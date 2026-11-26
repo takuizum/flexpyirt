@@ -75,6 +75,7 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
+| V51 | IRT 真値等化・観測得点等化と素点-尺度得点変換表（2 値: 20 + 20 項目、3PL + 2PL、リンクあり。多値: 4 GRM $K=4$ + 6 2PL と 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL、リンクあり。母集団は新・旧・合成 $w_1=0.5$。変換表は真値と EAPsum） | `equateIRT:::score_compute(method = "TSE" / "OSE")`、`SNSequate::irt.eq(method = "TS")`。mirt の `expected.test()`・`probtrace()`・`testinfo()`・`fscores(method = "EAPsum", full.scores = FALSE)` と `uniroot()`、`equate::equate(type = "equipercentile")` | #106 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -937,6 +938,39 @@
   標本誤差の範囲で $B=H$（標準誤差は 3% 以内）、$B=H$ を強制するとサンドイッチが Oakes の共分散に
   一致すること、行を 2 倍にすると共分散が半分になること、`b_se` と `link()` が選んだ共分散を読むこと、
   JSON の往復、拒否するケース。
+
+- **IRT 等化と素点-尺度得点変換表（V51、#106）**: DESIGN §20 を `tests/test_r_equating.py` で照合
+  （生成スクリプト `validation/r/v51_irt_equating_reference.R` → `tests/reference/v51_irt_equating.json`。
+  mirt 1.48、equateIRT 2.5.2、SNSequate 1.3.5、equate 2.0.9）。パラメタは推定しない: 項目パラメタは R で決めて保存し、
+  潜在分布は $[-6,6]$ の等間隔 61 点上の $N(0,1)$、リンクは $\theta_Y=A\theta_X+B$（2 値 $A=1.15$, $B=-0.25$、
+  多値 $A=0.9$, $B=0.3$）。速いテスト層は保存したパラメタから直接フォームを作り、カーネルと変換の規則を確かめる。
+  遅い層は同じ値に固定した推定結果で `irt_equate()`・`score_distribution()`・`scale_table()` を通して全比較を繰り返す。
+  最大差:
+  - **2 値の真値等化**（20 + 20 項目、3PL はそれぞれ 12・9 項目、$\sum c=2.317$・$1.477$）: 曲線の値域内の得点は
+    equateIRT 自身の Newton 解（`score_compute`。$|\Delta\theta|<10^{-6}$ で止まり誤差は約 $10^{-12}$）と比べて、
+    等化得点 `2.4e-12`、$\theta$ `1.2e-12`（許容 $10^{-9}$）。全得点で SNSequate と比べて、$\sum c$ 以下の
+    Kolen & Brennan の補間と最高点は `2.4e-15`（許容 $10^{-11}$）。値域内は SNSequate が使う `uniroot()` の既定許容値
+    による `1.2e-4`（許容 $10^{-3}$。補助的な確認）。
+  - **2 値の観測得点等化**: 両母集団に同じ節点と重みを与えた equateIRT の OSE、$w_1=1$, $0$, $0.5$: `5.7e-14`
+    （許容 $10^{-11}$）。
+  - **多値・混合形式の真値等化**（新: 4 GRM $K=4$ + 6 2PL、最高点 18。旧: 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL、
+    最高点 20、$\sum c=0.795$）: 多値フォームの IRT 等化を行う R パッケージはないので、新フォームの `expected.test()` を
+    `uniroot(tol = 1e-13)` で解き、旧フォームの `expected.test()` を $A\theta+B$ で評価した参照を作った:
+    $\theta$ `5.5e-13`、等化得点 `9.3e-13`（許容 $10^{-9}$）。
+  - **モデル上の分布**: `probtrace()` 上の R の Lord–Wingersky 再帰は、R 内で mirt の
+    `fscores(method = "EAPsum", full.scores = FALSE)` の `expected` / $N$ と $10^{-12}$ で一致。flexpyirt の分布は
+    どの母集団でも両者と相対 `5.6e-15`（許容は相対 $10^{-11}$）。
+  - **多値の観測得点等化**: 2 つの合成分布に対する `equate::equate(type = "equipercentile")`: `4.5e-9`。equate は
+    パーセンタイル順位と累積分布を小数 10 桁に丸める（`equate:::equip`）ので、得点では約 $10^{-10}/g(y)$
+    （許容 $10^{-8}$）。同じ分布で flexpyequate の等パーセンタイル等化とは `2.5e-14` で一致し、単体テストでは
+    確率 0 を含む乱数の分布で両者を $10^{-12}$ で比べる。
+  - **旧多値フォームの素点-尺度得点変換表**（slope 10、intercept 50、境界 25 と 75、整数に丸め）: 真値
+    （`expected.test()` の `uniroot()` による $\theta$、SE は $1/\sqrt{\texttt{testinfo}}$）: $\theta$ `2.3e-12`、SE 相対
+    `1.2e-12`。EAPsum（mirt `fscores`）: $\theta$ `5.6e-15`、SE 相対 `1.6e-15`。丸めた尺度得点は一致。
+  - **R で照合していないもの**: 4PL の上側漸近線の補間、多母集団のフォームと母集団、リンクは
+    `tests/test_equating.py` で `expected_score()`・`item_information()`・`summed_score_table()` と DESIGN §20 の式に
+    対して単体テストする。EH・Davidian・混合の母集団は `link()` と同じ推定格子（`_fitted_grid`）から作り、等化としての
+    テストは別にない。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

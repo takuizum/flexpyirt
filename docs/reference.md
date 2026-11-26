@@ -24,6 +24,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
 - Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
+- IRT equating: [`irt_equate`](#irt_equate), [`IRTEquatingResult`](#irtequatingresult), [`score_distribution`](#score_distribution), [`scale_table`](#scale_table)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
@@ -1384,6 +1385,102 @@ function works inside `jax.jit` and `jax.vmap` and can be differentiated; values
 tail probabilities that would underflow to 0 (it is slower); for the other methods the logarithm
 of the result is taken. Raises `SpecificationError` for a wrong shape, an unknown `method`, or an
 approximation with `K != 2`.
+
+## IRT equating
+
+### `irt_equate`
+
+```text
+irt_equate(new, old, *, method="true_score", new_items=None, old_items=None, link=None,
+           new_group=None, old_group=None, population="new", synthetic_weight=None)
+           -> IRTEquatingResult
+```
+
+Equate every summed score $x=0,\dots,X$ of a new form to the summed-score scale of an old form
+once both are on one $\theta$ scale ([guide section 15](guide.md#equating-and-raw-to-scale-tables)).
+The common scale is the old form's; with `link=` the new form's items are evaluated at
+$(\theta-B)/A$. Unidimensional models, every item model, single and multiple groups.
+
+- `"true_score"` (Lord, 1980; Kolen & Brennan, 2014, §6.5): $e_Y(x)=\tau_Y(\theta_x)$ with
+  $\tau_X(\theta_x)=x$ on the test characteristic curves $\tau(\theta)=\sum_j\sum_kk\,P_{jk}(\theta)$,
+  solved by safeguarded Newton. Scores at or below the sum of the lower asymptotes are equated
+  linearly between $(0,0)$ and $(\tau_X^{\mathrm{lo}},\tau_Y^{\mathrm{lo}})$, and scores at or above
+  the sum of the upper asymptotes linearly between $(\tau_X^{\mathrm{hi}},\tau_Y^{\mathrm{hi}})$ and
+  the two maximum scores; their `theta` is $-\infty$ / $+\infty$.
+- `"observed_score"` (Lord & Wingersky, 1984; Kolen & Brennan, 2014, §6.6): the model-implied
+  summed-score distributions of both forms in the synthetic population
+  $w_1\cdot\text{new}+(1-w_1)\cdot\text{old}$ (Lord–Wingersky recursion over each fitted latent
+  distribution), equated by the equipercentile method of Kolen & Brennan (2014, ch. 2).
+
+Validated against equateIRT and SNSequate (dichotomous 3PL / 2PL) and against references built
+from mirt and the equate package (GRM, GPCM, 3PL, 2PL). Standard errors of equated scores are
+not available.
+
+| Argument | Type | Description |
+|---|---|---|
+| `new` | `FitResult` | Unidimensional fit containing the new form $X$ |
+| `old` | `FitResult` | Unidimensional fit containing the old form $Y$ (may be `new`) |
+| `method` | `"true_score"` / `"observed_score"` | Equating method (default `"true_score"`) |
+| `new_items`, `old_items` | list[str], optional | Items of each form (default: all items of the fit) |
+| `link` | `LinkResult`, optional | `link(new, old)`: maps the scale of `new` onto that of `old` (unidimensional; its groups must be `new_group` / `old_group`) |
+| `new_group`, `old_group` | str, optional | Group of each form's parameters and population; required for a multiple-group fit |
+| `population` | `"new"` / `"old"` / `"synthetic"` | Population of observed-score equating: $w_1=1$, $w_1=0$ or $w_1=$ `synthetic_weight` (default `"new"`; observed-score method only) |
+| `synthetic_weight` | float, optional | Weight $w_1\in[0,1]$ of the new form's population; required with `population="synthetic"` and not allowed otherwise |
+
+**Returns**: [`IRTEquatingResult`](#irtequatingresult)
+
+**Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (multidimensional fit,
+unknown or duplicated items, missing or unknown group, a `link` that is not a unidimensional
+`LinkResult` between these groups or lacks the new form's items, invalid `population` /
+`synthetic_weight`, or, for the true-score method, a test characteristic curve that decreases),
+`ConvergenceWarning` (the true-score solver did not converge).
+
+### `IRTEquatingResult`
+
+| Attribute | Description |
+|---|---|
+| `table` | `DataFrame`: `score` (new form, $0..X$), `equated` (on the old form's summed-score scale) and, for the true-score method, `theta` (on the old form's scale; $\pm\infty$ beyond the asymptotes) |
+| `method` | `"true_score"` / `"observed_score"` |
+| `new_items`, `old_items` | Items of the two forms |
+| `new_range`, `old_range` | Lower and upper asymptotes $(\tau^{\mathrm{lo}},\tau^{\mathrm{hi}})$ of the two test characteristic curves |
+| `population`, `synthetic_weight` | Population and $w_1$ of observed-score equating (`None` for the true-score method) |
+| `new_distribution`, `old_distribution` | `DataFrame`s `score`, `probability`: the model-implied distributions in the synthetic population (observed-score method; `None` otherwise) |
+
+Methods: `summary(*, digits=4)`, `str()`, and an HTML view in Jupyter.
+
+### `score_distribution`
+
+```text
+score_distribution(res, *, items=None, group=None) -> DataFrame
+```
+
+The model-implied summed-score distribution $f(x)=\sum_qL(x\mid\theta_q)w_q$ of a form (the
+Lord–Wingersky likelihood of its items over the group's fitted latent distribution, any latent
+family). For all items of a `Normal` fit it is the `probability` column of
+[`summed_score_table`](#summed_score_table). Columns `score`, `probability`. `group` is required
+for a multiple-group fit.
+
+### `scale_table`
+
+```text
+scale_table(res, *, slope, intercept, method="true_score", items=None, group=None,
+            lowest=None, highest=None, n_digits=0) -> DataFrame
+```
+
+A raw-to-scale table: each summed score $x$ of a form gets $\theta(x)$, its standard error, and
+the scale score $\min\{\max\{\text{slope}\cdot\theta+\text{intercept},\text{lowest}\},\text{highest}\}$.
+
+| `method` | $\theta(x)$ | Standard error |
+|---|---|---|
+| `"true_score"` (default) | solves $\tau(\theta)=x$ on the form's test characteristic curve; $-\infty$ / $+\infty$ at or beyond its lower / upper asymptote | $I(\theta)^{-1/2}$ from the test information of the form's items (NaN where $\theta$ is infinite) |
+| `"EAPsum"` | summed-score EAP under the group's fitted latent distribution | posterior SD |
+
+`slope` must be positive; a missing bound is not applied (so an infinite $\theta$ gives an
+infinite scale score). Columns `score`, `theta`, `theta_se`, `scale_score`, `scale_score_se`
+($\text{slope}\cdot$`theta_se`, not clipped) and `scale_score_rounded` (NumPy `round` to
+`n_digits`, half to even). Raises `SpecificationError` for a multidimensional model, unknown
+items or group, a non-positive `slope`, `lowest >= highest`, a negative `n_digits`, or (true
+score) a decreasing test characteristic curve.
 
 ---
 
