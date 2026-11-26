@@ -97,30 +97,26 @@ expected_score_rmsd_jit = jax.jit(expected_score_rmsd, static_argnums=0)
 item_location_jit = jax.jit(item_location, static_argnums=0)
 
 
-def robust_z(values: np.ndarray, kept: np.ndarray) -> np.ndarray:
-    r"""Robust z of Huynh & Meyer (2010) with median and IQR over the kept items.
+def robust_z(values: np.ndarray) -> np.ndarray:
+    r"""Robust z of Huynh & Meyer (2010) over all common items.
 
     .. math::
-        z_j = \frac{x_j - \operatorname{median}_{i\in\mathcal K} x_i}
-                   {0.74\,\mathrm{IQR}_{i\in\mathcal K}(x_i)},
+        z_j = \frac{x_j - \operatorname{median}_i x_i}{0.74\,\mathrm{IQR}_i(x_i)},
 
-    with quantiles by linear interpolation (R ``quantile(type = 7)``). Every item, kept or not, is
-    scored against the kept items' median and IQR.
+    with quantiles by linear interpolation (R ``quantile(type = 7)``). The median and IQR are
+    taken over every common item, kept or removed (DESIGN.md §20).
 
     Parameters
     ----------
     values : ndarray, shape (J,)
         Per-item differences :math:`x_j` (NaN entries are skipped in the median and IQR).
-    kept : ndarray of bool, shape (J,)
-        The current anchor set :math:`\mathcal K`.
 
     Returns
     -------
     ndarray, shape (J,)
-        Robust z; all NaN when the kept items have no finite values or an IQR at or below
-        ``1e-12``.
+        Robust z; all NaN when there are no finite values or the IQR is at or below ``1e-12``.
     """
-    ref = values[kept & np.isfinite(values)]
+    ref = values[np.isfinite(values)]
     if ref.size == 0:
         return np.full(values.shape, np.nan)
     q1, med, q3 = np.quantile(ref, [0.25, 0.5, 0.75])

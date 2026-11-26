@@ -1923,10 +1923,13 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
      TCC と同じ）の差の二乗平均平方根を、`target` 群の推定済み格子 $(\theta_q^{(t)}, w_q^{(t)})$（`link()` の既定の格子）で
      とる。$E_j^*(\theta) = E_j^{\mathrm{src}}((\theta - B)/A)$。2 つのモデル曲線の比較であり、項目適合度の観測値対モデルの
      RMSD ではない。項目の得点の尺度（$0$ 〜 $K_j - 1$）のままで、$K_j - 1$ で割らない。
-   **頑健 z**（Huynh & Meyer, 2010）: $x \in \{\ell, \delta\}$ と現在のアンカー集合 $\mathcal K$ について
-   $$z_j = \frac{x_j - \operatorname{median}_{i\in\mathcal K} x_i}{0.74\,\mathrm{IQR}_{i\in\mathcal K}(x_i)}.$$
+   **頑健 z**（Huynh & Meyer, 2010）: $x \in \{\ell, \delta\}$ と共通項目 $\mathcal C$ について
+   $$z_j = \frac{x_j - \operatorname{median}_{i\in\mathcal C} x_i}{0.74\,\mathrm{IQR}_{i\in\mathcal C}(x_i)}.$$
    IQR は線形補間の分位点（R の `quantile(type = 7)`、NumPy の既定 `linear`）。$0.74 \approx 1/1.349$ により
-   $0.74\,\mathrm{IQR}$ は正規分布の標準偏差の一致推定量になる。除外済みの項目も、残っている項目の中央値と IQR で z を計算する。
+   $0.74\,\mathrm{IQR}$ は正規分布の標準偏差の一致推定量になる。中央値と IQR は除外した項目も含む**すべての**共通項目でとり、
+   リンキングをやり直すたびに計算し直すのは差だけにする。中央値と IQR はもともとドリフトした項目に頑健であり、縮んでいくアンカー集合で
+   推定し直すと IQR が縮んで段階ごとに別の項目にフラグが立つ（V50a のシミュレーションでは、12 個の共通項目に 3 個のドリフトを
+   仕込んだところ、`min_items` で止まるまでに 10 項目を外した）。
    IQR が正でない（$10^{-12}$ 未満。たとえば Rasch 項目の傾きの比はすべて $-\log A$）ときその z は NaN とし、フラグに
    使わない。Huynh & Meyer は 2 回の推定の生のパラメータで計算するが、ここではリンキング後の $b^*$・$a^*$ で計算する。
    傾きの統計量はどちらでも同じ（$\log A$ はすべての $\ell_j$ を同じだけずらす）で、位置の統計量は $A = 1$（Rasch）なら同じ。

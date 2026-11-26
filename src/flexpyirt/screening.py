@@ -129,8 +129,8 @@ def _screening_table(
             }
         )
     table = pd.DataFrame(rows)
-    table["robust_z_a"] = robust_z(table["log_ratio_a"].to_numpy(dtype=float), kept)
-    table["robust_z_b"] = robust_z(table["difference_b"].to_numpy(dtype=float), kept)
+    table["robust_z_a"] = robust_z(table["log_ratio_a"].to_numpy(dtype=float))
+    table["robust_z_b"] = robust_z(table["difference_b"].to_numpy(dtype=float))
     if statistic == "robust_z":
         abs_z = np.abs(table[["robust_z_a", "robust_z_b"]].to_numpy(dtype=float))
         all_nan = np.all(np.isnan(abs_z), axis=1)
@@ -158,7 +158,7 @@ class CommonItemScreeningResult:
         (:math:`\log|a^*| - \log|a^{\mathrm{tgt}}|`), ``difference_b``
         (:math:`b^* - b^{\mathrm{tgt}}`),
         ``displacement`` (:math:`|b^* - b^{\mathrm{tgt}}|`), ``robust_z_a``, ``robust_z_b``
-        (against the kept items' median and IQR), ``rmsd``, ``statistic`` (the value compared with
+        (against the median and IQR of all common items), ``rmsd``, ``statistic`` (the value compared with
         ``threshold``), ``flagged``, ``kept`` and ``iteration_removed`` (nullable integer; the
         purification step that removed the item).
     link : LinkResult
@@ -296,9 +296,9 @@ def screen_common_items(
 
     - ``robust_z`` (Huynh & Meyer, 2010): for :math:`x_j = \log|a_j^*| - \log|a_j^{\mathrm{tgt}}|`
       and for :math:`x_j = b_j^* - b_j^{\mathrm{tgt}}`,
-      :math:`z_j = (x_j - \operatorname{median}_{\mathcal K} x)
-      / (0.74\,\mathrm{IQR}_{\mathcal K} x)`
-      over the kept items :math:`\mathcal K`; the statistic is :math:`\max(|z_a|, |z_b|)`.
+      :math:`z_j = (x_j - \operatorname{median} x)
+      / (0.74\,\mathrm{IQR}\, x)`
+      over all common items; the statistic is :math:`\max(|z_a|, |z_b|)`.
     - ``displacement``: :math:`|b_j^* - b_j^{\mathrm{tgt}}|` in logits.
     - ``rmsd``: :math:`\{\sum_q w_q [E_j^*(\theta_q) - E_j^{\mathrm{tgt}}(\theta_q)]^2\}^{1/2}`,
       the root mean squared difference of the expected item score curves

@@ -2596,13 +2596,15 @@ data-independent shapes (§15.21).
      default grid of `link()`). $E_j^*(\theta) = E_j^{\mathrm{src}}((\theta - B)/A)$. It compares two
      model curves; it is not the observed-versus-model RMSD of item fit. It is on the item's score
      scale ($0$ to $K_j - 1$) and is not divided by $K_j - 1$.
-   **Robust z** (Huynh & Meyer, 2010): for $x \in \{\ell, \delta\}$ and the current anchor set
-   $\mathcal K$,
-   $$z_j = \frac{x_j - \operatorname{median}_{i\in\mathcal K} x_i}{0.74\,\mathrm{IQR}_{i\in\mathcal K}(x_i)},$$
+   **Robust z** (Huynh & Meyer, 2010): for $x \in \{\ell, \delta\}$ over the common items $\mathcal C$,
+   $$z_j = \frac{x_j - \operatorname{median}_{i\in\mathcal C} x_i}{0.74\,\mathrm{IQR}_{i\in\mathcal C}(x_i)},$$
    with the IQR from linearly interpolated quantiles (R `quantile(type = 7)`, NumPy's default
    `linear`); $0.74 \approx 1/1.349$ makes $0.74\,\mathrm{IQR}$ a consistent estimate of a normal
-   standard deviation. Items already removed are scored against the median and IQR of the kept
-   items. When the IQR is not positive (below $10^{-12}$, e.g. the slope ratios of Rasch items, which
+   standard deviation. The median and IQR are taken over **all** common items, removed ones
+   included, and only the differences are recomputed after each relinking: both are robust to the
+   drifted items by construction, whereas re-estimating them on the shrinking anchor set shrinks
+   the IQR and flags further items at every step (in the V50a simulation, with three planted
+   drifts among 12 common items, it removed 10 items before `min_items` stopped it). When the IQR is not positive (below $10^{-12}$, e.g. the slope ratios of Rasch items, which
    are all $-\log A$), that z is NaN and does not flag. Huynh & Meyer compute the statistic on the
    two calibrations' raw parameters; here it is computed after the linking, on $b^*$ and $a^*$. The
    slope statistic is the same either way ($\log A$ shifts every $\ell_j$ equally), and the location
