@@ -80,6 +80,7 @@ English | [日本語](VALIDATION.ja.md)
 | V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
+| V50 | Common-item screening for linking (#105): robust z (Huynh & Meyer, 2010), displacement and RMSD of expected item score curves; removal order, linking constants at every purification step and the final item table (2PL; mixed 2PL + GRM + GPCM) | separate `mirt()` calibrations + base-R recomputation (`median()`, `quantile(type = 7)`, `expected.item()`, V20 linking); `equateIRT::dif.test` as a cross-check of the drifted items | field |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -699,6 +700,40 @@ English | [日本語](VALIDATION.ja.md)
   closed forms, the one-factor criterion equal to §16.5's, finite-difference gradients, exact
   recovery of known transformations for two and three factors, the delta-method Jacobian
   against re-solving the linking, `transform_theta`, errors): `tests/test_m6_linking_multidim.py`.
+- **Common-item screening (V50, #105)**: no R package implements the robust z, the displacement
+  or the expected-score RMSD together with characteristic-curve linking and purification, so
+  `validation/r/v50_screening_reference.R` (→ `tests/reference/v50_screening.json`, mirt 1.48,
+  equateIRT 2.5.2) recomputes the rules of DESIGN §20 in base R: each form is calibrated with
+  `mirt` (`optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`, 61 nodes on $[-6, 6]$, latent
+  $N(0, 1)$); the linking on each anchor set is the V20 base-R Stocking–Lord / Haebara (asserted
+  `max |grad| < 1e-9`); locations, `log_ratio_a`, robust z (`median()`,
+  `quantile(type = 7)`, `IQR()`), displacement and the RMSD of `expected.item()` curves on the
+  target grid follow the formulas, and the purification loop is written out with the same removal
+  rule. `tests/test_r_v50_screening.py` runs `screen_common_items()` on `FitResult`s fixed at
+  mirt's estimates and compares the removal order, $(A, B)$ and the criterion at every step, the
+  final item table, the flags and the `ScreeningWarning`. Source populations $N(0.4, 1.2^2)$ on
+  the target scale; drift planted in the source form.
+  - **V50a (`v50a_2pl`, 2PL, 12 common + 8 unique items per form, $N=2000$/form; drift: `c01`
+    $b + 0.8$, `c02` $a \times 1.8$, `c03` $b - 0.6$)**: seven variants (robust z with
+    `removal="largest"` and `"all"`, displacement, RMSD, displacement with symmetric Haebara,
+    robust z with `max_iter=1`, RMSD 0.02 with `min_items=11`). Removal orders agree exactly
+    (robust z removes `c02, c01, c03, c10`; displacement and RMSD `c01, c03`); over all steps
+    `max |Δ(A, B)| = 2.3e-11`, per-item quantities `5.0e-12`, robust z `2.7e-10`.
+    `equateIRT::dif.test` (Lord's Wald test after Stocking–Lord linking, with purification,
+    $\alpha = 0.05$) flags `c01, c02, c03, c12`: the three planted drifts, which robust z also
+    removes first.
+  - **V50b (`v50b_mixed`, 2PL + GRM $K=4$ + GPCM $K=4$, 6 + 3 + 3 common, $N=2500$/form; drift:
+    `d01` $b + 0.7$, `g01` thresholds $+0.6$, `p02` $a \times 0.5$)**: four variants (robust z,
+    displacement, RMSD, RMSD with Haebara and `removal="all"`). Removal orders agree exactly
+    (robust z `p02, d01, g01`; RMSD `g01, p02, d01`; displacement `d01, g01`);
+    `max |Δ(A, B)| = 1.0e-11`, per-item quantities `4.8e-12`, robust z `3.4e-10`.
+  Tolerances: $(A, B)$ `1e-9`, criterion rel `1e-7`, per-item quantities `1e-9`, robust z
+  `1e-8`. **Checked only independently** (unit tests in `tests/test_screening.py`): the
+  location of 4PL and nominal items ($b^* = A\,b + B$ for every kernel), the RMSD against a direct
+  evaluation of the moved source curve, exact recovery of $(A, B)$ on drift-free items, the removal of
+  planted drifts among slightly perturbed items, the NaN robust z of Rasch slope ratios, the `items=`
+  subset and `stack_screening_tables()`. The thresholds are conventions (DESIGN §20); V50 checks
+  that the rules are computed as specified, not that the thresholds are good.
 - **Bifactor models (V32, M7)**: two simulated cases in `tests/test_mirt_m7_bifactor.py` (plain
   EM and SQUAREM; generator `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`,
   mirt 1.46.1 `bfactor()`, `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`,

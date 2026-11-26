@@ -104,6 +104,10 @@
 - **受け入れ基準**: mirt の `bfactor()`、`residuals()`、`iteminfo()` / `testinfo()` / `marginal_rxx()` /
   `fscores(method = "EAPsum")`、`survey.weights`、`SE.type = "sandwich"` / `"crossprod"` との V 番号つき照合。
 
+## 現場向け機能
+- [x] リンキングの共通項目の点検と項目パラメータドリフト（#105。`screen_common_items()`、
+  `CommonItemScreeningResult`、`stack_screening_tables()`: 頑健 z・変位・期待得点の RMSD と反復的な純化、1 次元。V50 で照合済み）。
+
 ## 継続的な作業
 - [ ] GitHub 上の最新の R mirt で照合し、参照値を定期的に確認する（#74）。
 - [ ] ユーザー定義の項目モデルの公開拡張 API と docs の例（#86）。新しい項目モデル（GGUM など）は本体に

@@ -75,6 +75,7 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
+| V50 | リンキングの共通項目の点検（#105）: 頑健 z（Huynh & Meyer, 2010）・変位・期待項目得点曲線の RMSD。除外の順序、純化の各段階のリンキング係数、最終の項目表（2PL、2PL + GRM + GPCM 混在） | 個別の `mirt()` 推定 + 素の R による再計算（`median()`、`quantile(type = 7)`、`expected.item()`、V20 のリンキング）。ドリフト項目の照合に `equateIRT::dif.test` | 現場向け |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -567,6 +568,31 @@
   （拒否する）。外部の R リンキングパッケージは使っていない。単体テスト（全カーネル・全族での曲線の不変性、3 つの族の
   閉じた式、1 因子の規準が §16.5 に一致、有限差分の勾配、2・3 因子での既知の変換の厳密な再現、リンキングを解き直して確かめる
   デルタ法のヤコビアン、`transform_theta`、エラー）: `tests/test_m6_linking_multidim.py`。
+
+- **共通項目の点検（V50、#105）**: 頑健 z・変位・期待得点の RMSD を特性曲線リンキングと純化と組み合わせて実装した R パッケージは
+  ないので、`validation/r/v50_screening_reference.R`（→ `tests/reference/v50_screening.json`、mirt 1.48、equateIRT 2.5.2）が
+  DESIGN §20 の規則を素の R で計算し直す。各フォームを `mirt`（`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、
+  $[-6, 6]$ 上 61 節点、潜在分布 $N(0, 1)$）で推定し、各アンカー集合のリンキングは V20 の素の R の Stocking–Lord / Haebara
+  （`max |grad| < 1e-9` を確認）。位置、`log_ratio_a`、頑健 z（`median()`、`quantile(type = 7)`、`IQR()`）、変位、
+  `target` の格子上の `expected.item()` 曲線の RMSD は式どおりに計算し、純化のループも同じ除外規則で書き下す。
+  `tests/test_r_v50_screening.py` は mirt の推定値に固定した `FitResult` で `screen_common_items()` を実行し、除外の順序、
+  各段階の $(A, B)$ と規準値、最終の項目表、フラグ、`ScreeningWarning` を比較する。`source` の母集団は `target` の尺度で
+  $N(0.4, 1.2^2)$。ドリフトは `source` のフォームに仕込む。
+  - **V50a（`v50a_2pl`、2PL、各フォーム共通 12 + 固有 8 項目、各フォーム $N=2000$。ドリフト: `c01` $b + 0.8$、
+    `c02` $a \times 1.8$、`c03` $b - 0.6$）**: 7 通り（頑健 z の `removal="largest"` と `"all"`、変位、RMSD、対称 Haebara での
+    変位、`max_iter=1` の頑健 z、`min_items=11` の RMSD 0.02）。除外の順序は完全に一致（頑健 z は `c02, c01, c03, c10`、変位と
+    RMSD は `c01, c03`）。全段階で `max |Δ(A, B)| = 2.3e-11`、項目ごとの量 `5.0e-12`、頑健 z `2.7e-10`。
+    `equateIRT::dif.test`（Stocking–Lord リンキング後の Lord の Wald 検定、純化あり、$\alpha = 0.05$）は `c01, c02, c03, c12`
+    にフラグを立てる。仕込んだ 3 項目であり、頑健 z も最初にこの 3 項目を外す。
+  - **V50b（`v50b_mixed`、2PL + GRM $K=4$ + GPCM $K=4$、共通 6 + 3 + 3 項目、各フォーム $N=2500$。ドリフト: `d01`
+    $b + 0.7$、`g01` 閾値 $+0.6$、`p02` $a \times 0.5$）**: 4 通り（頑健 z、変位、RMSD、Haebara と `removal="all"` の RMSD）。
+    除外の順序は完全に一致（頑健 z は `p02, d01, g01`、RMSD は `g01, p02, d01`、変位は `d01, g01`）。
+    `max |Δ(A, B)| = 1.0e-11`、項目ごとの量 `4.8e-12`、頑健 z `3.4e-10`。
+  許容誤差: $(A, B)$ `1e-9`、規準値は相対 `1e-7`、項目ごとの量 `1e-9`、頑健 z `1e-8`。**独立にのみ確認したもの**
+  （`tests/test_screening.py` の単体テスト）: 4PL と名義項目の位置（すべてのカーネルで $b^* = A\,b + B$）、移した `source`
+  曲線の直接評価との RMSD の一致、ドリフトのない項目での $(A, B)$ の厳密な回復、わずかに揺らした項目に仕込んだドリフトの除外、Rasch の傾きの比の頑健 z が
+  NaN になること、`items=` による部分集合、`stack_screening_tables()`。閾値は慣行であり（DESIGN §20）、V50 が確かめるのは
+  規則が仕様どおりに計算されることで、閾値のよさではない。
 
 - **混合正規潜在分布（V22、M5）**: flexpyirt の `NormalMixture`（DESIGN §16.7）は形状に mirt のクラスのパラメタ化を
   使い、混合を解析的に標準化する。したがって格子 $\theta_q$ 上では、像の格子 $z_q=M+\sqrt V\theta_q$ 上の mirt の

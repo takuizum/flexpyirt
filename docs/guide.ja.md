@@ -1034,6 +1034,49 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
   項目は傾きが $1/A$ になる）。`linked.transform_theta()` はスカラー・配列・Series・採点 DataFrame（`theta`、`se`、
   plausible values `pv1..`）を変換し、$(A, B)$ を既知として扱う（変換後の `se` はリンキング誤差を含まない）。
 
+### 共通項目の点検
+
+リンキングを信頼する前に、共通項目に項目パラメータドリフトがないかを確かめる。2 回の推定の間でパラメータが動いた項目
+（露出・文脈の変化）はアンカーから外し、リンキングをやり直す。`screen_common_items(source, target)` は `link()` でリンクし、
+`source` の項目を変換して、共通項目ごとに次を計算する。
+
+| `statistic` | 項目ごとの量 | 既定の `threshold` |
+|---|---|---|
+| `"robust_z"`（既定） | $\max(\lvert z_a\rvert, \lvert z_b\rvert)$: 傾きの対数比と位置の差の頑健 z。共通項目にわたる $(x - \mathrm{median}) / (0.74\,\mathrm{IQR})$（Huynh & Meyer, 2010） | 1.645 |
+| `"displacement"` | $\lvert b^* - b^{\mathrm{tgt}}\rvert$。変換後の位置の差（ロジット） | 0.3 |
+| `"rmsd"` | 2 つの期待項目得点曲線の差の二乗平均平方根。`target` の潜在分布で重み付け | 0.1 |
+
+位置 $b$ は 2 値項目では困難度、GRM・GPCM の項目では閾値の平均。`purify=True`（既定）では、フラグの立った項目のうち統計量が
+最大のものを外してリンキングをやり直し、残した項目にフラグがなくなるまで繰り返す（`removal="all"` は各段階でフラグの立った項目を
+すべて外す。`min_items` と `max_iter` がループを制限し、それで止まったときは `ScreeningWarning` が出る）。
+
+```python
+from flexpyirt import screen_common_items
+
+# 最初の共通項目が 1 ロジット難しくなった後の実施回。
+d_drift = d_new.copy()
+d_drift[0] -= a_new[0]
+drift_df = pd.DataFrame(
+    simulate_2pl(a_new, d_drift, rng.normal(0.5, 1.2, 800), rng), columns=new_items
+)
+drift_res = fit(Model.uniform(TwoPL(), items=new_items), drift_df, method=BAEM(squarem=True))
+
+screened = screen_common_items(drift_res, res, statistic="displacement")
+print(screened.removed_items)
+print(screened.history[["iteration", "n_items", "A", "B", "removed"]].round(3))
+print(screened.table[["item", "difference_b", "rmsd", "flagged", "kept"]].round(3))
+linked_screened = screened.link  # 残した項目での LinkResult
+```
+
+- `screened.table` は最終のリンキングの下での共通項目ごとの行で、変換後の `source` と `target` の傾きと位置、`log_ratio_a`、
+  `difference_b`、`displacement`、`robust_z_a`、`robust_z_b`、`rmsd`、`flagged`、`kept`、`iteration_removed` を持つ。
+  `history` は各段階の $(A, B)$ と外した項目、`initial_link` はすべての共通項目でのリンキング。
+- 閾値は慣行であり、導出された値ではない。運用に合わせて決める。共通項目が少ない（8 項目程度未満）と頑健 z の IQR は不安定。
+- 複数の実施回にわたるドリフトは、それぞれを基準フォームに対して点検し、表を積む:
+  `stack_screening_tables({"2025": screened_2025, "2026": screened_2026})`。
+- 1 次元の推定結果のみ。1 つの多群推定の中での DIF 検定は `FitResult.dif()`。mirt の推定結果に同じ規則を素の R で当てた
+  再計算と照合済み（2PL と 2PL + GRM + GPCM 混在）。
+
 ### 多次元モデル
 
 因子数が同じ確認的モデルの 2 つの推定結果は、$\boldsymbol\theta^* = \mathbf A\boldsymbol\theta + \boldsymbol\beta$ で
