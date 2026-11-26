@@ -98,13 +98,15 @@ def test_fit_latent_rows_per_group(kind: str) -> None:
     assert res.converged
     latent = res.latent.set_index("group")
     assert list(latent.index) == ["ref", "foc"]
-    assert latent.loc["ref", "mean"] == 0.0 and latent.loc["ref", "var"] == 1.0
-    assert np.isnan(latent.loc["ref", "mean_se"])
-    assert np.isfinite(latent.loc["foc", "mean_se"])
-    shape = [c for c in latent.columns if c.startswith(("phi_", "rmean_", "rvar_", "logit_"))]
+    moments = latent[["mean", "var", "mean_se"]].to_numpy(dtype=float)  # rows: ref, foc
+    assert moments[0, 0] == 0.0 and moments[0, 1] == 1.0
+    assert np.isnan(moments[0, 2]) and np.isfinite(moments[1, 2])
+    prefixes = ("phi_", "rmean_", "rvar_", "logit_")
+    shape = [str(c) for c in latent.columns if str(c).startswith(prefixes)]
     shape = [c for c in shape if not c.endswith("_se")]
-    assert shape and np.isfinite(latent.loc[["ref", "foc"], shape].to_numpy()).all()
-    assert latent.loc["ref", shape[0]] != latent.loc["foc", shape[0]]  # per-group shapes
+    table = latent[shape].to_numpy(dtype=float)
+    assert shape and np.isfinite(table).all()
+    assert table[0, 0] != table[1, 0]  # per-group shapes
 
 
 @pytest.mark.slow

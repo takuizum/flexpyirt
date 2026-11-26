@@ -115,10 +115,11 @@ def test_parameters_and_se(name: str) -> None:
     ref = _reference(raw)
     ours = res.parameters.set_index(["group", "item", "param"])
     for key, row in ref.iterrows():
-        assert abs(ours.loc[key, "estimate"] - row["value"]) < TOL_PARAM, key
-        assert bool(ours.loc[key, "free"]) == bool(row["free"]), key
+        mine = ours.loc[[key]].iloc[0]
+        assert abs(float(mine["estimate"]) - float(row["value"])) < TOL_PARAM, key
+        assert bool(mine["free"]) == bool(row["free"]), key
         if row["free"]:
-            assert abs(ours.loc[key, "se"] / row["se"] - 1.0) < TOL_SE_REL, key
+            assert abs(float(mine["se"]) / float(row["se"]) - 1.0) < TOL_SE_REL, key
 
 
 @pytest.mark.parametrize("name", CASES)
