@@ -97,10 +97,15 @@ jobs:
       # So has flexpyequate (packages/flexpyequate/pyproject.toml).
       - name: Pytest (flexpyequate)
         run: uv run pytest packages/flexpyequate --durations=10
+      # The isolated env has no extras, hence no matplotlib: `import flexpyirt` and
+      # `import flexpyirt.plotting` must work and the plot functions must raise
+      # MissingDependencyError (DESIGN.md §21).
       - name: Editable install smoke test (isolated env)
         run: |
           uv run --isolated --no-project --with-editable ./packages/flexpyctt --with-editable . \
             python -c "import flexpyctt, flexpyirt; print(flexpyctt.__version__, flexpyirt.__version__)"
+          uv run --isolated --no-project --with-editable ./packages/flexpyctt --with-editable . \
+            python scripts/check_plotting_without_matplotlib.py
           uv run --isolated --no-project --with-editable ./packages/flexpyequate \
             python -c "import flexpyequate; print(flexpyequate.__version__)"
 
