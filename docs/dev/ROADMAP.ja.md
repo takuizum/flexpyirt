@@ -74,13 +74,15 @@
      V32 で mirt の `bfactor()` と照合済み）。
    - [x] two-tier モデル（`Model.with_two_tier()`、相関してよい主因子 1〜2 個と特殊因子、単一群、Oakes/Hessian SE、
      EAP スコアリング。V33 で mirt の `bfactor(model2 = )` と照合済み）。
-2. [ ] 局所依存（Q3, LD-X², JSI）を多母集団・正規以外の潜在分布・多次元 / 双因子モデルに広げる（#81）。
+2. [x] 局所依存（Q3, LD-X², JSI）を多母集団・正規以外の潜在分布・多次元 / 双因子モデルに広げる（#81）。
    - [x] `FitResult.local_dependence()`（Q3、Q3\*、LD-X²、G²）を多母集団、`EmpiricalHistogram` /
      `DavidianCurve` / `NormalMixture` の潜在分布、確認的な 2〜3 因子モデルに広げた（V26 で mirt の
      `residuals()` と照合。混合分布は密度を与えたときの統計量のみ）。
    - [x] 双因子・two-tier モデルの `FitResult.local_dependence()`。期待度数表は縮約した格子の上で求める
      （V38 で `bfactor()` の適合に対する mirt の `residuals()` と照合）。
-     未対応: 単一群・1 次元・正規分布以外の JSI（複数の傾きを持つ項目についての定義がなく、mirt にも参照値がない）。
+   - 実装しない（決定済み、#81）: 単一群・1 次元・`Normal` 以外の JSI。JSI は単一群・1 次元のモデルについてのみ
+     定義されており、多次元・多母集団への拡張は研究されておらず、参照となる実装もない（mirt の `type = "JSI"` は
+     1 因子が必要）。これらのモデルでは `jsi()` は `SpecificationError` を出す（DESIGN.md §16.17）。
 3. [ ] 項目・テスト情報関数、信頼性、合計得点による EAP（#82）。公開する Lord–Wingersky / Poisson 二項分布の
    カーネル（#83）の上に作る。
    - [x] カーネル（#83）: `summed_score_distribution()`。Poisson 二項分布のカーネルとしての Lord–Wingersky 再帰
@@ -106,7 +108,9 @@
 
 ## 継続的な作業
 - [ ] GitHub 上の最新の R mirt で照合し、参照値を定期的に確認する（#74）。
-- [ ] ユーザー定義の項目モデルの公開拡張 API と docs の例（#86）。新しい項目モデル（GGUM など）は本体に
-  組み込まず、この API の照合済みの例として追加する。
+- [x] ユーザー定義の項目モデルの公開拡張 API と docs の例（#86）: `ItemModel` / `ItemKernel` の契約、JSON 用の
+  `register_item_model`、ガイドの 2PL の実例（DESIGN §20）。2PL / GRM の再実装は組み込みと機械精度で一致する。
+- [ ] 組み込みでないモデルの照合済みの例（GGUM を mirt の `itemtype = "ggum"` と照合、V44 など）。新しい項目モデルは
+  本体に組み込まず、このように追加する。
 - [x] flexpyctt: 古典的項目分析（キーによる採点、項目統計量、α / ω、選択肢分析。#101）。V46 で psych・ltm・polycor
   と照合済み。

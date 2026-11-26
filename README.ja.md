@@ -1,5 +1,11 @@
 # flexpyirt
 
+[![PyPI](https://img.shields.io/pypi/v/flexpyirt)](https://pypi.org/project/flexpyirt/)
+[![Python](https://img.shields.io/pypi/pyversions/flexpyirt)](https://pypi.org/project/flexpyirt/)
+[![CI](https://github.com/takuizum/flexpyirt/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/takuizum/flexpyirt/actions/workflows/ci.yml)
+[![Docs](https://github.com/takuizum/flexpyirt/actions/workflows/docs.yml/badge.svg?branch=main)](https://takuizum.github.io/flexpyirt/ja/)
+[![License](https://img.shields.io/pypi/l/flexpyirt)](https://github.com/takuizum/flexpyirt/blob/main/LICENSE)
+
 [English](https://github.com/takuizum/flexpyirt/blob/main/README.md) | 日本語
 
 JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin EM による周辺最尤推定（MMLE）を中核に、
@@ -45,6 +51,20 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 局所依存と一次元性 | Q3、Q3\*、Chen & Thissen の LD $X^2$ / $G^2$（`FitResult.local_dependence()`、mirt の `residuals()` と同じ）、ジャックナイフ傾き指標（`FitResult.jsi()`、mirt と同じ。速い近似もある）、モデルに基づく平行分析（`model_parallel_analysis()`、ltm の `unidimTest` と同じ）、確認的・探索的 DETECT（`detect()`、`exploratory_detect()`、sirt と同じ）、ブートストラップでバイアス補正する DIMTEST（`dimtest()`、シミュレーションで確認）、複数の手法を実行して合意を別々に示す `dimensionality()` のレポート。DETECT と DIMTEST は flexpyctt が提供する | ✓ |
 | 古典的項目分析 | 正答キーによる採点（`score_responses()`）、項目の困難度と項目–合計・項目–残りの相関（点双列相関または双列・多分系列相関。`item_analysis()`）、Feldt の信頼区間つきの α 係数（`coefficient_alpha()`）、ω total（`coefficient_omega()`）、得点群ごとの選択肢分析（`distractor_analysis()`）。psych、ltm、polycor と照合済み。flexpyctt が提供 | ✓ |
 | 識別性の検査 | 識別できない指定は推定前に `IdentificationError` | — |
+
+## まだ対応していないもの
+
+いずれも[ロードマップ](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/ROADMAP.ja.md)で予定・管理している。
+
+- 多母集団モデルでの Davidian 曲線・混合正規（[#75](https://github.com/takuizum/flexpyirt/issues/75)）
+- 多母集団・欠測・MAP 推定での $M_2$（[#76](https://github.com/takuizum/flexpyirt/issues/76)）。双因子・two-tier・多母集団の多次元モデルでの
+  $M_2$ と S-X2
+- 群ごとの潜在分布を群について vmap する多数群の推定（[#79](https://github.com/takuizum/flexpyirt/issues/79)）
+- 多次元モデルの情報行列と方向情報量
+- 標本ウェイトに対する設計に基づく標準誤差: ウェイト付き・クラスタロバストなサンドイッチ SE
+  （[#85](https://github.com/takuizum/flexpyirt/issues/85)）。ウェイト付きの推定結果での項目適合度・$M_2$・局所依存・DIF
+- 単一群・1 次元・正規潜在分布以外のモデルでのジャックナイフ傾き指標
+- ユーザー定義の項目モデルのための公開拡張 API（[#86](https://github.com/takuizum/flexpyirt/issues/86)）
 
 ## インストール
 
@@ -151,6 +171,34 @@ R `mirt`（既定設定、`TOL = 1e-4`、CPU・61 点求積）との実行時間
 （[Apple M5 での計測結果](https://github.com/takuizum/flexpyirt/blob/main/benchmarks/results/2026-11-21-apple-m5.md)）では、初回の JAX/XLA コンパイル（cold の EM 推定で約 0.8–1.1 秒）以降は、テストした全ケースで
 warm の CPU 推定が `mirt` より速く（`mirt` 比 `0.12×–0.60×`）、標準誤差なしの 1 回限りの cold 推定では
 `mirt` の方が速い。
+
+## ほかのライブラリとの比較
+
+各ライブラリ自身のドキュメントに書かれている内容（2026-11-25 時点。R
+[mirt](https://cran.r-project.org/package=mirt) 1.48、PyPI の
+[mirt](https://pypi.org/project/mirt/) 1.2.0・[IRTorch](https://pypi.org/project/irtorch/) 0.5.6・
+[py-irt](https://pypi.org/project/py-irt/) 0.8.3・[girth](https://pypi.org/project/girth/) 0.8.0）。
+「—」はドキュメントに記載がないことを示し、できないとは限らない。誤りがあれば
+[GitHub Issues](https://github.com/takuizum/flexpyirt/issues) で知らせてほしい。
+
+| | flexpyirt | R mirt | mirt（Python） | IRTorch | py-irt | girth |
+|---|---|---|---|---|---|---|
+| 推定法 | MML、Bock–Aitkin EM（SQUAREM） | EM、MH-RM、MCEM / QMCEM、SEM | EM（SQUAREM）、MH-RM、MCEM / QMCEM、Gibbs、GVEM（Rust コア） | 勾配法による MML・JML、（変分）オートエンコーダ | 変分推論（Pyro） | MML、JML、条件付き最尤 |
+| 項目モデル | Rasch、2PL、3PL、4PL、GRM、GPCM、PCM、名義 | これらとほか多数 | これらとほか（5PL、評定尺度、nested logit、GGUM、CDM） | 1〜3PL、GRM、GPCM、名義、nested logit、スプライン・ニューラルネットのモデル | 1PL、2PL、4PL | Rasch、1〜3PL、GRM、PCM、GGUM |
+| 多母集団、DIF | ✓ | ✓ | ✓ | — | — | — |
+| 固定項目パラメタ推定（FIPC） | ✓ | ✓ | ✓ | — | — | — |
+| 特性曲線法リンキング | ✓ Haebara・Stocking–Lord、SE つき、多次元も | —（別パッケージ） | Stocking–Lord | アンカー項目によるリンキング（スプライン、ニューラルネット） | — | — |
+| 潜在分布: ヒストグラム / Davidian / 混合正規 | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | — | — | — | — |
+| 多次元 | 確認的 2〜3 因子、双因子、two-tier | 探索的・確認的、双因子、two-tier | 探索的・確認的、双因子 | 複数の潜在変数 | — | 多次元 2PL・GRM |
+| 適合度: $M_2$ / S-X2 / 局所依存 | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | ✓ / ✓ / ✓ | — / — / Q3 | — | — |
+| 項目パラメタの標準誤差 | Oakes、Hessian（自動微分で厳密）、サンドイッチ、クロス積 | Oakes・Louis・サンドイッチなど多数 | Louis / Oakes、サンドイッチ、クロス積、ブートストラップ | — | — | ブートストラップ |
+| スコアリング | EAP、MAP、ML、WLE、plausible values、合計得点 EAP | 同じものとさらに多数 | EAP、MAP、ML、WLE、plausible values | ML、EAP、MAP、ニューラルネット | — | ML、MAP、EAP |
+| GPU | ✓（JAX） | — | ✓（PyTorch、任意） | ✓（PyTorch） | — | — |
+| R mirt との数値照合 | ✓（V1〜V40） | （参照元） | — | — | — | — |
+| ライセンス | MIT | GPL (≥ 3) | MIT | MIT | MIT | MIT |
+
+flexpyirt の未対応の項目は[ロードマップ](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/ROADMAP.ja.md)で
+管理している。探索的な高次元モデル、MH-RM / MCEM による推定、認知診断モデルは当面の対象外である。
 
 ## ドキュメント
 

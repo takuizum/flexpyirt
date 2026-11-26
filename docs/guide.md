@@ -25,8 +25,9 @@ for the models and algorithms behind them, see [Theory](theory.md).
 17. [Number of dimensions](#17-number-of-dimensions)
 18. [Local dependence and the dimensionality report](#18-local-dependence-and-the-dimensionality-report)
 19. [DETECT](#19-detect)
-20. [Classical item analysis](#20-classical-item-analysis)
-21. [Errors and warnings](#21-errors-and-warnings)
+20. [User-defined item models](#20-user-defined-item-models)
+21. [Classical item analysis](#21-classical-item-analysis)
+22. [Errors and warnings](#22-errors-and-warnings)
 
 ## 1. Setup
 
@@ -132,7 +133,8 @@ logit scale; the interior ML estimates agree). Polytomous categories start at 0 
 data coded from 1, such as mirt's `Science`). `Nominal` has no display `b` columns: its
 categories are not ordered, so adjacent-category thresholds on the $\theta$ scale are not defined
 in general (they are singular when $\mathrm{ak}_k=\mathrm{ak}_{k-1}$), and mirt's
-`coef(m, IRTpars = TRUE)` reports Bock's zero-sum slopes and intercepts instead.
+`coef(m, IRTpars = TRUE)` reports Bock's zero-sum slopes and intercepts instead. A model that is
+not in the table can be written by the user ([section 20](#20-user-defined-item-models)).
 
 ```python
 theta3 = rng.normal(0, 1, 2000)
@@ -1181,7 +1183,7 @@ print(linked_md.transform_theta(res_mirt_new.score(new_mirt_df.iloc[:3])).round(
 
 ## 16. Polychoric correlations
 
-Sections 16, 17, 19 and 20 use **flexpyctt**, the companion package for analyses that need no fitted
+Sections 16, 17, 19 and 21 use **flexpyctt**, the companion package for analyses that need no fitted
 model. It is installed together with flexpyirt, and can be installed on its own
 (`pip install flexpyctt`) where JAX is not wanted: it depends on NumPy, SciPy and pandas only and
 needs no 64-bit setting. Its functions take `rng` (an integer seed or a
@@ -1291,7 +1293,11 @@ print(report)
   look for pairs that stand out. The default re-estimates the model for every item, as mirt's
   `residuals(type = "JSI")`. `method="one_step"` skips the re-estimation (one Taylor step from
   the full model) and is far faster on long tests; it agrees closely with the default from about
-  15 items on, but not on short tests, where it warns.
+  15 items on, but not on short tests, where it warns. JSI is defined only for single-group
+  unidimensional models: its multidimensional / multiple-group extension has not been studied and
+  there is no reference implementation, so `jsi()` raises `SpecificationError` for
+  multiple-group, multidimensional (including bifactor and two-tier) and non-`Normal` latent
+  models. Use `local_dependence()` for those.
 - `model_parallel_analysis()` simulates data from the fitted model and asks whether the observed
   second eigenvalue is larger than the model produces (Drasgow & Lissak, 1983). Because the
   model was fitted to the same data the $p$-value is conservative: a small value is evidence of a
@@ -1333,7 +1339,112 @@ print(test.assessment_items, round(test.statistic, 3), round(test.p_value, 3))
   the rest. It is conservative, so a small $p$ is strong evidence of a second dimension and a
   large $p$ is only weak evidence for unidimensionality.
 
-## 20. Classical item analysis
+## 20. User-defined item models
+
+An item model that flexpyirt does not provide can be written in Python and used like a built-in
+one. You write two small classes against the protocols `ItemKernel` and `ItemModel` in
+`flexpyirt.items` (full contract in the [API reference](reference.md#user-defined-item-models)):
+
+- the **kernel** holds the response function: `log_prob(theta, params)` returns the
+  `(Q, n_categories)` log-probabilities at the nodes `theta` of shape `(Q, D)`, written with
+  `jax.numpy`. Gradients and Hessians come from automatic differentiation, so nothing else has to
+  be derived. It also names the parameters (`param_names`, with the `D` slopes first;
+  `slope_params`; `intercept_params`) and returns a copy for `D` factors (`with_factors`). It must
+  be hashable: a frozen dataclass.
+- the **item model** gives the `name` shown in the tables, the `kernel`, which parameters are free
+  by default, starting values from an item's responses and rest scores, and bounds.
+
+The example re-implements the 2PL, so the result can be checked against `TwoPL`.
+
+```python
+from dataclasses import dataclass
+from typing import ClassVar
+
+import jax.numpy as jnp
+
+from flexpyirt.items import register_item_model
+
+
+@dataclass(frozen=True)
+class LogisticKernel:
+    """The pure log-probability function of P(y = 1 | theta) = sigmoid(a'theta + d)."""
+
+    n_factors: int = 1
+    n_categories: ClassVar[int] = 2
+
+    def with_factors(self, n_factors):
+        return LogisticKernel(n_factors)
+
+    @property
+    def param_names(self):
+        if self.n_factors == 1:
+            return ("a", "d")
+        return (*(f"a{m}" for m in range(1, self.n_factors + 1)), "d")
+
+    @property
+    def slope_params(self):
+        return self.param_names[: self.n_factors]
+
+    @property
+    def intercept_params(self):
+        return ("d",)
+
+    def log_prob(self, theta, params):
+        z = theta @ params[: self.n_factors] + params[self.n_factors]  # theta: (Q, D)
+        return jnp.stack([jax.nn.log_sigmoid(-z), jax.nn.log_sigmoid(z)], axis=-1)
+
+
+@dataclass(frozen=True)
+class MyTwoPL:
+    """The item model: name, kernel, free pattern, starting values and bounds."""
+
+    name: ClassVar[str] = "My2PL"
+
+    @property
+    def kernel(self):
+        return LogisticKernel()
+
+    def default_free(self):
+        return (True, True)
+
+    def start_values(self, item, rest):
+        p = np.clip(item.mean(), 0.01, 0.99)
+        return np.array([1.0, np.log(p / (1.0 - p))])
+
+    def bounds(self):
+        return (-np.inf, -np.inf), (np.inf, np.inf)
+
+
+custom = fit(Model.uniform(MyTwoPL(), items=items), df, method=BAEM(tol=1e-6, squarem=True))
+print(custom.items.head(3))
+gap = (custom.parameters["estimate"] - res_sq.parameters["estimate"]).abs().max()
+print(f"largest difference from the built-in TwoPL: {gap:.1e}")
+```
+
+Both fits reach the same maximum; the small difference comes from the convergence tolerance and
+the different starting values. (The test suite checks that re-implementations of the 2PL and the
+GRM give the built-in estimates, standard errors and scores to machine precision.)
+
+Everything that evaluates the response function works with a user-defined model: standard errors,
+scoring, item fit, M2, information, multiple groups, priors and multidimensional models. `link()`
+and `fix_from(..., parameterization="irt")` need model-specific transformations and raise
+`SpecificationError`; ML and WLE scoring assume that the response categories increase with
+$\theta$. Display thresholds (`b` columns) appear only if the kernel defines the optional members
+`irt_names`, `irt_dependency_indices` and `irt_thresholds`.
+
+To save the fit as JSON, register the class first; register it again in a new session before
+loading the file.
+
+```python
+register_item_model(MyTwoPL)  # or use @register_item_model on the class
+restored = FitResult.from_json(custom.to_json())
+print(restored.items.equals(custom.items))
+```
+
+flexpyirt checks the machinery, not your model: a user-defined model is as correct as its
+`log_prob`. Check a new model against an independent implementation before relying on it.
+
+## 21. Classical item analysis
 
 Before (or instead of) fitting an IRT model, classical item statistics show which items behave
 badly. They need no model, so they are in flexpyctt.
@@ -1385,7 +1496,7 @@ print(options[options["item"] == items[0]].round(3))
   `point_biserial` with the rest score; the key should show the opposite. Here the wrong answers
   were drawn at random, so the distractors of an item look alike.
 
-## 21. Errors and warnings
+## 22. Errors and warnings
 
 | Type | When |
 |---|---|
