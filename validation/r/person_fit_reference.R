@@ -17,7 +17,9 @@
 #     (h = 1e-5), item information from mirt's iteminfo() and its derivative (WLE) by central
 #     differences (h = 1e-4). There is no installed reference (PerFit is not installable here).
 #   - mirt::itemfit(m, fit_stats = "infit", Theta = theta) for EAP, MAP and WLE (ML gives
-#     infinite estimates, which mirt replaces by the finite extremes +/- 0.1).
+#     infinite estimates, which mirt replaces by the finite extremes +/- 0.1), and item z_outfit
+#     recomputed from mirt's residual moments with the per-item respondent count (mirt's
+#     itemfit() recycles that count over rows; this matters only with missing responses).
 # Person statistics are stored for the first N_STORE unique patterns of each case (all of them
 # are computed on the full data); item statistics for every item.
 #
@@ -130,9 +132,23 @@ person_block <- function(theta, pf, z_out_n, lzs, store) {
        lz_star = if (is.null(lzs)) NULL else encode_num(lzs[store]))
 }
 
-item_block <- function(f) {
+# Item z_outfit from mirt's residual moments with q^2 = sum_i(C / W^2) / N_j^2 - 1 / N_j per item.
+# mirt's itemfit() writes colSums((C / W^2) / N^2) with N a length-J vector, which R recycles
+# down the rows instead of across the columns; with missing responses (N_j unequal) its
+# z.outfit is off. Without missing responses the two agree.
+item_z_outfit <- function(m, theta) {
+  attr(m, "inoutfitreturn") <- TRUE
+  pf <- personfit(m, Theta = matrix(theta))
+  n_j <- colSums(!is.na(pf$resid))
+  outfit <- colSums(pf$resid^2 / pf$W, na.rm = TRUE) / n_j
+  q <- sqrt(colSums(pf$C / pf$W^2, na.rm = TRUE) / n_j^2 - 1 / n_j)
+  q[q > 1.4142] <- 1.4142
+  (outfit^(1 / 3) - 1) * (3 / q) + q / 3
+}
+
+item_block <- function(f, z_outfit = f$z.outfit) {
   list(item = f$item, infit = f$infit, z_infit = f$z.infit, outfit = f$outfit,
-       z_outfit = f$z.outfit)
+       z_outfit = z_outfit, z_outfit_mirt = f$z.outfit)
 }
 
 # --- single-group cases ---------------------------------------------------------------------
@@ -161,8 +177,10 @@ single_case <- function(name) {
     if (!is.null(lzs)) lzs_full[store] <- lzs
     persons[[method]] <- person_block(theta, pf, z_outfit_answered(m, theta),
                                       if (is.null(lzs)) NULL else lzs_full, store)
-    if (method != "ML") item_fit[[method]] <- item_block(itemfit(m, fit_stats = "infit",
-                                                                 Theta = matrix(theta)))
+    if (method != "ML") {
+      item_fit[[method]] <- item_block(itemfit(m, fit_stats = "infit", Theta = matrix(theta)),
+                                       item_z_outfit(m, theta))
+    }
   }
   cat(sprintf("%-14s N=%d patterns=%d stored=%d\n", name, nrow(dat), nrow(pats), length(store)))
   list(source = name, n_store = length(store), persons = persons, item_fit = item_fit)

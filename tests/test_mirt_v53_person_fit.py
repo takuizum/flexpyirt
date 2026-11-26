@@ -53,6 +53,8 @@ TOL_AT_THETA = 1e-9
 """Relative tolerance of l_z and infit / outfit at mirt's theta (measured: VALIDATION.md V53)."""
 TOL_LZ_STAR = 1e-7
 """Absolute tolerance of l_z* vs the R recomputation with central differences."""
+LZ_STAR_THETA_MAX = 10.0
+"""l_z* is compared with the R recomputation for |theta| <= 10 only (see the test)."""
 TOL_THETA = {"EAP": 1e-8, "MAP": 1e-5, "ML": 1e-4, "WLE": 1e-4}
 """Ability estimates vs mirt (V13 / V37 tolerances)."""
 TOL_END_TO_END = 1e-3
@@ -214,8 +216,12 @@ def test_person_fit_at_mirt_theta(name: str, method: str) -> None:
         got["z_outfit"][complete], _num(ref["z_outfit_mirt"])[complete], rtol=TOL_AT_THETA
     )
     if method != "EAP":
+        # Beyond |theta| = 10 (mirt's ML on 3PL flat tails and on its missing-data extremes,
+        # V13) the R central differences of probtrace() lose precision; the 2PL closed form in
+        # test_person_fit.py covers flexpyirt there.
+        moderate = finite & (np.abs(theta) <= LZ_STAR_THETA_MAX)
         np.testing.assert_allclose(
-            got["lz_star"][finite], _num(ref["lz_star"])[finite], rtol=0, atol=TOL_LZ_STAR
+            got["lz_star"][moderate], _num(ref["lz_star"])[moderate], rtol=0, atol=TOL_LZ_STAR
         )
 
 
@@ -265,6 +271,10 @@ def test_item_infit_outfit(name: str, method: str) -> None:
         for col in ("infit", "z_infit", "outfit", "z_outfit"):
             np.testing.assert_allclose(
                 part[col].to_numpy(), np.asarray(block[col]), atol=TOL_END_TO_END, err_msg=col
+            )
+        if data.notna().all(axis=None):  # mirt's own z.outfit is right without missing data
+            np.testing.assert_allclose(
+                part["z_outfit"].to_numpy(), np.asarray(block["z_outfit_mirt"]), atol=TOL_END_TO_END
             )
 
 
