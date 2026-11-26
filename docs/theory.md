@@ -60,7 +60,11 @@ fixed at 0.
 **Information.** The Fisher information of an item tells how precisely it measures at each
 $\theta$; for the 2PL it is $I_j(\theta)=a_j^2P_j(\theta)\{1-P_j(\theta)\}$, largest at
 $\theta=b_j$. The test information $I(\theta)=\sum_jI_j(\theta)$ appears in the WLE
-([section 10](#10-scoring-respondents)).
+([section 10](#10-scoring-respondents)). With several factors the information is a matrix,
+$\mathbf I_j(\boldsymbol\theta)=\sum_kP_{jk}\,\nabla\log P_{jk}\,\nabla\log P_{jk}^\top$; for the
+multidimensional 2PL it is $P_j(1-P_j)\,\mathbf a_j\mathbf a_j^\top$, so an item informs only along
+its slope vector $\mathbf a_j$. The information in a direction $\mathbf u$ ($\|\mathbf u\|=1$) is
+$\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$ (Reckase & McKinley, 1991; Reckase, 2009).
 
 Guide: [section 3](guide.md#3-specifying-a-model).
 
@@ -407,6 +411,8 @@ Guide: [section 15](guide.md#15-scale-linking).
 - Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37, 357–373.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24, 50–64.
 - Rasch, G. (1960). *Probabilistic Models for Some Intelligence and Attainment Tests*. Danish Institute for Educational Research.
+- Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Rubin, D. B. (1976). Inference and missing data. *Biometrika*, 63, 581–592.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7, 201–210.

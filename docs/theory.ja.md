@@ -54,7 +54,11 @@ flexpyirt の傾きの $1/1.7$ になる。
 
 **情報量.** 項目の Fisher 情報量は、その項目が各 $\theta$ でどれだけ精密に測れるかを表す。2PL では
 $I_j(\theta)=a_j^2P_j(\theta)\{1-P_j(\theta)\}$ で、$\theta=b_j$ で最大になる。テスト情報量
-$I(\theta)=\sum_jI_j(\theta)$ は WLE に現れる（[10 節](#10-受検者のスコアリング)）。
+$I(\theta)=\sum_jI_j(\theta)$ は WLE に現れる（[10 節](#10-受検者のスコアリング)）。因子が複数あると情報量は
+行列 $\mathbf I_j(\boldsymbol\theta)=\sum_kP_{jk}\,\nabla\log P_{jk}\,\nabla\log P_{jk}^\top$ になる。多次元 2PL では
+$P_j(1-P_j)\,\mathbf a_j\mathbf a_j^\top$ で、項目は傾きベクトル $\mathbf a_j$ の方向についてだけ情報をもつ。方向
+$\mathbf u$（$\|\mathbf u\|=1$）の情報量は $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$（Reckase & McKinley, 1991;
+Reckase, 2009）。
 
 ガイド: [3 節](guide.ja.md#3-モデルを指定する)。
 
@@ -342,6 +346,8 @@ $d^*=d-\mathbf a^{*\top}\boldsymbol\beta$ になる（Oshima, Davey & Lee, 2000�
 - Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37, 357–373.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24, 50–64.
 - Rasch, G. (1960). *Probabilistic Models for Some Intelligence and Attainment Tests*. Danish Institute for Educational Research.
+- Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Rubin, D. B. (1976). Inference and missing data. *Biometrika*, 63, 581–592.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7, 201–210.
