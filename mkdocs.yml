@@ -49,7 +49,9 @@ plugins:
   - search
   - i18n:
       docs_structure: suffix
-      fallback_to_default: false
+      # Lets the Japanese pages use the figures in docs/images (they have no .ja version). Every
+      # page has a Japanese version (tests/test_docs.py), so no page falls back to English.
+      fallback_to_default: true
       reconfigure_material: true
       reconfigure_search: true
       languages:

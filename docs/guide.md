@@ -386,6 +386,67 @@ print(reliability(res, df))  # with data: columns marginal, empirical
   flexpyirt's value does, and it does not change when the latent scale is transformed linearly.
 - `reliability()` needs `Normal` latent distributions.
 
+### Plots
+
+`flexpyirt.plotting` draws the figures looked at in every analysis: item characteristic curves
+with observed proportions, information curves, the test characteristic curve and the
+item–person (Wright) map. It needs matplotlib, installed with `pip install "flexpyirt[plot]"`;
+without it `import flexpyirt` still works and the plot functions raise
+`MissingDependencyError`. The functions return matplotlib objects (save them with
+`fig.savefig(...)`) and never call `plt.show()`.
+
+Every number in a figure comes from a function that returns a DataFrame, so the figures can be
+redrawn with any other library:
+
+- `item_probabilities(res, theta)`: the category probabilities $P_{jk}(\theta)$ (mirt's
+  `probtrace()`), one row per item, category and `theta`.
+- `empirical_item_curve(res, data)`: respondents sorted by EAP $\theta$ and cut into `n_bins`
+  bins of equal size (as mirt's `itemfit()`); per bin and category the mean `theta`, the number
+  of respondents `n`, the `observed` proportion and the model's `expected` probability at that
+  mean.
+- `wright_map_table(res, data)`: `persons` (EAP scores) and `items` (for each item and category
+  $k\ge1$ the `location` where $P(Y\ge k\mid\theta)=1/2$, the Thurstonian threshold; $b$ for
+  2PL items).
+
+```python
+from flexpyirt import empirical_item_curve, item_probabilities, wright_map_table
+
+trace = item_probabilities(res, np.linspace(-3.0, 3.0, 7), items="q01")
+print(trace.head(3).round(3))  # item, category, theta, probability
+observed = empirical_item_curve(res, df, items=["q01"], n_bins=10)
+print(observed.head(4).round(3))  # item, bin, theta, n, category, observed, expected
+wright = wright_map_table(res, df)
+print(wright.items.head(3).round(3))  # item, category, location
+```
+
+```python
+from flexpyirt.plotting import (
+    plot_expected_score,
+    plot_information,
+    plot_item_curves,
+    plot_wright_map,
+)
+
+fig_curves = plot_item_curves(res, items[:3], data=df)  # one panel per item, observed points
+ax_information = plot_information(res, standard_error=True)  # test information and its SE
+ax_expected = plot_expected_score(res)  # test characteristic curve
+fig_wright = plot_wright_map(res, df)  # persons beside item locations
+```
+
+![Item characteristic curves with observed proportions](images/plots/item_curves.png)
+
+![Test information and standard error](images/plots/information.png)
+![Test characteristic curve](images/plots/expected_score.png)
+
+![Wright map](images/plots/wright_map.png)
+
+- `plot_item_curves` draws $P(Y=1\mid\theta)$ for dichotomous items and every category for
+  polytomous items; `ax=` draws a single item into existing axes.
+- `plot_information(res, items=[...])` draws item information instead of test information.
+- For a multiple-group model the curves of every group are drawn (see
+  [DIF](#differential-item-functioning-dif)); with `data`, pass `group=labels` as for
+  `score()`.
+
 ### Limited-information fit (M2)
 
 `m2(data)` computes the Maydeu-Olivares & Joe (2005, 2006) limited-information goodness-of-fit
@@ -752,6 +813,17 @@ the item free minus the constrained one (negative values favour DIF), as in mirt
 dif_table = mg.dif(mg_df, group=group, items=items[6:9])
 print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
 ```
+
+`plot_item_curves` on a multiple-group fit draws each group's curve, with the observed
+proportions of each group when `data` and `group` are given: the DIF plot of an item.
+
+```python
+from flexpyirt.plotting import plot_item_curves
+
+fig_dif = plot_item_curves(mg, items[6:9], data=mg_df, group=group)
+```
+
+![Item characteristic curves per group (DIF plot)](images/plots/dif.png)
 
 ### Observed-score DIF (Mantel–Haenszel, logistic regression)
 

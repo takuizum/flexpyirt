@@ -153,6 +153,14 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and
   `SE.type = "sandwich"` / `"crossprod"`.
 
+## Field features
+- [x] Plots (#103): `item_probabilities()`, `empirical_item_curve()` and `wright_map_table()` return
+  the numbers behind the figures; `flexpyirt.plotting` (`plot_item_curves` with observed proportions and
+  per-group curves for DIF, `plot_information`, `plot_expected_score`, `plot_wright_map`) draws them with
+  matplotlib from the optional extra `flexpyirt[plot]`. Unidimensional models, every item family, single
+  and multiple groups; validated in V48 against mirt `itemfit(return.tables = TRUE)`, `probtrace()`,
+  `coef(IRTpars = TRUE)` and TAM `tam.threshold()`.
+
 ## Ongoing
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).
 - [x] Public extension API for user-defined item models, with docs examples (#86): the

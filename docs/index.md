@@ -26,7 +26,7 @@ wanted.
 equipercentile and kernel equating). It is independent of flexpyirt and is not installed with it:
 `pip install flexpyequate`. See [Score equating](equating.md).
 
-For polars input, install `flexpyirt[polars]`. For GPUs, install a CUDA build of `jax` first
+For polars input, install `flexpyirt[polars]`; for the plots (`flexpyirt.plotting`), `flexpyirt[plot]`. For GPUs, install a CUDA build of `jax` first
 (see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)).
 
 flexpyirt computes in **64-bit floating point**. The JAX setting belongs to you, so the library

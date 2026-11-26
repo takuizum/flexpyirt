@@ -18,6 +18,12 @@ from flexpyctt.dif import (
 )
 from flexpyirt import errors
 from flexpyirt.correlation import PolychoricResult, polychoric
+from flexpyirt.curves import (
+    WrightMapTable,
+    empirical_item_curve,
+    item_probabilities,
+    wright_map_table,
+)
 from flexpyirt.dimensionality import (
     ComparisonDataResult,
     DetectResult,
@@ -103,12 +109,14 @@ __all__ = [
     "Rasch",
     "ThreePL",
     "TwoPL",
+    "WrightMapTable",
     "__version__",
     "comparison_data",
     "detect",
     "dimensionality",
     "dimtest",
     "efa",
+    "empirical_item_curve",
     "empirical_kaiser",
     "errors",
     "expected_score",
@@ -117,6 +125,7 @@ __all__ = [
     "generalized_mantel_haenszel",
     "hull",
     "item_information",
+    "item_probabilities",
     "link",
     "logistic_dif",
     "mantel",
@@ -129,4 +138,5 @@ __all__ = [
     "summed_score_table",
     "test_information",
     "velicer_map",
+    "wright_map_table",
 ]
