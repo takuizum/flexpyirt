@@ -15,7 +15,7 @@ from flexpyirt._core import CompiledProblem, _expand, _item_log_probs, _latent_l
 from flexpyirt.items import ItemKernel
 from flexpyirt.sumscore import summed_score_distribution
 
-__all__ = ["item_curves", "summed_score_eap"]
+__all__ = ["category_probabilities", "item_curves", "summed_score_eap"]
 
 
 def item_curves(prob: CompiledProblem, eta: Array, theta: Array) -> tuple[Array, Array]:
@@ -55,6 +55,28 @@ def item_curves(prob: CompiledProblem, eta: Array, theta: Array) -> tuple[Array,
         information = information.at[:, :, fam.columns].set(jnp.swapaxes(info_f, 1, 2))
         expected = expected.at[:, :, fam.columns].set(jnp.swapaxes(exp_f, 1, 2))
     return information, expected
+
+
+def category_probabilities(prob: CompiledProblem, eta: Array, theta: Array) -> Array:
+    r"""Return the category probabilities :math:`P_{jk}(\theta)` of every group at ``theta``.
+
+    ``theta`` has shape ``(T,)``; the result has shape ``(G, T, J, K_max)`` with items in column
+    order and the categories of items with fewer than ``K_max`` categories padded with zeros,
+    the layout :func:`~flexpyirt.sumscore.summed_score_distribution` takes.
+    """
+    n_items = prob.y.shape[1]
+    k_max = max(fam.kernel.n_categories for fam in prob.families)
+    probs = jnp.zeros((prob.n_groups, theta.shape[0], n_items, k_max), dtype=theta.dtype)
+    nodes = theta.reshape(-1, 1)
+    for fam in prob.families:
+        xi = _expand(eta, fam.fixed_values, fam.free_index)  # (G, J_f, P_f)
+
+        def per_item(p: Array, k: ItemKernel = fam.kernel) -> Array:
+            return jnp.exp(k.log_prob(nodes, p))  # (T, K_f)
+
+        p_f = jax.vmap(jax.vmap(per_item))(xi)  # (G, J_f, T, K_f)
+        probs = probs.at[:, :, fam.columns, : fam.kernel.n_categories].set(jnp.swapaxes(p_f, 1, 2))
+    return probs
 
 
 def summed_score_eap(prob: CompiledProblem, eta: Array) -> tuple[Array, Array, Array]:

@@ -10,6 +10,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 from flexpyirt import errors
+from flexpyirt.classification import ClassificationResult, classification_accuracy
 from flexpyirt.correlation import PolychoricResult, polychoric
 from flexpyirt.dimensionality import (
     ComparisonDataResult,
@@ -66,6 +67,7 @@ __all__ = [
     "GRM",
     "PCM",
     "BetaPrior",
+    "ClassificationResult",
     "ComparisonDataResult",
     "DavidianCurve",
     "DetectResult",
@@ -96,6 +98,7 @@ __all__ = [
     "ThreePL",
     "TwoPL",
     "__version__",
+    "classification_accuracy",
     "comparison_data",
     "detect",
     "dimensionality",
