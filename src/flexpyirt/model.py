@@ -787,8 +787,14 @@ class Model:
             )
         return replace(self, latent=dist)
 
-    def with_groups(self, **latents: LatentSpec) -> Model:
+    def with_groups(
+        self, groups: Mapping[str, LatentSpec] | None = None, /, **latents: LatentSpec
+    ) -> Model:
         """Return a multiple-group model; keyword order defines the groups, the first is reference.
+
+        The groups are given either as keywords or as one positional mapping (insertion order),
+        which suits many groups and labels that are not Python identifiers (DESIGN.md §26):
+        ``with_groups({"ref": Normal.standard()} | {s: Normal.free() for s in schools})``.
 
         Every group must use ``Normal`` or every group must use ``EmpiricalHistogram`` (mixing
         them across groups raises :class:`~flexpyirt.errors.SpecificationError`; DESIGN.md §4.4).
@@ -804,6 +810,14 @@ class Model:
         factor: ``Normal.free()`` frees all of that group's factor means and variances, and the
         factor correlations follow ``with_factors(correlated=...)`` in every group (§15.43).
         """
+        if groups is not None:
+            if latents:
+                raise SpecificationError(
+                    "with_groups() takes the groups as one mapping or keywords, not both."
+                )
+            if not isinstance(groups, Mapping):
+                raise SpecificationError("with_groups() expects a mapping of group name to latent.")
+            latents = {str(name): dist for name, dist in groups.items()}
         if len(latents) < 2:
             raise SpecificationError("with_groups() needs at least two groups.")
         for name, dist in latents.items():

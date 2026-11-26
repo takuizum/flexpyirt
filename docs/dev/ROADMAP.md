@@ -109,7 +109,11 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 - [x] Linking for 4PL, nominal and multidimensional models (#78; `link(..., transformation=)` with a
   diagonal, orthogonal or oblique $\mathbf A$ for confirmatory two- and three-factor models;
   validated in V40).
-- [ ] Many groups: per-group latent distributions vmapped over groups (#79; DESIGN §12 open question 2).
+- [x] Many groups (#79; DESIGN §12 open question 2, §26): the E-step and Oakes' cross term run
+  over fixed-size single-group blocks of patterns (cost linear in respondents, compile time
+  independent of the number of groups), the latent M-step is `vmap`ped over the stacked group
+  parameters, and `with_groups()` takes a mapping. Validated against mirt `multipleGroup` with 10
+  groups (V55); benchmarks for 10, 50 and 200 groups in `benchmarks/`.
 - **Acceptance**: each item validated against mirt (or an independent R implementation) within the
   VALIDATION.md tolerances.
 

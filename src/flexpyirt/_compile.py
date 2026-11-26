@@ -22,6 +22,7 @@ from flexpyirt._core import (
     CoupledBlock,
     CoupledMember,
     FamilyBlock,
+    GroupBlocks,
     LatentBlock,
     PriorBlock,
 )
@@ -76,6 +77,7 @@ __all__ = [
     "TABLE_COLUMNS",
     "Compiled",
     "Prepared",
+    "build_group_blocks",
     "build_table",
     "coerce_groups",
     "coerce_responses",
@@ -263,6 +265,46 @@ def pad_patterns(
         np.vstack([patterns, np.zeros((pad, patterns.shape[1]), dtype=patterns.dtype)]),
         np.concatenate([groups, np.zeros(pad, dtype=groups.dtype)]),
         np.concatenate([counts, np.zeros(pad)]),
+    )
+
+
+GROUP_BLOCK_MIN_GROUPS = 2
+"""Smallest number of groups that uses the group-blocked E-step (DESIGN.md §26)."""
+_BLOCK_SIZES = tuple(1 << k for k in range(3, 11))
+"""Candidate group-block sizes ``B`` (8 to 1024; DESIGN.md §26)."""
+_BLOCK_OVERHEAD_ROWS = 64
+"""Per-block overhead, in rows, of the block-size cost (DESIGN.md §26)."""
+
+
+def build_group_blocks(pattern_groups: np.ndarray, n_groups: int, n_rows: int) -> GroupBlocks:
+    """Split each group's pattern rows into equal-size blocks, group-major (DESIGN.md §26).
+
+    ``pattern_groups`` are the groups of the real (unpadded) pattern rows ``0..n_real-1``;
+    ``n_rows`` is the padded number of rows ``P``, used as the sentinel row index. The block
+    size minimizes the padded rows plus a per-block overhead.
+    """
+    sizes = np.bincount(pattern_groups, minlength=n_groups)
+
+    def cost(b: int) -> int:
+        n_blocks = int(np.sum(-(-sizes // b)))
+        return n_blocks * b + _BLOCK_OVERHEAD_ROWS * n_blocks
+
+    block = min(_BLOCK_SIZES, key=lambda b: (cost(b), -b))
+    rows: list[np.ndarray] = []
+    groups: list[int] = []
+    last: list[bool] = []
+    for g in range(n_groups):
+        idx = np.flatnonzero(pattern_groups == g)
+        n_blocks = -(-idx.size // block)
+        padded = np.full(n_blocks * block, n_rows, dtype=np.int32)
+        padded[: idx.size] = idx
+        rows.extend(padded.reshape(n_blocks, block))
+        groups.extend([g] * n_blocks)
+        last.extend([False] * (n_blocks - 1) + [True] * (n_blocks > 0))
+    return GroupBlocks(
+        rows=jnp.asarray(np.stack(rows), dtype=jnp.int32),
+        group=jnp.asarray(groups, dtype=jnp.int32),
+        last=jnp.asarray(last, dtype=jnp.bool_),
     )
 
 
@@ -1743,6 +1785,11 @@ def compile_problem(
         param1=jnp.asarray(prior_p1, dtype=jnp.float64),
         param2=jnp.asarray(prior_p2, dtype=jnp.float64),
     )
+    blocks = (
+        build_group_blocks(pat_groups[:n_patterns], n_groups, patterns.shape[0])
+        if n_groups >= GROUP_BLOCK_MIN_GROUPS and reduction is None
+        else None
+    )
     problem = CompiledProblem(
         y=jnp.asarray(patterns, dtype=jnp.int32),
         counts=jnp.asarray(counts, dtype=jnp.float64),
@@ -1755,6 +1802,7 @@ def compile_problem(
         n_groups=n_groups,
         coupled=_coupled_blocks(family_free_index, slot_bounds),
         reduction=reduction,
+        blocks=blocks,
     )
     if model.is_reduced and bool(
         np.any(np.asarray(latent.free_index)[:, : 2 * model.n_factors] >= 0)

@@ -31,6 +31,7 @@
   "test_m7_sumscore": 12.5,
   "test_m7_two_tier": 10.9,
   "test_m7_weights": 12.1,
+  "test_many_groups": 20.0,
   "test_mirt_m1": 31.8,
   "test_mirt_m4_multigroup": 0.1,
   "test_mirt_m6_fit_multidim": 3.7,

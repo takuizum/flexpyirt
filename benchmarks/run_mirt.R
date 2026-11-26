@@ -10,6 +10,7 @@
 # Run from the repository root:
 #   Rscript benchmarks/run_mirt.R
 #   Rscript benchmarks/run_mirt.R --quick
+#   Rscript benchmarks/run_mirt.R --quick --cases manygroups_2pl_g200 --algos default --se none
 
 suppressMessages({
   library(mirt)
@@ -22,6 +23,9 @@ parse_args <- function(args) {
     out = file.path("benchmarks", "data", "mirt_raw.json"),
     cases = character(0),
     quick = FALSE,
+    many_groups = FALSE,
+    algos = c("default", "nr_none"),
+    se = c("none", "oakes"),
     repeats = NA_integer_,
     tol = 1e-4,
     ncycles = 2000L,
@@ -35,6 +39,24 @@ parse_args <- function(args) {
       cfg$data_dir <- args[i + 1L]; i <- i + 2L
     } else if (flag == "--out") {
       cfg$out <- args[i + 1L]; i <- i + 2L
+    } else if (flag == "--algos") {
+      i <- i + 1L
+      vals <- character(0)
+      while (i <= length(args) && !startsWith(args[i], "--")) {
+        vals <- c(vals, args[i]); i <- i + 1L
+      }
+      stopifnot(all(vals %in% c("default", "nr_none")))
+      cfg$algos <- vals
+    } else if (flag == "--se") {
+      i <- i + 1L
+      vals <- character(0)
+      while (i <= length(args) && !startsWith(args[i], "--")) {
+        vals <- c(vals, args[i]); i <- i + 1L
+      }
+      stopifnot(all(vals %in% c("none", "oakes")))
+      cfg$se <- vals
+    } else if (flag == "--many-groups") {
+      cfg$many_groups <- TRUE; i <- i + 1L
     } else if (flag == "--quick") {
       cfg$quick <- TRUE; i <- i + 1L
     } else if (flag == "--repeats") {
@@ -76,6 +98,8 @@ if (length(cfg$cases) > 0L) {
     found <- vapply(selected, `[[`, character(1), "name")
     stop("Unknown case(s): ", paste(setdiff(cfg$cases, found), collapse = ", "))
   }
+} else if (cfg$many_groups) {
+  selected <- Filter(function(c) c$model == "manygroups_2pl", all_cases)
 } else if (cfg$quick) {
   selected <- Filter(function(c) c$name %in% quick_names, all_cases)
 } else {
@@ -104,6 +128,7 @@ fit_once <- function(case_info, dat, grp, algo, se_flag) {
   model_kind <- case_info$model
   warns <- character(0)
   m <- NULL
+  invisible(gc(reset = TRUE))
   elapsed <- system.time({
     m <- withCallingHandlers(
       {
@@ -113,7 +138,7 @@ fit_once <- function(case_info, dat, grp, algo, se_flag) {
           do.call(mirt, c(list(dat, 1, itemtype = "graded"), common))
         } else if (model_kind == "3pl") {
           do.call(mirt, c(list(dat, 1, itemtype = "3PL"), common))
-        } else if (model_kind == "twogroup_2pl") {
+        } else if (model_kind %in% c("twogroup_2pl", "manygroups_2pl")) {
           anchors <- unlist(case_info$anchors)
           do.call(
             multipleGroup,
@@ -139,6 +164,8 @@ fit_once <- function(case_info, dat, grp, algo, se_flag) {
     )
   })[["elapsed"]]
 
+  mem <- gc()
+  peak_mb <- sum(mem[, ncol(mem)])  # "max used" (Mb) of Ncells + Vcells since gc(reset = TRUE)
   grid_range <- range(m@Model$Theta)
   grid_n <- nrow(m@Model$Theta)
   stopifnot(
@@ -148,6 +175,7 @@ fit_once <- function(case_info, dat, grp, algo, se_flag) {
 
   list(
     elapsed_s = unname(as.numeric(elapsed)),
+    peak_mb = unname(as.numeric(peak_mb)),
     iterations = as.integer(extract.mirt(m, "iterations")),
     converged = isTRUE(extract.mirt(m, "converged")),
     loglik = as.numeric(extract.mirt(m, "logLik")),
@@ -173,9 +201,9 @@ for (case_info in selected) {
     dat <- raw_df
   }
 
-  for (se_name in c("none", "oakes")) {
+  for (se_name in cfg$se) {
     se_flag <- (se_name == "oakes")
-    for (algo in c("default", "nr_none")) {
+    for (algo in cfg$algos) {
       elapsed_vec <- numeric(cfg$repeats)
       last <- NULL
       for (r in seq_len(cfg$repeats)) {
@@ -187,6 +215,7 @@ for (case_info in selected) {
         algo = algo,
         se = se_name,
         elapsed_s = unname(median(elapsed_vec)),
+        peak_mb = last$peak_mb,
         min_s = unname(min(elapsed_vec)),
         max_s = unname(max(elapsed_vec)),
         runs_s = unname(as.list(elapsed_vec)),

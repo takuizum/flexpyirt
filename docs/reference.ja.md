@@ -503,11 +503,15 @@ model.with_latent(dist) -> Model
 #### `Model.with_groups`
 
 ```text
-model.with_groups(**latents) -> Model
+model.with_groups(groups=None, /, **latents) -> Model
 ```
 
 多母集団モデルにする。キーワード引数の順で群を定義し、**最初の群が参照群**。2 群以上が必要。
-例: `model.with_groups(ref=Normal.standard(), focal=Normal.free())`。
+例: `model.with_groups(ref=Normal.standard(), focal=Normal.free())`。群は位置引数のマッピング 1 つでも渡せる
+（挿入順。キーは `str` に変換）。群が多いときや識別子でないラベルに使う:
+`model.with_groups({"ref": Normal.standard()} | {s: Normal.free() for s in schools})`。マッピングと
+キーワードの両方を渡すと `SpecificationError`。全群が同じ潜在分布の族（`Normal` か `EmpiricalHistogram`）を使う。
+群が 2 つ以上のとき E-step は各群のパターンのブロック上で回る（DESIGN §26）。
 
 #### `Model.equal_across_groups`
 

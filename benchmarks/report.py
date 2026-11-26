@@ -36,6 +36,12 @@ def _fmt_sec(val: float | None) -> str:
     return f"{val:.3f}"
 
 
+def _fmt_mb(val: float | None) -> str:
+    if val is None or not math.isfinite(val):
+        return "—"
+    return f"{val:.0f}"
+
+
 def _fmt_ratio(num: float | None, den: float | None) -> str:
     if num is None or den is None or den <= 0.0 or not (math.isfinite(num) and math.isfinite(den)):
         return "—"
@@ -272,6 +278,51 @@ def render_markdown(merged: dict[str, Any]) -> str:
             )
             + " |"
         )
+
+    # Compile time and peak memory (recorded since #79; older raw files have neither).
+    mem_rows = [
+        row
+        for row in merged["results"]
+        if any(
+            rec is not None and ("peak_rss_mb" in rec or "peak_mb" in rec)
+            for rec in (row["flexpyirt_plain"], row["flexpyirt_squarem"], row["mirt_default"])
+        )
+    ]
+    if mem_rows:
+        lines.extend(
+            [
+                "",
+                "## Compile time and peak memory",
+                "",
+                "flexpyirt compile time is cold minus warm time; peak memory is the worker "
+                "process's peak resident set size (`ru_maxrss`, includes the JAX runtime). mirt "
+                'memory is R\'s `gc()` "max used" since a reset before the fit (R heap only).',
+                "",
+                "| Case | SE | plain compile (s) | plain peak RSS (MiB) | SQUAREM compile (s) "
+                "| SQUAREM peak RSS (MiB) | mirt default R heap (MiB) |",
+                "|---|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for row in mem_rows:
+            fp = row["flexpyirt_plain"]
+            fs = row["flexpyirt_squarem"]
+            md = row["mirt_default"]
+            se_label = "None" if row["se"] == "none" else "Oakes"
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        row["label"],
+                        se_label,
+                        _fmt_sec(fp.get("compile_s") if fp else None),
+                        _fmt_mb(fp.get("peak_rss_mb") if fp else None),
+                        _fmt_sec(fs.get("compile_s") if fs else None),
+                        _fmt_mb(fs.get("peak_rss_mb") if fs else None),
+                        _fmt_mb(md.get("peak_mb") if md else None),
+                    ]
+                )
+                + " |"
+            )
 
     # Record mirt's resolved default optimizer & acceleration per case for transparency.
     if mmeta is not None:
