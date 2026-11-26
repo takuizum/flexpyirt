@@ -79,7 +79,10 @@ def test_code_blocks_run(doc: str, capsys: pytest.CaptureFixture[str]) -> None:
         warnings.simplefilter("error", errors.HeywoodWarning)
         for i, code in enumerate(blocks):
             try:
-                exec(compile(code, f"{doc}[block {i}]", "exec"), namespace)
+                # dont_inherit: run the blocks as a plain script, without this module's
+                # ``from __future__ import annotations`` (string annotations break dataclasses
+                # defined in a namespace that is not in sys.modules).
+                exec(compile(code, f"{doc}[block {i}]", "exec", dont_inherit=True), namespace)
             except Exception as e:  # pragma: no cover - message for the failing block
                 raise AssertionError(f"{doc} block {i} failed:\n{code}") from e
     capsys.readouterr()

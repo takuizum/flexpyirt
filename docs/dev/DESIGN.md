@@ -333,15 +333,19 @@ class ItemKernel(Protocol):
     n_categories: int
     slope_params: tuple[str, ...]
     intercept_params: tuple[str, ...]
-    irt_names: tuple[str, ...]  # display thresholds (empty for D > 1)
-    irt_dependency_indices: tuple[tuple[int, ...], ...]
 
     def with_factors(self, n_factors: int) -> ItemKernel: ...
-    def irt_thresholds(self, params: Array) -> Array: ...
     def log_prob(self, theta: Array, params: Array) -> Array: ...  # theta (Q, D) -> (Q, K)
+
+    # optional: display thresholds (empty for D > 1)
+    irt_names: tuple[str, ...]
+    irt_dependency_indices: tuple[tuple[int, ...], ...]
+
+    def irt_thresholds(self, params: Array) -> Array: ...
 ```
 The design goal: writing `log_prob` on `(Q, D)` nodes is enough for a new item kernel to get the
 E-step, M-step (autodiff Newton), Oakes/Hessian SEs, and EAP scoring for $D \in \{1, 2, 3\}$.
+This protocol, with `ItemModel`, is public: §20 fixes the contract for user-defined item models.
 
 ## 7. Item models (in stages)
 | Model | Internal parameters | Milestone |
@@ -1911,6 +1915,13 @@ data-independent shapes (§15.21).
     $\le1.2\times10^{-7}$). The tests also check the refit against `fit()` on the data without the
     item, the approximations against the refit on a 15-item data set (`"newton"` 1 step 0.03, 2
     steps 0.02, `"one_step"` 0.05) and the vmapped gradients against single ones.
+    **Scope (decided 2026-11-26, #81)**: JSI is defined only for single-group unidimensional
+    models (one slope per item; Edwards, Houts & Cai, 2018). Its multidimensional /
+    multiple-group extension (including bifactor and two-tier models) and its use with non-Normal
+    latent distributions have not been studied, and there is no reference implementation (mirt's
+    `type = "JSI"` needs one factor; see also item 11 and §17.3), so it is not implemented:
+    `jsi()` raises `SpecificationError` for multiple-group, multidimensional and non-`Normal`
+    latent models, with a message saying why.
 18. **Package split: `flexpyctt` and `flexpyequate` (decided 2026-11-25, issue #87)**: tools that need no fitted IRT
     model are released as separate, JAX-free distributions from this repository. flexpyirt keeps
     BA-EM estimation and everything that uses its result.
@@ -2633,6 +2644,93 @@ data-independent shapes (§15.21).
    $\mathbf A$ and NaN otherwise (a rotated standard error needs the posterior covariance, which
    the score table does not carry).
 
+## 20. User-defined item models (#86)
+
+1. **Public contract.** `flexpyirt.items.ItemModel` and `flexpyirt.items.ItemKernel` (§6) are the
+   public extension point: an object that implements them can be put in a `Model` like a built-in
+   item model, and every part of the library that only evaluates `log_prob` works with it.
+   Instead of adding more built-in models, a model such as GGUM is written by the user.
+   - **`ItemModel`** (Spec layer; all members required): the class attribute `name` (a non-empty
+     string that is not a built-in name; shown in the `model` column and stored in JSON),
+     `kernel` (the kernel with `n_factors == 1`), `default_free()`, `start_values(item, rest)`
+     and `bounds()`. The last three describe the unidimensional parameter layout
+     `kernel.param_names`; in a model with $D$ factors the slope entry is used for each of the $D$
+     slopes. It should be a frozen dataclass (hashable, compared by value, like `Model`).
+   - **`ItemKernel`** (Core layer), required: `n_factors`, `with_factors(n_factors)`,
+     `param_names`, `n_categories` (≥ 2; categories are coded $0..K-1$), `slope_params`,
+     `intercept_params` and `log_prob(theta, params)`. The kernel must be hashable and compare
+     equal exactly when it describes the same function (a frozen dataclass does both): it is a
+     static argument of jit, and items with equal kernels form one family (§4.3).
+   - **Optional kernel members**: `irt_names`, `irt_dependency_indices` and
+     `irt_thresholds(params)`. With them, `FitResult.items` adds display thresholds with
+     delta-method SEs (§7, §15.18); without them it shows the internal parameters only. Internal
+     code reads them through `items.irt_names(kernel)`, `items.irt_dependency_indices(kernel)` and
+     `items.irt_thresholds(kernel, params)`, which return empty values for a kernel without them.
+     `slope_params` and `intercept_params` stay required (they decide the parameter layout and
+     the identification checks of §4.5; `intercept_params` may be empty).
+   - **Parameter layout**: `param_names[:n_factors]` are the slopes and equal `slope_params`
+     (every model has a slope: the multidimensional starting values, the scale of identification
+     checks, the Heywood check and the ML/WLE extreme-pattern rule all read it). The other
+     parameters follow in an order that does not depend on `n_factors`.
+   - **`log_prob(theta, params)`** receives the nodes as a `(Q, D)` float64 array on every code
+     path (the ML/WLE scoring helpers that passed a 1-D `theta` now reshape it to `(1, D)`) and
+     `params` as a float64 vector in `param_names` order, and returns the `(Q, n_categories)`
+     log-probabilities. It must be written with `jax.numpy` (traced by jit, differentiated
+     twice by autodiff for the Newton M-step and the SEs) and must not branch in Python on
+     parameter values. For parameters outside the model's domain it should return NaN, which the
+     M-step line search rejects (§15.3).
+2. **Checking the contract.** `Model.__post_init__` calls `items.check_item_model` for every item
+   whose model is not built in: a non-empty, non-built-in `name`; a hashable kernel with
+   `n_factors == 1`; unique `param_names`; exactly one slope, first; `intercept_params` among the
+   non-slope parameters; `n_categories >= 2`; `default_free()` and both bounds of length
+   `len(param_names)` with `lower < upper`. Errors are `SpecificationError` naming the item.
+   `log_prob` itself is not checked (its shape and values are only known when traced).
+3. **What works with a user-defined model.**
+
+   | Feature | Status |
+   |---|---|
+   | `fit` (EM, MAP with priors, fixed parameters, equality constraints, groups, weights, latent distributions) | Yes |
+   | Multidimensional, bifactor and two-tier models | Yes, through `kernel.with_factors` |
+   | Standard errors (every `se=` method) | Yes |
+   | `score`: EAP, MAP, PV, EAPsum | Yes |
+   | `score`: ML, WLE | Yes, but the all-lowest / all-highest pattern rule (§15.24) assumes that category $0$ is the lowest and $K-1$ the highest response for a positive slope; it is not meaningful for a non-monotone model |
+   | `item_fit`, `m2`, `local_dependence`, `jsi`, `dif`, information, expected score, reliability, summed scores | Yes (they evaluate `log_prob`; the item score is the category $0..K-1$) |
+   | Display thresholds in `FitResult.items` | Only with the optional kernel members |
+   | `Model.fix_from(parameterization="slope_intercept")` | Yes |
+   | `Model.fix_from(parameterization="irt")` | No (`SpecificationError`): the conversion from $b$ is model-specific |
+   | `link()` | No (`SpecificationError`): the scale transformation of the parameters (§16.5, §19) is model-specific |
+   | Free latent variance by default (§4.5) | Only for built-in `Rasch` / `PCM`; for a fixed-slope custom model use `Model.with_latent(Normal(free_var=True))` |
+   | `to_json` / `from_json` | After `register_item_model` (item 4) |
+
+4. **JSON (`register_item_model(cls, *, to_dict=None, from_dict=None)`).** A user-defined item
+   model is stored as `{"type": cls.name, **to_dict(model)}`, the same shape as the built-in
+   entries (§15.28), and rebuilt with `from_dict(fields)` (the object without `"type"`). The
+   defaults handle a dataclass whose `__init__` fields are `bool`, `int`, finite `float` or
+   `str`. The registry is per Python session (never `eval` or `pickle`): `to_json` of an
+   unregistered model and `from_json` of an unknown `"type"` raise `SpecificationError` naming
+   `register_item_model`. Registering a built-in name, or another class under a name already
+   taken (with a different `__qualname__`), is an error; a class with the same `__qualname__`
+   replaces the earlier registration (a re-run notebook cell). `from_dict` must return an
+   instance of the registered class with that `name`, and the rebuilt model is checked as in
+   item 2. No stored name changes, so `schema_version` stays 7: a file with a user-defined model
+   is read by a session that registered the class, and older flexpyirt versions report its
+   `"type"` as unknown.
+5. **Starting values in multidimensional models.** For a user-defined model, the non-slope
+   starting values are `start_values(item, rest)[1:]` with the rest score on all items (the
+   built-in effective-slope rule of §15.31 is model-specific). The slopes use the built-in rule
+   (factor-specific item–rest correlations), or `start_values(...)[0]` on every loaded factor
+   when the slope is fixed by default.
+6. **Verification.** `tests/test_custom_items.py` re-implements the 2PL (without display members)
+   and the GRM (with them) against the public protocol only. Fitted together in one mixed model,
+   they reproduce the built-in fit to $10^{-12}$: log-likelihood, iteration count, estimates,
+   Oakes SEs, display thresholds and their SEs, EAP/MAP/ML/WLE scores, S-X2, M2 and item
+   information. The multidimensional case agrees to $10^{-5}$ (different starting values, item
+   5). The tests also cover JSON registration, the contract checks and the unsupported features.
+   A user-defined model is as correct as its `log_prob`: flexpyirt verifies the machinery, not the
+   model. The guide's worked example is the 2PL re-implementation; a model not built in (such as
+   GGUM, Roberts, Donoghue & Laughlin, 2000) would be presented as validated only with its own
+   mirt comparison.
+
 ## References
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -2708,6 +2806,7 @@ data-independent shapes (§15.21).
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
+- Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
