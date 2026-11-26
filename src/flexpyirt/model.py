@@ -123,18 +123,7 @@ class Model:
         for name, item_model in self.items:
             check_item_model(name, item_model)
         if self.groups is not None:
-            kinds = {type(dist) for _, dist in self.groups}
-            for single_only in (DavidianCurve, NormalMixture):
-                if single_only in kinds:
-                    raise SpecificationError(
-                        f"{single_only.__name__} is only supported for single-group models; use "
-                        "Model.with_latent() instead of with_groups()."
-                    )
-            if EmpiricalHistogram in kinds and len(kinds) > 1:
-                raise SpecificationError(
-                    "Cannot mix EmpiricalHistogram and Normal across groups; when "
-                    "EmpiricalHistogram is specified, every group must use EmpiricalHistogram."
-                )
+            _check_group_latent_family(self.groups)
 
     # ---- constructors ------------------------------------------------------------------------
 
@@ -787,13 +776,21 @@ class Model:
             )
         return replace(self, latent=dist)
 
-    def with_groups(self, **latents: LatentSpec) -> Model:
+    def with_groups(
+        self, groups: Mapping[str, LatentSpec] | None = None, /, **latents: LatentSpec
+    ) -> Model:
         """Return a multiple-group model; keyword order defines the groups, the first is reference.
 
-        Every group must use ``Normal`` or every group must use ``EmpiricalHistogram`` (mixing
-        them across groups raises :class:`~flexpyirt.errors.SpecificationError`; DESIGN.md §4.4).
-        :class:`~flexpyirt.DavidianCurve` and :class:`~flexpyirt.NormalMixture` are single-group
-        only.
+        The groups are given either as keywords or as one positional mapping (insertion order),
+        which suits many groups and labels that are not Python identifiers (DESIGN.md §26):
+        ``with_groups({"ref": Normal.standard()} | {s: Normal.free() for s in schools})``.
+
+        Every group uses the same latent family: ``Normal``, ``EmpiricalHistogram``,
+        :class:`~flexpyirt.DavidianCurve` (same ``degree``) or :class:`~flexpyirt.NormalMixture`
+        (same ``n_components``); mixing them raises :class:`~flexpyirt.errors.SpecificationError`
+        (DESIGN.md §4.4, §27). In a Davidian model, a group that should stay normal gets its
+        ``phi_*`` rows fixed at 0 in the parameter table (a Davidian curve with all angles 0 is the
+        normal density).
 
         Examples
         --------
@@ -804,27 +801,26 @@ class Model:
         factor: ``Normal.free()`` frees all of that group's factor means and variances, and the
         factor correlations follow ``with_factors(correlated=...)`` in every group (§15.43).
         """
+        if groups is not None:
+            if latents:
+                raise SpecificationError(
+                    "with_groups() takes the groups as one mapping or keywords, not both."
+                )
+            if not isinstance(groups, Mapping):
+                raise SpecificationError("with_groups() expects a mapping of group name to latent.")
+            latents = {str(name): dist for name, dist in groups.items()}
         if len(latents) < 2:
             raise SpecificationError("with_groups() needs at least two groups.")
         for name, dist in latents.items():
-            if isinstance(dist, (DavidianCurve, NormalMixture)):
-                raise SpecificationError(
-                    f"{type(dist).__name__} is only supported for single-group models "
-                    f"(group {name!r}); "
-                    "use Model.with_latent() instead of with_groups()."
-                )
-            if not isinstance(dist, (Normal, EmpiricalHistogram)):
+            if not isinstance(dist, (Normal, EmpiricalHistogram, DavidianCurve, NormalMixture)):
                 raise SpecificationError(f"Unsupported latent distribution for group {name!r}.")
         kinds = {type(dist) for dist in latents.values()}
-        if self.is_multidimensional and EmpiricalHistogram in kinds:
+        if self.is_multidimensional and kinds != {Normal}:
             raise SpecificationError(
-                "EmpiricalHistogram is only supported for unidimensional models."
+                "EmpiricalHistogram, DavidianCurve and NormalMixture are only supported for "
+                "unidimensional models."
             )
-        if EmpiricalHistogram in kinds and len(kinds) > 1:
-            raise SpecificationError(
-                "Cannot mix EmpiricalHistogram and Normal across groups; when EmpiricalHistogram "
-                "is specified, every group must use EmpiricalHistogram."
-            )
+        _check_group_latent_family(tuple(latents.items()))
         if self.latent is not None:
             raise SpecificationError("Use with_groups() instead of with_latent() for groups.")
         return replace(self, groups=tuple(latents.items()))
@@ -951,3 +947,27 @@ class Model:
             item_names=None if item_names is None else list(item_names),
             table=None,
         ).table
+
+
+def _check_group_latent_family(groups: tuple[tuple[str, LatentSpec], ...]) -> None:
+    """Raise unless every group uses one latent family (and one degree / size; DESIGN.md §27)."""
+    kinds = {type(dist) for _, dist in groups}
+    if len(kinds) > 1:
+        names = ", ".join(sorted(k.__name__ for k in kinds))
+        hint = (
+            " To keep a group normal in a Davidian model, use DavidianCurve for every group and "
+            "fix that group's phi_* rows at 0 in the parameter table (DESIGN.md §27)."
+            if DavidianCurve in kinds
+            else ""
+        )
+        raise SpecificationError(
+            f"Every group must use the same latent distribution family; got {names}.{hint}"
+        )
+    sizes = {
+        dist.degree if isinstance(dist, DavidianCurve) else dist.n_components
+        for _, dist in groups
+        if isinstance(dist, (DavidianCurve, NormalMixture))
+    }
+    if len(sizes) > 1:
+        what = "degree" if DavidianCurve in kinds else "n_components"
+        raise SpecificationError(f"Every group must use the same {what}; got {sorted(sizes)}.")

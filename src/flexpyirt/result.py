@@ -878,9 +878,10 @@ class FitResult:
                 "item_fit() does not support bifactor, two-tier or multiple-group "
                 "multidimensional models yet (single-group with_factors() models are supported)."
             )
-        if model.is_empirical_histogram or model.is_davidian or model.is_mixture:
+        if model.is_empirical_histogram:
             raise SpecificationError(
-                "item_fit() supports models with Normal latent distributions only."
+                "item_fit() supports Normal, DavidianCurve and NormalMixture latent "
+                "distributions (not EmpiricalHistogram)."
             )
         if isinstance(min_cell, bool) or not (isinstance(min_cell, (int, float)) and min_cell > 0):
             raise SpecificationError(f"min_cell must be a positive number, got {min_cell!r}.")

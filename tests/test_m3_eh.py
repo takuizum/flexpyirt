@@ -93,11 +93,11 @@ def test_eh_min_weight_exceeds_grid_raises() -> None:
 def test_mixing_eh_and_normal_across_groups_raises() -> None:
     items = ["q1", "q2", "q3"]
     base = Model.uniform(TwoPL(), items=items)
-    with pytest.raises(SpecificationError, match="Cannot mix EmpiricalHistogram and Normal"):
+    with pytest.raises(SpecificationError, match="same latent distribution family"):
         base.with_groups(ref=EmpiricalHistogram(), focal=Normal.free())
-    with pytest.raises(SpecificationError, match="Cannot mix EmpiricalHistogram and Normal"):
+    with pytest.raises(SpecificationError, match="same latent distribution family"):
         base.with_groups(ref=Normal.standard(), focal=EmpiricalHistogram())
-    with pytest.raises(SpecificationError, match="Cannot mix EmpiricalHistogram and Normal"):
+    with pytest.raises(SpecificationError, match="same latent distribution family"):
         Model(
             items=base.items,
             groups=(("ref", EmpiricalHistogram()), ("focal", Normal.standard())),

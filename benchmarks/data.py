@@ -22,7 +22,7 @@ import pandas as pd
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent / "data"
 
-ModelKind = Literal["2pl", "grm", "3pl", "twogroup_2pl"]
+ModelKind = Literal["2pl", "grm", "3pl", "twogroup_2pl", "manygroups_2pl"]
 
 
 @dataclass(frozen=True)
@@ -35,10 +35,11 @@ class BenchmarkCase:
         Machine-readable case identifier (used for CSV filenames and JSON keys).
     label : str
         Human-readable label for Markdown tables.
-    model : {"2pl", "grm", "3pl", "twogroup_2pl"}
-        Model family.
+    model : {"2pl", "grm", "3pl", "twogroup_2pl", "manygroups_2pl"}
+        Model family. ``manygroups_2pl`` has ``n_groups`` groups with every item invariant
+        across groups and free focal means and variances (DESIGN.md §26).
     n_persons : int
-        Total number of respondents (for ``twogroup_2pl``, split equally across 2 groups).
+        Total number of respondents, split equally across the groups.
     n_items : int
         Number of items.
     n_categories : int
@@ -65,6 +66,15 @@ class BenchmarkCase:
     def item_names(self) -> list[str]:
         """Return item column names ``q01..q{J}``."""
         return [f"q{j:02d}" for j in range(1, self.n_items + 1)]
+
+    @property
+    def group_names(self) -> list[str]:
+        """Return the group labels in model order (the first is the reference group)."""
+        if self.model == "twogroup_2pl":
+            return ["ref", "focal"]
+        if self.model == "manygroups_2pl":
+            return [f"s{g:03d}" for g in range(1, self.n_groups + 1)]
+        return ["all"]
 
     @property
     def anchors(self) -> list[str]:
@@ -131,7 +141,23 @@ CASES: tuple[BenchmarkCase, ...] = (
     ),
 )
 
-CASES_BY_NAME: dict[str, BenchmarkCase] = {c.name: c for c in CASES}
+MANY_GROUP_CASES: tuple[BenchmarkCase, ...] = tuple(
+    BenchmarkCase(
+        name=f"manygroups_2pl_g{g}",
+        label=f"{g}-group 2PL ({g}×200 × 20)",
+        model="manygroups_2pl",
+        n_persons=200 * g,
+        n_items=20,
+        n_categories=2,
+        seed=202610 + g,
+        n_groups=g,
+        n_anchors=20,
+    )
+    for g in (10, 50, 200)
+)
+"""Many-group cases (#79, DESIGN.md §26); not in the default suite (``--many-groups``)."""
+
+CASES_BY_NAME: dict[str, BenchmarkCase] = {c.name: c for c in (*CASES, *MANY_GROUP_CASES)}
 QUICK_CASE_NAMES: tuple[str, ...] = ("2pl_n1000_j20", "grm4_n2000_j20")
 
 
@@ -195,6 +221,17 @@ def simulate_case(case: BenchmarkCase) -> pd.DataFrame:
         y = np.vstack([y_ref, y_foc])
         df = pd.DataFrame(y, columns=cols)
         df.insert(0, "group", np.repeat(["ref", "focal"], n_per))
+    elif case.model == "manygroups_2pl":
+        n_per = n // case.n_groups
+        a = rng.lognormal(0.0, 0.3, j)
+        d = rng.normal(0.0, 1.0, j)
+        means = np.concatenate([[0.0], rng.normal(0.0, 0.5, case.n_groups - 1)])
+        sds = np.concatenate([[1.0], rng.uniform(0.8, 1.25, case.n_groups - 1)])
+        theta = means[:, None] + sds[:, None] * rng.normal(0.0, 1.0, (case.n_groups, n_per))
+        p = _sigmoid(theta.reshape(-1, 1) * a[None, :] + d[None, :])
+        y = (rng.random(p.shape) < p).astype(np.int64)
+        df = pd.DataFrame(y, columns=cols)
+        df.insert(0, "group", np.repeat(case.group_names, n_per))
     else:  # pragma: no cover - exhaustive Literal guard
         raise ValueError(f"Unknown model kind: {case.model}")
 
@@ -227,8 +264,12 @@ def _count_unique_patterns(df: pd.DataFrame) -> int:
     return len(df.drop_duplicates())
 
 
-def resolve_cases(case_names: Sequence[str] | None, *, quick: bool = False) -> list[BenchmarkCase]:
+def resolve_cases(
+    case_names: Sequence[str] | None, *, quick: bool = False, many_groups: bool = False
+) -> list[BenchmarkCase]:
     """Select benchmark cases from CLI arguments."""
+    if many_groups and not case_names:
+        return list(MANY_GROUP_CASES)
     if case_names:
         unknown = [name for name in case_names if name not in CASES_BY_NAME]
         if unknown:
@@ -260,7 +301,7 @@ def generate_datasets(
             "csv": csv_name,
             "items": case.item_names,
             "anchors": case.anchors,
-            "groups": ["ref", "focal"] if case.n_groups == 2 else ["all"],
+            "groups": case.group_names,
             "n_patterns": _count_unique_patterns(df),
         }
         entries.append(entry)
@@ -290,13 +331,18 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Generate only the quick benchmark subset.",
     )
+    parser.add_argument(
+        "--many-groups",
+        action="store_true",
+        help="Generate only the many-group cases (G = 10, 50, 200).",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     """CLI entry point."""
     args = _parse_args(argv)
-    cases = resolve_cases(args.cases, quick=args.quick)
+    cases = resolve_cases(args.cases, quick=args.quick, many_groups=args.many_groups)
     manifest = generate_datasets(cases, data_dir=args.data_dir)
     for entry in manifest["cases"]:  # type: ignore[attr-defined]
         print(

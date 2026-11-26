@@ -178,6 +178,9 @@ weights on the fitted quadrature grid. Sparse cells are collapsed exactly as mir
 free latent parameters (mirt's convention). For a confirmatory multidimensional model
 (`with_factors()`, single group) the recursion runs at every node of the fitted product grid with
 the multivariate-normal weights, and the free factor correlations count as latent parameters.
+With `DavidianCurve` and `NormalMixture` latent distributions the weights are each group's fitted
+density and its free shape parameters count as latent parameters (DESIGN §27);
+`EmpiricalHistogram` raises `SpecificationError`.
 
 | Argument | Description |
 |---|---|
@@ -204,8 +207,7 @@ as in mirt (descriptive outside the Rasch family).
 statistics. A multiple-group model adds a leading `group` column (one row per group and item).
 
 **Raises**: `SpecificationError` for unknown or empty `statistics`; for S-X2: bifactor, two-tier,
-multiple-group multidimensional, `EmpiricalHistogram`, `DavidianCurve`, or `NormalMixture`
-models, missing responses, an item with an unobserved category (within a group), or a
+multiple-group multidimensional or `EmpiricalHistogram` models, missing responses, an item with an unobserved category (within a group), or a
 non-positive `min_cell`; for infit / outfit: multidimensional models or another `method`.
 
 #### `FitResult.person_fit`
@@ -574,12 +576,18 @@ Set the latent distribution of a single-group model to a `Normal`, `EmpiricalHis
 #### `Model.with_groups`
 
 ```text
-model.with_groups(**latents) -> Model
+model.with_groups(groups=None, /, **latents) -> Model
 ```
 
 Make a multiple-group model. Keyword order defines the groups, and **the first group is the
 reference group**. At least two groups. Example:
-`model.with_groups(ref=Normal.standard(), focal=Normal.free())`.
+`model.with_groups(ref=Normal.standard(), focal=Normal.free())`. The groups can instead be one
+positional mapping (insertion order; keys are converted to `str`), for many groups or labels that
+are not identifiers: `model.with_groups({"ref": Normal.standard()} | {s: Normal.free() for s in
+schools})`. Passing both a mapping and keywords raises `SpecificationError`. Every group uses the
+same latent family: `Normal`, `EmpiricalHistogram`, `DavidianCurve` (same `degree`) or
+`NormalMixture` (same `n_components`) (DESIGN §27). With two or more groups the E-step runs over
+blocks of each group's patterns (DESIGN §26).
 
 #### `Model.equal_across_groups`
 
@@ -936,7 +944,8 @@ Hermite polynomials with unit-sphere coefficients parameterized by $k$ angles
 analytically standardized by the exact continuous moments of $h_k$ so the continuous mean and
 variance equal `mean` and `var` for every $\boldsymbol\phi$. Quadrature weights are normalized on
 the grid, keeping EM monotone (non-decreasing) and Oakes / Hessian standard errors exact for all
-free item and latent parameters. Single-group unidimensional models only. The Fisher information
+free item and latent parameters. Unidimensional models, with one group or several (every group
+`DavidianCurve` of the same `degree`, each with its own shape; DESIGN §27). The Fisher information
 is singular at $\boldsymbol\phi = \mathbf 0$ in `phi_1`, `phi_2` (in `phi_1` for `degree=1`), so
 near-normal traits give unreliable angle standard errors, a non-standard likelihood-ratio test
 against `Normal` (use AIC / BIC), and possibly several local maxima
@@ -948,9 +957,9 @@ against `Normal` (use AIC / BIC), and possibly several local maxima
 | `mean`, `var` | Value (or starting value when free) of the continuous mean and positive variance |
 | `free_mean`, `free_var` | Whether `mean` / `var` is estimated (same identification rules as `Normal`) |
 
-**Raises**: `SpecificationError` for an invalid `degree`, `mean`, `var`, or flags, or when used
-with `Model.with_groups()` or `Model.with_factors()`; `IdentificationError` when `free_mean` or
-`free_var` lacks fixed intercepts or slopes.
+**Raises**: `SpecificationError` for an invalid `degree`, `mean`, `var`, or flags, when used with
+`Model.with_factors()`, or when `Model.with_groups()` mixes it with another family or degree;
+`IdentificationError` when `free_mean` or `free_var` lacks fixed intercepts or slopes.
 
 ### `NormalMixture`
 
@@ -968,10 +977,11 @@ components $c \ge 2$ have raw means `rmean_c`, raw variances `rvar_c` and logits
 its continuous mean and variance equal `mean` and `var` for every shape; each component is
 normalized on the grid and then mixed. `FitResult.latent` reports the standardized components
 `pi_c`, `mean_c`, `var_c` with delta-method SEs. Oakes / Hessian standard errors cover item and
-latent parameters. Single-group unidimensional models only; equispaced or Gauss–Hermite grids.
-Components are exchangeable (label switching) and the likelihood can have several local maxima:
-refit from a few starting shapes and keep the highest `loglik`. `score(method="MAP")`,
-`item_fit()` and `m2()` raise `SpecificationError`.
+latent parameters. Unidimensional models, with one group or several (every group `NormalMixture`
+with the same `n_components`, each with its own shape; DESIGN §27); equispaced or Gauss–Hermite
+grids. Components are exchangeable (label switching) and the likelihood can have several local
+maxima: refit from a few starting shapes and keep the highest `loglik`. `score(method="MAP")` and
+`m2()` raise `SpecificationError`; `item_fit()` integrates over each group's fitted mixture.
 
 | Argument | Description |
 |---|---|
@@ -981,8 +991,9 @@ refit from a few starting shapes and keep the highest `loglik`. `score(method="M
 | `means`, `variances`, `weights` | Optional length-$k$ starting shape (component means, positive variances, positive weights summing to 1) in any affine scale; defaults `(0, 1.5, -1.5, 3, -3, ...)`, all `1`, and `1/k` |
 
 **Raises**: `SpecificationError` for an invalid `n_components`, `mean`, `var`, flags or starting
-shape, or when used with `Model.with_groups()` or `Model.with_factors()`; `IdentificationError`
-when `free_mean` or `free_var` lacks fixed intercepts or slopes.
+shape, when used with `Model.with_factors()`, or when `Model.with_groups()` mixes it with another
+family or number of components; `IdentificationError` when `free_mean` or `free_var` lacks fixed
+intercepts or slopes.
 
 ---
 

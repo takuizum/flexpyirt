@@ -345,7 +345,9 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 
 ## 12. 未決事項
 1. ~~**EH の識別の取り方**~~ → **決定（2026-11-21）**: 参照群を毎反復で平均 0・分散 1 に標準化する（FIPC では行わない）。モーメント制約付きの EH M-step として実装（§4.4、§15.34）。
-2. 多母集団で群の数が多いとき（例: 学校 × 学年）の扱い。群ごとの潜在分布を vmap できる形にしておく。
+2. ~~多母集団で群の数が多いとき（例: 学校 × 学年）の扱い。群ごとの潜在分布を vmap できる形にしておく。~~
+   → **決定（2026-11-26、#79）**: 群ブロック化したパターン配置。E-step は固定長の単一群ブロック上で回し、
+   潜在分布の M-step は積み重ねた `(G, L)` の潜在パラメタ上の `vmap` のまま（§26）。
 3. ~~欠測の設計~~ → MAR 前提の除外のみ（§14.8、2026-11-20）。
 4. ~~パッケージ名~~ → `flexpyirt` に決定（2026-11-20）。
 5. ~~項目をまたぐ等値制約の M-step（§4.3）の実装方式~~ → 項目の連結成分ごとの同時 Newton（§16.1、2026-11-21）。
@@ -2762,6 +2764,97 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    `iteminfo()`。差分の精度が落ちる $|\hat\theta|>10$ は除く）と、単体テストの 2PL の閉じた式および帰無分布の
    シミュレーションと比べる。$l_z^*$ を実装した R パッケージは手元にない（`PerFit::lzstar` はインストールできず、
    2 値項目しか扱わない）。$l_z^*$ は、この照合をオーナーが認めた場合にだけ利用者向け文書に載せる（#108）。
+
+## 26. 多数の群: 群ブロック化した E-step（#79）
+
+1. **問題.** #79 以前の E-step はすべてのパターンをすべての群で評価していた。対数同時確率は
+   `einsum("pjk,gjqk->pgq")` のあとで各パターン自身の群を選び、期待度数は群の one-hot を使った
+   `einsum("pg,pjk,pq->gjkq")`。どちらも時間 $O(P\,G\,J\,K\,Q)$・メモリ $O(P\,G\,Q)$ で、必要な計算の
+   $G$ 倍になる。また Oakes の交差項（§15.20）は jit 内で群の Python ループを展開していたため、
+   コンパイル時間とパターンチャンクの走査回数が $G$ に比例して増えた。各パターンはちょうど 1 つの群に属する。
+   潜在パラメタは既に `(G, L)` に積まれ、潜在分布の M-step は既に群上の 1 つの `vmap` だった（§4.4、§14）。
+2. **決定: 群ブロック.** `compile_problem` は各群の（実在する）パターン行を共通の長さ $B$ のブロックに分け、
+   `GroupBlocks` pytree に記録する: `rows (N_B, B)`（平坦なパターン配列への添字。パディングは番兵 $P$）、
+   `group (N_B,)`（ブロックの群）、`last (N_B,)`（群の最後のブロックか）。ブロックは群の順に並ぶ。
+   `CompiledProblem` の平坦な `(P, J)` 配置は変えないので、E-step 以外の呼び出し側（スコアリング、項目適合度、
+   受験者適合度、M2、JSI、ロバスト SE）はそのまま動く。ブロックの添字は派生データで、`compile_problem`
+   でだけ作る（コンパイル済み問題の `y` の行・`group`・`counts` を差し替えるコードはない）。
+   パディングは度数 0・全欠測の行を読むので寄与しない。
+   - **ブロック長**: $B\in\{8,16,\dots,1024\}$ のうち
+     $\sum_g\lceil P_g/B\rceil B + 64\,N_B(B)$（パディング込みの行数 + ブロックあたり 64 行相当のオーバーヘッド）
+     を最小にするもの。同点なら大きい $B$。パディングの総量は高々 $G(B-1)$ 行。（$N_B$ を 8 の倍数に揃えることも
+     試したが、2 群で E-step の計算が 3 倍になったのでやめた。）
+   - **適用範囲**: $G\ge2$ の縮約なしモデルすべて。単一群（$G=1$）と bifactor / two-tier
+     （§17.1。E-step がブロック格子上で分解されている）は平坦な経路のままで、`CompiledProblem.blocks` は `None`。
+3. **ブロック化した E-step.** 群 $g=g(b)$ のブロック $b$ の行 $p\in b$ について
+   $$\lambda_{pq}=\log w_{gq}+\sum_f\sum_{j,k}\mathbf 1[y_{pj}=k]\log P^{(g)}_{jkq},\qquad
+   h_{pq}=\mathrm{softmax}_q\lambda_{pq},$$
+   $$\bar n_{gq}=\sum_{b:g(b)=g}\sum_{p\in b}c_ph_{pq},\qquad
+   \bar r_{gjkq}=\sum_{b:g(b)=g}\sum_{p\in b}c_p h_{pq}\mathbf 1[y_{pj}=k].$$
+   項目の表 $\log P^{(g)}_{jkq}$ `(G, J_f, Q, K_f)` と潜在分布の対数重み `(G, Q)` は E-step ごとに 1 回計算し
+   （従来どおり）、各ブロックは自分の群の切片を取り出して family ごとに `(B, J_f K_f) x (J_f K_f, Q)` の積を
+   1 回行う。ブロックは `lax.scan` で畳み込み、$\bar n$ と $\bar r$ をブロックの群の位置にその場で加算する
+   （`.at[g].add`）ので、ピークメモリは $N_B$ によらず $O(G J K Q + B J K Q)$。ブロックごとの事後確率
+   $h$ `(N_B, B, Q)` は平坦な `(P, Q)` の行へ書き戻す（どのブロックにも入らない平坦配置のパディング行は
+   $\lambda_{pq}=0$・度数 0）。周辺対数尤度、EAP、plausible values、Hessian SE（scan を通した自動微分）、
+   E-step はすべてこの経路を通る。計算量は $O(P G J K Q)$ から $O(N_B B\,J K Q)$ になる。
+   和の順序が平坦な経路と異なるので、結果は丸め誤差（相対 $\sim10^{-12}$）の範囲で一致し、ビット単位では一致しない
+   （回帰テストは `tests/test_many_groups.py`）。
+4. **Oakes の交差項**（§15.20）はブロック上の 1 つの `lax.scan` になる。各ブロックはカテゴリの共起を
+   現在の群の $C_{q}$ `(Q, D, D)` に、$\bar s_p\bar s_p^\top$ の項を $T_2$ に加える。群の最後のブロック（`last`）
+   では `lax.cond` で $\sum_q L_{gq}^\top C_q L_{gq}$ を $T_1$ に足して $C$ を 0 に戻す。群のスコア表は
+   ブロックの群（動的な添字）でブロックごとに 1 回取り出し（ブロック内のサブチャンクはそれを使い回し、パディング行だけの
+   サブチャンクは `lax.cond` で飛ばす）、トレースされるプログラムは $G$ に依存しない（コンパイル時間は $G$ によらず一定）。
+5. **潜在分布.** 潜在パラメタは `(G, L)`（`free_index` も `(G, L)`）に積んだまま。潜在分布の M-step、
+   Oakes の自身の Hessian、潜在分布のスコア表は群上で `vmap` する。全群が 1 つの潜在分布の族と静的な形 $L$ を
+   共有する（§4.4。群ごとの Davidian / 混合は #75、§27）。jit 内で群の Python ループは回らない。
+6. **API.** `Model.with_groups()` は位置引数のマッピングも 1 つ受け取る
+   （`with_groups({"ref": Normal.standard()} | {s: Normal.free() for s in schools})`。挿入順が群の順で、
+   先頭が参照群）。識別子でない群ラベルや数百の群でも `**` 展開が要らない。アンカー・不変性は従来どおり
+   `equal_across_groups()` で 1 回宣言し、`FitResult.latent` は既に群ごとに 1 行の DataFrame。
+7. **範囲外・制約（後続課題）.** (a) 多数の群で群ごとに異なる項目パラメタ: 各項目の局所ベクトルは最大
+   $G\,P_f$ 個のスロットを持ち、その Newton の Hessian は密（§14.2）なので、完全に非不変な項目は項目あたり
+   $O(G^2)$ になる。不変な項目でつないだアンカー付きデザインには影響しない。(b) `se="crossprod"` /
+   `"sandwich"` は各パターンを全群の表で微分する（§17.5）ので、チャンク長が $1/G$ で縮む。
+   (c) bifactor / two-tier の多母集団モデルは $G$ 倍の平坦な E-step のまま。
+8. **照合.** 回帰: 小さな $G$ でブロック化した経路と平坦な経路が $10^{-10}$ で一致すること（推定値、対数尤度、
+   Oakes と Hessian の SE、EAP）。V55: 不変なアンカー項目を持つ $G=10$ 群の 2PL を mirt `multipleGroup`
+   と照合（VALIDATION.md）。`benchmarks/` で $G=10,50,200$ のベンチマーク（コンパイル時間、ウォーム時間、
+   ピークメモリ）を mirt と比べる。
+
+## 27. 群ごとの Davidian 曲線と正規混合（#75）
+
+1. **範囲.** `DavidianCurve`（§4.4、§16.4）と `NormalMixture`（§4.4、§16.7）を `with_groups()` モデルの潜在分布として
+   使えるようにする。各群が自分の平均・分散・形（Davidian の角度 $\boldsymbol\phi_g$、混合の生の平均・生の分散・ロジット）を持ち、
+   項目パラメタはアンカーでつながった 1 組（FIPC では `fix_from()` で固定）。1 群のときと同じく、等間隔格子上の 1 次元モデルのみ。
+2. **モデルごとに 1 つの族（決定）.** 全群が同じクラスと同じ `degree`（Davidian）・`n_components`（混合）を使う。族や次数を
+   混ぜる（例: 参照群は `Normal`、焦点群は `DavidianCurve`）と `SpecificationError`。理由: 潜在ブロックは 1 つの静的な種類で
+   `(G, L)` に積まれており（§26.5）、混在には $L$ の群ごとのパディングと、全群で全族を評価する `lax.switch` が要る。また主な用途は
+   混在なしで実現できる: $\boldsymbol\phi=\mathbf 0$ の Davidian 曲線は正規密度**そのもの**なので、Davidian モデルの中で正規のままに
+   したい群は、パラメタ表（`table=`）でその群の `phi_*` 行を 0 に固定すれば格子上でちょうど $N(\mu_g,\sigma^2_g)$ になる。混合には
+   正規分布にちょうど一致する要素がない（成分の重みを 0 にする必要がある）ので、混合モデルの中の正規の群は提供しない。
+3. **識別.** `Normal` と同じ（§4.5、§14.5）。既定では参照群を標準化し（`mean = 0`・`var = 1` を固定、形は 1 群のときと同じく自由）、
+   各焦点群は `DavidianCurve(k, free_mean=True, free_var=True)` / `NormalMixture(k, free_mean=True, free_var=True)` で
+   `mean`・`var` を自由にし、同じアンカーのグラフで検査する（潜在分布の行はどの族でも `mean`・`var` という名前）。各群の形は
+   1 群のときと同じくその群のデータで識別される（§16.4・§16.7 の解析的な標準化が形と位置・尺度を分ける）。FIPC: `fix_from()` で
+   項目を固定し、全群が平均と分散を自由にしてよい。
+4. **コア.** 新しいものはない。`LatentBlock` は既に静的な `(davidian_degree, mixture_components)` とともに `(G, L)` のパラメタを持ち、
+   対数重み・潜在分布の M-step（$\sum_q\bar n_{gq}\log w_{gq}$ のマスク付き Newton）・Oakes の自身の Hessian・潜在分布のスコア表は
+   群上で `vmap` され、$G\ge2$ では E-step が群ブロック化される（§26）。EM は単調のままで、Oakes の恒等式も群ごとに厳密。
+5. **外側の層.** `FitResult.latent` は群ごとに 1 行（混合は群ごとの標準化した成分つき）。退化した混合の警告（§16.7）は群ごとに
+   行い、群名を示す。EAP・ML・WLE・PV の採点は受験者の群の密度を使う（MAP は使えないまま。§16.4、§16.7）。`item_fit()`
+   （S-X2、Orlando & Thissen, 2000）は Lord–Wingersky の期待度数表に各群の求積重み $w_{gq}$ を使い、重みしか要らないので、
+   1 群でも多群でも Davidian・混合モデルで使えるようにする（自由度からはその群の自由な潜在分布パラメタを形も含めて引く。
+   `Normal` と同じ）。既定の重みの `link()` は選んだ群の推定密度で積分する（変更なし）。`simulate_responses()` は各群の密度から
+   引く（変更なし）。JSON は 1 群のときと同じく群ごとの潜在分布の指定を保存するので形式は変わらない（`schema_version` は 8 のまま）。
+   SE: `oakes` と `hessian`。`crossprod` / `sandwich` は使えないまま（§17.5）。これらの族で引き続き使えないもの: `m2()`、
+   `information()`、`EAPsum`。
+6. **照合（V56）.** mirt の `multipleGroup()` は平均・分散が自由な群ごとの Davidian を持たず（"not currently supported"）、
+   `dentype = "mixture-k"` は潜在クラスモデルで、群ごとの混合密度ではない。V19・V22 が 1 群で行うのと同じく、V56 は格子上で
+   正規化した標準化密度（Davidian は `dcurver::ddc`、混合は各成分を格子上で正規化してから混ぜる）を
+   `multipleGroup(customGroup = createGroup(...))` に与えて厳密な離散化モデルを mirt で推定し、mirt の解を独立な R の周辺対数尤度
+   上の Newton ステップで磨き、R の Richardson Hessian による SE、mirt の Oakes SE、`probtrace()` から R で計算した EAP、
+   群の推定値で固定した同じ `customGroup` の 1 群 mirt オブジェクトでの `itemfit()` による群ごとの S-X2 を記録する。
 
 ## 参考文献
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.

@@ -120,7 +120,24 @@ def _build_spec(case: BenchmarkCase) -> Any:
             .with_groups(ref=Normal.standard(), focal=Normal.free())
             .equal_across_groups(items=case.anchors)
         )
+    if case.model == "manygroups_2pl":
+        groups = case.group_names
+        latents = {groups[0]: Normal.standard()} | {g: Normal.free() for g in groups[1:]}
+        return (
+            Model.uniform(TwoPL(), items=items)
+            .with_groups(latents)
+            .equal_across_groups(items=case.anchors)
+        )
     raise ValueError(f"Unknown model kind: {case.model}")
+
+
+def _peak_rss_mb() -> float:
+    """Return this process's peak resident set size in MiB (``ru_maxrss``)."""
+    import resource
+
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # ru_maxrss is in bytes on macOS and in KiB on Linux.
+    return float(peak) / (1024.0**2 if sys.platform == "darwin" else 1024.0)
 
 
 def _run_worker(
@@ -196,6 +213,8 @@ def _run_worker(
         "warm_min_s": min(warm_runs_s),
         "warm_max_s": max(warm_runs_s),
         "warm_runs_s": warm_runs_s,
+        "compile_s": cold_s - statistics.median(warm_runs_s),
+        "peak_rss_mb": _peak_rss_mb(),
         "n_iter": int(cold_res.n_iter),
         "n_em_evaluations": int(cold_res.n_em_evaluations),
         "n_safeguards": int(cold_res.n_safeguards),
@@ -326,7 +345,8 @@ def run_benchmark(
                         f"{case.name:24s} se={se_arg:5s} {mode} "
                         f"cold={rec['cold_s']:6.3f}s warm={rec['warm_s']:6.3f}s "
                         f"iter={rec['n_iter']:4d} em_evals={rec['n_em_evaluations']:4d} "
-                        f"ll={rec['loglik']:.4f} conv={rec['converged']}{warn_tag}",
+                        f"ll={rec['loglik']:.4f} conv={rec['converged']} "
+                        f"rss={rec['peak_rss_mb']:.0f}MB{warn_tag}",
                         flush=True,
                     )
 
@@ -362,6 +382,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--quick",
         action="store_true",
         help="Quick mode: fewer cases (unless --cases is given) and 1 warm repeat.",
+    )
+    parser.add_argument(
+        "--many-groups",
+        action="store_true",
+        help="Run only the many-group cases (G = 10, 50, 200; DESIGN.md §26).",
     )
     parser.add_argument(
         "--repeats",
@@ -413,7 +438,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     repeats = (1 if args.quick else DEFAULT_WARM_REPEATS) if args.repeats is None else args.repeats
     if not args.quick and repeats < 3:
         raise SystemExit("Full benchmark requires --repeats >= 3 (use --quick for 1 repeat).")
-    cases = resolve_cases(args.cases, quick=args.quick)
+    cases = resolve_cases(args.cases, quick=args.quick, many_groups=args.many_groups)
     run_benchmark(
         cases,
         data_dir=args.data_dir,

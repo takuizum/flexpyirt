@@ -130,7 +130,9 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 ## 6.2 Added in M2
 - Item model `GRM(n_categories=K)` (categories $0..K-1$). Missing data (NaN, MAR) accepted.
 - Multiple groups: `Model.with_groups(ref=Normal.standard(), focal=Normal.free())` (the first is the
-  reference group), `.equal_across_groups(items=..., params=None)`, `fit(..., group=labels)`.
+  reference group; since #79 also one positional mapping, `with_groups({"ref": ..., "s01": ...})`,
+  for many groups or labels that are not identifiers; since #75 every group may also use one
+  `DavidianCurve` degree or one `NormalMixture` size, each with its own shape), `.equal_across_groups(items=..., params=None)`, `fit(..., group=labels)`.
   `FitResult.items` has a `group` column; `score(data, group=labels)`.
 - FIPC: `Model.fix_from(bank, items=None, parameterization="slope_intercept" | "irt")` +
   `.with_latent(Normal.free())`.

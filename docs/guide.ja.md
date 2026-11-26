@@ -300,7 +300,8 @@ np.testing.assert_array_equal(loaded.score(df).to_numpy(), res.score(df).to_nump
 
 `item_fit(data)` は各項目の Orlando と Thissen の S-X2 を計算する。合計得点ごとの各反応カテゴリの観測度数とモデルによる
 期待度数を比べ、度数の少ないセルは mirt の `itemfit()` と同じ方法でまとめる（既定 `min_cell=1`）。欠測のないデータ、
-すべての反応カテゴリが観測されていること、`Normal` 潜在分布が必要。2〜3 因子の確認的モデル（`with_factors()`、
+すべての反応カテゴリが観測されていること、`Normal`・`DavidianCurve`・`NormalMixture` の潜在分布が必要（期待度数は
+推定した密度で積分する。`EmpiricalHistogram` は不可）。2〜3 因子の確認的モデル（`with_factors()`、
 単一群）でも使える。合計得点は全項目の合計のままで、期待度数は推定時の直積格子の上で積分する。多母集団モデルでは `group=` を
 渡すと、（mirt と同じく）群ごとに S-X2 を計算し、先頭に `group` 列がつく。
 
@@ -766,7 +767,11 @@ print(dc.score(skew_df.iloc[:3], method="EAP").round(3))  # 推定した Davidia
 
 - **識別性**: `mean` と `var` は `Normal` と同じ規則に従う（既定は `0`・`1` 固定。Rasch / PCM では `free_var=True`、
   FIPC では `DavidianCurve.free(degree)` を使う）。
-- **対象範囲**: 単一群の 1 次元モデルのみ（`with_groups()` と `with_factors()` は `SpecificationError`）。
+- **対象範囲**: 1 次元モデル（`with_factors()` は `SpecificationError`）で、1 群でも多群でもよい。`with_groups()` では
+  全群が同じ `degree` の `DavidianCurve` を使い、群ごとに形を持ち、焦点群は `Normal` と同じく平均と分散を自由にする
+  （アンカーつきの `with_groups(ref=DavidianCurve(2), focal=DavidianCurve(2, free_mean=True, free_var=True))`、
+  FIPC では全群を自由に。DESIGN §27）。ある群を正規のままにするには、パラメタ表でその群の `phi_*` 行を 0 に固定する
+  （角度がすべて 0 の Davidian 曲線は正規密度）。`Normal` と `DavidianCurve` の群を混ぜると `SpecificationError`。
 - **採点**: `"EAP"` と `"PV"` は推定した Davidian 密度を使い、`"ML"` と `"WLE"` は尤度のみ。Davidian 密度は多峰に
   なったり $P_k$ の実根で 0 になったりするため、`"MAP"` は `SpecificationError`。
 - **正規に近い特性と局所最大**: $\boldsymbol\phi=\mathbf 0$（正規密度）では `phi_1` と `phi_2` の 1 次の効果が純粋な
@@ -802,9 +807,11 @@ print(mix.score(bi_df.iloc[:3], method="EAP").round(3))  # 推定した混合事
 ```
 
 - **識別性と対象範囲**: `DavidianCurve` と同じ（Rasch / PCM では `free_var=True`、FIPC では `NormalMixture.free(k)`。
-  単一群の 1 次元モデルのみ）。等間隔格子と Gauss–Hermite 格子に対応する。
-- **採点**: `"EAP"` と `"PV"` は推定した混合を使い、`"ML"` と `"WLE"` は尤度のみ。混合の事前分布は多峰になりうるため
-  `"MAP"` は `SpecificationError`。`item_fit()` と `m2()` はまだ使えない。
+  1 次元モデル）。多群も `DavidianCurve` と同じく使え、全群が同じ `n_components` の `NormalMixture` で群ごとに形を持つ
+  （DESIGN §27）。等間隔格子と Gauss–Hermite 格子に対応する。
+- **採点と適合度**: `"EAP"` と `"PV"` は推定した混合を使い、`"ML"` と `"WLE"` は尤度のみ。混合の事前分布は多峰になりうるため
+  `"MAP"` は `SpecificationError`。`item_fit()`（S-X2）は `DavidianCurve` と同じく各群の推定した混合で積分する。
+  `m2()` はまだ使えない。
 - **初期値・ラベルスイッチング・退化した推定**: 成分は交換可能なので番号に意味はなく、尤度に局所最大が複数ありうる。
   いくつかの初期形状（`NormalMixture(2, means=[0, 2], variances=[1, 0.3], weights=[0.7, 0.3])`）から推定し直し、
   `loglik` が最も高いものを採る。重みがほぼ 0、格子より細い、格子の外に中心がある成分や、一致する 2 つの成分は
@@ -858,6 +865,26 @@ print(mg.items[mg.items["item"] == "q01"])  # アンカーは両群で同じ値
 mg_scores = mg.score(mg_df.iloc[[0, -1]], group=["ref", "focal"])
 print(mg_scores)
 ```
+
+### 多数の群
+
+数十〜数百の群（学校、学校 × 学年）では、`with_groups()` に群を 1 つのマッピングで渡す。挿入順が群の順で、
+先頭が参照群。群ラベルは Python の識別子でなくてよく、アンカーは全群に対して 1 回宣言すればよい:
+
+```python
+schools = [f"school_{k:03d}" for k in range(1, 101)]
+many_spec = (
+    Model.uniform(TwoPL(), items=items)
+    .with_groups({"school_000": Normal.standard()} | {s: Normal.free() for s in schools})
+    .equal_across_groups(items=None)  # 全項目を不変に: 尺度は 1 つ、学校ごとに平均・分散
+)
+print(len(many_spec.resolved_groups()))
+```
+
+群が 2 つ以上のとき E-step は各群の反応パターンのブロック上で回るので、計算量は受験者数 × 群数ではなく
+受験者数に比例し、コンパイル時間は群の数によらない（DESIGN §26。10・50・200 群のベンチマークは
+`benchmarks/`）。`mg.latent` は群ごとに 1 行。多数の群で群ごとに異なる項目パラメタ（`equal_across_groups()`
+なし）と `se="crossprod"` / `"sandwich"` は、今も群の数に応じて重くなる。
 
 ### 特異項目機能（DIF）
 

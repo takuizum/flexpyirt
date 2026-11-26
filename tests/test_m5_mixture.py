@@ -149,12 +149,12 @@ def test_raw_starts_map_any_affine_scale_to_the_raw_gauge() -> None:
 def test_model_unsupported_combinations() -> None:
     items = ["q1", "q2", "q3", "q4"]
     base = Model.uniform(TwoPL(), items=items)
-    with pytest.raises(SpecificationError, match="single-group"):
-        base.with_groups(ref=NormalMixture(2), focal=NormalMixture(2))
-    with pytest.raises(SpecificationError, match="single-group"):
+    # One family and one number of components across groups (DESIGN.md §27).
+    assert base.with_groups(ref=NormalMixture(2), focal=NormalMixture(2)).is_mixture
+    with pytest.raises(SpecificationError, match="same latent distribution family"):
         base.with_groups(ref=Normal.standard(), focal=NormalMixture(2))
-    with pytest.raises(SpecificationError, match="single-group"):
-        Model(items=base.items, groups=(("ref", NormalMixture(2)), ("focal", NormalMixture(2))))
+    with pytest.raises(SpecificationError, match="same n_components"):
+        Model(items=base.items, groups=(("ref", NormalMixture(2)), ("focal", NormalMixture(3))))
     with pytest.raises(SpecificationError, match="unidimensional"):
         base.with_factors({"F1": ["q1", "q2"], "F2": ["q3", "q4"]}).with_latent(NormalMixture(2))
     with pytest.raises(SpecificationError, match="with_latent"):
@@ -498,8 +498,7 @@ def test_scoring_and_rejected_methods() -> None:
     pd.testing.assert_frame_equal(pv1, pv2)
     with pytest.raises(SpecificationError, match="NormalMixture"):
         res.score(sub, method="MAP")
-    with pytest.raises(SpecificationError, match="item_fit"):
-        res.item_fit(df)
+    assert list(res.item_fit(df)["item"]) == list(df.columns)  # DESIGN §27
     with pytest.raises(SpecificationError, match="m2"):
         res.m2(df)
 
