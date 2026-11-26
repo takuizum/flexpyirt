@@ -42,6 +42,7 @@ from flexpyirt.items import (
     _gpcm_intercept_starts,
     _intercept_start,
     _slope_start,
+    is_builtin_item_model,
 )
 from flexpyirt.latent import (
     DavidianCurve,
@@ -270,8 +271,16 @@ def pad_patterns(
 # --------------------------------------------------------------------------------------------
 
 
-def _non_slope_starts(item_model: ItemModel, item: np.ndarray, a_eff: float) -> list[float]:
-    """Return classical starting values for non-slope parameters given effective slope ``a_eff``."""
+def _non_slope_starts(
+    item_model: ItemModel, item: np.ndarray, rest: np.ndarray, a_eff: float
+) -> list[float]:
+    """Return classical starting values for non-slope parameters given effective slope ``a_eff``.
+
+    A user-defined item model (DESIGN.md §20) uses its own ``start_values(item, rest)[1:]``
+    computed from the rest score on all items, ignoring ``a_eff``.
+    """
+    if not is_builtin_item_model(item_model):
+        return [float(v) for v in np.asarray(item_model.start_values(item, rest))[1:]]
     p = float(item.mean())
     if isinstance(item_model, (ThreePL, FourPL)):
         g, u = _asymptote_starts(p, free_upper=isinstance(item_model, FourPL))
@@ -320,31 +329,50 @@ def _start_values(model: Model, y: np.ndarray) -> dict[str, np.ndarray]:
         scores[:, [col_of[item_name] for item_name in assigned]].sum(axis=1)
         for _, assigned in model.factors
     ]
+    total_all = scores.sum(axis=1)
     out = {}
     for j, (name, item_model) in enumerate(model.items):
         rows = obs[:, j]
         loaded = model.item_factors(name)
         slopes = np.zeros(n_factors, dtype=float)
+        builtin = is_builtin_item_model(item_model)
+        fixed_slope = not item_model.default_free()[0]
         if rows.sum() < 2:
             placeholder = np.array([0.0, 1.0])
+            placeholder_rest = np.zeros(2)
             for m in loaded:
-                slopes[m] = (
-                    1.0 if isinstance(item_model, (Rasch, PCM)) else 1.0 / math.sqrt(len(loaded))
-                )
+                if builtin:
+                    slopes[m] = (
+                        1.0
+                        if isinstance(item_model, (Rasch, PCM))
+                        else 1.0 / math.sqrt(len(loaded))
+                    )
+                else:
+                    slopes[m] = (
+                        float(item_model.start_values(placeholder, placeholder_rest)[0])
+                        if fixed_slope
+                        else 1.0 / math.sqrt(len(loaded))
+                    )
             a_eff = max(float(np.linalg.norm(slopes)), 0.25)
-            out[name] = np.array([*slopes, *_non_slope_starts(item_model, placeholder, a_eff)])
+            out[name] = np.array(
+                [*slopes, *_non_slope_starts(item_model, placeholder, placeholder_rest, a_eff)]
+            )
             continue
         item = y[rows, j].astype(float)
+        rest = (total_all - scores[:, j])[rows].astype(float)
         for m in loaded:
-            if isinstance(item_model, (Rasch, PCM)):
+            if builtin and isinstance(item_model, (Rasch, PCM)):
                 slopes[m] = 1.0
+            elif not builtin and fixed_slope:
+                # A fixed slope keeps the model's own starting (fixed) value on every factor.
+                slopes[m] = float(item_model.start_values(item, rest)[0])
             else:
                 rest_m = (factor_totals[m] - scores[:, j])[rows].astype(float)
                 slopes[m] = float(
                     np.clip(_slope_start(item, rest_m) / math.sqrt(len(loaded)), 0.25, 3.0)
                 )
         a_eff = max(float(np.linalg.norm(slopes)), 0.25)
-        out[name] = np.array([*slopes, *_non_slope_starts(item_model, item, a_eff)])
+        out[name] = np.array([*slopes, *_non_slope_starts(item_model, item, rest, a_eff)])
     return out
 
 
