@@ -80,6 +80,7 @@ English | [日本語](VALIDATION.ja.md)
 | V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
+| V43 | Information matrix, directional information and expected scores of multidimensional models at chosen parameters (two correlated factors with 2PL, 3PL, 4PL, GRM, GPCM and nominal items and four cross-loadings; three factors with 2PL, 3PL, GRM and GPCM and two cross-loadings; bifactor 2PL + GRM with three specific factors; two-tier 2PL + GRM with two correlated primary factors and two specific factors) | `iteminfo(item, Theta, multidim_matrix = TRUE)`, `iteminfo(item, Theta, degrees = )`, `testinfo(m, Theta, degrees = )`, `expected.item()`, `expected.test()` on `mirt()` / `bfactor()` objects built with `pars =` and `TOL = NaN` | M7 |
 | V45 | Optional unconstrained M-step scale (`BAEM(m_step_scale="unconstrained")`) on the V3, V4, V5, V7, V9, V11 and V14 cases; `LogitNormalPrior` (`"natural"`: no mirt equivalent, independent numerical check; `mode_scale="logit"`: mirt `norm` on `g`) | the existing references of those cases; SciPy (`stats.norm`, `integrate.quad`) and a stationarity condition written from the formula; `v45_3pl_logit_norm_map.json` (mirt) and the flexMIRT logit-metric mode computed in the test | #15 |
 | V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
 
@@ -823,7 +824,8 @@ English | [日本語](VALIDATION.ja.md)
     mirt returns `NA` for exactly those and flexpyirt NaN (mirt refuses the
     `full.scores = FALSE` table for data with missing responses, so that case has no table
     reference).
-  - **Not validated, raises `SpecificationError`**: multidimensional models (all functions);
+  - **Not validated, raises `SpecificationError`**: reliability, the summed-score table and
+    EAPsum for multidimensional models (their information and expected scores are V43);
     reliability, the summed-score table and EAPsum with `EmpiricalHistogram`, `DavidianCurve`
     or `NormalMixture`. The pooled `empirical_rxx()` of a `multipleGroup` fit (stored as
     `empirical_rxx_pooled`) has no flexpyirt counterpart; flexpyirt reports it per group.
@@ -835,6 +837,45 @@ English | [日本語](VALIDATION.ja.md)
     the marginal reliability under a linear change of the latent scale ($10^{-13}$),
     reliability bounds and closeness of the marginal and empirical values on simulated data,
     and the error paths.
+- **Multidimensional information matrix, directional information and expected score (V43,
+  M7)**: DESIGN §18.3 in `tests/test_mirt_m7_information_multidim.py` (slow tier, about 40 s;
+  generator `validation/r/m7_information_multidim_reference.R` →
+  `tests/reference/v43_information_multidim.json`, mirt 1.46.1). Nothing is estimated: each case
+  sets chosen item parameters with `pars = "values"` and builds the mirt object with
+  `TOL = NaN` (`mirt()` for the confirmatory models, `bfactor()` / `bfactor(model2 = )` for the
+  bifactor and two-tier models), and flexpyirt gets the same values with every parameter fixed.
+  Cases: `cfa2_mixed` (10 items: 2PL, 3PL, 4PL with $u<1$, GRM $K=3,4$, GPCM $K=3,4$, nominal
+  $K=3$; four items load on both factors), `cfa3` (9 items, 2PL, 3PL, GRM, GPCM; two
+  cross-loadings), `bifactor` (12 items, 2PL + GRM $K=3$, general and three specific factors)
+  and `two_tier` (8 items, 2PL + GRM $K=3$, two correlated primary factors with one
+  cross-loading and two specific factors). Each has 15 points: 12 uniform on $[-3,3]^D$, all
+  $-5$, alternating $\pm5$, and the origin; and 4–5 directions given as angles with
+  $\sum_m\cos^2\alpha_m=1$, including the axes, the diagonal and directions with a negative
+  cosine. The generator also asserts that mirt's `testinfo(degrees = )` equals
+  $\mathbf u^\top(\sum_j\mathbf I_j)\mathbf u$ of its own `multidim_matrix = TRUE` matrices
+  ($10^{-10}$). Largest differences over all cases:
+  - **Item information matrices** (`iteminfo(multidim_matrix = TRUE)`): `1.1e-15` absolute,
+    `1.0e-12` relative (at entries of size about $10^{-4}$ at the extreme points); the test
+    matrix (their sum) `1.8e-15` absolute.
+  - **Directional item and test information** (`iteminfo` / `testinfo(degrees = )`, with
+    `direction = cos(degrees)`): item `1.0e-12` relative, test `5.8e-14` relative.
+  - **Composite SE** $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$ against the inverse of the
+    sum of mirt's matrices (`solve()` in R; mirt's `plot(type = "SE")` shows $1/\sqrt{I_{\mathbf u}}$ instead, DESIGN §18.3): `2.8e-14` relative.
+  - **`expected.item()` / `expected.test()`**: `4.8e-14` absolute / `4.7e-15` relative.
+  Tolerance for all: $10^{-10}$ relative plus $10^{-13}$ absolute (for entries that are 0 because
+  a slope is fixed at 0).
+  - **Unit tests** (`tests/test_m7_information_multidim.py`; the simple-structure and
+    multiple-group tests are in the slow tier): a two-factor simple-structure model equals the two
+    unidimensional sub-tests along the axes (item and test information, composite SE, expected
+    scores; $10^{-12}$) and its matrices are block diagonal; matrices are exactly symmetric, PSD and
+    of rank 1 for the built-in families; the 2PL closed form $P(1-P)\mathbf a\mathbf a^\top$
+    ($10^{-12}$); directional information $=\mathbf u^\top\mathbf I\mathbf u$, invariance under
+    scaling and sign of the direction, the composite SE against a direct inverse and the bound
+    $\mathrm{SE}_{\mathbf u}\ge I_{\mathbf u}^{-1/2}$; infinite SE for a numerically singular matrix;
+    in a bifactor model each item's matrix is 0 outside the general and own specific factors; a
+    multiple-group model uses each group's parameters; unidimensional `information_matrix` is
+    the scalar information; the `theta` layouts (array, DataFrame by factor name, one point) and
+    the error paths.
 - **The numbers behind the plots (V48, #103)**: DESIGN §21 in `tests/test_mirt_v48_plots.py`
   (slow tier, about 20 s; generator `validation/r/v48_plots_reference.R` →
   `tests/reference/v48_plots.json`, mirt 1.48, TAM 4.3-25, 61 points on $[-6, 6]$). mirt fits
