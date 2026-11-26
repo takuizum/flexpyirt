@@ -75,6 +75,74 @@ $10^{-8}$ 程度）。
 パッケージ flexpyctt（NumPy / SciPy。JAX は使わない）の関数である。flexpyirt 自身の `polychoric()` は同じ推定量の
 JAX による実装で、同じ照合を通り、すべての照合ケースで 2 つは $10^{-9}$ まで一致する。
 
+## 検証ケース
+
+以下の各ケースはリポジトリのテストである。参照値は R で生成し（V30 はシミュレーション研究による）ソースと一緒に
+保存してあり、テストがそれと照合する。推定したモデルは上の許容誤差で mirt と照合する。独自の許容誤差を持つ量は
+ケース一覧の後の表に示す。ケースごとの R の呼び出し、設定、測った最大の差は
+[検証計画](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/VALIDATION.ja.md)にある。V26 には M7 で
+追加した第 2 部がある。
+
+| ID | 機能 | モデルとデータ | 照合先 |
+|---|---|---|---|
+| V1 | 2PL | `LSAT7`、単一群 | `mirt(..., "2PL")`、Oakes の SE |
+| V2 | Rasch | 単一群、潜在分散を推定 | `mirt(..., "Rasch")` |
+| V3 | GRM | `Science` | `mirt(..., "graded")` |
+| V4 | 多母集団 | 2PL、2 群、一部のアンカー項目、焦点群の平均・分散を推定 | `multipleGroup(..., invariance = c(<アンカー>, "free_means", "free_var"))` |
+| V5 | FIPC | 固定項目、潜在分布を推定 | `pars = "values"`・`est = FALSE` での `mirt()` |
+| V6 | 経験ヒストグラム | FIPC のもとで 1 群・2 群 | `mirt(..., dentype = "EH")`、`multipleGroup(...)` |
+| V7 | 事前分布と MAP | 事前分布つきの 3PL | `mirt.model(... PRIOR = ...)` |
+| V8 | GPCM、PCM | `Science` とシミュレーション | `mirt(..., "gpcm")`、`mirt(..., "Rasch")` |
+| V9 | 欠測反応 | MAR のデータ | `NA` を含むデータでの `mirt()` |
+| V10 | 標準誤差 | Oakes の恒等式（ロバスト SE は V35） | `mirt(..., SE.type = "Oakes")` |
+| V11 | 3PL、4PL | シミュレーション、単一群 | `mirt(..., "3PL" / "4PL")` |
+| V12 | IRT 閾値とデルタ法 SE | 2PL、Rasch、GRM、GPCM、PCM、2 群の 2PL | `coef(m, IRTpars = TRUE, printSE = TRUE)` |
+| V13 | MAP・ML・WLE スコア | 2PL、GRM、GPCM、3PL、2 群、欠測 | `fscores(m, method = ...)` |
+| V14 | 確認的 2〜3 因子モデル | 単純構造と交差負荷の 2PL、GRM、3 因子の 2PL | `mirt.model(... COV = ...)` での `mirt()` |
+| V15 | S-X2 項目適合度 | GRM、GPCM、PCM、3PL、FIPC。最小セル 1 と 3。2 群では群ごと | `itemfit(m, fit_stats = "S_X2")` |
+| V16 | 項目間の等値制約 | 共通の傾き、モデルをまたぐ制約の 2PL + GRM、2 群 | `mirt.model(... CONSTRAIN = ...)` |
+| V17 | DIF 検定 | V4 のデータ、`add` と `drop` の方式 | `DIF(mg, scheme = ...)` |
+| V18 | $M_2$ / $M_2^*$ | 2PL、3PL、分散を推定する Rasch、GRM、GPCM | `M2(m)` と R による厳密な計算 |
+| V19 | Davidian 曲線 | 2PL、GRM、平均・分散を推定する FIPC の 2PL | `mirt(..., dentype = "Davidian-k")` と mirt 内での厳密な尤度 |
+| V20 | 尺度リンキング | 2PL、GRM、GPCM、3PL、2PL + GPCM の混在。Haebara と Stocking–Lord の両方の対称形、SE | 別々の `mirt()` 推定 + R による独立な基準関数 |
+| V21 | 多母集団の確認的モデル | 2 因子、両因子にアンカー、焦点群の平均・分散を推定 | `COV = F1*F2` での `multipleGroup()` |
+| V22 | 混合正規 | 2 成分の 2PL と GRM、3 成分の GPCM | 全項目を不変とした `multipleGroup(..., dentype = "mixture-k")` と R による独立な実装 |
+| V23 | 名義反応モデル | `Science`、順序のない得点係数、2PL との混在、2 因子 | `mirt(..., "nominal")`、`itemfit()` |
+| V24 | ポリコリック相関 | テトラコリック、2〜5 カテゴリ、10% の MCAR、空セル、`LSAT7`、`Science`。平滑化 | lavaan `lavCor()`、psych `polychoric()`、`cor.smooth()` |
+| V25 | 次元数 | V24 の行列での EKC・MAP・固有値。平行分析の参照値 | EFAtools `EKC()`・`PARALLEL()`、psych `vss()`、EFA.dimensions `MAP()` |
+| V26 | 局所依存、モデルに基づく平行分析 | `LSAT7` の 2PL、`Science` の GRM、依存するペアと MCAR を含むシミュレーションの 2PL | `residuals(m, type = "LD" / "LDG2" / "Q3")`、ltm `unidimTest()` |
+| V26 (M7) | 1 群を超える局所依存 | 2 群。EH・Davidian・混合の潜在分布。2 因子・3 因子 | 対応する mirt の推定結果での `residuals()` |
+| V27 | DETECT | 確認的（2 次元・1 次元・`Science`）と探索的 | sirt `conf.detect()`、`expl.detect()` |
+| V28 | EFA、Hull 法 | ULS と ML、すべての因子数。CAF、CFI、RMSEA | EFAtools `EFA()`・`HULL()`、psych `fa()` |
+| V29 | 比較データ法 | 母集団の生成、順位和検定、3 つのデータ | EFAtools `CD()` とその内部の各段階 |
+| V30 | DIMTEST | 2PL、$N$ 1000〜2000、$J$ 20〜30、条件ごとに 200 回 | シミュレーション研究（DIMPACK 以外に参照実装がない） |
+| V31 | ジャックナイフ傾き指標 | `LSAT7` の 2PL、`Science` の GRM、シミュレーションの 2PL と GPCM | `residuals(m, type = "JSI")` |
+| V32 | 双因子モデル | 特殊因子 3 つと一般因子だけの項目を含む 2PL、テストレット 3 つの GRM | `bfactor()`、`fscores()` |
+| V33 | two-tier モデル | 相関する主因子 2 つの 2PL、交差負荷項目を含む GRM | `bfactor(..., model2 = )` |
+| V34 | 標本ウェイト | 2PL、GRM、欠測を含む 2 群、FIPC、双因子の 2PL | `survey.weights` つきの `mirt()`・`multipleGroup()`・`bfactor()` |
+| V35 | ロバストな標準誤差 | 誤指定の 2PL、混在形式、MAP、2 群、FIPC、2 因子・3 因子、EH | `mirt(..., SE.type = "crossprod" / "sandwich")` |
+| V36 | 合計得点の分布 | $J$ 10〜300 の Poisson 二項分布、GRM と混在形式 | poibin `ppoibin()`・`dpoibin()`、`dpois()`、`fscores(method = "EAPsum")` |
+| V37 | 情報量・期待得点・信頼性・合計得点 EAP | 2PL（欠測ありも）、3PL、GRM、GPCM、名義、混在形式、2 群 | `iteminfo()`、`testinfo()`、`expected.item()`、`marginal_rxx()`、`empirical_rxx()`、`fscores(method = "EAPsum")` |
+| V38 | 双因子・two-tier モデルの局所依存 | MCAR を含む双因子の 2PL、双因子の GRM、two-tier の 2PL | `bfactor()` の推定結果での `residuals()` |
+| V39 | 確認的モデルの $M_2$ と S-X2 | V14 の 4 つのモデル | `M2()`、`itemfit()` と R による厳密な $M_2^*$ |
+| V40 | リンキング: 4PL・名義・多次元 | 4PL、名義、2PL + 名義の混在。対角・直交・斜交の $\mathbf A$ による 2 因子・3 因子モデル | 別々の `mirt()` 推定 + R による独立な基準関数 |
+
+mirt で推定したモデルとの単純な比較ではないケースの許容誤差:
+
+| 量 | 許容誤差 |
+|---|---|
+| 同じ項目推定値での尺度リンキングの $(A,B)$ / 基準関数 | $10^{-9}$ / $10^{-9}$（相対） |
+| 同じ推定値と共分散での尺度リンキングの SE | $10^{-5}$（相対） |
+| 推定からリンキングまで通した $(A,B)$ / 基準関数 / SE | $10^{-6}$ / $10^{-5}$（相対） / $10^{-3}$（相対） |
+| ポリコリック相関（lavaan / psych と）、閾値、平滑化 | $10^{-6}$ / $10^{-3}$、$10^{-12}$、$10^{-12}$ |
+| EKC・MAP・観測固有値、正規参照の平均 / 95 パーセンタイル | $10^{-11}$、$\lvert z\rvert\le4.5$ / $6\times10^{-3}$ |
+| LD $X^2$ / $G^2$、符号付き $V$・Q3、モデルに基づく平行分析の観測値 / シミュレーションの平均 / 95 パーセンタイル | $10^{-5}$（相対）、$10^{-6}$、$2\times10^{-4}$ / $\lvert z\rvert\le4.5$ / 0.02 |
+| DETECT の条件付き共分散・指標・Ward の高さ | $10^{-12}$ |
+| EFA の $\Lambda\Lambda^\top$ / 共通性、CAF・CFI・RMSEA、$\chi^2$、Hull の適合度 / $st$ | $10^{-4}$、$2\times10^{-4}$、$10^{-4}$（相対）、$10^{-5}$ / $10^{-2}$（相対） |
+| 比較データ法: PAF、同じ乱数からの母集団、順位和検定の $p$、RMSE の平均 | $10^{-12}$、完全一致、$10^{-10}$（相対）、残す $k$ で 15%・次の $k$ で 60%（相対） |
+| DIMTEST（シミュレーション研究の小さな再実行）: 帰無仮説のもとでの .05 での棄却 / 検出力 | 20 回中 3 回以下 / 10 回中 8 回以上 |
+| mirt の推定値でのクロス積・サンドイッチ共分散（要素は $\sqrt{v_{ii}v_{jj}}$ に対する相対）、推定から通したパラメタ / SE | $10^{-9}$ / $10^{-6}$、$10^{-6}$ / $10^{-5}$（相対） |
+
 ## mirt との既知の違い
 
 これらの違いは意図したもので、flexpyirt は自分が報告する量を厳密に最大化している。ふつうの使い方では小さいか
