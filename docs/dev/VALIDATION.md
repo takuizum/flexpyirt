@@ -80,6 +80,7 @@ English | [日本語](VALIDATION.ja.md)
 | V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
+| V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -833,6 +834,44 @@ English | [日本語](VALIDATION.ja.md)
     the marginal reliability under a linear change of the latent scale ($10^{-13}$),
     reliability bounds and closeness of the marginal and empirical values on simulated data,
     and the error paths.
+- **The numbers behind the plots (V48, #103)**: DESIGN §20 in `tests/test_mirt_v48_plots.py`
+  (slow tier, about 20 s; generator `validation/r/v48_plots_reference.R` →
+  `tests/reference/v48_plots.json`, mirt 1.48, TAM 4.3-25, 61 points on $[-6, 6]$). mirt fits
+  every model (`TOL = 1e-8`, converged) and its estimates go into a `FitResult` with every
+  parameter fixed, as in V37. The data are stored row by row (unique patterns plus each row's
+  pattern) because the bins depend on the order of the respondents. Cases: `twopl` ($J=10$,
+  $N=1003$, so the remainder 3 puts one extra respondent in the first bin and two in the last),
+  `twopl_missing` ($N=1200$, 10% MCAR, bins per item over the respondents who answered it),
+  `grm` ($K=4$, $J=6$, $N=1500$), `mixed` (3 2PL, 3 3PL, 2 GPCM $K=4$, 2 nominal $K=3$;
+  $N=3000$), `twogroup` (5 2PL + 3 GRM $K=4$, all items invariant, $N=805$ per group, focal mean
+  and variance free) and `gpcm_tam` (TAM's own GPCM fit). Largest differences over all cases:
+  - **EAP scores** (the input of the bins) against `fscores(method = "EAP")`: `7.1e-15`
+    (tolerance $10^{-9}$).
+  - **`empirical_item_curve()`** against `itemfit(fit_stats = "X2", return.tables = TRUE,
+    group.bins = 10, mincell.X2 = 0, Theta = eap)`, item by item (mirt returns one item's tables
+    per call; `mincell.X2 = 0` turns its cell collapsing off; a `multipleGroup` fit is refused,
+    so each group's `extract.group()` is called with that group's rows of `Theta`, which is what
+    mirt's own per-group `itemfit()` does): the bin sizes equal mirt's row sums exactly;
+    observed proportions are identical (`0`); expected probabilities `4.6e-15` (tolerance
+    $10^{-9}$); bin means against mirt's labels, which are rounded to 4 decimals, `5.0e-5`
+    (the rounding; tolerance $5\times10^{-5}$). The expected tables are $N\,P(\bar\theta_b)$, so
+    they also check the bin means to full precision.
+  - **`item_probabilities()`** against `probtrace()` on $\theta\in\{-6,-4,-3.5,\dots,4,6\}$:
+    `2.9e-15` (tolerance $10^{-12}$).
+  - **`wright_map_table()` item locations** against `uniroot(tol = 1e-13)` of
+    $\sum_{c\ge k}$`probtrace()`$-1/2$ on $[-20, 20]$: `2.1e-14`; against
+    `coef(IRTpars = TRUE)` $b$ (2PL) and $b_k$ (GRM): `1.1e-14` (tolerance $10^{-9}$). For the
+    3PL items the threshold is below $b$, as it must be. Against TAM's `tam.threshold()` at TAM's
+    own GPCM estimates (slopes and intercepts read from `B` and `AXsi`): `8.4e-5`, TAM's bisection
+    stops when the interval is below $10^{-4}$ (tolerance $10^{-4}$).
+  - **Not validated**: mirt's $X^2$ / $G^2$ statistics and cell collapsing, and the
+    Clopper–Pearson interval of `empirical.plot` (not computed); the figures themselves.
+  - **Unit and smoke tests** (`tests/test_plotting.py`, fast tier): mirt's bin-size rule, a
+    brute-force recomputation of the bins with missing responses, closed-form thresholds (2PL
+    $-d/a$, GRM $-d_k/a$, a 3PL item with and without a crossing), two groups with DIF, the
+    error paths; every plot function on the Agg back end with the plotted data equal to the
+    DataFrames; `MissingDependencyError` when matplotlib cannot be imported. CI also runs
+    `scripts/check_plotting_without_matplotlib.py` in an environment without matplotlib.
 - **Robust standard errors (V35, M7)**: `fit(se="crossprod" | "sandwich")` (DESIGN §17.5) against
   mirt 1.48 `SE.type = "crossprod"` / `"sandwich"`. The generator stores mirt's parameter table
   (`mod2values`) and the full `vcov` matrices, each row labelled by the first `parnum` of its

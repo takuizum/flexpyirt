@@ -1934,7 +1934,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    `itemfit(fit_stats = "X2", return.tables = TRUE)` の観測表・期待表（セル併合 `mincell.X2` の前）、
    $(\bar\theta_b,O_{bk})$ は `itemfit(empirical.plot = )` の点に当たる。
    欠測: 回答者は回答した項目の区間にだけ入る（mirt の `pick`）。多群モデルでは群ごとにその群の
-   パラメータで区間を作る（mirt の群ごとの `itemfit()`）。`group=` は `score()` と同じく `data` の各行の
+   パラメタで区間を作る（mirt の群ごとの `itemfit()`）。`group=` は `score()` と同じく `data` の各行の
    群ラベルで、結果の先頭に `group` 列が付く。（ある群で）回答数が `n_bins` 未満の項目は
    `SpecificationError`（mirt なら空の区間ができる）。意図して mirt と変えた点: セル併合と $X^2$ は
    しない（適合度統計量は別 issue）、`empirical.CI` の Clopper–Pearson 区間は出さない、`method` は EAP
@@ -1953,7 +1953,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    等間隔 4001 点で評価し、$P(Y_j\ge k\mid\theta)-1/2$ の最初の符号変化を二分法 64 回で詰める（全閾値を
    まとめて、1 回あたりカーネル呼び出し 1 回）。$a>0$ の順序付き項目族ではこの関数は増加する。名義
    項目（カテゴリに順序がない）ではデータのカテゴリ順での最初の交点、交点がなければ（例: $g\ge1/2$ の
-   3PL 項目）NaN。多群モデルでは `items` に各群のパラメータによる閾値を全群分入れる（両方の表に
+   3PL 項目）NaN。多群モデルでは `items` に各群のパラメタによる閾値を全群分入れる（両方の表に
    `group` 列）。
 
 5. **描画関数**（`flexpyirt.plotting`。既定の $\theta$ 格子は $[-4,4]$ の 161 点で、`theta=` で変える）。
