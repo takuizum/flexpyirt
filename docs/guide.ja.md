@@ -874,6 +874,46 @@ fig_dif = plot_item_curves(mg, items[6:9], data=mg_df, group=group)
 
 ![群ごとの項目特性曲線（DIF の図）](images/plots/dif.png)
 
+全項目をスクリーニングするには `dif_screen(spec, data, group=..., strategy=...)` を使う。モデルは `spec` から
+自動で作り（アンカーと制約は `anchor_items`・`items`・`params` で決まる）、アンカーを純化する。
+
+- `"all_others"`: 各項目を、他のすべての項目をアンカーとして検定する（1 ラウンド）。
+- `"sequential_free"`: 続けて、検出された項目を自由にして他の項目を検定し直し、検出結果が変わらなくなるまで繰り返す。
+- `"sequential_constrain"`: 既知のアンカー（`anchor_items=`）から、他の項目をすべて自由にして始める。DIF のない
+  項目を等値にし、検出された項目を検定し直す。
+
+スクリーニングでは `p_adjust="BH"` が既定で、検出の水準は `alpha=0.05`。`test="wald"` にすると、2 回の推定の
+代わりに標準誤差つきの推定 1 回で検定する（自分で作ったモデルには `dif(..., test="wald")`）。結果には `table`
+（最終的なアンカーに対する検定）、`history`（各ラウンド）、`flagged_items`、`anchor_items`、`fit`（検出された項目を
+自由にした最終モデル。そのまま得点推定に使える）がある。
+
+`dif_effect_sizes(result)` は多母集団モデルの差の大きさを、各焦点群と第 1 群の間で求める: 期待項目得点の差を焦点群の
+潜在分布で積分した符号つき・符号なしの差（Chalmers, 2018）、`data` を渡すと期待得点の標準化差（Meade, 2010）と
+各群の RMSD（不変モデルで求めるのがよい）、さらに期待テスト得点の行（`level == "test"`）。
+
+```python
+from flexpyirt import dif_effect_sizes, dif_screen
+
+# q07–q09 をスクリーニングする（他の項目はアンカー）: アンカー q01–q06 から始め、各項目を Wald 検定し（1 ラウンドに
+# 標準誤差つきの推定 1 回）、DIF のない項目を等値にし、検出された項目を検出結果が変わらなくなるまで
+# 検定し直す（mirt の DIF(scheme = "add_sequential")）。
+screen = dif_screen(
+    Model.uniform(TwoPL(), items=items).with_groups(ref=Normal.standard(), focal=Normal.free()),
+    mg_df,
+    group=group,
+    items=items[6:9],
+    anchor_items=anchors,
+    strategy="sequential_constrain",
+    test="wald",
+)
+print(screen.table.round(4))  # item, x2, df, p, adj_p, flagged, converged
+print("flagged:", screen.flagged_items)
+
+# 最終的な部分不変モデルの効果量（焦点群 − 参照群）。
+effects = dif_effect_sizes(screen, data=mg_df, group=group)
+print(effects.round(3))
+```
+
 ### 観測得点による DIF（Mantel–Haenszel、ロジスティック回帰）
 
 flexpyctt は IRT モデルを推定せずに DIF のある項目を探せる。回答者を合計得点（または `anchor_items` の合計、外部の
@@ -1742,6 +1782,7 @@ except SpecificationError as e:
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Chalmers, R. P. (2018). Model-based measures for detecting and quantifying response bias. *Psychometrika*, 83(3), 696–732.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
@@ -1749,6 +1790,7 @@ except SpecificationError as e:
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Meade, A. W. (2010). A taxonomy of effect size measures for the differential functioning of items and scales. *Journal of Applied Psychology*, 95(4), 728–743.
 - Mislevy, R. J. (1984). Estimating latent distributions. *Psychometrika*, 49(3), 359–381.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.

@@ -36,6 +36,7 @@ from flexpyirt.curves import (
     item_probabilities,
     wright_map_table,
 )
+from flexpyirt.dif import DIFScreenResult, dif_effect_sizes, dif_screen
 from flexpyirt.dimensionality import (
     ComparisonDataResult,
     DetectResult,
@@ -104,6 +105,7 @@ __all__ = [
     "CommonItemScreeningResult",
     "ComparisonDataResult",
     "DIFResult",
+    "DIFScreenResult",
     "DavidianCurve",
     "DetectResult",
     "DimensionalityResult",
@@ -144,6 +146,8 @@ __all__ = [
     "compare_fits",
     "comparison_data",
     "detect",
+    "dif_effect_sizes",
+    "dif_screen",
     "dimensionality",
     "dimtest",
     "distractor_analysis",

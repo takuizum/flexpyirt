@@ -16,6 +16,7 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 公開関数の引数は、最初の 1〜2 個を除いてキーワード専用（`*` の後ろ）。
 
 - 推定: [`fit`](#fit), [`FitResult`](#fitresult)
+- DIF: [`dif_screen`](#dif_screen), [`DIFScreenResult`](#difscreenresult), [`dif_effect_sizes`](#dif_effect_sizes)（と [`FitResult.dif`](#fitresultdif)）
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult), [`screen_common_items`](#screen_common_items), [`CommonItemScreeningResult`](#commonitemscreeningresult), [`stack_screening_tables`](#stack_screening_tables)
 - 相関（flexpyctt）: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - 次元数（`model_parallel_analysis` と `dimensionality` 以外は flexpyctt）: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) とその結果
@@ -317,29 +318,38 @@ JSI は単一群・1 次元のモデルについてのみ定義されている�
 #### `FitResult.dif`
 
 ```text
-dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None) -> DataFrame
+dif(data=None, *, group=None, items, params=None, scheme="add", test="likelihood_ratio",
+    p_adjust="holm", item_names=None) -> DataFrame
 ```
 
-多母集団モデルの群間の尤度比検定による DIF（[ガイド 9 節](guide.ja.md#特異項目機能dif)）。mirt の `DIF()` に相当。
-項目ごとに、その項目の `params` を群間で等値にして（`scheme="add"`）または群ごとに自由にして（`scheme="drop"`）
-モデルを推定し直し（同じ `BAEM` 設定と求積、この推定値から開始）、
+多母集団モデルの群間の尤度比検定または Wald 検定による DIF（[ガイド 9 節](guide.ja.md#特異項目機能dif)）。mirt の
+`DIF()` に相当。`test="likelihood_ratio"` では、項目ごとに、その項目の `params` を群間で等値にして（`scheme="add"`）
+または群ごとに自由にして（`scheme="drop"`）モデルを推定し直し（同じ `BAEM` 設定と求積、この推定値から開始）、
 $X^2 = 2(\ell_{\text{free}} - \ell_{\text{constrained}})$、$df = |k_{\text{base}} - k_{\text{new}}|$ を求める。
+`test="wald"`（`scheme="add"` のみ）では推定し直さず、項目のパラメタの群間の差 $\mathbf L\boldsymbol\eta$ をこの推定の
+`vcov` で検定する: $W=(\mathbf L\boldsymbol\eta)^\top(\mathbf L\mathbf V\mathbf L^\top)^{-1}\mathbf L\boldsymbol\eta$、
+$df$ = $\mathbf L$ の行数（mirt の `DIF(Wald = TRUE)`）。
 
 | 引数 | 説明 |
 |---|---|
-| `data`, `group` | この結果を推定したときの反応と群ラベル |
-| `items` | 検定する項目（項目ごとに 1 回推定し直す） |
+| `data`, `group` | この結果を推定したときの反応と群ラベル（尤度比検定で必要） |
+| `items` | 検定する項目（尤度比検定では項目ごとに 1 回推定し直す） |
 | `params` | 検定する内部パラメタ（既定: 各項目の全パラメタ） |
 | `scheme` | `"add"`（制約する。推定済みモデルが基準）または `"drop"`（自由にする） |
+| `test` | `"likelihood_ratio"`（既定）または `"wald"`（`fit(..., se=...)` が必要。flexpyirt の自然なパラメタで検定するので、3PL/4PL の `g` / `u` は mirt のロジット尺度の検定と異なる） |
 | `p_adjust` | `adj_p` の補正。`"holm"`（既定、mirt と同じ）、`"BH"`（Benjamini–Hochberg）、`"none"` |
 | `item_names` | `data` が配列のときの列名 |
 
-**戻り値**: `item`, `converged`, `aic`, `sabic`, `hq`, `bic`（項目を自由にしたモデル − 制約したモデル。負なら DIF を
-支持）, `x2`, `df`, `p`, `adj_p` 列の `DataFrame`。
+**戻り値**: `DataFrame`。尤度比: `item`, `converged`, `aic`, `sabic`, `hq`, `bic`（項目を自由にしたモデル − 制約した
+モデル。負なら DIF を支持）, `x2`, `df`, `p`, `adj_p`。Wald: `item`, `x2`（統計量 $W$）, `df`, `p`, `adj_p`。
 
 **例外**: 単一群のモデル、事前分布つきの MAP 推定、未知の項目やパラメタ、検定するものがない項目（`"add"` で
-すでに等値、`"drop"` ですでに自由）では `SpecificationError`。推定し直すモデルが識別できない（例: 唯一のアンカーを
-自由にする）と `IdentificationError`。
+すでに等値、`"drop"` ですでに自由）、`vcov` のない推定や `scheme="drop"` での Wald 検定、`data` / `group` のない
+尤度比検定では `SpecificationError`。推定し直すモデルが識別できない（例: 唯一のアンカーを自由にする）と
+`IdentificationError`。
+
+全項目をアンカーの純化つきでスクリーニングするには [`dif_screen`](#dif_screen)、効果量は
+[`dif_effect_sizes`](#dif_effect_sizes)。
 
 #### `FitResult.to_json`
 
@@ -865,6 +875,105 @@ Gauss–Hermite 格子に対応する。成分は交換可能（ラベルスイ�
 `IdentificationError`。
 
 ---
+
+## 特異項目機能（DIF）
+
+1 次元の多母集団モデルが対象（[ガイド 9 節](guide.ja.md#特異項目機能dif)、DESIGN.md §16.22）。符号は焦点群 − 参照群。
+検定はすべて全群にわたる総括検定。
+
+### `dif_screen`
+
+```text
+dif_screen(spec, data, *, group, items=None, anchor_items=None, strategy="all_others",
+           test="likelihood_ratio", params=None, p_adjust="BH", alpha=0.05, max_iter=10,
+           method=None, quadrature=None, se=None, item_names=None) -> DIFScreenResult
+```
+
+全項目の DIF をスクリーニングし、アンカーを純化する。モデルは `spec` から作る（`spec` の `equal_across_groups()` は
+置き換える）。検定しない項目と `params` 以外のパラメタは群間で等値、検定する項目の `params` は手順に応じて等値か自由。
+自由な検定項目の集合を $F$ とすると、項目 $i$ は $F\cup\{i\}$ と $F\setminus\{i\}$ の比較（尤度比、または
+$F\cup\{i\}$ の推定の Wald 統計量）で検定する。各ラウンドで全検定項目の最新の $p$ を補正し、補正後 $p<$ `alpha`
+を検出とする。
+
+| `strategy` | 手順 | mirt の `DIF(scheme = )` |
+|---|---|---|
+| `"all_others"` | 全検定項目を制約して 1 ラウンド。各項目を他の全項目をアンカーとして検定する | 完全不変モデルからの `"drop"` |
+| `"sequential_free"` | 1 ラウンド目は `"all_others"` と同じ。以後、検出された項目を自由にして他の項目を検定し直し、検出結果が変わらなくなるまで繰り返す | `"drop_sequential"` |
+| `"sequential_constrain"` | アンカー（`anchor_items` が必要）から、検定項目をすべて自由にして始める。以後、検出されなかった項目を制約し、検出された項目を検定し直し、検出結果が変わらなくなるまで繰り返す | `"add_sequential"` |
+
+| 引数 | 説明 |
+|---|---|
+| `spec` | 1 次元の多母集団 `Model`（焦点群の潜在分布は通常 `Normal.free()`）。事前分布と `equal_across_items()` は不可 |
+| `data`, `group` | 反応と群ラベル |
+| `items` | 検定する項目（既定: `anchor_items` 以外の全項目） |
+| `anchor_items` | 常に群間で等値で、検定しない項目（どちらの引数にもない項目もアンカー） |
+| `strategy` | 上の表を参照 |
+| `test` | `"likelihood_ratio"`（検定ごとに 2 回の推定、キャッシュする）または `"wald"`（検定ごとに標準誤差つきの推定 1 回。`"sequential_constrain"` ではラウンドごとに 1 回） |
+| `params` | 検定する内部パラメタ（既定: 全部）。項目が持たない名前はその項目では無視する |
+| `p_adjust` | 検定項目にわたる補正。`"BH"`（既定）、`"holm"`、`"none"` |
+| `alpha` | 補正後 $p<$ `alpha` で検出（mirt の数値の `seq_stat`） |
+| `max_iter` | 逐次戦略の最大ラウンド数（mirt の `max_run` − 1） |
+| `method`, `quadrature` | すべての推定の設定 |
+| `se` | 最終モデル（と Wald 検定の推定）の標準誤差（`None` なら `"oakes"`） |
+| `item_names` | `data` が配列のときの列名 |
+
+**戻り値**: [`DIFScreenResult`](#difscreenresult)。
+
+**例外**: `PrecisionError`。単一群や多次元のモデル、事前分布、項目間の等値制約、未知の項目や重なる項目、`params` を
+1 つも持たない項目、`"sequential_constrain"` でアンカーがない、不正なオプションでは `SpecificationError`。手順の途中の
+モデルが識別できない（例: 全項目が検出された）と `IdentificationError`。
+
+**警告**: 逐次戦略が `max_iter` ラウンドで同じ検出結果を繰り返さなかったら `ConvergenceWarning`。
+
+### `DIFScreenResult`
+
+`dif_screen()` が返す frozen dataclass。
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `table` | DataFrame | 検定項目ごとに 1 行: `item`, `x2`, `df`, `p`, `adj_p`, `flagged`, `converged`。`"all_others"` では唯一のラウンドの検定。逐次戦略では最終的なアンカーに対する各項目の検定（その項目を自由にしたモデルと制約したモデルの比較、他の項目は最終モデルのとおり。検出された項目は mirt の最終出力と同じ）。`adj_p` は表にわたって補正する。`flagged` は手順の判定 |
+| `flagged_items`, `anchor_items` | list[str] | 検出された項目と、それ以外の全項目（最終モデルで群間で等値） |
+| `history` | DataFrame | ラウンドと検定項目ごとに 1 行: `round`, `item`, `retested`, `x2`, `df`, `p`, `adj_p`, `flagged`（検定し直さなかった項目は最新の統計量のまま） |
+| `fit` | `FitResult` | 最終モデル。検出された項目の検定したパラメタを群間で自由にしたもの |
+| `strategy`, `test` | str | 使ったオプション |
+| `n_rounds`, `converged` | int, bool | 検定のラウンド数と、検出結果が繰り返したか |
+
+### `dif_effect_sizes`
+
+```text
+dif_effect_sizes(result, *, data=None, group=None, focal=None, items=None, density="focal",
+                 item_names=None) -> DataFrame
+```
+
+推定した 1 次元の多母集団モデル（`FitResult` か、`fit` を使う `DIFScreenResult`）の効果量を、各焦点群と参照群
+（第 1 群）の間で求める。$D_j(\theta)=E_{fj}(\theta)-E_{rj}(\theta)$ を期待項目得点の差、$w_q$ を推定時の格子上の焦点群
+（または参照群）の推定潜在分布の重みとすると:
+
+| 列 | 定義 | mirt |
+|---|---|---|
+| `signed_difference` | $\sum_qw_qD_j(\theta_q)$（Chalmers, 2018） | `DRF(DIF = TRUE, best_fitting = TRUE)` の `sDIF` |
+| `unsigned_difference` | $\sum_qw_q\lvert D_j(\theta_q)\rvert$ | `uDIF` |
+| `expected_score_standardized_difference`（`data` あり） | 焦点群の回答者の EAP での $E_{fj}(\hat\theta_i)$ と $E_{rj}(\hat\theta_i)$ の Cohen の $d$（Meade, 2010） | `empirical_ES()` の `ESSD` |
+| `rmsd_reference`, `rmsd_focal`（`data` あり） | 群のデータの事後期待項目得点 $\hat E_{gj}$ による $\big(\sum_qw_{gq}(\hat E_{gj}(\theta_q)-E_{gj}(\theta_q))^2\big)^{1/2}$（期待得点の RMSD; Köhler, Robitzsch & Hartig, 2020） | `RMSD_DIF(probfun = FALSE)` |
+
+RMSD は各群のパラメタがその群に合うかを測るので、群間で等値なパラメタの項目（不変モデル）に使う。項目の行の後に、
+焦点群ごとに `level="test"`、`item="test"` の行があり、`items` にわたって合計した期待得点を使う: 符号つき・符号なしの
+DTF（`DRF(DIF = FALSE)`）と期待テスト得点の標準化差（`ETSSD`。RMSD は NaN）。
+
+| 引数 | 説明 |
+|---|---|
+| `result` | `FitResult` または `DIFScreenResult` |
+| `data`, `group` | 推定に使った反応と群ラベル（データに基づく列が加わる） |
+| `focal` | 焦点群（既定: 第 1 群以外の全群） |
+| `items` | 項目（既定: 全項目）。テストの行はこれらにわたって合計する |
+| `density` | `"focal"`（既定）または `"reference"`: 差を重み付ける潜在分布 |
+| `item_names` | `data` が配列のときの列名 |
+
+**戻り値**: `group`（焦点群）, `level`（`"item"` / `"test"`）, `item`, `signed_difference`, `unsigned_difference`、
+`data` を渡すと `expected_score_standardized_difference`, `rmsd_reference`, `rmsd_focal` 列の `DataFrame`。
+
+**例外**: `PrecisionError`。単一群や多次元の推定、（`data` を渡したときの）ウェイトつき推定、未知の群や項目、参照群を
+焦点群に指定、`group` のない `data` では `SpecificationError`。
 
 ## 尺度リンキング
 

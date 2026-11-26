@@ -2181,7 +2181,6 @@ data-independent shapes (§15.21).
     multiple-group multidimensional models (not validated; $M_2$ for multiple groups is #76).
     Unidimensional results are unchanged bit for bit (the same code path with $D=1$).
     **Validation (V39)**: mirt 1.48 on the four V14 models, see VALIDATION.md.
-
 20. **Observed-score DIF in flexpyctt (`mantel_haenszel()`, `mantel()`,
     `generalized_mantel_haenszel()`, `logistic_dif()`, `DIFResult`; issue #102, V47)**: DIF
     screening without an IRT model, in `flexpyctt.dif` (public layer: input checks, matching
@@ -2331,6 +2330,86 @@ data-independent shapes (§15.21).
     **Validation (V46)**: `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R`, see
     VALIDATION.md. **Left out** (as in the issue): hierarchical $\omega$, split-half, Guttman
     $\lambda$, glb, the upper–lower 27% index, plots (#103), weights.
+22. **DIF workflow: screening with anchor purification, Wald tests, effect sizes (#104, V49)**:
+    post-fit orchestration in the Result layer (`dif.py`, `_dif.py`); only the refits run in
+    `jit`. Scope: unidimensional multiple-group models (two or more groups, every item family,
+    every latent family), MLE only (no priors), no sampling weights, no equality constraints
+    across items in the specification. Each test is an omnibus test across all groups.
+    - **Wald tests (`FitResult.dif(..., test="wald")`)**: for each tested item, with
+      $\boldsymbol\eta$ the free parameters of the fit and $\mathbf V$ = `vcov`, the
+      $r=\sum_p(m_p-1)$ contrasts $\eta_{p,u_1}-\eta_{p,u_k}$ ($k=2..m_p$) between the $m_p$
+      distinct `free_id`s $u_k$ of parameter $p$ across groups form $\mathbf L$ and
+      $W=(\mathbf L\boldsymbol\eta)^\top(\mathbf L\mathbf V\mathbf L^\top)^{-1}
+      (\mathbf L\boldsymbol\eta)\sim\chi^2_r$ (Wald, 1943; Lord, 1980), as mirt's
+      `DIF(Wald = TRUE)`. No refit; needs `se=` at fit time; only `scheme="add"` (the
+      parameters must be free across groups). The contrasts are on flexpyirt's natural
+      parameters, so for 3PL/4PL `g`/`u` (mirt tests them on the logit scale) the statistic
+      differs from mirt's; 2PL, GRM, GPCM, Rasch and nominal parameters are the same as mirt's.
+      The columns are `item`, `x2` (the statistic $W$), `df`, `p`, `adj_p`.
+    - **`dif_screen(spec, data, *, group, items, anchor_items, strategy, test, params,
+      p_adjust="BH", alpha=0.05, max_iter=10, method, quadrature, se, item_names)`** builds the
+      models itself from `spec` (its `equal_across_groups()` calls are replaced): every
+      parameter of an untested item (`anchor_items` and items not in `items`) and every
+      parameter outside `params` is equal across groups; the `params` of a tested item are equal
+      ("constrained") or free per group ("free") according to the state of the procedure. With
+      $F$ the set of free tested items, the test of item $i$ in state $F$ compares
+      $F\cup\{i\}$ with $F\setminus\{i\}$, i.e. item $i$ with every other item as in $F$:
+      likelihood ratio $X^2=2(\ell_{F\cup\{i\}}-\ell_{F\setminus\{i\}})$,
+      $df=k_{F\cup\{i\}}-k_{F\setminus\{i\}}$, or the Wald statistic of the fit of
+      $F\cup\{i\}$. Fits are cached by $F$, and each refit starts at the estimates of the model
+      of the current round. Each round adjusts the latest $p$ of every tested item over the
+      tested items (`p_adjust`, default `"BH"` for screening) and flags $\tilde p<\alpha$.
+      Strategies (Candell & Drasgow, 1988; Kopf, Zeileis & Strobl, 2015; mirt's `DIF()`
+      schemes):
+      - `"all_others"` (mirt `scheme = "drop"` from the fully invariant model): one round with
+        $F=\varnothing$, each item tested with all others as anchors.
+      - `"sequential_free"` (`"drop_sequential"`): round 1 as `"all_others"`; then, while the
+        flags change and at most `max_iter` rounds, $F$ = flagged items and the unflagged items
+        are retested against $F$ (flagged items keep their latest statistic).
+      - `"sequential_constrain"` (`"add_sequential"`): needs at least one untested anchor item;
+        round 1 tests every item with $F$ = all tested items (only the anchors constrained);
+        then $F$ = flagged items and the flagged items are retested against $F$.
+      The procedure has converged when a round reproduces the flags of the round before
+      (round 1 is compared with the starting $F$); otherwise a `ConvergenceWarning` after
+      `max_iter` rounds. mirt's `max_run = r` equals `max_iter = r - 1`.
+      The result `DIFScreenResult` holds `table` (one row per tested item: `item`, `x2`, `df`,
+      `p`, `adj_p`, `flagged`, `converged`), `flagged_items`, `anchor_items` (all items not
+      flagged, in model order), `history` (one row per round and tested item: `round`, `item`,
+      `retested`, `x2`, `df`, `p`, `adj_p`, `flagged`), `fit` (the final model, $F$ = flagged
+      items, with `se=`), `n_rounds` and `converged`. For `"all_others"` the table is round 1;
+      for the sequential strategies it is the test of every item against the final $F$ (each
+      item against the purified anchors; for flagged items this is mirt's final output), with
+      `adj_p` adjusted over the table; `flagged` is the decision of the procedure. A
+      refit that does not converge is recorded in `converged` (no warning per refit).
+    - **`dif_effect_sizes(result, *, data=None, group=None, focal=None, items=None,
+      density="focal", item_names=None)`** (`result` a multiple-group `FitResult` or a
+      `DIFScreenResult`): for each focal group $f$ (default every group after the first, the
+      reference $r$) and item $j$, with expected item scores $E_{gj}(\theta)=\sum_kkP_{gjk}(\theta)$
+      and $D_j(\theta)=E_{fj}(\theta)-E_{rj}(\theta)$ on the fitted grid $\theta_q$ with the
+      normalized fitted latent weights $w_q$ of the focal (or, `density="reference"`, reference)
+      group:
+      $\text{signed}_j=\sum_qw_qD_j(\theta_q)$, $\text{unsigned}_j=\sum_qw_q|D_j(\theta_q)|$
+      (Chalmers, 2018; mirt `DRF(DIF = TRUE, best_fitting = TRUE)` `sDIF` / `uDIF`). With
+      `data`, also the expected-score standardized difference (Meade, 2010; mirt
+      `empirical_ES()` `ESSD`) at the EAP scores $\hat\theta_i$ of the $n$ focal respondents:
+      $\big(\overline{E_{f j}(\hat\theta)}-\overline{E_{r j}(\hat\theta)}\big)/
+      \sqrt{(s^2_{f}+s^2_{r})/2}$ (sample variances, denominator $n-1$; the pooled SD of two
+      samples of equal size), and the root mean squared deviation of each of the two groups
+      $g$ (`rmsd_reference`, `rmsd_focal`): with the E-step expected counts $\bar r_{gjkq}$
+      of the group, $\hat E_{gj}(\theta_q)=\sum_kk\bar r_{gjkq}/\sum_k\bar r_{gjkq}$ and
+      $\mathrm{RMSD}_{gj}=\big(\sum_qw_{gq}(\hat E_{gj}(\theta_q)-E_{gj}(\theta_q))^2\big)^{1/2}$
+      (expected-score form; for dichotomous items the category-1 RMSD of von Davier, 2005, and
+      Köhler, Robitzsch & Hartig, 2020; mirt `RMSD_DIF(probfun = FALSE)`). The RMSD measures
+      how well each group's parameters fit that group, so it detects DIF for items whose
+      parameters are equal across groups (an invariant or partially invariant fit). One more
+      row per focal group (`level="test"`, `item="test"`) sums $D_j$ over `items`
+      (signed / unsigned DTF, mirt `DRF(DIF = FALSE)`; the expected test score standardized
+      difference, mirt `ETSSD`; RMSD NaN). Columns: `group`, `level`, `item`,
+      `signed_difference`, `unsigned_difference` and, with `data`,
+      `expected_score_standardized_difference`, `rmsd_reference`, `rmsd_focal`. Signs are focal
+      minus reference (mirt's). Not in scope: mirt's default DRF density (the posterior counts
+      of the data), DRF's sampling-based tests and intervals, pairwise comparisons of focal
+      groups, multidimensional models.
 
 ## 17. Implementation decisions (M7)
 
@@ -3515,9 +3594,11 @@ data-independent shapes (§15.21).
 - Candell, G. L., & Drasgow, F. (1988). An iterative procedure for linking metrics and assessing item bias in item response theory. *Applied Psychological Measurement*, 12(3), 253–260.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Chalmers, R. P. (2018). Model-based measures for detecting and quantifying response bias. *Psychometrika*, 83(3), 696–732.
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
 - Cohen, J. (1960). A coefficient of agreement for nominal scales. *Educational and Psychological Measurement*, 20(1), 37–46.
+- von Davier, M. (2005). *A general diagnostic model applied to language testing data* (ETS Research Report RR-05-16). Educational Testing Service.
 - Devroye, L. (1986). *Non-Uniform Random Variate Generation*. Springer.
 - Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
 - Drasgow, F., Levine, M. V., & Williams, E. A. (1985). Appropriateness measurement with polychotomous item response models and standardized indices. *British Journal of Mathematical and Statistical Psychology*, 38(1), 67–86.
@@ -3551,7 +3632,9 @@ data-independent shapes (§15.21).
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
+- Köhler, C., Robitzsch, A., & Hartig, J. (2020). A bias-corrected RMSD item fit statistic: An evaluation and comparison to alternatives. *Journal of Educational and Behavioral Statistics*, 45(3), 251–273.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
+- Kopf, J., Zeileis, A., & Strobl, C. (2015). Anchor selection strategies for DIF analysis: Review, assessment, and new approaches. *Educational and Psychological Measurement*, 75(1), 22–56.
 - Landis, J. R., Heyman, E. R., & Koch, G. G. (1978). Average partial association in three-way contingency tables: A review and discussion of alternative tests. *International Statistical Review*, 46(3), 237–254.
 - Lathrop, Q. N., & Cheng, Y. (2013). Two approaches to estimation of classification accuracy rate under item response theory. *Applied Psychological Measurement*, 37(3), 226–241.
 - Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
@@ -3559,6 +3642,7 @@ data-independent shapes (§15.21).
 - Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24(2), 115–138.
 - Liu, I.-M., & Agresti, A. (1996). Mantel–Haenszel-type inference for cumulative odds ratios with a stratified ordinal response. *Biometrics*, 52(4), 1223–1234.
 - Livingston, S. A., & Lewis, C. (1995). Estimating the consistency and accuracy of classifications based on test scores. *Journal of Educational Measurement*, 32(2), 179–197.
+- Lord, F. M. (1980). *Applications of Item Response Theory to Practical Testing Problems*. Erlbaum.
 - Lord, F. M. (1980). *Applications of Item Response Theory to Practical Testing Problems*. Lawrence Erlbaum.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
@@ -3571,6 +3655,7 @@ data-independent shapes (§15.21).
 - Maydeu-Olivares, A., & Joe, H. (2006). Limited information goodness-of-fit testing in multidimensional contingency tables. *Psychometrika*, 71(4), 713–732.
 - Maydeu-Olivares, A., & Joe, H. (2014). Assessing approximate fit in categorical data analysis. *Multivariate Behavioral Research*, 49(4), 305–328.
 - McLachlan, G. J., & Peel, D. (2000). *Finite Mixture Models*. Wiley.
+- Meade, A. W. (2010). A taxonomy of effect size measures for the differential functioning of items and scales. *Journal of Applied Psychology*, 95(4), 728–743.
 - Mislevy, R. J. (1984). Estimating latent distributions. *Psychometrika*, 49(3), 359–381.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
@@ -3615,14 +3700,15 @@ data-independent shapes (§15.21).
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Swaminathan, H., & Rogers, H. J. (1990). Detecting differential item functioning using logistic regression procedures. *Journal of Educational Measurement*, 27(4), 361–370.
+- Thissen, D., & Wainer, H. (Eds.). (2001). *Test Scoring*. Lawrence Erlbaum Associates.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
-- Thissen, D., & Wainer, H. (Eds.). (2001). *Test Scoring*. Lawrence Erlbaum Associates.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Velicer, W. F. (1976). Determining the number of components from the matrix of partial correlations. *Psychometrika*, 41(3), 321–327.
 - Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
 - Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
+- Wald, A. (1943). Tests of statistical hypotheses concerning several parameters when the number of observations is large. *Transactions of the American Mathematical Society*, 54(3), 426–482.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.

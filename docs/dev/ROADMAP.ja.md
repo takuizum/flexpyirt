@@ -118,6 +118,11 @@
   `plot_expected_score`、`plot_wright_map`）が任意依存 `flexpyirt[plot]` の matplotlib で描く。1 次元モデル、
   全項目族、単一群・多母集団。V48 で mirt の `itemfit(return.tables = TRUE)`、`probtrace()`、
   `coef(IRTpars = TRUE)` と TAM の `tam.threshold()` に照合。
+- [x] DIF の分析手順（#104）: `dif_screen()` がアンカーを純化しながら全項目をスクリーニングし（`"all_others"`、
+  `"sequential_free"`、`"sequential_constrain"`。尤度比検定または Wald 検定）、最終的な部分不変モデルを返す。
+  `dif_effect_sizes()` が期待得点の符号つき・符号なしの差、ESSD、RMSD とテスト（DTF）の行を返す。
+  `FitResult.dif(test="wald")`。1 次元の多母集団モデル、2 群以上。V49 で mirt の `DIF(scheme = "drop" /
+  "drop_sequential" / "add_sequential", Wald = TRUE)`、`DRF()` の点推定、`empirical_ES()`、`RMSD_DIF()` に照合。
 - [x] リンキングの共通項目の点検と項目パラメータドリフト（#105。`screen_common_items()`、
   `CommonItemScreeningResult`、`stack_screening_tables()`: 頑健 z・変位・期待得点の RMSD と反復的な純化、1 次元。V50 で照合済み）。
 - [x] 受験者適合度と残差にもとづく項目適合度（#108）: `FitResult.person_fit()`（$l_z$、$l_z^*$、受験者の infit / outfit と

@@ -88,6 +88,7 @@ English | [日本語](VALIDATION.ja.md)
 | V46 | Classical item analysis (flexpyctt): keyed scoring, alpha (pairwise and listwise), item statistics, point-biserial / biserial / polyserial correlations, omega total (Pearson and polychoric), option analysis; simulated 10-item multiple-choice (complete, 5% MCAR) and 6-item 0–4 data (complete, 6% MCAR) | none (not mirt): psych `alpha()`, `score.multiple.choice()`, `responseFrequency()`, `polyserial()`, `biserial()`, `fa()`, `omega(nfactors = 1)`; ltm `cronbach.alpha()`, `biserial.cor()`; polycor `polyserial(ML = FALSE)`; lavaan `lavCor()`; base R for option statistics | flexpyctt |
 | V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `packages/flexpyctt/validation/r/ctt_dif_reference.R`; the worked example of Liu & Agresti (1996, Table 1) | — |
 | V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
+| V49 | DIF screening with anchor purification (all others as anchors, sequential freeing, sequential constraining; two groups, 8 2PL + 4 GRM $K=3$; three groups 2PL), Wald DIF tests, signed / unsigned expected-score differences, DTF, ESSD / ETSSD and RMSD at mirt's estimates | `DIF(scheme = "drop" / "drop_sequential" / "add_sequential", seq_stat = 0.05, p.adjust = "BH", max_run = )`, `DIF(Wald = TRUE)`, `mirt:::calc_DRFs(best_fitting = TRUE)` (behind `DRF()`), `empirical_ES()`, `RMSD_DIF(probfun = FALSE)` | M5 |
 | V50 | Common-item screening for linking (#105): robust z (Huynh & Meyer, 2010), displacement and RMSD of expected item score curves; removal order, linking constants at every purification step and the final item table (2PL; mixed 2PL + GRM + GPCM) | separate `mirt()` calibrations + base-R recomputation (`median()`, `quantile(type = 7)`, `expected.item()`, V20 linking); `equateIRT::dif.test` as a cross-check of the drifted items | field |
 | V51 | IRT true-score and observed-score equating and raw-to-scale tables (dichotomous: 20 + 20 items, 3PL + 2PL, with a link; polytomous: 4 GRM $K=4$ + 6 2PL vs 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL, with a link; populations new / old / synthetic $w_1=0.5$; scale table true score and EAPsum) | `equateIRT:::score_compute(method = "TSE" / "OSE")`, `SNSequate::irt.eq(method = "TS")`; mirt `expected.test()`, `probtrace()`, `testinfo()`, `fscores(method = "EAPsum", full.scores = FALSE)` with `uniroot()`, and `equate::equate(type = "equipercentile")` | #106 |
 | V52 | Classification accuracy and consistency for cut scores (#107): Lee (summed-score cuts) and Rudner ($\theta$ cuts), D and P approaches, one to three cuts, non-integer cuts, both cut-scale conversions (3PL $J=20$; GRM $K=4$, $J=10$; two-group 2PL $J=15$, focal mean and variance free) | cacIRT 1.4 `class.Lee()`, `Lee.poly.D()` / `Lee.poly.P()`, `Rud.D()` / `Rud.P()` with mirt's `testinfo()` SE; independent recomputation from mirt `probtrace()` / `expected.test()` / `testinfo()` (kappa, false positive / negative rates, per-category indices, tables) | field |
@@ -1003,6 +1004,42 @@ English | [日本語](VALIDATION.ja.md)
     error paths; every plot function on the Agg back end with the plotted data equal to the
     DataFrames; `MissingDependencyError` when matplotlib cannot be imported. CI also runs
     `scripts/check_plotting_without_matplotlib.py` in an environment without matplotlib.
+- **DIF screening, Wald DIF tests and effect sizes (V49, #104)**: DESIGN §16.22 in
+  `tests/test_mirt_m5_dif_screen.py` (slow tier, about 7 min; generator
+  `validation/r/m5_dif_screen_reference.R` → `tests/reference/v49_dif_screen.json`, mirt 1.48;
+  `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`, 81 points on $[-8,8]$ for every fit and
+  refit; set `V49_CACHE=<file.rds>` to keep the long `DIF()` runs between runs of the generator).
+  Data: two groups of 1200 (8 2PL items and 4 graded items $K=3$; DIF in q02's slope, q04's and
+  q07's intercepts and q09's intercepts; focal $N(0.4, 1.3)$) and three groups of 800 (8 2PL items,
+  intercept DIF in q03 for g3).
+  - **`"all_others"`** against `DIF(<fully invariant>, scheme = "drop", p.adjust = "BH")` for all
+    parameters and for intercepts only (two and three groups): $X^2$ to $1.5\times10^{-11}$, `df`
+    exact, flagged sets equal.
+  - **Sequential strategies** against `DIF(scheme = "drop_sequential" / "add_sequential",
+    seq_stat = 0.05, p.adjust = "BH")` with `max_run` 2, 3 and `Inf` (our `max_iter` = `max_run` − 1):
+    flagged sets equal after every number of rounds, the flagged items' final tests (mirt's output)
+    $X^2$ to $1.5\times10^{-11}$, and the final model's log-likelihood
+    (`return_seq_model = TRUE`) to $1.5\times10^{-15}$ relative. In these data the flags are the
+    same from round 1 on (both strategies converge in two rounds); the iteration itself is unit-tested
+    (`tests/test_m5_dif_screen.py`). mirt's sequential loop indexes item names by position within
+    `items2test`, so the generator tests a prefix `1:k` (the anchors are the last items).
+  - **Wald** against `DIF(Wald = TRUE)` on the anchored model with Oakes SEs (`SE.type = "Oakes"`),
+    both fitted independently: $W$ to $2.7\times10^{-7}$ relative, `p` / `adj_p` (Holm) to
+    $1.2\times10^{-7}$ relative.
+  - **Effect sizes** at mirt's estimates of the partially invariant model (q02, q04, q07, q09 free)
+    and the invariant model, put into fixed `FitResult`s on 201 points on $[-6,6]$ (DRF's
+    `quadpts`, `theta_lim` and `RMSD_DIF()`'s grid): signed / unsigned differences (focal and
+    reference densities) and DTF against `mirt:::calc_DRFs(best_fitting = TRUE)` to
+    $1.1\times10^{-15}$; EAP scores to $6.7\times10^{-15}$; ESSD and ETSSD against `empirical_ES()`
+    (with `Theta.focal` the EAPs on the same grid) to $2.2\times10^{-15}$; RMSD of both groups and
+    both models against `RMSD_DIF(probfun = FALSE)` to $9.7\times10^{-16}$. Tolerances: $X^2$
+    $10^{-8}$, $p$ $10^{-3}$ relative (mirt's `p` is `1 - pchisq()`, imprecise for tiny $p$),
+    log-likelihood $10^{-8}$ relative, $W$ $10^{-5}$ relative, effect sizes $10^{-12}$.
+  - **mirt differences**: `DRF(den.type = "focal" / "reference")` stops in mirt 1.48
+    (`add_std.DRF()` refers to an undefined `VAR`), so the generator calls `calc_DRFs()`, which
+    computes `DRF()`'s point estimates. mirt's `DRF()` default density (`best_fitting = FALSE`) is
+    the posterior counts of the data, not reproduced (DESIGN §16.22). For the sequential schemes
+    mirt reports only the flagged items; `DIFScreenResult.table` has every tested item.
 - **Robust standard errors (V35, M7)**: `fit(se="crossprod" | "sandwich")` (DESIGN §17.5) against
   mirt 1.48 `SE.type = "crossprod"` / `"sandwich"`. The generator stores mirt's parameter table
   (`mod2values`) and the full `vcov` matrices, each row labelled by the first `parnum` of its

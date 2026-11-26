@@ -21,6 +21,7 @@ random numbers; flexpyirt's take a JAX PRNG `key`.
 Apart from the first one or two, arguments of public functions are keyword-only (after `*`).
 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
+- DIF: [`dif_screen`](#dif_screen), [`DIFScreenResult`](#difscreenresult), [`dif_effect_sizes`](#dif_effect_sizes) (and [`FitResult.dif`](#fitresultdif))
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult), [`screen_common_items`](#screen_common_items), [`CommonItemScreeningResult`](#commonitemscreeningresult), [`stack_screening_tables`](#stack_screening_tables)
 - Correlations (flexpyctt): [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
@@ -359,33 +360,43 @@ not available for other models.
 #### `FitResult.dif`
 
 ```text
-dif(data, *, group, items, params=None, scheme="add", p_adjust="holm", item_names=None) -> DataFrame
+dif(data=None, *, group=None, items, params=None, scheme="add", test="likelihood_ratio",
+    p_adjust="holm", item_names=None) -> DataFrame
 ```
 
-Likelihood-ratio DIF tests across the groups of a multiple-group model
-([guide section 9](guide.md#differential-item-functioning-dif)), as mirt's `DIF()`. For each item
-the model is refitted (same `BAEM` settings and quadrature, starting from these estimates) with
-the item's `params` made equal across groups (`scheme="add"`) or freed in every group
-(`scheme="drop"`); $X^2 = 2(\ell_{\text{free}} - \ell_{\text{constrained}})$ with
-$df = |k_{\text{base}} - k_{\text{new}}|$.
+Likelihood-ratio or Wald DIF tests across the groups of a multiple-group model
+([guide section 9](guide.md#differential-item-functioning-dif)), as mirt's `DIF()`. With
+`test="likelihood_ratio"` the model is refitted for each item (same `BAEM` settings and quadrature,
+starting from these estimates) with the item's `params` made equal across groups (`scheme="add"`)
+or freed in every group (`scheme="drop"`); $X^2 = 2(\ell_{\text{free}} - \ell_{\text{constrained}})$
+with $df = |k_{\text{base}} - k_{\text{new}}|$. With `test="wald"` (`scheme="add"` only) nothing is
+refitted: the differences $\mathbf L\boldsymbol\eta$ between the item's parameters in the groups
+are tested with this fit's `vcov`, $W=(\mathbf L\boldsymbol\eta)^\top(\mathbf L\mathbf V
+\mathbf L^\top)^{-1}\mathbf L\boldsymbol\eta$ on $df$ = rows of $\mathbf L$ (mirt's
+`DIF(Wald = TRUE)`).
 
 | Argument | Description |
 |---|---|
-| `data`, `group` | The responses and group labels this result was fitted to |
-| `items` | Items to test (one refit each) |
+| `data`, `group` | The responses and group labels this result was fitted to (needed for the likelihood-ratio test) |
+| `items` | Items to test (one refit each for the likelihood-ratio test) |
 | `params` | Internal parameters to test (default: all of each item's parameters) |
 | `scheme` | `"add"` (constrain; the fitted model is the baseline) or `"drop"` (free) |
+| `test` | `"likelihood_ratio"` (default) or `"wald"` (needs `fit(..., se=...)`; on flexpyirt's natural parameters, so 3PL/4PL `g` / `u` differ from mirt's logit-scale test) |
 | `p_adjust` | `"holm"` (default, mirt's), `"BH"` (Benjamini–Hochberg) or `"none"` for `adj_p` |
 | `item_names` | Column names when `data` is an array |
 
-**Returns**: `DataFrame` with columns `item`, `converged`, `aic`, `sabic`, `hq`, `bic` (the model
-with the item free minus the constrained one; negative values favour DIF), `x2`, `df`, `p` and
-`adj_p`.
+**Returns**: `DataFrame`. Likelihood ratio: `item`, `converged`, `aic`, `sabic`, `hq`, `bic` (the
+model with the item free minus the constrained one; negative values favour DIF), `x2`, `df`, `p`
+and `adj_p`. Wald: `item`, `x2` (the statistic $W$), `df`, `p`, `adj_p`.
 
 **Raises**: `SpecificationError` for single-group models, MAP fits with priors, unknown items or
-parameters, or an item with nothing to test (already equal for `"add"`, already free for
-`"drop"`); `IdentificationError` if a refitted model is not identified (e.g. freeing the only
-anchors).
+parameters, an item with nothing to test (already equal for `"add"`, already free for
+`"drop"`), a Wald test without `vcov` or with `scheme="drop"`, or a likelihood-ratio test without
+`data` / `group`; `IdentificationError` if a refitted model is not identified (e.g. freeing the
+only anchors).
+
+To screen every item with anchor purification, use [`dif_screen`](#dif_screen); for effect sizes,
+[`dif_effect_sizes`](#dif_effect_sizes).
 
 #### `FitResult.to_json`
 
@@ -966,6 +977,113 @@ shape, or when used with `Model.with_groups()` or `Model.with_factors()`; `Ident
 when `free_mean` or `free_var` lacks fixed intercepts or slopes.
 
 ---
+
+## Differential item functioning (DIF)
+
+Unidimensional multiple-group models ([guide section 9](guide.md#differential-item-functioning-dif);
+DESIGN.md §16.22). Signs are focal minus reference; every test is an omnibus test across all groups.
+
+### `dif_screen`
+
+```text
+dif_screen(spec, data, *, group, items=None, anchor_items=None, strategy="all_others",
+           test="likelihood_ratio", params=None, p_adjust="BH", alpha=0.05, max_iter=10,
+           method=None, quadrature=None, se=None, item_names=None) -> DIFScreenResult
+```
+
+Screens every item for DIF and purifies the anchor set. The models are built from `spec` (its
+`equal_across_groups()` calls are replaced): untested items and parameters outside `params` are
+equal across groups; the `params` of a tested item are equal or free according to the procedure.
+With $F$ the set of free tested items, item $i$ is tested by comparing $F\cup\{i\}$ with
+$F\setminus\{i\}$ (likelihood ratio, or the Wald statistic of the fit of $F\cup\{i\}$). Each
+round adjusts the latest $p$ of every tested item and flags adjusted $p<$ `alpha`.
+
+| `strategy` | Procedure | mirt `DIF(scheme = )` |
+|---|---|---|
+| `"all_others"` | One round with every tested item constrained: each item is tested with all others as anchors | `"drop"` from the fully invariant model |
+| `"sequential_free"` | Round 1 as `"all_others"`; then the flagged items are freed and the unflagged ones retested, until the flags repeat | `"drop_sequential"` |
+| `"sequential_constrain"` | Starts from the anchors (needs `anchor_items`) with every tested item free; then the unflagged items are constrained and the flagged ones retested, until the flags repeat | `"add_sequential"` |
+
+| Argument | Description |
+|---|---|
+| `spec` | Unidimensional multiple-group `Model` (focal latent distributions usually `Normal.free()`); no priors, no `equal_across_items()` |
+| `data`, `group` | Responses and group labels |
+| `items` | Items to test (default: every item not in `anchor_items`) |
+| `anchor_items` | Items always equal across groups and not tested (items in neither argument are anchors too) |
+| `strategy` | See the table above |
+| `test` | `"likelihood_ratio"` (two fits per test, cached) or `"wald"` (one fit with standard errors per test; with `"sequential_constrain"` one fit per round) |
+| `params` | Internal parameters tested (default: all); names an item does not have are ignored for it |
+| `p_adjust` | `"BH"` (default), `"holm"` or `"none"`, over the tested items |
+| `alpha` | Flag when adjusted $p<$ `alpha` (mirt's numeric `seq_stat`) |
+| `max_iter` | Maximum rounds of the sequential strategies (mirt's `max_run` minus 1) |
+| `method`, `quadrature` | Settings of every fit |
+| `se` | Standard errors of the final fit (and of the Wald fits; `"oakes"` when `None`) |
+| `item_names` | Column names when `data` is an array |
+
+**Returns**: [`DIFScreenResult`](#difscreenresult).
+
+**Raises**: `PrecisionError`; `SpecificationError` for a single-group or multidimensional
+model, priors, equality constraints across items, unknown or overlapping items, an item without
+any of `params`, no anchor item with `"sequential_constrain"`, or invalid options;
+`IdentificationError` if a model of the procedure is not identified (e.g. every item flagged).
+
+**Warns**: `ConvergenceWarning` if a sequential strategy has not repeated its flags after
+`max_iter` rounds.
+
+### `DIFScreenResult`
+
+Frozen dataclass returned by `dif_screen()`.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `table` | DataFrame | One row per tested item: `item`, `x2`, `df`, `p`, `adj_p`, `flagged`, `converged`. `"all_others"`: the tests of the only round. Sequential strategies: each item tested against the final anchors (free versus constrained, every other item as in the final model; for flagged items this is mirt's final output). `adj_p` is adjusted over the table; `flagged` is the decision of the procedure |
+| `flagged_items`, `anchor_items` | list[str] | Flagged items; every other item (equal across groups in the final model) |
+| `history` | DataFrame | One row per round and tested item: `round`, `item`, `retested`, `x2`, `df`, `p`, `adj_p`, `flagged` (items not retested carry their latest statistic) |
+| `fit` | `FitResult` | The final model, with the flagged items' tested parameters free across groups |
+| `strategy`, `test` | str | The options used |
+| `n_rounds`, `converged` | int, bool | Rounds of tests; whether the flags repeated |
+
+### `dif_effect_sizes`
+
+```text
+dif_effect_sizes(result, *, data=None, group=None, focal=None, items=None, density="focal",
+                 item_names=None) -> DataFrame
+```
+
+Effect sizes of a fitted unidimensional multiple-group model (a `FitResult` or a
+`DIFScreenResult`, whose `fit` is used), each focal group against the reference group (the
+first). With $D_j(\theta)=E_{fj}(\theta)-E_{rj}(\theta)$ the difference of expected item scores and
+$w_q$ the fitted latent weights of the focal (or reference) group on the fitted grid:
+
+| Column | Definition | mirt |
+|---|---|---|
+| `signed_difference` | $\sum_qw_qD_j(\theta_q)$ (Chalmers, 2018) | `DRF(DIF = TRUE, best_fitting = TRUE)` `sDIF` |
+| `unsigned_difference` | $\sum_qw_q\lvert D_j(\theta_q)\rvert$ | `uDIF` |
+| `expected_score_standardized_difference` (with `data`) | Cohen's $d$ of $E_{fj}(\hat\theta_i)$ and $E_{rj}(\hat\theta_i)$ at the EAP scores of the focal respondents (Meade, 2010) | `empirical_ES()` `ESSD` |
+| `rmsd_reference`, `rmsd_focal` (with `data`) | $\big(\sum_qw_{gq}(\hat E_{gj}(\theta_q)-E_{gj}(\theta_q))^2\big)^{1/2}$ with the posterior expected item score $\hat E_{gj}$ of the group's data (expected-score RMSD; Köhler, Robitzsch & Hartig, 2020) | `RMSD_DIF(probfun = FALSE)` |
+
+The RMSD measures how well each group's parameters fit that group, so use it on items whose
+parameters are equal across groups (an invariant fit). After the item rows, one row per focal
+group with `level="test"` and `item="test"` uses the expected score summed over `items`: signed /
+unsigned DTF (`DRF(DIF = FALSE)`) and the expected test score standardized difference (`ETSSD`;
+RMSD is NaN).
+
+| Argument | Description |
+|---|---|
+| `result` | `FitResult` or `DIFScreenResult` |
+| `data`, `group` | Responses and group labels of the fit (adds the data-based columns) |
+| `focal` | Focal group(s) (default: every group but the first) |
+| `items` | Items (default: all); the test row sums over them |
+| `density` | `"focal"` (default) or `"reference"`: the latent density weighting the differences |
+| `item_names` | Column names when `data` is an array |
+
+**Returns**: `DataFrame` with `group` (focal group), `level` (`"item"` / `"test"`), `item`,
+`signed_difference`, `unsigned_difference` and, with `data`,
+`expected_score_standardized_difference`, `rmsd_reference`, `rmsd_focal`.
+
+**Raises**: `PrecisionError`; `SpecificationError` for a single-group, multidimensional or (with
+`data`) weighted fit, unknown groups or items, the reference group as focal, or `data` without
+`group`.
 
 ## Scale linking
 
