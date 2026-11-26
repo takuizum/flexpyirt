@@ -705,7 +705,7 @@ for 3PL/4PL asymptotes `g` and `u`.
 ### `LogitNormalPrior`
 
 ```text
-LogitNormalPrior(mean_logit, sd_logit)
+LogitNormalPrior(mean_logit, sd_logit, *, mode_scale="natural")
 ```
 
 Logit-normal prior on $(0, 1)$ ($\operatorname{logit} X \sim N(\mu, s^2)$; Aitchison & Shen, 1980):
@@ -713,9 +713,14 @@ $\log\pi(x) = -\log x - \log(1 - x) - \log s - \tfrac{1}{2}\log(2\pi) - \frac{(\
 ($-\infty$ outside $(0, 1)$). The $-\log x - \log(1 - x)$ term belongs to the density of $X$
 itself. Requires finite `mean_logit` and positive finite `sd_logit`. Commonly used for 3PL/4PL
 asymptotes: `LogitNormalPrior(-1.0986, 0.5)` centers `g` on $1/4$. flexMIRT's
-`Guessing : Normal(mean, sd)` is the same distribution but maximizes the posterior over
-$\operatorname{logit} g$ (without that term), so its estimates differ slightly; mirt has no
-equivalent prior ([guide section 11](guide.md#11-priors-and-map-estimation)).
+`Guessing : Normal(mean, sd)` and mirt's `PRIOR = (..., g, norm, mean, sd)` are the same
+distribution but maximize the posterior over $\operatorname{logit} g$ (without that term), so
+their estimates differ slightly ([guide section 11](guide.md#11-priors-and-map-estimation)).
+
+| Argument | Description |
+|---|---|
+| `mean_logit`, `sd_logit` | Mean and standard deviation of $\operatorname{logit} X$ |
+| `mode_scale` | `"natural"` (default): the density above, natural-scale posterior mode. `"logit"`: the term $\log\phi(\operatorname{logit} x; \mu, s)$ without the Jacobian, giving flexMIRT's and mirt's logit-metric posterior mode, log posterior and (delta-method) SEs |
 
 ---
 

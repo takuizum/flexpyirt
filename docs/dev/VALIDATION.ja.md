@@ -75,7 +75,7 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
-| V45 | M-step の非拘束尺度（任意、`BAEM(m_step_scale="unconstrained")`）を V3・V4・V5・V7・V9・V11・V14 のケースで照合。`LogitNormalPrior`（mirt に同等なものがないため独立な数値検証） | 各ケースの既存の参照値。SciPy（`stats.norm`、`integrate.quad`）と式から書いた停留条件 | #15 |
+| V45 | M-step の非拘束尺度（任意、`BAEM(m_step_scale="unconstrained")`）を V3・V4・V5・V7・V9・V11・V14 のケースで照合。`LogitNormalPrior`（`"natural"` は mirt に同等なものがないため独立な数値検証。`mode_scale="logit"` は mirt の `g` への `norm`） | 各ケースの既存の参照値。SciPy（`stats.norm`、`integrate.quad`）と式から書いた停留条件。`v45_3pl_logit_norm_map.json`（mirt）とテスト内で計算した flexMIRT の logit 尺度のモード | #15 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -953,8 +953,8 @@
      SQUAREM あり・なし）、焦点群の分散が自由な 2 群モデル、境界のケース（$g=0$ で生成した項目: 両尺度ともその項目で
      $g<10^{-4}$ に終わって `HeywoodWarning` を出し、対数尤度は 1e-5 で一致）を加える。
   2. *`LogitNormalPrior`*: mirt には自然尺度でこの密度を持つ事前分布がない（`g` への `norm` は mirt 内部の
-     $\operatorname{logit}g$ に Jacobian なしで作用し、flexMIRT の `Guessing : Normal` と同じ）ので、mirt の参照値は
-     ない。代わりに `tests/test_logitnormal_prior.py` で次を確かめる: `log_pdf` が `scipy.stats.norm` による
+     $\operatorname{logit}g$ に Jacobian なしで作用し、flexMIRT の `Guessing : Normal` と同じ）ので、既定の
+     `mode_scale="natural"` には mirt の参照値はない。代わりに `tests/test_logitnormal_prior.py` で次を確かめる: `log_pdf` が `scipy.stats.norm` による
      $\log\phi(\operatorname{logit}x;\mu,s)-\log x-\log(1-x)$ と 4 組の $(\mu,s)$ で一致（相対 1e-13）。
      `scipy.integrate.quad` で密度の積分が 1（1e-10）、$\operatorname{logit}X$ の平均が $\mu$（1e-9）、分散が $s^2$
      （相対 1e-9）。Core の `eval_log_prior` が `log_pdf` と一致し、使わないスロットの勾配は 0 で有限。シミュレーション
@@ -965,6 +965,24 @@
      尤度の勾配は mirt で照合済みの周辺対数尤度のもの。同じテストで flexMIRT の logit 尺度の目的関数（Jacobian を
      除いた核）を Newton 法で最大化すると、どの $g$ も `LogitNormalPrior` のときより $1/2$ に近く、差は最大 0.037
      で、2 つの推定値が違うことを確かめる（DESIGN §15.48）。
+  3. *`LogitNormalPrior(..., mode_scale="logit")`（logit 尺度のモード、DESIGN §15.48）*: ここでは mirt が参照値。
+     mirt の `PRIOR = (..., g, norm, μ, s)` は内部の $\operatorname{logit}g$ に Jacobian なしでかかる正規事前分布。
+     `validation/r/m7_logit_norm_prior_reference.R` はシミュレーションした 3PL（$J=8$、$N=1200$、$g$ に
+     `norm(-1.3863, 0.6)`、$d$ に `norm(0, 3)`。NR、`TOL = 1e-10`、Oakes の SE）を推定し、R の中で mirt の
+     `logPrior` が $\sum\log\phi(\operatorname{logit}g)+\sum\log\phi(d)$ に一致すること（1e-9）と、mirt の推定値が
+     スクリプト内に書いた勾配で logit 尺度の目的関数の停留点であること（勾配の最大絶対値 2e-9）を確かめる。mirt は
+     $\operatorname{logit}g$ とその SE を出力するので、参照値には $g$ とデルタ法の
+     $\mathrm{SE}(g)=g(1-g)\,\mathrm{SE}(\operatorname{logit}g)$ を保存する。flexpyirt は両方の M-step 尺度で、mirt の
+     対数尤度と対数事後（テストは相対 1e-9。実測は絶対 4e-10 と 5e-12）、$a,d,g$（テストは 1e-6。実測 2e-8）、
+     $a,d,g$ の Oakes の SE（テストは相対 1e-5。実測 3e-8）に一致する。mirt とは独立に、2 の V45 のデータで、両方の
+     M-step 尺度の MAP が、テスト内に書いた勾配で $\ell+\sum\log\phi(\operatorname{logit}g;\mu,s)+\sum\log\pi(d)$ の
+     停留点であり（最大で自然尺度 2e-8、非拘束尺度 2e-9。テストは 1e-6）、厳密な局所最大であること、そこで
+     $\lambda=\operatorname{logit}g$ についての Newton 法で求めた flexMIRT のモードに一致し（5e-9。テストは 1e-7）、
+     対数事後も一致すること（1e-12。テストは 1e-8）、Hessian による SE がその独立な目的関数の logit 尺度の Hessian の
+     逆行列からのデルタ法の SE に一致すること（相対 7e-9。テストは 1e-6）、`"natural"` のモードとは $g$ で最大 0.037
+     違うことを確かめる。単体テストでは、`log_pdf` を $\operatorname{logit}x$ の `scipy.stats.norm.logpdf` と照合し
+     （1e-13）、Core のコード `PRIOR_LOGITNORMAL_LOGIT = 5` とその勾配、`mode_scale` の検証、JSON のキー（往復と、
+     ないときは `"natural"`）を確かめる。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。
 - **SE の内部整合**: Oakes の SE と、収束点での周辺対数尤度の直接 `jax.hessian` による SE が一致すること（小規模ケース）。
 - **不変性**: 項目の並べ替え、群ラベルの付け替え、パターン圧縮の有無で結果が変わらないこと。

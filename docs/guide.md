@@ -812,9 +812,14 @@ Priors are evaluated directly on the **natural parameter scale** without a Jacob
 when $\operatorname{logit} g$ is normal (Aitchison & Shen, 1980), so its formula contains
 $-\log g - \log(1 - g)$: that term is part of the density of $g$, not a change of scale. For
 example, `LogitNormalPrior(-1.0986, 0.5)` centers $g$ on $1/4$, the chance rate of four-option
-items. flexMIRT's `Guessing : Normal(mean, sd)` describes the same distribution of $g$ but
-maximizes the posterior over $\operatorname{logit} g$, which leaves that term out, so its estimates of
-$g$ typically lie somewhat closer to $1/2$ than flexpyirt's. In a multiple-group model, `.prior()`
+items. flexMIRT's `Guessing : Normal(mean, sd)` (and R mirt's `PRIOR = (..., g, norm, mean, sd)`)
+describes the same distribution of $g$ but maximizes the posterior over $\operatorname{logit} g$,
+which leaves that term out, so its estimates of $g$ typically lie somewhat closer to $1/2$. To
+reproduce those estimates, pass `mode_scale="logit"`:
+`LogitNormalPrior(-1.0986, 0.5, mode_scale="logit")` evaluates
+$\log\phi(\operatorname{logit} g; \mu, s)$ without the Jacobian, so the MAP estimate, the
+log posterior and the standard errors are those of the logit-metric objective (the SE of $g$
+is the delta-method SE $g(1-g)\,\mathrm{SE}(\operatorname{logit} g)$). In a multiple-group model, `.prior()`
 applies to every group, and a parameter shared across groups (same `free_id`) is counted **once**.
 Fixed parameters ignore their prior. Priors on latent-distribution parameters (`"mean"`, `"var"`)
 are not supported (`SpecificationError`).

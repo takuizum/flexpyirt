@@ -636,15 +636,20 @@ logit ヤコビアンなし）。正の有限な `a`, `b` が必要。3PL / 4PL 
 ### `LogitNormalPrior`
 
 ```text
-LogitNormalPrior(mean_logit, sd_logit)
+LogitNormalPrior(mean_logit, sd_logit, *, mode_scale="natural")
 ```
 
 $(0, 1)$ 上のロジット正規事前分布（$\operatorname{logit} X \sim N(\mu, s^2)$; Aitchison & Shen, 1980）:
 $\log\pi(x) = -\log x - \log(1 - x) - \log s - \tfrac{1}{2}\log(2\pi) - \frac{(\operatorname{logit} x - \mu)^2}{2s^2}$
 （$(0, 1)$ の外では $-\infty$）。$-\log x - \log(1 - x)$ の項は $X$ 自体の密度の一部。有限の `mean_logit` と正の有限な
 `sd_logit` が必要。3PL / 4PL の漸近線によく使う: `LogitNormalPrior(-1.0986, 0.5)` は `g` の中心を $1/4$ に置く。
-flexMIRT の `Guessing : Normal(mean, sd)` は同じ分布だが事後分布を $\operatorname{logit} g$ について（この項なしで）
-最大化するので、推定値は少し違う。mirt には同等の事前分布はない（[ガイド 11 節](guide.ja.md#11-事前分布と-map-推定)）。
+flexMIRT の `Guessing : Normal(mean, sd)` と mirt の `PRIOR = (..., g, norm, mean, sd)` は同じ分布だが、事後分布を
+$\operatorname{logit} g$ について（この項なしで）最大化するので、推定値は少し違う（[ガイド 11 節](guide.ja.md#11-事前分布と-map-推定)）。
+
+| 引数 | 説明 |
+|---|---|
+| `mean_logit`, `sd_logit` | $\operatorname{logit} X$ の平均と標準偏差 |
+| `mode_scale` | `"natural"`（既定）: 上の密度で、自然尺度の事後モード。`"logit"`: ヤコビアンなしの項 $\log\phi(\operatorname{logit} x; \mu, s)$ で、flexMIRT と mirt の logit 尺度の事後モード・対数事後・（デルタ法の）SE を与える |
 
 ---
 
