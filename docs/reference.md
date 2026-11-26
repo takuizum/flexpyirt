@@ -185,7 +185,7 @@ or a non-positive `min_cell`.
 #### `FitResult.m2`
 
 ```text
-m2(data, *, item_names=None, ci=0.90) -> DataFrame
+m2(data, *, group=None, item_names=None, ci=0.90) -> DataFrame
 ```
 
 Limited-information goodness-of-fit statistic $M_2$ / $M_2^*$ of Maydeu-Olivares & Joe (2005, 2006)
@@ -195,25 +195,33 @@ $M_2$ for dichotomous items). The Jacobian $\Delta_2 = \partial\pi_2/\partial\et
 every free item and latent parameter (shared parameters once) via JAX autodiff. Confirmatory
 multidimensional models (`with_factors()`) are integrated over the fitted product grid, and
 $\Delta_2$ has a column for every free factor correlation (mirt's `M2()` omits the latent columns,
-so its value is slightly larger).
+so its value is slightly larger). For a multiple-group model the margins of the $G$ groups are
+stacked (block-diagonal covariance, the rows of group $g$ in $\Delta_2$ scaled by
+$\sqrt{N_g/N}$), so $df = G(J+\binom J2) - k$. With missing responses each margin is the mean over
+the respondents who answered its item(s), and the covariance is the exact one of these
+pairwise-available means when responses are missing completely at random. MAP fits are evaluated
+at the MAP estimates with every free parameter counted in $k$, as in mirt
+([guide section 5](guide.md#limited-information-fit-m2)).
 
 | Argument | Description |
 |---|---|
-| `data` | Complete responses on the fitted items (typically the fitting data) |
+| `data` | Responses on the fitted items (typically the fitting data); missing as NaN |
+| `group` | Group labels, one per row (required for a multiple-group model) |
 | `item_names` | Column names when `data` is an array |
 | `ci` | Confidence level strictly in `(0, 1)` for the RMSEA confidence interval (default `0.90`) |
 
 **Returns**: One-row `DataFrame` with columns `m2`, `df` ($J + \binom{J}{2} - k$), `p`, `rmsea`,
-`rmsea_<lo>`, `rmsea_<hi>` (named from `ci`, e.g. `rmsea_5`, `rmsea_95` for `0.90`), `srmsr`,
-`tli`, `cfi`. When `df <= 0` or $\Delta_2$ is rank-deficient (the model is not locally identified
+`rmsea_<lo>`, `rmsea_<hi>` (named from `ci`, e.g. `rmsea_5`, `rmsea_95` for `0.90`), `srmsr`
+(one `srmsr_<group>` column per group for a multiple-group model), `tli`, `cfi`. When `df <= 0` or $\Delta_2$ is rank-deficient (the model is not locally identified
 from first- and second-order moments), a `FlexpyirtWarning` is emitted and `m2`, `p`, RMSEA, its
 CI, `tli` and `cfi` are `NaN` (`df` and `srmsr` remain finite). Polytomous models return `NaN` for
 `tli` and `cfi` (the independence null model is dichotomous only); if the dichotomous null $M_2$ is not greater than the fitted $M_2$,
 a `FlexpyirtWarning` is emitted and `tli`/`cfi` are `NaN`.
 
 **Raises**: `PrecisionError` if JAX 64-bit is disabled; `SpecificationError` for bifactor, two-tier,
-multiple-group, `EmpiricalHistogram`, `NormalMixture`, or MAP (with priors) models, missing responses, invalid
-`ci`, or fewer than 2 items or respondents.
+`EmpiricalHistogram` or `NormalMixture` models, a multiple-group `DavidianCurve` model, weighted
+fits, invalid `ci` or group labels, fewer than 2 items or than 2 respondents in a group, or an
+item or pair of items that nobody answered (in some group).
 
 #### `FitResult.local_dependence`
 
@@ -1234,7 +1242,7 @@ Runs several diagnostics and reports them side by side, with two separate consen
   `model_parallel_analysis()`
   ($p \ge$ `alpha`), the largest Q3\* $<$ `q3_star_threshold` (0.2 is a common rule; critical
   values depend on the test and sample) and the RMSEA of `FitResult.m2()` $\le$ `rmsea_threshold`
-  (close fit; unavailable with missing data, then reported as such). Consensus = number of
+  (close fit; unavailable for a multiple-group `fit`, then reported as such). Consensus = number of
   available methods supporting it. Methods are not weighted.
 
 ### `DimensionalityResult`

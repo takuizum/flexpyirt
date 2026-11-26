@@ -75,6 +75,7 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
+| V42 | 多母集団・欠測データ・MAP 推定の $M_2^*$（大きさの異なる 2 群とアンカー項目の 2PL、欠測なしと 15% MCAR。2 群の GRM $K=3$。2 群の 2 因子 2PL。20% MCAR の単一群 2PL。2PL の MAP 推定） | mirt の推定値での `multipleGroup()` / `mirt()` の `M2(m, quadpts =, theta_lim =)`。加えて DESIGN §16.20 を R で独立に計算した値と、mirt の流儀で書いた R コード | M6 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -328,9 +329,41 @@
   - **数値計算上の注意**: GRM では、項目得点の周辺モーメントのもとでの $\Delta_2$ は条件が悪い。項目の微分を中心差分
     （刻み $10^{-6}$、誤差 $\sim10^{-10}$）で求めると $M_2$ が相対 `4e-6` ずれるので、R の参照値では項目の列に mirt の
     解析的な `dP`（2PL と graded では正しい）を使い、flexpyirt は自動微分を使う。
-  - **照合していない範囲**: 多母集団の多次元モデル（V21 の構成。`SpecificationError` のまま。双因子・two-tier も
-    同じ）、多次元モデルでの 3PL / GPCM / 名義項目（項目カーネルは V18 / V15 で照合済みで、単体テストは 2PL + GRM の
+  - **照合していない範囲**: 多母集団の多次元モデルの S-X2（V21 の構成。`SpecificationError` のまま。双因子・two-tier
+    では両方の統計量が同じ。多母集団の $M_2$ は V42）、多次元モデルでの 3PL / GPCM / 名義項目（項目カーネルは V18 / V15 で照合済みで、単体テストは 2PL + GRM の
     混合モデルを扱うが、mirt との比較はない）、mirt の既定以外の格子。
+- **多母集団・欠測データ・MAP 推定の $M_2^*$（V42、M6、#76。DESIGN §16.20）**: mirt 1.46.1 で推定した 6 つの
+  シミュレーションケース（`multipleGroup()` / `mirt()`、`TOL = 1e-10`、$[-6,6]$ の 61 点、2 因子は次元ごとに 31 点。
+  `validation/r/m6_m2_groups_missing_map_reference.R` → `tests/reference/v42_m2_groups_missing_map.json`）:
+  `twogroup_2pl`（2PL、$J=6$、700 / 300、項目 1–3 を群間で等値、焦点群の平均と分散は自由）、`twogroup_2pl_missing`
+  （同じ設計で 15% MCAR）、`twogroup_grm`（GRM $K=3$、$J=5$、500 / 500、全項目等値）、`twogroup_2d`（2 因子 2PL、
+  $J=8$、600 / 400、全項目等値、焦点群の平均・分散・相関は自由）、`missing_2pl`（2PL、$J=7$、$N=800$、20% MCAR）、
+  `map_2pl`（2PL、$J=6$、$N=250$、$a$ に `lnorm(0, 0.5)`、$d$ に `norm(0, 2)`）。mirt の `M2()` を生の参照値とする。
+  R スクリプトは DESIGN §16.20 の式を R で独立に書いた `exact`（すべての自由パラメタについての中心差分の $\Delta$ で、
+  群の行を $\sqrt{N_g/N}$ 倍、群ごとの mirt の `buildXi2els` を $N_gN_{ab}/(N_aN_b)$ で再尺度化、多母集団の独立モデル）も
+  計算し、同じコードを mirt の流儀にしたものが mirt の生の $M_2$ を再現することを R の中で確かめる。テスト:
+  `tests/test_mirt_m6_m2_groups.py`（slow 層）と `tests/test_m5_m2.py` の単体テスト。
+  - **mirt の推定値で**、flexpyirt の既定の値は `exact` と、2 値のケースすべてで相対 `5.5e-10`、GRM で `3.8e-7`
+    （V39 と同じく R の参照値の中心差分の誤差）以内で一致し、$df$ は同一、TLI / CFI は `1.1e-10`、群ごとの SRMSR は mirt の値と
+    `7.8e-15` 以内。`_mirt_convention=True` と `_latent_in_delta=False` では mirt の生の $M_2$ を `1.8e-14`、TLI / CFI を
+    `9.4e-8`（mirt は帰無モデルを EM で推定する）以内で再現する。
+  - **flexpyirt で推定し直すと**、対数尤度（MAP では対数事後）は mirt と `6.1e-10`、$M_2$ は `exact` と `3.0e-5`
+    以内（推定値の一致は約 `1e-5`）。
+  - **mirt と厳密な統計量の差**: mirt の値は `twogroup_2pl` と `twogroup_2d` で `0.45%`・`0.37%`（群の行の重みなし、
+    潜在分布の列なし）、`twogroup_grm` で `2.6%`（潜在分布の列）、`missing_2pl` と `twogroup_2pl_missing` で `5.8%`・
+    `18.3%`（`N.ratio` の重み付け）大きく、`map_2pl` では同一（mirt も flexpyirt も事前分布を使わない）。
+  - **シミュレーションによる較正**（mirt との比較ではない。作業用スクリプトで実行し、ここと slow 層の単体テスト
+    `test_m2_with_mcar_missing_follows_chi2_at_true_parameters` に要約）: 2PL、$J=6$、$N=600$、真値で 1000 反復
+    （$df=21$）。全項目 30% の MCAR では厳密な統計量の平均 `20.86 ± 0.21`、分散 `42.9`（42）、.05 での棄却率 5.3%
+    （KS $p=0.84$）、mirt の重み付けでは平均 `19.12`（KS $p=10^{-12}$）。項目ごとに異なる MCAR 率（0, 0, 10, 40, 60, 70%）
+    では `20.86 ± 0.21`、5.6%（KS $p=0.12$）に対し、mirt は `19.90`、分散 `59.6`（KS $p=10^{-14}$）。推定したパラメタでは
+    （$df=9$、とくに断らなければ 400 反復）: 欠測なし `9.22 ± 0.22`
+    （棄却率 6.0%、KS $p=0.63$）、30% MCAR `9.04 ± 0.20`、4.8%（KS $p=0.61$）で mirt の重み付けは `8.94`、異なる率では
+    `9.19 ± 0.22`、6.0%（KS $p=0.64$）に対し mirt は `7.17`、1.5%（KS $p=5\times10^{-17}$）、異なる率で $N=2000$（300 反復）
+    では `8.92 ± 0.24`、4.7%（KS $p=0.82$）に対し mirt は `6.81` で棄却なし（KS $p=4\times10^{-14}$）。全項目等値で焦点群の平均・分散が自由な 900 / 150 の 2 群（400 反復、$df=28$）: 平均
+    `28.17`、棄却率 5.5%（KS $p=0.29$）。mirt の流儀では `26.72`（KS $p=0.004$）。
+  - **照合していない範囲**: 多母集団の `DavidianCurve`（エラー）、多値の帰無モデル（TLI / CFI は `NaN` のまま。§16.3）、
+    MCAR でない MAR（統計量に参照分布がない。文書に記載）。
 - **確認的 2–3 次元 MIRT（V14, M4）**: 4 つのシミュレーションケースを `tests/test_mirt_m4_mirt.py` で照合した
   （通常 EM・SQUAREM の双方で通過。参照値生成: `validation/r/m4_mirt_reference.R` →
   `tests/reference/v14_mirt2d.json`、`accelerate = "none"`, `TOL = 1e-10`, `SE.type = "Oakes"`、

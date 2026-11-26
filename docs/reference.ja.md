@@ -165,7 +165,7 @@ Lord–Wingersky 漸化式と、推定時の求積格子上の推定済み潜在
 #### `FitResult.m2`
 
 ```text
-m2(data, *, item_names=None, ci=0.90) -> DataFrame
+m2(data, *, group=None, item_names=None, ci=0.90) -> DataFrame
 ```
 
 Maydeu-Olivares & Joe (2005, 2006) による限定情報の適合度統計量 $M_2$ / $M_2^*$
@@ -173,23 +173,29 @@ Maydeu-Olivares & Joe (2005, 2006) による限定情報の適合度統計量 $M
 （mirt の既定 `M2(type = "M2*")` に対応。2 値項目では厳密に $M_2$）。ヤコビ行列
 $\Delta_2 = \partial\pi_2/\partial\eta^\top$ は JAX 自動微分により、すべての自由な項目・潜在分布パラメタを含む
 （共有パラメタは 1 回）。確認的多次元モデル（`with_factors()`）では推定時の直積格子の上で積分し、$\Delta_2$ は自由な
-因子間相関ごとに 1 列を持つ（mirt の `M2()` は潜在分布の列を入れないので、値がわずかに大きい）。
+因子間相関ごとに 1 列を持つ（mirt の `M2()` は潜在分布の列を入れないので、値がわずかに大きい）。多母集団モデルでは
+$G$ 群の周辺を並べ（共分散はブロック対角、$\Delta_2$ の群 $g$ の行を $\sqrt{N_g/N}$ 倍する）、$df = G(J+\binom J2) - k$。
+欠測があるときは各周辺をその項目に答えた回答者の平均とし、共分散は欠測が完全にランダムなときのこれらの平均の厳密な共分散を
+使う。MAP 推定は MAP 推定値で計算し、自由パラメタはすべて $k$ に数える（mirt と同じ。
+[ガイド 5 節](guide.ja.md#限定情報の適合度m2)）。
 
 | 引数 | 説明 |
 |---|---|
-| `data` | 推定した項目への欠測のない反応（通常は推定に使ったデータ） |
+| `data` | 推定した項目への反応（通常は推定に使ったデータ）。欠測は NaN |
+| `group` | 行ごとの群ラベル（多母集団モデルでは必須） |
 | `item_names` | `data` が配列のときの列名 |
 | `ci` | RMSEA 信頼区間の信頼水準（`(0, 1)` の開区間、既定 `0.90`） |
 
 **戻り値**: 1 行の `DataFrame`。列は `m2`, `df`（$J + \binom{J}{2} - k$）, `p`, `rmsea`,
-`rmsea_<lo>`, `rmsea_<hi>`（`ci` に従う。例: `0.90` で `rmsea_5`, `rmsea_95`）, `srmsr`,
-`tli`, `cfi`。`df <= 0` または $\Delta_2$ がランク落ちしているとき（1 次・2 次モーメントから局所識別できないとき）は
+`rmsea_<lo>`, `rmsea_<hi>`（`ci` に従う。例: `0.90` で `rmsea_5`, `rmsea_95`）, `srmsr`
+（多母集団モデルでは群ごとの `srmsr_<群>` 列）, `tli`, `cfi`。`df <= 0` または $\Delta_2$ がランク落ちしているとき（1 次・2 次モーメントから局所識別できないとき）は
 `FlexpyirtWarning` を出し、`m2`・`p`・RMSEA・信頼区間・`tli`・`cfi` を `NaN` とする（`df` と `srmsr` は有限のまま）。
 多値モデルでは `tli` と `cfi` を `NaN` とする（独立帰無モデルは 2 値項目でのみ定義されるため）。2 値モデルで帰無モデルの $M_2$ が当てはめモデルの $M_2$
 以下のときは `FlexpyirtWarning` を出し `tli`・`cfi` を `NaN` とする。
 
-**例外**: JAX 64 ビットが無効なとき `PrecisionError`。双因子・two-tier・多母集団・`EmpiricalHistogram`・`NormalMixture`・事前分布つきの
-MAP モデル、欠測を含むデータ、不正な `ci`、項目数または回答者数が 2 未満のとき `SpecificationError`。
+**例外**: JAX 64 ビットが無効なとき `PrecisionError`。双因子・two-tier・`EmpiricalHistogram`・`NormalMixture` のモデル、
+多母集団の `DavidianCurve` モデル、ウェイト付きの推定、不正な `ci` や群ラベル、項目数が 2 未満または群の回答者数が 2 未満、
+（ある群で）誰も答えていない項目または項目のペアがあるとき `SpecificationError`。
 
 #### `FitResult.local_dependence`
 
@@ -1120,7 +1126,7 @@ dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=
 - **本質的一次元性は認められるか**: 欠測のないデータで `exploratory_detect()`（選んだ分割の検証用の半分での
   DETECT $<$ `detect_threshold`）、欠測のない 2 値データで `dimtest()`（$p \ge$ `alpha`）、`fit` を与えればさらに `model_parallel_analysis()`（$p \ge$ `alpha`）、最大の
   Q3\* $<$ `q3_star_threshold`（0.2 はよく使われる目安で、臨界値はテストと標本による）、`FitResult.m2()` の
-  RMSEA $\le$ `rmsea_threshold`（近似的な適合。欠測があると使えず、その旨を示す）。合意は支持する手法の数（使えた
+  RMSEA $\le$ `rmsea_threshold`（近似的な適合。多母集団の `fit` では使えず、その旨を示す）。合意は支持する手法の数（使えた
   手法のうち）。手法に重みは付けない。
 
 ### `DimensionalityResult`

@@ -90,7 +90,10 @@ A milestone is complete when all of its acceptance criteria are met. Milestones 
 ## M6 Lifting the single-group / unidimensional restrictions
 Each item is accepted when its mirt (or independent) comparison passes; the issue lists the reference.
 - [ ] Davidian curve and normal-mixture latent distributions in multiple-group models (#75).
-- [ ] M2 for multiple groups, missing data and MAP fits (#76).
+- [x] M2 for multiple groups, missing data and MAP fits (#76; DESIGN §16.20, validated in V42):
+  stacked statistic over groups with the group rows of $\Delta$ scaled by $\sqrt{N_g/N}$,
+  pairwise-available margins with their exact covariance under MCAR, and MAP fits evaluated at the
+  MAP estimates (as mirt). Multiple-group `DavidianCurve`, EH and mixtures still raise.
 - [x] M2 and S-X2 for confirmatory multidimensional models (#77): `FitResult.m2()` and
   `FitResult.item_fit()` for single-group `with_factors()` models (2–3 factors, product grid;
   validated in V39). Bifactor / two-tier and multiple-group multidimensional models still raise.

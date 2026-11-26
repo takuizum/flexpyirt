@@ -332,6 +332,11 @@ covariance and $\Delta_2$ their derivatives with respect to the parameters,
 $$M_2=N\,\mathbf e_2^\top C_2\,\mathbf e_2,\qquad C_2=\Xi_2^{-1}-\Xi_2^{-1}\Delta_2(\Delta_2^\top\Xi_2^{-1}\Delta_2)^{-1}\Delta_2^\top\Xi_2^{-1},$$
 which is approximately $\chi^2$ with (number of margins − number of parameters) degrees of freedom.
 The RMSEA derived from it measures approximate fit on a sample-size-free scale.
+The reference distribution only needs the parameter estimates to be consistent, so $M_2$ applies
+unchanged to MAP estimates. With several groups the margins of all groups are tested together.
+With missing responses each margin is computed from the respondents who answered its items, and
+$\Xi_2$ is adjusted for how many respondents answered each combination of items; this is valid
+when responses are missing completely at random.
 
 Guide: [section 5](guide.md#5-reading-the-results), [section 9](guide.md#9-multiple-groups).
 
