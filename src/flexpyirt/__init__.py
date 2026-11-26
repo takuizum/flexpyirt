@@ -66,9 +66,14 @@ from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, Normal, NormalMi
 from flexpyirt.linking import LinkResult, link
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
-from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior
+from flexpyirt.priors import BetaPrior, LogitNormalPrior, LogNormalPrior, NormalPrior
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
+from flexpyirt.screening import (
+    CommonItemScreeningResult,
+    screen_common_items,
+    stack_screening_tables,
+)
 from flexpyirt.sumscore import summed_score_distribution
 
 try:
@@ -83,6 +88,7 @@ __all__ = [
     "PCM",
     "AlphaResult",
     "BetaPrior",
+    "CommonItemScreeningResult",
     "ComparisonDataResult",
     "DavidianCurve",
     "DetectResult",
@@ -99,6 +105,7 @@ __all__ = [
     "LinkResult",
     "LocalDependenceResult",
     "LogNormalPrior",
+    "LogitNormalPrior",
     "MAPResult",
     "Model",
     "ModelParallelAnalysisResult",
@@ -140,6 +147,8 @@ __all__ = [
     "polychoric",
     "reliability",
     "score_responses",
+    "screen_common_items",
+    "stack_screening_tables",
     "summed_score_distribution",
     "summed_score_table",
     "test_information",

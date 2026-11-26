@@ -58,6 +58,7 @@ from flexpyirt.model import LATENT_ITEM
 from flexpyirt.priors import (
     PRIOR_TYPES,
     BetaPrior,
+    LogitNormalPrior,
     LogNormalPrior,
     NormalPrior,
     Prior,
@@ -386,6 +387,8 @@ def _prior_center(pri: Prior) -> float | None:
             return None
     if isinstance(pri, BetaPrior):
         return pri.a / (pri.a + pri.b)
+    if isinstance(pri, LogitNormalPrior):
+        return 1.0 / (1.0 + math.exp(-pri.mean_logit)) if pri.mean_logit > -700 else None
     return None
 
 
@@ -897,7 +900,7 @@ def validate_table_constraints(
             if not isinstance(pri, PRIOR_TYPES):
                 raise SpecificationError(
                     f"Invalid prior {pri!r} at {where}; "
-                    "use NormalPrior, LogNormalPrior, BetaPrior or None."
+                    "use NormalPrior, LogNormalPrior, BetaPrior, LogitNormalPrior or None."
                 )
             if free[i]:
                 p_lo, p_hi = pri.support
