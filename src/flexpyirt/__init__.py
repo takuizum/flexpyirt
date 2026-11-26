@@ -1,7 +1,7 @@
 """flexpyirt: Bock–Aitkin EM estimation for item response theory models, built on JAX.
 
-The model-free dimensionality tools (``parallel_analysis``, ``efa``, ``detect``, ...) are defined
-in flexpyctt and re-exported here; ``polychoric`` is flexpyirt's JAX implementation
+The model-free tools (``parallel_analysis``, ``efa``, ``item_analysis``, ...) are defined in
+flexpyctt and re-exported here; ``polychoric`` is flexpyirt's JAX implementation
 (DESIGN.md §16.18).
 """
 
@@ -9,6 +9,15 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
+from flexpyctt.item_analysis import (
+    AlphaResult,
+    OmegaResult,
+    coefficient_alpha,
+    coefficient_omega,
+    distractor_analysis,
+    item_analysis,
+    score_responses,
+)
 from flexpyirt import errors
 from flexpyirt.correlation import PolychoricResult, polychoric
 from flexpyirt.dimensionality import (
@@ -65,6 +74,7 @@ __all__ = [
     "GPCM",
     "GRM",
     "PCM",
+    "AlphaResult",
     "BetaPrior",
     "ComparisonDataResult",
     "DavidianCurve",
@@ -89,6 +99,7 @@ __all__ = [
     "Normal",
     "NormalMixture",
     "NormalPrior",
+    "OmegaResult",
     "ParallelAnalysisResult",
     "PolychoricResult",
     "Quadrature",
@@ -96,10 +107,13 @@ __all__ = [
     "ThreePL",
     "TwoPL",
     "__version__",
+    "coefficient_alpha",
+    "coefficient_omega",
     "comparison_data",
     "detect",
     "dimensionality",
     "dimtest",
+    "distractor_analysis",
     "efa",
     "empirical_kaiser",
     "errors",
@@ -107,12 +121,14 @@ __all__ = [
     "exploratory_detect",
     "fit",
     "hull",
+    "item_analysis",
     "item_information",
     "link",
     "model_parallel_analysis",
     "parallel_analysis",
     "polychoric",
     "reliability",
+    "score_responses",
     "summed_score_distribution",
     "summed_score_table",
     "test_information",
