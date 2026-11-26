@@ -1223,3 +1223,10 @@ English | [日本語](VALIDATION.ja.md)
   marginal log-likelihood at the converged point (small cases).
 - **Invariance**: results do not change with item reordering, group relabelling, or with or
   without pattern compression.
+- **User-defined item models (#86, DESIGN §20)**: `tests/test_custom_items.py` re-implements the
+  2PL and the GRM against the public `ItemModel` / `ItemKernel` protocols only. In one mixed model
+  they reproduce the built-in fit to $10^{-12}$ (log-likelihood, iteration count, estimates, Oakes
+  SEs, display thresholds and SEs, EAP/MAP/ML/WLE scores, S-X2, M2, item information); a
+  two-factor model agrees to $10^{-5}$ (different starting values). This checks the extension
+  machinery, not a new model: an example model that is not built in (e.g. GGUM) needs its own
+  mirt comparison (V44 is reserved for GGUM) before it is presented as validated.

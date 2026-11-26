@@ -264,14 +264,18 @@ class ItemKernel(Protocol):
     n_categories: int
     slope_params: tuple[str, ...]
     intercept_params: tuple[str, ...]
-    irt_names: tuple[str, ...]  # 表示用閾値（D > 1 では空）
-    irt_dependency_indices: tuple[tuple[int, ...], ...]
 
     def with_factors(self, n_factors: int) -> ItemKernel: ...
-    def irt_thresholds(self, params: Array) -> Array: ...
     def log_prob(self, theta: Array, params: Array) -> Array: ...  # theta (Q, D) -> (Q, K)
+
+    # 任意: 表示用閾値（D > 1 では空）
+    irt_names: tuple[str, ...]
+    irt_dependency_indices: tuple[tuple[int, ...], ...]
+
+    def irt_thresholds(self, params: Array) -> Array: ...
 ```
 新しい項目カーネルは `(Q, D)` 節点に対する `log_prob` を書くだけで、$D \in \{1, 2, 3\}$ の E-step・M-step（自動微分 Newton）・Oakes/Hessian SE・EAP スコアリングがすべて動くことを設計目標にする。
+このプロトコルは `ItemModel` とともに公開で、ユーザー定義の項目モデルの契約は §20 で定める。
 
 ## 7. 対応する項目モデル（段階的）
 | モデル | 内部パラメタ | マイルストーン |
@@ -1357,6 +1361,10 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     含むシミュレーションの GPCM。推定し直した値は $10^{-5}$ で一致する（観測値 $\le1.2\times10^{-7}$）。テストでは
     ほかに、推定し直した値を項目を除いたデータへの `fit()` と、近似を 15 項目のデータで推定し直した値と（`"newton"`
     1 ステップ 0.03、2 ステップ 0.02、`"one_step"` 0.05）、vmap した勾配を 1 つずつの勾配と比べる。
+    **適用範囲（2026-11-26 決定、#81）**: JSI は単一群・1 次元のモデル（項目ごとに傾きが 1 つ）についてのみ定義されている
+    （Edwards, Houts & Cai, 2018）。多次元・多母集団への拡張（双因子・two-tier モデルを含む）や正規分布以外の潜在分布での
+    使い方は研究されておらず、参照となる実装もない（mirt の `type = "JSI"` は 1 因子が必要。11 項と §17.3 も参照）ので、
+    実装しない。`jsi()` は多母集団・多次元・`Normal` 以外の潜在分布のモデルで、理由を示す `SpecificationError` を出す。
 18. **パッケージの分割: `flexpyctt` と `flexpyequate`（2026-11-25 決定、issue #87）**: 推定済みの IRT モデルを使わない道具を、JAX に依存
     しない別の配布物としてこのリポジトリから公開する。flexpyirt は BA-EM による推定と、その結果を使う道具に絞る。
 
@@ -1970,6 +1978,73 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    対角の $\mathbf A$ では $A_m\,\mathrm{se}_m$、それ以外では NaN にする（回転後の標準誤差には事後共分散が必要だが、
    得点表はそれを持たない）。
 
+## 20. ユーザー定義の項目モデル（#86）
+
+1. **公開の契約。** `flexpyirt.items.ItemModel` と `flexpyirt.items.ItemKernel`（§6）を公開の拡張点とする。
+   これらを実装したオブジェクトは組み込みの項目モデルと同じように `Model` に入れられ、`log_prob` を評価するだけの機能はすべて動く。
+   組み込みのモデルを増やす代わりに、GGUM のようなモデルはユーザーが書く。
+   - **`ItemModel`**（Spec 層、すべて必須）: クラス属性 `name`（空でなく組み込みの名前と重ならない文字列。`model` 列に表示し JSON に保存する）、
+     `kernel`（`n_factors == 1` のカーネル）、`default_free()`、`start_values(item, rest)`、`bounds()`。
+     後の 3 つは 1 次元のパラメタ並び `kernel.param_names` を表し、$D$ 因子のモデルでは傾きの要素を $D$ 個の傾きそれぞれに使う。
+     frozen dataclass にする（`Model` と同じくハッシュ可能で値で比較する）。
+   - **`ItemKernel`**（Core 層）の必須メンバ: `n_factors`、`with_factors(n_factors)`、`param_names`、
+     `n_categories`（2 以上。カテゴリは $0..K-1$ で符号化）、`slope_params`、`intercept_params`、`log_prob(theta, params)`。
+     カーネルはハッシュ可能で、同じ関数を表すときに限り等しくなること（frozen dataclass なら両方を満たす）。
+     jit の静的引数であり、カーネルの等しい項目が 1 つのファミリーになる（§4.3）。
+   - **任意のカーネルメンバ**: `irt_names`、`irt_dependency_indices`、`irt_thresholds(params)`。
+     あれば `FitResult.items` にデルタ法 SE 付きの表示用閾値を加え（§7、§15.18）、なければ内部パラメタだけを表示する。
+     内部のコードは `items.irt_names(kernel)`、`items.irt_dependency_indices(kernel)`、`items.irt_thresholds(kernel, params)`
+     を通して読み、これらはメンバのないカーネルには空の値を返す。`slope_params` と `intercept_params` は必須のまま
+     （パラメタの並びと §4.5 の識別チェックを決めるため。`intercept_params` は空でもよい）。
+   - **パラメタの並び**: `param_names[:n_factors]` が傾きで、`slope_params` に等しい（どのモデルにも傾きがある。
+     多次元の初期値、識別チェック、Heywood チェック、ML/WLE の極端パターンの規則がこれを読む）。
+     ほかのパラメタは `n_factors` によらない順に続く。
+   - **`log_prob(theta, params)`** は、どの経路でも節点を `(Q, D)` の float64 配列で受け取り（1 次元の `theta` を渡していた
+     ML/WLE スコアリングの補助関数は `(1, D)` に整形するよう直した）、`params` を `param_names` 順の float64 ベクトルで受け取って、
+     `(Q, n_categories)` の対数確率を返す。`jax.numpy` で書き（jit でトレースされ、Newton の M-step と SE のために自動微分で
+     2 回微分される）、パラメタの値で Python の分岐をしないこと。モデルの定義域外のパラメタには NaN を返す。NaN は M-step の
+     直線探索が退ける（§15.3）。
+2. **契約のチェック。** `Model.__post_init__` は、組み込みでないモデルの項目ごとに `items.check_item_model` を呼ぶ:
+   空でなく組み込みでない `name`、`n_factors == 1` のハッシュ可能なカーネル、重複のない `param_names`、先頭にちょうど 1 つの傾き、
+   傾き以外のパラメタに含まれる `intercept_params`、`n_categories >= 2`、長さ `len(param_names)` で `lower < upper` の
+   `default_free()` と上下限。エラーは項目名を含む `SpecificationError`。`log_prob` 自体はチェックしない
+   （形と値はトレースして初めてわかる）。
+3. **ユーザー定義モデルで使える機能。**
+
+   | 機能 | 状態 |
+   |---|---|
+   | `fit`（EM、事前分布つき MAP、パラメタの固定、等値制約、多母集団、重み、潜在分布） | 使える |
+   | 多次元・bifactor・two-tier モデル | `kernel.with_factors` を通して使える |
+   | 標準誤差（すべての `se=`） | 使える |
+   | `score`: EAP、MAP、PV、EAPsum | 使える |
+   | `score`: ML、WLE | 使えるが、全最低・全最高パターンの規則（§15.24）は傾きが正のときカテゴリ $0$ が最低、$K-1$ が最高の反応であることを仮定する。単調でないモデルでは意味をなさない |
+   | `item_fit`、`m2`、`local_dependence`、`jsi`、`dif`、情報量、期待得点、信頼性、合計得点 | 使える（`log_prob` を評価する。項目得点はカテゴリ $0..K-1$） |
+   | `FitResult.items` の表示用閾値 | 任意のカーネルメンバがあるときだけ |
+   | `Model.fix_from(parameterization="slope_intercept")` | 使える |
+   | `Model.fix_from(parameterization="irt")` | 使えない（`SpecificationError`）。$b$ からの変換はモデルごとに違う |
+   | `link()` | 使えない（`SpecificationError`）。パラメタの尺度変換（§16.5、§19）はモデルごとに違う |
+   | 既定での潜在分散の推定（§4.5） | 組み込みの `Rasch` / `PCM` だけ。傾きを固定したユーザー定義モデルでは `Model.with_latent(Normal(free_var=True))` を使う |
+   | `to_json` / `from_json` | `register_item_model` の後（項目 4） |
+
+4. **JSON（`register_item_model(cls, *, to_dict=None, from_dict=None)`）。** ユーザー定義の項目モデルは
+   組み込みと同じ形（§15.28）の `{"type": cls.name, **to_dict(model)}` で保存し、`from_dict(fields)`（`"type"` を除いたオブジェクト）
+   で復元する。既定では、`__init__` のフィールドが `bool`・`int`・有限の `float`・`str` の dataclass を扱う。
+   レジストリは Python セッションごと（`eval` も `pickle` も使わない）で、登録していないモデルの `to_json` と未知の `"type"` の
+   `from_json` は `register_item_model` を名指しする `SpecificationError` を出す。組み込みの名前の登録と、すでに使われている名前への
+   （`__qualname__` の違う）別クラスの登録はエラー。`__qualname__` が同じクラスは前の登録を置き換える（ノートブックのセルの再実行）。
+   `from_dict` は登録したクラスのその `name` のインスタンスを返すこと。復元したモデルは項目 2 と同じくチェックする。
+   保存する名前は変わらないので `schema_version` は 7 のまま。ユーザー定義モデルを含むファイルはクラスを登録したセッションで読め、
+   古い flexpyirt はその `"type"` を未知として報告する。
+5. **多次元モデルの初期値。** ユーザー定義モデルでは、傾き以外の初期値を全項目の残余得点による `start_values(item, rest)[1:]` とする
+   （§15.31 の組み込みの実効傾きの規則はモデルごとに違う）。傾きは組み込みの規則（因子ごとの項目–残余相関）を使い、
+   既定で傾きが固定なら負荷するすべての因子に `start_values(...)[0]` を使う。
+6. **検証。** `tests/test_custom_items.py` は公開のプロトコルだけを使って 2PL（表示用メンバなし）と GRM（あり）を実装し直す。
+   1 つの混合モデルで推定すると、対数尤度・反復回数・推定値・Oakes SE・表示用閾値とその SE・EAP/MAP/ML/WLE の得点・S-X2・M2・
+   項目情報量が組み込みの推定と $10^{-12}$ まで一致する。多次元の場合は $10^{-5}$ まで一致する（初期値が違う、項目 5）。
+   JSON の登録、契約のチェック、使えない機能のテストも含む。ユーザー定義モデルの正しさは `log_prob` の正しさで決まる。
+   flexpyirt が検証するのは仕組みであり、モデルではない。ガイドの実例は 2PL の再実装で、組み込みでないモデル
+   （GGUM、Roberts, Donoghue & Laughlin, 2000 など）は、それ自身の mirt との照合があるときだけ検証済みとして示す。
+
 ## 参考文献
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
@@ -2050,6 +2125,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
+- Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.
 - Rost, J. (1990). Rasch models in latent classes: An integration of two approaches to item analysis. *Applied Psychological Measurement*, 14(3), 271–282.
 - Rudner, L. M. (2001). Computing the expected proportions of misclassified examinees. *Practical Assessment, Research, and Evaluation*, 7, Article 14.
