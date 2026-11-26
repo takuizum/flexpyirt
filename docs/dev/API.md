@@ -28,6 +28,8 @@ res  # a table in Jupyter (_repr_html_)
 res.items  # DataFrame: item, a, b(=-d/a), a_se, b_se, ...
 res.loglik, res.aic, res.bic
 res.score(df, method="EAP")  # DataFrame: theta, se
+res.person_fit(df)  # DataFrame: theta, lz, infit, z_infit, outfit, z_outfit, n_items
+res.item_fit(df, statistics=("infit", "outfit"))  # item, infit, z_infit, outfit, z_outfit
 ```
 
 ## 2. Mixed formats + priors (MAP)
@@ -149,7 +151,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 
 ## 7. Main classes and functions
 
-The tools that need no fitted model (`polychoric` to `detect` in the table below, except
+The tools that need no fitted model (`polychoric` to `logistic_dif` in the table below, except
 `model_parallel_analysis` and `dimensionality`) are defined in the flexpyctt distribution and
 re-exported by flexpyirt; they take `rng` (a seed or `numpy.random.Generator`) instead of a JAX
 `key`. `flexpyirt.polychoric` is the JAX implementation; `flexpyctt.polychoric` the NumPy / SciPy
@@ -164,22 +166,33 @@ one (DESIGN.md §16.18).
 | `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
 | `fit` | function | Estimation; returns a `FitResult` |
-| `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
+| `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `person_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
 | `dif_screen`, `dif_effect_sizes` | function | DIF workflow for unidimensional multiple-group models: screening every item with anchor purification (`strategy="all_others"` / `"sequential_free"` / `"sequential_constrain"`, likelihood-ratio or Wald tests; returns a `DIFScreenResult` with `table`, `history`, `flagged_items`, `anchor_items` and the final `fit`) and effect sizes (signed / unsigned expected-score differences, ESSD, RMSD, a test row). `FitResult.dif(..., test="wald")` adds Wald tests (DESIGN §16.20) |
 | `link` | function | Differentiable IRT scale linking (Haebara / Stocking–Lord, non-symmetric & symmetric; `transformation=` for a diagonal, orthogonal or oblique $\mathbf A$ in multidimensional models); returns a `LinkResult` |
 | `LinkResult` | class | Scale-linking result (`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `transformation`, `items`, `transform_theta`, `summary`) |
+| `screen_common_items` | function | Common-item screening for linking and item parameter drift (robust z, displacement, expected-score RMSD; iterative purification with `link()`); returns a `CommonItemScreeningResult` |
+| `CommonItemScreeningResult` | class | Screening result (`table`, `link`, `initial_link`, `kept_items`, `removed_items`, `history`, `flagged_items`, `summary`) |
+| `stack_screening_tables` | function | Stacks the screening tables of several administrations with an `administration` column |
+| `irt_equate` | function | IRT true-score / observed-score equating of the summed scores of a new form to an old form on one scale (or through a `LinkResult`); returns an `IRTEquatingResult` (`table`, `new_distribution`, `old_distribution`, `summary`) |
+| `score_distribution` | function | Model-implied summed-score distribution of a form (items, group) in its fitted population |
+| `scale_table` | function | Raw-to-scale table: $\theta$ per summed score (true score or EAPsum), its SE, and a clipped, rounded linear scale score |
 | `polychoric` | function | Polychoric / tetrachoric correlation matrix (two-step ML, smoothing); returns a `PolychoricResult` |
 | `parallel_analysis`, `velicer_map`, `empirical_kaiser` | function | Number-of-dimensions diagnostics; return `ParallelAnalysisResult`, `MAPResult`, `EmpiricalKaiserResult` (frozen dataclasses with `n_factors`) |
 | `comparison_data` | function | Comparison-data method (Ruscio & Roche, 2012); returns `ComparisonDataResult` |
 | `efa`, `hull` | function | Unrotated ULS / ML EFA of a correlation matrix with EFAtools' fit indices; the Hull method. Return `EFAResult`, `HullResult` |
 | `dimtest` | function | DIMTEST with bootstrap bias correction; returns `DimtestResult` |
 | `detect`, `exploratory_detect` | function | Confirmatory / exploratory DETECT; return `DetectResult`, `ExploratoryDetectResult` |
+| `mantel_haenszel`, `mantel`, `generalized_mantel_haenszel`, `logistic_dif` | function | Observed-score DIF (flexpyctt): Mantel–Haenszel with ETS classes, Mantel's test, generalized MH, logistic regression; purification of the matching score. Return `DIFResult` (`table`, `anchor_items`, `n_iter`, `converged`, `flag_history`) |
 | `model_parallel_analysis`, `dimensionality` | function | Model-based parallel analysis of a `FitResult`; the ensemble report. Return `ModelParallelAnalysisResult`, `DimensionalityResult` |
-| `item_information`, `test_information`, `expected_score` | function | Item / test information (with the conditional SE) and expected scores of a unidimensional `FitResult` at given `theta`; return DataFrames indexed by `theta` (DESIGN §18.2) |
+| `item_information`, `test_information`, `expected_score` | function | Item / test information (with the conditional SE) and expected scores of a `FitResult` at given `theta`; return DataFrames indexed by `theta` (DESIGN §18.2) |
+| `information_matrix` | function | Test (or one item's) Fisher information matrix at given `theta`, a `(T, D, D)` array; for multidimensional models `item_information` / `test_information` take `direction=` (directional information and the composite SE) and `theta` of shape `(T, D)`, indexed by a factor-name `MultiIndex` (DESIGN §18.3) |
 | `item_probabilities`, `empirical_item_curve`, `wright_map_table` | function | The numbers behind the plots: trace lines (long DataFrame), observed category proportions in equal-count bins of EAP $\theta$ beside the model, and the person scores and Thurstonian item thresholds of a Wright map (`WrightMapTable(persons, items)`) (DESIGN §21) |
 | `flexpyirt.plotting` | module | `plot_item_curves` (with observed proportions; one curve per group = DIF plot), `plot_information`, `plot_expected_score`, `plot_wright_map`; matplotlib from the optional extra `flexpyirt[plot]`, imported lazily (`MissingDependencyError` without it) (DESIGN §21) |
 | `reliability`, `summed_score_table` | function | Marginal and empirical reliability; the summed-score EAP table (also `FitResult.score(method="EAPsum")`). Return DataFrames |
 | `summed_score_distribution` | function | Lord–Wingersky / Poisson-binomial kernel on category probabilities (DESIGN §18.1) |
+| `compare_fits` | function | Model-comparison table over fits of the same data: `n_params`, `loglik`, AIC, SABIC, HQ, BIC and likelihood-ratio tests against the previous row (mirt's `anova()`; DESIGN §24.1) |
+| `simulate_responses`, `SimulatedData` | function, frozen dataclass | Simulated responses from a `FitResult` or a `Model` + item bank, with a JAX `key`; returns `responses`, `theta`, `group` (DESIGN §24.2) |
+| `classification_accuracy` | function | Classification accuracy and consistency of cut scores (Lee, 2010, on the summed score; Rudner, 2001, 2005, on $\theta$; D and P approaches) for a unidimensional `FitResult`; returns a `ClassificationResult` (`summary`, `by_category`, `by_cut`, `conditional`, `accuracy_table`, `consistency_table`; DESIGN §18.4) |
 | `LocalDependenceResult` | frozen dataclass | Returned by `FitResult.local_dependence()` (`pairs`, `q3`, `q3_mean`, `max_q3_star`) |
 | `JSIResult` | frozen dataclass | Returned by `FitResult.jsi()` (`matrix`, `pairs`, `method`, `converged`) |
 | `PolychoricResult` | frozen dataclass | `correlation`, `unsmoothed_correlation`, `thresholds`, `categories`, `n_obs`, per-pair `converged` / `at_boundary` / `zero_cell_corrected`, `smoothed`, `min_eigenvalue` |

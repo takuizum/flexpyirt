@@ -202,6 +202,16 @@ res = fit(
   variance, multiple groups, 3PL/4PL, or tight `tol`). It converges to the same fixed point with
   monotone `history["loglik"]` and far fewer EM evaluations. Plain EM (`squarem=False`) is the
   default.
+- **`m_step_scale="unconstrained"`** (default `"natural"`): runs the M-step's Newton steps on
+  $\operatorname{logit}$ / $\log$ scales of the parameters that have a bound — $g$ and $u$ on
+  $\operatorname{logit}$, latent variances on $\log$, factor correlations on
+  $2\operatorname{atanh}\rho$, and a slope only when a `LogNormalPrior` or an edited bound
+  restricts it to $(0, \infty)$. Unbounded parameters such as slopes are not transformed, so
+  negative slopes stay possible. The objective is the same, so an interior solution is the same as
+  with the default; the estimates, parameter table, priors and standard errors stay on the natural
+  scale. The difference is at a bound: the default stops exactly on it (e.g. $g=0$), while the
+  unconstrained scale only approaches it, sometimes after many more iterations. Both raise
+  `HeywoodWarning` once a parameter is within `1e-4` of its bound.
 - **`quadrature`**: the latent-variable grid. The default is 61 equally spaced points on
   $[-6, 6]$ (mirt's default). See [section 13](#13-choosing-the-quadrature-grid) for when to
   widen it.
@@ -320,6 +330,47 @@ fit_table = res.item_fit(df)  # item, s_x2, df, rmsea, p (one row per item)
 print(fit_table.round(3))
 ```
 
+### Person fit and infit / outfit
+
+`person_fit(data)` checks each respondent's response vector against the fitted model at the
+respondent's ability estimate (`method=` as in `score()`: `"EAP"`, `"MAP"`, `"ML"` or `"WLE"`;
+missing responses are skipped). It returns one row per respondent with `theta`, the requested
+statistics and `n_items` (answered items):
+
+- `lz`: the standardized log-likelihood $l_z$ (Drasgow, Levine & Williams, 1985; mirt's `Zh`).
+  Large negative values mean the responses are less likely than the model expects (guessing,
+  careless responding, items answered against their difficulty).
+- `lz_star`: $l_z^*$, corrected for using $\hat\theta$ instead of $\theta$ (Snijders, 2001;
+  Sinharay, 2016 for polytomous items), so that it is close to $N(0, 1)$ under the model; $l_z$
+  itself has a variance below 1 and is conservative. Needs `method="ML"`, `"MAP"` or `"WLE"`.
+  It is checked against an R recomputation of the formulas and a simulation of its null
+  distribution, as no R package at hand implements it.
+- `infit` / `outfit` with `z_infit` / `z_outfit`: information-weighted and unweighted mean
+  squares of the standardized residuals and their Wilson–Hilferty $z$ values (Wright & Masters,
+  1982). Values near 1 fit; well above 1 means unexpected responses (outfit is sensitive to
+  outliers on items far from $\hat\theta$), well below 1 means responses more predictable than
+  the model says. They are computed for every item model, as in mirt, but their reference
+  distribution is derived for Rasch-family models; for other models read them descriptively.
+
+`item_fit(data, statistics=...)` adds `"infit"` and `"outfit"` for items, computed over the
+respondents who answered each item (S-X2 stays the default; `"infit"` / `"outfit"` allow missing
+responses). In a multiple-group model pass `group=`: each respondent is evaluated with their own
+group's parameters, and item statistics are computed within each group.
+
+```python
+# A respondent who answers every item the opposite way is flagged.
+aberrant = df.copy()
+aberrant.iloc[0] = 1.0 - aberrant.iloc[0]
+pf = res.person_fit(aberrant, method="WLE", statistics=("lz", "lz_star", "infit", "outfit"))
+flagged = pf[pf["lz_star"] < -1.645]  # one-sided 5% test
+print(f"{len(flagged)} of {len(pf)} respondents flagged")
+print(pf.sort_values("lz_star").head().round(3))
+assert 0 in flagged.index
+
+item_table = res.item_fit(df, statistics=("s_x2", "infit", "outfit"), method="WLE")
+print(item_table.round(3))
+```
+
 ### Summed-score distribution
 
 `summed_score_distribution(probs)` gives the distribution of the summed score when the item scores
@@ -355,8 +406,8 @@ the [reference](reference.md#summed_score_distribution) for details.
 `item_information(res, theta)` and `test_information(res, theta)` give the Fisher information of
 each item and of the whole test at the values `theta`, and `expected_score(res, theta)` gives the
 expected item scores and their sum, the test characteristic curve. They work for every item
-model of a unidimensional fit. Each returns a DataFrame indexed by `theta`, so `.plot()` draws the
-curves. `test_information` also has the conditional standard error `se` $=1/\sqrt{I(\theta)}$.
+model. Each returns a DataFrame indexed by `theta`, so `.plot()` draws the curves (multidimensional
+models: [section 14](#information-of-multidimensional-models)). `test_information` also has the conditional standard error `se` $=1/\sqrt{I(\theta)}$ (unidimensional models).
 
 `reliability(res)` returns the marginal reliability: the reliability
 $\sigma^2/(\sigma^2+1/I(\theta))$ of a score with error variance $1/I(\theta)$, averaged over the
@@ -465,6 +516,59 @@ by `m2()` or `item_fit()`.
 m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi
 print(m2_table.round(3))
 ```
+
+### Comparing models (AIC, BIC, likelihood-ratio tests)
+
+`compare_fits()` puts several fits of the same data in one table, ordered from the most
+restricted model to the least restricted: `n_params`, `loglik`, AIC, sample-size adjusted BIC
+(`sabic`), Hannan–Quinn (`hq`) and BIC, and for each row after the first the likelihood-ratio test
+against the row before (`x2`, `df`, `p`). It is mirt's `anova(mod1, mod2, ...)`.
+
+```python
+from flexpyirt import compare_fits
+
+res_rasch = fit(Model.uniform(Rasch(), items=items), df, se=None)
+table = compare_fits(res_rasch, res, names=["Rasch", "2PL"])
+print(table.round(3))  # model, n_params, loglik, aic, sabic, hq, bic, x2, df, p
+```
+
+- The likelihood-ratio test is valid only when each model is nested in the next one and the
+  restriction is not on the boundary of the parameter space. flexpyirt cannot check either: a
+  variance fixed at 0, a mixture with fewer components or a `DavidianCurve` against a `Normal`
+  latent distribution is not tested correctly by $\chi^2_{df}$. Use the information criteria
+  there.
+- Fits with different numbers of respondents raise `SpecificationError`. A row whose number of
+  parameters does not increase (`p` is NaN), a log-likelihood that decreases while parameters
+  are added, and fits with priors give a `FlexpyirtWarning`.
+
+### Simulating responses
+
+`simulate_responses()` draws response data from a fitted model, or from a model whose item
+parameters you give, for power studies, recovery checks and teaching. Random numbers come from an
+explicit JAX key, so the same key gives the same data.
+
+```python
+from flexpyirt import simulate_responses
+
+sim = simulate_responses(res, n_obs=2000, key=jax.random.key(1))
+print(sim.responses.head())  # one int column per item, ready for fit()
+print(sim.theta[:5])  # the respondents' latent traits
+refit = fit(spec, sim.responses, se=None)
+
+bank = pd.DataFrame({"item": items, "a": a_true, "d": d_true})
+sim_true = simulate_responses(spec, parameters=bank, n_obs=1000, key=jax.random.key(2))
+```
+
+- Abilities are drawn from the fitted latent distribution of each group (`Normal` with one or
+  more factors, `NormalMixture`, `DavidianCurve`, or the `EmpiricalHistogram`'s grid points), or
+  taken from `theta=`. For a multiple-group model `n_obs` is per group (or a mapping
+  `{"ref": 500, "focal": 800}`), and `sim.group` holds the labels to pass as `fit(..., group=)`.
+- From a `Model`, `parameters` is an item bank as for
+  [`Model.fix_from()`](#10-fixed-item-parameter-calibration-fipc) (slope–intercept columns) with
+  every item parameter; the latent distribution is the specification's (`Normal(mean=, var=)`,
+  or a `NormalMixture`'s `means`, `variances`, `weights`).
+- Every response is observed. To mimic a test design or missing data, set entries of
+  `sim.responses` to NaN.
 
 ## 6. Standard errors
 
@@ -595,6 +699,44 @@ print(scores_sum.head(3))
   multiple-group model it has a `group` column, and each respondent is scored with the table of
   their group.
 - Unidimensional models with `Normal` latent distributions only.
+
+### Classification accuracy and consistency
+
+When a test has cut scores (pass / fail, proficiency levels), `classification_accuracy(res,
+cut_scores=...)` estimates from the fitted model how often the observed category agrees with the
+true one (**accuracy**) and how often two parallel administrations would agree (**consistency**),
+with Cohen's kappa for consistency. A score at or above a cut is in the higher category.
+
+```python
+from flexpyirt import classification_accuracy
+
+cls = classification_accuracy(res, cut_scores=[5, 9])  # Lee (2010): cuts on the summed score
+print(round(cls.accuracy, 3), round(cls.consistency, 3), round(cls.kappa, 3))
+print(cls.by_cut.round(3))  # per cut: accuracy, consistency, kappa, false_positive, false_negative
+print(cls.by_category.round(3))  # per category: true_proportion, proportion, accuracy, consistency
+
+cls_theta = classification_accuracy(res, cut_scores=[-0.5, 0.8], method="rudner")  # cuts on theta
+cls_data = classification_accuracy(res, cut_scores=[5, 9], data=df)  # over the respondents' EAPs
+print(cls_theta.summary.round(3))
+print(cls_data.summary.round(3))
+```
+
+- `method="lee"` (default; Lee, 2010) uses the exact distribution of the summed score given
+  $\theta$, for every item model; the true category is that of the expected summed score.
+  `method="rudner"` (Rudner, 2001, 2005) takes the estimate of $\theta$ as normal around $\theta$
+  with standard error $1/\sqrt{I(\theta)}$. The results are checked against the R package cacIRT.
+- Without `data` the indices are integrated over the fitted latent distribution on the quadrature
+  grid; with `data` they are averaged over the respondents' estimates (`score_method`, default
+  `"EAP"`).
+- `scale="theta"` with Lee, or `scale="summed_score"` with Rudner, converts the cuts through the
+  test characteristic curve (`by_cut` shows the converted cuts).
+- `conditional` gives the accuracy and consistency at each quadrature node or respondent;
+  `accuracy_table` (true x observed) and `consistency_table` are the joint distributions.
+- For a multiple-group model the indices are computed per group, and every table has a `group`
+  column (use `summary` instead of `accuracy` / `consistency` / `kappa`).
+- The conditional accuracy jumps where the true category changes, so on the fitted grid the
+  accuracy can differ from its value for a continuous latent distribution by up to about the node
+  spacing (below 0.01 with the default 61 nodes); consistency and kappa are not affected.
 
 ## 8. Latent distributions and identification
 
@@ -870,6 +1012,48 @@ effects = dif_effect_sizes(screen, data=mg_df, group=group)
 print(effects.round(3))
 ```
 
+### Observed-score DIF (Mantel–Haenszel, logistic regression)
+
+flexpyctt screens items for DIF without fitting an IRT model: respondents are matched on their
+total score (or on `anchor_items`, or an external `matching` variable) and the groups are compared
+at each score. `mantel_haenszel()` gives the Mantel–Haenszel $\chi^2$, the common odds ratio
+$\hat\alpha_{MH}$, the ETS delta $\Delta_{MH}=-2.35\ln\hat\alpha_{MH}$ and the ETS classes A / B / C;
+`logistic_dif()` tests uniform and non-uniform DIF with nested logistic regressions and reports
+Nagelkerke's $\Delta R^2$. `mantel()` (ordered polytomous items) and
+`generalized_mantel_haenszel()` (several focal groups, or unordered categories) take the same
+arguments. With `purify=True`, flagged items are removed from the matching score and the tests
+are repeated until the flagged set repeats.
+
+```python
+from flexpyctt import logistic_dif, mantel_haenszel
+
+# 20 binary items; the focal group has a lower mean, and items q03 and q07 are harder for it
+# (uniform DIF).
+dif_rng = np.random.default_rng(7)
+dif_theta = np.concatenate([dif_rng.normal(0.0, 1.0, 1200), dif_rng.normal(-0.5, 1.0, 800)])
+dif_group = np.repeat(["ref", "focal"], [1200, 800])
+dif_shift = np.where(dif_group[:, None] == "focal", np.isin(np.arange(20), [2, 6]) * 0.8, 0.0)
+dif_prob = 1 / (1 + np.exp(-1.2 * (dif_theta[:, None] - np.linspace(-1.5, 1.5, 20) - dif_shift)))
+dif_df = pd.DataFrame(
+    (dif_rng.random((2000, 20)) < dif_prob).astype(int),
+    columns=[f"q{j:02d}" for j in range(1, 21)],
+)
+
+mh = mantel_haenszel(dif_df, group=dif_group, focal="focal", purify=True, p_adjust="holm")
+print(mh.table[["item", "chi2", "delta", "ets_class", "adj_p", "flagged"]].round(3).head(8))
+print(mh.flagged_items, mh.n_iter, mh.converged)
+lr = logistic_dif(dif_df, group=dif_group, focal="focal", purify=True, p_adjust="holm")
+print(lr.table.loc[lr.table["flagged"], ["item", "chi2", "delta_r2", "jodoin_gierl_class"]])
+```
+
+- $\Delta_{MH}<0$ means the item is harder for the focal group at the same total score. Class C
+  (here q03 and q07) needs $|\Delta_{MH}|\ge1.5$ and significantly above 1; class A means
+  $|\Delta_{MH}|<1$ or not significant. `classification="effect_size"` uses the thresholds only.
+- Matching is on the observed total, so with large group differences in ability and few items
+  some items without DIF can be flagged (q17 here, with a negligible effect size): read the
+  effect sizes, not only the p-values.
+- The matching items must be complete: drop rows with missing responses first.
+
 ## 10. Fixed item parameter calibration (FIPC)
 
 Fix some items at the values of an already scaled item bank and estimate the new items and the
@@ -906,7 +1090,7 @@ fipc_spec_irt = (
 ## 11. Priors and MAP estimation
 
 Attach prior distributions to item parameters with `Model.prior(*, param, dist, items=None)` to
-perform Bayes modal (MAP) estimation (Mislevy, 1986; Swaminathan & Gifford, 1986). Three
+perform Bayes modal (MAP) estimation (Mislevy, 1986; Swaminathan & Gifford, 1986). Four
 natural-scale priors are provided:
 
 | Class | Support | Typical use |
@@ -914,9 +1098,21 @@ natural-scale priors are provided:
 | `NormalPrior(mean, sd)` | $(-\infty, \infty)$ | Intercepts `d` / `dk`, or slopes `a` |
 | `LogNormalPrior(mean_log, sd_log)` | $(0, \infty)$ | Slopes `a` ($\log a \sim N(\mu, s^2)$) |
 | `BetaPrior(a, b)` | $(0, 1)$ | 3PL / 4PL asymptotes `g` and `u` |
+| `LogitNormalPrior(mean_logit, sd_logit)` | $(0, 1)$ | 3PL / 4PL asymptotes ($\operatorname{logit} g \sim N(\mu, s^2)$) |
 
 Priors are evaluated directly on the **natural parameter scale** without a Jacobian term
-(matching R mirt's log-prior objective `LL.Priors`). In a multiple-group model, `.prior()`
+(matching R mirt's log-prior objective `LL.Priors`). `LogitNormalPrior` is the density of $g$
+when $\operatorname{logit} g$ is normal (Aitchison & Shen, 1980), so its formula contains
+$-\log g - \log(1 - g)$: that term is part of the density of $g$, not a change of scale. For
+example, `LogitNormalPrior(-1.0986, 0.5)` centers $g$ on $1/4$, the chance rate of four-option
+items. flexMIRT's `Guessing : Normal(mean, sd)` (and R mirt's `PRIOR = (..., g, norm, mean, sd)`)
+describes the same distribution of $g$ but maximizes the posterior over $\operatorname{logit} g$,
+which leaves that term out, so its estimates of $g$ typically lie somewhat closer to $1/2$. To
+reproduce those estimates, pass `mode_scale="logit"`:
+`LogitNormalPrior(-1.0986, 0.5, mode_scale="logit")` evaluates
+$\log\phi(\operatorname{logit} g; \mu, s)$ without the Jacobian, so the MAP estimate, the
+log posterior and the standard errors are those of the logit-metric objective (the SE of $g$
+is the delta-method SE $g(1-g)\,\mathrm{SE}(\operatorname{logit} g)$). In a multiple-group model, `.prior()`
 applies to every group, and a parameter shared across groups (same `free_id`) is counted **once**.
 Fixed parameters ignore their prior. Priors on latent-distribution parameters (`"mean"`, `"var"`)
 are not supported (`SpecificationError`).
@@ -961,7 +1157,7 @@ print(table.head(4))
 | `value` | Starting value (the fixed value if not free) |
 | `free` | Whether the parameter is estimated |
 | `lower`, `upper` | Bounds; starting values must lie strictly inside |
-| `prior` | Prior object (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, or `None`; ignored if fixed) |
+| `prior` | Prior object (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior`, or `None`; ignored if fixed) |
 | `free_id` | Free-parameter number. **Rows with the same number are constrained to be equal.** Newly freed rows may keep `-1` (they get a number) |
 
 ```python
@@ -1106,6 +1302,41 @@ res_mg = fit(
 print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
 ```
 
+### Information of multidimensional models
+
+The information functions of section 5 also work for confirmatory, bifactor and two-tier models.
+With several factors the information about $\boldsymbol\theta$ is a matrix,
+$\mathbf I(\boldsymbol\theta)=\sum_j\sum_kP_{jk}\,\nabla\log P_{jk}\,\nabla\log P_{jk}^\top$, which
+`information_matrix(res, theta)` returns as an array of shape `(T, D, D)` (one item's with
+`item=`). `item_information` and `test_information` give the information in one direction
+$\mathbf u$ of the latent space, $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$ (Reckase &
+McKinley, 1991), so they need `direction=`, a vector with one entry per factor (it is scaled to
+length 1). `theta` is a `(T, D)` array or a DataFrame with the factor names as columns, and the
+results are indexed by the factor values. `expected_score` needs no direction.
+
+```python
+from flexpyirt import expected_score, information_matrix, item_information, test_information
+
+grid = pd.DataFrame({"F1": [-1.0, 0.0, 1.0], "F2": [0.0, 0.0, 0.5]})
+angle = np.radians(30.0)
+direction = [np.cos(angle), np.sin(angle)]  # 30 degrees from F1 (mirt: degrees = c(30, 60))
+print(item_information(res_mirt, grid, direction=direction).iloc[:, :3].round(3))
+print(test_information(res_mirt, grid, direction=direction).round(3))  # information, se
+print(information_matrix(res_mirt, grid)[0].round(3))  # 2 x 2 test information at (-1, 0)
+print(expected_score(res_mirt, grid)["total"].round(2))
+```
+
+- mirt's `degrees=` (the angle to each axis) corresponds to `direction=np.cos(np.radians(degrees))`
+  when the angles are consistent ($\sum_m\cos^2\alpha_m=1$); flexpyirt scales the direction to length
+  1, mirt does not.
+- `test_information`'s `se` is the standard error of the estimate of the combination
+  $\mathbf u^\top\boldsymbol\theta$, $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$, which is at least
+  $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ because the other directions are estimated too. It is
+  infinite where the information matrix is singular. mirt's `plot(type = "SE")` draws
+  $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ instead, `1 / np.sqrt` of the `information` column.
+- In bifactor and two-tier models `theta` has a column for every factor, general and specific.
+- Reliability and the summed-score functions are for unidimensional models only.
+
 ### Bifactor models
 
 `.with_bifactor(specific={...}, general="general")` declares one general factor on which every item
@@ -1247,6 +1478,103 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
   `Model.fix_from()`; Rasch/PCM items get slope $1/A$); `linked.transform_theta()` transforms
   scalars, arrays, Series, or scoring DataFrames (`theta`, `se`, and plausible values `pv1..`),
   treating $(A, B)$ as known (the transformed `se` excludes linking error).
+
+### Screening the common items
+
+Before a linking is trusted, the common items are checked for item parameter drift: an item whose
+parameters moved between the two calibrations (exposure, a changed context) is removed from the
+anchor set and the linking is repeated. `screen_common_items(source, target)` links with `link()`,
+transforms the source items and computes for every common item
+
+| `statistic` | Per item | Default `threshold` |
+|---|---|---|
+| `"robust_z"` (default) | $\max(\lvert z_a\rvert, \lvert z_b\rvert)$: robust z of the log slope ratios and of the location differences, $(x - \mathrm{median}) / (0.74\,\mathrm{IQR})$ over the common items (Huynh & Meyer, 2010) | 1.645 |
+| `"displacement"` | $\lvert b^* - b^{\mathrm{tgt}}\rvert$, the location difference after the transformation (logits) | 0.3 |
+| `"rmsd"` | root mean squared difference of the two expected item score curves, weighted by the target's latent distribution | 0.1 |
+
+The location $b$ is the difficulty of a dichotomous item and the mean of the thresholds of a GRM
+or GPCM item. With `purify=True` (default) the flagged item with the largest statistic is removed
+and the linking repeated until no kept item is flagged (`removal="all"` removes every flagged item
+per step; `min_items` and `max_iter` bound the loop and a `ScreeningWarning` says when they stop
+it):
+
+```python
+from flexpyirt import screen_common_items
+
+# A later administration in which the first common item became one logit harder.
+d_drift = d_new.copy()
+d_drift[0] -= a_new[0]
+drift_df = pd.DataFrame(
+    simulate_2pl(a_new, d_drift, rng.normal(0.5, 1.2, 800), rng), columns=new_items
+)
+drift_res = fit(Model.uniform(TwoPL(), items=new_items), drift_df, method=BAEM(squarem=True))
+
+screened = screen_common_items(drift_res, res, statistic="displacement")
+print(screened.removed_items)
+print(screened.history[["iteration", "n_items", "A", "B", "removed"]].round(3))
+print(screened.table[["item", "difference_b", "rmsd", "flagged", "kept"]].round(3))
+linked_screened = screened.link  # the LinkResult on the kept items
+```
+
+- `screened.table` has one row per common item under the final linking: transformed source and
+  target slopes and locations, `log_ratio_a`, `difference_b`, `displacement`, `robust_z_a`,
+  `robust_z_b`, `rmsd`, `flagged`, `kept` and `iteration_removed`. `history` gives $(A, B)$ and the
+  removed items at every step, and `initial_link` the linking on all common items.
+- The thresholds are conventions, not derived values; set them for your programme. Robust z with
+  few common items (fewer than about 8) has an unstable IQR.
+- For drift across several administrations, screen each against the base form and stack the
+  tables: `stack_screening_tables({"2025": screened_2025, "2026": screened_2026})`.
+- Unidimensional fits only. DIF tests inside one multiple-group fit are `FitResult.dif()`.
+  Validated against a base-R recomputation of the same rules on mirt calibrations (2PL and mixed
+  2PL + GRM + GPCM).
+
+### Equating and raw-to-scale tables
+
+Once two forms are on one scale (here with `linked_sl`; FIPC or a concurrent calibration need no
+link), `irt_equate(new, old)` converts every summed score of the new form to the summed-score
+scale of the old form (Kolen & Brennan, 2014, §6.5–6.6):
+
+- `method="true_score"` (default): solve $\tau_X(\theta)=x$ on the new form's test characteristic
+  curve and report $\tau_Y(\theta)$. Scores at or below the sum of the lower asymptotes (3PL /
+  4PL guessing) and at or above the sum of the upper asymptotes are equated by the linear
+  interpolation of Kolen & Brennan; their `theta` is $-\infty$ / $+\infty$.
+- `method="observed_score"`: the model-implied summed-score distributions of both forms
+  (Lord–Wingersky recursion over the fitted latent distribution) in the population `"new"`,
+  `"old"` or `"synthetic"` (with `synthetic_weight=` for the new form's population), equated
+  by the equipercentile method.
+
+`score_distribution()` returns the model-implied distribution of a form, and `scale_table()`
+maps each summed score to a reporting scale $\text{slope}\cdot\theta+\text{intercept}$, clipped
+to `[lowest, highest]` and rounded, with $\theta$ from the test characteristic curve
+(`"true_score"`) or the summed-score EAP (`"EAPsum"`).
+
+```python
+from flexpyirt import irt_equate, scale_table, score_distribution
+
+true_eq = irt_equate(src_res, res, link=linked_sl)
+print(true_eq.table.head().round(3))  # score, theta (base scale), equated
+observed_eq = irt_equate(
+    src_res,
+    res,
+    method="observed_score",
+    link=linked_sl,
+    population="synthetic",
+    synthetic_weight=0.5,
+)
+print(observed_eq.table.head().round(3))
+print(score_distribution(res).head().round(4))
+
+raw_to_scale = scale_table(res, slope=10.0, intercept=50.0, lowest=20.0, highest=80.0)
+print(raw_to_scale.round(2).head())
+```
+
+- With one fit holding both forms, pass it twice with `new_items=` / `old_items=` (and
+  `new_group=` / `old_group=` for a multiple-group fit).
+- True-score methods need test characteristic curves that do not decrease (no negative slopes,
+  no nominal items whose expected score falls); observed-score equating has no such condition.
+- Standard errors of equated scores are not available yet. Validated against equateIRT and
+  SNSequate (dichotomous items) and against references built from mirt and the equate package
+  (polytomous and mixed formats).
 
 ### Multidimensional models
 
@@ -1587,6 +1915,7 @@ except SpecificationError as e:
 
 ## References
 
+- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
@@ -1606,6 +1935,8 @@ except SpecificationError as e:
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
+- Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.

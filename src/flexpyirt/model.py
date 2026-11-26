@@ -903,7 +903,7 @@ class Model:
         param : str
             Internal item parameter name (e.g. ``"a"``, ``"a1"``, ``"d"``, ``"g"``, ``"u"``,
             ``"d1"``).
-        dist : NormalPrior, LogNormalPrior, or BetaPrior
+        dist : NormalPrior, LogNormalPrior, BetaPrior, or LogitNormalPrior
             Prior distribution on the natural parameter scale.
         items : iterable of str or callable, optional
             Items to attach the prior to (default: every item in the model).
@@ -911,7 +911,7 @@ class Model:
         if not isinstance(dist, PRIOR_TYPES):
             raise SpecificationError(
                 f"Unsupported prior distribution {dist!r}; "
-                "use NormalPrior, LogNormalPrior or BetaPrior."
+                "use NormalPrior, LogNormalPrior, BetaPrior or LogitNormalPrior."
             )
         latent_prefixes = ("mean_", "var_", "cor_", "phi_", "rmean_", "rvar_", "logit_")
         if param in ("mean", "var") or param.startswith(latent_prefixes):

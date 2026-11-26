@@ -328,9 +328,11 @@ def test_multidimensional_and_non_normal_models() -> None:
         method=method,
         se=None,
     )
-    for fn in (item_information, test_information, expected_score):
-        with pytest.raises(SpecificationError, match="unidimensional"):
-            fn(two_factor, THETA)
+    # Information of a multidimensional model needs a direction (DESIGN.md §18.3).
+    for fn in (item_information, test_information):
+        with pytest.raises(SpecificationError, match="direction"):
+            fn(two_factor, np.zeros((2, 2)))
+    assert expected_score(two_factor, np.zeros((2, 2)))["total"].between(0, 6).all()
     with pytest.raises(SpecificationError, match="unidimensional"):
         reliability(two_factor)
     with pytest.raises(SpecificationError, match="unidimensional"):
@@ -357,7 +359,7 @@ def test_multidimensional_and_non_normal_models() -> None:
 
 
 @pytest.mark.parametrize("structure", ["bifactor", "two_tier"])
-def test_bifactor_and_two_tier_models_are_rejected(structure: str) -> None:
+def test_bifactor_and_two_tier_models_reject_reliability_and_eapsum(structure: str) -> None:
     items = [f"q{j}" for j in range(1, 9)]
     base = Model.uniform(TwoPL(), items=items)
     if structure == "bifactor":
@@ -372,9 +374,6 @@ def test_bifactor_and_two_tier_models_are_rejected(structure: str) -> None:
     table = spec.parameter_table(dummy)
     table["free"] = False
     res = fit(spec, dummy, table=table, se=None)
-    for fn in (item_information, test_information, expected_score):
-        with pytest.raises(SpecificationError, match="unidimensional"):
-            fn(res, THETA)
     with pytest.raises(SpecificationError, match="unidimensional"):
         reliability(res)
     with pytest.raises(SpecificationError, match="unidimensional"):

@@ -2,8 +2,11 @@
 
 Priors are defined on the **natural parameter scale** without a Jacobian term (DESIGN.md §4.7):
 evaluating :meth:`log_pdf` at an item parameter value directly gives its contribution to the log
-posterior. The normal prior is named :class:`NormalPrior` to avoid clashing with the latent
-distribution :class:`~flexpyirt.Normal` (API.md §7).
+posterior. :class:`LogitNormalPrior` is a density on :math:`(0, 1)` whose formula contains the
+logit Jacobian because that is part of the density itself, unless ``mode_scale="logit"`` asks for
+the logit-metric posterior mode (DESIGN.md §15.48). The normal prior is
+named :class:`NormalPrior` to avoid clashing with the latent distribution
+:class:`~flexpyirt.Normal` (API.md §7).
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ from __future__ import annotations
 import math
 import numbers
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, get_args
 
 import jax
 import jax.numpy as jnp
@@ -23,11 +26,14 @@ from flexpyirt.errors import SpecificationError
 
 __all__ = [
     "PRIOR_BETA",
+    "PRIOR_LOGITNORMAL",
+    "PRIOR_LOGITNORMAL_LOGIT",
     "PRIOR_LOGNORMAL",
     "PRIOR_NONE",
     "PRIOR_NORMAL",
     "BetaPrior",
     "LogNormalPrior",
+    "LogitNormalPrior",
     "NormalPrior",
     "Prior",
     "encode_prior",
@@ -38,6 +44,11 @@ PRIOR_NONE = 0
 PRIOR_NORMAL = 1
 PRIOR_LOGNORMAL = 2
 PRIOR_BETA = 3
+PRIOR_LOGITNORMAL = 4
+PRIOR_LOGITNORMAL_LOGIT = 5
+
+LogitModeScale = Literal["natural", "logit"]
+_LOGIT_MODE_SCALES: tuple[str, ...] = get_args(LogitModeScale)
 
 _HALF_LOG_2PI = 0.5 * math.log(2.0 * math.pi)
 
@@ -215,11 +226,124 @@ class BetaPrior:
         return jnp.where(valid, val, -jnp.inf)
 
 
-Prior = NormalPrior | LogNormalPrior | BetaPrior
-PRIOR_TYPES: tuple[type[NormalPrior], type[LogNormalPrior], type[BetaPrior]] = (
+@dataclass(frozen=True)
+class LogitNormalPrior:
+    r"""Logit-normal prior distribution on :math:`(0, 1)` (natural parameter scale).
+
+    :math:`\operatorname{logit}X \sim N(\mu, s^2)` (Aitchison & Shen, 1980), so the density of
+    :math:`X` itself contains the Jacobian of the logit:
+
+    .. math::
+        \log\pi(x) = -\log x - \log(1 - x) - \log s - \frac{1}{2}\log(2\pi)
+                     - \frac{(\operatorname{logit} x - \mu)^2}{2s^2},
+        \qquad 0 < x < 1,
+
+    and :math:`-\infty` outside :math:`(0, 1)`. Used for 3PL/4PL asymptotes :math:`g` and
+    :math:`u`; :math:`\mu=\operatorname{logit}(1/4)\approx-1.0986` centers :math:`g` on the
+    chance rate of four-option items.
+
+    flexMIRT's ``Guessing : Normal(mu, s)`` prior (Houts & Cai, flexMIRT user's manual) and R
+    ``mirt``'s ``PRIOR = (..., g, norm, mu, s)`` (Chalmers, 2012) are the same distribution of
+    :math:`g`, but both maximize the posterior over :math:`\lambda=\operatorname{logit} g`, which
+    drops the :math:`-\log x - \log(1 - x)` term from the objective. ``mode_scale="logit"``
+    evaluates that objective term instead,
+
+    .. math::
+        \log\tilde\pi(x) = -\log s - \frac{1}{2}\log(2\pi)
+                     - \frac{(\operatorname{logit} x - \mu)^2}{2s^2},
+        \qquad 0 < x < 1,
+
+    the normal log density of :math:`\lambda` at :math:`\operatorname{logit} x` (not a density of
+    :math:`x`), so the MAP estimate is the logit-metric posterior mode of flexMIRT and mirt and
+    ``log_posterior`` equals theirs (DESIGN.md §15.48). The default ``"natural"`` gives the
+    natural-scale posterior mode of the proper density, as for every other prior (DESIGN.md §4.7).
+
+    Parameters
+    ----------
+    mean_logit : float
+        Mean :math:`\mu` of :math:`\operatorname{logit} X` (finite).
+    sd_logit : float
+        Standard deviation :math:`s` of :math:`\operatorname{logit} X` (positive and finite).
+    mode_scale : {"natural", "logit"}, default "natural"
+        Scale on which the posterior mode is taken: ``"natural"`` includes the logit Jacobian
+        (density of :math:`X`), ``"logit"`` omits it (flexMIRT / mirt ``norm`` on ``g``).
+    """
+
+    mean_logit: float
+    sd_logit: float
+    mode_scale: LogitModeScale
+
+    def __init__(
+        self,
+        mean_logit: RealScalar,
+        sd_logit: RealScalar,
+        *,
+        mode_scale: LogitModeScale = "natural",
+    ) -> None:
+        """Validate prior hyperparameters and store them as Python floats."""
+        object.__setattr__(
+            self, "mean_logit", _validate_finite(mean_logit, "LogitNormalPrior mean_logit")
+        )
+        object.__setattr__(
+            self, "sd_logit", _validate_positive(sd_logit, "LogitNormalPrior sd_logit")
+        )
+        if not isinstance(mode_scale, str) or mode_scale not in _LOGIT_MODE_SCALES:
+            raise SpecificationError(
+                f"LogitNormalPrior mode_scale must be one of {list(_LOGIT_MODE_SCALES)}, "
+                f"got {mode_scale!r}."
+            )
+        object.__setattr__(self, "mode_scale", mode_scale)
+
+    @property
+    def support(self) -> tuple[float, float]:
+        """Open support :math:`(0, 1)`."""
+        return (0.0, 1.0)
+
+    def log_pdf(self, x: ArrayLike) -> Array:
+        r"""Evaluate the log prior term at ``x`` (``-inf`` outside ``(0, 1)``).
+
+        For ``mode_scale="natural"`` this is the log density of :math:`X`; for ``"logit"`` it is
+        :math:`\log\tilde\pi(x)`, the log density of :math:`\operatorname{logit} X` at
+        :math:`\operatorname{logit} x` (no Jacobian).
+        """
+        arr = _as_float_array(x)
+        active = arr > -jnp.inf
+        return _logitnormal_log_pdf(
+            arr,
+            jnp.asarray(self.mean_logit, dtype=arr.dtype),
+            jnp.asarray(self.sd_logit, dtype=arr.dtype),
+            active,
+            active & (self.mode_scale == "natural"),
+        )
+
+
+def _logitnormal_log_pdf(
+    x: Array, mean: Array, sd: Array, active: Array, with_jacobian: Array
+) -> Array:
+    r"""Logit-normal log prior where ``active`` (0 elsewhere), ``-inf`` outside ``(0, 1)``.
+
+    :math:`\log\phi(\operatorname{logit}x;\mu,s) - [\log x + \log(1-x)]`, the bracket only where
+    ``with_jacobian`` (DESIGN.md §15.48).
+    """
+    valid = active & (x > 0.0) & (x < 1.0)
+    safe_x = jnp.where(valid, x, 0.5)
+    safe_sd = jnp.where(active, sd, 1.0)
+    log_x = jnp.log(safe_x)
+    log_1mx = jnp.log1p(-safe_x)
+    z = (log_x - log_1mx - mean) / safe_sd
+    jacobian = jnp.where(with_jacobian, -log_x - log_1mx, 0.0)
+    val = jacobian - jnp.log(safe_sd) - _HALF_LOG_2PI - 0.5 * z * z
+    return jnp.where(valid, val, jnp.where(active, -jnp.inf, 0.0))
+
+
+Prior = NormalPrior | LogNormalPrior | BetaPrior | LogitNormalPrior
+PRIOR_TYPES: tuple[
+    type[NormalPrior], type[LogNormalPrior], type[BetaPrior], type[LogitNormalPrior]
+] = (
     NormalPrior,
     LogNormalPrior,
     BetaPrior,
+    LogitNormalPrior,
 )
 
 
@@ -233,9 +357,12 @@ def encode_prior(prior: Prior | None) -> tuple[int, float, float]:
         return (PRIOR_LOGNORMAL, float(prior.mean_log), float(prior.sd_log))
     if isinstance(prior, BetaPrior):
         return (PRIOR_BETA, float(prior.a), float(prior.b))
+    if isinstance(prior, LogitNormalPrior):
+        kind = PRIOR_LOGITNORMAL if prior.mode_scale == "natural" else PRIOR_LOGITNORMAL_LOGIT
+        return (kind, float(prior.mean_logit), float(prior.sd_logit))
     raise SpecificationError(
         f"Unsupported prior distribution {prior!r}; "
-        "use NormalPrior, LogNormalPrior, BetaPrior or None."
+        "use NormalPrior, LogNormalPrior, BetaPrior, LogitNormalPrior or None."
     )
 
 
@@ -245,8 +372,8 @@ def eval_log_prior(x: Array, kind: Array, param1: Array, param2: Array) -> Array
     Uses the double-``where`` pattern on every branch so that unselected branches and unused
     padding slots (``kind == PRIOR_NONE``) never evaluate :math:`\log 0` or negative logs and
     contribute zero value, gradient and Hessian. Out-of-support values for an active
-    :class:`LogNormalPrior` or :class:`BetaPrior` prior return :math:`-\infty` (rejected by the
-    M-step line search and SQUAREM safeguard).
+    :class:`LogNormalPrior`, :class:`BetaPrior` or :class:`LogitNormalPrior` prior return
+    :math:`-\infty` (rejected by the M-step line search and SQUAREM safeguard).
     """
     is_norm = kind == PRIOR_NORMAL
     sd_n = jnp.where(is_norm, param2, 1.0)
@@ -272,4 +399,8 @@ def eval_log_prior(x: Array, kind: Array, param1: Array, param2: Array) -> Array
     )
     lp_beta = jnp.where(valid_beta, lp_beta_val, jnp.where(is_beta, -jnp.inf, 0.0))
 
-    return lp_norm + lp_ln + lp_beta
+    is_logitn_nat = kind == PRIOR_LOGITNORMAL
+    is_logitn = is_logitn_nat | (kind == PRIOR_LOGITNORMAL_LOGIT)
+    lp_logitn = _logitnormal_log_pdf(x, param1, param2, is_logitn, is_logitn_nat)
+
+    return lp_norm + lp_ln + lp_beta + lp_logitn

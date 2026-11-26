@@ -28,6 +28,7 @@ __all__ = [
     "PAdjust",
     "adjust_p",
     "dif_tests",
+    "information_criteria",
     "item_rows",
     "set_shared",
     "wald_statistic",
@@ -83,8 +84,15 @@ def adjust_p(p: np.ndarray, method: PAdjust) -> np.ndarray:
     return out
 
 
-def _criteria(loglik: float, k: int, n: int) -> dict[str, float]:
-    """AIC, sample-size adjusted BIC, Hannan–Quinn and BIC of one fit (mirt's definitions)."""
+def information_criteria(loglik: float, k: float, n: float) -> dict[str, float]:
+    r"""AIC, sample-size adjusted BIC, Hannan–Quinn and BIC of one fit (mirt's definitions).
+
+    .. math::
+        \mathrm{AIC}=-2\ell+2k,\quad \mathrm{SABIC}=-2\ell+k\log\frac{N+2}{24},\quad
+        \mathrm{HQ}=-2\ell+2k\log\log N,\quad \mathrm{BIC}=-2\ell+k\log N
+
+    (Akaike, 1974; Sclove, 1987; Hannan & Quinn, 1979; Schwarz, 1978).
+    """
     m2 = -2.0 * loglik
     return {
         "aic": m2 + 2.0 * k,
@@ -240,7 +248,7 @@ def dif_tests(
     base["value"] = result.parameters["estimate"].to_numpy(dtype=float)
     k_base = result.n_params
     n = result.n_obs
-    base_crit = _criteria(result.loglik, k_base, n)
+    base_crit = information_criteria(result.loglik, k_base, n)
     lookup = dict(model.items)
 
     rows_out = []
@@ -276,7 +284,7 @@ def dif_tests(
                 f"{'equal across groups' if scheme == 'add' else 'free in every group'}; "
                 f"nothing to test with scheme={scheme!r}."
             )
-        new_crit = _criteria(new.loglik, k_new, n)
+        new_crit = information_criteria(new.loglik, k_new, n)
         # mirt's sign: criteria of the model with the item free minus the constrained one, so a
         # negative difference favours DIF in both schemes.
         if scheme == "add":

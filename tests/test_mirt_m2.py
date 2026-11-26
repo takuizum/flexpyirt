@@ -104,15 +104,23 @@ def load(name: str) -> Case:
 
 CASES = ["v3_science_grm", "v4_twogroup_2pl", "v5_fipc_2pl", "v9_missing_2pl"]
 
+# (squarem, m_step_scale): the unconstrained M-step scale must reach the same solution (V45).
+RUNS = [(False, "natural"), (True, "natural"), (False, "unconstrained")]
+
 
 @cache
-def _fit(name: str, se: str, squarem: bool = False) -> FitResult:
+def _fit(name: str, se: str, squarem: bool = False, scale: str = "natural") -> FitResult:
     case = load(name)
     return fit(
         case.spec,
         case.data,
         group=case.group,
-        method=BAEM(tol=1e-9, max_iter=20000, squarem=squarem),
+        method=BAEM(
+            tol=1e-9,
+            max_iter=20000,
+            squarem=squarem,
+            m_step_scale=scale,  # type: ignore[arg-type]
+        ),
         quadrature=case.quadrature,
         se=se,  # type: ignore[arg-type]
     )
@@ -141,20 +149,20 @@ def _items(res: FitResult, group: str) -> pd.DataFrame:
     return items.set_index("item")
 
 
-@pytest.mark.parametrize("squarem", SQUAREM)
+@pytest.mark.parametrize(("squarem", "scale"), RUNS)
 @pytest.mark.parametrize("name", CASES)
-def test_loglik(name: str, squarem: bool) -> None:
-    case, res = load(name), _fit(name, "oakes", squarem)
+def test_loglik(name: str, squarem: bool, scale: str) -> None:
+    case, res = load(name), _fit(name, "oakes", squarem, scale)
     assert res.converged
     ref = float(case.raw["loglik"])
     assert abs(res.loglik - ref) <= TOL_LOGLIK_REL * abs(ref)
     assert res.loglik >= _fixed_at_mirt(name).loglik - 1e-8
 
 
-@pytest.mark.parametrize("squarem", SQUAREM)
+@pytest.mark.parametrize(("squarem", "scale"), RUNS)
 @pytest.mark.parametrize("name", CASES)
-def test_parameters(name: str, squarem: bool) -> None:
-    case, res = load(name), _fit(name, "oakes", squarem)
+def test_parameters(name: str, squarem: bool, scale: str) -> None:
+    case, res = load(name), _fit(name, "oakes", squarem, scale)
     for g in case.groups:
         ref = case.params(g)
         ours = _items(res, g).loc[ref.index]

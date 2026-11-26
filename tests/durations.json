@@ -55,11 +55,15 @@
   "test_mirt_m7_weights": 150.0,
   "test_mirt_v40_linking": 330.0,
   "test_mirt_v40_linking_multidim": 1830.0,
+  "test_mirt_v54_compare_fits": 40.0,
   "test_mirt_v6_eh": 290.9,
   "test_oakes": 398.2,
   "test_quadrature_gh": 127.5,
+  "test_r_v50_screening": 44.0,
   "test_reference_meta": 1.5,
   "test_release_version": 0.2,
   "test_scaffold": 6.4,
-  "test_shards": 0.3
+  "test_screening": 16.2,
+  "test_shards": 0.3,
+  "test_v54_simulate": 120.0
 }

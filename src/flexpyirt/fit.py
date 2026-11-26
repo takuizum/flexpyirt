@@ -48,8 +48,8 @@ SQUAREM_FALLBACK_WARN_MIN = 5
 SQUAREM_FALLBACK_WARN_RATE = 0.5
 """Fallback fraction above which a ``ConvergenceWarning`` is emitted on a converged fit."""
 
-_em = jax.jit(_core.em, static_argnames=("max_iter", "n_newton"))
-_squarem = jax.jit(_core.squarem, static_argnames=("max_iter", "n_newton"))
+_em = jax.jit(_core.em, static_argnames=("max_iter", "n_newton", "unconstrained"))
+_squarem = jax.jit(_core.squarem, static_argnames=("max_iter", "n_newton", "unconstrained"))
 _information = {
     "oakes": jax.jit(_core.information_oakes),
     "hessian": jax.jit(_core.information_hessian),
@@ -177,6 +177,7 @@ def fit(
         tol=method.tol,
         max_iter=method.max_iter,
         n_newton=method.m_step_newton_steps,
+        unconstrained=method.m_step_scale == "unconstrained",
     )
     eta = np.asarray(out.eta)
     converged = bool(out.converged)

@@ -1,7 +1,7 @@
 """flexpyirt: Bock–Aitkin EM estimation for item response theory models, built on JAX.
 
-The model-free dimensionality tools (``parallel_analysis``, ``efa``, ``detect``, ...) are defined
-in flexpyctt and re-exported here; ``polychoric`` is flexpyirt's JAX implementation
+The model-free tools (``parallel_analysis``, ``efa``, ``detect``, ``mantel_haenszel``, ...) are
+defined in flexpyctt and re-exported here; ``polychoric`` is flexpyirt's JAX implementation
 (DESIGN.md §16.18).
 """
 
@@ -9,7 +9,16 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
+from flexpyctt.dif import (
+    DIFResult,
+    generalized_mantel_haenszel,
+    logistic_dif,
+    mantel,
+    mantel_haenszel,
+)
 from flexpyirt import errors
+from flexpyirt.classification import ClassificationResult, classification_accuracy
+from flexpyirt.comparison import compare_fits
 from flexpyirt.correlation import PolychoricResult, polychoric
 from flexpyirt.curves import (
     WrightMapTable,
@@ -44,9 +53,11 @@ from flexpyirt.dimensionality import (
     parallel_analysis,
     velicer_map,
 )
+from flexpyirt.equating import IRTEquatingResult, irt_equate, scale_table, score_distribution
 from flexpyirt.fit import fit
 from flexpyirt.information import (
     expected_score,
+    information_matrix,
     item_information,
     reliability,
     summed_score_table,
@@ -57,9 +68,15 @@ from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, Normal, NormalMi
 from flexpyirt.linking import LinkResult, link
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
-from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior
+from flexpyirt.priors import BetaPrior, LogitNormalPrior, LogNormalPrior, NormalPrior
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
+from flexpyirt.screening import (
+    CommonItemScreeningResult,
+    screen_common_items,
+    stack_screening_tables,
+)
+from flexpyirt.simulate import SimulatedData, simulate_responses
 from flexpyirt.sumscore import summed_score_distribution
 
 try:
@@ -73,7 +90,10 @@ __all__ = [
     "GRM",
     "PCM",
     "BetaPrior",
+    "ClassificationResult",
+    "CommonItemScreeningResult",
     "ComparisonDataResult",
+    "DIFResult",
     "DIFScreenResult",
     "DavidianCurve",
     "DetectResult",
@@ -86,10 +106,12 @@ __all__ = [
     "FitResult",
     "FourPL",
     "HullResult",
+    "IRTEquatingResult",
     "JSIResult",
     "LinkResult",
     "LocalDependenceResult",
     "LogNormalPrior",
+    "LogitNormalPrior",
     "MAPResult",
     "Model",
     "ModelParallelAnalysisResult",
@@ -101,10 +123,13 @@ __all__ = [
     "PolychoricResult",
     "Quadrature",
     "Rasch",
+    "SimulatedData",
     "ThreePL",
     "TwoPL",
     "WrightMapTable",
     "__version__",
+    "classification_accuracy",
+    "compare_fits",
     "comparison_data",
     "detect",
     "dif_effect_sizes",
@@ -118,14 +143,25 @@ __all__ = [
     "expected_score",
     "exploratory_detect",
     "fit",
+    "generalized_mantel_haenszel",
     "hull",
+    "information_matrix",
+    "irt_equate",
     "item_information",
     "item_probabilities",
     "link",
+    "logistic_dif",
+    "mantel",
+    "mantel_haenszel",
     "model_parallel_analysis",
     "parallel_analysis",
     "polychoric",
     "reliability",
+    "scale_table",
+    "score_distribution",
+    "screen_common_items",
+    "simulate_responses",
+    "stack_screening_tables",
     "summed_score_distribution",
     "summed_score_table",
     "test_information",
