@@ -132,7 +132,7 @@ class PriorBlock:
     ----------
     kind : (n_free,) int32
         ``0`` none, ``1`` NormalPrior, ``2`` LogNormalPrior, ``3`` BetaPrior,
-        ``4`` LogitNormalPrior.
+        ``4`` LogitNormalPrior, ``5`` LogitNormalPrior with ``mode_scale="logit"``.
     param1, param2 : (n_free,) float64
         Distribution parameters (unused entries hold ``0.0`` and ``1.0``).
     """

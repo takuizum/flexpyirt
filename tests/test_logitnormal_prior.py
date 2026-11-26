@@ -1,16 +1,20 @@
 """``LogitNormalPrior`` (DESIGN §15.48, V45).
 
 R mirt has no logit-normal prior on the natural scale (its ``norm`` prior on ``g`` acts on the
-internal logit(g) without the Jacobian, like flexMIRT's ``Guessing : Normal``), so V45 is an
-independent numerical check: the density against SciPy (normalization and moments of
-logit X by quadrature), and the MAP estimate against a stationarity condition written here from
-the formula, with the likelihood gradient from the mirt-validated marginal log-likelihood.
+internal logit(g) without the Jacobian, like flexMIRT's ``Guessing : Normal``), so for
+``mode_scale="natural"`` V45 is an independent numerical check: the density against SciPy
+(normalization and moments of logit X by quadrature), and the MAP estimate against a stationarity
+condition written here from the formula, with the likelihood gradient from the mirt-validated
+marginal log-likelihood. ``mode_scale="logit"`` is checked the same way against the logit-metric
+objective, against the flexMIRT mode computed here by Newton's method, and against R mirt's
+``PRIOR = (..., g, norm, mu, s)`` fit (``tests/reference/v45_3pl_logit_norm_map.json``).
 """
 
 from __future__ import annotations
 
 import math
 from functools import cache
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -31,8 +35,14 @@ from flexpyirt import (
     fit,
 )
 from flexpyirt._compile import _prior_center, compile_problem, prepare
+from flexpyirt._json import _deserialize_prior, _serialize_prior
 from flexpyirt.errors import SpecificationError
-from flexpyirt.priors import PRIOR_LOGITNORMAL, encode_prior, eval_log_prior
+from flexpyirt.priors import (
+    PRIOR_LOGITNORMAL,
+    PRIOR_LOGITNORMAL_LOGIT,
+    encode_prior,
+    eval_log_prior,
+)
 from flexpyirt.quadrature import Quadrature
 
 
@@ -105,6 +115,79 @@ def test_core_evaluation_matches_and_is_branch_safe() -> None:
     assert grad[0] == 0.0
 
 
+# ---- mode_scale="logit" ------------------------------------------------------------------------
+
+
+def test_logit_mode_scale_drops_the_jacobian() -> None:
+    """log pi~(x) = log N(logit x; mean, sd): the logit-metric objective term (DESIGN §15.48)."""
+    x = np.array([1e-6, 0.01, 0.1, 0.25, 0.5, 0.8, 0.999])
+    prior = LogitNormalPrior(-1.0986, 0.5, mode_scale="logit")
+    logit = np.log(x) - np.log1p(-x)
+    np.testing.assert_allclose(
+        np.asarray(prior.log_pdf(x)), stats.norm.logpdf(logit, -1.0986, 0.5), rtol=1e-13
+    )
+    natural = np.asarray(LogitNormalPrior(-1.0986, 0.5).log_pdf(x))
+    np.testing.assert_allclose(
+        natural - np.asarray(prior.log_pdf(x)), -np.log(x) - np.log1p(-x), rtol=1e-12
+    )
+    out = np.asarray(prior.log_pdf(np.array([-0.1, 0.0, 1.0, 1.5])))
+    assert np.all(out == -np.inf)
+    assert prior.support == (0.0, 1.0)
+    assert prior != LogitNormalPrior(-1.0986, 0.5)
+    assert LogitNormalPrior(0.0, 1.0).mode_scale == "natural"
+
+
+@pytest.mark.parametrize("bad", ["Logit", "unconstrained", None, 1])
+def test_invalid_mode_scale(bad: object) -> None:
+    with pytest.raises(SpecificationError, match="mode_scale"):
+        LogitNormalPrior(0.0, 1.0, mode_scale=bad)  # type: ignore[arg-type]
+
+
+def test_core_evaluation_logit_mode() -> None:
+    prior = LogitNormalPrior(-1.2, 0.7, mode_scale="logit")
+    kind, p1, p2 = encode_prior(prior)
+    assert (kind, p1, p2) == (PRIOR_LOGITNORMAL_LOGIT, -1.2, 0.7)
+    x = jnp.asarray([0.05, 0.2, 0.6])
+    got = eval_log_prior(x, jnp.full(3, kind, dtype=jnp.int32), jnp.full(3, p1), jnp.full(3, p2))
+    np.testing.assert_allclose(got, prior.log_pdf(x), rtol=1e-15)
+    # Mixed with the natural code and padding: inactive slots stay zero and differentiable.
+    kinds = jnp.asarray([0, PRIOR_LOGITNORMAL, PRIOR_LOGITNORMAL_LOGIT], dtype=jnp.int32)
+    x0 = jnp.asarray([0.0, 0.3, 0.3])
+
+    def total(v: jnp.ndarray) -> jnp.ndarray:
+        return jnp.sum(eval_log_prior(v, kinds, jnp.full(3, -1.2), jnp.full(3, 0.7)))
+
+    grad = np.asarray(jax.grad(total)(x0))
+    assert grad[0] == 0.0
+    # d/dx log N(logit x) = -(logit x - mu) / (s^2 x (1 - x)); natural adds -1/x + 1/(1 - x).
+    lam = math.log(0.3 / 0.7)
+    g_logit = -(lam + 1.2) / (0.49 * 0.3 * 0.7)
+    assert grad[2] == pytest.approx(g_logit, rel=1e-13)
+    assert grad[1] == pytest.approx(g_logit - 1 / 0.3 + 1 / 0.7, rel=1e-13)
+
+
+@pytest.mark.parametrize("mode_scale", ["natural", "logit"])
+def test_json_round_trip_of_mode_scale(mode_scale: str) -> None:
+    prior = LogitNormalPrior(-1.2, 0.7, mode_scale=mode_scale)  # type: ignore[arg-type]
+    obj = _serialize_prior(prior)
+    assert obj == {
+        "type": "LogitNormalPrior",
+        "mean_logit": -1.2,
+        "sd_logit": 0.7,
+        "mode_scale": mode_scale,
+    }
+    assert _deserialize_prior(obj, field_name="prior") == prior
+
+
+def test_json_without_mode_scale_reads_as_natural() -> None:
+    obj = {"type": "LogitNormalPrior", "mean_logit": -1.2, "sd_logit": 0.7}
+    assert _deserialize_prior(obj, field_name="prior") == LogitNormalPrior(-1.2, 0.7)
+    with pytest.raises(SpecificationError, match="mode_scale"):
+        _deserialize_prior({**obj, "mode_scale": "jacobian"}, field_name="prior")
+    with pytest.raises(SpecificationError):
+        _deserialize_prior({**obj, "mode_scale": 1}, field_name="prior")
+
+
 # ---- attachment -------------------------------------------------------------------------------
 
 
@@ -142,85 +225,133 @@ MEAN, SD = -1.3863, 0.6  # logit(1/5)
 
 
 @cache
-def _map_fit(scale: str) -> tuple[Model, pd.DataFrame, FitResult]:
+def _map_fit(scale: str, mode_scale: str = "natural") -> tuple[Model, pd.DataFrame, FitResult]:
     df = _sim_3pl(1200, 45)
+    prior = LogitNormalPrior(MEAN, SD, mode_scale=mode_scale)  # type: ignore[arg-type]
     spec = (
         Model.uniform(ThreePL(), items=df.columns)
-        .prior(param="g", dist=LogitNormalPrior(MEAN, SD))
+        .prior(param="g", dist=prior)
         .prior(param="d", dist=NormalPrior(0.0, 3.0))
     )
     res = fit(
         spec,
         df,
         method=BAEM(tol=1e-10, max_iter=20000, m_step_scale=scale),  # type: ignore[arg-type]
-        se=None,
+        se="hessian",
     )
     return spec, df, res
 
 
+def _ids(spec: Model, df: pd.DataFrame) -> tuple[_core.CompiledProblem, np.ndarray, np.ndarray]:
+    prep = prepare(spec, df, group=None, item_names=None, table=None)
+    comp = compile_problem(spec, prep.y, prep.group, prep.table, Quadrature.equispaced())
+    table = prep.table[prep.table["free"]]
+    g_ids = table.loc[table["param"] == "g", "free_id"].to_numpy()
+    d_ids = table.loc[table["param"] == "d", "free_id"].to_numpy()
+    return comp.problem, g_ids, d_ids
+
+
 @pytest.mark.slow
+@pytest.mark.parametrize("mode_scale", ["natural", "logit"])
 @pytest.mark.parametrize("scale", ["natural", "unconstrained"])
-def test_v45_map_is_stationary_point_of_independent_objective(scale: str) -> None:
+def test_v45_map_is_stationary_point_of_independent_objective(scale: str, mode_scale: str) -> None:
     r"""d/deta [l(eta) + sum log pi(eta)] = 0 at the MAP, with the prior gradients from the formula.
 
     .. math::
-        \frac{d}{dg}\log\pi(g)=-\frac1g+\frac1{1-g}-\frac{\operatorname{logit}g-\mu}{s^2g(1-g)},
-        \qquad \frac{d}{dd}\log\pi(d)=-\frac{d}{9}.
+        \frac{d}{dg}\log\pi(g)=[-\tfrac1g+\tfrac1{1-g}]
+            -\frac{\operatorname{logit}g-\mu}{s^2g(1-g)},
+        \qquad \frac{d}{dd}\log\pi(d)=-\frac{d}{9},
+
+    the bracket only for ``mode_scale="natural"``.
     """
-    spec, df, res = _map_fit(scale)
+    spec, df, res = _map_fit(scale, mode_scale)
     assert res.converged
-    prep = prepare(spec, df, group=None, item_names=None, table=None)
-    comp = compile_problem(spec, prep.y, prep.group, prep.table, Quadrature.equispaced())
+    problem, g_ids, d_ids = _ids(spec, df)
     eta = jnp.asarray(res._eta)
-    grad = np.array(jax.grad(lambda e: _core.marginal_loglik(comp.problem, e))(eta))
-    table = prep.table[prep.table["free"]]
-    for fid, param in zip(table["free_id"], table["param"], strict=True):
+    grad = np.array(jax.grad(lambda e: _core.marginal_loglik(problem, e))(eta))
+    for fid in g_ids:
         x = float(res._eta[fid])
-        if param == "g":
-            logit = math.log(x / (1 - x))
-            grad[fid] += -1 / x + 1 / (1 - x) - (logit - MEAN) / (SD**2 * x * (1 - x))
-        elif param == "d":
-            grad[fid] += -x / 9.0
+        logit = math.log(x / (1 - x))
+        grad[fid] += -(logit - MEAN) / (SD**2 * x * (1 - x))
+        if mode_scale == "natural":
+            grad[fid] += -1 / x + 1 / (1 - x)
+    for fid in d_ids:
+        grad[fid] += -float(res._eta[fid]) / 9.0
     assert np.max(np.abs(grad)) < 1e-6
     # A strict local maximum of the log posterior.
-    hess = np.asarray(jax.hessian(lambda e: _core.log_posterior(comp.problem, e))(eta))
+    hess = np.asarray(jax.hessian(lambda e: _core.log_posterior(problem, e))(eta))
     assert np.max(np.linalg.eigvalsh(hess)) < 0.0
+
+
+def _flexmirt_mode(spec: Model, df: pd.DataFrame, start: np.ndarray) -> tuple[np.ndarray, Any]:
+    """flexMIRT's logit-metric MAP, by Newton's method on lambda = logit g (independent code).
+
+    flexMIRT's ``Guessing : Normal(mean, sd)`` maximizes l + log N(lambda; mean, sd) over
+    ``lambda = logit g`` (DESIGN §15.48). Returns the mode on the natural scale and the negative
+    log posterior as a function of the logit-scale vector (g slots replaced by lambda).
+    """
+    problem, g_ids, d_ids = _ids(spec, df)
+    g_idx = jnp.asarray(g_ids)
+    d_idx = jnp.asarray(d_ids)
+
+    def neg_objective(v: jnp.ndarray) -> jnp.ndarray:
+        lam = v[g_idx]
+        e = v.at[g_idx].set(jax.nn.sigmoid(lam))
+        lp = jnp.sum(_normal_logpdf(lam, MEAN, SD)) + jnp.sum(_normal_logpdf(e[d_idx], 0.0, 3.0))
+        return -(_core.marginal_loglik(problem, e) + lp)
+
+    grad_fn = jax.jit(jax.grad(neg_objective))
+    hess_fn = jax.jit(jax.hessian(neg_objective))
+    v = jnp.asarray(start).at[g_idx].set(jnp.log(start[g_ids] / (1 - start[g_ids])))
+    for _ in range(20):
+        v = v - jnp.linalg.solve(hess_fn(v), grad_fn(v))
+    assert float(jnp.max(jnp.abs(grad_fn(v)))) < 1e-8
+    assert np.min(np.linalg.eigvalsh(np.asarray(hess_fn(v)))) > 0.0
+    x = np.asarray(v.at[g_idx].set(jax.nn.sigmoid(v[g_idx])))
+    return x, (neg_objective, v, g_ids)
+
+
+def _normal_logpdf(x: jnp.ndarray, mean: float, sd: float) -> jnp.ndarray:
+    """Normal log density (jax), written out for the independent objective."""
+    return -0.5 * math.log(2 * math.pi) - math.log(sd) - 0.5 * ((x - mean) / sd) ** 2
 
 
 @pytest.mark.slow
 def test_v45_scales_agree_and_jacobian_moves_g_away_from_one_half() -> None:
-    """Both M-step scales give one MAP; flexMIRT's logit-scale objective gives g nearer 1/2.
-
-    flexMIRT's ``Guessing : Normal(mean, sd)`` maximizes l + log N(logit g; mean, sd), i.e. the
-    same kernel without the -log g - log(1 - g) term (DESIGN §15.48). That mode is computed here
-    by Newton's method on the same likelihood.
-    """
+    """Both M-step scales give one MAP; flexMIRT's logit-scale objective gives g nearer 1/2."""
     spec, df, nat = _map_fit("natural")
     _, _, unc = _map_fit("unconstrained")
     np.testing.assert_allclose(unc._eta, nat._eta, rtol=0, atol=1e-6)
 
-    prep = prepare(spec, df, group=None, item_names=None, table=None)
-    comp = compile_problem(spec, prep.y, prep.group, prep.table, Quadrature.equispaced())
-    table = prep.table[prep.table["free"]]
-    g_ids = jnp.asarray(table.loc[table["param"] == "g", "free_id"].to_numpy())
-    d_ids = jnp.asarray(table.loc[table["param"] == "d", "free_id"].to_numpy())
-
-    def neg_flexmirt_objective(e: jnp.ndarray) -> jnp.ndarray:
-        g = e[g_ids]
-        logit = jnp.log(g) - jnp.log1p(-g)
-        lp = jnp.sum(-0.5 * ((logit - MEAN) / SD) ** 2) + jnp.sum(-0.5 * (e[d_ids] / 3.0) ** 2)
-        return -(_core.marginal_loglik(comp.problem, e) + lp)
-
-    # Newton from our MAP (the two modes are close): exact gradient and Hessian by autodiff.
-    grad_fn = jax.jit(jax.grad(neg_flexmirt_objective))
-    hess_fn = jax.jit(jax.hessian(neg_flexmirt_objective))
-    x = jnp.asarray(nat._eta)
-    for _ in range(20):
-        x = x - jnp.linalg.solve(hess_fn(x), grad_fn(x))
-    assert float(jnp.max(jnp.abs(grad_fn(x)))) < 1e-8
-    assert np.min(np.linalg.eigvalsh(np.asarray(hess_fn(x)))) > 0.0
-    x_flex = np.asarray(x)
-    g_flex = x_flex[np.asarray(g_ids)]
-    g_ours = nat._eta[np.asarray(g_ids)]
+    x_flex, _ = _flexmirt_mode(spec, df, nat._eta)
+    _, g_ids, _ = _ids(spec, df)
+    g_flex = x_flex[g_ids]
+    g_ours = nat._eta[g_ids]
     assert np.all(np.abs(g_ours - 0.5) > np.abs(g_flex - 0.5))
     assert np.max(np.abs(g_ours - g_flex)) > 1e-3
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("scale", ["natural", "unconstrained"])
+def test_v45_logit_mode_scale_reproduces_flexmirt_mode_and_se(scale: str) -> None:
+    r"""``mode_scale="logit"``: MAP, log posterior and SEs of flexMIRT's logit-metric objective.
+
+    The SE of :math:`g` is the delta-method SE of the logit-scale estimate,
+    :math:`\mathrm{SE}(g)=g(1-g)\,\mathrm{SE}(\lambda)`, from the inverse logit-scale Hessian of
+    the independent objective (DESIGN §15.48).
+    """
+    _, df, nat = _map_fit("natural")
+    spec, _, res = _map_fit(scale, "logit")
+    assert res.converged
+    x_flex, (neg_objective, v_hat, g_ids) = _flexmirt_mode(spec, df, nat._eta)
+    np.testing.assert_allclose(res._eta, x_flex, rtol=0, atol=1e-6)
+    assert res.log_posterior == pytest.approx(-float(neg_objective(v_hat)), abs=1e-8)
+    # flexMIRT's mode differs from the natural-scale one (V45: up to ~0.04 in g).
+    assert np.max(np.abs(res._eta[g_ids] - nat._eta[g_ids])) > 1e-3
+
+    cov_logit = np.linalg.inv(np.asarray(jax.hessian(neg_objective)(v_hat)))
+    se_ref = np.sqrt(np.diag(cov_logit))
+    g = x_flex[g_ids]
+    se_ref[g_ids] *= g * (1 - g)
+    assert res.vcov is not None
+    np.testing.assert_allclose(np.sqrt(np.diag(res.vcov)), se_ref, rtol=1e-4)

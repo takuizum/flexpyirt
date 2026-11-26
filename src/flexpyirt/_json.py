@@ -71,7 +71,9 @@ key ``n_cat`` to ``n_categories`` and the priors ``LogNormal(meanlog, sdlog)`` /
 ``bifactor`` (DESIGN.md §17.1), 6 the model key ``n_primary_factors`` (DESIGN.md §17.2), and 7
 the optional top-level key ``sum_weights`` (the sum of the sampling weights; present only for a
 fit with ``weights=``, DESIGN.md §17.4), and 8 the method key ``m_step_scale`` (DESIGN.md §15.47;
-older files read as ``"natural"``) and the prior ``LogitNormalPrior`` (DESIGN.md §15.48).
+older files read as ``"natural"``) and the prior ``LogitNormalPrior`` with keys ``mean_logit``,
+``sd_logit`` and ``mode_scale`` (DESIGN.md §15.48; ``mode_scale`` is optional on read, absent
+meaning ``"natural"``).
 """
 SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7, 8})
 """Schema versions accepted by :func:`load_fit_result`; version 1 has no factor keys."""
@@ -546,6 +548,7 @@ def _serialize_logitnormal_prior(prior: LogitNormalPrior) -> dict[str, Any]:
         "type": "LogitNormalPrior",
         "mean_logit": _encode_float(prior.mean_logit),
         "sd_logit": _encode_float(prior.sd_logit),
+        "mode_scale": prior.mode_scale,
     }
 
 
@@ -574,12 +577,20 @@ def _deserialize_beta_prior(obj: dict[str, Any], field_name: str) -> BetaPrior:
 
 
 def _deserialize_logitnormal_prior(obj: dict[str, Any], field_name: str) -> LogitNormalPrior:
-    _check_keys(obj, required={"type", "mean_logit", "sd_logit"}, field_name=field_name)
+    # ``mode_scale`` was added within schema version 8; absent means "natural" (DESIGN.md §15.48).
+    required = {"type", "mean_logit", "sd_logit"}
+    if "mode_scale" in obj:
+        required = required | {"mode_scale"}
+    _check_keys(obj, required=required, field_name=field_name)
+    mode_scale = "natural"
+    if "mode_scale" in obj:
+        mode_scale = _require_str(obj["mode_scale"], field_name=f"{field_name}.mode_scale")
     return LogitNormalPrior(
         mean_logit=_decode_float(
             obj["mean_logit"], field_name=f"{field_name}.mean_logit", finite=True
         ),
         sd_logit=_decode_float(obj["sd_logit"], field_name=f"{field_name}.sd_logit", finite=True),
+        mode_scale=mode_scale,  # type: ignore[arg-type]  # validated by LogitNormalPrior
     )
 
 
