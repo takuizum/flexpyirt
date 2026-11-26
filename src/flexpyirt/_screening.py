@@ -11,7 +11,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
-from flexpyirt.items import ItemKernel, NominalKernel
+from flexpyirt.items import ItemKernel, NominalKernel, irt_thresholds
 
 __all__ = [
     "ROBUST_Z_SCALE",
@@ -50,7 +50,7 @@ def item_location(kernel: ItemKernel, params: Array) -> Array:
     """
     if isinstance(kernel, NominalKernel):
         return -params[-1] / ((kernel.n_categories - 1) * params[0])
-    return jnp.mean(kernel.irt_thresholds(params))
+    return jnp.mean(irt_thresholds(kernel, params))
 
 
 def expected_score_rmsd(
