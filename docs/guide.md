@@ -835,6 +835,48 @@ fig_dif = plot_item_curves(mg, items[6:9], data=mg_df, group=group)
 
 ![Item characteristic curves per group (DIF plot)](images/plots/dif.png)
 
+### Observed-score DIF (Mantel–Haenszel, logistic regression)
+
+flexpyctt screens items for DIF without fitting an IRT model: respondents are matched on their
+total score (or on `anchor_items`, or an external `matching` variable) and the groups are compared
+at each score. `mantel_haenszel()` gives the Mantel–Haenszel $\chi^2$, the common odds ratio
+$\hat\alpha_{MH}$, the ETS delta $\Delta_{MH}=-2.35\ln\hat\alpha_{MH}$ and the ETS classes A / B / C;
+`logistic_dif()` tests uniform and non-uniform DIF with nested logistic regressions and reports
+Nagelkerke's $\Delta R^2$. `mantel()` (ordered polytomous items) and
+`generalized_mantel_haenszel()` (several focal groups, or unordered categories) take the same
+arguments. With `purify=True`, flagged items are removed from the matching score and the tests
+are repeated until the flagged set repeats.
+
+```python
+from flexpyctt import logistic_dif, mantel_haenszel
+
+# 20 binary items; the focal group has a lower mean, and items q03 and q07 are harder for it
+# (uniform DIF).
+dif_rng = np.random.default_rng(7)
+dif_theta = np.concatenate([dif_rng.normal(0.0, 1.0, 1200), dif_rng.normal(-0.5, 1.0, 800)])
+dif_group = np.repeat(["ref", "focal"], [1200, 800])
+dif_shift = np.where(dif_group[:, None] == "focal", np.isin(np.arange(20), [2, 6]) * 0.8, 0.0)
+dif_prob = 1 / (1 + np.exp(-1.2 * (dif_theta[:, None] - np.linspace(-1.5, 1.5, 20) - dif_shift)))
+dif_df = pd.DataFrame(
+    (dif_rng.random((2000, 20)) < dif_prob).astype(int),
+    columns=[f"q{j:02d}" for j in range(1, 21)],
+)
+
+mh = mantel_haenszel(dif_df, group=dif_group, focal="focal", purify=True, p_adjust="holm")
+print(mh.table[["item", "chi2", "delta", "ets_class", "adj_p", "flagged"]].round(3).head(8))
+print(mh.flagged_items, mh.n_iter, mh.converged)
+lr = logistic_dif(dif_df, group=dif_group, focal="focal", purify=True, p_adjust="holm")
+print(lr.table.loc[lr.table["flagged"], ["item", "chi2", "delta_r2", "jodoin_gierl_class"]])
+```
+
+- $\Delta_{MH}<0$ means the item is harder for the focal group at the same total score. Class C
+  (here q03 and q07) needs $|\Delta_{MH}|\ge1.5$ and significantly above 1; class A means
+  $|\Delta_{MH}|<1$ or not significant. `classification="effect_size"` uses the thresholds only.
+- Matching is on the observed total, so with large group differences in ability and few items
+  some items without DIF can be flagged (q17 here, with a negligible effect size): read the
+  effect sizes, not only the p-values.
+- The matching items must be complete: drop rows with missing responses first.
+
 ## 10. Fixed item parameter calibration (FIPC)
 
 Fix some items at the values of an already scaled item bank and estimate the new items and the

@@ -29,6 +29,7 @@
 | EFA の含意する $\Lambda\Lambda^\top$ / 共通性、CAF・CFI・RMSEA、$\chi^2$、Hull の適合度 / $st$ | 1e-4、2e-4、1e-4（相対）、1e-5 / 1e-2（相対） |
 | CD: 主因子法の $\Lambda\Lambda^\top$、同じ乱数による 1 因子の母集団、順位和の $p$、平均 RMSE（採用された $k$ / 棄却された追加の $k$） | 1e-12、厳密、1e-10（相対）、15% / 60%（相対） |
 | DIMTEST（シミュレーション研究。テストではその小さい版）: .05 での第 1 種の誤り / 検出力 | 20 回中 $\le 0.15$ / 10 回中 $\ge 8$ |
+| 観測得点による DIF: MH・一般化 MH の統計量、$\hat\alpha_{MH}$ とその対数の分散、Mantel の統計量、累積オッズ比とその標準誤差。ロジスティック回帰の尤度比統計量、$\Delta R^2$、係数／標準誤差と Wald。検出結果と純化の経過 | 1e-10（相対）。1e-8 / 1e-6（相対）。一致 |
 | mirt の推定値でのクロス積／サンドイッチの共分散（各要素を $\sqrt{v_{ii}v_{jj}}$ で割った差）。通しで当てはめたときのパラメタ／SE | 1e-9 / 1e-6、1e-6 / 1e-5（相対） |
 
 ## ケース一覧（マイルストーンと対応）
@@ -77,6 +78,7 @@
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
 | V43 | 指定したパラメタでの多次元モデルの情報行列・方向別の情報量・期待得点（相関する 2 因子で 2PL・3PL・4PL・GRM・GPCM・名義の項目と交差負荷 4 項目。3 因子で 2PL・3PL・GRM・GPCM と交差負荷 2 項目。特殊因子 3 の双因子 2PL + GRM。相関する主因子 2 と特殊因子 2 の two-tier 2PL + GRM） | `pars =` と `TOL = NaN` で作った `mirt()` / `bfactor()` のオブジェクトでの `iteminfo(item, Theta, multidim_matrix = TRUE)`、`iteminfo(item, Theta, degrees = )`、`testinfo(m, Theta, degrees = )`、`expected.item()`、`expected.test()` | M7 |
 | V45 | M-step の非拘束尺度（任意、`BAEM(m_step_scale="unconstrained")`）を V3・V4・V5・V7・V9・V11・V14 のケースで照合。`LogitNormalPrior`（`"natural"` は mirt に同等なものがないため独立な数値検証。`mode_scale="logit"` は mirt の `g` への `norm`） | 各ケースの既存の参照値。SciPy（`stats.norm`、`integrate.quad`）と式から書いた停留条件。`v45_3pl_logit_norm_map.json`（mirt）とテスト内で計算した flexMIRT の logit 尺度のモード | #15 |
+| V47 | 観測得点による DIF（flexpyctt、#102）: 連続修正の有無、Holm / BH、純化、利用者のアンカー、外部のマッチング変数を含む Mantel–Haenszel（`difR::verbal`、均一・不均一 DIF を入れたシミュレーションの 2PL）。3 群と名義カテゴリの一般化 MH（シミュレーションの段階反応）。Mantel 検定と Liu–Agresti のオッズ比。ロジスティック回帰（both / uniform / non-uniform、尤度比 / Wald、純化、アンカー、マッチング） | difR 6.1.0 の `difMH()`、`difGMH()`、`difLogistic()`、`difMantel.poly()`、`liu_agresti_ccor()`。`stats::mantelhaen.test()`。R での直接の実装: `packages/flexpyctt/validation/r/ctt_dif_reference.R`。Liu & Agresti（1996、表 1）の計算例 | — |
 | V48 | mirt の推定値での図の数値（2PL $J=10$、$N=1003$。欠測 10% の 2PL。GRM $K=4$、$J=6$。2PL + 3PL + GPCM + 名義の混合 $J=10$。2 群の 2PL + GRM で焦点群の平均・分散を推定。TAM の GPCM $K=4$、$J=6$）: 経験的項目曲線、トレースライン、サーストン閾値 | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))`（群ごとは `extract.group()`）、`probtrace()`、`probtrace()` に対する `uniroot()`、`coef(IRTpars = TRUE)`。TAM `tam.threshold()` | #103 |
 | V50 | リンキングの共通項目の点検（#105）: 頑健 z（Huynh & Meyer, 2010）・変位・期待項目得点曲線の RMSD。除外の順序、純化の各段階のリンキング係数、最終の項目表（2PL、2PL + GRM + GPCM 混在） | 個別の `mirt()` 推定 + 素の R による再計算（`median()`、`quantile(type = 7)`、`expected.item()`、V20 のリンキング）。ドリフト項目の照合に `equateIRT::dif.test` | 現場向け |
 
@@ -1029,6 +1031,31 @@
   JSON の往復、拒否するケース。
 
 ## 照合以外の検証
+- **観測得点による DIF（V47、flexpyctt、#102）**: 参照値は difR 6.1.0 と base R によるもので、
+  `packages/flexpyctt/tests/reference/v47_dif.json` にコミットする。一致の程度: MH の $\chi^2$、$\hat\alpha_{MH}$ と
+  Phillips–Holland の分散、一般化 MH の統計量（difGMH と、群 x カテゴリ x 層の表への `mantelhaen.test()`）、Mantel の
+  統計量とオッズ比は相対 $10^{-10}$ まで（どれも閉じた式）。純化の経過（`difPur`）、反復回数、収束の判定、最終的な
+  検出結果は一致。ロジスティック回帰: `difLogistic()` は既定の `epsilon = 1e-8` で `glm()` を呼ぶので、このデータでは
+  係数と統計量が最尤推定値から相対 $2\times10^{-4}$ までずれる。そこでスクリプトは `stats::glm.control` を
+  `epsilon = 1e-14` のものに置き換える。すると尤度比統計量、$\Delta R^2$、係数は $10^{-8}$ まで、標準誤差と Wald
+  統計量は $10^{-6}$ まで一致する（`glm()` の `vcov()` は 1 つ前の反復の IRLS の重みを使い、逸脱度の基準は
+  $\sqrt{\epsilon}$ 程度のステップで止まる）。テストで確認している既知の差: (1) `mantelhaen.test()` は
+  $\lvert\sum A-\sum E(A)\rvert<1/2$ のとき連続修正を省く（difR と flexpyctt は省かない。シミュレーションのデータで
+  3 項目）。(2) `difMantel.poly()` は出力を丸め（統計量は小数 3 桁、オッズ比は 4 桁）、純化では検出された項目を
+  その項目自身のマッチング得点からも外す。そこで Mantel の統計量と純化の経過は、difR のほかの方法と同じ規則で R で
+  計算し直し、`difMantel.poly()` は丸めた値での照合にとどめる。(3) `liu_agresti_ccor(se = "liu_agresti")` は
+  $T=\sum ad/N-\hat\psi\sum bc/N$ の焦点群の累積度数による微分を $a/N-\hat\psi b/N$ としており（$a/N$ の符号が誤り）、
+  $\sum ad/N$ ではなく $\sum bc/N$ で割るので、その `SE_log_Psi` は $SE(\ln\hat\psi)$ でも $SE(\hat\psi)$ でもない
+  （$\psi=1.48$、3 層、$N=20000$ を 300 反復したモンテカルロの SD 0.0296 に対して 0.031。`verbal` のある項目で
+  Phillips–Holland の 0.36 に対して 0.14）。flexpyctt と R スクリプトの `la_eq3()` は代わりに Liu & Agresti（1996）の
+  式 (3) を使う。小さな層が多数ある場合にも妥当な推定量である（DESIGN §16.20）。R の実装は論文の記法で Python とは
+  独立に書いたもので、論文の計算例（表 1、28 施設: $\ln\hat\theta=-1.153$、SE .571）を再現する。Python のテストも
+  Mantel の 4.84 を含めて同じ公表値を確認する。推定値を代入するデルタ法（レビュー前の実装。層が大きい確認では
+  モンテカルロの 0.0296 に対して 0.0291）はこの例で 0.375 になり、1 層 4 人では約 40% 過小になる。Python の
+  モンテカルロのテスト（4 人と 10 人の層が 150 個、4 カテゴリの比例オッズの項目、400 反復）で式 (3) の SE の平均が
+  $\ln\hat\psi$ のモンテカルロ SD と 10% 以内で一致すること、別のテストで層が大きい 0 / 1 項目では
+  Phillips–Holland の標準誤差と 1% 以内で一致することを確認する。
+  (4) `liu_agresti_ccor()` は flexpyctt の $1/\hat\psi$ を返す（difR の向き: 1 より大きいと焦点群に有利）。
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **M-step の非拘束尺度と `LogitNormalPrior`（V45、#15）**: DESIGN §15.47–§15.48。
   1. *両方の M-step 尺度での内点解*: V3・V4・V5・V9（`tests/test_mirt_m2.py`: 対数尤度、項目と潜在分布のパラメタ。
