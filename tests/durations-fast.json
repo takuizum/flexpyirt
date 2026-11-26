@@ -38,6 +38,7 @@
   "test_mirt_m7_local_dependence_bifactor": 10.4,
   "test_mirt_v40_linking": 43.4,
   "test_mirt_v40_linking_multidim": 5.1,
+  "test_multigroup_latent_shapes": 40.0,
   "test_oakes": 6.7,
   "test_quadrature_gh": 3.0,
   "test_r_m7_sumscore": 10.4,
