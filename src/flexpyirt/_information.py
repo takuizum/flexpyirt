@@ -49,7 +49,8 @@ def item_curves(prob: CompiledProblem, eta: Array, theta: Array) -> tuple[Array,
             d_log_p = jax.jacfwd(log_prob_at)(t)  # (K, D)
             p_cat = jnp.exp(log_p)
             matrix = jnp.einsum("k,km,kn->mn", p_cat, d_log_p, d_log_p)
-            return matrix, jnp.sum(s * p_cat)
+            # Exactly symmetric (the contraction order may differ in the last bit).
+            return 0.5 * (matrix + matrix.T), jnp.sum(s * p_cat)
 
         def per_item(p: Array) -> tuple[Array, Array]:
             return jax.vmap(lambda t: at_theta(t, p))(theta)

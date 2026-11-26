@@ -197,15 +197,17 @@ def _directional(matrices: np.ndarray, direction: np.ndarray | None) -> np.ndarr
 
 
 def _composite_se(matrices: np.ndarray, direction: np.ndarray) -> np.ndarray:
-    r"""Return :math:`\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}` per point (inf if not PD)."""
+    r"""Return :math:`\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}` per point.
+
+    ``inf`` where the matrix is numerically singular: its smallest eigenvalue is at most
+    ``D * eps`` times its largest (or the matrix is 0).
+    """
+    n_dims = matrices.shape[-1]
+    eigvals = np.linalg.eigvalsh(matrices)
+    regular = eigvals[:, 0] > n_dims * np.finfo(np.float64).eps * eigvals[:, -1]
     out = np.full(matrices.shape[0], np.inf)
-    for t, matrix in enumerate(matrices):
-        try:
-            chol = np.linalg.cholesky(matrix)
-        except np.linalg.LinAlgError:
-            continue
-        half = np.linalg.solve(chol, direction)
-        out[t] = float(np.sqrt(half @ half))
+    for t in np.flatnonzero(regular):
+        out[t] = float(np.sqrt(direction @ np.linalg.solve(matrices[t], direction)))
     return out
 
 
@@ -311,7 +313,7 @@ def test_information(
     DataFrame
         One row per point of ``theta`` (indexed as in :func:`item_information`) with the
         columns ``information`` and ``se`` (infinite where the information is 0 or, for a
-        multidimensional model, where the information matrix is not positive definite).
+        multidimensional model, where the information matrix is numerically singular).
 
     Raises
     ------

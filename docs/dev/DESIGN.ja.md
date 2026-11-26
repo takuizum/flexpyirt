@@ -1882,8 +1882,10 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
      つまり合成値 $\mathbf u^\top\boldsymbol\theta$ の ML 推定量の漸近的な条件付き標準誤差で、$D=1$ では
      $I(\theta)^{-1/2}$ になる。$I_{\mathbf u}^{-1/2}$ ではない（こちらは $\mathbf u$ に直交する座標が既知の
      ときの標準誤差）。両者が一致するのは $\mathbf u$ が $\mathbf I$ の固有ベクトルのときだけ。
-     $\mathbf I(\boldsymbol\theta)$ が正定値でない（Cholesky 分解に失敗する。たとえば一次独立な傾き
-     ベクトルが因子数より少ない）点では、1 次元で $I=0$ のときと同じく `se` は $+\infty$。mirt に対応する
+     $\mathbf I(\boldsymbol\theta)$ が数値的に特異な（最小固有値が最大固有値の $D\varepsilon$ 倍
+     以下。$\varepsilon$ は倍精度の機械イプシロン。たとえば一次独立な傾きベクトルが因子数より少ない）
+     点では、1 次元で $I=0$ のときと同じく `se` は $+\infty$。項目の行列は $(\mathbf M+\mathbf M^\top)/2$
+     で対称化し、厳密に対称にする。mirt に対応する
      ものはなく、参照値は R で mirt の項目情報行列の和を逆行列にして作る。
    - `information_matrix(res, theta, *, item=None, group=None)` は形 `(T, D, D)` の NumPy 配列を返す:
      テスト情報行列、または `item=`（項目名）を与えればその項目の行列。DataFrame ではなく配列にするのは、

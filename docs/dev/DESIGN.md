@@ -2536,9 +2536,11 @@ data-independent shapes (§15.21).
      $\mathbf u^\top\boldsymbol\theta$, which reduces to $I(\theta)^{-1/2}$ for $D=1$. It is not
      $I_{\mathbf u}^{-1/2}$, which would be the standard error if the coordinates orthogonal to
      $\mathbf u$ were known; the two coincide only when $\mathbf u$ is an eigenvector of
-     $\mathbf I$. Where $\mathbf I(\boldsymbol\theta)$ is not positive definite (Cholesky
-     fails; e.g. fewer linearly independent slope vectors than factors), `se` is $+\infty$, as
-     for $I=0$ in one dimension. mirt has no counterpart; the reference inverts the sum of
+     $\mathbf I$. Where $\mathbf I(\boldsymbol\theta)$ is numerically singular (its smallest
+     eigenvalue is at most $D\varepsilon$ times its largest, $\varepsilon$ the double-precision
+     machine epsilon; e.g. fewer linearly independent slope vectors than factors), `se` is
+     $+\infty$, as for $I=0$ in one dimension. The item matrices are symmetrized,
+     $(\mathbf M+\mathbf M^\top)/2$, so that they are exactly symmetric. mirt has no counterpart; the reference inverts the sum of
      mirt's item information matrices in R.
    - `information_matrix(res, theta, *, item=None, group=None)` returns a NumPy array of shape
      `(T, D, D)`: the test information matrix, or with `item=` (an item name) that item's matrix.
