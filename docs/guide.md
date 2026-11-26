@@ -202,6 +202,16 @@ res = fit(
   variance, multiple groups, 3PL/4PL, or tight `tol`). It converges to the same fixed point with
   monotone `history["loglik"]` and far fewer EM evaluations. Plain EM (`squarem=False`) is the
   default.
+- **`m_step_scale="unconstrained"`** (default `"natural"`): runs the M-step's Newton steps on
+  $\operatorname{logit}$ / $\log$ scales of the parameters that have a bound — $g$ and $u$ on
+  $\operatorname{logit}$, latent variances on $\log$, factor correlations on
+  $2\operatorname{atanh}\rho$, and a slope only when a `LogNormalPrior` or an edited bound
+  restricts it to $(0, \infty)$. Unbounded parameters such as slopes are not transformed, so
+  negative slopes stay possible. The objective is the same, so an interior solution is the same as
+  with the default; the estimates, parameter table, priors and standard errors stay on the natural
+  scale. The difference is at a bound: the default stops exactly on it (e.g. $g=0$), while the
+  unconstrained scale only approaches it, sometimes after many more iterations. Both raise
+  `HeywoodWarning` once a parameter is within `1e-4` of its bound.
 - **`quadrature`**: the latent-variable grid. The default is 61 equally spaced points on
   $[-6, 6]$ (mirt's default). See [section 13](#13-choosing-the-quadrature-grid) for when to
   widen it.
@@ -355,8 +365,8 @@ the [reference](reference.md#summed_score_distribution) for details.
 `item_information(res, theta)` and `test_information(res, theta)` give the Fisher information of
 each item and of the whole test at the values `theta`, and `expected_score(res, theta)` gives the
 expected item scores and their sum, the test characteristic curve. They work for every item
-model of a unidimensional fit. Each returns a DataFrame indexed by `theta`, so `.plot()` draws the
-curves. `test_information` also has the conditional standard error `se` $=1/\sqrt{I(\theta)}$.
+model. Each returns a DataFrame indexed by `theta`, so `.plot()` draws the curves (multidimensional
+models: [section 14](#information-of-multidimensional-models)). `test_information` also has the conditional standard error `se` $=1/\sqrt{I(\theta)}$ (unidimensional models).
 
 `reliability(res)` returns the marginal reliability: the reliability
 $\sigma^2/(\sigma^2+1/I(\theta))$ of a score with error variance $1/I(\theta)$, averaged over the
@@ -899,7 +909,7 @@ fipc_spec_irt = (
 ## 11. Priors and MAP estimation
 
 Attach prior distributions to item parameters with `Model.prior(*, param, dist, items=None)` to
-perform Bayes modal (MAP) estimation (Mislevy, 1986; Swaminathan & Gifford, 1986). Three
+perform Bayes modal (MAP) estimation (Mislevy, 1986; Swaminathan & Gifford, 1986). Four
 natural-scale priors are provided:
 
 | Class | Support | Typical use |
@@ -907,9 +917,21 @@ natural-scale priors are provided:
 | `NormalPrior(mean, sd)` | $(-\infty, \infty)$ | Intercepts `d` / `dk`, or slopes `a` |
 | `LogNormalPrior(mean_log, sd_log)` | $(0, \infty)$ | Slopes `a` ($\log a \sim N(\mu, s^2)$) |
 | `BetaPrior(a, b)` | $(0, 1)$ | 3PL / 4PL asymptotes `g` and `u` |
+| `LogitNormalPrior(mean_logit, sd_logit)` | $(0, 1)$ | 3PL / 4PL asymptotes ($\operatorname{logit} g \sim N(\mu, s^2)$) |
 
 Priors are evaluated directly on the **natural parameter scale** without a Jacobian term
-(matching R mirt's log-prior objective `LL.Priors`). In a multiple-group model, `.prior()`
+(matching R mirt's log-prior objective `LL.Priors`). `LogitNormalPrior` is the density of $g$
+when $\operatorname{logit} g$ is normal (Aitchison & Shen, 1980), so its formula contains
+$-\log g - \log(1 - g)$: that term is part of the density of $g$, not a change of scale. For
+example, `LogitNormalPrior(-1.0986, 0.5)` centers $g$ on $1/4$, the chance rate of four-option
+items. flexMIRT's `Guessing : Normal(mean, sd)` (and R mirt's `PRIOR = (..., g, norm, mean, sd)`)
+describes the same distribution of $g$ but maximizes the posterior over $\operatorname{logit} g$,
+which leaves that term out, so its estimates of $g$ typically lie somewhat closer to $1/2$. To
+reproduce those estimates, pass `mode_scale="logit"`:
+`LogitNormalPrior(-1.0986, 0.5, mode_scale="logit")` evaluates
+$\log\phi(\operatorname{logit} g; \mu, s)$ without the Jacobian, so the MAP estimate, the
+log posterior and the standard errors are those of the logit-metric objective (the SE of $g$
+is the delta-method SE $g(1-g)\,\mathrm{SE}(\operatorname{logit} g)$). In a multiple-group model, `.prior()`
 applies to every group, and a parameter shared across groups (same `free_id`) is counted **once**.
 Fixed parameters ignore their prior. Priors on latent-distribution parameters (`"mean"`, `"var"`)
 are not supported (`SpecificationError`).
@@ -954,7 +976,7 @@ print(table.head(4))
 | `value` | Starting value (the fixed value if not free) |
 | `free` | Whether the parameter is estimated |
 | `lower`, `upper` | Bounds; starting values must lie strictly inside |
-| `prior` | Prior object (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, or `None`; ignored if fixed) |
+| `prior` | Prior object (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior`, or `None`; ignored if fixed) |
 | `free_id` | Free-parameter number. **Rows with the same number are constrained to be equal.** Newly freed rows may keep `-1` (they get a number) |
 
 ```python
@@ -1098,6 +1120,41 @@ res_mg = fit(
 )
 print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
 ```
+
+### Information of multidimensional models
+
+The information functions of section 5 also work for confirmatory, bifactor and two-tier models.
+With several factors the information about $\boldsymbol\theta$ is a matrix,
+$\mathbf I(\boldsymbol\theta)=\sum_j\sum_kP_{jk}\,\nabla\log P_{jk}\,\nabla\log P_{jk}^\top$, which
+`information_matrix(res, theta)` returns as an array of shape `(T, D, D)` (one item's with
+`item=`). `item_information` and `test_information` give the information in one direction
+$\mathbf u$ of the latent space, $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$ (Reckase &
+McKinley, 1991), so they need `direction=`, a vector with one entry per factor (it is scaled to
+length 1). `theta` is a `(T, D)` array or a DataFrame with the factor names as columns, and the
+results are indexed by the factor values. `expected_score` needs no direction.
+
+```python
+from flexpyirt import expected_score, information_matrix, item_information, test_information
+
+grid = pd.DataFrame({"F1": [-1.0, 0.0, 1.0], "F2": [0.0, 0.0, 0.5]})
+angle = np.radians(30.0)
+direction = [np.cos(angle), np.sin(angle)]  # 30 degrees from F1 (mirt: degrees = c(30, 60))
+print(item_information(res_mirt, grid, direction=direction).iloc[:, :3].round(3))
+print(test_information(res_mirt, grid, direction=direction).round(3))  # information, se
+print(information_matrix(res_mirt, grid)[0].round(3))  # 2 x 2 test information at (-1, 0)
+print(expected_score(res_mirt, grid)["total"].round(2))
+```
+
+- mirt's `degrees=` (the angle to each axis) corresponds to `direction=np.cos(np.radians(degrees))`
+  when the angles are consistent ($\sum_m\cos^2\alpha_m=1$); flexpyirt scales the direction to length
+  1, mirt does not.
+- `test_information`'s `se` is the standard error of the estimate of the combination
+  $\mathbf u^\top\boldsymbol\theta$, $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$, which is at least
+  $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ because the other directions are estimated too. It is
+  infinite where the information matrix is singular. mirt's `plot(type = "SE")` draws
+  $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ instead, `1 / np.sqrt` of the `information` column.
+- In bifactor and two-tier models `theta` has a column for every factor, general and specific.
+- Reliability and the summed-score functions are for unidimensional models only.
 
 ### Bifactor models
 
@@ -1580,6 +1637,7 @@ except SpecificationError as e:
 
 ## References
 
+- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
@@ -1597,6 +1655,8 @@ except SpecificationError as e:
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
+- Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.

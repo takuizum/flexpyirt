@@ -1,4 +1,4 @@
-r"""Classification accuracy and consistency for cut scores (DESIGN.md §18.3).
+r"""Classification accuracy and consistency for cut scores (DESIGN.md §18.4).
 
 Result / Python shell layer for unidimensional models: :func:`classification_accuracy` takes a
 :class:`~flexpyirt.FitResult` and cut scores and returns a :class:`ClassificationResult`. The

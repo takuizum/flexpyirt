@@ -194,6 +194,13 @@ res = fit(
   単調性・実行可能性の安全装置が $\theta_2$ に戻した場合は 2 回）。収束の遅いモデル（分散を推定する Rasch / PCM、
   多母集団、3PL / 4PL、厳しい `tol`）で有効にする。同じ不動点に収束し、`history["loglik"]` は単調で、
   EM の評価回数が大きく減る。既定は通常の EM（`squarem=False`）。
+- **`m_step_scale="unconstrained"`**（既定は `"natural"`）: 範囲のあるパラメタについて、M-step の Newton 法を
+  $\operatorname{logit}$ / $\log$ 尺度で進める。$g$・$u$ は $\operatorname{logit}$、潜在分散は $\log$、因子間相関は
+  $2\operatorname{atanh}\rho$ で、傾きは `LogNormalPrior` や編集した範囲で $(0, \infty)$ に制限されているときだけ
+  $\log$ になる。傾きのような範囲のないパラメタは変換しないので、負の傾きもそのまま推定できる。目的関数は同じなので
+  内点解は既定と同じで、推定値・パラメタ表・事前分布・標準誤差は自然尺度のまま。違いは境界にある: 既定は境界上
+  （例: $g=0$）でちょうど止まるが、非拘束尺度は境界に近づくだけで、かなり多くの反復を要することがある。どちらも
+  パラメタが境界から `1e-4` 以内になると `HeywoodWarning` を出す。
 - **`quadrature`**: 潜在変数の求積格子。既定は等間隔 61 点・$[-6, 6]$（mirt の既定と同じ）。
   広げるべき場合は [13 節](#13-求積格子の選び方)。
 - **`se`**: `"oakes"`（既定）、`"hessian"`、`"sandwich"`、`"crossprod"`、`None`（計算しない）。
@@ -332,9 +339,9 @@ print(np.asarray(score_dist).sum(axis=1))  # each row sums to 1
 ### 情報関数・期待得点・信頼性
 
 `item_information(res, theta)` と `test_information(res, theta)` は、`theta` の各値での項目ごと・テスト全体の
-Fisher 情報量を返す。`expected_score(res, theta)` は項目の期待得点とその和（テスト特性曲線）を返す。1 次元の
-推定結果なら、どの項目モデルでも使える。どれも `theta` をインデックスにした DataFrame を返すので、`.plot()` で
-そのまま曲線が描ける。`test_information` には条件付き標準誤差 `se` $=1/\sqrt{I(\theta)}$ も入る。
+Fisher 情報量を返す。`expected_score(res, theta)` は項目の期待得点とその和（テスト特性曲線）を返す。どの
+項目モデルでも使える。どれも `theta` をインデックスにした DataFrame を返すので、`.plot()` でそのまま曲線が描ける
+（多次元モデルは [14 節](#多次元モデルの情報量)）。`test_information` には条件付き標準誤差 `se` $=1/\sqrt{I(\theta)}$ も入る（1 次元モデル）。
 
 `reliability(res)` は周辺信頼性を返す。誤差分散 $1/I(\theta)$ の得点の信頼性
 $\sigma^2/(\sigma^2+1/I(\theta))$ を、推定された潜在分布で平均したもの。反応データを渡して
@@ -822,15 +829,24 @@ fipc_spec_irt = (
 ## 11. 事前分布と MAP 推定
 
 `Model.prior(*, param, dist, items=None)` で項目パラメタに事前分布を付けると、Bayes modal（MAP）推定を行う
-（Mislevy, 1986; Swaminathan & Gifford, 1986）。自然尺度上の 3 種類の事前分布を用意している。
+（Mislevy, 1986; Swaminathan & Gifford, 1986）。自然尺度上の 4 種類の事前分布を用意している。
 
 | クラス | 台（サポート） | 主な用途 |
 |---|---|---|
 | `NormalPrior(mean, sd)` | $(-\infty, \infty)$ | 切片 `d` / `dk`、または傾き `a` |
 | `LogNormalPrior(mean_log, sd_log)` | $(0, \infty)$ | 傾き `a`（$\log a \sim N(\mu, s^2)$） |
 | `BetaPrior(a, b)` | $(0, 1)$ | 3PL / 4PL の漸近線 `g`・`u` |
+| `LogitNormalPrior(mean_logit, sd_logit)` | $(0, 1)$ | 3PL / 4PL の漸近線（$\operatorname{logit} g \sim N(\mu, s^2)$） |
 
 事前分布は**ヤコビアンなしの自然パラメタ尺度**で直接評価する（R mirt の対数事前目的関数 `LL.Priors` と一致）。
+`LogitNormalPrior` は $\operatorname{logit} g$ が正規分布に従うときの $g$ の密度（Aitchison & Shen, 1980）なので、式に
+$-\log g - \log(1 - g)$ が入る。これは $g$ の密度の一部で、尺度の変更ではない。たとえば
+`LogitNormalPrior(-1.0986, 0.5)` は $g$ の中心を 4 肢選択の当て推量の確率 $1/4$ に置く。flexMIRT の
+`Guessing : Normal(mean, sd)`（と R mirt の `PRIOR = (..., g, norm, mean, sd)`）は $g$ の分布としては同じだが、
+事後分布を $\operatorname{logit} g$ について最大化するのでこの項が入らず、$g$ の推定値はふつう少し $1/2$ に近くなる。
+その推定値を再現するには `mode_scale="logit"` を渡す: `LogitNormalPrior(-1.0986, 0.5, mode_scale="logit")` は
+ヤコビアンなしの $\log\phi(\operatorname{logit} g; \mu, s)$ を評価するので、MAP 推定値・対数事後・標準誤差は logit 尺度の
+目的関数のものになる（$g$ の SE はデルタ法の SE $g(1-g)\,\mathrm{SE}(\operatorname{logit} g)$）。
 多母集団モデルでは `.prior()` が全群に適用され、群間で共有されるパラメタ（同じ `free_id`）の事前分布は **1 回だけ**
 数えられる。固定されたパラメタの事前分布は無視される。潜在分布パラメタ（`"mean"`, `"var"`）への事前分布は対象外
 （`SpecificationError`）。
@@ -873,7 +889,7 @@ print(table.head(4))
 | `value` | 初期値（固定なら固定値） |
 | `free` | 推定するか |
 | `lower`, `upper` | 範囲。初期値はこの範囲の内側でなければならない |
-| `prior` | 事前分布オブジェクト（`NormalPrior`, `LogNormalPrior`, `BetaPrior`, または `None`。固定なら無視） |
+| `prior` | 事前分布オブジェクト（`NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior`, または `None`。固定なら無視） |
 | `free_id` | 自由パラメタの番号。**同じ番号の行は同じ値に制約される**（等値制約）。新しく自由にした行は `-1` のままでよい（番号が振られる） |
 
 ```python
@@ -1008,6 +1024,37 @@ res_mg = fit(
 )
 print(res_mg.latent.round(3))  # focal mean_1, mean_2, var_1, var_2 and both groups' cor_12
 ```
+
+### 多次元モデルの情報量
+
+5 節の情報関数は、確認的・双因子・two-tier モデルにも使える。因子が複数あると $\boldsymbol\theta$ についての
+情報量は行列 $\mathbf I(\boldsymbol\theta)=\sum_j\sum_kP_{jk}\,\nabla\log P_{jk}\,\nabla\log P_{jk}^\top$ になり、
+`information_matrix(res, theta)` がこれを形 `(T, D, D)` の配列で返す（`item=` を渡すとその項目の行列）。
+`item_information` と `test_information` は、潜在空間の 1 つの方向 $\mathbf u$ についての情報量
+$\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$（Reckase & McKinley, 1991）を返すので、`direction=`
+（因子ごとに 1 つの値をもつベクトル。長さ 1 に正規化する）が必要。`theta` は `(T, D)` の配列か、因子名を列に
+もつ DataFrame で、結果は因子の値をインデックスにする。`expected_score` には方向は要らない。
+
+```python
+from flexpyirt import expected_score, information_matrix, item_information, test_information
+
+grid = pd.DataFrame({"F1": [-1.0, 0.0, 1.0], "F2": [0.0, 0.0, 0.5]})
+angle = np.radians(30.0)
+direction = [np.cos(angle), np.sin(angle)]  # F1 から 30 度（mirt では degrees = c(30, 60)）
+print(item_information(res_mirt, grid, direction=direction).iloc[:, :3].round(3))
+print(test_information(res_mirt, grid, direction=direction).round(3))  # information, se
+print(information_matrix(res_mirt, grid)[0].round(3))  # (-1, 0) での 2 x 2 のテスト情報行列
+print(expected_score(res_mirt, grid)["total"].round(2))
+```
+
+- mirt の `degrees=`（各軸との角度）は、角度が整合している（$\sum_m\cos^2\alpha_m=1$）とき
+  `direction=np.cos(np.radians(degrees))` にあたる。flexpyirt は方向を長さ 1 にするが、mirt はしない。
+- `test_information` の `se` は、組み合わせ $\mathbf u^\top\boldsymbol\theta$ の推定値の標準誤差
+  $\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}$。ほかの方向も推定するので、$1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$
+  以上になる。情報行列が特異な点では無限大。mirt の `plot(type = "SE")` は代わりに
+  $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$ を描く。これは `information` 列の `1 / np.sqrt`。
+- 双因子モデルと two-tier モデルでは、`theta` は一般因子・特殊因子を含むすべての因子の列をもつ。
+- 信頼性と合計得点の関数は 1 次元モデル専用。
 
 ### 双因子モデル
 
@@ -1437,6 +1484,7 @@ except SpecificationError as e:
 
 ## 参考文献
 
+- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
@@ -1454,6 +1502,8 @@ except SpecificationError as e:
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25(1), 53–67.
+- Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.

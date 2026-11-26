@@ -1,6 +1,6 @@
 """V52: classification accuracy and consistency vs cacIRT and a recomputation from R mirt.
 
-Reference values come from ``validation/r/classification_reference.R`` (DESIGN.md §18.3,
+Reference values come from ``validation/r/classification_reference.R`` (DESIGN.md §18.4,
 VALIDATION.md V52): cacIRT's ``class.Lee()`` (3PL), ``Lee.poly.D()`` / ``Lee.poly.P()`` (GRM)
 and ``Rud.D()`` / ``Rud.P()`` with mirt's information SE, together with an independent
 recomputation in R from mirt's ``probtrace()``, ``expected.test()`` and ``testinfo()`` that

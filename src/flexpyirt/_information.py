@@ -1,7 +1,8 @@
-r"""Information, expected-score and summed-score EAP kernels (Core layer, DESIGN.md §18.2).
+r"""Information, expected-score and summed-score EAP kernels (Core layer, DESIGN.md §18.2, §18.3).
 
-Pure JAX functions on :class:`~flexpyirt._core.CompiledProblem` pytrees for unidimensional
-models. The item information comes from automatic differentiation of the category
+Pure JAX functions on :class:`~flexpyirt._core.CompiledProblem` pytrees. The information
+kernel serves unidimensional and multidimensional models (§18.3); the summed-score EAP is
+unidimensional. The item information comes from automatic differentiation of the category
 log-probabilities of each item kernel; there are no hand-written item-family derivatives.
 """
 
@@ -19,20 +20,21 @@ __all__ = ["category_probabilities", "item_curves", "summed_score_eap"]
 
 
 def item_curves(prob: CompiledProblem, eta: Array, theta: Array) -> tuple[Array, Array]:
-    r"""Return the item information and the expected item score of every group at ``theta``.
+    r"""Return the item information matrices and expected item scores of every group.
 
     .. math::
-        I_j(\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\theta)
-            \Big(\frac{\partial\log P_{jk}(\theta)}{\partial\theta}\Big)^2,\qquad
-        E_j(\theta)=\sum_{k=0}^{K_j-1}k\,P_{jk}(\theta)
+        \mathbf I_j(\boldsymbol\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\boldsymbol\theta)\,
+            \nabla\log P_{jk}(\boldsymbol\theta)\,\nabla\log P_{jk}(\boldsymbol\theta)^\top,
+        \qquad E_j(\boldsymbol\theta)=\sum_{k=0}^{K_j-1}k\,P_{jk}(\boldsymbol\theta)
 
-    (Birnbaum, 1968; Samejima, 1969). ``theta`` has shape ``(T,)``; both results have shape
-    ``(G, T, J)`` with items in column order.
+    (Birnbaum, 1968; Samejima, 1969; Reckase, 2009). ``theta`` has shape ``(T, D)`` with ``D``
+    the number of factors of the model (``D = 1`` for unidimensional models). The information
+    has shape ``(G, T, J, D, D)`` and the expected score ``(G, T, J)``, items in column order.
     """
     n_items = prob.y.shape[1]
-    shape = (prob.n_groups, theta.shape[0], n_items)
-    information = jnp.zeros(shape, dtype=theta.dtype)
-    expected = jnp.zeros(shape, dtype=theta.dtype)
+    n_points, n_dims = theta.shape
+    information = jnp.zeros((prob.n_groups, n_points, n_items, n_dims, n_dims), dtype=theta.dtype)
+    expected = jnp.zeros((prob.n_groups, n_points, n_items), dtype=theta.dtype)
     for fam in prob.families:
         xi = _expand(eta, fam.fixed_values, fam.free_index)  # (G, J_f, P_f)
         scores = jnp.arange(fam.kernel.n_categories, dtype=theta.dtype)
@@ -41,17 +43,19 @@ def item_curves(prob: CompiledProblem, eta: Array, theta: Array) -> tuple[Array,
             t: Array, p: Array, k: ItemKernel = fam.kernel, s: Array = scores
         ) -> tuple[Array, Array]:
             def log_prob_at(u: Array) -> Array:
-                return k.log_prob(u.reshape(1, 1), p)[0]
+                return k.log_prob(u.reshape(1, -1), p)[0]
 
             log_p = log_prob_at(t)
-            d_log_p = jax.jacfwd(log_prob_at)(t)
+            d_log_p = jax.jacfwd(log_prob_at)(t)  # (K, D)
             p_cat = jnp.exp(log_p)
-            return jnp.sum(p_cat * d_log_p * d_log_p), jnp.sum(s * p_cat)
+            matrix = jnp.einsum("k,km,kn->mn", p_cat, d_log_p, d_log_p)
+            # Exactly symmetric (the contraction order may differ in the last bit).
+            return 0.5 * (matrix + matrix.T), jnp.sum(s * p_cat)
 
         def per_item(p: Array) -> tuple[Array, Array]:
             return jax.vmap(lambda t: at_theta(t, p))(theta)
 
-        info_f, exp_f = jax.vmap(jax.vmap(per_item))(xi)  # (G, J_f, T)
+        info_f, exp_f = jax.vmap(jax.vmap(per_item))(xi)  # (G, J_f, T, D, D), (G, J_f, T)
         information = information.at[:, :, fam.columns].set(jnp.swapaxes(info_f, 1, 2))
         expected = expected.at[:, :, fam.columns].set(jnp.swapaxes(exp_f, 1, 2))
     return information, expected

@@ -19,13 +19,13 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult)
 - 相関（flexpyctt）: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - 次元数（`model_parallel_analysis` と `dimensionality` 以外は flexpyctt）: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) とその結果
-- 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
+- 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - 図: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
 - 分類: [`classification_accuracy`](#classification_accuracy), [`ClassificationResult`](#classificationresult)
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)、[ユーザー定義の項目モデル](#ユーザー定義の項目モデル)
-- 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
+- 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior), [`LogitNormalPrior`](#logitnormalprior)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - 例外と警告: [`flexpyirt.errors`](#flexpyirterrors)
@@ -470,7 +470,7 @@ model.equal_across_items(*, items, params) -> Model
 model.prior(*, param, dist, items=None) -> Model
 ```
 
-選択した項目の内部パラメタ `param` に事前分布 `dist`（`NormalPrior`, `LogNormalPrior`, `BetaPrior`）を全群共通で付ける
+選択した項目の内部パラメタ `param` に事前分布 `dist`（`NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior`）を全群共通で付ける
 （MAP 推定、[ガイド 11 節](guide.ja.md#11-事前分布と-map-推定)）。事前分布はヤコビアンなしの自然尺度で評価される。
 固定パラメタの事前分布は無視され、群間で共有されるパラメタ（同じ `free_id`）は 1 回だけ数えられる。潜在分布パラメタ
 （`"mean"`, `"var"`, `"phi_*"`, `"rmean_*"`, `"rvar_*"`, `"logit_*"` など）への指定は `SpecificationError`。
@@ -478,7 +478,7 @@ model.prior(*, param, dist, items=None) -> Model
 | 引数 | 説明 |
 |---|---|
 | `param` | 内部項目パラメタ名（`"a"`, `"d"`, `"g"`, `"u"`, `"d1"`, …） |
-| `dist` | `NormalPrior`, `LogNormalPrior`, `BetaPrior` のいずれか |
+| `dist` | `NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior` のいずれか |
 | `items` | 項目名のリスト、`str -> bool` の関数、または全項目を表す `None` |
 
 #### `Model.parameter_table`
@@ -697,6 +697,24 @@ $(0, 1)$ 上のベータ事前分布:
 $\log\pi(x) = (a - 1)\log x + (b - 1)\log(1 - x) - \log B(a, b)$
 （$(0, 1)$ の外で $-\infty$。Swaminathan & Gifford, 1986、mirt の `expbeta` の自然尺度対数事前目的関数と一致、
 logit ヤコビアンなし）。正の有限な `a`, `b` が必要。3PL / 4PL の漸近線 `g`, `u` によく使う。
+
+### `LogitNormalPrior`
+
+```text
+LogitNormalPrior(mean_logit, sd_logit, *, mode_scale="natural")
+```
+
+$(0, 1)$ 上のロジット正規事前分布（$\operatorname{logit} X \sim N(\mu, s^2)$; Aitchison & Shen, 1980）:
+$\log\pi(x) = -\log x - \log(1 - x) - \log s - \tfrac{1}{2}\log(2\pi) - \frac{(\operatorname{logit} x - \mu)^2}{2s^2}$
+（$(0, 1)$ の外では $-\infty$）。$-\log x - \log(1 - x)$ の項は $X$ 自体の密度の一部。有限の `mean_logit` と正の有限な
+`sd_logit` が必要。3PL / 4PL の漸近線によく使う: `LogitNormalPrior(-1.0986, 0.5)` は `g` の中心を $1/4$ に置く。
+flexMIRT の `Guessing : Normal(mean, sd)` と mirt の `PRIOR = (..., g, norm, mean, sd)` は同じ分布だが、事後分布を
+$\operatorname{logit} g$ について（この項なしで）最大化するので、推定値は少し違う（[ガイド 11 節](guide.ja.md#11-事前分布と-map-推定)）。
+
+| 引数 | 説明 |
+|---|---|
+| `mean_logit`, `sd_logit` | $\operatorname{logit} X$ の平均と標準偏差 |
+| `mode_scale` | `"natural"`（既定）: 上の密度で、自然尺度の事後モード。`"logit"`: ヤコビアンなしの項 $\log\phi(\operatorname{logit} x; \mu, s)$ で、flexMIRT と mirt の logit 尺度の事後モード・対数事後・（デルタ法の）SE を与える |
 
 ---
 
@@ -1203,37 +1221,73 @@ dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=
 
 ## 情報関数と信頼性
 
-推定済みの 1 次元モデルに対する関数（[ガイド 5 節](guide.ja.md#情報関数期待得点信頼性)）。多次元モデルでは
-どれも `SpecificationError`。
+推定済みのモデルに対する関数（[ガイド 5 節](guide.ja.md#情報関数期待得点信頼性)）。情報関数と `expected_score` は
+1 次元・確認的多次元・双因子・two-tier モデルに使える（[ガイド 14 節](guide.ja.md#多次元モデルの情報量)）。
+`reliability` と合計得点の関数は、多次元モデルでは `SpecificationError`。
+
+因子が $D$ 個のモデルでは、`theta` は形 `(T, D)` の配列、列がちょうど因子名である DataFrame（順序は任意）、
+または 1 点を表す長さ $D$ の 1 次元配列。結果は、水準名が因子名の `MultiIndex` をインデックスにする。1 次元
+モデルでは `theta` は数値か 1 次元配列で、インデックスの名前は `theta`。
 
 ### `item_information`
 
 ```text
-item_information(res, theta, *, group=None) -> DataFrame
+item_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 潜在特性の値 `theta` での各項目の Fisher 情報量
 $I_j(\theta)=\sum_kP_{jk}(\theta)\,(\partial\log P_{jk}(\theta)/\partial\theta)^2$（Birnbaum, 1968;
-Samejima, 1969）。どの項目モデルでも自動微分で計算する。mirt の `iteminfo()` が返す値と同じ。
+Samejima, 1969）。どの項目モデルでも自動微分で計算する。mirt の `iteminfo()` が返す値と同じ。多次元モデルでは、
+単位ベクトル $\mathbf u$ = `direction` / ‖`direction`‖ の方向の情報量
+$\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u$（$\mathbf I_j$ は [`information_matrix`](#information_matrix)
+の項目情報行列。Reckase & McKinley, 1991）。mirt の `iteminfo(..., degrees = )` は
+`direction=np.cos(np.radians(degrees))` にあたる（$\sum_m\cos^2\alpha_m=1$ のとき。mirt は方向を正規化しない）。
 
 | 引数 | 型 | 説明 |
 |---|---|---|
-| `res` | `FitResult` | 推定済みの 1 次元モデル |
-| `theta` | float / 1 次元配列 | 潜在特性の値（有限） |
+| `res` | `FitResult` | 推定済みのモデル |
+| `theta` | float / 配列 / DataFrame | 潜在特性の値（有限。上を参照） |
+| `direction` | 長さ $D$ の 1 次元配列（任意） | 潜在空間の方向。長さ 1 に正規化する。多次元モデルでは必須、1 次元モデルでは指定できない |
 | `group` | str（任意） | 群名。多母集団モデルでは必須 |
 
-**戻り値**: `theta` の値ごとに 1 行（インデックス。名前は `theta`）、項目ごとに 1 列の `DataFrame`。
+**戻り値**: `theta` の点ごとに 1 行、項目ごとに 1 列の `DataFrame`。
 
 ### `test_information`
 
 ```text
-test_information(res, theta, *, group=None) -> DataFrame
+test_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 テスト情報量 $I(\theta)=\sum_jI_j(\theta)$ と条件付き標準誤差 $1/\sqrt{I(\theta)}$（mirt の `testinfo()`）。
+多次元モデルでは、方向別のテスト情報量 $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$（mirt の
+`testinfo(..., degrees = )`）と、合成値 $\mathbf u^\top\boldsymbol\theta$ の推定値の標準誤差
+$\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$（1 次元では $1/\sqrt{I(\theta)}$ に等しい）。
+mirt の `plot(type = "SE")` が描く $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$（`1 / np.sqrt(information)`）ではない。
 引数は [`item_information`](#item_information) と同じ。
 
-**戻り値**: `theta` をインデックスとし、列 `information` と `se` をもつ `DataFrame`。
+**戻り値**: [`item_information`](#item_information) と同じインデックスで、列 `information` と `se` をもつ
+`DataFrame`（情報量が 0 か情報行列が特異な点では `se` は無限大）。
+
+### `information_matrix`
+
+```text
+information_matrix(res, theta, *, item=None, group=None) -> ndarray
+```
+
+`theta` の各点での 1 項目の Fisher 情報行列
+$\mathbf I_j(\boldsymbol\theta)=\sum_kP_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}^\top$、
+またはテスト情報行列 $\sum_j\mathbf I_j$（Reckase, 2009）。自動微分で計算する。mirt の
+`iteminfo(..., multidim_matrix = TRUE)`（テストは項目についての和）にあたる。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `res` | `FitResult` | 推定済みのモデル |
+| `theta` | float / 配列 / DataFrame | 潜在特性の値（有限。上を参照） |
+| `item` | str（任意） | 項目名。省略するとテスト情報行列 |
+| `group` | str（任意） | 群名。多母集団モデルでは必須 |
+
+**戻り値**: 形 `(T, D, D)` の配列。点ごとに対称な半正定値行列が 1 つで、行と列はモデルの因子の順
+（1 次元モデルでは `(T, 1, 1)`）。
 
 ### `expected_score`
 
@@ -1242,11 +1296,11 @@ expected_score(res, theta, *, group=None) -> DataFrame
 ```
 
 項目の期待得点 $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ とテスト特性曲線 $T(\theta)=\sum_jE_j(\theta)$。
-カテゴリの得点はデータと同じ $0,\dots,K_j-1$（mirt の `expected.item()` と `expected.test()`）。引数は
-[`item_information`](#item_information) と同じ。
+カテゴリの得点はデータと同じ $0,\dots,K_j-1$（mirt の `expected.item()` と `expected.test()`）。多次元モデルでは
+$\theta$ はベクトル。引数 `res`・`theta`・`group` は [`item_information`](#item_information) と同じ。
 
-**戻り値**: `theta` をインデックスとし、項目ごとの列と列 `total` をもつ `DataFrame`。`total` という名前の
-項目があると `SpecificationError`。
+**戻り値**: [`item_information`](#item_information) と同じインデックスで、項目ごとの列と列 `total` をもつ
+`DataFrame`。`total` という名前の項目があると `SpecificationError`。
 
 ### `reliability`
 
@@ -1441,7 +1495,7 @@ classification_accuracy(res, *, cut_scores, method="lee", scale=None, data=None,
                         item_names=None, score_method="EAP") -> ClassificationResult
 ```
 
-カット得点による分類の正確さと一貫性（[ガイド 7 節](guide.ja.md#分類の正確さと一貫性)、DESIGN.md §18.3）。カット
+カット得点による分類の正確さと一貫性（[ガイド 7 節](guide.ja.md#分類の正確さと一貫性)、DESIGN.md §18.4）。カット
 $c_1<\dots<c_C$ がカテゴリ $h(v)=\#\{k: v\ge c_k\}=0,\dots,C$ を決める。真の値 $\theta$ で、各方法は観測
 カテゴリの確率 $P_h(\theta)$ と真のカテゴリ $t(\theta)$ を与える:
 
@@ -1495,7 +1549,7 @@ DataFrame にも先頭に `group` 列がつく（2 つの表は `(group, categor
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural")
 ```
 
 | 引数 | 説明 |
@@ -1504,6 +1558,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 | `max_iter` | 採択される最大反復回数。到達すると `ConvergenceWarning` |
 | `m_step_newton_steps` | 1 回の M-step で進める Newton 法のステップ数。各ステップで期待対数尤度は減らない |
 | `squarem` | SQUAREM スキーム S3 加速（Varadhan & Roland, 2008）と単調性・実行可能性の安全装置を有効にする（既定 `False`） |
+| `m_step_scale` | `"natural"`（既定）: M-step の Newton 法を範囲つきの自然尺度で行い、境界解にちょうど到達する。`"unconstrained"`: 範囲のあるパラメタ（$g$、$u$、潜在分散、因子間相関、事前分布や編集した範囲で制限された傾き）を $\operatorname{logit}$ / $\log$ 尺度で動かす。範囲のないパラメタは変換しない。目的関数と内点解は同じで、推定値・表・事前分布・SE は自然尺度のまま。境界解には近づくだけ（[ガイド 4 節](guide.ja.md#4-推定する)） |
 
 ### `Quadrature`
 

@@ -97,6 +97,9 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   $\dim\xi_j\le 5$ or so). Items of the same item model ("item family") are stacked and `vmap`ed.
   A backtracking line search guarantees that $Q_j$ increases (monotone, as a generalized EM). The
   M-step need not converge fully; a few Newton steps are enough.
+  The Newton runs on the natural scale with a bounded active set (§15.2) by default;
+  `BAEM(m_step_scale="unconstrained")` runs it on logit/log scales of the bounded coordinates
+  instead, with the same objective (§15.47).
 - Fixed parameters are not part of $\eta$ (they come from the ParameterTable as constants).
 - **Equality constraints across items** (e.g. one common $a$ for all items) break the
   decomposition. **Decision (M5, §16.1)**: items connected by shared `free_id`s form a component
@@ -216,6 +219,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   posterior than $\theta_2$, $\alpha$ is stepped back towards $-1$ up to a fixed number of halvings;
   if still unacceptable, $\theta_2$ is used directly, guaranteeing monotone log posterior
   (§15.11–§15.12, §15.17).
+  SQUAREM always works on the natural scale, whatever `m_step_scale` is (§15.47).
 - Both plain EM and SQUAREM run entirely on device in `lax.while_loop` (no Python iteration loop or
   host callbacks). Optional progress output with `jax.debug.callback` is left for later.
 
@@ -227,8 +231,13 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   a Jacobian term (the posterior mode on the natural scale; verified against R mirt 1.46's
   `LL.Priors`, where `expbeta` evaluates `dbeta(plogis(logit_g), a, b, log = TRUE)` with no logit
   Jacobian; see VALIDATION.md).
-- Even if optimization ran on a transformed scale, the objective is evaluated with the
-  natural-scale prior.
+- Even if optimization runs on a transformed scale (`BAEM(m_step_scale="unconstrained")`,
+  §15.47), the objective is evaluated with the natural-scale prior.
+- **Decision (#15, §15.48)**: `LogitNormalPrior(mean_logit, sd_logit)` is a fourth prior, a
+  distribution on $(0,1)$ with $\operatorname{logit}X\sim N(\mu,s^2)$. Its natural-scale density
+  contains the logit Jacobian because that is part of the density of $X$ itself, not a change
+  of optimization scale. `LogitNormalPrior(..., mode_scale="logit")` drops that Jacobian to give
+  the logit-metric posterior mode of flexMIRT and mirt (§15.48).
 - Fixed parameters ignore their priors; a parameter shared across groups (same `free_id`) is
   counted **once**. Priors on latent-distribution parameters are out of scope (`SpecificationError`).
 - Results report `loglik` (likelihood only) and `log_posterior` (equal to `loglik` without priors)
@@ -518,6 +527,8 @@ data-independent shapes (§15.21).
    coordinate within $10^{-8}$ of a bound whose gradient points outwards is held for that step
    ($\varepsilon$-active set; Bertsekas, 1982) so a boundary asymptote does not block `a` and `d`
    from converging. The objective-ascent check still guarantees EM monotonicity.
+   `BAEM(m_step_scale="unconstrained")` replaces this box with logit/log coordinates (§15.47);
+   the default stays this active-set Newton.
 3. **Numerical stability at $g=0$ and $u=1$**: log-probabilities are computed as
    $$\log P_1 = \operatorname{logaddexp}\big(\log g,\ \log(u-g)+\log\sigma(z)\big),\qquad
    \log P_0 = \operatorname{logaddexp}\big(\log(1-u),\ \log(u-g)+\log\sigma(-z)\big)$$
@@ -1063,6 +1074,94 @@ data-independent shapes (§15.21).
     and in `LinkResult.A`/`B` (the linking constants of Kolen & Brennan, 2014), and the port of
     mirt's cell collapsing (`_itemfit.collapse_cells`) keeps mirt's local names so it can be
     compared line by line.
+47. **Optional unconstrained M-step scale (`BAEM(m_step_scale="unconstrained")`, #15, V45)**:
+    $\eta$, the ParameterTable, priors, standard errors and SQUAREM all stay on the natural scale
+    (§4.7, §15.2). Only the masked Newton of the M-step (`_newton.newton_ascent`, used by the
+    item-wise, coupled, latent and two-tier latent M-steps) can run on an unconstrained scale.
+    `BAEM.m_step_scale: Literal["natural", "unconstrained"]` defaults to `"natural"`, the bounded
+    active-set Newton of §15.2, so existing results do not change.
+    - **Which coordinates.** With `"unconstrained"`, each free coordinate of the M-step box
+      `(lower, upper)` (the table bounds intersected with the prior support, §15.16) is mapped by
+      $$z=\begin{cases}\operatorname{logit}\frac{x-l}{u-l}, & l,u\text{ finite},\\
+      \log(x-l), & \text{only } l \text{ finite},\\ \log(u-x), & \text{only } u \text{ finite},\\
+      x, & \text{unbounded},\end{cases}$$
+      with inverses $x=l+(u-l)\,\sigma(z)$, $x=l+e^{z}$, $x=u-e^{z}$. This gives logit($g$),
+      logit($u$), log($\sigma^2$) for latent variances (also the mixture `rvar_c`), and
+      $2\operatorname{atanh}(\rho)$ for MVN correlations in $(-1,1)$. The rule follows the bounds, not
+      the parameter name: slopes keep $(-\infty,\infty)$ and are **not** transformed (an
+      $\exp(a)$ scale would add the constraint $a>0$, while negative slopes are legitimate), but
+      a slope whose box is $(0,\infty)$ because of a `LogNormalPrior` or user-edited bounds is
+      optimized on $\log a$, which adds no constraint the box did not already impose.
+    - **Objective and step.** The Newton step maximizes $f(T^{-1}(z))$, where $f$ is the same
+      natural-scale objective (expected complete-data log-likelihood plus the natural-scale log
+      prior). Gradient and Hessian in $z$ come from autodiff through $T^{-1}$ (the chain rule; no
+      Jacobian term is added, because the objective is not a density in $z$). The step is the
+      same as §15.2 without the box: Newton direction on $z$, gradient fallback if it is not an
+      ascent direction, and halving $2^{-k}$ for $k<30$. A candidate is accepted iff its
+      natural-scale value $x=T^{-1}(z)$ lies strictly inside `(lower, upper)` on the free
+      coordinates (a saturated $\sigma(z)$ that rounds onto a bound is rejected), the objective
+      is finite, and $f(x_{\text{cand}})\ge f(x)$. The iterate is carried on the natural scale
+      and the comparison uses $f(x)$ itself, so a rejected step returns $x$ bit for bit and EM
+      stays monotone exactly as in §15.2.
+    - **Interior and boundary solutions.** $T$ is a monotone bijection of the open box, so
+      interior fixed points of EM are the same on both scales (only the path differs, because
+      the M-step is a partial Newton maximization). A boundary optimum cannot be reached:
+      $z\to\pm\infty$, the natural-scale change per iteration shrinks geometrically, and EM
+      stops by the $\max|\Delta\eta|<$ `tol` rule with the parameter close to but not at the
+      bound, often after many more iterations than the active-set Newton. `HeywoodWarning`
+      (§15.6) still uses the natural-scale distance $<10^{-4}$, so it fires only once the
+      parameter has drifted that close; a slow drift that is stopped earlier by `tol` can end
+      without the warning. That is why `"natural"` stays the default.
+    - **SQUAREM** (§15.11–§15.12) is unchanged: it extrapolates the natural-scale $\eta$ and
+      checks the same natural-scale bounds. `m_step_scale` only changes the EM map $F$ it calls.
+    - **Not changed**: the ParameterTable (`value`, `lower`, `upper`), standard errors (Oakes,
+      Hessian, cross-product and sandwich are all on natural $\eta$, so Wald intervals of $g$ are
+      not confined to $(0,1)$ by this option), priors, and the stopping rule. `BAEM` is saved in
+      the JSON (schema version 8 adds the `m_step_scale` key; versions $\le 7$ read as
+      `"natural"`).
+48. **Logit-normal prior (`LogitNormalPrior(mean_logit, sd_logit)`, #15, V45)**: a prior on a
+    parameter in $(0,1)$ (usually $g$ or $u$) under which $\operatorname{logit}X\sim
+    N(\mu,s^2)$ (Aitchison & Shen, 1980). On the natural scale, as every
+    prior in §4.7, its density includes the Jacobian of the logit:
+    $$\log\pi(x)=-\log x-\log(1-x)-\log s-\tfrac12\log(2\pi)-\frac{(\operatorname{logit}x-\mu)^2}{2s^2},\qquad 0<x<1,$$
+    and $-\infty$ outside $(0,1)$. The support is $(0,1)$, so it is intersected with the box like
+    `BetaPrior` (§15.16); the Core code is `PRIOR_LOGITNORMAL = 4` in `eval_log_prior`; a starting
+    value outside the box moves to the prior median $\sigma(\mu)$.
+    - **Relation to flexMIRT.** flexMIRT (Houts & Cai) estimates the 3PL lower asymptote on the
+      logit metric, $\lambda=\log[g/(1-g)]$, and its `Prior ..., Guessing : Normal(μ, s);` (e.g.
+      `Normal(-1.09, 0.5)` for $g\approx 1/4$) is a normal prior on $\lambda$. Its posterior mode
+      maximizes $\ell+\log\phi(\lambda;\mu,s)$ over $\lambda$, which is the mode over $g$ of
+      $\ell+\log\phi(\operatorname{logit}g;\mu,s)$ — the same normal kernel **without** the
+      $-\log g-\log(1-g)$ term. `LogitNormalPrior` is the proper density on $g$, so its natural-scale
+      MAP (§4.7) differs from flexMIRT's estimate by that term. The term grows towards both bounds,
+      so the `LogitNormalPrior` mode lies further from $1/2$ than flexMIRT's; the prior itself (as a
+      distribution of $g$) is the same.
+      R mirt's `norm` prior on `g` acts on mirt's internal logit($g$) and behaves like flexMIRT's.
+      `mode_scale="logit"` (below) reproduces that mode.
+    - **`mode_scale: Literal["natural", "logit"] = "natural"`** (keyword-only). `"natural"` is the
+      density above. `"logit"` drops the Jacobian and evaluates the normal log density of
+      $\lambda=\operatorname{logit}x$ at the natural-scale value,
+      $$\log\tilde\pi(x)=-\log s-\tfrac12\log(2\pi)-\frac{(\operatorname{logit}x-\mu)^2}{2s^2},\qquad 0<x<1,$$
+      ($-\infty$ outside). Because $\operatorname{logit}$ is a bijection of $(0,1)$ and no Jacobian
+      is added, $\arg\max_g[\ell+\log\tilde\pi]=\sigma(\arg\max_\lambda[\ell+\log\phi(\lambda;\mu,s)])$:
+      the MAP is flexMIRT's `Guessing : Normal(μ, s)` and mirt's `PRIOR = (..., g, norm, μ, s)`
+      estimate, and `log_posterior` equals their logit-metric log posterior (mirt's `logPrior` is
+      $\sum\log\phi(\operatorname{logit}g)$). $\log\tilde\pi$ is not a density of $x$ (it is the
+      density of $\lambda$); `log_pdf` returns it as the objective term, as for every prior (§4.7).
+      - Core: a separate code `PRIOR_LOGITNORMAL_LOGIT = 5` in `eval_log_prior` with the same two
+        parameters, so `PriorBlock` and the jit kernels are unchanged (branch-free double-`where`
+        like the other codes). Support, box intersection and start value ($\sigma(\mu)$, which is
+        also the logit-scale prior mode) are as for `"natural"`.
+      - Standard errors use the same objective on natural $\eta$, so they are consistent with it:
+        at a stationary point the natural-scale Hessian is $J^\top H_\lambda J$ with
+        $J=\operatorname{diag}(g(1-g))$, hence $\mathrm{SE}(g)=g(1-g)\,\mathrm{SE}(\lambda)$, the
+        delta-method SE of the logit-scale estimate. `m_step_scale` (§15.47) is independent: it
+        changes the Newton path, not the objective.
+      - JSON: the `"LogitNormalPrior"` object gains a `mode_scale` key within schema version 8,
+        written always and optional on read (absent → `"natural"`).
+    - The hyperparameters are validated like `LogNormalPrior` (`mean_logit` finite, `sd_logit`
+      positive and finite). JSON registers it as `"LogitNormalPrior"` with keys `mean_logit` and
+      `sd_logit` (schema version 8).
 
 ## 16. Implementation decisions (M5)
 1. **Equality constraints across items (`Model.equal_across_items`, shared `free_id`s)**:
@@ -2408,9 +2507,9 @@ data-independent shapes (§15.21).
    **Measured accuracy and speed** are recorded in VALIDATION.md (V36).
 
 2. **Information, expected score, reliability and summed-score EAP (#82, V37)**:
-   **Scope.** Unidimensional models, single and multiple groups. Every function raises
-   `SpecificationError` for a multidimensional model (the information matrix and directional
-   information are a later change).
+   **Scope.** Unidimensional models, single and multiple groups. The information matrix and
+   directional information of multidimensional models are item 3; reliability and the
+   summed-score functions raise `SpecificationError` for a multidimensional model.
    **API (Decision, owner 2026-11-25).** Module-level functions that take the fit first, like
    `link()` and `dimensionality()`:
    `item_information(res, theta, *, group=None)`, `test_information(res, theta, *, group=None)`,
@@ -2498,7 +2597,80 @@ data-independent shapes (§15.21).
    **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
    **Measured agreement** is recorded in VALIDATION.md (V37).
 
-3. **Classification accuracy and consistency for cut scores (#107, V52)**:
+3. **Information matrix and directional information of multidimensional models (#82, V43)**:
+   **Scope.** Confirmatory models from `with_factors` (2–3 factors, any loading pattern
+   including cross-loadings), bifactor models (`with_bifactor`) and two-tier models
+   (`with_two_tier`), single and multiple groups. `item_information`, `test_information` and
+   `expected_score` accept them; the new `information_matrix` returns the matrix itself.
+   `reliability`, `summed_score_table` and `score(method="EAPsum")` stay unidimensional (a
+   multidimensional summed-score EAP and a marginal reliability of a composite are separate
+   questions without a mirt reference).
+   **Information matrix.** With $\boldsymbol\theta\in\mathbb R^D$, item $j$'s Fisher information
+   matrix and the test information matrix are
+   $$\mathbf I_j(\boldsymbol\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)^\top,\qquad
+     \mathbf I(\boldsymbol\theta)=\sum_j\mathbf I_j(\boldsymbol\theta)$$
+   (Reckase, 2009, ch. 5), from the same forward-mode autodiff of the item kernel's category
+   log-probabilities as item 2, now with respect to all $D$ coordinates (`jax.jacfwd` gives
+   the $K_j\times D$ Jacobian). For every built-in family $P_{jk}$ depends on
+   $\boldsymbol\theta$ only through $\mathbf a_j^\top\boldsymbol\theta$, so $\mathbf I_j=c_j(\boldsymbol\theta)\,\mathbf a_j\mathbf a_j^\top$
+   has rank 1; the code does not use this (user-defined kernels need not have it). For a
+   unidimensional model $D=1$ and the matrix is the scalar of item 2; there is one code path.
+   In bifactor and two-tier models the kernels are evaluated at the full $D$-vector; the
+   dimension reduction of §17 concerns only the integration over $\boldsymbol\theta$ and plays
+   no role here.
+   **Directional information.** Along a unit vector $\mathbf u$ ($\|\mathbf u\|=1$),
+   $$I_{j,\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u,\qquad
+     I_{\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$$
+   (Reckase & McKinley, 1991; Ackerman, 1994), the information about $\boldsymbol\theta$ when
+   it moves along $\mathbf u$. mirt's `iteminfo(..., degrees = )` / `testinfo(..., degrees = )`
+   take the angles $\alpha_m$ to the axes and use $u_m=\cos\alpha_m$ without normalizing;
+   flexpyirt takes the direction vector and **normalizes it**, so the two agree whenever the
+   angles are consistent ($\sum_m\cos^2\alpha_m=1$), and mirt's angles are
+   `direction=np.cos(np.radians(degrees))`.
+   **API (Decision, 2026-11-26).**
+   - `theta` of a multidimensional model is a `(T, D)` array-like, or a DataFrame whose columns
+     are exactly the factor names (in any order; reordered to the model's order); a 1-D array of
+     length $D$ is a single point. Unidimensional models keep the 1-D `theta` of item 2. The
+     result is indexed by a `MultiIndex` whose level names are the factor names (index name
+     `theta` for unidimensional models, as before).
+   - `item_information(res, theta, *, direction=None, group=None)` and
+     `test_information(res, theta, *, direction=None, group=None)`: for a multidimensional model
+     `direction` (1-D, length $D$, finite, non-zero; normalized) is **required**, because there
+     is no natural default direction (mirt also requires `degrees`); one column per item,
+     respectively the columns `information` and `se`. For a unidimensional model `direction`
+     must be `None`. One direction per call; several directions are several calls.
+   - `test_information`'s `se` is $\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$,
+     the asymptotic conditional standard error of the ML estimate of the composite
+     $\mathbf u^\top\boldsymbol\theta$, which reduces to $I(\theta)^{-1/2}$ for $D=1$. It is not
+     $I_{\mathbf u}^{-1/2}$, which would be the standard error if the coordinates orthogonal to
+     $\mathbf u$ were known; the two coincide only when $\mathbf u$ is an eigenvector of
+     $\mathbf I$. Where $\mathbf I(\boldsymbol\theta)$ is numerically singular (its smallest
+     eigenvalue is at most $D\varepsilon$ times its largest, $\varepsilon$ the double-precision
+     machine epsilon; e.g. fewer linearly independent slope vectors than factors), `se` is
+     $+\infty$, as for $I=0$ in one dimension. The item matrices are symmetrized,
+     $(\mathbf M+\mathbf M^\top)/2$, so that they are exactly symmetric. **This differs from
+     mirt**: mirt has no SE in `testinfo()`, but its `plot(type = "SE")` / `type = "infoSE"` for
+     two- and three-factor models draws $1/\sqrt{I_{\mathbf u}}$ (`1/sqrt(testinfo(x, Theta,
+     degrees = ))`), the conditional-on-the-other-coordinates value above. flexpyirt reports the
+     composite SE instead, because it is the standard error of an estimable quantity and equals
+     the unidimensional SE when $D=1$; $1/\sqrt{I_{\mathbf u}}$ is `1 / np.sqrt(information)`
+     of the same DataFrame. The reference inverts the sum of mirt's item information matrices
+     in R.
+   - `information_matrix(res, theta, *, item=None, group=None)` returns a NumPy array of shape
+     `(T, D, D)`: the test information matrix, or with `item=` (an item name) that item's matrix.
+     It is an array rather than a DataFrame because a $D\times D$ matrix per point has no flat
+     layout that is not awkward to index; rows and columns follow the fitted model's `Model.factor_names`.
+     Unidimensional models give `(T, 1, 1)`. This is mirt's
+     `iteminfo(..., multidim_matrix = TRUE)` (per point), summed over items for the test.
+   - `expected_score(res, theta, *, group=None)`: $E_j(\boldsymbol\theta)=\sum_kk\,P_{jk}(\boldsymbol\theta)$
+     and `total`, as in item 2 with the multidimensional `theta`; mirt's `expected.item()` /
+     `expected.test()` with a $D$-column `Theta`.
+   **Nothing new is stored** in `FitResult`; `schema_version` is unchanged.
+   **Measured agreement** is recorded in VALIDATION.md (V43).
+
+4. **Classification accuracy and consistency for cut scores (#107, V52)**:
    **What it computes.** A test with cut scores $c_1<\dots<c_C$ sorts respondents into $H=C+1$
    ordered categories $h=0,\dots,C$; a value at or above $c_k$ is above that cut, so
    the category of a value $v$ is $h(v)=\#\{k: v\ge c_k\}$. From one administration and the
@@ -2841,6 +3013,8 @@ data-independent shapes (§15.21).
    `plot_item_curves`, `plot_wright_map`, like `reliability` and `score`).
 
 ## References
+- Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
+- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -2881,6 +3055,7 @@ data-independent shapes (§15.21).
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
+- Houts, C. R., & Cai, L. (n.d.). *flexMIRT user's manual: Flexible multilevel multidimensional item analysis and test scoring* (versions 3.5–3.7). Vector Psychometric Group.
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
@@ -2919,6 +3094,7 @@ data-independent shapes (§15.21).
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.

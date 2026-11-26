@@ -22,13 +22,13 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Correlations (flexpyctt): [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
-- Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
+- Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - Plots: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
 - Classification: [`classification_accuracy`](#classification_accuracy), [`ClassificationResult`](#classificationresult)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal), [user-defined item models](#user-defined-item-models)
-- Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
+- Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior), [`LogitNormalPrior`](#logitnormalprior)
 - Latent distribution: [`Normal`](#normal)
 - Settings: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - Exceptions and warnings: [`flexpyirt.errors`](#flexpyirterrors)
@@ -531,7 +531,7 @@ the items' starting values. Equivalent to giving the rows one `free_id` in an ed
 model.prior(*, param, dist, items=None) -> Model
 ```
 
-Attach a prior distribution `dist` (`NormalPrior`, `LogNormalPrior`, or `BetaPrior`) to internal parameter
+Attach a prior distribution `dist` (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, or `LogitNormalPrior`) to internal parameter
 `param` of the selected items across all groups (MAP estimation; [guide section 11](guide.md#11-priors-and-map-estimation)).
 Priors are evaluated on the natural parameter scale without a Jacobian term. Fixed parameters
 ignore their prior, and a parameter shared across groups (`free_id`) is counted once. Priors on
@@ -541,7 +541,7 @@ latent-distribution parameters (`"mean"`, `"var"`, `"phi_*"`, `"rmean_*"`, `"rva
 | Argument | Description |
 |---|---|
 | `param` | Internal item parameter name (`"a"`, `"d"`, `"g"`, `"u"`, `"d1"`, …) |
-| `dist` | `NormalPrior`, `LogNormalPrior`, or `BetaPrior` |
+| `dist` | `NormalPrior`, `LogNormalPrior`, `BetaPrior`, or `LogitNormalPrior` |
 | `items` | List of item names, a `str -> bool` function, or `None` for every item |
 
 #### `Model.parameter_table`
@@ -775,6 +775,26 @@ $\log\pi(x) = (a - 1)\log x + (b - 1)\log(1 - x) - \log B(a, b)$
 ($-\infty$ outside $(0, 1)$; Swaminathan & Gifford, 1986; mirt `expbeta` log-prior objective on
 the natural scale without a logit Jacobian). Requires positive finite `a` and `b`. Commonly used
 for 3PL/4PL asymptotes `g` and `u`.
+
+### `LogitNormalPrior`
+
+```text
+LogitNormalPrior(mean_logit, sd_logit, *, mode_scale="natural")
+```
+
+Logit-normal prior on $(0, 1)$ ($\operatorname{logit} X \sim N(\mu, s^2)$; Aitchison & Shen, 1980):
+$\log\pi(x) = -\log x - \log(1 - x) - \log s - \tfrac{1}{2}\log(2\pi) - \frac{(\operatorname{logit} x - \mu)^2}{2s^2}$
+($-\infty$ outside $(0, 1)$). The $-\log x - \log(1 - x)$ term belongs to the density of $X$
+itself. Requires finite `mean_logit` and positive finite `sd_logit`. Commonly used for 3PL/4PL
+asymptotes: `LogitNormalPrior(-1.0986, 0.5)` centers `g` on $1/4$. flexMIRT's
+`Guessing : Normal(mean, sd)` and mirt's `PRIOR = (..., g, norm, mean, sd)` are the same
+distribution but maximize the posterior over $\operatorname{logit} g$ (without that term), so
+their estimates differ slightly ([guide section 11](guide.md#11-priors-and-map-estimation)).
+
+| Argument | Description |
+|---|---|
+| `mean_logit`, `sd_logit` | Mean and standard deviation of $\operatorname{logit} X$ |
+| `mode_scale` | `"natural"` (default): the density above, natural-scale posterior mode. `"logit"`: the term $\log\phi(\operatorname{logit} x; \mu, s)$ without the Jacobian, giving flexMIRT's and mirt's logit-metric posterior mode, log posterior and (delta-method) SEs |
 
 ---
 
@@ -1326,40 +1346,81 @@ Runs several diagnostics and reports them side by side, with two separate consen
 
 ## Information and reliability
 
-Functions of a fitted unidimensional model ([guide section 5](guide.md#information-expected-score-and-reliability)).
-All raise `SpecificationError` for a multidimensional model.
+Functions of a fitted model ([guide section 5](guide.md#information-expected-score-and-reliability)).
+The information functions and `expected_score` work for unidimensional, confirmatory
+multidimensional, bifactor and two-tier models
+([guide section 14](guide.md#information-of-multidimensional-models)); `reliability` and the
+summed-score functions raise `SpecificationError` for a multidimensional model.
+
+For a model with $D$ factors, `theta` is an array of shape `(T, D)`, a DataFrame whose columns are
+exactly the factor names (in any order), or one point as a 1-D array of length $D$; results are
+indexed by a `MultiIndex` whose level names are the factor names. For a unidimensional model
+`theta` is a number or 1-D array and the index is named `theta`.
 
 ### `item_information`
 
 ```text
-item_information(res, theta, *, group=None) -> DataFrame
+item_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 Fisher information of every item at the latent trait values `theta`,
 $I_j(\theta)=\sum_kP_{jk}(\theta)\,(\partial\log P_{jk}(\theta)/\partial\theta)^2$ (Birnbaum, 1968;
 Samejima, 1969), computed for every item model by automatic differentiation. It is what mirt's
-`iteminfo()` returns.
+`iteminfo()` returns. For a multidimensional model it is the directional information
+$\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u$ along the unit vector
+$\mathbf u$ = `direction` / ‖`direction`‖, with the item information matrix of
+[`information_matrix`](#information_matrix) (Reckase & McKinley, 1991); mirt's
+`iteminfo(..., degrees = )` is `direction=np.cos(np.radians(degrees))` when
+$\sum_m\cos^2\alpha_m=1$ (mirt does not normalize the direction).
 
 | Argument | Type | Description |
 |---|---|---|
-| `res` | `FitResult` | A fitted unidimensional model |
-| `theta` | float / 1-D array | Latent trait values (finite) |
+| `res` | `FitResult` | A fitted model |
+| `theta` | float / array / DataFrame | Latent trait values (finite; see above) |
+| `direction` | 1-D array of length $D$, optional | Direction in the latent space, normalized to length 1; required for a multidimensional model, not allowed for a unidimensional one |
 | `group` | str, optional | Group name; required for a multiple-group model |
 
-**Returns**: `DataFrame` with one row per value of `theta` (the index, named `theta`) and one
-column per item.
+**Returns**: `DataFrame` with one row per point of `theta` and one column per item.
 
 ### `test_information`
 
 ```text
-test_information(res, theta, *, group=None) -> DataFrame
+test_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 Test information $I(\theta)=\sum_jI_j(\theta)$ and the conditional standard error
-$1/\sqrt{I(\theta)}$ (mirt's `testinfo()`). Arguments as for
-[`item_information`](#item_information).
+$1/\sqrt{I(\theta)}$ (mirt's `testinfo()`). For a multidimensional model, the directional test
+information $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$ (mirt's `testinfo(..., degrees = )`)
+and the standard error of the estimate of the composite $\mathbf u^\top\boldsymbol\theta$,
+$\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$, which equals $1/\sqrt{I(\theta)}$
+in one dimension. This is not mirt's `plot(type = "SE")`, which draws $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$
+(`1 / np.sqrt(information)`). Arguments as for [`item_information`](#item_information).
 
-**Returns**: `DataFrame` indexed by `theta` with the columns `information` and `se`.
+**Returns**: `DataFrame` indexed like [`item_information`](#item_information) with the columns
+`information` and `se` (infinite where the information is 0 or the information matrix is
+singular).
+
+### `information_matrix`
+
+```text
+information_matrix(res, theta, *, item=None, group=None) -> ndarray
+```
+
+Fisher information matrix
+$\mathbf I_j(\boldsymbol\theta)=\sum_kP_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}^\top$
+of one item, or the test information matrix $\sum_j\mathbf I_j$, at each point of `theta`
+(Reckase, 2009), by automatic differentiation. It is mirt's `iteminfo(..., multidim_matrix = TRUE)`
+(summed over items for the test).
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted model |
+| `theta` | float / array / DataFrame | Latent trait values (finite; see above) |
+| `item` | str, optional | Item name; by default the test information matrix |
+| `group` | str, optional | Group name; required for a multiple-group model |
+
+**Returns**: array of shape `(T, D, D)`, one symmetric positive semi-definite matrix per point,
+rows and columns in the order of the model's factors (`(T, 1, 1)` for a unidimensional model).
 
 ### `expected_score`
 
@@ -1369,11 +1430,11 @@ expected_score(res, theta, *, group=None) -> DataFrame
 
 Expected item scores $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ and the test characteristic curve
 $T(\theta)=\sum_jE_j(\theta)$, with categories scored $0,\dots,K_j-1$ as in the data (mirt's
-`expected.item()` and `expected.test()`). Arguments as for
-[`item_information`](#item_information).
+`expected.item()` and `expected.test()`); $\theta$ is a vector for a multidimensional model.
+Arguments `res`, `theta` and `group` as for [`item_information`](#item_information).
 
-**Returns**: `DataFrame` indexed by `theta` with one column per item and the column `total`. An
-item named `total` raises `SpecificationError`.
+**Returns**: `DataFrame` indexed like [`item_information`](#item_information) with one column per
+item and the column `total`. An item named `total` raises `SpecificationError`.
 
 ### `reliability`
 
@@ -1584,7 +1645,7 @@ classification_accuracy(res, *, cut_scores, method="lee", scale=None, data=None,
 ```
 
 Classification accuracy and consistency of cut scores
-([guide section 7](guide.md#classification-accuracy-and-consistency); DESIGN.md §18.3). The cuts
+([guide section 7](guide.md#classification-accuracy-and-consistency); DESIGN.md §18.4). The cuts
 $c_1<\dots<c_C$ define the categories $h(v)=\#\{k: v\ge c_k\}=0,\dots,C$. At a true value
 $\theta$ each method gives the probabilities $P_h(\theta)$ of the observed categories and a true
 category $t(\theta)$:
@@ -1643,7 +1704,7 @@ multiple-group result every DataFrame has a leading `group` column (the two tabl
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural")
 ```
 
 | Argument | Description |
@@ -1652,6 +1713,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 | `max_iter` | Maximum number of accepted iterations; reaching it gives a `ConvergenceWarning` |
 | `m_step_newton_steps` | Newton steps per M-step; no step decreases the expected log-likelihood |
 | `squarem` | Enable SQUAREM scheme S3 acceleration (Varadhan & Roland, 2008) with a monotonicity/feasibility safeguard (default `False`) |
+| `m_step_scale` | `"natural"` (default): M-step Newton on the natural scale with bounds, reaching boundary solutions exactly. `"unconstrained"`: Newton on $\operatorname{logit}$ / $\log$ scales of the parameters with a bound ($g$, $u$, latent variances, factor correlations, slopes bounded by a prior or an edited bound); unbounded parameters are not transformed. Same objective and interior solution; estimates, table, priors and SEs stay on the natural scale; a boundary solution is only approached ([guide section 4](guide.md#4-fitting)) |
 
 ### `Quadrature`
 

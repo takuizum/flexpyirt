@@ -1,4 +1,4 @@
-r"""Classification accuracy and consistency kernels (Core layer, DESIGN.md §18.3).
+r"""Classification accuracy and consistency kernels (Core layer, DESIGN.md §18.4).
 
 Pure JAX functions. Cut scores :math:`c_1<\dots<c_C` define the categories
 :math:`h(v)=\#\{k: v\ge c_k\}=0,\dots,C`. Each method gives, at true values :math:`\theta_n`,

@@ -85,6 +85,8 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - **決定（v1）**: 項目ごとの Newton–Raphson（自動微分で勾配・Hessian、$\dim\xi_j\le 5$ 程度）。
   同じ項目モデル（"item family"）の項目は配列にまとめて `vmap`。ステップは backtracking line search
   で $Q_j$ の増加を保証（一般化 EM として単調性を保つ）。M-step は完全収束させず、Newton 数ステップで打ち切ってよい。
+  Newton は既定では自然尺度と有界アクティブセット（§15.2）で走る。`BAEM(m_step_scale="unconstrained")` では
+  範囲のある座標を logit / log 尺度にして、同じ目的関数で走らせる（§15.47）。
 - 固定パラメタは $\eta$ に含めない（定数として ParameterTable から渡す）。
 - **項目をまたぐ等値制約**（例: 全項目共通の $a$）は分解を壊す。**決定（M5、§16.1）**: `free_id` の共有で連結された項目の成分ごとに、その自由パラメタ全体について同時にマスク付き Newton を解く。成分に属さない項目は従来どおり項目ごとの `vmap`。
 
@@ -166,6 +168,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   wall-time ベンチマーク前のため既定 `False`、§15.13）。外挿候補が境界（事前分布の台との積集合）を出るか対数事後が
   非有限・$\theta_2$ 未満なら $\alpha$ を $-1$ 方向へ固定回数まで半減し、なお不適なら $\theta_2$ をそのまま採って
   対数事後の単調性を保つ（§15.11–§15.12, §15.17）。
+  SQUAREM は `m_step_scale` によらず常に自然尺度で動く（§15.47）。
 - 通常の EM・SQUAREM とも全体がデバイス上の `lax.while_loop` で走る（Python の反復ループやホストコールバックなし）。
   `jax.debug.callback` による進捗表示は後回し。
 
@@ -175,7 +178,12 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - 事前分布は**自然なパラメタ尺度**（$a, d, g, u, d_k$ など）で定義し、Jacobian 項は入れない（自然尺度での事後モード。
   R mirt 1.46 の `LL.Priors` でも `expbeta` は `dbeta(plogis(logit_g), a, b, log = TRUE)` を logit ヤコビアンなしで
   評価していることを確認済み。VALIDATION.ja.md 参照）。
-- 内部の最適化を変換後の尺度で行っても、目的関数自体は自然尺度の事前分布で評価する。
+- 内部の最適化を変換後の尺度で行っても（`BAEM(m_step_scale="unconstrained")`、§15.47）、目的関数自体は
+  自然尺度の事前分布で評価する。
+- **決定（#15、§15.48）**: 4 つ目の事前分布 `LogitNormalPrior(mean_logit, sd_logit)` を追加する。
+  $\operatorname{logit}X\sim N(\mu,s^2)$ となる $(0,1)$ 上の分布。自然尺度の密度に logit の Jacobian が入るのは、
+  それが $X$ 自体の密度の一部だからで、最適化の尺度を変えるのではない。
+  `LogitNormalPrior(..., mode_scale="logit")` はこの Jacobian を除き、flexMIRT と mirt の logit 尺度の事後モードを与える（§15.48）。
 - 固定パラメタは事前分布を無視し、群間で共有するパラメタ（同じ `free_id`）の事前分布は **1 回だけ**数える。
   潜在分布パラメタへの事前分布は対象外（`SpecificationError`）。
 - 結果には `loglik`（尤度のみ）と `log_posterior`（事前分布なしでは `loglik` と同値）を分けて返し、`history` も
@@ -405,6 +413,8 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    進め、境界から $10^{-8}$ 以内で勾配が外側を向く自由座標はそのステップで固定する（$\varepsilon$-active set;
    Bertsekas, 1982）。これにより、境界に張り付いた漸近線が `a`, `d` の収束を妨げず、目的関数の増加判定により
    EM の単調性も保たれる。
+   `BAEM(m_step_scale="unconstrained")` はこの箱の代わりに logit / log 座標を使う（§15.47）。既定はこの
+   アクティブセット Newton のまま。
 3. **$g=0$・$u=1$ での数値安定性**: 対数確率を
    $$\log P_1 = \operatorname{logaddexp}\big(\log g,\ \log(u-g)+\log\sigma(z)\big),\qquad
    \log P_0 = \operatorname{logaddexp}\big(\log(1-u),\ \log(u-g)+\log\sigma(-z)\big)$$
@@ -712,6 +722,75 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     `_upgrade_legacy_names` が `n_cat`・`LogNormal`/`meanlog`/`sdlog`・`Beta` を version 4 の名前に置き換える。
     内部カーネルの数式記号（`G`, `Q`, `K_f` など）と `LinkResult.A`/`B`（Kolen & Brennan, 2014 のリンキング定数）は
     そのまま残し、mirt のセル併合の移植（`_itemfit.collapse_cells`）は行ごとに照合できるよう mirt の局所変数名を保つ。
+47. **M-step の非拘束尺度（任意、`BAEM(m_step_scale="unconstrained")`、#15、V45）**: $\eta$・ParameterTable・
+    事前分布・標準誤差・SQUAREM はすべて自然尺度のまま（§4.7、§15.2）。M-step のマスク付き Newton
+    （`_newton.newton_ascent`。項目ごと・連結成分・潜在分布・two-tier 潜在分布の M-step が使う）だけを非拘束の尺度で
+    走らせられる。`BAEM.m_step_scale: Literal["natural", "unconstrained"]` の既定は `"natural"`（§15.2 の有界
+    アクティブセット Newton）なので、既存の結果は変わらない。
+    - **対象の座標**: `"unconstrained"` では、M-step の箱 `(lower, upper)`（表の範囲と事前分布の台の積集合、§15.16）
+      の自由座標をそれぞれ
+      $$z=\begin{cases}\operatorname{logit}\frac{x-l}{u-l}, & l,u\text{ が有限},\\
+      \log(x-l), & l \text{ だけ有限},\\ \log(u-x), & u \text{ だけ有限},\\
+      x, & \text{範囲なし}\end{cases}$$
+      で写す（逆変換は $x=l+(u-l)\,\sigma(z)$、$x=l+e^{z}$、$x=u-e^{z}$）。これで $g$・$u$ は logit、潜在分散
+      （混合分布の `rvar_c` も）は log、$(-1,1)$ の MVN 相関は $2\operatorname{atanh}(\rho)$ になる。規則は
+      パラメタ名ではなく範囲で決まる: 傾きは $(-\infty,\infty)$ のままで**変換しない**（$\exp(a)$ の尺度は
+      $a>0$ という制約を足すが、負の傾きは正当）。ただし `LogNormalPrior` や利用者が編集した範囲で箱が
+      $(0,\infty)$ になった傾きは $\log a$ で最適化する。箱がすでに課している以上の制約は足さない。
+    - **目的関数とステップ**: Newton は $f(T^{-1}(z))$ を最大化する。$f$ は同じ自然尺度の目的関数（期待完全データ
+      対数尤度 + 自然尺度の対数事前分布）。$z$ での勾配と Hessian は $T^{-1}$ を通した自動微分（連鎖律）で得る。
+      目的関数は $z$ の密度ではないので Jacobian 項は足さない。ステップは箱を除いて §15.2 と同じ: $z$ での Newton
+      方向、上昇方向でなければ勾配、$k<30$ の $2^{-k}$ 半減。候補は、自然尺度の値 $x=T^{-1}(z)$ が自由座標で
+      `(lower, upper)` の真に内側にあり（飽和した $\sigma(z)$ が境界に丸められたものは棄却）、目的関数が有限で
+      $f(x_{\text{cand}})\ge f(x)$ のときだけ採る。反復点は自然尺度で持ち、比較も $f(x)$ そのもので行うので、
+      棄却されたステップはビット単位で $x$ を返し、§15.2 と同じく EM の単調性が厳密に保たれる。
+    - **内点解と境界解**: $T$ は開いた箱の単調な一対一変換なので、EM の内点の不動点は両尺度で同じ（M-step が
+      部分的な Newton 最大化なので経路だけが違う）。境界の最適解には到達しない: $z\to\pm\infty$ となり、反復ごとの
+      自然尺度の変化が幾何的に小さくなって、パラメタが境界に近いが境界ではない点で $\max|\Delta\eta|<$ `tol` に
+      よって止まる。アクティブセット Newton よりかなり多くの反復を要することが多い。`HeywoodWarning`（§15.6）は
+      自然尺度の距離 $<10^{-4}$ を使うので、そこまで近づいてはじめて出る。`tol` で早めに止まったゆっくりした
+      漂流は警告なしに終わりうる。このため既定は `"natural"` のままにする。
+    - **SQUAREM**（§15.11–§15.12）は変えない: 自然尺度の $\eta$ を外挿し、同じ自然尺度の範囲で検査する。
+      `m_step_scale` が変えるのは SQUAREM が呼ぶ EM 写像 $F$ だけ。
+    - **変えないもの**: ParameterTable（`value`、`lower`、`upper`）、標準誤差（Oakes、Hessian、cross-product、
+      sandwich はすべて自然尺度の $\eta$ で計算するので、このオプションで $g$ の Wald 区間が $(0,1)$ に収まる
+      わけではない）、事前分布、停止規則。`BAEM` は JSON に保存する（スキーマ版 8 で `m_step_scale` キーを追加。
+      版 7 以下は `"natural"` として読む）。
+48. **ロジット正規事前分布（`LogitNormalPrior(mean_logit, sd_logit)`、#15、V45）**: $(0,1)$ のパラメタ（通常は
+    $g$ や $u$）に対する事前分布で、$\operatorname{logit}X\sim N(\mu,s^2)$（Aitchison & Shen, 1980）。§4.7 の
+    ほかの事前分布と同じく自然尺度で評価し、その密度には logit の Jacobian が入る:
+    $$\log\pi(x)=-\log x-\log(1-x)-\log s-\tfrac12\log(2\pi)-\frac{(\operatorname{logit}x-\mu)^2}{2s^2},\qquad 0<x<1,$$
+    $(0,1)$ の外では $-\infty$。台は $(0,1)$ なので `BetaPrior` と同じく箱と交わらせる（§15.16）。Core では
+    `eval_log_prior` の `PRIOR_LOGITNORMAL = 4`。箱の外の初期値は事前分布の中央値 $\sigma(\mu)$ に移す。
+    - **flexMIRT との関係**: flexMIRT（Houts & Cai）は 3PL の下側漸近線を logit 尺度 $\lambda=\log[g/(1-g)]$ で
+      推定し、`Prior ..., Guessing : Normal(μ, s);`（例: $g\approx 1/4$ に対する `Normal(-1.09, 0.5)`）は
+      $\lambda$ 上の正規事前分布。その事後モードは $\lambda$ について $\ell+\log\phi(\lambda;\mu,s)$ を最大化し、
+      これは $g$ について $\ell+\log\phi(\operatorname{logit}g;\mu,s)$ を最大化する点、つまり同じ正規の核から
+      $-\log g-\log(1-g)$ の項を**除いた**ものの最頻値になる。`LogitNormalPrior` は $g$ 上の正式な密度なので、
+      その自然尺度の MAP（§4.7）は flexMIRT の推定値とこの項の分だけ違う。この項は両端に向かって大きくなるので、
+      `LogitNormalPrior` の最頻値は flexMIRT のものより $1/2$ から遠い。事前分布そのもの（$g$ の分布として）は
+      同じ。R mirt の `g` への `norm` 事前分布も mirt 内部の logit($g$) に作用し、flexMIRT と同じふるまいになる。
+      下の `mode_scale="logit"` でこのモードを再現できる。
+    - **`mode_scale: Literal["natural", "logit"] = "natural"`**（キーワード専用）。`"natural"` は上の密度。
+      `"logit"` は Jacobian を除き、$\lambda=\operatorname{logit}x$ の正規対数密度を自然尺度の値で評価する:
+      $$\log\tilde\pi(x)=-\log s-\tfrac12\log(2\pi)-\frac{(\operatorname{logit}x-\mu)^2}{2s^2},\qquad 0<x<1,$$
+      （外では $-\infty$）。$\operatorname{logit}$ は $(0,1)$ の一対一変換で Jacobian を足さないので、
+      $\arg\max_g[\ell+\log\tilde\pi]=\sigma(\arg\max_\lambda[\ell+\log\phi(\lambda;\mu,s)])$ となる。
+      つまり MAP は flexMIRT の `Guessing : Normal(μ, s)` と mirt の `PRIOR = (..., g, norm, μ, s)` の推定値で、
+      `log_posterior` はそれらの logit 尺度の対数事後（mirt の `logPrior` は $\sum\log\phi(\operatorname{logit}g)$）に
+      一致する。$\log\tilde\pi$ は $x$ の密度ではない（$\lambda$ の密度）。`log_pdf` は、ほかの事前分布と同じく
+      目的関数の項としてこれを返す（§4.7）。
+      - Core: `eval_log_prior` に別コード `PRIOR_LOGITNORMAL_LOGIT = 5` を設け、同じ 2 つのパラメタを使う。
+        `PriorBlock` と jit カーネルは変えない（ほかのコードと同じ分岐なしの二重 `where`）。台、箱との交わり、
+        初期値（$\sigma(\mu)$。logit 尺度の事前分布の最頻値でもある）は `"natural"` と同じ。
+      - 標準誤差は同じ目的関数を自然尺度の $\eta$ で微分するので、目的関数と整合する。停留点では自然尺度の
+        Hessian は $J=\operatorname{diag}(g(1-g))$ として $J^\top H_\lambda J$ なので、
+        $\mathrm{SE}(g)=g(1-g)\,\mathrm{SE}(\lambda)$、すなわち logit 尺度の推定値のデルタ法 SE になる。
+        `m_step_scale`（§15.47）とは独立で、あちらは Newton の経路を変えるだけで目的関数は変えない。
+      - JSON: `"LogitNormalPrior"` オブジェクトにスキーマ版 8 の中で `mode_scale` キーを加える。書き出しでは常に
+        書き、読み込みでは省略可（ないときは `"natural"`）。
+    - 超パラメタは `LogNormalPrior` と同じく検証する（`mean_logit` は有限、`sd_logit` は正で有限）。JSON では
+      キー `mean_logit`・`sd_logit` を持つ `"LogitNormalPrior"` として登録する（スキーマ版 8）。
 
 ## 16. 実装上の決定（M5）
 1. **項目をまたぐ等値制約（`Model.equal_across_items`、`free_id` の共有）**:
@@ -1774,8 +1853,8 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    **精度と速度の実測**は VALIDATION.md（V36）に記録する。
 
 2. **情報関数・期待得点・信頼性・合計得点 EAP（#82、V37）**:
-   **範囲。** 1 次元モデル（単一群・多母集団）。多次元モデルではどの関数も `SpecificationError`
-   （情報行列と方向別の情報量は別の変更で扱う）。
+   **範囲。** 1 次元モデル（単一群・多母集団）。多次元モデルの情報行列と方向別の情報量は項目 3 で扱う。
+   信頼性と合計得点の関数は、多次元モデルでは `SpecificationError`。
    **API（決定、オーナー 2026-11-25）。** `link()` や `dimensionality()` と同じく、推定結果を第 1 引数に
    とるモジュール関数にする: `item_information(res, theta, *, group=None)`、
    `test_information(res, theta, *, group=None)`、`expected_score(res, theta, *, group=None)`、
@@ -1848,7 +1927,68 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    **`FitResult` に新しく保存するものはない。** `schema_version` は変えない。
    **一致の実測値**は VALIDATION.md（V37）に記録する。
 
-3. **カット得点による分類の正確さと一貫性（#107, V52）**:
+3. **多次元モデルの情報行列と方向別の情報量（#82、V43）**:
+   **範囲。** `with_factors` による確認的モデル（2–3 因子、交差負荷を含む任意の負荷パターン）、
+   bifactor モデル（`with_bifactor`）と two-tier モデル（`with_two_tier`）。単一群と多母集団。
+   `item_information`・`test_information`・`expected_score` がこれらを受け付け、新しい
+   `information_matrix` が行列そのものを返す。`reliability`・`summed_score_table`・
+   `score(method="EAPsum")` は 1 次元のまま（多次元の合計得点 EAP や合成得点の周辺信頼性は別の問題で、
+   mirt の参照値もない）。
+   **情報行列。** $\boldsymbol\theta\in\mathbb R^D$ について、項目 $j$ の Fisher 情報行列とテスト情報行列は
+   $$\mathbf I_j(\boldsymbol\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)^\top,\qquad
+     \mathbf I(\boldsymbol\theta)=\sum_j\mathbf I_j(\boldsymbol\theta)$$
+   （Reckase, 2009, 5 章）。項目 2 と同じく項目カーネルのカテゴリ対数確率の前進モード自動微分で求め、
+   今度は $D$ 個の座標すべてで微分する（`jax.jacfwd` が $K_j\times D$ のヤコビ行列を返す）。組み込みの
+   項目族ではどれも $P_{jk}$ が $\boldsymbol\theta$ に $\mathbf a_j^\top\boldsymbol\theta$ を通してだけ
+   依存するので、$\mathbf I_j=c_j(\boldsymbol\theta)\,\mathbf a_j\mathbf a_j^\top$ は階数 1 になる。
+   コードはこの性質を使わない（利用者定義のカーネルが満たすとは限らない）。1 次元モデルでは $D=1$ で、
+   行列は項目 2 のスカラーそのもの。コードの経路は 1 つ。bifactor と two-tier モデルでは、カーネルを
+   $D$ 次元ベクトル全体で評価する。§17 の次元縮約は $\boldsymbol\theta$ についての積分だけの話で、
+   ここでは関係しない。
+   **方向別の情報量。** 単位ベクトル $\mathbf u$（$\|\mathbf u\|=1$）の方向について
+   $$I_{j,\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u,\qquad
+     I_{\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$$
+   （Reckase & McKinley, 1991; Ackerman, 1994）。$\boldsymbol\theta$ が $\mathbf u$ に沿って動くときの
+   情報量である。mirt の `iteminfo(..., degrees = )` / `testinfo(..., degrees = )` は各軸との角度
+   $\alpha_m$ をとり、正規化せずに $u_m=\cos\alpha_m$ を使う。flexpyirt は方向ベクトルをとって
+   **正規化する**ので、角度が整合していれば（$\sum_m\cos^2\alpha_m=1$）両者は一致し、mirt の角度は
+   `direction=np.cos(np.radians(degrees))` にあたる。
+   **API（決定、2026-11-26）。**
+   - 多次元モデルの `theta` は `(T, D)` の配列様のもの、または列がちょうど因子名である DataFrame
+     （順序は任意で、モデルの順に並べ替える）。長さ $D$ の 1 次元配列は 1 点を表す。1 次元モデルは
+     項目 2 の 1 次元の `theta` のまま。結果のインデックスは、水準名が因子名の `MultiIndex`（1 次元
+     モデルではこれまでどおり名前 `theta` のインデックス）。
+   - `item_information(res, theta, *, direction=None, group=None)` と
+     `test_information(res, theta, *, direction=None, group=None)`: 多次元モデルでは `direction`
+     （1 次元、長さ $D$、有限、0 でない。正規化する）が**必須**。自然な既定の方向がないため（mirt も
+     `degrees` を必須にしている）。列はそれぞれ項目ごとに 1 列、`information` と `se`。1 次元モデルでは
+     `direction` は `None` でなければならない。1 回の呼び出しで方向は 1 つ。複数の方向は複数回呼ぶ。
+   - `test_information` の `se` は $\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$、
+     つまり合成値 $\mathbf u^\top\boldsymbol\theta$ の ML 推定量の漸近的な条件付き標準誤差で、$D=1$ では
+     $I(\theta)^{-1/2}$ になる。$I_{\mathbf u}^{-1/2}$ ではない（こちらは $\mathbf u$ に直交する座標が既知の
+     ときの標準誤差）。両者が一致するのは $\mathbf u$ が $\mathbf I$ の固有ベクトルのときだけ。
+     $\mathbf I(\boldsymbol\theta)$ が数値的に特異な（最小固有値が最大固有値の $D\varepsilon$ 倍
+     以下。$\varepsilon$ は倍精度の機械イプシロン。たとえば一次独立な傾きベクトルが因子数より少ない）
+     点では、1 次元で $I=0$ のときと同じく `se` は $+\infty$。項目の行列は $(\mathbf M+\mathbf M^\top)/2$
+     で対称化し、厳密に対称にする。**mirt とは異なる**: mirt の `testinfo()` に SE はないが、2・3 因子モデルの
+     `plot(type = "SE")` / `type = "infoSE"` は $1/\sqrt{I_{\mathbf u}}$（`1/sqrt(testinfo(x, Theta, degrees = ))`、
+     上の「他の座標が既知」の値）を描く。flexpyirt は推定可能な量の標準誤差であり $D=1$ で 1 次元の SE に一致する
+     合成値の SE を返す。$1/\sqrt{I_{\mathbf u}}$ は同じ DataFrame の `1 / np.sqrt(information)`。参照値は R で
+     mirt の項目情報行列の和を逆行列にして作る。
+   - `information_matrix(res, theta, *, item=None, group=None)` は形 `(T, D, D)` の NumPy 配列を返す:
+     テスト情報行列、または `item=`（項目名）を与えればその項目の行列。DataFrame ではなく配列にするのは、
+     点ごとの $D\times D$ 行列には引きやすい平らな配置がないため。行と列は推定したモデルの `Model.factor_names` の順。
+     1 次元モデルでは `(T, 1, 1)`。mirt の `iteminfo(..., multidim_matrix = TRUE)`（点ごと）にあたり、
+     テストはその項目についての和。
+   - `expected_score(res, theta, *, group=None)`: $E_j(\boldsymbol\theta)=\sum_kk\,P_{jk}(\boldsymbol\theta)$
+     と `total`。項目 2 と同じで、`theta` が多次元になるだけ。$D$ 列の `Theta` を与えた mirt の
+     `expected.item()` / `expected.test()` にあたる。
+   **`FitResult` に新しく保存するものはない。** `schema_version` は変えない。
+   **一致の実測値**は VALIDATION.md（V43）に記録する。
+
+4. **カット得点による分類の正確さと一貫性（#107, V52）**:
    **何を計算するか。** カット得点 $c_1<\dots<c_C$ のあるテストは受検者を $H=C+1$ 個の順序づいた
    カテゴリ $h=0,\dots,C$ に分ける。値がカット以上ならそのカットより上なので、値 $v$ のカテゴリは
    $h(v)=\#\{k: v\ge c_k\}$。1 回の実施と推定済みモデルから、観測されたカテゴリが真のカテゴリに一致する
@@ -2122,6 +2262,8 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    `reliability` や `score` と同じ）では `data` の各行の群ラベル。
 
 ## 参考文献
+- Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
+- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -2162,6 +2304,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
+- Houts, C. R., & Cai, L. (n.d.). *flexMIRT user's manual: Flexible multilevel multidimensional item analysis and test scoring* (versions 3.5–3.7). Vector Psychometric Group.
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
@@ -2200,6 +2343,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Plackett, R. L. (1954). A reduction formula for normal multivariate integrals. *Biometrika*, 41(3–4), 351–360.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.

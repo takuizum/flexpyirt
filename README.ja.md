@@ -42,7 +42,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | EM の加速 | 単調性の安全装置つき SQUAREM（スキーム S3）、`BAEM(squarem=True)`。有無どちらでも mirt と一致 | ✓ |
 | 項目適合度 | Orlando–Thissen の S-X2（`FitResult.item_fit()`、多母集団は群ごと。単一群の確認的 2〜3 因子モデルにも対応）。mirt と同じセルのまとめ方・自由度・RMSEA・p 値 | ✓ |
 | 合計得点 | 項目のカテゴリ確率を与えたときの合計得点の分布（`summed_score_distribution()`）。Lord–Wingersky 再帰（2 値項目では Poisson 二項分布）、その対数空間版、FFT による方法、正規・精密化正規・Poisson 近似。`jit`・`vmap`・自動微分に対応 | ✓ |
-| 情報関数と信頼性 | 自動微分によるすべての項目モデルの項目・テスト情報量（`item_information()`、条件付き標準誤差つきの `test_information()`）、期待得点とテスト特性曲線（`expected_score()`）、周辺信頼性・経験的信頼性（`reliability()`）、合計得点 EAP の表（`summed_score_table()`）と `score(method="EAPsum")`。1 次元モデル（単一群・多母集団） | ✓ |
+| 情報関数と信頼性 | 自動微分によるすべての項目モデルの項目・テスト情報量（`item_information()`、条件付き標準誤差つきの `test_information()`）、期待得点とテスト特性曲線（`expected_score()`）、周辺信頼性・経験的信頼性（`reliability()`）、合計得点 EAP の表（`summed_score_table()`）と `score(method="EAPsum")`。これらは 1 次元モデル（単一群・多母集団）。確認的・双因子・two-tier モデルでは情報行列（`information_matrix()`）、方向別の情報量（`direction=` を渡した `item_information()` / `test_information()`）と期待得点 | ✓ |
 | 図 | EAP の $\theta$ の区間ごとの観測比率つき項目特性曲線（群ごとにも描け、DIF の図になる）、標準誤差つきの項目・テスト情報量、テスト特性曲線、Wright マップ（`flexpyirt.plotting`。matplotlib は `flexpyirt[plot]`）。数値は `item_probabilities()`、`empirical_item_curve()`、`wright_map_table()` が返し、mirt の `itemfit()` の表・`probtrace()`、TAM の `tam.threshold()` と照合済み。1 次元モデル | ✓ |
 | 分類の正確さ | カット得点による分類の正確さと一貫性、一貫性の Cohen の κ、カットごとの偽陽性・偽陰性率、カテゴリごとの指標（`classification_accuracy()`: 合計得点上のカットの Lee, 2010 と $\theta$ 上のカットの Rudner, 2001, 2005。推定された潜在分布で積分、または受検者の推定値で平均）。1 次元モデル（単一群・多母集団） | ✓ |
 | 限定情報の適合度 | Maydeu-Olivares & Joe の M2 / M2*（`FitResult.m2()`。単一群の 1 次元モデルと確認的 2〜3 因子モデル）。自由度・p 値・RMSEA と信頼区間・SRMSR・2 値の TLI / CFI | ✓ |

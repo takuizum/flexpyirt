@@ -59,12 +59,15 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | Normal mixtures | `multipleGroup(..., dentype = "mixture-k")` with all items invariant, plus an independent R implementation |
 | S-X2 item fit | `itemfit(m, fit_stats = "S_X2")` |
 | Item and test information, expected scores | `iteminfo()`, `testinfo()`, `expected.item()`, `expected.test()` at mirt's estimates (2PL, 3PL, GRM, GPCM, nominal, mixed formats, two groups): to $10^{-9}$ relative |
+| Multidimensional information | Information matrices (`iteminfo(..., multidim_matrix = TRUE)`), directional item and test information (`iteminfo()` / `testinfo()` with `degrees =`) and expected scores of two- and three-factor models with every item model and cross-loadings, a bifactor and a two-tier model: to $10^{-10}$ relative |
 | Reliability | `marginal_rxx()` (also recomputed with a tight integration tolerance, and for a group with mean and variance other than 0 and 1 on the equivalent standardized model) and `empirical_rxx()`: to $10^{-10}$ |
 | Summed-score EAP | `fscores(m, method = "EAPsum")`, the table and the scores of each respondent, including `NA` for incomplete response patterns: to $10^{-9}$ |
 | $M_2$ / $M_2^*$ | `M2(m)`, plus an exact R computation where mirt differs (see below) |
 | DIF tests | `DIF(mg, scheme = "add" / "drop")` |
 | Robust standard errors | `mirt(..., SE.type = "crossprod")` and `SE.type = "sandwich"`: whole covariance matrices at mirt's estimates, and standard errors from a full fit |
 | SQUAREM | every comparison above is repeated with `BAEM(squarem=True)` |
+| Unconstrained M-step scale | the comparisons of 3PL, 4PL, priors and MAP, missing responses, multiple groups, fixed item parameter calibration and confirmatory 2–3 factor models are repeated with `BAEM(m_step_scale="unconstrained")` at the same tolerances |
+| `LogitNormalPrior` | the default `mode_scale="natural"` has no mirt equivalent, so it is checked independently: the density against SciPy (it integrates to 1, and logit $X$ has the stated mean and variance), and the MAP estimate as a stationary point of the log posterior written from the formula, to $10^{-6}$. `mode_scale="logit"` matches mirt's `norm` prior on `g` (log-likelihood and log posterior to $10^{-9}$ relative, $a$, $d$, $g$ to $10^{-6}$, Oakes SEs to $10^{-5}$ relative) and flexMIRT's logit-metric mode computed independently |
 | Polychoric correlations | lavaan's `lavCor()` on ordered variables to $10^{-6}$, psych's `polychoric()` to $10^{-3}$ (its optimizer's tolerance) and psych's `cor.smooth()` for smoothing |
 | Parallel analysis, MAP, empirical Kaiser criterion | EFAtools' `EKC()` and `PARALLEL()`, psych's `vss()`, EFA.dimensions' `MAP()` and an independent R implementation of the fourth-power MAP, on the same correlation matrices to $10^{-11}$; reference eigenvalues of normal data within Monte Carlo error |
 | Q3 and LD $X^2$ / $G^2$ | `residuals(m, type = "Q3" / "LD" / "LDG2")` on the same models fitted by mirt |

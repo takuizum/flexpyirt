@@ -47,6 +47,7 @@ from flexpyirt.dimensionality import (
 from flexpyirt.fit import fit
 from flexpyirt.information import (
     expected_score,
+    information_matrix,
     item_information,
     reliability,
     summed_score_table,
@@ -57,7 +58,7 @@ from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, Normal, NormalMi
 from flexpyirt.linking import LinkResult, link
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
-from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior
+from flexpyirt.priors import BetaPrior, LogitNormalPrior, LogNormalPrior, NormalPrior
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
 from flexpyirt.sumscore import summed_score_distribution
@@ -90,6 +91,7 @@ __all__ = [
     "LinkResult",
     "LocalDependenceResult",
     "LogNormalPrior",
+    "LogitNormalPrior",
     "MAPResult",
     "Model",
     "ModelParallelAnalysisResult",
@@ -118,6 +120,7 @@ __all__ = [
     "exploratory_detect",
     "fit",
     "hull",
+    "information_matrix",
     "item_information",
     "item_probabilities",
     "link",

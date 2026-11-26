@@ -1,5 +1,5 @@
 # Reference values for classification accuracy and consistency (VALIDATION.md V52;
-# DESIGN.md §18.3) from R: cacIRT (Lathrop, 2015) and an independent recomputation from mirt.
+# DESIGN.md §18.4) from R: cacIRT (Lathrop, 2015) and an independent recomputation from mirt.
 # Run from the repository root:  Rscript validation/r/classification_reference.R
 # Writes tests/reference/v52_classification.json. CI does not run R; the JSON is committed.
 #

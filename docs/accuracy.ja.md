@@ -54,12 +54,15 @@ $10^{-8}$ 程度）。
 | 混合正規 | 全項目を不変にした `multipleGroup(..., dentype = "mixture-k")` と、R の独立な実装 |
 | S-X2 項目適合度 | `itemfit(m, fit_stats = "S_X2")` |
 | 項目・テスト情報量、期待得点 | mirt の推定値での `iteminfo()`・`testinfo()`・`expected.item()`・`expected.test()`（2PL、3PL、GRM、GPCM、名義、混合形式、2 群）。相対 $10^{-9}$ まで |
+| 多次元の情報量 | すべての項目モデルと交差負荷を含む 2 因子・3 因子モデル、双因子モデル、two-tier モデルの情報行列（`iteminfo(..., multidim_matrix = TRUE)`）、方向別の項目・テスト情報量（`degrees =` を渡した `iteminfo()` / `testinfo()`）と期待得点。相対 $10^{-10}$ まで |
 | 信頼性 | `marginal_rxx()`（積分の許容誤差を厳しくした再計算とも照合。平均・分散が 0・1 でない群は、標準化した等価モデルで照合）と `empirical_rxx()`。$10^{-10}$ まで |
 | 合計得点による EAP | `fscores(m, method = "EAPsum")` の表と受検者ごとの得点（欠測のある反応パターンが `NA` になる点も含む）。$10^{-9}$ まで |
 | $M_2$ / $M_2^*$ | `M2(m)`。mirt と異なる場合は R による厳密な計算（下記参照） |
 | DIF 検定 | `DIF(mg, scheme = "add" / "drop")` |
 | ロバスト標準誤差 | `mirt(..., SE.type = "crossprod")`・`SE.type = "sandwich"`: mirt の推定値での共分散行列全体と、通しで当てはめたときの標準誤差 |
 | SQUAREM | 上のすべての照合を `BAEM(squarem=True)` でも行う |
+| M-step の非拘束尺度 | 3PL・4PL、事前分布と MAP、欠測、多母集団、項目パラメタ固定の較正、2–3 因子の確認的モデルの照合を `BAEM(m_step_scale="unconstrained")` でも同じ許容誤差で行う |
+| `LogitNormalPrior` | 既定の `mode_scale="natural"` は mirt に同等のものがないため独立に検証する: 密度を SciPy と照合し（積分が 1、logit $X$ の平均と分散が指定どおり）、MAP 推定値が式から書いた対数事後の停留点であることを $10^{-6}$ で確かめる。`mode_scale="logit"` は mirt の `g` への `norm` 事前分布に一致し（対数尤度と対数事後は相対 $10^{-9}$、$a$・$d$・$g$ は $10^{-6}$、Oakes の SE は相対 $10^{-5}$）、独立に計算した flexMIRT の logit 尺度のモードにも一致する |
 | ポリコリック相関 | 順序変数に対する lavaan の `lavCor()` と $10^{-6}$ まで、psych の `polychoric()` と $10^{-3}$ まで（その最適化の許容誤差による）、平滑化は psych の `cor.smooth()` |
 | 平行分析、MAP、経験的カイザー基準 | 同じ相関行列に対する EFAtools の `EKC()`・`PARALLEL()`、psych の `vss()`、EFA.dimensions の `MAP()`、4 乗版 MAP の R による独立な実装と $10^{-11}$ まで。正規データの参照固有値は Monte Carlo 誤差の範囲で |
 | Q3、LD $X^2$ / $G^2$ | mirt で推定した同じモデルでの `residuals(m, type = "Q3" / "LD" / "LDG2")` |

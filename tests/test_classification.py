@@ -1,4 +1,4 @@
-"""Classification accuracy and consistency without R (DESIGN.md §18.3, VALIDATION.md V52).
+"""Classification accuracy and consistency without R (DESIGN.md §18.4, VALIDATION.md V52).
 
 Independent checks of :func:`flexpyirt.classification_accuracy`: brute-force enumeration of all
 response patterns of a short mixed-format test (item probabilities written out here in NumPy),
