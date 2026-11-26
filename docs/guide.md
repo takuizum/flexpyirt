@@ -1260,6 +1260,55 @@ print(linked_sl.transform_theta(src_res.score(src_df.iloc[:3])).round(3))
   scalars, arrays, Series, or scoring DataFrames (`theta`, `se`, and plausible values `pv1..`),
   treating $(A, B)$ as known (the transformed `se` excludes linking error).
 
+### Screening the common items
+
+Before a linking is trusted, the common items are checked for item parameter drift: an item whose
+parameters moved between the two calibrations (exposure, a changed context) is removed from the
+anchor set and the linking is repeated. `screen_common_items(source, target)` links with `link()`,
+transforms the source items and computes for every common item
+
+| `statistic` | Per item | Default `threshold` |
+|---|---|---|
+| `"robust_z"` (default) | $\max(\lvert z_a\rvert, \lvert z_b\rvert)$: robust z of the log slope ratios and of the location differences, $(x - \mathrm{median}) / (0.74\,\mathrm{IQR})$ over the common items (Huynh & Meyer, 2010) | 1.645 |
+| `"displacement"` | $\lvert b^* - b^{\mathrm{tgt}}\rvert$, the location difference after the transformation (logits) | 0.3 |
+| `"rmsd"` | root mean squared difference of the two expected item score curves, weighted by the target's latent distribution | 0.1 |
+
+The location $b$ is the difficulty of a dichotomous item and the mean of the thresholds of a GRM
+or GPCM item. With `purify=True` (default) the flagged item with the largest statistic is removed
+and the linking repeated until no kept item is flagged (`removal="all"` removes every flagged item
+per step; `min_items` and `max_iter` bound the loop and a `ScreeningWarning` says when they stop
+it):
+
+```python
+from flexpyirt import screen_common_items
+
+# A later administration in which the first common item became one logit harder.
+d_drift = d_new.copy()
+d_drift[0] -= a_new[0]
+drift_df = pd.DataFrame(
+    simulate_2pl(a_new, d_drift, rng.normal(0.5, 1.2, 800), rng), columns=new_items
+)
+drift_res = fit(Model.uniform(TwoPL(), items=new_items), drift_df, method=BAEM(squarem=True))
+
+screened = screen_common_items(drift_res, res, statistic="displacement")
+print(screened.removed_items)
+print(screened.history[["iteration", "n_items", "A", "B", "removed"]].round(3))
+print(screened.table[["item", "difference_b", "rmsd", "flagged", "kept"]].round(3))
+linked_screened = screened.link  # the LinkResult on the kept items
+```
+
+- `screened.table` has one row per common item under the final linking: transformed source and
+  target slopes and locations, `log_ratio_a`, `difference_b`, `displacement`, `robust_z_a`,
+  `robust_z_b`, `rmsd`, `flagged`, `kept` and `iteration_removed`. `history` gives $(A, B)$ and the
+  removed items at every step, and `initial_link` the linking on all common items.
+- The thresholds are conventions, not derived values; set them for your programme. Robust z with
+  few common items (fewer than about 8) has an unstable IQR.
+- For drift across several administrations, screen each against the base form and stack the
+  tables: `stack_screening_tables({"2025": screened_2025, "2026": screened_2026})`.
+- Unidimensional fits only. DIF tests inside one multiple-group fit are `FitResult.dif()`.
+  Validated against a base-R recomputation of the same rules on mirt calibrations (2PL and mixed
+  2PL + GRM + GPCM).
+
 ### Multidimensional models
 
 Two fits of confirmatory models with the same number of factors are linked by

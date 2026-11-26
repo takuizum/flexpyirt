@@ -58,8 +58,10 @@
   "test_mirt_v6_eh": 290.9,
   "test_oakes": 398.2,
   "test_quadrature_gh": 127.5,
+  "test_r_v50_screening": 44.0,
   "test_reference_meta": 1.5,
   "test_release_version": 0.2,
   "test_scaffold": 6.4,
+  "test_screening": 16.2,
   "test_shards": 0.3
 }
