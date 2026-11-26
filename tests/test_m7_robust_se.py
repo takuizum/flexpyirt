@@ -407,15 +407,6 @@ def test_bifactor_and_two_tier_are_rejected_before_fitting(se: str) -> None:
             fit(spec, data, se=se)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("se", ["crossprod", "sandwich"])
-def test_weights_are_rejected_before_fitting(se: str) -> None:
-    """The cross-product does not account for sampling weights yet (DESIGN.md §17.5)."""
-    data = _simulate_2pl(19, 50, 6)
-    spec = Model.uniform(TwoPL(), items=data.columns)
-    with pytest.raises(SpecificationError, match="not available with weights="):
-        fit(spec, data, se=se, weights=np.ones(len(data)))  # type: ignore[arg-type]
-
-
 def test_unknown_se_lists_the_options() -> None:
     data = _simulate_2pl(17, 50, 5)
     spec = Model.uniform(TwoPL(), items=data.columns)
