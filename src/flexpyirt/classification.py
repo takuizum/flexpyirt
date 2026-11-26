@@ -208,7 +208,8 @@ def _true_score(
 ) -> np.ndarray:
     r""":math:`\tau(\theta)=\sum_j\sum_kk\,P_{jk}(\theta)` of one group."""
     probs = np.asarray(_category_probabilities(prob, eta, jnp.asarray(theta)))[group_index]
-    return np.einsum("tjk,k->t", probs, np.arange(probs.shape[-1], dtype=np.float64))
+    scores = np.arange(probs.shape[-1], dtype=np.float64)
+    return np.asarray(np.einsum("tjk,k->t", probs, scores), dtype=np.float64)
 
 
 def _inverse_true_score(
@@ -235,7 +236,7 @@ def _inverse_true_score(
         lo = np.where(above, lo, mid)
         if np.all(hi - lo <= 4.0 * np.spacing(np.maximum(np.abs(lo), np.abs(hi)))):
             break
-    return 0.5 * (lo + hi)
+    return np.asarray(0.5 * (lo + hi), dtype=np.float64)
 
 
 def _points(
