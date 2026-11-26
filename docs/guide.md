@@ -1292,7 +1292,11 @@ print(report)
   look for pairs that stand out. The default re-estimates the model for every item, as mirt's
   `residuals(type = "JSI")`. `method="one_step"` skips the re-estimation (one Taylor step from
   the full model) and is far faster on long tests; it agrees closely with the default from about
-  15 items on, but not on short tests, where it warns.
+  15 items on, but not on short tests, where it warns. JSI is defined only for single-group
+  unidimensional models: its multidimensional / multiple-group extension has not been studied and
+  there is no reference implementation, so `jsi()` raises `SpecificationError` for
+  multiple-group, multidimensional (including bifactor and two-tier) and non-`Normal` latent
+  models. Use `local_dependence()` for those.
 - `model_parallel_analysis()` simulates data from the fitted model and asks whether the observed
   second eigenvalue is larger than the model produces (Drasgow & Lissak, 1983). Because the
   model was fitted to the same data the $p$-value is conservative: a small value is evidence of a

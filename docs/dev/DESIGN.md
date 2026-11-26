@@ -1915,6 +1915,13 @@ data-independent shapes (§15.21).
     $\le1.2\times10^{-7}$). The tests also check the refit against `fit()` on the data without the
     item, the approximations against the refit on a 15-item data set (`"newton"` 1 step 0.03, 2
     steps 0.02, `"one_step"` 0.05) and the vmapped gradients against single ones.
+    **Scope (decided 2026-11-26, #81)**: JSI is defined only for single-group unidimensional
+    models (one slope per item; Edwards, Houts & Cai, 2018). Its multidimensional /
+    multiple-group extension (including bifactor and two-tier models) and its use with non-Normal
+    latent distributions have not been studied, and there is no reference implementation (mirt's
+    `type = "JSI"` needs one factor; see also item 11 and §17.3), so it is not implemented:
+    `jsi()` raises `SpecificationError` for multiple-group, multidimensional and non-`Normal`
+    latent models, with a message saying why.
 18. **Package split: `flexpyctt` and `flexpyequate` (decided 2026-11-25, issue #87)**: tools that need no fitted IRT
     model are released as separate, JAX-free distributions from this repository. flexpyirt keeps
     BA-EM estimation and everything that uses its result.
