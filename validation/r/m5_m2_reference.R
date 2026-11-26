@@ -22,6 +22,7 @@
 # For threepl, gpcm_sim, and rasch_free_var, this script keeps mirt's raw M2() output untouched and
 # also records exact R M2* values computed with central-difference derivatives of expected.item()
 # and mirt's own buildXi2els C++ routine.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -237,7 +238,7 @@ cases <- list(
 )
 res <- list(
   meta = list(case = "v18_m2", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")), converged = TRUE,
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(), converged = TRUE,
               TOL = 1e-10, optimizer = "NR", accelerate = "none"),
   cases = cases
 )

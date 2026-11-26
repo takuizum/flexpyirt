@@ -15,6 +15,7 @@
 #     COV_11..COV_DD -> var_1..var_D (fixed at 1),
 #     COV_21 / COV_31 / COV_32 -> cor_12 / cor_13 / cor_23 (free; since variances are fixed at 1,
 #     covariance equals correlation identically, and SEs are on the same natural scale).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -298,7 +299,7 @@ bundle <- list(
     case = "v14_mirt2d",
     description = "V14: Confirmatory 2-3 dimensional MIRT (2PL simple, 2PL cross-loading, GRM, 3D 2PL)",
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     TOL = 1e-10,
     accelerate = "none",
     optimizer = "per case (NR for 2D, BFGS reltol 1e-13 for 3D)",

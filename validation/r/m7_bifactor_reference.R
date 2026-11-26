@@ -17,6 +17,7 @@
 # grid, which with independent normal weights equals the factorized posterior on the same 1-D grid.
 # With D = 4 the product grid has quadpts^4 nodes, so EAPs are computed with eap_quadpts = 15
 # (15^4 = 50,625 nodes) at mirt's estimates; the Python test scores at the same grid.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -200,7 +201,7 @@ bundle <- list(
     case = "v32_bifactor",
     description = "V32: bifactor models (2PL with general-only items, GRM) by bfactor()",
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     TOL = 1e-10,
     accelerate = "none",
     optimizer = "NR",

@@ -7,6 +7,7 @@
 # latent parameters stay free so they count against the S-X2 degrees of freedom, fixed FIPC bank
 # items stay fixed), and fitted with TOL = NaN so no EM step moves anything. itemfit() is then
 # evaluated on the same quadrature grid as the fit (its default would be 61 points on [-6, 6]).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -60,7 +61,7 @@ cases <- list(
 )
 res <- list(
   meta = list(case = "v15_sx2", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")), converged = TRUE),
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(), converged = TRUE),
   cases = cases
 )
 write_json(res, file.path("tests", "reference", "v15_sx2.json"), auto_unbox = TRUE, digits = NA,

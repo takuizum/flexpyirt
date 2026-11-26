@@ -23,6 +23,7 @@
 # cacIRT's logistic is 1 / (1 + exp(-D a (theta - b))) with D = 1.7 (class.Rud's D approach
 # ignores its D argument), so mirt's slope-intercept parameters are passed as
 # a / 1.7, b = -d / a, c = g.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(cacIRT)
@@ -331,7 +332,7 @@ bundle <- list(
                         "cacIRT class.Lee / class.Rud / Lee.poly.D / Lee.poly.P and an",
                         "independent recomputation from mirt"),
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     cacirt_version = as.character(packageVersion("cacIRT")),
     quadpts = quadpts, theta_lim = theta_lim,
     # Every mirt fit above is asserted to have converged (fit_single(), multipleGroup());

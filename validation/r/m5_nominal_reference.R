@@ -42,6 +42,7 @@
 # category 1 (not 0) has the lowest category slope and the true ML estimate is interior;
 # flexpyirt returns that interior estimate (DESIGN.md §16.6, VALIDATION.md V23). Non-finite scores
 # are written as "Inf" / "-Inf" (as in m4_scoring_reference.R).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -291,7 +292,7 @@ write_case <- function(case, description, dat, itemtype, quad, n_cat,
   sx2 <- itemfit(m_oakes, fit_stats = "S_X2", quadpts = quad$quadpts, theta_lim = quad$theta_lim)
   res <- c(list(
     meta = list(case = case, description = description, itemtype = itemtype, n_cat = n_cat,
-                r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+                r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
                 TOL = 1e-10, quadpts = quad$quadpts, theta_lim = quad$theta_lim,
                 grid_check = range(m_oakes@Model$Theta),
                 accelerate = "none", optimizer = "NR", reference_start = reference_start,
@@ -470,7 +471,7 @@ res_2d <- list(
   meta = list(case = "v23_nominal_2d",
               description = "V23f: Two-factor confirmatory nominal, J=8, K=4, N=3000, cor 0.4 (seed 20261206)",
               itemtype = "nominal", n_cat = 4L, n_factors = 2L,
-              r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+              r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
               TOL = 1e-10, quadpts = quad_2d$quadpts, theta_lim = quad_2d$theta_lim,
               grid_check = range(m_2d@Model$Theta), n_nodes = nrow(m_2d@Model$Theta),
               accelerate = "none", optimizer = "NR",

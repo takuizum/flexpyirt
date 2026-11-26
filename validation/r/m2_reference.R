@@ -5,6 +5,7 @@
 # As in m1_reference.R: optimizer = "NR", accelerate = "none", TOL = 1e-10.
 # Cases with a free latent mean/variance (V4, V5) use 81 points on [-8, 8] so that grid
 # truncation is negligible (VALIDATION.md, DESIGN.md §14.9).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -53,7 +54,7 @@ write_case <- function(case, description, dat, groups, group_labels, fit_fun, qu
   rich <- extract(m_rich, groups)
   res <- c(list(
     meta = list(case = case, description = description,
-                r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+                r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
                 TOL = 1e-10, quadpts = quad$quadpts, theta_lim = quad$theta_lim,
                 grid_check = range(m_oakes@Model$Theta),
                 accelerate = "none", optimizer = "NR",

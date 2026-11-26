@@ -25,6 +25,7 @@
 # Every fit, including DIF()'s refits, uses optimizer = "NR", accelerate = "none", TOL = 1e-10 and
 # 81 points on [-8, 8].
 # The DIF() runs take long; set V49_CACHE=<file.rds> to keep them between runs.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -212,7 +213,7 @@ pack <- function(data, group) {
 
 res <- list(
   meta = list(case = "v49_dif_screen", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")), TOL = 1e-10, quadpts = 81,
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(), TOL = 1e-10, quadpts = 81,
               theta_lim = c(-8, 8), grid_check = range(base_inv@Model$Theta),
               accelerate = "none", optimizer = "NR", seq_stat = 0.05, p_adjust = "BH",
               effect_size_quadpts = 201, effect_size_theta_lim = c(-6, 6), converged = TRUE),

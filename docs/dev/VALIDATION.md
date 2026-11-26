@@ -5,13 +5,39 @@ English | [日本語](VALIDATION.ja.md)
 ## Approach
 - Reference values come from R `mirt` and are committed as JSON in `tests/reference/`. CI does not
   run R.
-- Generator scripts are `validation/r/<case>.R`. Each writes the equivalent of `sessionInfo()`
-  (R and mirt versions) into the JSON.
+- Generator scripts are `validation/r/<case>.R`. Each writes the R version, the mirt version and
+  mirt's commit SHA into the JSON's `meta` (see "R and mirt versions" below).
 - Comparisons use **the same conditions**: the same quadrature (e.g. 61 equally spaced points on
   $[-6,6]$), the same convergence criterion (a strict `TOL` on the mirt side, e.g. 1e-8), no
   acceleration, the same priors.
 - Data are both simulated (fixed seeds) and public (e.g. mirt's bundled `LSAT7`, `Science`,
   `SAT12`).
+
+## R and mirt versions
+- **Policy (#74)**: references are generated with the latest R mirt on GitHub
+  (`philchalmers/mirt`, default branch), not with a CRAN release, so a fix or a regression in mirt
+  shows up here before it reaches CRAN. Every reference JSON records `mirt_version` and
+  `mirt_sha` (the commit, `packageDescription("mirt")$RemoteSha`) in its `meta`;
+  `tests/test_reference_meta.py` and `tests/test_reference_provenance.py` reject a reference
+  without a commit SHA, a script that does not load mirt through `validation/r/setup.R`, and a
+  script missing from `validation/r/run_references.sh`.
+- **Regenerating**: `Rscript validation/r/install_mirt.R [ref]` installs mirt from GitHub into the
+  user library (or `FLEXPYIRT_R_LIB`); `validation/r/run_references.sh` reruns every script that
+  uses mirt, in two stages (the second reads JSON written by the first; `JOBS` sets the
+  parallelism). `validation/r/setup.R` stops if the mirt it would load has no `RemoteSha`.
+- **Scheduled check**: `.github/workflows/mirt-head.yml` (weekly and on demand, separate from the
+  test CI, which still never runs R) installs R and mirt HEAD, reruns the scripts, compares the new
+  JSON with the committed JSON (`scripts/compare_references.py`: SEs 1e-3 relative,
+  log-likelihoods and fit statistics 1e-6 relative, other values 1e-5 absolute + 1e-6 relative,
+  i.e. the strictest entry of the tolerance table for each kind) and runs the whole test suite on
+  the regenerated references. On drift or a failure it opens an issue (or comments on the open
+  one). References are never updated automatically: a person decides whether the drift is a mirt
+  regression, a fix of a known mirt issue (#20) or a change to adopt, regenerates locally and opens
+  a PR; every adopted drift is recorded below, and a test tolerance changes only with a written
+  reason.
+- **Current references**: R 4.6.2, mirt 1.48.5 at `2b342bb` (philchalmers/mirt, 2026-11-23).
+  Before #74 they came from CRAN mirt 1.46.1 (V1–V13, `v14_mirt2d`, V16–V20, V22, V23, `v26_local_dependence`, V31, V32, V43) and
+  1.48 (the rest).
 
 ## Tolerances (initial values, revised as needed)
 | Quantity | Tolerance (max. absolute difference) |

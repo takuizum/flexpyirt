@@ -17,6 +17,7 @@
 #   - fscores(method = "EAPsum", full.scores = TRUE, full.scores.SE = TRUE) per unique pattern
 # The case twopl_missing has missing responses: mirt refuses the EAPsum table there, so it
 # stores only the per-pattern EAPsum scores (NA for incomplete patterns) and empirical_rxx().
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -240,7 +241,7 @@ bundle <- list(
                         "vs mirt iteminfo / testinfo / expected.item / expected.test /",
                         "marginal_rxx / empirical_rxx / fscores(method = 'EAPsum')"),
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     quadpts = quadpts, theta_lim = theta_lim,
     # Every mirt fit above is asserted to have converged (fit_single(), multipleGroup()).
     converged = TRUE

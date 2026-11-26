@@ -26,6 +26,7 @@
 #     default grid (121 points for one factor, 61 per dimension for two).
 # The Python test puts mirt's estimates into a flexpyirt FitResult (every parameter fixed) and
 # compares, so the comparison does not depend on how tightly either program converged.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -340,7 +341,7 @@ cases[[9]] <- group_case("groups_factors2_2pl", dat, grp, spec, "2PL", anchors, 
 
 res <- list(
   meta = list(case = "v26_local_dependence_extensions", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")), converged = TRUE,
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(), converged = TRUE,
               theta_lim = LIM, grid_check = LIM),
   cases = cases
 )

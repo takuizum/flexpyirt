@@ -23,6 +23,7 @@
 # multivariate-normal weights and each specific factor's weights). EAPs are computed with
 # eap_quadpts points per dimension at mirt's estimates (9^5 = 59,049 nodes for D = 5,
 # 15^4 = 50,625 for D = 4); the Python test scores at the same grid.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -236,7 +237,7 @@ bundle <- list(
     case = "v33_two_tier",
     description = "V33: two-tier models (2PL with three specific factors, GRM with a cross-loading) by bfactor(model2 = )",
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     TOL = 1e-10,
     accelerate = "none",
     optimizer = "BFGS",

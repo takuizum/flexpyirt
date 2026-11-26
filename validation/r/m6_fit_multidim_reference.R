@@ -17,6 +17,7 @@
 #     mirt's own buildXi2els and no latent column (must reproduce the raw output: asserted), and
 #   - `exact_with_latent`: the same with one analytic Delta column per free correlation
 #     (Maydeu-Olivares & Joe, 2005, 2006), which is flexpyirt's default.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -219,7 +220,7 @@ cases <- list(
 )
 res <- list(
   meta = list(case = "v39_fit_multidim", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")), converged = TRUE,
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(), converged = TRUE,
               description = paste("V39: M2 / M2* and S-X2 for confirmatory 2-3D MIRT at mirt's",
                                   "V14 estimates (TOL = NaN), on the fit's product grid")),
   cases = cases

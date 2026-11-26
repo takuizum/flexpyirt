@@ -52,12 +52,24 @@ def test_check_reference_meta_accepts_valid_and_rejects_invalid() -> None:
     with pytest.raises(AssertionError, match="grid_check"):
         check_reference_meta({**valid_full, "grid_check": [-4, 4]})
 
+    with_mirt = {
+        **valid_full,
+        "mirt_version": "1.48.5",
+        "mirt_sha": "0123456789abcdef" * 2 + "01234567",
+    }
+    check_reference_meta(with_mirt)
+    with pytest.raises(AssertionError, match="mirt_sha"):
+        check_reference_meta({**with_mirt, "mirt_sha": None})
+    with pytest.raises(AssertionError, match="mirt_sha"):
+        check_reference_meta({k: v for k, v in with_mirt.items() if k != "mirt_sha"})
+
 
 def test_all_committed_reference_jsons_pass_meta_checks() -> None:
     files = sorted(REFERENCE_DIR.glob("*.json"))
     assert len(files) >= 13
     for path in files:
         raw = json.loads(path.read_text())
+        assert "mirt_version" in raw["meta"], path.name
         check_reference_meta(raw["meta"])
 
 

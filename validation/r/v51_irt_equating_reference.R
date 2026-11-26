@@ -31,6 +31,7 @@
 #   - OSE: equate::equate(type = "equipercentile") on the two synthetic distributions.
 #   - Raw-to-scale table of the old form: true score (uniroot on expected.test(), SE from
 #     testinfo()) and EAPsum (fscores), then the linear transformation, clipping and round().
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(equateIRT)
@@ -276,7 +277,7 @@ meta <- list(
   converged = TRUE,  # no estimation: every parameter is fixed
   theta_lim = theta_lim,
   quadpts = quadpts,
-  mirt = as.character(packageVersion("mirt")),
+  mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
   equateIRT = as.character(packageVersion("equateIRT")),
   SNSequate = as.character(packageVersion("SNSequate")),
   equate = as.character(packageVersion("equate")),

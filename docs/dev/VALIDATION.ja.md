@@ -4,9 +4,15 @@
 
 ## 方針
 - 照合の参照値は R `mirt` で生成し、JSON で `tests/reference/` にコミットする。CI では R を実行しない。
-- 生成スクリプトは `validation/r/<case>.R`。各スクリプトの先頭に `sessionInfo()` 相当（R・mirt のバージョン）を JSON に書き出す。
+- 生成スクリプトは `validation/r/<case>.R`。各スクリプトは R の版・mirt の版・mirt のコミット SHA を JSON の `meta` に書く（下の「R と mirt の版」）。
 - 照合は**同じ条件**で行う: 同じ求積（等間隔 61 点・$[-6,6]$ など）、同じ収束基準（mirt 側は `TOL` を厳しく、例: 1e-8）、加速なし、同じ事前分布。
 - データはシミュレーション（固定シード）と公開データ（例: mirt 同梱の `LSAT7`, `Science`, `SAT12`）の両方。
+
+## R と mirt の版
+- **方針（#74）**: 参照値は CRAN の固定版ではなく、GitHub 上の最新の R mirt（`philchalmers/mirt` の既定ブランチ）で作る。mirt の修正や退行が CRAN に出る前にここで分かる。参照値の JSON は `meta` に `mirt_version` と `mirt_sha`（コミット、`packageDescription("mirt")$RemoteSha`）を必ず記録する。`tests/test_reference_meta.py` と `tests/test_reference_provenance.py` が、コミット SHA のない参照値、`validation/r/setup.R` を通さずに mirt を読むスクリプト、`validation/r/run_references.sh` に載っていないスクリプトを検出する。
+- **作り直し方**: `Rscript validation/r/install_mirt.R [ref]` で GitHub の mirt をユーザーライブラリ（または `FLEXPYIRT_R_LIB`）に入れ、`validation/r/run_references.sh` で mirt を使う全スクリプトを 2 段に分けて実行する（2 段目は 1 段目が書いた JSON を読む。並列度は `JOBS`）。読み込む mirt に `RemoteSha` がなければ `validation/r/setup.R` が止める。
+- **定期チェック**: `.github/workflows/mirt-head.yml`（週 1 回と手動。R を走らせないテスト CI とは別）が R と mirt HEAD を入れてスクリプトを再実行し、新しい JSON をコミット済みの JSON と比べ（`scripts/compare_references.py`: SE は相対 1e-3、対数尤度と適合度統計量は相対 1e-6、その他は絶対 1e-5 + 相対 1e-6。許容誤差表の種類ごとに最も厳しい値）、作り直した参照値でテスト全体を走らせる。ずれや失敗があれば issue を立てる（開いているものがあればコメント）。参照値は自動では更新しない。ずれが mirt の退行か、既知の mirt の問題（#20）の修正か、取り込むべき変更かを人が判断し、手元で作り直して PR にする。取り込んだずれは下に記録し、テストの許容誤差は理由を書いたときだけ変える。
+- **現在の参照値**: R 4.6.2、mirt 1.48.5（`2b342bb`、philchalmers/mirt、2026-11-23）。#74 以前は CRAN の mirt 1.46.1（V1–V13、`v14_mirt2d`、V16–V20、V22、V23、`v26_local_dependence`、V31、V32、V43）と 1.48（それ以外）で作っていた。
 
 ## 許容誤差（初期値、必要に応じて見直す）
 | 量 | 許容（最大絶対差） |
