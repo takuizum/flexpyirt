@@ -12,8 +12,10 @@ objective, against the flexMIRT mode computed here by Newton's method, and again
 
 from __future__ import annotations
 
+import json
 import math
 from functools import cache
+from pathlib import Path
 from typing import Any
 
 import jax
@@ -44,6 +46,7 @@ from flexpyirt.priors import (
     eval_log_prior,
 )
 from flexpyirt.quadrature import Quadrature
+from tests._reference import check_reference_meta
 
 
 def _reference_log_pdf(x: np.ndarray, mean: float, sd: float) -> np.ndarray:
@@ -344,7 +347,7 @@ def test_v45_logit_mode_scale_reproduces_flexmirt_mode_and_se(scale: str) -> Non
     spec, _, res = _map_fit(scale, "logit")
     assert res.converged
     x_flex, (neg_objective, v_hat, g_ids) = _flexmirt_mode(spec, df, nat._eta)
-    np.testing.assert_allclose(res._eta, x_flex, rtol=0, atol=1e-6)
+    np.testing.assert_allclose(res._eta, x_flex, rtol=0, atol=1e-7)
     assert res.log_posterior == pytest.approx(-float(neg_objective(v_hat)), abs=1e-8)
     # flexMIRT's mode differs from the natural-scale one (V45: up to ~0.04 in g).
     assert np.max(np.abs(res._eta[g_ids] - nat._eta[g_ids])) > 1e-3
@@ -354,4 +357,57 @@ def test_v45_logit_mode_scale_reproduces_flexmirt_mode_and_se(scale: str) -> Non
     g = x_flex[g_ids]
     se_ref[g_ids] *= g * (1 - g)
     assert res.vcov is not None
-    np.testing.assert_allclose(np.sqrt(np.diag(res.vcov)), se_ref, rtol=1e-4)
+    np.testing.assert_allclose(np.sqrt(np.diag(res.vcov)), se_ref, rtol=1e-6)
+
+
+# ---- V45: mirt PRIOR = (..., g, norm, mu, s) ------------------------------------------------
+
+
+REFERENCE = Path(__file__).parent / "reference" / "v45_3pl_logit_norm_map.json"
+
+
+@cache
+def _mirt_case() -> tuple[dict[str, Any], pd.DataFrame, Model]:
+    raw = dict(json.loads(REFERENCE.read_text()))
+    check_reference_meta(raw["meta"], require_grid_check=True)
+    patterns = pd.DataFrame(np.asarray(raw["patterns"], dtype=float), columns=raw["items"])
+    counts = np.asarray(raw["counts"], dtype=int)
+    data = patterns.loc[patterns.index.repeat(counts)].reset_index(drop=True)
+    g_prior, d_prior = raw["priors"]["g"], raw["priors"]["d"]
+    assert g_prior["mode_scale"] == "logit"
+    spec = (
+        Model.uniform(ThreePL(), items=raw["items"])
+        .prior(
+            param="g",
+            dist=LogitNormalPrior(g_prior["mean_logit"], g_prior["sd_logit"], mode_scale="logit"),
+        )
+        .prior(param="d", dist=NormalPrior(d_prior["mean"], d_prior["sd"]))
+    )
+    return raw, data, spec
+
+
+@cache
+def _mirt_fit(scale: str) -> FitResult:
+    _, data, spec = _mirt_case()
+    return fit(
+        spec,
+        data,
+        method=BAEM(tol=1e-9, max_iter=20000, m_step_scale=scale),  # type: ignore[arg-type]
+        se="oakes",
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("scale", ["natural", "unconstrained"])
+def test_v45_logit_mode_scale_matches_mirt_norm_prior_on_g(scale: str) -> None:
+    """``mode_scale="logit"`` reproduces mirt's ``norm`` prior on its internal logit(g)."""
+    raw, _, _ = _mirt_case()
+    res = _mirt_fit(scale)
+    assert res.converged
+    assert res.loglik == pytest.approx(raw["loglik"], rel=1e-9)
+    assert res.log_posterior == pytest.approx(raw["log_posterior"], rel=1e-9)
+    ref = pd.DataFrame(raw["estimates"]["all"]["params"]).T.loc[raw["items"]]
+    ours = res.items.set_index("item").loc[ref.index]
+    for p in ("a", "d", "g"):
+        np.testing.assert_allclose(ours[p], ref[p].astype(float), rtol=0, atol=1e-6)
+        np.testing.assert_allclose(ours[f"{p}_se"], ref[f"{p}_se"].astype(float), rtol=1e-5)
