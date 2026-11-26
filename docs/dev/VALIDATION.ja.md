@@ -75,6 +75,7 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
+| V45 | M-step の非拘束尺度（任意、`BAEM(m_step_scale="unconstrained")`）を V3・V4・V5・V7・V9・V11・V14 のケースで照合。`LogitNormalPrior`（mirt に同等なものがないため独立な数値検証） | 各ケースの既存の参照値。SciPy（`stats.norm`、`integrate.quad`）と式から書いた停留条件 | #15 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -940,6 +941,30 @@
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
+- **M-step の非拘束尺度と `LogitNormalPrior`（V45、#15）**: DESIGN §15.47–§15.48。
+  1. *両方の M-step 尺度での内点解*: V3・V4・V5・V9（`tests/test_mirt_m2.py`: 対数尤度、項目と潜在分布のパラメタ。
+     V4 の焦点群の分散は $\log\sigma^2$ で動く）、V11（`tests/test_mirt_m3.py`: 3PL/4PL、$\operatorname{logit}g$・
+     $\operatorname{logit}u$、Oakes と Hessian の SE も）、V7（`tests/test_mirt_m3_priors.py`: MAP。`LogNormalPrior`
+     のついた傾きは $\log a$ で動く）、V14（`tests/test_mirt_m4_mirt.py`: 2–3 因子、相関は
+     $2\operatorname{atanh}\rho$ で動く）の mirt 照合を `BAEM(m_step_scale="unconstrained")` でも自然尺度と同じ
+     許容誤差で行い、すべて通る。`tests/test_m_step_scale.py` は、変換と Newton ステップの単体テスト（同じ内点の
+     最大点、境界へは内側から近づく、固定スロットは動かない、棄却されたステップは厳密に元の値）、シミュレーション
+     した 3PL の MAP（`tol=1e-8` で推定値は自然尺度と 1e-5 以内、対数事後は 1e-12、Oakes の共分散は相対 1e-4。
+     SQUAREM あり・なし）、焦点群の分散が自由な 2 群モデル、境界のケース（$g=0$ で生成した項目: 両尺度ともその項目で
+     $g<10^{-4}$ に終わって `HeywoodWarning` を出し、対数尤度は 1e-5 で一致）を加える。
+  2. *`LogitNormalPrior`*: mirt には自然尺度でこの密度を持つ事前分布がない（`g` への `norm` は mirt 内部の
+     $\operatorname{logit}g$ に Jacobian なしで作用し、flexMIRT の `Guessing : Normal` と同じ）ので、mirt の参照値は
+     ない。代わりに `tests/test_logitnormal_prior.py` で次を確かめる: `log_pdf` が `scipy.stats.norm` による
+     $\log\phi(\operatorname{logit}x;\mu,s)-\log x-\log(1-x)$ と 4 組の $(\mu,s)$ で一致（相対 1e-13）。
+     `scipy.integrate.quad` で密度の積分が 1（1e-10）、$\operatorname{logit}X$ の平均が $\mu$（1e-9）、分散が $s^2$
+     （相対 1e-9）。Core の `eval_log_prior` が `log_pdf` と一致し、使わないスロットの勾配は 0 で有限。シミュレーション
+     した 3PL（$J=8$、$N=1200$、$g$ に `LogitNormalPrior(-1.3863, 0.6)`、$d$ に `NormalPrior(0, 3)`、`tol=1e-10`）の
+     MAP が両方の M-step 尺度で、テスト内に式から書いた事前分布の勾配
+     $-1/g+1/(1-g)-(\operatorname{logit}g-\mu)/(s^2g(1-g))$ を使った $\ell(\eta)+\sum\log\pi$ の停留点であり
+     （勾配の最大絶対値は自然尺度 3e-8、非拘束尺度 3e-9。テストは 1e-6）、厳密な局所最大（Hessian が負定値）。
+     尤度の勾配は mirt で照合済みの周辺対数尤度のもの。同じテストで flexMIRT の logit 尺度の目的関数（Jacobian を
+     除いた核）を Newton 法で最大化すると、どの $g$ も `LogitNormalPrior` のときより $1/2$ に近く、差は最大 0.037
+     で、2 つの推定値が違うことを確かめる（DESIGN §15.48）。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。
 - **SE の内部整合**: Oakes の SE と、収束点での周辺対数尤度の直接 `jax.hessian` による SE が一致すること（小規模ケース）。
 - **不変性**: 項目の並べ替え、群ラベルの付け替え、パターン圧縮の有無で結果が変わらないこと。

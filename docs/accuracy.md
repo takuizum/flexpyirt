@@ -65,6 +65,8 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | DIF tests | `DIF(mg, scheme = "add" / "drop")` |
 | Robust standard errors | `mirt(..., SE.type = "crossprod")` and `SE.type = "sandwich"`: whole covariance matrices at mirt's estimates, and standard errors from a full fit |
 | SQUAREM | every comparison above is repeated with `BAEM(squarem=True)` |
+| Unconstrained M-step scale | the comparisons of 3PL, 4PL, priors and MAP, missing responses, multiple groups, fixed item parameter calibration and confirmatory 2–3 factor models are repeated with `BAEM(m_step_scale="unconstrained")` at the same tolerances |
+| `LogitNormalPrior` | mirt has no equivalent prior, so it is checked independently: the density against SciPy (it integrates to 1, and logit $X$ has the stated mean and variance), and the MAP estimate as a stationary point of the log posterior written from the formula, to $10^{-6}$ |
 | Polychoric correlations | lavaan's `lavCor()` on ordered variables to $10^{-6}$, psych's `polychoric()` to $10^{-3}$ (its optimizer's tolerance) and psych's `cor.smooth()` for smoothing |
 | Parallel analysis, MAP, empirical Kaiser criterion | EFAtools' `EKC()` and `PARALLEL()`, psych's `vss()`, EFA.dimensions' `MAP()` and an independent R implementation of the fourth-power MAP, on the same correlation matrices to $10^{-11}$; reference eigenvalues of normal data within Monte Carlo error |
 | Q3 and LD $X^2$ / $G^2$ | `residuals(m, type = "Q3" / "LD" / "LDG2")` on the same models fitted by mirt |

@@ -233,7 +233,7 @@ class LogitNormalPrior:
         \qquad 0 < x < 1,
 
     and :math:`-\infty` outside :math:`(0, 1)`. Used for 3PL/4PL asymptotes :math:`g` and
-    :math:`u`; :math:`\mu=\operatorname{logit}(1/4)\approx-1.0986` centres :math:`g` on the
+    :math:`u`; :math:`\mu=\operatorname{logit}(1/4)\approx-1.0986` centers :math:`g` on the
     chance rate of four-option items.
 
     flexMIRT's ``Guessing : Normal(mu, s)`` prior (Houts & Cai, flexMIRT user's manual) is the same

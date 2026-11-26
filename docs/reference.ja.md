@@ -23,7 +23,7 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 - 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - モデル: [`Model`](#model)
 - 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
-- 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
+- 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior), [`LogitNormalPrior`](#logitnormalprior)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
 - 例外と警告: [`flexpyirt.errors`](#flexpyirterrors)
@@ -464,7 +464,7 @@ model.equal_across_items(*, items, params) -> Model
 model.prior(*, param, dist, items=None) -> Model
 ```
 
-選択した項目の内部パラメタ `param` に事前分布 `dist`（`NormalPrior`, `LogNormalPrior`, `BetaPrior`）を全群共通で付ける
+選択した項目の内部パラメタ `param` に事前分布 `dist`（`NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior`）を全群共通で付ける
 （MAP 推定、[ガイド 11 節](guide.ja.md#11-事前分布と-map-推定)）。事前分布はヤコビアンなしの自然尺度で評価される。
 固定パラメタの事前分布は無視され、群間で共有されるパラメタ（同じ `free_id`）は 1 回だけ数えられる。潜在分布パラメタ
 （`"mean"`, `"var"`, `"phi_*"`, `"rmean_*"`, `"rvar_*"`, `"logit_*"` など）への指定は `SpecificationError`。
@@ -472,7 +472,7 @@ model.prior(*, param, dist, items=None) -> Model
 | 引数 | 説明 |
 |---|---|
 | `param` | 内部項目パラメタ名（`"a"`, `"d"`, `"g"`, `"u"`, `"d1"`, …） |
-| `dist` | `NormalPrior`, `LogNormalPrior`, `BetaPrior` のいずれか |
+| `dist` | `NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior` のいずれか |
 | `items` | 項目名のリスト、`str -> bool` の関数、または全項目を表す `None` |
 
 #### `Model.parameter_table`
@@ -632,6 +632,19 @@ $(0, 1)$ 上のベータ事前分布:
 $\log\pi(x) = (a - 1)\log x + (b - 1)\log(1 - x) - \log B(a, b)$
 （$(0, 1)$ の外で $-\infty$。Swaminathan & Gifford, 1986、mirt の `expbeta` の自然尺度対数事前目的関数と一致、
 logit ヤコビアンなし）。正の有限な `a`, `b` が必要。3PL / 4PL の漸近線 `g`, `u` によく使う。
+
+### `LogitNormalPrior`
+
+```text
+LogitNormalPrior(mean_logit, sd_logit)
+```
+
+$(0, 1)$ 上のロジット正規事前分布（$\operatorname{logit} X \sim N(\mu, s^2)$; Aitchison & Shen, 1980）:
+$\log\pi(x) = -\log x - \log(1 - x) - \log s - \tfrac{1}{2}\log(2\pi) - \frac{(\operatorname{logit} x - \mu)^2}{2s^2}$
+（$(0, 1)$ の外では $-\infty$）。$-\log x - \log(1 - x)$ の項は $X$ 自体の密度の一部。有限の `mean_logit` と正の有限な
+`sd_logit` が必要。3PL / 4PL の漸近線によく使う: `LogitNormalPrior(-1.0986, 0.5)` は `g` の中心を $1/4$ に置く。
+flexMIRT の `Guessing : Normal(mean, sd)` は同じ分布だが事後分布を $\operatorname{logit} g$ について（この項なしで）
+最大化するので、推定値は少し違う。mirt には同等の事前分布はない（[ガイド 11 節](guide.ja.md#11-事前分布と-map-推定)）。
 
 ---
 
@@ -1264,7 +1277,7 @@ IRT モデルのカテゴリ確率。先頭の軸はバッチ軸。結果の形�
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural")
 ```
 
 | 引数 | 説明 |
@@ -1273,6 +1286,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False)
 | `max_iter` | 採択される最大反復回数。到達すると `ConvergenceWarning` |
 | `m_step_newton_steps` | 1 回の M-step で進める Newton 法のステップ数。各ステップで期待対数尤度は減らない |
 | `squarem` | SQUAREM スキーム S3 加速（Varadhan & Roland, 2008）と単調性・実行可能性の安全装置を有効にする（既定 `False`） |
+| `m_step_scale` | `"natural"`（既定）: M-step の Newton 法を範囲つきの自然尺度で行い、境界解にちょうど到達する。`"unconstrained"`: 範囲のあるパラメタ（$g$、$u$、潜在分散、因子間相関、事前分布や編集した範囲で制限された傾き）を $\operatorname{logit}$ / $\log$ 尺度で動かす。範囲のないパラメタは変換しない。目的関数と内点解は同じで、推定値・表・事前分布・SE は自然尺度のまま。境界解には近づくだけ（[ガイド 4 節](guide.ja.md#4-推定する)） |
 
 ### `Quadrature`
 

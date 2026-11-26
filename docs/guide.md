@@ -200,6 +200,16 @@ res = fit(
   variance, multiple groups, 3PL/4PL, or tight `tol`). It converges to the same fixed point with
   monotone `history["loglik"]` and far fewer EM evaluations. Plain EM (`squarem=False`) is the
   default.
+- **`m_step_scale="unconstrained"`** (default `"natural"`): runs the M-step's Newton steps on
+  $\operatorname{logit}$ / $\log$ scales of the parameters that have a bound — $g$ and $u$ on
+  $\operatorname{logit}$, latent variances on $\log$, factor correlations on
+  $2\operatorname{atanh}\rho$, and a slope only when a `LogNormalPrior` or an edited bound
+  restricts it to $(0, \infty)$. Unbounded parameters such as slopes are not transformed, so
+  negative slopes stay possible. The objective is the same, so an interior solution is the same as
+  with the default; the estimates, parameter table, priors and standard errors stay on the natural
+  scale. The difference is at a bound: the default stops exactly on it (e.g. $g=0$), while the
+  unconstrained scale only approaches it, sometimes after many more iterations. Both raise
+  `HeywoodWarning` once a parameter is within `1e-4` of its bound.
 - **`quadrature`**: the latent-variable grid. The default is 61 equally spaced points on
   $[-6, 6]$ (mirt's default). See [section 13](#13-choosing-the-quadrature-grid) for when to
   widen it.
@@ -787,7 +797,7 @@ fipc_spec_irt = (
 ## 11. Priors and MAP estimation
 
 Attach prior distributions to item parameters with `Model.prior(*, param, dist, items=None)` to
-perform Bayes modal (MAP) estimation (Mislevy, 1986; Swaminathan & Gifford, 1986). Three
+perform Bayes modal (MAP) estimation (Mislevy, 1986; Swaminathan & Gifford, 1986). Four
 natural-scale priors are provided:
 
 | Class | Support | Typical use |
@@ -795,9 +805,16 @@ natural-scale priors are provided:
 | `NormalPrior(mean, sd)` | $(-\infty, \infty)$ | Intercepts `d` / `dk`, or slopes `a` |
 | `LogNormalPrior(mean_log, sd_log)` | $(0, \infty)$ | Slopes `a` ($\log a \sim N(\mu, s^2)$) |
 | `BetaPrior(a, b)` | $(0, 1)$ | 3PL / 4PL asymptotes `g` and `u` |
+| `LogitNormalPrior(mean_logit, sd_logit)` | $(0, 1)$ | 3PL / 4PL asymptotes ($\operatorname{logit} g \sim N(\mu, s^2)$) |
 
 Priors are evaluated directly on the **natural parameter scale** without a Jacobian term
-(matching R mirt's log-prior objective `LL.Priors`). In a multiple-group model, `.prior()`
+(matching R mirt's log-prior objective `LL.Priors`). `LogitNormalPrior` is the density of $g$
+when $\operatorname{logit} g$ is normal (Aitchison & Shen, 1980), so its formula contains
+$-\log g - \log(1 - g)$: that term is part of the density of $g$, not a change of scale. For
+example, `LogitNormalPrior(-1.0986, 0.5)` centers $g$ on $1/4$, the chance rate of four-option
+items. flexMIRT's `Guessing : Normal(mean, sd)` describes the same distribution of $g$ but
+maximizes the posterior over $\operatorname{logit} g$, which leaves that term out, so its estimates of
+$g$ typically lie somewhat closer to $1/2$ than flexpyirt's. In a multiple-group model, `.prior()`
 applies to every group, and a parameter shared across groups (same `free_id`) is counted **once**.
 Fixed parameters ignore their prior. Priors on latent-distribution parameters (`"mean"`, `"var"`)
 are not supported (`SpecificationError`).
@@ -842,7 +859,7 @@ print(table.head(4))
 | `value` | Starting value (the fixed value if not free) |
 | `free` | Whether the parameter is estimated |
 | `lower`, `upper` | Bounds; starting values must lie strictly inside |
-| `prior` | Prior object (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, or `None`; ignored if fixed) |
+| `prior` | Prior object (`NormalPrior`, `LogNormalPrior`, `BetaPrior`, `LogitNormalPrior`, or `None`; ignored if fixed) |
 | `free_id` | Free-parameter number. **Rows with the same number are constrained to be equal.** Newly freed rows may keep `-1` (they get a number) |
 
 ```python
@@ -1359,6 +1376,7 @@ except SpecificationError as e:
 
 ## References
 
+- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37(1), 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.

@@ -224,8 +224,8 @@ def test_two_group_free_variance_matches() -> None:
     nat, unc = _fit_two_group("natural"), _fit_two_group("unconstrained")
     assert nat.converged and unc.converged
     np.testing.assert_allclose(unc._eta, nat._eta, rtol=0, atol=1e-6)
-    lat = unc.latent.set_index("group")
-    assert lat.loc["focal", "var"] > 1.2
+    focal_var = unc.latent.set_index("group")["var"].to_numpy(dtype=float)[1]
+    assert focal_var > 1.2
 
 
 @pytest.mark.slow

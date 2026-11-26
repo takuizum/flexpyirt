@@ -39,7 +39,8 @@ from flexpyirt.quadrature import Quadrature
 def _reference_log_pdf(x: np.ndarray, mean: float, sd: float) -> np.ndarray:
     """log N(logit x; mean, sd) - log x - log(1 - x) (change of variables)."""
     logit = np.log(x) - np.log1p(-x)
-    return stats.norm.logpdf(logit, mean, sd) - np.log(x) - np.log1p(-x)
+    out: np.ndarray = stats.norm.logpdf(logit, mean, sd) - np.log(x) - np.log1p(-x)
+    return out
 
 
 # ---- density ----------------------------------------------------------------------------------

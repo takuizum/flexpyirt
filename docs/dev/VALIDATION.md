@@ -80,6 +80,7 @@ English | [日本語](VALIDATION.ja.md)
 | V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
+| V45 | Optional unconstrained M-step scale (`BAEM(m_step_scale="unconstrained")`) on the V3, V4, V5, V7, V9, V11 and V14 cases; `LogitNormalPrior` (no mirt equivalent: independent numerical check) | the existing references of those cases; SciPy (`stats.norm`, `integrate.quad`) and a stationarity condition written from the formula | #15 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -1171,6 +1172,38 @@ English | [日本語](VALIDATION.ja.md)
   (about 4 minutes); the tests run 20 null and 10 alternative replications.
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
+- **Unconstrained M-step scale and `LogitNormalPrior` (V45, #15)**: DESIGN §15.47–§15.48.
+  1. *Interior solutions on both M-step scales.* The mirt comparisons of V3, V4, V5 and V9
+     (`tests/test_mirt_m2.py`: log-likelihood, item and latent parameters; the focal variance of V4
+     is stepped on $\log\sigma^2$), V11 (`tests/test_mirt_m3.py`: 3PL/4PL, $\operatorname{logit}g$,
+     $\operatorname{logit}u$, plus Oakes and Hessian SEs), V7 (`tests/test_mirt_m3_priors.py`: MAP,
+     the slopes with `LogNormalPrior` stepped on $\log a$) and V14 (`tests/test_mirt_m4_mirt.py`:
+     2–3 factor models, correlations stepped on $2\operatorname{atanh}\rho$) are repeated with
+     `BAEM(m_step_scale="unconstrained")` at the same tolerances as the natural scale; all pass.
+     `tests/test_m_step_scale.py` adds unit tests of the transforms and of the Newton step (same
+     interior maximum, boundary approached from inside, fixed slots untouched, rejected step
+     exact), a simulated 3PL MAP fit (estimates within 1e-5 of the natural scale with
+     `tol=1e-8`, log posterior to 1e-12, Oakes covariance to 1e-4 relative, with and without
+     SQUAREM), a two-group fit with a free focal variance, and a boundary case (items generated
+     with $g=0$): both scales end with $g<10^{-4}$ on those items, raise `HeywoodWarning`, and
+     agree in log-likelihood to 1e-5.
+  2. *`LogitNormalPrior`.* mirt has no prior with this density on the natural scale (its `norm`
+     prior on `g` acts on the internal $\operatorname{logit}g$ without the Jacobian, like
+     flexMIRT's `Guessing : Normal`), so there is no mirt reference. `tests/test_logitnormal_prior.py`
+     checks instead: `log_pdf` against $\log\phi(\operatorname{logit}x;\mu,s)-\log x-\log(1-x)$
+     from `scipy.stats.norm` (1e-13 relative) for four $(\mu,s)$; by `scipy.integrate.quad`, the
+     density integrates to 1 (1e-10) and $\operatorname{logit}X$ has mean $\mu$ (1e-9) and variance
+     $s^2$ (1e-9 relative); the Core `eval_log_prior` equals `log_pdf` and inactive slots have zero,
+     finite gradients; and the MAP of a simulated 3PL ($J=8$, $N=1200$,
+     `LogitNormalPrior(-1.3863, 0.6)` on $g$, `NormalPrior(0, 3)` on $d$, `tol=1e-10`) on both
+     M-step scales is a stationary point of $\ell(\eta)+\sum\log\pi$ with the prior gradient
+     $-1/g+1/(1-g)-(\operatorname{logit}g-\mu)/(s^2g(1-g))$ written in the test (max |gradient|
+     3e-8 natural, 3e-9 unconstrained; tested at 1e-6) and a strict local maximum (negative
+     definite Hessian). The likelihood gradient is that of the mirt-validated marginal
+     log-likelihood. The same test maximizes flexMIRT's logit-scale objective (the kernel
+     without the Jacobian) by Newton's method: every $g$ lies nearer $1/2$ than with
+     `LogitNormalPrior`, up to 0.037 apart, which confirms that the two estimates differ
+     (DESIGN §15.48).
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is
   non-decreasing across iterations.
 - **Internal SE consistency**: Oakes SEs agree with SEs from the direct `jax.hessian` of the
