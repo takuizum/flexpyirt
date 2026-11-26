@@ -11,6 +11,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from flexpyirt import errors
 from flexpyirt.correlation import PolychoricResult, polychoric
+from flexpyirt.dif import DIFScreenResult, dif_effect_sizes, dif_screen
 from flexpyirt.dimensionality import (
     ComparisonDataResult,
     DetectResult,
@@ -37,7 +38,6 @@ from flexpyirt.dimensionality import (
     parallel_analysis,
     velicer_map,
 )
-from flexpyirt.dif import DIFScreenResult, dif_effect_sizes, dif_screen
 from flexpyirt.fit import fit
 from flexpyirt.information import (
     expected_score,

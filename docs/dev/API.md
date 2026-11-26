@@ -164,6 +164,7 @@ one (DESIGN.md §16.18).
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
 | `fit` | function | Estimation; returns a `FitResult` |
 | `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
+| `dif_screen`, `dif_effect_sizes` | function | DIF workflow for unidimensional multiple-group models: screening every item with anchor purification (`strategy="all_others"` / `"sequential_free"` / `"sequential_constrain"`, likelihood-ratio or Wald tests; returns a `DIFScreenResult` with `table`, `history`, `flagged_items`, `anchor_items` and the final `fit`) and effect sizes (signed / unsigned expected-score differences, ESSD, RMSD, a test row). `FitResult.dif(..., test="wald")` adds Wald tests (DESIGN §16.20) |
 | `link` | function | Differentiable IRT scale linking (Haebara / Stocking–Lord, non-symmetric & symmetric; `transformation=` for a diagonal, orthogonal or oblique $\mathbf A$ in multidimensional models); returns a `LinkResult` |
 | `LinkResult` | class | Scale-linking result (`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `transformation`, `items`, `transform_theta`, `summary`) |
 | `polychoric` | function | Polychoric / tetrachoric correlation matrix (two-step ML, smoothing); returns a `PolychoricResult` |

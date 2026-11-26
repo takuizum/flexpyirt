@@ -1487,6 +1487,67 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     §17 のブロック構造に沿った計算が必要）、多母集団の多次元モデル（未照合。多母集団の $M_2$ は #76）。
     1 次元の結果はビット単位で変わらない（$D=1$ の同じコードパス）。
     **照合（V39）**: V14 の 4 モデルで mirt 1.48 と照合した。VALIDATION.md を参照。
+20. **DIF の分析手順: アンカーの純化つきスクリーニング、Wald 検定、効果量（#104、V49）**: Result 層での推定後の
+    処理（`dif.py`、`_dif.py`）。`jit` で動くのは推定し直しだけ。範囲: 1 次元の多母集団モデル（2 群以上、全項目モデル、
+    全潜在分布）、MLE のみ（事前分布なし）、標本ウェイトなし、仕様に項目間の等値制約がないこと。検定はすべて全群に
+    わたる総括検定。
+    - **Wald 検定（`FitResult.dif(..., test="wald")`）**: 検定する項目ごとに、推定値の自由パラメタ
+      $\boldsymbol\eta$ と `vcov` の $\mathbf V$ を使い、パラメタ $p$ の群間で異なる $m_p$ 個の `free_id`
+      $u_k$ の対比 $\eta_{p,u_1}-\eta_{p,u_k}$（$k=2..m_p$）計 $r=\sum_p(m_p-1)$ 行で $\mathbf L$ を作り、
+      $W=(\mathbf L\boldsymbol\eta)^\top(\mathbf L\mathbf V\mathbf L^\top)^{-1}
+      (\mathbf L\boldsymbol\eta)\sim\chi^2_r$（Wald, 1943; Lord, 1980）。mirt の `DIF(Wald = TRUE)` に相当。
+      推定し直さない。推定時に `se=` が必要。`scheme="add"` のみ（パラメタが群間で自由でなければならない）。
+      対比は flexpyirt の自然なパラメタ上でとるので、3PL/4PL の `g`/`u`（mirt はロジット尺度で検定する）では mirt と
+      値が違う。2PL・GRM・GPCM・Rasch・名義反応のパラメタは mirt と同じ。列は `item`、`x2`（統計量 $W$）、`df`、
+      `p`、`adj_p`。
+    - **`dif_screen(spec, data, *, group, items, anchor_items, strategy, test, params,
+      p_adjust="BH", alpha=0.05, max_iter=10, method, quadrature, se, item_names)`** はモデルを `spec` から自分で
+      作る（`spec` の `equal_across_groups()` は置き換える）。検定しない項目（`anchor_items` と `items` にない項目）の
+      全パラメタと、`params` 以外のパラメタは群間で等値。検定する項目の `params` は手順の状態に応じて等値（制約）か
+      群ごとに自由。自由な検定項目の集合を $F$ とすると、状態 $F$ での項目 $i$ の検定は $F\cup\{i\}$ と
+      $F\setminus\{i\}$ の比較（項目 $i$ 以外は $F$ のとおり）: 尤度比
+      $X^2=2(\ell_{F\cup\{i\}}-\ell_{F\setminus\{i\}})$、$df=k_{F\cup\{i\}}-k_{F\setminus\{i\}}$、または
+      $F\cup\{i\}$ の推定の Wald 統計量。推定は $F$ ごとにキャッシュし、推定し直しは現在のラウンドのモデルの推定値から
+      始める。各ラウンドで、検定する全項目の最新の $p$ を検定項目にわたって補正し（`p_adjust`、スクリーニングの既定は
+      `"BH"`）、$\tilde p<\alpha$ を検出とする。戦略（Candell & Drasgow, 1988; Kopf, Zeileis & Strobl, 2015; mirt の
+      `DIF()` の scheme）:
+      - `"all_others"`（mirt の完全不変モデルからの `scheme = "drop"`）: $F=\varnothing$ で 1 ラウンド。各項目を他の
+        全項目をアンカーとして検定する。
+      - `"sequential_free"`（`"drop_sequential"`）: 1 ラウンド目は `"all_others"` と同じ。以後、検出結果が変わる間
+        （最大 `max_iter` ラウンド）、$F$ = 検出された項目とし、検出されていない項目を $F$ に対して検定し直す（検出
+        された項目は最新の統計量のまま）。
+      - `"sequential_constrain"`（`"add_sequential"`）: 検定しないアンカー項目が 1 つ以上必要。1 ラウンド目は
+        $F$ = 全検定項目（アンカーだけ制約）で全項目を検定し、以後 $F$ = 検出された項目として、検出された項目を
+        $F$ に対して検定し直す。
+      あるラウンドが直前のラウンドと同じ検出結果を出したら収束（1 ラウンド目は開始時の $F$ と比べる）。`max_iter`
+      ラウンドで収束しなければ `ConvergenceWarning`。mirt の `max_run = r` は `max_iter = r - 1` に当たる。
+      結果の `DIFScreenResult` は `table`（検定項目ごとに 1 行: `item`、`x2`、`df`、`p`、`adj_p`、`flagged`、
+      `converged`）、`flagged_items`、`anchor_items`（検出されなかった全項目、モデルの順）、`history`（ラウンドと検定
+      項目ごとに 1 行: `round`、`item`、`retested`、`x2`、`df`、`p`、`adj_p`、`flagged`）、`fit`（最終モデル。
+      $F$ = 検出された項目、`se=` つき）、`n_rounds`、`converged` を持つ。`"all_others"` の表は 1 ラウンド目。逐次
+      戦略の表は最終的な $F$ に対する各項目の検定（純化したアンカーに対する各項目の検定。検出された項目は mirt の最終
+      出力と同じ）で、`adj_p` は表にわたって補正する。`flagged` は手順の判定。推定し直しが収束しなかったことは
+      `converged` に記録する（推定ごとの警告は出さない）。
+    - **`dif_effect_sizes(result, *, data=None, group=None, focal=None, items=None,
+      density="focal", item_names=None)`**（`result` は多母集団の `FitResult` か `DIFScreenResult`）: 各焦点群
+      $f$（既定は第 1 群 = 参照群 $r$ 以外の全群）と項目 $j$ について、期待項目得点
+      $E_{gj}(\theta)=\sum_kkP_{gjk}(\theta)$ の差 $D_j(\theta)=E_{fj}(\theta)-E_{rj}(\theta)$ を、推定時の格子
+      $\theta_q$ と焦点群（`density="reference"` なら参照群）の正規化した推定潜在分布の重み $w_q$ で積分する:
+      $\text{signed}_j=\sum_qw_qD_j(\theta_q)$、$\text{unsigned}_j=\sum_qw_q|D_j(\theta_q)|$（Chalmers, 2018;
+      mirt の `DRF(DIF = TRUE, best_fitting = TRUE)` の `sDIF` / `uDIF`）。`data` を渡すと、焦点群の $n$ 人の EAP
+      $\hat\theta_i$ での期待得点の標準化差（Meade, 2010; mirt の `empirical_ES()` の `ESSD`）
+      $\big(\overline{E_{fj}(\hat\theta)}-\overline{E_{rj}(\hat\theta)}\big)/\sqrt{(s^2_{f}+s^2_{r})/2}$（標本分散、
+      分母 $n-1$。同じ大きさの 2 標本の併合 SD）と、2 群それぞれの RMSD（`rmsd_reference`、`rmsd_focal`）も求める。
+      群の E-step の期待度数 $\bar r_{gjkq}$ から $\hat E_{gj}(\theta_q)=\sum_kk\bar r_{gjkq}/\sum_k\bar r_{gjkq}$
+      とし、$\mathrm{RMSD}_{gj}=\big(\sum_qw_{gq}(\hat E_{gj}(\theta_q)-E_{gj}(\theta_q))^2\big)^{1/2}$（期待得点の
+      形。2 値項目では von Davier, 2005、Köhler, Robitzsch & Hartig, 2020 のカテゴリ 1 の RMSD; mirt の
+      `RMSD_DIF(probfun = FALSE)`）。RMSD は各群のパラメタがその群に合うかを測るので、群間で等値な項目（不変・部分
+      不変モデル）の DIF を検出する。焦点群ごとにもう 1 行（`level="test"`、`item="test"`）で $D_j$ を `items`
+      にわたって合計する（符号つき・符号なしの DTF、mirt の `DRF(DIF = FALSE)`。期待テスト得点の標準化差、mirt の
+      `ETSSD`。RMSD は NaN）。列: `group`、`level`、`item`、`signed_difference`、`unsigned_difference`、`data` を
+      渡すと `expected_score_standardized_difference`、`rmsd_reference`、`rmsd_focal`。符号は焦点群 − 参照群
+      （mirt と同じ）。範囲外: mirt の DRF の既定の密度（データの事後期待度数）、DRF の抽出による検定と区間、焦点群
+      どうしの対比較、多次元モデル。
 
 ## 17. 実装上の決定（M7）
 
@@ -1917,10 +1978,13 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
 - Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
+- Candell, G. L., & Drasgow, F. (1988). An iterative procedure for linking metrics and assessing item bias in item response theory. *Applied Psychological Measurement*, 12(3), 253–260.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Chalmers, R. P. (2018). Model-based measures for detecting and quantifying response bias. *Psychometrika*, 83(3), 696–732.
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
+- von Davier, M. (2005). *A general diagnostic model applied to language testing data* (ETS Research Report RR-05-16). Educational Testing Service.
 - Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
 - Drezner, Z., & Wesolowsky, G. O. (1990). On the computation of the bivariate normal integral. *Journal of Statistical Computation and Simulation*, 35(1–2), 101–107.
 - Edwards, M. C., Houts, C. R., & Cai, L. (2018). A diagnostic procedure to detect departures from local independence in item response theory models. *Psychological Methods*, 23(1), 138–149.
@@ -1946,9 +2010,12 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
+- Köhler, C., Robitzsch, A., & Hartig, J. (2020). A bias-corrected RMSD item fit statistic: An evaluation and comparison to alternatives. *Journal of Educational and Behavioral Statistics*, 45(3), 251–273.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
+- Kopf, J., Zeileis, A., & Strobl, C. (2015). Anchor selection strategies for DIF analysis: Review, assessment, and new approaches. *Educational and Psychological Measurement*, 75(1), 22–56.
 - Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
 - Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24(2), 115–138.
+- Lord, F. M. (1980). *Applications of Item Response Theory to Practical Testing Problems*. Erlbaum.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings." *Applied Psychological Measurement*, 8(4), 453–461.
 - Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
@@ -1958,6 +2025,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Maydeu-Olivares, A., & Joe, H. (2006). Limited information goodness-of-fit testing in multidimensional contingency tables. *Psychometrika*, 71(4), 713–732.
 - Maydeu-Olivares, A., & Joe, H. (2014). Assessing approximate fit in categorical data analysis. *Multivariate Behavioral Research*, 49(4), 305–328.
 - McLachlan, G. J., & Peel, D. (2000). *Finite Mixture Models*. Wiley.
+- Meade, A. W. (2010). A taxonomy of effect size measures for the differential functioning of items and scales. *Journal of Applied Psychology*, 95(4), 728–743.
 - Mislevy, R. J. (1984). Estimating latent distributions. *Psychometrika*, 49(3), 359–381.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.
@@ -1987,14 +2055,15 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
+- Thissen, D., & Wainer, H. (Eds.). (2001). *Test Scoring*. Lawrence Erlbaum Associates.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.
 - Thissen, D., Steinberg, L., & Wainer, H. (1993). Detection of differential item functioning using the parameters of item response models. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 67–113). Erlbaum.
-- Thissen, D., & Wainer, H. (Eds.). (2001). *Test Scoring*. Lawrence Erlbaum Associates.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
 - Velicer, W. F. (1976). Determining the number of components from the matrix of partial correlations. *Psychometrika*, 41(3), 321–327.
 - Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
 - Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
+- Wald, A. (1943). Tests of statistical hypotheses concerning several parameters when the number of observations is large. *Transactions of the American Mathematical Society*, 54(3), 426–482.
 - Wang, C. (2015). On latent trait estimation in multidimensional compensatory item response models. *Psychometrika*, 80(2), 428–449.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54(3), 427–450.
 - White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.

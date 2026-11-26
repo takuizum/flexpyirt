@@ -338,7 +338,9 @@ def dif_screen(
         names = spec.item_kernel(lookup[item]).param_names
         chosen[item] = names if params is None else tuple(p for p in params if p in names)
         if not chosen[item]:
-            raise SpecificationError(f"Item {item!r} has none of the parameters {list(params)}.")
+            raise SpecificationError(
+                f"Item {item!r} has none of the parameters {list(params or ())}."
+            )
 
     invariant = replace(spec, equal=()).equal_across_groups(items=None)
     base = invariant.parameter_table(data, group=group, item_names=item_names)
@@ -435,7 +437,11 @@ def _expected_scores(res: FitResult, theta: np.ndarray, group_index: int) -> np.
 
 
 def _essd(focal: np.ndarray, reference: np.ndarray) -> float:
-    r"""Cohen's :math:`d` of two equal-size samples: :math:`(\bar x-\bar y)/\sqrt{(s_x^2+s_y^2)/2}`."""
+    r"""Cohen's :math:`d` of two equal-size samples (Meade, 2010).
+
+    .. math::
+        d=(\bar x-\bar y)\big/\sqrt{(s_x^2+s_y^2)/2}
+    """
     if focal.shape[0] < 2:
         return float("nan")
     pooled = np.sqrt((np.var(focal, ddof=1) + np.var(reference, ddof=1)) / 2.0)

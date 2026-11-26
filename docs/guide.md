@@ -751,6 +751,51 @@ dif_table = mg.dif(mg_df, group=group, items=items[6:9])
 print(dif_table.round(4))  # item, converged, aic, sabic, hq, bic, x2, df, p, adj_p
 ```
 
+To screen every item, use `dif_screen(spec, data, group=..., strategy=...)`. It builds the models
+from `spec` itself (anchors and constraints come from `anchor_items`, `items` and `params`) and
+purifies the anchor set:
+
+- `"all_others"`: each item is tested with all other items as anchors (one round).
+- `"sequential_free"`: then the flagged items are freed and the others retested, until the flags
+  repeat.
+- `"sequential_constrain"`: start from known anchors (`anchor_items=`) with every other item free;
+  the items without DIF are then constrained and the flagged ones retested.
+
+`p_adjust="BH"` is the default for screening, and `alpha=0.05` the flagging level. `test="wald"`
+replaces each pair of fits by one fit with standard errors (`dif(..., test="wald")` does the same
+for a fit you built). The result has `table` (the tests against the final anchors), `history`
+(each round), `flagged_items`, `anchor_items` and `fit`, the final model with the flagged items
+free, ready for scoring.
+
+`dif_effect_sizes(result)` quantifies the differences of a multiple-group fit, each focal group
+against the first group: the signed and unsigned differences of the expected item scores
+integrated over the focal latent density (Chalmers, 2018), with `data` also the expected-score
+standardized difference (Meade, 2010) and the RMSD of each group (best computed on an invariant
+fit), and one test row (`level == "test"`) for the expected test score.
+
+```python
+from flexpyirt import dif_effect_sizes, dif_screen
+
+# Screen the six non-anchor items: start from the anchors q01-q06, test every other item with a
+# Wald test (one fit with standard errors per round), constrain the items that show no DIF and
+# retest the flagged ones until the flags repeat (mirt's DIF(scheme = "add_sequential")).
+screen = dif_screen(
+    Model.uniform(TwoPL(), items=items).with_groups(ref=Normal.standard(), focal=Normal.free()),
+    mg_df,
+    group=group,
+    anchor_items=anchors,
+    strategy="sequential_constrain",
+    test="wald",
+    quadrature=Quadrature.equispaced(81, bounds=(-8, 8)),
+)
+print(screen.table.round(4))  # item, x2, df, p, adj_p, flagged, converged
+print("flagged:", screen.flagged_items)
+
+# Effect sizes on the final, partially invariant fit (focal minus reference).
+effects = dif_effect_sizes(screen, data=mg_df, group=group)
+print(effects.round(3))
+```
+
 ## 10. Fixed item parameter calibration (FIPC)
 
 Fix some items at the values of an already scaled item bank and estimate the new items and the
@@ -1363,6 +1408,7 @@ except SpecificationError as e:
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Chalmers, R. P. (2018). Model-based measures for detecting and quantifying response bias. *Psychometrika*, 83(3), 696–732.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
@@ -1370,6 +1416,7 @@ except SpecificationError as e:
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
+- Meade, A. W. (2010). A taxonomy of effect size measures for the differential functioning of items and scales. *Journal of Applied Psychology*, 95(4), 728–743.
 - Mislevy, R. J. (1984). Estimating latent distributions. *Psychometrika*, 49(3), 359–381.
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56(2), 177–196.

@@ -90,10 +90,8 @@ def test_wald_statistic_by_hand() -> None:
     expected = diff @ np.linalg.inv(contrast @ vcov @ contrast.T) @ diff
     assert df == 2
     assert stat == pytest.approx(expected, rel=1e-12)
-    assert wald_statistic(eta, vcov, table, np.array([1, 4])) == (
-        pytest.approx(np.nan, nan_ok=True),
-        0,
-    )
+    stat, df = wald_statistic(eta, vcov, table, np.array([1, 4]))
+    assert np.isnan(stat) and df == 0
 
 
 @pytest.mark.slow
@@ -327,7 +325,7 @@ def test_effect_sizes_with_data() -> None:
     )
     item = out[out["level"] == "item"].set_index("item")
     assert item.loc["q0", "expected_score_standardized_difference"] == 0.0  # no difference
-    assert item.loc["q2", "expected_score_standardized_difference"] < 0
+    assert (item["expected_score_standardized_difference"].loc[["q2"]] < 0).all()
     assert (item[["rmsd_reference", "rmsd_focal"]] >= 0).all().all()
     assert np.isnan(out[out["level"] == "test"]["rmsd_focal"].iloc[0])
     # ESSD by hand at the focal EAP scores.
@@ -339,7 +337,7 @@ def test_effect_sizes_with_data() -> None:
 
 
 def test_effect_size_errors() -> None:
-    res, df, grp = _fixed_two_group(shift=0.0)
+    res, df, _ = _fixed_two_group(shift=0.0)
     with pytest.raises(SpecificationError, match="reference group"):
         dif_effect_sizes(res, focal="ref")
     with pytest.raises(SpecificationError, match="Unknown focal"):
