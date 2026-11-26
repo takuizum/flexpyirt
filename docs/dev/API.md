@@ -151,7 +151,7 @@ res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_c
 
 ## 7. Main classes and functions
 
-The tools that need no fitted model (`polychoric` to `detect` in the table below, except
+The tools that need no fitted model (`polychoric` to `logistic_dif` in the table below, except
 `model_parallel_analysis` and `dimensionality`) are defined in the flexpyctt distribution and
 re-exported by flexpyirt; they take `rng` (a seed or `numpy.random.Generator`) instead of a JAX
 `key`. `flexpyirt.polychoric` is the JAX implementation; `flexpyctt.polychoric` the NumPy / SciPy
@@ -178,6 +178,7 @@ one (DESIGN.md §16.18).
 | `efa`, `hull` | function | Unrotated ULS / ML EFA of a correlation matrix with EFAtools' fit indices; the Hull method. Return `EFAResult`, `HullResult` |
 | `dimtest` | function | DIMTEST with bootstrap bias correction; returns `DimtestResult` |
 | `detect`, `exploratory_detect` | function | Confirmatory / exploratory DETECT; return `DetectResult`, `ExploratoryDetectResult` |
+| `mantel_haenszel`, `mantel`, `generalized_mantel_haenszel`, `logistic_dif` | function | Observed-score DIF (flexpyctt): Mantel–Haenszel with ETS classes, Mantel's test, generalized MH, logistic regression; purification of the matching score. Return `DIFResult` (`table`, `anchor_items`, `n_iter`, `converged`, `flag_history`) |
 | `model_parallel_analysis`, `dimensionality` | function | Model-based parallel analysis of a `FitResult`; the ensemble report. Return `ModelParallelAnalysisResult`, `DimensionalityResult` |
 | `item_information`, `test_information`, `expected_score` | function | Item / test information (with the conditional SE) and expected scores of a `FitResult` at given `theta`; return DataFrames indexed by `theta` (DESIGN §18.2) |
 | `information_matrix` | function | Test (or one item's) Fisher information matrix at given `theta`, a `(T, D, D)` array; for multidimensional models `item_information` / `test_information` take `direction=` (directional information and the composite SE) and `theta` of shape `(T, D)`, indexed by a factor-name `MultiIndex` (DESIGN §18.3) |

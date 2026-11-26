@@ -6,8 +6,8 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）と�
 使い方の流れは[ユーザーガイド](guide.ja.md)、数式とアルゴリズムは [理論](theory.ja.md) を参照。
 各関数の docstring にも同じ内容と対応する式・出典がある（`help(flexpyirt.fit)` など）。
 
-**flexpyctt** は、推定済みのモデルを使わない道具をまとめたパッケージである。[相関](#相関)と、[次元数](#次元数)のうち
-モデルを使わないものが入る（どちらのパッケージのものかは各項目に書く）。依存は NumPy、SciPy、pandas だけなので、
+**flexpyctt** は、推定済みのモデルを使わない道具をまとめたパッケージである。[相関](#相関)、[次元数](#次元数)のうち
+モデルを使わないもの、[観測得点による DIF](#観測得点による特異項目機能dif) が入る（どちらのパッケージのものかは各項目に書く）。依存は NumPy、SciPy、pandas だけなので、
 JAX なしでインストールでき（`pip install flexpyctt`）、64 ビットの設定も要らない。flexpyirt をインストールすると
 一緒に入る。関数は `from flexpyctt import ...` で使う。flexpyirt も同じ名前で再公開しているが、`polychoric` だけは
 別で、`flexpyirt.polychoric` は同じ推定量の JAX による実装である。乱数を使う関数は、flexpyctt では `rng`（整数の
@@ -19,6 +19,7 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult), [`screen_common_items`](#screen_common_items), [`CommonItemScreeningResult`](#commonitemscreeningresult), [`stack_screening_tables`](#stack_screening_tables)
 - 相関（flexpyctt）: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - 次元数（`model_parallel_analysis` と `dimensionality` 以外は flexpyctt）: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) とその結果
+- 観測得点による DIF（flexpyctt）: [`mantel_haenszel`](#mantel_haenszel), [`mantel`](#mantel), [`generalized_mantel_haenszel`](#generalized_mantel_haenszel), [`logistic_dif`](#logistic_dif), [`DIFResult`](#difresult)
 - 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - 図: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
@@ -1322,6 +1323,117 @@ dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=
 | `n_supporting`, `n_unidimensionality_methods` | int | 本質的一次元性についての合意 |
 | `results` | dict | 個々の結果 |
 | `summary()` | str | テキストのレポート（`str(result)` も同じ） |
+
+---
+
+## 観測得点による特異項目機能（DIF）
+
+パッケージ: flexpyctt（`from flexpyctt import mantel_haenszel, ...`）。IRT モデルを使わない DIF の検出で、回答者を
+観測得点でそろえ（マッチング）、マッチング得点の値ごとに群を比べる。推定済みの多母集団モデルによる DIF の検定は
+[`FitResult.dif`](#fitresult) を参照。
+
+4 つの関数に共通の引数:
+
+| 引数 | 既定値 | 説明 |
+|---|---|---|
+| `data` | | 回答者 x 項目（DataFrame または配列）。検定する項目とマッチングに使う項目に欠測があってはならない（先にその行を除く） |
+| `group` | | 各回答者の群のラベル |
+| `focal` | | 焦点群のラベル（`generalized_mantel_haenszel` ではラベルのリスト）。それ以外の回答者はすべて参照群 |
+| `items` | `None` | 検定する項目（既定ではすべて） |
+| `anchor_items` | `None` | 合計をマッチング得点にする項目（既定ではすべて）。検定する項目は常にそれ自身のマッチング得点に含まれる |
+| `matching` | `None` | 合計得点の代わりに使う外部のマッチング変数（回答者ごとに 1 つ）。`anchor_items`・`purify` とは併用できない |
+| `purify` | `False` | 純化: ある段階で検出された項目を次の段階のマッチング得点から外し、検出される項目の組が繰り返すか `max_iter` に達するまで続ける |
+| `max_iter` | `10` | 純化の反復の上限 |
+| `p_adjust` | `"none"` | `"holm"` または `"BH"`: 最終的な p 値を検定した項目にわたって補正する。純化には補正前の p 値を使う |
+| `alpha` | `0.05` | `flagged`、純化、ETS 分類の有意水準 |
+
+マッチング得点の異なる値はそれぞれ 1 つの層になる（得点をまとめることはしない）。
+
+### `mantel_haenszel`
+
+```text
+mantel_haenszel(data, *, group, focal, items=None, anchor_items=None, matching=None,
+                purify=False, max_iter=10, p_adjust="none", alpha=0.05,
+                continuity_correction=True, classification="ets") -> DIFResult
+```
+
+0 / 1 項目・2 群の Mantel–Haenszel 検定（Holland & Thayer, 1988）。マッチング得点 $k$ で正答・誤答した参照群の
+人数を $A_k, B_k$、焦点群の人数を $C_k, D_k$、$k$ の人数を $T_k$ として
+
+$$\chi^2_{MH}=\frac{\big(\lvert\sum_kA_k-\sum_kE(A_k)\rvert-\tfrac12\big)^2}{\sum_k\operatorname{Var}(A_k)},\qquad
+\hat\alpha_{MH}=\frac{\sum_kA_kD_k/T_k}{\sum_kB_kC_k/T_k},\qquad \Delta_{MH}=-2.35\ln\hat\alpha_{MH}.$$
+
+$\hat\alpha_{MH}>1$（$\Delta_{MH}<0$）は項目が参照群に有利であることを表す。$\ln\hat\alpha_{MH}$ の標準誤差は
+Phillips & Holland (1987) による。`continuity_correction=False` で $\tfrac12$ を引かない。ETS 分類
+（`classification="ets"`）: $\lvert\Delta_{MH}\rvert<1$ または $\chi^2_{MH}$ が有意でなければ（`adj_p` で判定するので、
+B と C の項目は必ず `flagged`）**A**、$\lvert\Delta_{MH}\rvert\ge1.5$ かつ片側検定で 1 より有意に大きければ
+（$(\lvert\Delta_{MH}\rvert-1)/SE>z_{1-\alpha}$。`alpha=0.05` で 1.645）**C**、
+それ以外は **B**。`classification="effect_size"` は閾値 1 と 1.5 だけを使う（difR が表示する分類）。
+
+`table` の列: `item`, `chi2`, `odds_ratio`, `log_odds_ratio`, `log_odds_ratio_se`, `delta`, `delta_se`,
+`ets_class`, `p`, `adj_p`, `flagged`。
+
+### `mantel`
+
+```text
+mantel(data, *, group, focal, items=None, anchor_items=None, matching=None, purify=False,
+       max_iter=10, p_adjust="none", alpha=0.05) -> DIFResult
+```
+
+順序のある多値項目・2 群の Mantel (1963) の検定。焦点群の項目得点の和を、マッチング得点を与えたときの期待値と
+比べる（$df=1$。0 / 1 項目では連続修正なしの $\chi^2_{MH}$ に等しい）。効果量は Liu & Agresti (1996) の累積共通
+オッズ比で、$\hat\alpha_{MH}$ と同じ向き（1 より大きいと参照群に有利。0 / 1 項目では $\hat\alpha_{MH}$ に等しい）に
+し、その対数の Liu & Agresti (1996) の式 (3) による標準誤差をつける。層が少数で大きくても、（合計得点でマッチング
+したときのように）小さな層が多数あっても妥当な推定量である。
+
+`table` の列: `item`, `chi2`, `df`, `cumulative_odds_ratio`, `log_cumulative_odds_ratio`,
+`log_cumulative_odds_ratio_se`, `p`, `adj_p`, `flagged`。
+
+### `generalized_mantel_haenszel`
+
+```text
+generalized_mantel_haenszel(data, *, group, focal, items=None, anchor_items=None,
+                            matching=None, purify=False, max_iter=10, p_adjust="none",
+                            alpha=0.05) -> DIFResult
+```
+
+複数の焦点群（`focal` はリスト）や順序のないカテゴリのための一般化 Mantel–Haenszel 検定（Somes, 1986;
+Penfield, 2001）。各層の群 x カテゴリの表を周辺度数を与えたときの期待値と比べ、$G$ 群・観測された $C$ カテゴリ
+で $df=(G-1)(C-1)$。焦点群が 1 つで 0 / 1 項目なら連続修正なしの $\chi^2_{MH}$ に等しい。
+
+`table` の列: `item`, `chi2`, `df`, `p`, `adj_p`, `flagged`。
+
+### `logistic_dif`
+
+```text
+logistic_dif(data, *, group, focal, items=None, anchor_items=None, matching=None,
+             purify=False, max_iter=10, p_adjust="none", alpha=0.05, kind="both",
+             test="likelihood_ratio") -> DIFResult
+```
+
+0 / 1 項目・2 群のロジスティック回帰による DIF（Swaminathan & Rogers, 1990）。マッチング得点を $S$、焦点群の
+指示変数を $G$ として、モデル $\operatorname{logit}P(x=1)=\beta_0+\beta_1S$ $(M_0)$、$+\beta_2G$ $(M_1)$、
+$+\beta_3SG$ $(M_2)$ を最尤法で推定する。`kind="both"` は $M_0$ と $M_2$（$df=2$）、`"uniform"` は $M_0$ と
+$M_1$、`"non_uniform"` は $M_1$ と $M_2$（$df=1$）を比べる。`test` は `"likelihood_ratio"` または `"wald"`
+（大きいほうのモデルで加えた係数の Wald 検定）。効果量は Nagelkerke の $R^2$ の差（Zumbo, 1999）で、
+$\Delta R^2$ だけによる Zumbo & Thomas（区切り 0.13、0.26）と Jodoin & Gierl（0.035、0.07）の A / B / C 分類を
+つける。外部の `matching` は連続変数でもよい。
+
+`table` の列: `item`, `chi2`, `df`, `delta_r2`, `zumbo_thomas_class`, `jodoin_gierl_class`,
+`group_coefficient`, `group_coefficient_se`, `interaction_coefficient`, `interaction_coefficient_se`
+（大きいほうのモデルの $G$ と $SG$ の係数。その項がなければ NaN）, `p`, `adj_p`, `flagged`。回帰が収束しない
+とき（分離など）は `ConvergenceWarning` を出す。
+
+### `DIFResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `table` | DataFrame | 検定した項目ごとに 1 行（列は上の各関数を参照）。`flagged` は `adj_p < alpha` |
+| `flagged_items` | list[str] | `table` で検出された項目 |
+| `anchor_items` | list[str] | 最後の段階でマッチング得点を作った項目（`matching` を使ったときは空） |
+| `n_iter`, `converged` | int, bool | 純化の反復回数と、検出された項目の組が繰り返したか（しなければ `ConvergenceWarning`） |
+| `flag_history` | DataFrame | 各段階で検出された項目（補正前の $p<$ `alpha`）。0 行目が最初の検定 |
+| `method` | str | `"mantel_haenszel"`, `"mantel"`, `"generalized_mantel_haenszel"`, `"logistic"` |
 
 ---
 
