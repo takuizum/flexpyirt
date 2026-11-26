@@ -158,9 +158,9 @@ class CommonItemScreeningResult:
         (:math:`\log|a^*| - \log|a^{\mathrm{tgt}}|`), ``difference_b``
         (:math:`b^* - b^{\mathrm{tgt}}`),
         ``displacement`` (:math:`|b^* - b^{\mathrm{tgt}}|`), ``robust_z_a``, ``robust_z_b``
-        (against the median and IQR of all common items), ``rmsd``, ``statistic`` (the value compared with
-        ``threshold``), ``flagged``, ``kept`` and ``iteration_removed`` (nullable integer; the
-        purification step that removed the item).
+        (against the median and IQR of all common items), ``rmsd``, ``statistic`` (the value
+        compared with ``threshold``), ``flagged``, ``kept`` and ``iteration_removed`` (nullable
+        integer; the purification step that removed the item).
     link : LinkResult
         Linking on the kept items.
     initial_link : LinkResult
@@ -259,6 +259,10 @@ class CommonItemScreeningResult:
             f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>" for k, v in meta
         )
         history = self.history.assign(removed=self.history["removed"].map(", ".join))
+        # The HTML renderer formats numeric columns as floats; pandas' NA is not one.
+        table = self.table.assign(
+            iteration_removed=self.table["iteration_removed"].astype("float64")
+        )
         return (
             f"{_HTML_STYLE}"
             '<div class="flexpyirt-result">'
@@ -267,7 +271,7 @@ class CommonItemScreeningResult:
             "<h4>Purification steps</h4>"
             f"{_frame_to_html_table(history, digits=4)}"
             "<h4>Common items (final linking)</h4>"
-            f"{_frame_to_html_table(self.table, digits=4)}"
+            f"{_frame_to_html_table(table, digits=4)}"
             "</div>"
         )
 
