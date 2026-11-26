@@ -155,6 +155,13 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   matplotlib from the optional extra `flexpyirt[plot]`. Unidimensional models, every item family, single
   and multiple groups; validated in V48 against mirt `itemfit(return.tables = TRUE)`, `probtrace()`,
   `coef(IRTpars = TRUE)` and TAM `tam.threshold()`.
+- [x] DIF workflow (#104): `dif_screen()` screens every item with anchor purification
+  (`"all_others"`, `"sequential_free"`, `"sequential_constrain"`; likelihood-ratio or Wald tests) and
+  returns the final partially invariant fit; `dif_effect_sizes()` gives signed / unsigned expected-score
+  differences, ESSD, RMSD and a test (DTF) row; `FitResult.dif(test="wald")`. Unidimensional
+  multiple-group models, two or more groups; validated in V49 against mirt `DIF(scheme = "drop" /
+  "drop_sequential" / "add_sequential", Wald = TRUE)`, `DRF()` point estimates, `empirical_ES()` and
+  `RMSD_DIF()`.
 
 ## Ongoing
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).

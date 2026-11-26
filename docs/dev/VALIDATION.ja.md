@@ -76,6 +76,7 @@
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
 | V48 | mirt の推定値での図の数値（2PL $J=10$、$N=1003$。欠測 10% の 2PL。GRM $K=4$、$J=6$。2PL + 3PL + GPCM + 名義の混合 $J=10$。2 群の 2PL + GRM で焦点群の平均・分散を推定。TAM の GPCM $K=4$、$J=6$）: 経験的項目曲線、トレースライン、サーストン閾値 | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))`（群ごとは `extract.group()`）、`probtrace()`、`probtrace()` に対する `uniroot()`、`coef(IRTpars = TRUE)`。TAM `tam.threshold()` | #103 |
+| V49 | アンカーを純化する DIF のスクリーニング（他の全項目をアンカー、逐次的に自由化、逐次的に制約。2 群・2PL 8 項目 + GRM $K=3$ 4 項目、3 群 2PL）、Wald 検定による DIF、mirt の推定値での期待得点の符号つき・符号なしの差、DTF、ESSD / ETSSD、RMSD | `DIF(scheme = "drop" / "drop_sequential" / "add_sequential", seq_stat = 0.05, p.adjust = "BH", max_run = )`、`DIF(Wald = TRUE)`、`mirt:::calc_DRFs(best_fitting = TRUE)`（`DRF()` の内部）、`empirical_ES()`、`RMSD_DIF(probfun = FALSE)` | M5 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -893,6 +894,35 @@
     DIF のある 2 群、エラーの経路。すべての描画関数を Agg バックエンドで描き、描いたデータが DataFrame と
     等しいこと。matplotlib を import できないときの `MissingDependencyError`。CI では matplotlib のない環境で
     `scripts/check_plotting_without_matplotlib.py` も実行する。
+- **DIF のスクリーニング、Wald 検定、効果量（V49、#104）**: DESIGN §16.20 を
+  `tests/test_mirt_m5_dif_screen.py` で照合する（slow tier、約 7 分。生成スクリプト
+  `validation/r/m5_dif_screen_reference.R` → `tests/reference/v49_dif_screen.json`、mirt 1.48。すべての推定と
+  推定し直しで `optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、$[-8,8]$ の 81 点。時間のかかる
+  `DIF()` の結果は `V49_CACHE=<file.rds>` で生成スクリプトの実行間に保存できる）。データ: 1200 人の 2 群（2PL 8
+  項目と段階反応 4 項目 $K=3$。q02 の識別力、q04・q07 の切片、q09 の切片に DIF。焦点群 $N(0.4, 1.3)$）と 800 人の
+  3 群（2PL 8 項目、g3 で q03 の切片に DIF）。
+  - **`"all_others"`** を `DIF(<完全不変>, scheme = "drop", p.adjust = "BH")` と全パラメタおよび切片だけで照合
+    （2 群と 3 群）: $X^2$ は $1.5\times10^{-11}$、`df` は完全一致、検出された項目は同じ。
+  - **逐次戦略** を `DIF(scheme = "drop_sequential" / "add_sequential", seq_stat = 0.05, p.adjust = "BH")` と
+    `max_run` 2・3・`Inf` で照合（flexpyirt の `max_iter` = `max_run` − 1）: 各ラウンド数で検出された項目が同じ、
+    検出された項目の最終検定（mirt の出力）の $X^2$ は $1.5\times10^{-11}$、最終モデルの対数尤度
+    （`return_seq_model = TRUE`）は相対 $1.5\times10^{-15}$。このデータでは 1 ラウンド目から検出結果が変わらない
+    （どちらの戦略も 2 ラウンドで収束）。反復そのものは単体テスト（`tests/test_m5_dif_screen.py`）で確かめる。
+    mirt の逐次ループは `items2test` 内の位置で項目名を引くので、生成スクリプトは先頭からの `1:k` を検定する
+    （アンカーは最後の項目）。
+  - **Wald** を Oakes の SE（`SE.type = "Oakes"`）つきのアンカーモデルでの `DIF(Wald = TRUE)` と照合（両方を
+    独立に推定）: $W$ は相対 $2.7\times10^{-7}$、`p` / `adj_p`（Holm）は相対 $1.2\times10^{-7}$。
+  - **効果量** は部分不変モデル（q02、q04、q07、q09 が自由）と不変モデルの mirt の推定値を、$[-6,6]$ の 201 点
+    （DRF の `quadpts`・`theta_lim` と `RMSD_DIF()` の格子）の固定 `FitResult` に入れて照合: 符号つき・符号なしの差
+    （焦点群と参照群の密度）と DTF を `mirt:::calc_DRFs(best_fitting = TRUE)` と $1.1\times10^{-15}$、EAP は
+    $6.7\times10^{-15}$、ESSD と ETSSD を `empirical_ES()`（`Theta.focal` は同じ格子の EAP）と
+    $2.2\times10^{-15}$、両群・両モデルの RMSD を `RMSD_DIF(probfun = FALSE)` と $9.7\times10^{-16}$。許容誤差:
+    $X^2$ $10^{-8}$、$p$ 相対 $10^{-3}$（mirt の `p` は `1 - pchisq()` で小さな $p$ では不正確）、対数尤度 相対
+    $10^{-8}$、$W$ 相対 $10^{-5}$、効果量 $10^{-12}$。
+  - **mirt との違い**: mirt 1.48 の `DRF(den.type = "focal" / "reference")` は止まる（`add_std.DRF()` が未定義の
+    `VAR` を参照する）ので、生成スクリプトは `DRF()` の点推定を計算する `calc_DRFs()` を呼ぶ。mirt の `DRF()` の
+    既定の密度（`best_fitting = FALSE`、データの事後期待度数）は再現しない（DESIGN §16.20）。逐次方式で mirt は
+    検出された項目だけを返すが、`DIFScreenResult.table` は検定した全項目を持つ。
 - **標本ウェイト（V34、M7）**: mirt の `survey.weights`（mirt 1.48、`optimizer = "NR"`、`TOL = 1e-10`、
   `SE.type = "Oakes"`）。参照ファイルは行ごとのウェイトとともに元の行を保存するので、ウェイトを足し合わせる
   パターン圧縮も比較の対象になる。V34a: シミュレーションの 2PL（$J=10$、$N=1000$）、合計点と関係する対数正規

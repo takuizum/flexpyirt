@@ -112,6 +112,11 @@
   `plot_expected_score`、`plot_wright_map`）が任意依存 `flexpyirt[plot]` の matplotlib で描く。1 次元モデル、
   全項目族、単一群・多母集団。V48 で mirt の `itemfit(return.tables = TRUE)`、`probtrace()`、
   `coef(IRTpars = TRUE)` と TAM の `tam.threshold()` に照合。
+- [x] DIF の分析手順（#104）: `dif_screen()` がアンカーを純化しながら全項目をスクリーニングし（`"all_others"`、
+  `"sequential_free"`、`"sequential_constrain"`。尤度比検定または Wald 検定）、最終的な部分不変モデルを返す。
+  `dif_effect_sizes()` が期待得点の符号つき・符号なしの差、ESSD、RMSD とテスト（DTF）の行を返す。
+  `FitResult.dif(test="wald")`。1 次元の多母集団モデル、2 群以上。V49 で mirt の `DIF(scheme = "drop" /
+  "drop_sequential" / "add_sequential", Wald = TRUE)`、`DRF()` の点推定、`empirical_ES()`、`RMSD_DIF()` に照合。
 
 ## 継続的な作業
 - [ ] GitHub 上の最新の R mirt で照合し、参照値を定期的に確認する（#74）。

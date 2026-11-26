@@ -42,11 +42,11 @@ pytestmark = pytest.mark.slow
 QUAD = Quadrature.equispaced(81, bounds=(-8, 8))
 ES_QUAD = Quadrature.equispaced(201, bounds=(-6, 6))
 METHOD = BAEM(tol=1e-9, max_iter=20000)
-TOL_X2 = 2e-4
+TOL_X2 = 1e-8
 """Absolute; measured in VALIDATION.md V49."""
 TOL_P_REL = 1e-3
 TOL_LOGLIK_REL = 1e-8
-TOL_WALD_REL = 1e-3
+TOL_WALD_REL = 1e-5
 """Relative; Oakes standard errors of two independent fits."""
 TOL_EFFECT = 1e-12
 """Effect sizes at mirt's estimates (no estimation involved)."""
@@ -163,8 +163,8 @@ def test_wald_matches_mirt() -> None:
     assert list(out["item"]) == list(ref["item"])
     np.testing.assert_array_equal(out["df"], ref["df"])
     np.testing.assert_allclose(out["x2"], ref["x2"], rtol=TOL_WALD_REL)
-    np.testing.assert_allclose(out["p"], ref["p"], rtol=5e-3, atol=1e-10)
-    np.testing.assert_allclose(out["adj_p"], ref["adj_p"], rtol=5e-3, atol=1e-10)
+    np.testing.assert_allclose(out["p"], ref["p"], rtol=1e-5, atol=1e-10)
+    np.testing.assert_allclose(out["adj_p"], ref["adj_p"], rtol=1e-5, atol=1e-10)
 
 
 @pytest.mark.parametrize("name", ["all_others", "all_others_intercepts"])

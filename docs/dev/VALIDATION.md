@@ -81,6 +81,7 @@ English | [日本語](VALIDATION.ja.md)
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
 | V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
+| V49 | DIF screening with anchor purification (all others as anchors, sequential freeing, sequential constraining; two groups, 8 2PL + 4 GRM $K=3$; three groups 2PL), Wald DIF tests, signed / unsigned expected-score differences, DTF, ESSD / ETSSD and RMSD at mirt's estimates | `DIF(scheme = "drop" / "drop_sequential" / "add_sequential", seq_stat = 0.05, p.adjust = "BH", max_run = )`, `DIF(Wald = TRUE)`, `mirt:::calc_DRFs(best_fitting = TRUE)` (behind `DRF()`), `empirical_ES()`, `RMSD_DIF(probfun = FALSE)` | M5 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -872,6 +873,42 @@ English | [日本語](VALIDATION.ja.md)
     error paths; every plot function on the Agg back end with the plotted data equal to the
     DataFrames; `MissingDependencyError` when matplotlib cannot be imported. CI also runs
     `scripts/check_plotting_without_matplotlib.py` in an environment without matplotlib.
+- **DIF screening, Wald DIF tests and effect sizes (V49, #104)**: DESIGN §16.20 in
+  `tests/test_mirt_m5_dif_screen.py` (slow tier, about 7 min; generator
+  `validation/r/m5_dif_screen_reference.R` → `tests/reference/v49_dif_screen.json`, mirt 1.48;
+  `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`, 81 points on $[-8,8]$ for every fit and
+  refit; set `V49_CACHE=<file.rds>` to keep the long `DIF()` runs between runs of the generator).
+  Data: two groups of 1200 (8 2PL items and 4 graded items $K=3$; DIF in q02's slope, q04's and
+  q07's intercepts and q09's intercepts; focal $N(0.4, 1.3)$) and three groups of 800 (8 2PL items,
+  intercept DIF in q03 for g3).
+  - **`"all_others"`** against `DIF(<fully invariant>, scheme = "drop", p.adjust = "BH")` for all
+    parameters and for intercepts only (two and three groups): $X^2$ to $1.5\times10^{-11}$, `df`
+    exact, flagged sets equal.
+  - **Sequential strategies** against `DIF(scheme = "drop_sequential" / "add_sequential",
+    seq_stat = 0.05, p.adjust = "BH")` with `max_run` 2, 3 and `Inf` (our `max_iter` = `max_run` − 1):
+    flagged sets equal after every number of rounds, the flagged items' final tests (mirt's output)
+    $X^2$ to $1.5\times10^{-11}$, and the final model's log-likelihood
+    (`return_seq_model = TRUE`) to $1.5\times10^{-15}$ relative. In these data the flags are the
+    same from round 1 on (both strategies converge in two rounds); the iteration itself is unit-tested
+    (`tests/test_m5_dif_screen.py`). mirt's sequential loop indexes item names by position within
+    `items2test`, so the generator tests a prefix `1:k` (the anchors are the last items).
+  - **Wald** against `DIF(Wald = TRUE)` on the anchored model with Oakes SEs (`SE.type = "Oakes"`),
+    both fitted independently: $W$ to $2.7\times10^{-7}$ relative, `p` / `adj_p` (Holm) to
+    $1.2\times10^{-7}$ relative.
+  - **Effect sizes** at mirt's estimates of the partially invariant model (q02, q04, q07, q09 free)
+    and the invariant model, put into fixed `FitResult`s on 201 points on $[-6,6]$ (DRF's
+    `quadpts`, `theta_lim` and `RMSD_DIF()`'s grid): signed / unsigned differences (focal and
+    reference densities) and DTF against `mirt:::calc_DRFs(best_fitting = TRUE)` to
+    $1.1\times10^{-15}$; EAP scores to $6.7\times10^{-15}$; ESSD and ETSSD against `empirical_ES()`
+    (with `Theta.focal` the EAPs on the same grid) to $2.2\times10^{-15}$; RMSD of both groups and
+    both models against `RMSD_DIF(probfun = FALSE)` to $9.7\times10^{-16}$. Tolerances: $X^2$
+    $10^{-8}$, $p$ $10^{-3}$ relative (mirt's `p` is `1 - pchisq()`, imprecise for tiny $p$),
+    log-likelihood $10^{-8}$ relative, $W$ $10^{-5}$ relative, effect sizes $10^{-12}$.
+  - **mirt differences**: `DRF(den.type = "focal" / "reference")` stops in mirt 1.48
+    (`add_std.DRF()` refers to an undefined `VAR`), so the generator calls `calc_DRFs()`, which
+    computes `DRF()`'s point estimates. mirt's `DRF()` default density (`best_fitting = FALSE`) is
+    the posterior counts of the data, not reproduced (DESIGN §16.20). For the sequential schemes
+    mirt reports only the flagged items; `DIFScreenResult.table` has every tested item.
 - **Robust standard errors (V35, M7)**: `fit(se="crossprod" | "sandwich")` (DESIGN §17.5) against
   mirt 1.48 `SE.type = "crossprod"` / `"sandwich"`. The generator stores mirt's parameter table
   (`mod2values`) and the full `vcov` matrices, each row labelled by the first `parnum` of its
