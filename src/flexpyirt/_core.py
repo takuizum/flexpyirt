@@ -35,6 +35,7 @@ __all__ = [
     "CoupledMember",
     "EMResult",
     "FamilyBlock",
+    "GroupBlocks",
     "LatentBlock",
     "PriorBlock",
     "eap",
@@ -226,6 +227,31 @@ class BifactorBlock:
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
+class GroupBlocks:
+    """Group-blocked view of the pattern rows for many groups (DESIGN.md §26).
+
+    Each group's pattern rows are split into blocks of a common size ``B``, ordered group-major.
+    The flat pattern arrays of :class:`CompiledProblem` are unchanged; this is an index into
+    them, built by ``compile_problem`` only.
+
+    Attributes
+    ----------
+    rows : (N_B, B) int
+        Row of each block slot in the flat pattern arrays; padding slots hold the sentinel ``P``
+        (a zero-count, all-missing row appended at run time).
+    group : (N_B,) int
+        Group of each block (0 for empty padding blocks).
+    last : (N_B,) bool
+        Whether the block is the last one of its group (``False`` for padding blocks).
+    """
+
+    rows: Array
+    group: Array
+    last: Array
+
+
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
 class CompiledProblem:
     r"""Everything the Core needs (DESIGN.md §5.2).
 
@@ -257,6 +283,9 @@ class CompiledProblem:
         is the primary grid embedded in ``D`` columns, item expected counts live on each item's
         block grid ``(Q_p n)``, and ``ExpectedCounts.n`` has shape ``(G, Q_p + B n)`` (primary
         marginal, then each block's specific marginal, flattened).
+    blocks : GroupBlocks or None
+        Group-blocked pattern index (DESIGN.md §26); set for non-reduced models with two or
+        more groups, ``None`` otherwise (the flat path).
     """
 
     y: Array
@@ -270,6 +299,7 @@ class CompiledProblem:
     n_groups: int = field(metadata={"static": True})
     coupled: tuple[CoupledBlock, ...] = ()
     reduction: BifactorBlock | None = None
+    blocks: GroupBlocks | None = None
 
 
 def _expand(eta: Array, fixed: Array, free_index: Array) -> Array:
@@ -446,12 +476,78 @@ def _log_joint(prob: CompiledProblem, eta: Array) -> Array:
     """
     if prob.reduction is not None:
         return _bifactor_parts(prob, eta)[0]
+    if prob.blocks is not None:
+        return _blocked_log_joint(prob, eta)
     n_pat, n_nodes = prob.y.shape[0], prob.nodes.shape[0]
     ell = jnp.zeros((n_pat, prob.n_groups, n_nodes), dtype=prob.nodes.dtype)
     for oh, logp in zip(_one_hots(prob), _item_log_probs(prob, eta), strict=True):
         ell = ell + jnp.einsum("pjk,gjqk->pgq", oh, logp)
     own = jnp.take_along_axis(ell, prob.group[:, None, None], axis=1)[:, 0, :]
     return own + _latent_log_weights(prob, eta)[prob.group]
+
+
+_BLOCK_MAP_ROWS = 512
+"""Rows evaluated together per ``lax.map`` step of the blocked log joint (DESIGN.md §26)."""
+
+
+def _padded_rows(prob: CompiledProblem) -> tuple[Array, Array]:
+    """Return ``y`` and ``counts`` with the sentinel row ``P`` appended (all missing, count 0)."""
+    y = jnp.concatenate([prob.y, jnp.full((1, prob.y.shape[1]), -1, dtype=prob.y.dtype)])
+    counts = jnp.concatenate([prob.counts, jnp.zeros((1,), dtype=prob.counts.dtype)])
+    return y, counts
+
+
+def _block_log_joint(
+    prob: CompiledProblem,
+    log_probs: list[Array],
+    log_w: Array,
+    y_block: Array,
+    g: Array,
+) -> tuple[Array, list[Array]]:
+    r"""``(B, Q)`` log joint of one single-group block and its per-family one-hots (§26).
+
+    .. math:: \lambda_{pq}=\log w_{gq}+\sum_f\sum_{j,k}\mathbf 1[y_{pj}=k]\log P^{(g)}_{jkq}
+    """
+    out = jnp.broadcast_to(log_w[g], (y_block.shape[0], log_w.shape[1]))
+    one_hots = []
+    for fam, lp in zip(prob.families, log_probs, strict=True):
+        oh = jax.nn.one_hot(y_block[:, fam.columns], fam.kernel.n_categories, dtype=log_w.dtype)
+        out = out + jnp.einsum("pjk,jqk->pq", oh, lp[g])
+        one_hots.append(oh)
+    return out, one_hots
+
+
+def _unblock(prob: CompiledProblem, per_block: Array) -> Array:
+    """Scatter ``(N_B, B, Q)`` block rows back to the flat ``(P, Q)`` rows (sentinels dropped).
+
+    Flat padding rows, which are in no block, are 0.
+    """
+    blk = prob.blocks
+    assert blk is not None
+    n_nodes = per_block.shape[-1]
+    out = jnp.zeros((prob.y.shape[0], n_nodes), dtype=per_block.dtype)
+    return out.at[blk.rows.ravel()].set(per_block.reshape(-1, n_nodes), mode="drop")
+
+
+def _blocked_log_joint(prob: CompiledProblem, eta: Array) -> Array:
+    r"""``(P, Q)`` log joint evaluated block by block, each block under its own group (§26).
+
+    Costs :math:`O(N_B B\,JKQ)` instead of the flat path's :math:`O(PGJKQ)`; flat padding rows
+    (count 0, in no block) get 0.
+    """
+    blk = prob.blocks
+    assert blk is not None
+    log_probs = _item_log_probs(prob, eta)
+    log_w = _latent_log_weights(prob, eta)
+    y_pad, _ = _padded_rows(prob)
+
+    def one(xs: tuple[Array, Array]) -> Array:
+        rows, g = xs
+        return _block_log_joint(prob, log_probs, log_w, y_pad[rows], g)[0]
+
+    batch = max(1, _BLOCK_MAP_ROWS // blk.rows.shape[1])
+    per_block = jax.lax.map(one, (blk.rows, blk.group), batch_size=batch)
+    return _unblock(prob, per_block)
 
 
 def marginal_loglik(prob: CompiledProblem, eta: Array) -> Array:
@@ -545,6 +641,8 @@ def _e_step_details(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, 
     """Run one E-step and return ``(counts, loglik, h)`` with ``h`` of shape ``(P, Q)``."""
     if prob.reduction is not None:
         return _bifactor_e_step(prob, eta)
+    if prob.blocks is not None:
+        return _blocked_e_step(prob, eta)
     log_joint = _log_joint(prob, eta)
     lse = jax.scipy.special.logsumexp(log_joint, axis=1, keepdims=True)
     h = jnp.exp(log_joint - lse)  # softmax_q(log_joint), (P, Q)
@@ -556,6 +654,53 @@ def _e_step_details(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, 
     )
     loglik = jnp.sum(prob.counts * lse[:, 0])
     return ExpectedCounts(r_bar, n_bar), loglik, h
+
+
+def _blocked_e_step(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, Array, Array]:
+    r"""E-step folded over single-group blocks with ``lax.scan`` (DESIGN.md §26).
+
+    .. math::
+        \bar n_{gq}=\sum_{b:g(b)=g}\sum_{p\in b}c_ph_{pq},\qquad
+        \bar r_{gjkq}=\sum_{b:g(b)=g}\sum_{p\in b}c_ph_{pq}\mathbf 1[y_{pj}=k]
+
+    The counts are accumulated in place at each block's group, so peak memory does not grow
+    with the number of blocks. Returns ``(counts, loglik, h)`` with ``h`` on the flat rows.
+    """
+    blk = prob.blocks
+    assert blk is not None
+    log_probs = _item_log_probs(prob, eta)
+    log_w = _latent_log_weights(prob, eta)
+    y_pad, c_pad = _padded_rows(prob)
+    dtype = log_w.dtype
+    n_groups, n_nodes = log_w.shape
+    init = (
+        jnp.zeros((n_groups, n_nodes), dtype=dtype),
+        tuple(
+            jnp.zeros((n_groups, fam.columns.shape[0], fam.kernel.n_categories, n_nodes), dtype)
+            for fam in prob.families
+        ),
+        jnp.zeros((), dtype=dtype),
+    )
+
+    def body(
+        carry: tuple[Array, tuple[Array, ...], Array], xs: tuple[Array, Array]
+    ) -> tuple[tuple[Array, tuple[Array, ...], Array], Array]:
+        n_acc, r_acc, ll = carry
+        rows, g = xs
+        lam, one_hots = _block_log_joint(prob, log_probs, log_w, y_pad[rows], g)
+        c_b = c_pad[rows]
+        lse = jax.scipy.special.logsumexp(lam, axis=1)
+        h = jnp.exp(lam - lse[:, None])
+        weighted = c_b[:, None] * h
+        n_acc = n_acc.at[g].add(jnp.sum(weighted, axis=0))
+        r_acc = tuple(
+            r.at[g].add(jnp.einsum("pjk,pq->jkq", oh, weighted))
+            for r, oh in zip(r_acc, one_hots, strict=True)
+        )
+        return (n_acc, r_acc, ll + jnp.sum(c_b * lse)), h
+
+    (n_bar, r_bar, loglik), h_blocks = jax.lax.scan(body, init, (blk.rows, blk.group))
+    return ExpectedCounts(r_bar, n_bar), loglik, _unblock(prob, h_blocks)
 
 
 def e_step(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, Array]:
@@ -1466,34 +1611,21 @@ def _oakes_own_hessian(prob: CompiledProblem, eta: Array, counts: ExpectedCounts
     return h_own + jnp.diag(d2_prior)
 
 
-def _oakes_cross_hessian(
-    prob: CompiledProblem, eta: Array, counts: ExpectedCounts, h: Array
-) -> Array:
-    r"""Oakes cross term :math:`\partial^2 Q(\eta\mid\eta')/\partial\eta\,\partial\eta'^\top`.
+class _OakesTables(NamedTuple):
+    """Centered score tables shared by both forms of Oakes' cross term (§15.20, §26)."""
 
-    Writing :math:`Q(\eta\mid\eta')=\sum_p c_p\sum_q h_{pq}(\eta')\,\psi_{pq}(\eta)` with
-    :math:`h_{pq}(\eta')=\mathrm{softmax}_q(\psi_{pq}(\eta'))`, differentiating through the
-    E-step gives (Oakes, 1999; Louis, 1982; DESIGN.md §15.20)
+    fam_d: list[tuple[FamilyBlock, Array]]  # per family ``(G, J_f, K_f, Q, S_f)``
+    d_logw: Array  # ``(G, Q, L)``
+    fam_fids: list[Array]  # per family ``(J_f, S_f)`` free index, ``n_free`` if fixed
+    lat_fids: Array  # ``(G, L)`` free index, ``n_free`` if fixed
+    n_cols: int  # ``D = 1 + sum_f J_f K_f``
 
-    .. math::
-        \left.\frac{\partial^2 Q(\eta\mid\eta')}
-            {\partial\eta\,\partial\eta'^\top}\right|_{\eta'=\eta}
-        = \sum_{p=1}^P c_p\left[
-            \sum_{q=1}^Q h_{pq}\,s_{pq}s_{pq}^\top - \bar s_p\bar s_p^\top
-          \right], \qquad
-        s_{pq}=\nabla_\eta\psi_{pq}(\eta),\quad \bar s_p=\sum_q h_{pq}s_{pq}.
 
-    Every kernel and latent derivative comes from ``jax.jacfwd``. Subtracting a
-    :math:`q`-independent weighted mean from each category's score table leaves
-    :math:`s_{pq}-\bar s_p` algebraically invariant while preventing cancellation in the
-    difference. Pattern chunks skip zero-count padding rows via ``lax.cond`` and never
-    materialize ``(P, Q, n_free)`` or ``(G, Q, D, n_free)`` intermediates.
-    """
+def _oakes_tables(prob: CompiledProblem, eta: Array, counts: ExpectedCounts) -> _OakesTables:
+    """Kernel and latent score tables, centered at each group's expected-count weights."""
     n_free = eta.shape[0]
     G = prob.n_groups
     Q = prob.nodes.shape[0]
-    P = prob.y.shape[0]
-
     # Normalize with a guarded positive denominator (a clamp at 1 would leave weights that do not
     # sum to 1 when a total is fractional); an empty group falls back to uniform weights.
     n_g_tot = jnp.sum(counts.n, axis=1, keepdims=True)
@@ -1539,8 +1671,123 @@ def _oakes_cross_hessian(
         d_logw = jax.vmap(latent_jac)(lat)  # (G, Q, L)
         d_logw = d_logw - jnp.sum(d_logw * q_w_g[:, :, None], axis=1, keepdims=True)
 
-    target_b = max(1, _OAKES_CHUNK_ELEMENTS // max(1, Q * D))
-    B = 1 << (min(P, target_b, _OAKES_MAX_CHUNK).bit_length() - 1)
+    return _OakesTables(
+        fam_d=fam_d,
+        d_logw=d_logw,
+        fam_fids=[
+            jnp.where(fam.slot_free_index >= 0, fam.slot_free_index, n_free) for fam, _ in fam_d
+        ],
+        lat_fids=jnp.where(lat_block.free_index >= 0, lat_block.free_index, n_free),
+        n_cols=D,
+    )
+
+
+def _oakes_chunk_terms(
+    tabs: _OakesTables,
+    eta: Array,
+    g: Array | int,
+    y_c: Array,
+    c_c: Array,
+    h_c: Array,
+) -> tuple[Array, Array]:
+    """Category co-occurrences ``(Q, D, D)`` and the ``T_2`` term of one chunk of group ``g``.
+
+    ``c_c`` must already be zero outside group ``g`` (and on padding rows).
+    """
+    n_free = eta.shape[0]
+    B = y_c.shape[0]
+    wg = c_c[:, None] * h_c  # (B, Q)
+    x_parts = [jnp.ones((B, 1), dtype=eta.dtype)]
+    s_bar = jnp.zeros((B, n_free), dtype=eta.dtype)
+    for (fam, d_lp), fids in zip(tabs.fam_d, tabs.fam_fids, strict=True):
+        K_f = fam.kernel.n_categories
+        J_f = fam.columns.shape[0]
+        S_f = fam.slot_free_index.shape[1]
+        d_flat = jnp.transpose(d_lp[g], (2, 0, 1, 3)).reshape(h_c.shape[1], -1)
+        y_f = y_c[:, fam.columns]
+        oh = jax.nn.one_hot(y_f, K_f, dtype=eta.dtype)
+        x_parts.append(oh.reshape(B, J_f * K_f))
+        hd = (h_c @ d_flat).reshape(B, J_f, K_f, S_f)
+        y_safe = jnp.maximum(y_f, 0)
+        picked = jnp.take_along_axis(hd, y_safe[:, :, None, None], axis=2)[:, :, 0, :]
+        picked = jnp.where((y_f >= 0)[:, :, None], picked, 0.0)
+        s_bar = s_bar.at[:, fids.ravel()].add(picked.reshape(B, -1), mode="drop")
+    x_c = jnp.concatenate(x_parts, axis=1)  # (B, D)
+    c_gq = jax.vmap(lambda wq: (x_c * wq[:, None]).T @ x_c, in_axes=1)(wg)
+    s_bar = s_bar.at[:, tabs.lat_fids[g]].add(h_c @ tabs.d_logw[g], mode="drop")
+    t2_g = (s_bar * c_c[:, None]).T @ s_bar
+    return c_gq, t2_g
+
+
+def _oakes_t1(tabs: _OakesTables, eta: Array, g: Array | int, c_mat: Array) -> Array:
+    r""":math:`T_1=\sum_q L_{gq}^\top C_{gq} L_{gq}` of group ``g`` from its co-occurrences."""
+    n_free = eta.shape[0]
+    D = tabs.n_cols
+    dlw_g = tabs.d_logw[g]
+    lfids_g = tabs.lat_fids[g]
+
+    def accumulate_t1(t1_acc: Array, q_idx: Array) -> tuple[Array, None]:
+        l_q = jnp.zeros((D, n_free), dtype=eta.dtype)
+        l_q = l_q.at[0, lfids_g].add(dlw_g[q_idx], mode="drop")
+        col = 1
+        for (fam, d_lp), fids in zip(tabs.fam_d, tabs.fam_fids, strict=True):
+            J_f = fam.columns.shape[0]
+            K_f = fam.kernel.n_categories
+            n_cols = J_f * K_f
+            d_idx = (col + jnp.arange(n_cols)).reshape(J_f, K_f)
+            l_q = l_q.at[d_idx[:, :, None], fids[:, None, :]].add(
+                d_lp[g, :, :, q_idx, :], mode="drop"
+            )
+            col += n_cols
+        return t1_acc + l_q.T @ (c_mat[q_idx] @ l_q), None
+
+    t1, _ = jax.lax.scan(
+        accumulate_t1,
+        jnp.zeros((n_free, n_free), dtype=eta.dtype),
+        jnp.arange(c_mat.shape[0]),
+    )
+    return t1
+
+
+def _oakes_chunk_size(tabs: _OakesTables, n_nodes: int, n_rows: int) -> int:
+    """Largest power of two not above ``n_rows`` that keeps a chunk's ``(Q, B, D)`` bounded."""
+    target_b = max(1, _OAKES_CHUNK_ELEMENTS // max(1, n_nodes * tabs.n_cols))
+    return 1 << (min(n_rows, target_b, _OAKES_MAX_CHUNK).bit_length() - 1)
+
+
+def _oakes_cross_hessian(
+    prob: CompiledProblem, eta: Array, counts: ExpectedCounts, h: Array
+) -> Array:
+    r"""Oakes cross term :math:`\partial^2 Q(\eta\mid\eta')/\partial\eta\,\partial\eta'^\top`.
+
+    Writing :math:`Q(\eta\mid\eta')=\sum_p c_p\sum_q h_{pq}(\eta')\,\psi_{pq}(\eta)` with
+    :math:`h_{pq}(\eta')=\mathrm{softmax}_q(\psi_{pq}(\eta'))`, differentiating through the
+    E-step gives (Oakes, 1999; Louis, 1982; DESIGN.md §15.20)
+
+    .. math::
+        \left.\frac{\partial^2 Q(\eta\mid\eta')}
+            {\partial\eta\,\partial\eta'^\top}\right|_{\eta'=\eta}
+        = \sum_{p=1}^P c_p\left[
+            \sum_{q=1}^Q h_{pq}\,s_{pq}s_{pq}^\top - \bar s_p\bar s_p^\top
+          \right], \qquad
+        s_{pq}=\nabla_\eta\psi_{pq}(\eta),\quad \bar s_p=\sum_q h_{pq}s_{pq}.
+
+    Every kernel and latent derivative comes from ``jax.jacfwd``. Subtracting a
+    :math:`q`-independent weighted mean from each category's score table leaves
+    :math:`s_{pq}-\bar s_p` algebraically invariant while preventing cancellation in the
+    difference. Pattern chunks skip zero-count padding rows via ``lax.cond`` and never
+    materialize ``(P, Q, n_free)`` or ``(G, Q, D, n_free)`` intermediates.
+    """
+    if prob.blocks is not None:
+        return _oakes_cross_hessian_blocked(prob, eta, counts, h)
+    n_free = eta.shape[0]
+    G = prob.n_groups
+    Q = prob.nodes.shape[0]
+    P = prob.y.shape[0]
+    tabs = _oakes_tables(prob, eta, counts)
+    D = tabs.n_cols
+
+    B = _oakes_chunk_size(tabs, Q, P)
     pad = (-P) % B
     if pad:
         y_pad = jnp.concatenate(
@@ -1559,23 +1806,12 @@ def _oakes_cross_hessian(
     h_chunks = h_pad.reshape(n_chunks, B, Q)
 
     h_cross = jnp.zeros((n_free, n_free), dtype=eta.dtype)
-    lat_fids_all = jnp.where(lat_block.free_index >= 0, lat_block.free_index, n_free)
-    fam_fids = [
-        jnp.where(fam.slot_free_index >= 0, fam.slot_free_index, n_free) for fam, _ in fam_d
-    ]
-
-    for g in range(G):
-        d_flats = [jnp.transpose(d_lp[g], (2, 0, 1, 3)).reshape(Q, -1) for _, d_lp in fam_d]
-        d_logw_g = d_logw[g]
-        lat_fids_g = lat_fids_all[g]
+    for g in range(G):  # G is small here: many groups take the blocked path (§26)
 
         def scan_body(
             acc: tuple[Array, Array],
             xs: tuple[Array, Array, Array, Array],
             g_idx: int = g,
-            d_flats_g: list[Array] = d_flats,
-            dlw_g: Array = d_logw_g,
-            lfids_g: Array = lat_fids_g,
         ) -> tuple[tuple[Array, Array], None]:
             c_acc, t2_acc = acc
             y_c, g_c, c_c, h_c = xs
@@ -1583,25 +1819,7 @@ def _oakes_cross_hessian(
 
             def do_chunk(_unused: None) -> tuple[Array, Array]:
                 cg = jnp.where(mask_g, c_c, 0.0)
-                wg = cg[:, None] * h_c  # (B, Q)
-                x_parts = [jnp.ones((B, 1), dtype=eta.dtype)]
-                s_bar = jnp.zeros((B, n_free), dtype=eta.dtype)
-                for (fam, _), fids, d_flat in zip(fam_d, fam_fids, d_flats_g, strict=True):
-                    K_f = fam.kernel.n_categories
-                    J_f = fam.columns.shape[0]
-                    S_f = fam.slot_free_index.shape[1]
-                    y_f = y_c[:, fam.columns]
-                    oh = jax.nn.one_hot(y_f, K_f, dtype=eta.dtype)
-                    x_parts.append(oh.reshape(B, J_f * K_f))
-                    hd = (h_c @ d_flat).reshape(B, J_f, K_f, S_f)
-                    y_safe = jnp.maximum(y_f, 0)
-                    picked = jnp.take_along_axis(hd, y_safe[:, :, None, None], axis=2)[:, :, 0, :]
-                    picked = jnp.where((y_f >= 0)[:, :, None], picked, 0.0)
-                    s_bar = s_bar.at[:, fids.ravel()].add(picked.reshape(B, -1), mode="drop")
-                x_c = jnp.concatenate(x_parts, axis=1)  # (B, D)
-                c_gq = jax.vmap(lambda wq: (x_c * wq[:, None]).T @ x_c, in_axes=1)(wg)
-                s_bar = s_bar.at[:, lfids_g].add(h_c @ dlw_g, mode="drop")
-                t2_g = (s_bar * cg[:, None]).T @ s_bar
+                c_gq, t2_g = _oakes_chunk_terms(tabs, eta, g_idx, y_c, cg, h_c)
                 return c_acc + c_gq, t2_acc + t2_g
 
             next_acc: tuple[Array, Array] = jax.lax.cond(
@@ -1614,35 +1832,59 @@ def _oakes_cross_hessian(
             jnp.zeros((n_free, n_free), dtype=eta.dtype),
         )
         (c_q, t2_g), _ = jax.lax.scan(scan_body, init_acc, (y_chunks, g_chunks, c_chunks, h_chunks))
-
-        def accumulate_t1(
-            t1_acc: Array,
-            q_idx: Array,
-            g_idx: int = g,
-            c_mat: Array = c_q,
-            dlw_g: Array = d_logw_g,
-            lfids_g: Array = lat_fids_g,
-        ) -> tuple[Array, None]:
-            l_q = jnp.zeros((D, n_free), dtype=eta.dtype)
-            l_q = l_q.at[0, lfids_g].add(dlw_g[q_idx], mode="drop")
-            col = 1
-            for (fam, d_lp), fids in zip(fam_d, fam_fids, strict=True):
-                J_f = fam.columns.shape[0]
-                K_f = fam.kernel.n_categories
-                n_cols = J_f * K_f
-                d_idx = (col + jnp.arange(n_cols)).reshape(J_f, K_f)
-                l_q = l_q.at[d_idx[:, :, None], fids[:, None, :]].add(
-                    d_lp[g_idx, :, :, q_idx, :], mode="drop"
-                )
-                col += n_cols
-            return t1_acc + l_q.T @ (c_mat[q_idx] @ l_q), None
-
-        t1_g, _ = jax.lax.scan(
-            accumulate_t1, jnp.zeros((n_free, n_free), dtype=eta.dtype), jnp.arange(Q)
-        )
-        h_cross = h_cross + (t1_g - t2_g)
+        h_cross = h_cross + (_oakes_t1(tabs, eta, g, c_q) - t2_g)
 
     return h_cross
+
+
+def _oakes_cross_hessian_blocked(
+    prob: CompiledProblem, eta: Array, counts: ExpectedCounts, h: Array
+) -> Array:
+    r"""Oakes' cross term as one ``lax.scan`` over single-group blocks (DESIGN.md §26).
+
+    Each block adds its co-occurrences to the running group's :math:`C_q` and its
+    :math:`\bar s_p\bar s_p^\top` term to :math:`T_2`; the last block of a group adds
+    :math:`T_1=\sum_q L_{gq}^\top C_q L_{gq}` and resets :math:`C`. Blocks larger than the
+    chunk budget are processed in power-of-two sub-chunks. The traced program does not depend
+    on the number of groups.
+    """
+    blk = prob.blocks
+    assert blk is not None
+    n_free = eta.shape[0]
+    Q = prob.nodes.shape[0]
+    tabs = _oakes_tables(prob, eta, counts)
+    D = tabs.n_cols
+    y_pad, c_pad = _padded_rows(prob)
+    h_pad = jnp.concatenate([h, jnp.zeros((1, Q), dtype=h.dtype)], axis=0)
+    B = blk.rows.shape[1]
+    sub = _oakes_chunk_size(tabs, Q, B)
+    n_sub = B // sub
+    zero_c = jnp.zeros((Q, D, D), dtype=eta.dtype)
+    zero_t = jnp.zeros((n_free, n_free), dtype=eta.dtype)
+
+    def body(
+        carry: tuple[Array, Array, Array], xs: tuple[Array, Array, Array]
+    ) -> tuple[tuple[Array, Array, Array], None]:
+        c_acc, t1_acc, t2_acc = carry
+        rows, g, last = xs
+
+        def sub_body(acc: tuple[Array, Array], sub_rows: Array) -> tuple[tuple[Array, Array], None]:
+            c_gq, t2_g = _oakes_chunk_terms(
+                tabs, eta, g, y_pad[sub_rows], c_pad[sub_rows], h_pad[sub_rows]
+            )
+            return (acc[0] + c_gq, acc[1] + t2_g), None
+
+        (c_acc, t2_acc), _ = jax.lax.scan(sub_body, (c_acc, t2_acc), rows.reshape(n_sub, sub))
+
+        def flush(state: tuple[Array, Array]) -> tuple[Array, Array]:
+            c_mat, t1 = state
+            return zero_c, t1 + _oakes_t1(tabs, eta, g, c_mat)
+
+        c_acc, t1_acc = jax.lax.cond(last, flush, lambda state: state, (c_acc, t1_acc))
+        return (c_acc, t1_acc, t2_acc), None
+
+    (_, t1, t2), _ = jax.lax.scan(body, (zero_c, zero_t, zero_t), (blk.rows, blk.group, blk.last))
+    return t1 - t2
 
 
 def information_oakes(prob: CompiledProblem, eta: Array) -> Array:
