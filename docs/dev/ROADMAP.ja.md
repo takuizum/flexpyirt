@@ -123,6 +123,9 @@
   $z$ 値）と `FitResult.item_fit(statistics=("infit", "outfit"))`。1 次元モデル（全項目モデル、欠測、多母集団）。
   V53 で mirt の `personfit()` / `itemfit(fit_stats = "infit")`、sirt の `personfit.stat()` と照合。$l_z^*$ は式の R での
   再計算と帰無分布のシミュレーションで照合（R パッケージの参照値はない。オーナーの承認待ち）。
+- [ ] モデル比較表と回答データのシミュレーション（#109）: `compare_fits()`（AIC・SABIC・HQ・BIC・尤度比検定。
+  mirt の `anova()`）と `simulate_responses()` / `SimulatedData`（`FitResult` または項目バンクを与えた `Model`
+  から。全項目モデル・全潜在分布・全モデル構造。JAX のキー）。V54 で照合。照合テストが夜間 CI で通ったらチェックする。
 
 ## 継続的な作業
 - [ ] GitHub 上の最新の R mirt で照合し、参照値を定期的に確認する（#74）。

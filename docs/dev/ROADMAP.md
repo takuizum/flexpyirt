@@ -173,6 +173,10 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   mirt `personfit()` / `itemfit(fit_stats = "infit")` and sirt `personfit.stat()`; $l_z^*$ against an
   R recomputation of the formulas and a simulation of its null distribution (no R package
   reference; pending the owner's acceptance).
+- [ ] Model-comparison table and simulation of responses (#109): `compare_fits()` (AIC, SABIC, HQ,
+  BIC, likelihood-ratio tests; mirt's `anova()`) and `simulate_responses()` / `SimulatedData` (from
+  a `FitResult` or a `Model` with an item bank; every item model, latent distribution and model
+  structure; JAX key). Validated in V54; checked once the comparison passes the nightly CI.
 
 ## Ongoing
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).
