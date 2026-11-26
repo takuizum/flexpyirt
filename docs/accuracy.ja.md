@@ -59,6 +59,8 @@ $10^{-8}$ 程度）。
 | 合計得点による EAP | `fscores(m, method = "EAPsum")` の表と受検者ごとの得点（欠測のある反応パターンが `NA` になる点も含む）。$10^{-9}$ まで |
 | $M_2$ / $M_2^*$ | `M2(m)`。mirt と異なる場合は R による厳密な計算（下記参照） |
 | DIF 検定 | `DIF(mg, scheme = "add" / "drop")` |
+| モデル比較（`compare_fits`） | Rasch / 2PL / 3PL、PCM / GPCM、入れ子の 2 群モデルでの `anova(mod1, mod2, ...)`: 表全体が $10^{-10}$ で一致 |
+| シミュレーション（`simulate_responses`） | 乱数は R と一致させられないため、同じパラメタ・$\theta$・一様乱数で `probtrace()` の確率と R と同じ回答になること、生成したデータのカテゴリと合計得点の分布がモンテカルロ誤差の範囲でモデルと一致すること、再推定でパラメタが戻ることを確かめる |
 | ロバスト標準誤差 | `mirt(..., SE.type = "crossprod")`・`SE.type = "sandwich"`: mirt の推定値での共分散行列全体と、通しで当てはめたときの標準誤差 |
 | SQUAREM | 上のすべての照合を `BAEM(squarem=True)` でも行う |
 | M-step の非拘束尺度 | 3PL・4PL、事前分布と MAP、欠測、多母集団、項目パラメタ固定の較正、2–3 因子の確認的モデルの照合を `BAEM(m_step_scale="unconstrained")` でも同じ許容誤差で行う |

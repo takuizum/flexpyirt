@@ -476,6 +476,59 @@ m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi
 print(m2_table.round(3))
 ```
 
+### Comparing models (AIC, BIC, likelihood-ratio tests)
+
+`compare_fits()` puts several fits of the same data in one table, ordered from the most
+restricted model to the least restricted: `n_params`, `loglik`, AIC, sample-size adjusted BIC
+(`sabic`), Hannan–Quinn (`hq`) and BIC, and for each row after the first the likelihood-ratio test
+against the row before (`x2`, `df`, `p`). It is mirt's `anova(mod1, mod2, ...)`.
+
+```python
+from flexpyirt import compare_fits
+
+res_rasch = fit(Model.uniform(Rasch(), items=items), df, se=None)
+table = compare_fits(res_rasch, res, names=["Rasch", "2PL"])
+print(table.round(3))  # model, n_params, loglik, aic, sabic, hq, bic, x2, df, p
+```
+
+- The likelihood-ratio test is valid only when each model is nested in the next one and the
+  restriction is not on the boundary of the parameter space. flexpyirt cannot check either: a
+  variance fixed at 0, a mixture with fewer components or a `DavidianCurve` against a `Normal`
+  latent distribution is not tested correctly by $\chi^2_{df}$. Use the information criteria
+  there.
+- Fits with different numbers of respondents raise `SpecificationError`. A row whose number of
+  parameters does not increase (`p` is NaN), a log-likelihood that decreases while parameters
+  are added, and fits with priors give a `FlexpyirtWarning`.
+
+### Simulating responses
+
+`simulate_responses()` draws response data from a fitted model, or from a model whose item
+parameters you give, for power studies, recovery checks and teaching. Random numbers come from an
+explicit JAX key, so the same key gives the same data.
+
+```python
+from flexpyirt import simulate_responses
+
+sim = simulate_responses(res, n_obs=2000, key=jax.random.key(1))
+print(sim.responses.head())  # one int column per item, ready for fit()
+print(sim.theta[:5])  # the respondents' latent traits
+refit = fit(spec, sim.responses, se=None)
+
+bank = pd.DataFrame({"item": items, "a": a_true, "d": d_true})
+sim_true = simulate_responses(spec, parameters=bank, n_obs=1000, key=jax.random.key(2))
+```
+
+- Abilities are drawn from the fitted latent distribution of each group (`Normal` with one or
+  more factors, `NormalMixture`, `DavidianCurve`, or the `EmpiricalHistogram`'s grid points), or
+  taken from `theta=`. For a multiple-group model `n_obs` is per group (or a mapping
+  `{"ref": 500, "focal": 800}`), and `sim.group` holds the labels to pass as `fit(..., group=)`.
+- From a `Model`, `parameters` is an item bank as for
+  [`Model.fix_from()`](#10-fixed-item-parameter-calibration-fipc) (slope–intercept columns) with
+  every item parameter; the latent distribution is the specification's (`Normal(mean=, var=)`,
+  or a `NormalMixture`'s `means`, `variances`, `weights`).
+- Every response is observed. To mimic a test design or missing data, set entries of
+  `sim.responses` to NaN.
+
 ## 6. Standard errors
 
 - **`se="oakes"`** (default): the observed information from Oakes' (1999) identity. The second

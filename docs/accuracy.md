@@ -64,6 +64,8 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | Summed-score EAP | `fscores(m, method = "EAPsum")`, the table and the scores of each respondent, including `NA` for incomplete response patterns: to $10^{-9}$ |
 | $M_2$ / $M_2^*$ | `M2(m)`, plus an exact R computation where mirt differs (see below) |
 | DIF tests | `DIF(mg, scheme = "add" / "drop")` |
+| Model comparison (`compare_fits`) | `anova(mod1, mod2, ...)` for Rasch / 2PL / 3PL, PCM / GPCM and nested two-group models: the whole table to $10^{-10}$ |
+| Simulation (`simulate_responses`) | Random numbers cannot match R's, so: the same parameters, $\theta$ and uniform numbers give `probtrace()`'s probabilities and the same responses as in R; simulated category and summed-score distributions agree with the model within Monte Carlo error, and refitting recovers the parameters |
 | Robust standard errors | `mirt(..., SE.type = "crossprod")` and `SE.type = "sandwich"`: whole covariance matrices at mirt's estimates, and standard errors from a full fit |
 | SQUAREM | every comparison above is repeated with `BAEM(squarem=True)` |
 | Unconstrained M-step scale | the comparisons of 3PL, 4PL, priors and MAP, missing responses, multiple groups, fixed item parameter calibration and confirmatory 2–3 factor models are repeated with `BAEM(m_step_scale="unconstrained")` at the same tolerances |

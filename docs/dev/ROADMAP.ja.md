@@ -120,6 +120,9 @@
   `coef(IRTpars = TRUE)` と TAM の `tam.threshold()` に照合。
 - [x] リンキングの共通項目の点検と項目パラメータドリフト（#105。`screen_common_items()`、
   `CommonItemScreeningResult`、`stack_screening_tables()`: 頑健 z・変位・期待得点の RMSD と反復的な純化、1 次元。V50 で照合済み）。
+- [ ] モデル比較表と回答データのシミュレーション（#109）: `compare_fits()`（AIC・SABIC・HQ・BIC・尤度比検定。
+  mirt の `anova()`）と `simulate_responses()` / `SimulatedData`（`FitResult` または項目バンクを与えた `Model`
+  から。全項目モデル・全潜在分布・全モデル構造。JAX のキー）。V54 で照合。照合テストが夜間 CI で通ったらチェックする。
 
 ## 継続的な作業
 - [ ] GitHub 上の最新の R mirt で照合し、参照値を定期的に確認する（#74）。
