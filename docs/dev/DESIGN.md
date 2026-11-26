@@ -3712,7 +3712,7 @@ data-independent shapes (§15.21).
 5. **Latent distributions.** The latent parameters stay stacked `(G, L)` with `free_index`
    `(G, L)`; the latent M-step, Oakes' own Hessian and the latent score tables are `vmap`ped
    over groups. Every group shares one latent family and one static shape $L$ (§4.4, #75 for
-   Davidian / mixture per group); no Python loop over groups runs inside jit.
+   Davidian / mixture per group, §27); no Python loop over groups runs inside jit.
 6. **API.** `Model.with_groups()` also accepts one positional mapping
    (`with_groups({"ref": Normal.standard()} | {s: Normal.free() for s in schools})`;
    insertion order defines the groups and the first is the reference), so non-identifier group
@@ -3729,6 +3729,58 @@ data-independent shapes (§15.21).
    log-likelihood, Oakes and Hessian SEs, EAP) to $10^{-10}$. V55: a 2PL with $G=10$ groups and
    anchored invariant items against mirt `multipleGroup` (VALIDATION.md). Benchmarks for
    $G=10,50,200$ in `benchmarks/` (compile time, warm time, peak memory) against mirt.
+
+## 27. Davidian curves and normal mixtures per group (#75)
+
+1. **Scope.** `DavidianCurve` (§4.4, §16.4) and `NormalMixture` (§4.4, §16.7) become valid latent
+   distributions of `with_groups()` models: each group has its own mean, variance and shape
+   (Davidian angles $\boldsymbol\phi_g$; mixture raw means, raw variances and logits), with one set
+   of item parameters linked by anchors (or fixed by `fix_from()` under FIPC). Unidimensional
+   models on equispaced grids only (as for one group).
+2. **One family per model (decision).** Every group uses the same class with the same `degree`
+   (Davidian) or `n_components` (mixture); mixing families (e.g. a `Normal` reference group and
+   `DavidianCurve` focal groups) or degrees raises `SpecificationError`. Reasons: the latent block
+   is stacked `(G, L)` with one static kind (§26.5), so mixing would need per-group padding of
+   $L$ and a `lax.switch` that evaluates every family in every group; and the main use is already
+   covered without it, because a Davidian curve with $\boldsymbol\phi=\mathbf 0$ **is** the normal
+   density: a group that should stay normal in a Davidian model gets its `phi_*` rows fixed at 0
+   in the parameter table (`table=`), which gives exactly $N(\mu_g,\sigma^2_g)$ on the grid. A
+   mixture has no such exact normal member (a component weight would have to be 0), so a normal
+   group in a mixture model is not offered.
+3. **Identification.** As for `Normal` (§4.5, §14.5): by default the reference group is
+   standardized (`mean = 0`, `var = 1` fixed, shape free, as in one group), and each focal group
+   frees `mean` / `var` through `DavidianCurve(k, free_mean=True, free_var=True)` /
+   `NormalMixture(k, free_mean=True, free_var=True)`, checked by the same anchor graph (the latent
+   rows are named `mean` and `var` for every family). Each group's shape is identified by its own
+   data as in one group (the analytic standardization of §16.4 / §16.7 separates shape from
+   location and scale). FIPC: `fix_from()` fixes the items and every group may free its mean and
+   variance.
+4. **Core.** Nothing new: `LatentBlock` already holds `(G, L)` parameters with a static
+   `(davidian_degree, mixture_components)`; the log weights, the latent M-step (masked Newton on
+   $\sum_q\bar n_{gq}\log w_{gq}$), Oakes' own Hessian and the latent score tables are `vmap`ped
+   over groups, and the E-step is group-blocked for $G\ge2$ (§26). EM stays monotone and Oakes'
+   identity exact per group.
+5. **Outer layer.** `FitResult.latent` gives one row per group (mixtures with the standardized
+   components per group); the degenerate-mixture warning (§16.7) runs per group and names it;
+   EAP / ML / WLE / PV scoring use the respondent's group density (MAP stays unavailable, §16.4,
+   §16.7); `item_fit()` (S-X2, Orlando & Thissen, 2000) uses each group's quadrature weights
+   $w_{gq}$ in the Lord–Wingersky expected table, which only needs the weights, so it is enabled
+   for Davidian and mixture models with one or several groups (the free latent parameters of the
+   group, shape included, are subtracted from the degrees of freedom as for `Normal`); `link()`
+   with default weights integrates over the chosen group's fitted density (unchanged);
+   `simulate_responses()` draws from each group's density (unchanged); JSON stores each group's
+   latent spec as for one group, so the format is unchanged (`schema_version` stays 8).
+   SEs: `oakes` and `hessian`; `crossprod` / `sandwich` stay unavailable (§17.5). Still rejected
+   for these families: `m2()`, `information()`, `EAPsum`.
+6. **Validation (V56).** mirt `multipleGroup()` has no per-group Davidian with free mean and
+   variance ("not currently supported") and its `dentype = "mixture-k"` is a latent-class model,
+   not a per-group mixture density. As V19 and V22 do for one group, V56 fits the exact
+   discretized model in mirt through `multipleGroup(customGroup = createGroup(...))` with the
+   standardized density normalized on the grid (Davidian via `dcurver::ddc`; the mixture with each
+   component normalized on the grid, then mixed), polishes mirt's solution by Newton steps on an
+   independent R marginal log-likelihood, and records the R Richardson-Hessian SEs, mirt's Oakes
+   SEs, EAPs computed in R from `probtrace()`, and S-X2 per group from `itemfit()` on single-group
+   mirt objects with the same `customGroup` fixed at the group's estimates.
 
 ## References
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
