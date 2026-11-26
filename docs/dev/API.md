@@ -28,6 +28,8 @@ res  # a table in Jupyter (_repr_html_)
 res.items  # DataFrame: item, a, b(=-d/a), a_se, b_se, ...
 res.loglik, res.aic, res.bic
 res.score(df, method="EAP")  # DataFrame: theta, se
+res.person_fit(df)  # DataFrame: theta, lz, infit, z_infit, outfit, z_outfit, n_items
+res.item_fit(df, statistics=("infit", "outfit"))  # item, infit, z_infit, outfit, z_outfit
 ```
 
 ## 2. Mixed formats + priors (MAP)
@@ -163,7 +165,7 @@ one (DESIGN.md §16.18).
 | `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
 | `fit` | function | Estimation; returns a `FitResult` |
-| `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
+| `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `person_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
 | `link` | function | Differentiable IRT scale linking (Haebara / Stocking–Lord, non-symmetric & symmetric; `transformation=` for a diagonal, orthogonal or oblique $\mathbf A$ in multidimensional models); returns a `LinkResult` |
 | `LinkResult` | class | Scale-linking result (`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `transformation`, `items`, `transform_theta`, `summary`) |
 | `polychoric` | function | Polychoric / tetrachoric correlation matrix (two-step ML, smoothing); returns a `PolychoricResult` |

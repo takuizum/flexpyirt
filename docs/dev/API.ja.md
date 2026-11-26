@@ -26,6 +26,8 @@ res  # Jupyter では表（_repr_html_）
 res.items  # DataFrame: item, a, b(=-d/a), a_se, b_se, ...
 res.loglik, res.aic, res.bic
 res.score(df, method="EAP")  # DataFrame: theta, se
+res.person_fit(df)  # DataFrame: theta, lz, infit, z_infit, outfit, z_outfit, n_items
+res.item_fit(df, statistics=("infit", "outfit"))  # item, infit, z_infit, outfit, z_outfit
 ```
 
 ## 2. 混合形式 + 事前分布（MAP）
@@ -152,7 +154,7 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
 | `BAEM`, `Quadrature` | frozen dataclass | 推定設定 |
 | `fit` | 関数 | 推定。`FitResult` を返す |
-| `FitResult` | クラス | 結果（`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`） |
+| `FitResult` | クラス | 結果（`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `person_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`） |
 | `link` | 関数 | 微分可能な IRT 尺度リンキング（Haebara・Stocking–Lord の非対称・対称版。多次元モデルでは `transformation=` で対角・直交・斜交の $\mathbf A$ を選ぶ）。`LinkResult` を返す |
 | `LinkResult` | クラス | 尺度リンキング結果（`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `transformation`, `items`, `transform_theta`, `summary`） |
 | `polychoric` | 関数 | ポリコリック・テトラコリック相関行列（2 段階の最尤法、平滑化）。`PolychoricResult` を返す |

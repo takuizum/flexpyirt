@@ -145,6 +145,14 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   `testinfo()` / `marginal_rxx()` / `fscores(method = "EAPsum")`, `survey.weights` and
   `SE.type = "sandwich"` / `"crossprod"`.
 
+## Field features (#103–#109)
+- [x] Person fit and residual item fit (#108): `FitResult.person_fit()` ($l_z$, $l_z^*$, person
+  infit / outfit with $z$ values) and `FitResult.item_fit(statistics=("infit", "outfit"))` for
+  unidimensional models (every item model, missing data, multiple groups); validated in V53 against
+  mirt `personfit()` / `itemfit(fit_stats = "infit")` and sirt `personfit.stat()`; $l_z^*$ against an
+  R recomputation of the formulas and a simulation of its null distribution (no R package
+  reference; pending the owner's acceptance).
+
 ## Ongoing
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).
 - [ ] Public extension API for user-defined item models, with docs examples (#86). New item models
