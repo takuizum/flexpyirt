@@ -87,6 +87,8 @@ English | [日本語](VALIDATION.ja.md)
 | V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `packages/flexpyctt/validation/r/ctt_dif_reference.R`; the worked example of Liu & Agresti (1996, Table 1) | — |
 | V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
 | V50 | Common-item screening for linking (#105): robust z (Huynh & Meyer, 2010), displacement and RMSD of expected item score curves; removal order, linking constants at every purification step and the final item table (2PL; mixed 2PL + GRM + GPCM) | separate `mirt()` calibrations + base-R recomputation (`median()`, `quantile(type = 7)`, `expected.item()`, V20 linking); `equateIRT::dif.test` as a cross-check of the drifted items | field |
+| V51 | IRT true-score and observed-score equating and raw-to-scale tables (dichotomous: 20 + 20 items, 3PL + 2PL, with a link; polytomous: 4 GRM $K=4$ + 6 2PL vs 3 GPCM $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL, with a link; populations new / old / synthetic $w_1=0.5$; scale table true score and EAPsum) | `equateIRT:::score_compute(method = "TSE" / "OSE")`, `SNSequate::irt.eq(method = "TS")`; mirt `expected.test()`, `probtrace()`, `testinfo()`, `fscores(method = "EAPsum", full.scores = FALSE)` with `uniroot()`, and `equate::equate(type = "equipercentile")` | #106 |
+| V52 | Classification accuracy and consistency for cut scores (#107): Lee (summed-score cuts) and Rudner ($\theta$ cuts), D and P approaches, one to three cuts, non-integer cuts, both cut-scale conversions (3PL $J=20$; GRM $K=4$, $J=10$; two-group 2PL $J=15$, focal mean and variance free) | cacIRT 1.4 `class.Lee()`, `Lee.poly.D()` / `Lee.poly.P()`, `Rud.D()` / `Rud.P()` with mirt's `testinfo()` SE; independent recomputation from mirt `probtrace()` / `expected.test()` / `testinfo()` (kappa, false positive / negative rates, per-category indices, tables) | field |
 | V53 | Person fit ($l_z$, $l_z^*$, person infit / outfit with $z$) and item infit / outfit at the EAP, MAP, ML and WLE estimates, on V37's data and estimates (2PL; 2PL with 8% missing; 3PL; GRM and GPCM $K=4$; nominal $K=4$; mixed 2PL + 3PL + GRM + GPCM + nominal; two groups 2PL + GRM) and a Rasch refit | `personfit(m, Theta = )`, `itemfit(m, fit_stats = "infit", Theta = )`; `sirt::personfit.stat()`; $l_z^*$ recomputed in R from the formulas | — |
 | V54 | Model-comparison table (Rasch vs 2PL vs 3PL on the V11a data; PCM vs GPCM on the V8b data; a fully invariant two-group 2PL vs the anchored model and vs the model with the last item free, V4 data) and simulation of responses (deterministic inversion for 2PL, Rasch, 3PL, 4PL, GRM, GPCM and nominal items, unidimensional and two-factor; distributional and recovery checks per latent distribution) | `anova(mod1, mod2, ...)`; `probtrace()` with the same $\theta$ and uniform numbers (random streams cannot match `simdata()`) | #109 |
 
@@ -742,6 +744,51 @@ English | [日本語](VALIDATION.ja.md)
   planted drifts among slightly perturbed items, the NaN robust z of Rasch slope ratios, the `items=`
   subset and `stack_screening_tables()`. The thresholds are conventions (DESIGN §22); V50 checks
   that the rules are computed as specified, not that the thresholds are good.
+- **Classification accuracy and consistency (V52, #107)**: DESIGN §18.4 in
+  `tests/test_r_classification.py` (slow tier; generator `validation/r/classification_reference.R`
+  → `tests/reference/v52_classification.json`, mirt 1.48, cacIRT 1.4, 61 points on $[-6, 6]$).
+  Each case's parameters go into a flexpyirt `FitResult` with every parameter fixed; mirt's EAP
+  scores are stored for the P approach. Cases: `threepl` (3PL, $J=20$, $N=3000$, generating
+  parameters fixed in mirt because a 3PL fit of this size did not converge), `grm` (GRM $K=4$,
+  $J=10$, $N=2000$, mirt estimates) and `twogroup` (2PL $J=15$, $N=1500$ per group, all items
+  invariant, focal mean and variance free). Runs: Lee with summed-score cuts 12, (8, 14),
+  (7.5, 13.2) and with $\theta$ cuts (−0.5, 0.8) converted by $\tau$; Rudner with $\theta$ cuts
+  0.3, (−0.5, 0.8) and with summed-score cuts (8, 14) converted by $\tau^{-1}$ (`uniroot` in R);
+  each with the D approach (fitted nodes and weights) and the P approach (mirt's EAP scores). Two
+  references per run:
+  - **cacIRT** (Lathrop, 2015): `class.Lee()` for the 3PL, `Lee.poly.D()` / `Lee.poly.P()` for
+    the GRM, and `Rud.D()` / `Rud.P()` with the SE $1/\sqrt{I(\theta)}$ from mirt's
+    `testinfo()`: "Simultaneous" (overall) and "Marginal" (per cut) accuracy and consistency and
+    the conditional values. `class.Rud()` is not used: cacIRT's `iif()` writes the 3PL
+    information with $(1-c^2)$ where Birnbaum's formula has $(1-c)^2$, so its SE is wrong
+    whenever $c>0$ (it is right for the 2PL). Largest differences: exact functions `1.2e-15`
+    (D) and `2.4e-15` (P); `Lee.poly.D()` `3.9e-12`, because cacIRT clips the category
+    probabilities to $[10^{-4}, 1-10^{-4}]$ before its recursion. cacIRT's `class.Lee()` puts a
+    true score equal to a cut below it in the D approach (`cut(right = TRUE)`) and above it in
+    the P approach; flexpyirt puts it above in both (no case hits a tie).
+  - **Recomputation in R** from mirt's `probtrace()`, `expected.test()` and `testinfo()` with a
+    Lord–Wingersky recursion written in the script: the tables $A$ and $B$, kappa, the per-cut
+    false positive / negative rates and the per-category indices (none of which cacIRT has), and
+    the conditional values. The script asserts that it reproduces cacIRT's exact functions to
+    $10^{-12}$. Largest differences: D `2.0e-14`, P `4.4e-15`; flexpyirt's EAP scores against
+    mirt's `7.8e-15`. Tolerances $10^{-12}$ (D, P, EAP) and $10^{-10}$ against `Lee.poly.D()`.
+  - **Without R** (`tests/test_classification.py`): brute-force enumeration of all 72 response
+    patterns of a mixed 2PL + 3PL + GRM $K=3$ + GPCM $K=3$ test with the item probabilities
+    written out in NumPy (tables, conditional values, kappa; `1e-14`), Rudner against
+    `scipy.stats.norm` with `test_information()`, identities between the indices (tables sum to
+    1, equal observed margins, accuracy + false positive + false negative = 1 per cut), the
+    scale conversions against `expected_score()`, multiple groups and the errors (fast tier).
+    Slow tier: a Monte Carlo simulation of two parallel administrations ($N=200\,000$,
+    $\theta\sim N(0,1)$) agrees with the D approach on a 2401-node grid within 4.5 Monte Carlo
+    SEs for accuracy, consistency and the accuracy table, for Lee and Rudner.
+  - **Discretization**: on the default 61-node grid the D approach's accuracy differs from the
+    continuous-latent value (2401 nodes) by up to `7.6e-3` (Lee, 5-item mixed test) and `2.5e-3`
+    (Rudner); consistency and kappa by `1e-9`. This is the jump of the conditional accuracy
+    where the true category changes (DESIGN §18.4), not an error of the implementation; cacIRT
+    gives the same value on the same grid.
+  - **Not validated**: `sirt::class.accuracy.rasch` (Rasch, cuts on $\theta$) was not used,
+    since cacIRT covers the same indices; latent distributions other than `Normal` (the code
+    path is the same weights; not compared with R).
 - **Bifactor models (V32, M7)**: two simulated cases in `tests/test_mirt_m7_bifactor.py` (plain
   EM and SQUAREM; generator `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`,
   mirt 1.46.1 `bfactor()`, `optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`,
@@ -1085,6 +1132,48 @@ English | [日本語](VALIDATION.ja.md)
   Tests: `tests/test_mirt_v54_compare_fits.py`, `tests/test_v54_simulate.py`. Reference generator:
   `validation/r/v54_compare_simulate_reference.R`.
 
+- **IRT equating and raw-to-scale tables (V51, #106)**: DESIGN §23 in `tests/test_r_equating.py`
+  (generator `validation/r/v51_irt_equating_reference.R` → `tests/reference/v51_irt_equating.json`;
+  mirt 1.48, equateIRT 2.5.2, SNSequate 1.3.5, equate 2.0.9). No parameters are estimated: the
+  item parameters are chosen in R and stored, the latent distributions are $N(0,1)$ on 61
+  equispaced points on $[-6,6]$, and the link is $\theta_Y=A\theta_X+B$ ($A=1.15$, $B=-0.25$
+  dichotomous; $A=0.9$, $B=0.3$ polytomous). The fast tier builds the forms from the stored
+  parameters and checks the kernels and the conversion rules; the slow tier repeats every
+  comparison end to end through `irt_equate()`, `score_distribution()` and `scale_table()` on
+  fits fixed at those values. Largest differences:
+  - **Dichotomous true score** (20 + 20 items; 12 and 9 3PL items, $\sum c=2.317$ and $1.477$):
+    against equateIRT's own Newton solution for the scores inside the range of the curve
+    (`score_compute`, whose $|\Delta\theta|<10^{-6}$ stop leaves about $10^{-12}$): equated
+    scores `2.4e-12`, $\theta$ `1.2e-12` (tolerance $10^{-9}$). Against SNSequate for every
+    score: the Kolen & Brennan interpolation below $\sum c$ and the maximum score `2.4e-15`
+    (tolerance $10^{-11}$); inside, `1.2e-4`, the default `uniroot()` tolerance SNSequate uses
+    (tolerance $10^{-3}$, a cross-check only).
+  - **Dichotomous observed score**: equateIRT's OSE with the same nodes and weights for both
+    populations, $w_1=1$, $0$, $0.5$: `5.7e-14` (tolerance $10^{-11}$).
+  - **Polytomous and mixed true score** (new: 4 GRM $K=4$ + 6 2PL, maximum 18; old: 3 GPCM
+    $K=3$ + 2 GRM $K=4$ + 5 3PL + 3 2PL, maximum 20, $\sum c=0.795$): no R package equates
+    polytomous forms by IRT; the reference solves `expected.test()` of the new form with
+    `uniroot(tol = 1e-13)` and evaluates `expected.test()` of the old form at $A\theta+B$:
+    $\theta$ `5.5e-13`, equated scores `9.3e-13` (tolerance $10^{-9}$).
+  - **Model-implied distributions**: the R Lord–Wingersky recursion on `probtrace()` equals
+    mirt's `fscores(method = "EAPsum", full.scores = FALSE)` `expected` / $N$ to $10^{-12}$ in R;
+    flexpyirt's distributions equal both to `5.6e-15` relative, in every population (tolerance
+    $10^{-11}$ relative).
+  - **Polytomous observed score**: `equate::equate(type = "equipercentile")` on the two
+    synthetic distributions: `4.5e-9`. equate rounds percentile ranks and the cumulative
+    distribution to 10 decimals (`equate:::equip`), about $10^{-10}/g(y)$ in the score
+    (tolerance $10^{-8}$). On the same distributions flexpyequate's equipercentile equating
+    agrees to `2.5e-14`, and the unit tests compare the two on random distributions with zero
+    probabilities to $10^{-12}$.
+  - **Raw-to-scale table** of the old polytomous form (slope 10, intercept 50, bounds 25 and
+    75, rounded to integers): true score ($\theta$ by `uniroot()` on `expected.test()`, SE
+    $1/\sqrt{\texttt{testinfo}}$): $\theta$ `2.3e-12`, SE `1.2e-12` relative; EAPsum (mirt
+    `fscores`): $\theta$ `5.6e-15`, SE `1.6e-15` relative; the rounded scale scores are equal.
+  - **Not covered by R**: the 4PL upper-asymptote interpolation, multiple-group forms and
+    populations, and links are unit-tested (`tests/test_equating.py`) against `expected_score()`,
+    `item_information()`, `summed_score_table()` and the formulas of DESIGN §23. EH, Davidian and
+    mixture populations come from the same fitted grid as `link()` (`_fitted_grid`) and have no
+    equating test of their own.
 - **Person fit and residual item fit (V53, #108)**: DESIGN §25. The cases reuse V37's data and
   mirt estimates (every parameter fixed, 61 points on $[-6, 6]$); per case and estimator (EAP,
   MAP, ML, WLE) the R script computes mirt's `fscores()`, `personfit(m, Theta = )` on the full

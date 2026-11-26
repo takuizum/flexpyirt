@@ -27,7 +27,9 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - Plots: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
+- IRT equating: [`irt_equate`](#irt_equate), [`IRTEquatingResult`](#irtequatingresult), [`score_distribution`](#score_distribution), [`scale_table`](#scale_table)
 - Model comparison and simulation: [`compare_fits`](#compare_fits), [`simulate_responses`](#simulate_responses), [`SimulatedData`](#simulateddata)
+- Classification: [`classification_accuracy`](#classification_accuracy), [`ClassificationResult`](#classificationresult)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal), [user-defined item models](#user-defined-item-models)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior), [`LogitNormalPrior`](#logitnormalprior)
@@ -1764,6 +1766,102 @@ tail probabilities that would underflow to 0 (it is slower); for the other metho
 of the result is taken. Raises `SpecificationError` for a wrong shape, an unknown `method`, or an
 approximation with `K != 2`.
 
+## IRT equating
+
+### `irt_equate`
+
+```text
+irt_equate(new, old, *, method="true_score", new_items=None, old_items=None, link=None,
+           new_group=None, old_group=None, population="new", synthetic_weight=None)
+           -> IRTEquatingResult
+```
+
+Equate every summed score $x=0,\dots,X$ of a new form to the summed-score scale of an old form
+once both are on one $\theta$ scale ([guide section 15](guide.md#equating-and-raw-to-scale-tables)).
+The common scale is the old form's; with `link=` the new form's items are evaluated at
+$(\theta-B)/A$. Unidimensional models, every item model, single and multiple groups.
+
+- `"true_score"` (Lord, 1980; Kolen & Brennan, 2014, §6.5): $e_Y(x)=\tau_Y(\theta_x)$ with
+  $\tau_X(\theta_x)=x$ on the test characteristic curves $\tau(\theta)=\sum_j\sum_kk\,P_{jk}(\theta)$,
+  solved by safeguarded Newton. Scores at or below the sum of the lower asymptotes are equated
+  linearly between $(0,0)$ and $(\tau_X^{\mathrm{lo}},\tau_Y^{\mathrm{lo}})$, and scores at or above
+  the sum of the upper asymptotes linearly between $(\tau_X^{\mathrm{hi}},\tau_Y^{\mathrm{hi}})$ and
+  the two maximum scores; their `theta` is $-\infty$ / $+\infty$.
+- `"observed_score"` (Lord & Wingersky, 1984; Kolen & Brennan, 2014, §6.6): the model-implied
+  summed-score distributions of both forms in the synthetic population
+  $w_1\cdot\text{new}+(1-w_1)\cdot\text{old}$ (Lord–Wingersky recursion over each fitted latent
+  distribution), equated by the equipercentile method of Kolen & Brennan (2014, ch. 2).
+
+Validated against equateIRT and SNSequate (dichotomous 3PL / 2PL) and against references built
+from mirt and the equate package (GRM, GPCM, 3PL, 2PL). Standard errors of equated scores are
+not available.
+
+| Argument | Type | Description |
+|---|---|---|
+| `new` | `FitResult` | Unidimensional fit containing the new form $X$ |
+| `old` | `FitResult` | Unidimensional fit containing the old form $Y$ (may be `new`) |
+| `method` | `"true_score"` / `"observed_score"` | Equating method (default `"true_score"`) |
+| `new_items`, `old_items` | list[str], optional | Items of each form (default: all items of the fit) |
+| `link` | `LinkResult`, optional | `link(new, old)`: maps the scale of `new` onto that of `old` (unidimensional; its groups must be `new_group` / `old_group`) |
+| `new_group`, `old_group` | str, optional | Group of each form's parameters and population; required for a multiple-group fit |
+| `population` | `"new"` / `"old"` / `"synthetic"` | Population of observed-score equating: $w_1=1$, $w_1=0$ or $w_1=$ `synthetic_weight` (default `"new"`; observed-score method only) |
+| `synthetic_weight` | float, optional | Weight $w_1\in[0,1]$ of the new form's population; required with `population="synthetic"` and not allowed otherwise |
+
+**Returns**: [`IRTEquatingResult`](#irtequatingresult)
+
+**Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (multidimensional fit,
+unknown or duplicated items, missing or unknown group, a `link` that is not a unidimensional
+`LinkResult` between these groups or lacks the new form's items, invalid `population` /
+`synthetic_weight`, or, for the true-score method, a test characteristic curve that decreases),
+`ConvergenceWarning` (the true-score solver did not converge).
+
+### `IRTEquatingResult`
+
+| Attribute | Description |
+|---|---|
+| `table` | `DataFrame`: `score` (new form, $0..X$), `equated` (on the old form's summed-score scale) and, for the true-score method, `theta` (on the old form's scale; $\pm\infty$ beyond the asymptotes) |
+| `method` | `"true_score"` / `"observed_score"` |
+| `new_items`, `old_items` | Items of the two forms |
+| `new_range`, `old_range` | Lower and upper asymptotes $(\tau^{\mathrm{lo}},\tau^{\mathrm{hi}})$ of the two test characteristic curves |
+| `population`, `synthetic_weight` | Population and $w_1$ of observed-score equating (`None` for the true-score method) |
+| `new_distribution`, `old_distribution` | `DataFrame`s `score`, `probability`: the model-implied distributions in the synthetic population (observed-score method; `None` otherwise) |
+
+Methods: `summary(*, digits=4)`, `str()`, and an HTML view in Jupyter.
+
+### `score_distribution`
+
+```text
+score_distribution(res, *, items=None, group=None) -> DataFrame
+```
+
+The model-implied summed-score distribution $f(x)=\sum_qL(x\mid\theta_q)w_q$ of a form (the
+Lord–Wingersky likelihood of its items over the group's fitted latent distribution, any latent
+family). For all items of a `Normal` fit it is the `probability` column of
+[`summed_score_table`](#summed_score_table). Columns `score`, `probability`. `group` is required
+for a multiple-group fit.
+
+### `scale_table`
+
+```text
+scale_table(res, *, slope, intercept, method="true_score", items=None, group=None,
+            lowest=None, highest=None, n_digits=0) -> DataFrame
+```
+
+A raw-to-scale table: each summed score $x$ of a form gets $\theta(x)$, its standard error, and
+the scale score $\min\{\max\{\text{slope}\cdot\theta+\text{intercept},\text{lowest}\},\text{highest}\}$.
+
+| `method` | $\theta(x)$ | Standard error |
+|---|---|---|
+| `"true_score"` (default) | solves $\tau(\theta)=x$ on the form's test characteristic curve; $-\infty$ / $+\infty$ at or beyond its lower / upper asymptote | $I(\theta)^{-1/2}$ from the test information of the form's items (NaN where $\theta$ is infinite) |
+| `"EAPsum"` | summed-score EAP under the group's fitted latent distribution | posterior SD |
+
+`slope` must be positive; a missing bound is not applied (so an infinite $\theta$ gives an
+infinite scale score). Columns `score`, `theta`, `theta_se`, `scale_score`, `scale_score_se`
+($\text{slope}\cdot$`theta_se`, not clipped) and `scale_score_rounded` (NumPy `round` to
+`n_digits`, half to even). Raises `SpecificationError` for a multidimensional model, unknown
+items or group, a non-positive `slope`, `lowest >= highest`, a negative `n_digits`, or (true
+score) a decreasing test characteristic curve.
+
 ---
 
 ## Model comparison and simulation
@@ -1962,6 +2060,70 @@ Import with `from flexpyirt.plotting import ...`. Needs matplotlib (`pip install
 | `plot_information` | Test information, or the information of `items`; `standard_error=True` adds the SE on a second y axis (`ax.twinx()`). `group=` is a group name (default: every group) | [`test_information`](#test_information), [`item_information`](#item_information) |
 | `plot_expected_score` | Test characteristic curve, one line per group by default | [`expected_score`](#expected_score) (`total`) |
 | `plot_wright_map` | Horizontal histogram of the person scores (`n_bins` bins) beside the item thresholds, sharing the $\theta$ axis | [`wright_map_table`](#wright_map_table) |
+
+---
+
+## Classification
+
+### `classification_accuracy`
+
+```text
+classification_accuracy(res, *, cut_scores, method="lee", scale=None, data=None, group=None,
+                        item_names=None, score_method="EAP") -> ClassificationResult
+```
+
+Classification accuracy and consistency of cut scores
+([guide section 7](guide.md#classification-accuracy-and-consistency); DESIGN.md §18.4). The cuts
+$c_1<\dots<c_C$ define the categories $h(v)=\#\{k: v\ge c_k\}=0,\dots,C$. At a true value
+$\theta$ each method gives the probabilities $P_h(\theta)$ of the observed categories and a true
+category $t(\theta)$:
+
+- `"lee"` (Lee, 2010): $P_h(\theta)=\sum_{s:\,h(s)=h}L(s\mid\theta)$ with the Lord–Wingersky
+  distribution of the summed score, $t(\theta)=h(\tau(\theta))$ with the expected summed score
+  $\tau$. A non-integer cut $c$ puts the scores $s\ge\lceil c\rceil$ above it.
+- `"rudner"` (Rudner, 2001, 2005): $P_h(\theta)=\Phi((c_{h+1}-\theta)/\mathrm{SE})-\Phi((c_h-\theta)/\mathrm{SE})$,
+  $\mathrm{SE}=I(\theta)^{-1/2}$, $t(\theta)=h(\theta)$.
+
+Over points $\theta_n$ with weights $w_n$ (the fitted quadrature and latent weights without `data`,
+the "D" approach; the respondents' estimates with weights $1/N$ with `data`, the "P" approach;
+Lathrop & Cheng, 2013), $A_{tk}=\sum_nw_n[t(\theta_n)=t]P_k(\theta_n)$ and
+$B_{hk}=\sum_nw_nP_h(\theta_n)P_k(\theta_n)$ give accuracy $\sum_hA_{hh}$, consistency
+$\sum_hB_{hh}$ and Cohen's kappa of consistency. These are cacIRT's `class.Lee()` / `class.Rud()`.
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted unidimensional model |
+| `cut_scores` | float / array | Strictly increasing cuts. On the summed score in $(0, S_{\max}]$, selecting different scores |
+| `method` | `"lee"` / `"rudner"` | Method (default `"lee"`) |
+| `scale` | `"summed_score"` / `"theta"`, optional | Scale of the cuts; default the method's own. Otherwise converted through the test characteristic curve ($\tau(c)$ for Lee, $\tau^{-1}(c)$ for Rudner) |
+| `data` | DataFrame / 2-D array, optional | Responses; averages over the respondents' estimates (P approach) |
+| `group` | array, optional | Group label of each row of `data` (required with `data` for a multiple-group model) |
+| `item_names` | list[str], optional | Column names when `data` is an array |
+| `score_method` | `"EAP"` / `"MAP"` / `"ML"` / `"WLE"` | Estimates of the P approach (default `"EAP"`); Rudner's SE is always $I(\hat\theta)^{-1/2}$ |
+
+**Returns**: [`ClassificationResult`](#classificationresult).
+
+**Raises**: `SpecificationError` for a multidimensional model, an unknown `method` / `scale` /
+`score_method`, invalid cuts, a summed-score cut outside the range of the test characteristic
+curve (Rudner), `group` / `item_names` / `score_method` without `data`, or a non-finite estimate
+in the P approach (ML on an extreme pattern).
+
+### `ClassificationResult`
+
+Frozen dataclass returned by [`classification_accuracy`](#classification_accuracy). In a
+multiple-group result every DataFrame has a leading `group` column (the two tables a
+`(group, category)` row index).
+
+| Attribute | Content |
+|---|---|
+| `method`, `scale`, `cut_scores`, `approach` | The settings (`approach` is `"D"` or `"P"`) |
+| `summary` | One row per group: `accuracy`, `consistency`, `kappa` (and `n` for the P approach) |
+| `by_category` | `category`, `true_proportion`, `proportion` (observed), `accuracy` (observed $=h$ given true $=h$), `consistency` (second $=h$ given first $=h$) |
+| `by_cut` | `cut` (and `summed_score_cut` / `theta_cut` when converted), `accuracy`, `consistency`, `kappa`, `false_positive` (true below, observed at or above), `false_negative` |
+| `conditional` | Per node (D) or respondent (P): `theta`, `weight`, `true_category`, `accuracy`, `consistency`, and `true_score` (Lee) or `se` (Rudner) |
+| `accuracy_table` | $A$: joint probabilities of the true (rows) and observed (columns) categories |
+| `consistency_table` | $B$: joint probabilities of the categories of two independent administrations |
+| `accuracy`, `consistency`, `kappa` | Floats of a single-group result (`SpecificationError` for a multiple-group result) |
 
 ---
 

@@ -44,6 +44,7 @@
 - [x] Davidian 曲線の潜在分布（`DavidianCurve`、単一群 1 次元、解析的標準化、Oakes/Hessian SE。V19 で照合済み）。
 - [x] 混合正規の潜在分布（`NormalMixture`、単一群 1 次元、mirt の混合のパラメタ化を解析的に標準化、Oakes/Hessian SE。V22 で照合済み）。
 - [x] 微分可能なリンキング（`link()`, `LinkResult`: Haebara / Stocking–Lord の非対称・対称版、自動微分による Ogasawara デルタ法 SE。2PL・3PL・GRM・GPCM と 2PL + GPCM 混在の共通項目について V20 で照合済み）。
+- [x] IRT 真値等化・観測得点等化と素点-尺度得点変換表（#106。`irt_equate()`, `score_distribution()`, `scale_table()`。1 次元、全項目モデル、単一群・多母集団。V51 で equateIRT・SNSequate と、mirt と equate パッケージから組み立てた参照に照合済み）。等化得点の標準誤差は後続。
 - [x] 項目適合度: S-X2（`FitResult.item_fit()`、1 次元、多母集団は群ごと。V15 で照合済み）。
 - [x] DIF: 多群の尤度比検定（`FitResult.dif()`、`add` / `drop` の 2 方式、Holm / BH 補正。V17 で照合済み）。
 - [x] M2 限定情報の適合度（`FitResult.m2()`、単一群 1 次元の $M_2$ / $M_2^*$、RMSEA と信頼区間、SRMSR、2 値の TLI / CFI。V18 で照合済み）。
@@ -126,6 +127,9 @@
 - [ ] モデル比較表と回答データのシミュレーション（#109）: `compare_fits()`（AIC・SABIC・HQ・BIC・尤度比検定。
   mirt の `anova()`）と `simulate_responses()` / `SimulatedData`（`FitResult` または項目バンクを与えた `Model`
   から。全項目モデル・全潜在分布・全モデル構造。JAX のキー）。V54 で照合。照合テストが夜間 CI で通ったらチェックする。
+- [x] カット得点による分類の正確さと一貫性（#107。`classification_accuracy()`、`ClassificationResult`: 合計得点上の
+  カットの Lee, 2010 と $\theta$ 上のカットの Rudner, 2001, 2005、D 法と P 法、κ、カットごとの偽陽性・偽陰性率。
+  1 次元モデル、単一群と多母集団。V52 で cacIRT と mirt からの再計算と照合）。
 
 ## 継続的な作業
 - [ ] GitHub 上の最新の R mirt で照合し、参照値を定期的に確認する（#74）。
