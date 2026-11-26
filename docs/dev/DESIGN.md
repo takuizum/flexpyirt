@@ -2850,7 +2850,7 @@ data-independent shapes (§15.21).
    labels themselves are not stored (like the weights and the data). The consumers of `vcov`
    (the `se` column, the delta-method display SEs, `link()`) use the chosen covariance without
    change (item 5); `jsi(method="one_step")` still requires `oakes` or `hessian`.
-   **Validation (V57)**: `validation/r/v57_weighted_cluster_se_reference.R` (mirt 1.48,
+   **Validation (V57)**: `validation/r/v57_weighted_cluster_se_reference.R` (GitHub mirt 1.48.5,
    `survey.weights`, TOL $=10^{-10}$): a 2PL with simulated schools (a school effect in $\theta$)
    and unequal weights, and a two-group 2PL with anchors and clusters that span the groups; the
    reference sandwiches are computed in R from mirt's Oakes covariance and per-person scores

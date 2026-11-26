@@ -3,7 +3,7 @@
 # Writes tests/reference/v57_<case>.json. CI does not run R; the JSON files are committed.
 #
 # mirt has no design-based weighted sandwich and no cluster-robust sandwich: with survey.weights,
-# mirt 1.48 builds the middle matrix of SE.type = "crossprod" / "sandwich" from Data$Freq, the sums
+# mirt (1.48 and GitHub HEAD) builds the middle matrix of SE.type = "crossprod" / "sandwich" from Data$Freq, the sums
 # of the weights (dpars.cpp computeInfo: add2outer(Igrad, grad, rs(g, pat))), i.e.
 # sum_i w_i s_i s_i^T. The design-based middle matrix is sum_i w_i^2 s_i s_i^T (Binder, 1983). So
 # every case stores
@@ -20,6 +20,7 @@
 #       unweighted cluster (w_i = 1), and singleton clusters (= N / (N - 1) times weighted).
 # Covariance rows are labelled by the first parnum of each (possibly constrained) parameter as
 # in vcov(), so the tests can map them to flexpyirt's free_id.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -138,7 +139,7 @@ write_case <- function(case, description, dat, grp, weights, cluster, fit_fun, e
   N <- nrow(dat)
   res <- c(list(
     meta = list(case = case, description = description, r_version = R.version.string,
-                mirt_version = as.character(packageVersion("mirt")),
+                mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
                 numDeriv_version = as.character(packageVersion("numDeriv")), TOL = TOL,
                 quadpts = quad$quadpts, theta_lim = quad$theta_lim,
                 grid_check = range(m@Model$Theta), accelerate = "none", optimizer = "NR",

@@ -1395,7 +1395,7 @@ English | [日本語](VALIDATION.ja.md)
 
 - **Weighted and cluster-robust sandwich (V57, #84, #85; DESIGN §17.6)**:
   `tests/test_mirt_v57_weighted_cluster_se.py` (reference
-  `validation/r/v57_weighted_cluster_se_reference.R`; mirt 1.48, `optimizer = "NR"`,
+  `validation/r/v57_weighted_cluster_se_reference.R`; GitHub mirt 1.48.5, `optimizer = "NR"`,
   `TOL = 1e-10`, 61 points on $[-6, 6]$). mirt has no design-based weighted sandwich (its
   `SE.type = "sandwich"` with `survey.weights` has the middle matrix $\sum_iw_is_is_i^\top$; the R
   script confirms this reading to $1.3\times10^{-10}$) and no cluster-robust one, so the

@@ -1267,7 +1267,7 @@
 
 - **重み付き・クラスタロバストなサンドイッチ（V57、#84、#85。DESIGN §17.6）**:
   `tests/test_mirt_v57_weighted_cluster_se.py`（参照値 `validation/r/v57_weighted_cluster_se_reference.R`。
-  mirt 1.48、`optimizer = "NR"`、`TOL = 1e-10`、$[-6, 6]$ 上の 61 点）。mirt には標本設計に基づく重み付き
+  GitHub の mirt 1.48.5、`optimizer = "NR"`、`TOL = 1e-10`、$[-6, 6]$ 上の 61 点）。mirt には標本設計に基づく重み付き
   サンドイッチがなく（`survey.weights` つきの `SE.type = "sandwich"` は中央の行列が $\sum_iw_is_is_i^\top$。
   R スクリプトはこの読みを $1.3\times10^{-10}$ で確認する）、クラスタロバスト版もないので、参照値は R で計算する。
   ブレッドは mirt の重み付き Oakes 共分散、個人ごとのスコアは mirt のグリッドと正規化した正規事前分布の上での

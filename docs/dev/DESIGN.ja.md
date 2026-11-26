@@ -2117,7 +2117,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    ファイルでは拒否し、それらのファイルは引き続き読める。ラベルそのものは保存しない（ウェイトやデータと
    同じ）。`vcov` を使う箇所（`se` 列、デルタ法の表示用 SE、`link()`）は変更なしで選んだ共分散を使う
    （項目 5）。`jsi(method="one_step")` は引き続き `oakes` か `hessian` を要求する。
-   **照合（V57）**: `validation/r/v57_weighted_cluster_se_reference.R`（mirt 1.48、`survey.weights`、
+   **照合（V57）**: `validation/r/v57_weighted_cluster_se_reference.R`（GitHub の mirt 1.48.5、`survey.weights`、
    TOL $=10^{-10}$）。学校を模した 2PL（$\theta$ に学校効果）で不均等なウェイト、および群をまたぐクラスタを
    持つアンカーつき 2 群 2PL。参照値のサンドイッチは、mirt の Oakes 共分散と個人ごとのスコア（mirt の
    グリッド上の個人ごとの周辺対数尤度の `numDeriv::jacobian`。`estfun.AllModelClass` と照合）から R で
