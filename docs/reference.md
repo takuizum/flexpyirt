@@ -26,7 +26,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - Plots: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
 - Model: [`Model`](#model)
-- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
+- Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal), [user-defined item models](#user-defined-item-models)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
 - Latent distribution: [`Normal`](#normal)
 - Settings: [`BAEM`](#baem), [`Quadrature`](#quadrature)
@@ -287,8 +287,12 @@ they warn (`FlexpyirtWarning`), because removing one item changes the estimates 
 
 **Returns**: [`JSIResult`](#jsiresult)
 
-**Raises**: `PrecisionError`; `SpecificationError` for unsupported models, fewer than three
-items, invalid options, or `"one_step"` on a fit without `se="oakes"` or `se="hessian"`.
+JSI is defined only for single-group unidimensional models; its multidimensional /
+multiple-group extension has not been studied and there is no reference implementation, so it is
+not available for other models.
+
+**Raises**: `PrecisionError`; `SpecificationError` for multiple-group, multidimensional
+(including bifactor and two-tier) or non-`Normal` latent models, fewer than three items, invalid options, or `"one_step"` on a fit without `se="oakes"` or `se="hessian"`.
 
 **Warns**: `ConvergenceWarning` if a refit does not converge.
 
@@ -345,7 +349,8 @@ fields so every attribute round-trips bit-for-bit.
 **Returns**: `str` (the JSON text).
 
 **Raises**: `SpecificationError` if `indent` is invalid or the result contains an unregistered
-model/prior type.
+model/prior type (register a user-defined item model with
+[`register_item_model`](#flexpyirtitemsregister_item_model) first).
 
 #### `FitResult.from_json`
 
@@ -367,7 +372,8 @@ reproduces every attribute, `items`, `latent`, `summary()`, `_repr_html_()`, `ai
 
 **Raises**: `PrecisionError` if JAX 64-bit floating point is disabled; `SpecificationError` if the
 JSON is malformed or non-strict (e.g. bare `NaN`/`Infinity` literals), the format tag, schema
-version, or a registered type name is unknown, or internal consistency checks fail;
+version, or a registered type name is unknown (including a user-defined item model that has not
+been registered in this session), or internal consistency checks fail;
 `FileNotFoundError` if `source` points to a nonexistent file.
 
 ---
@@ -660,6 +666,72 @@ with $\mathrm{ak}_0=0$, $\mathrm{ak}_{K-1}=K-1$, and $d_0=0$ fixed. Internal par
 constraint; no display `b` / `bk` columns). Same as mirt's `itemtype = "nominal"`. Fixing
 $\mathrm{ak}_k=k$ reproduces `GPCM(n_categories)` identically (and with `n_categories = 2` there are no free `ak`
 parameters, so `Nominal(2)` equals `GPCM(2)` / `TwoPL`). Uses `NominalKernel(n_categories)`.
+
+### User-defined item models
+
+An item model that is not built in can be written against two protocols in `flexpyirt.items`
+and used in a `Model` like the classes above (see the [user guide](guide.md#20-user-defined-item-models)
+for a worked example). Items whose kernels compare equal are estimated together.
+
+**`flexpyirt.items.ItemKernel`** (the response function; must be hashable and compare by value:
+use a frozen dataclass)
+
+| Member | Required | Description |
+|---|---|---|
+| `n_factors` | yes | Number of latent factors $D$ |
+| `with_factors(n_factors)` | yes | A copy of the kernel for `n_factors` factors |
+| `param_names` | yes | Parameter names in order; the first $D$ are the slopes |
+| `n_categories` | yes | Number of categories $K \ge 2$ (responses coded `0..K-1`) |
+| `slope_params` | yes | The slopes, `param_names[:n_factors]` |
+| `intercept_params` | yes | Parameters that carry the location (used by the identification checks; may be empty) |
+| `log_prob(theta, params)` | yes | `(Q, K)` log-probabilities at nodes `theta` of shape `(Q, D)` for the parameter vector `params`; written with `jax.numpy`, differentiable twice; NaN outside the parameter domain |
+| `irt_names`, `irt_dependency_indices`, `irt_thresholds(params)` | no | Display thresholds added to `FitResult.items` with delta-method SEs: their names, the indices of the parameters each depends on, and their values |
+
+**`flexpyirt.items.ItemModel`** (the specification; use a frozen dataclass)
+
+| Member | Description |
+|---|---|
+| `name` | Class attribute: the name in the `model` column and in JSON (not a built-in name) |
+| `kernel` | The kernel with `n_factors == 1` |
+| `default_free()` | Whether each parameter is estimated by default |
+| `start_values(item, rest)` | Starting values from one item's observed responses and their rest scores |
+| `bounds()` | `(lower, upper)` tuples of parameter bounds |
+
+`default_free()`, `start_values()` and `bounds()` follow the unidimensional `param_names`; in a
+model with $D$ factors their slope entry applies to every slope. `Model` checks these rules when
+it is built (`SpecificationError`). Everything that evaluates `log_prob` works with a user-defined
+model: estimation, standard errors, scoring, item fit, M2, local dependence, DIF, information,
+summed scores, multiple groups, priors and multidimensional models. ML and WLE scoring assume
+that a higher category means a higher $\theta$ for a positive slope. Not available:
+`link()` and `Model.fix_from(..., parameterization="irt")` (`SpecificationError`), and the free
+latent variance that a model of only `Rasch` / `PCM` items gets by default (use
+`Model.with_latent(Normal(free_var=True))`).
+
+#### `flexpyirt.items.register_item_model`
+
+```text
+register_item_model(cls, *, to_dict=None, from_dict=None) -> cls
+```
+
+Register a user-defined item-model class so that `FitResult.to_json()` can save fits that use it
+and `FitResult.from_json()` can load them. The model is stored as
+`{"type": cls.name, **to_dict(model)}` and rebuilt with `from_dict(fields)`. By default the class
+must be a dataclass whose fields are `bool`, `int`, finite `float` or `str`. Registration lasts
+for the Python session: register the class again before loading in a new one. Can be used as a
+class decorator.
+
+| Argument | Type | Description |
+|---|---|---|
+| `cls` | type | The item-model class; `cls.name` is the JSON type name |
+| `to_dict` | callable, optional | `model -> dict` of JSON values (without `"type"`) |
+| `from_dict` | callable, optional | `dict -> model`, the inverse of `to_dict` (pass both or neither) |
+
+**Returns**: `cls`.
+
+**Raises**: `SpecificationError` if `cls.name` is missing or built in, another class is registered
+under the same name, only one of `to_dict` / `from_dict` is given, or the default encoding is used
+for a class that is not a dataclass. Without registration, `to_json()` raises
+`SpecificationError`.
 
 ---
 

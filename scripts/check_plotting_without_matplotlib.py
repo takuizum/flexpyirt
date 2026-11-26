@@ -1,4 +1,4 @@
-"""Check flexpyirt without matplotlib (CI, isolated environment with no extras; DESIGN.md §20).
+"""Check flexpyirt without matplotlib (CI, isolated environment with no extras; DESIGN.md §21).
 
 ``import flexpyirt`` and ``import flexpyirt.plotting`` must work, the DataFrame functions behind
 the plots must work, and every plot function must raise ``MissingDependencyError`` naming the

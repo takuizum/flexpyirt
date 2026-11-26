@@ -23,7 +23,7 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 - 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - 図: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
 - モデル: [`Model`](#model)
-- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)
+- 項目モデル: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal)、[ユーザー定義の項目モデル](#ユーザー定義の項目モデル)
 - 事前分布: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior)
 - 潜在分布: [`Normal`](#normal)
 - 設定: [`BAEM`](#baem), [`Quadrature`](#quadrature)
@@ -255,7 +255,10 @@ $$\mathrm{JSI}_{ji} = \frac{\hat a_i - \hat a_i^{(-j)}}{\mathrm{SE}(\hat a_i^{(-
 
 **戻り値**: [`JSIResult`](#jsiresult)
 
-**例外**: `PrecisionError`。対応しないモデル、項目が 3 つ未満、不正な指定、標準誤差のない推定結果での `"one_step"` は
+JSI は単一群・1 次元のモデルについてのみ定義されている。多次元・多母集団への拡張は研究されておらず、参照となる実装も
+ないので、ほかのモデルには使えない。
+
+**例外**: `PrecisionError`。多母集団・多次元（双因子・two-tier を含む）・`Normal` 以外の潜在分布のモデル、項目が 3 つ未満、不正な指定、標準誤差のない推定結果での `"one_step"` は
 `SpecificationError`。
 
 **警告**: 推定し直しが収束しなければ `ConvergenceWarning`。
@@ -306,7 +309,7 @@ float64 値は `repr` 厳密な JSON 数値として、非有限値（`NaN`, `+i
 
 **戻り値**: `str`（直列化された JSON 文字列）。
 
-**例外**: `indent` が不正、または未登録のモデル・事前分布型が含まれる場合に `SpecificationError`。
+**例外**: `indent` が不正、または未登録のモデル・事前分布型が含まれる場合に `SpecificationError`（ユーザー定義の項目モデルは先に [`register_item_model`](#flexpyirtitemsregister_item_model) で登録する）。
 
 #### `FitResult.from_json`
 
@@ -326,7 +329,8 @@ FitResult.from_json(source) -> FitResult
 **戻り値**: `FitResult`
 
 **例外**: JAX の 64 ビット浮動小数点が無効なら `PrecisionError`。不正・非厳格な JSON（生の `NaN`/`Infinity`
-リテラルなど）、未知の `format` タグ・スキーマ版・登録名、または内部整合性違反なら `SpecificationError`。存在しない
+リテラルなど）、未知の `format` タグ・スキーマ版・登録名（このセッションで登録していないユーザー定義の項目モデルを含む）、
+または内部整合性違反なら `SpecificationError`。存在しない
 ファイルパスなら `FileNotFoundError`。
 
 ---
@@ -593,6 +597,65 @@ $P(y=k\mid\theta)=\exp(a\,\mathrm{ak}_k\,\theta+d_k)/\sum_{c=0}^{K-1}\exp(a\,\ma
 mirt の `itemtype = "nominal"` と同じ。$\mathrm{ak}_k=k$ に固定すると `GPCM(n_categories)` と厳密に一致する
 （`n_categories = 2` では自由な `ak` パラメタがなく、`Nominal(2)` は `GPCM(2)` / `TwoPL` と一致する）。
 `NominalKernel(n_categories)` を用いる。
+
+### ユーザー定義の項目モデル
+
+組み込みにない項目モデルは、`flexpyirt.items` の 2 つのプロトコルに沿って書けば、上のクラスと同じように `Model`
+で使える（実例は[ユーザーガイド](guide.ja.md#20-ユーザー定義の項目モデル)）。カーネルが等しい項目はまとめて推定する。
+
+**`flexpyirt.items.ItemKernel`**（反応関数。ハッシュ可能で値で比較できること。frozen dataclass にする）
+
+| メンバ | 必須 | 説明 |
+|---|---|---|
+| `n_factors` | はい | 潜在因子の数 $D$ |
+| `with_factors(n_factors)` | はい | `n_factors` 因子用のカーネルのコピー |
+| `param_names` | はい | パラメタ名（順序つき）。先頭の $D$ 個が傾き |
+| `n_categories` | はい | カテゴリ数 $K \ge 2$（反応は `0..K-1` で符号化） |
+| `slope_params` | はい | 傾き。`param_names[:n_factors]` |
+| `intercept_params` | はい | 位置を担うパラメタ（識別チェックが使う。空でもよい） |
+| `log_prob(theta, params)` | はい | 形 `(Q, D)` の節点 `theta` とパラメタベクトル `params` での `(Q, K)` の対数確率。`jax.numpy` で書き、2 回微分できること。パラメタの定義域外では NaN |
+| `irt_names`、`irt_dependency_indices`、`irt_thresholds(params)` | いいえ | `FitResult.items` にデルタ法 SE 付きで加える表示用閾値。その名前、それぞれが依存するパラメタの添字、値 |
+
+**`flexpyirt.items.ItemModel`**（仕様。frozen dataclass にする）
+
+| メンバ | 説明 |
+|---|---|
+| `name` | クラス属性。`model` 列と JSON での名前（組み込みの名前は使えない） |
+| `kernel` | `n_factors == 1` のカーネル |
+| `default_free()` | 各パラメタを既定で推定するか |
+| `start_values(item, rest)` | 1 項目の観測された反応とその残余得点からの初期値 |
+| `bounds()` | パラメタの上下限の `(lower, upper)` タプル |
+
+`default_free()`・`start_values()`・`bounds()` は 1 次元の `param_names` に従い、$D$ 因子のモデルでは傾きの要素を
+すべての傾きに使う。`Model` は作るときにこれらの規則をチェックする（`SpecificationError`）。`log_prob` を評価する
+機能はすべてユーザー定義モデルで使える: 推定、標準誤差、スコアリング、項目適合度、M2、局所依存、DIF、情報量、
+合計得点、多母集団、事前分布、多次元モデル。ML と WLE のスコアリングは、傾きが正のとき高いカテゴリほど $\theta$
+が高いことを仮定する。使えないもの: `link()` と `Model.fix_from(..., parameterization="irt")`
+（`SpecificationError`）、および `Rasch` / `PCM` だけのモデルが既定で得る潜在分散の推定
+（`Model.with_latent(Normal(free_var=True))` を使う）。
+
+#### `flexpyirt.items.register_item_model`
+
+```text
+register_item_model(cls, *, to_dict=None, from_dict=None) -> cls
+```
+
+ユーザー定義の項目モデルのクラスを登録し、それを使った推定結果を `FitResult.to_json()` で保存し
+`FitResult.from_json()` で読めるようにする。モデルは `{"type": cls.name, **to_dict(model)}` として保存し、
+`from_dict(fields)` で復元する。既定では、フィールドが `bool`・`int`・有限の `float`・`str` の dataclass であること。
+登録は Python セッションの間だけ有効なので、新しいセッションでは読む前に登録し直す。クラスデコレータとしても使える。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `cls` | type | 項目モデルのクラス。`cls.name` が JSON での型名 |
+| `to_dict` | callable、任意 | `model -> dict`（JSON の値、`"type"` を除く） |
+| `from_dict` | callable、任意 | `dict -> model`。`to_dict` の逆（両方を渡すか、どちらも渡さない） |
+
+**戻り値**: `cls`。
+
+**例外**: `cls.name` がないか組み込みの名前のとき、同じ名前で別のクラスが登録済みのとき、`to_dict` / `from_dict`
+の片方だけを渡したとき、dataclass でないクラスに既定の符号化を使ったときに `SpecificationError`。登録しないと
+`to_json()` が `SpecificationError` を出す。
 
 ---
 

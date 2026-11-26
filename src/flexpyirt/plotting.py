@@ -1,4 +1,4 @@
-r"""Figures of a fitted unidimensional model, drawn with matplotlib (DESIGN.md §20).
+r"""Figures of a fitted unidimensional model, drawn with matplotlib (DESIGN.md §21).
 
 matplotlib is an optional dependency (``pip install "flexpyirt[plot]"``). It is imported when a
 plot function is called, never by ``import flexpyirt`` or ``import flexpyirt.plotting``; without

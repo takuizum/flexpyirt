@@ -1,4 +1,4 @@
-"""Unit tests of the plot data functions and smoke tests of flexpyirt.plotting (DESIGN.md §20).
+"""Unit tests of the plot data functions and smoke tests of flexpyirt.plotting (DESIGN.md §21).
 
 The numbers are checked against closed forms and brute-force recomputations here and against
 mirt / TAM in ``tests/test_mirt_v48_plots.py`` (V48). The figures are only smoke-tested on the

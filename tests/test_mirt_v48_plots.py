@@ -1,6 +1,6 @@
 """V48: the numbers behind the plots vs R mirt and TAM.
 
-Reference values come from ``validation/r/v48_plots_reference.R`` (DESIGN.md §20,
+Reference values come from ``validation/r/v48_plots_reference.R`` (DESIGN.md §21,
 VALIDATION.md V48): mirt's ``itemfit(fit_stats = "X2", return.tables = TRUE)`` tables per
 :math:`\\theta` bin (cell collapsing off), ``probtrace()``, Thurstonian thresholds found with
 ``uniroot()`` on ``probtrace()``, ``coef(IRTpars = TRUE)`` and TAM's ``tam.threshold()``. The

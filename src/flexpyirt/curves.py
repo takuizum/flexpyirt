@@ -1,6 +1,6 @@
 r"""The numbers behind the plots: trace lines, empirical item curves and Wright-map tables.
 
-Result / Python shell layer (DESIGN.md §20) for unidimensional models. Every function takes a
+Result / Python shell layer (DESIGN.md §21) for unidimensional models. Every function takes a
 :class:`~flexpyirt.FitResult` first and returns DataFrames; :mod:`flexpyirt.plotting` draws
 them, so what a figure shows is exactly what these functions return.
 """

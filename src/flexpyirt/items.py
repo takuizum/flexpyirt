@@ -6,12 +6,19 @@ starting values. Its *kernel* holds only the pure log-probability function used 
 models that share a kernel (``Rasch`` and ``TwoPL``; ``ThreePL`` and ``FourPL``; ``GRM`` with the
 same number of categories; ``GPCM`` and ``PCM`` with the same number of categories; ``Nominal``
 with the same number of categories) are estimated together as one "family" (DESIGN.md §4.3, §6).
+
+:class:`ItemModel` and :class:`ItemKernel` are also the public extension point for user-defined
+item models (DESIGN.md §20): a class that implements them can be used in a :class:`~flexpyirt.Model`
+like a built-in one, and :func:`register_item_model` lets it round-trip through JSON.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import math
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import ClassVar, Protocol
+from typing import Any, ClassVar, Protocol
 
 import jax
 import jax.numpy as jnp
@@ -37,6 +44,7 @@ __all__ = [
     "Rasch",
     "ThreePL",
     "TwoPL",
+    "register_item_model",
 ]
 
 
@@ -64,7 +72,17 @@ def _linear_predictor(theta: Array, slopes: Array, n_factors: int) -> Array:
 class ItemKernel(Protocol):
     """Pure log-probability function of an item family (Core layer).
 
-    Implementations must be hashable (they are static arguments of jit).
+    This is the public contract for the kernel of a user-defined item model (DESIGN.md §20).
+    Implementations must be hashable and compare equal exactly when they describe the same
+    function (a frozen dataclass does both): kernels are static arguments of jit, and items whose
+    kernels are equal are estimated together as one family.
+
+    Required members are listed here. Three members are optional: ``irt_names``,
+    ``irt_dependency_indices`` and ``irt_thresholds(params)`` add display thresholds (with
+    delta-method SEs) to :attr:`FitResult.items`; a kernel without them has no display columns.
+
+    Parameter layout: ``param_names[:n_factors]`` are the slopes and equal ``slope_params``; the
+    remaining parameters follow in a fixed order that does not depend on ``n_factors``.
     """
 
     @property
@@ -78,7 +96,7 @@ class ItemKernel(Protocol):
 
     @property
     def param_names(self) -> tuple[str, ...]:
-        """Internal parameter names, in order."""
+        """Internal parameter names, in order: ``n_factors`` slopes first."""
         ...
 
     @property
@@ -88,26 +106,12 @@ class ItemKernel(Protocol):
 
     @property
     def slope_params(self) -> tuple[str, ...]:
-        """Parameters that carry the latent scale (used by identification checks)."""
+        """Parameters that carry the latent scale: ``param_names[:n_factors]``."""
         ...
 
     @property
     def intercept_params(self) -> tuple[str, ...]:
-        """Parameters that carry the latent location (used by identification checks)."""
-        ...
-
-    @property
-    def irt_names(self) -> tuple[str, ...]:
-        """Display IRT threshold/difficulty names, in order (e.g. ``("b",)``; empty for D > 1)."""
-        ...
-
-    @property
-    def irt_dependency_indices(self) -> tuple[tuple[int, ...], ...]:
-        """Indices into ``param_names`` that enter each display threshold in ``irt_names``."""
-        ...
-
-    def irt_thresholds(self, params: Array) -> Array:
-        """Return display IRT thresholds/difficulties of shape ``(len(irt_names),)``."""
+        """Parameters that carry the latent location (identification checks; may be empty)."""
         ...
 
     def log_prob(self, theta: Array, params: Array) -> Array:
@@ -117,6 +121,24 @@ class ItemKernel(Protocol):
     def __hash__(self) -> int:
         """Kernels must be hashable (static arguments of jit)."""
         ...
+
+
+def irt_names(kernel: ItemKernel) -> tuple[str, ...]:
+    """Return ``kernel.irt_names``, or ``()`` for a kernel without display thresholds."""
+    return tuple(getattr(kernel, "irt_names", ()))
+
+
+def irt_dependency_indices(kernel: ItemKernel) -> tuple[tuple[int, ...], ...]:
+    """Return ``kernel.irt_dependency_indices``, or ``()`` without display thresholds."""
+    return tuple(getattr(kernel, "irt_dependency_indices", ()))
+
+
+def irt_thresholds(kernel: ItemKernel, params: Array) -> Array:
+    """Return ``kernel.irt_thresholds(params)``, or an empty array without display thresholds."""
+    if not irt_names(kernel):
+        return jnp.empty((0,), dtype=params.dtype)
+    result: Array = kernel.irt_thresholds(params)  # type: ignore[attr-defined]
+    return result
 
 
 @dataclass(frozen=True)
@@ -530,13 +552,21 @@ class NominalKernel:
 
 
 class ItemModel(Protocol):
-    """An item model as used in a specification (Spec layer)."""
+    """An item model as used in a specification (Spec layer).
+
+    This is the public contract for a user-defined item model (DESIGN.md §20); every member is
+    required. ``default_free``, ``start_values`` and ``bounds`` describe the unidimensional
+    parameter layout ``kernel.param_names`` (the slope first); in a model with ``D`` factors the
+    slope entry applies to each of the ``D`` slopes. Implementations should be frozen dataclasses
+    (hashable, compared by value).
+    """
 
     name: ClassVar[str]
+    """Model name shown in tables and stored in JSON (must not clash with a built-in name)."""
 
     @property
     def kernel(self) -> ItemKernel:
-        """Log-probability kernel; items with equal kernels are estimated as one family."""
+        """Log-probability kernel with ``n_factors == 1``; equal kernels form one family."""
         ...
 
     def default_free(self) -> tuple[bool, ...]:
@@ -908,3 +938,196 @@ class Nominal:
     def bounds(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
         """Unbounded."""
         return _unbounded(2 * self.n_categories - 2)
+
+
+# --------------------------------------------------------------------------------------------
+# User-defined item models (DESIGN.md §20)
+# --------------------------------------------------------------------------------------------
+
+BUILTIN_ITEM_MODELS: tuple[type[Any], ...] = (
+    TwoPL,
+    Rasch,
+    ThreePL,
+    FourPL,
+    GRM,
+    GPCM,
+    PCM,
+    Nominal,
+)
+"""Item-model classes defined by flexpyirt."""
+
+BUILTIN_KERNELS: tuple[type[Any], ...] = (
+    DichotomousKernel,
+    FourPLKernel,
+    GradedKernel,
+    GPCMKernel,
+    NominalKernel,
+)
+"""Kernel classes defined by flexpyirt."""
+
+BUILTIN_ITEM_MODEL_NAMES: frozenset[str] = frozenset(m.name for m in BUILTIN_ITEM_MODELS)
+
+
+def is_builtin_item_model(item_model: ItemModel) -> bool:
+    """Return whether ``item_model`` is one of flexpyirt's own item models."""
+    return type(item_model) in BUILTIN_ITEM_MODELS
+
+
+def check_item_model(item: str, item_model: ItemModel) -> None:
+    """Check that a user-defined ``item_model`` keeps the contract of DESIGN.md §20.
+
+    Built-in item models are not checked. Raises :class:`SpecificationError` naming ``item``.
+    """
+    if is_builtin_item_model(item_model):
+        return
+    where = f"item {item!r} ({type(item_model).__name__})"
+    name = getattr(type(item_model), "name", None)
+    if not isinstance(name, str) or not name:
+        raise SpecificationError(f"Item model of {where} needs a non-empty class attribute 'name'.")
+    if name in BUILTIN_ITEM_MODEL_NAMES:
+        raise SpecificationError(f"Item model of {where} reuses the built-in name {name!r}.")
+    try:
+        kernel = item_model.kernel
+        hash(kernel)
+    except TypeError as e:
+        raise SpecificationError(f"The kernel of {where} must be hashable: {e}") from e
+    if kernel.n_factors != 1:
+        raise SpecificationError(
+            f"The kernel of {where} must be unidimensional (n_factors == 1); multidimensional "
+            "models call kernel.with_factors()."
+        )
+    params = tuple(kernel.param_names)
+    if len(set(params)) != len(params):
+        raise SpecificationError(f"The kernel of {where} has duplicated param_names {params}.")
+    if tuple(kernel.slope_params) != params[:1]:
+        raise SpecificationError(
+            f"The kernel of {where} must list exactly one slope, first: slope_params "
+            f"{tuple(kernel.slope_params)} != param_names[:1] {params[:1]}."
+        )
+    unknown = [p for p in kernel.intercept_params if p not in params[1:]]
+    if unknown:
+        raise SpecificationError(
+            f"intercept_params {unknown} of {where} are not non-slope param_names."
+        )
+    if int(kernel.n_categories) < 2:
+        raise SpecificationError(f"The kernel of {where} needs n_categories >= 2.")
+    free = tuple(item_model.default_free())
+    lower, upper = item_model.bounds()
+    for label, seq in (("default_free()", free), ("bounds()[0]", lower), ("bounds()[1]", upper)):
+        if len(seq) != len(params):
+            raise SpecificationError(
+                f"{label} of {where} has {len(seq)} entries; param_names has {len(params)}."
+            )
+    if not all(lo < hi for lo, hi in zip(lower, upper, strict=True)):
+        raise SpecificationError(f"bounds() of {where} need lower < upper for every parameter.")
+
+
+ItemModelToDict = Callable[[Any], Mapping[str, Any]]
+ItemModelFromDict = Callable[[Mapping[str, Any]], Any]
+
+_JSON_FIELD_TYPES = (bool, int, float, str)
+
+
+@dataclass(frozen=True)
+class _Registration:
+    cls: type[Any]
+    to_dict: ItemModelToDict
+    from_dict: ItemModelFromDict
+
+
+_REGISTRY: dict[str, _Registration] = {}
+
+
+def registered_item_model(name: str) -> _Registration | None:
+    """Return the JSON registration of a user-defined item model ``name`` (or ``None``)."""
+    return _REGISTRY.get(name)
+
+
+def registration_for(item_model: ItemModel) -> _Registration | None:
+    """Return the JSON registration of ``item_model``'s class (or ``None``)."""
+    reg = _REGISTRY.get(getattr(type(item_model), "name", ""))
+    return reg if reg is not None and reg.cls is type(item_model) else None
+
+
+def _dataclass_to_dict(item_model: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for f in dataclasses.fields(item_model):
+        if not f.init:
+            continue
+        value = getattr(item_model, f.name)
+        if not isinstance(value, _JSON_FIELD_TYPES) or (
+            isinstance(value, float) and not math.isfinite(value)
+        ):
+            raise SpecificationError(
+                f"Field {f.name!r} of {type(item_model).__name__} is {value!r}; the default JSON "
+                "encoding takes bool, int, finite float and str fields only. Pass to_dict= and "
+                "from_dict= to register_item_model()."
+            )
+        out[f.name] = value
+    return out
+
+
+def register_item_model(
+    cls: type[Any],
+    *,
+    to_dict: ItemModelToDict | None = None,
+    from_dict: ItemModelFromDict | None = None,
+) -> type[Any]:
+    """Register a user-defined item model so that fits using it can be saved as JSON.
+
+    :meth:`FitResult.to_json` stores an item model as ``{"type": cls.name, **to_dict(model)}`` and
+    :meth:`FitResult.from_json` rebuilds it with ``from_dict(fields)`` (the stored object without
+    ``"type"``). The defaults handle a dataclass whose ``__init__`` fields are ``bool``, ``int``,
+    finite ``float`` or ``str``: ``to_dict`` returns those fields and ``from_dict`` is
+    ``cls(**fields)``. Registration lasts for the Python session; register the class again (for
+    example in the module that defines it) before loading a saved fit in a new session.
+    Registering another class with the same ``__qualname__`` under the same name replaces the
+    earlier one (a re-run notebook cell). Usable as a class decorator.
+
+    Parameters
+    ----------
+    cls : type
+        The item-model class (implements :class:`ItemModel`); ``cls.name`` is the JSON ``"type"``.
+    to_dict : callable, optional
+        ``model -> mapping`` of JSON-serializable values (without the key ``"type"``).
+    from_dict : callable, optional
+        ``mapping -> model``, the inverse of ``to_dict``.
+
+    Returns
+    -------
+    type
+        ``cls`` unchanged.
+
+    Raises
+    ------
+    SpecificationError
+        If ``cls.name`` is missing or names a built-in model, if another class is already
+        registered under ``cls.name`` (with another ``__qualname__``), or if the default encoding is
+        used for a non-dataclass.
+    """
+    name = getattr(cls, "name", None)
+    if not isinstance(name, str) or not name:
+        raise SpecificationError(f"{cls!r} needs a non-empty class attribute 'name'.")
+    if name in BUILTIN_ITEM_MODEL_NAMES or cls in BUILTIN_ITEM_MODELS:
+        raise SpecificationError(f"{name!r} is a built-in item model and is already registered.")
+    if (to_dict is None) != (from_dict is None):
+        raise SpecificationError("Pass both to_dict= and from_dict=, or neither.")
+    if to_dict is None or from_dict is None:
+        if not dataclasses.is_dataclass(cls):
+            raise SpecificationError(
+                f"{cls.__name__} is not a dataclass; pass to_dict= and from_dict= to "
+                "register_item_model()."
+            )
+        to_dict = _dataclass_to_dict
+
+        def from_dict(fields: Mapping[str, Any]) -> Any:
+            return cls(**fields)
+
+    existing = _REGISTRY.get(name)
+    if existing is not None and existing.cls.__qualname__ != cls.__qualname__:
+        # A class of the same qualified name replaces the earlier one (a re-run notebook cell).
+        raise SpecificationError(
+            f"Item model name {name!r} is already registered for {existing.cls!r}."
+        )
+    _REGISTRY[name] = _Registration(cls=cls, to_dict=to_dict, from_dict=from_dict)
+    return cls

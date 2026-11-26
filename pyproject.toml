@@ -43,7 +43,7 @@ Releases = "https://github.com/takuizum/flexpyirt/releases"
 
 [project.optional-dependencies]
 polars = ["polars>=1.0"]
-# flexpyirt.plotting (imported lazily; DESIGN.md §20).
+# flexpyirt.plotting (imported lazily; DESIGN.md §21).
 plot = ["matplotlib>=3.8"]
 
 [dependency-groups]

@@ -1,4 +1,4 @@
-"""Regenerate the figures shown in the user guide (docs/images/plots/*.png; DESIGN.md §20).
+"""Regenerate the figures shown in the user guide (docs/images/plots/*.png; DESIGN.md §21).
 
 Runs the ```python blocks of docs/guide.md top to bottom (as tests/test_docs.py does) until the
 figures of the guide exist, then saves them, so the pictures are exactly what the guide's code
