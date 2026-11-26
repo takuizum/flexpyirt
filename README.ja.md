@@ -31,7 +31,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 | 項目間の等値制約 | 項目・項目モデルをまたぐ共通パラメタ（`Model.equal_across_items()`、例: 全項目共通の傾き）。群間等値と組み合わせ可 | ✓ |
 | FIPC | 項目バンクの値で一部の項目を固定し、残りの項目と潜在分布を推定 | ✓ |
 | 欠測 | 欠測（MAR）を含むデータ | ✓ |
-| 標本ウェイト | 調査ウェイト `fit(..., weights=...)`: すべてのモデル・多母集団・FIPC での重み付き周辺尤度（mirt の `survey.weights`）。Oakes / Hessian の SE は mirt と一致するが、度数ウェイトでのみ正しい。項目適合度・M2・局所依存・DIF はウェイト付きの推定結果には使えない | ✓ |
+| 標本ウェイト | 調査ウェイト `fit(..., weights=...)`: すべてのモデル・多母集団・FIPC での重み付き周辺尤度（mirt の `survey.weights`）。Oakes / Hessian の SE は mirt と一致するが、度数ウェイトでのみ正しい。標本設計に基づくサンドイッチ SE（`se="sandwich"`、Binder, 1983）と、学校などのクラスタ抽出に対するクラスタロバスト SE（`cluster=`）は、mirt の重み付き情報行列と R で数値微分した個人ごとのスコアと照合済み。項目適合度・M2・局所依存・DIF はウェイト付きの推定結果には使えない | ✓ |
 | 標準誤差 | Oakes の恒等式（既定）／周辺対数尤度（MAP 時は対数事後）の Hessian、表示用 IRT 閾値のデルタ法 SE（`b_se` / `bk_se`）、ロバストなサンドイッチ・クロス積の SE（`se="sandwich"` / `"crossprod"`。Davidian 曲線・正規混合・双因子・two-tier モデルでは不可） | ✓ |
 | スコアリング | EAP・MAP・ML・WLE（1–3 因子、標準誤差つき）および plausible values（`PV`、1–3 因子、明示的な JAX PRNG `key`）。ベイズ手法は群ごとの潜在分布を事前分布に使う | ✓ |
 | 多次元モデル | 確認的 2–3 因子 MIRT（`Model.with_factors()`、多母集団も可）。交差負荷、相関／直交の多変量正規因子、直積求積格子、Oakes/Hessian SE、EAP・MAP・ML・WLE スコアリング。次元縮約による特殊因子数に制限のない双因子モデル（`Model.with_bifactor()`、単一群、EAP スコアリング）。相関してよい主因子 1〜2 個の two-tier モデル（`Model.with_two_tier()`） | ✓ |
@@ -65,8 +65,7 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
   $M_2$ と S-X2
 - 群ごとの潜在分布を群について vmap する多数群の推定（[#79](https://github.com/takuizum/flexpyirt/issues/79)）
 - 多次元モデルの情報行列と方向情報量
-- 標本ウェイトに対する設計に基づく標準誤差: ウェイト付き・クラスタロバストなサンドイッチ SE
-  （[#85](https://github.com/takuizum/flexpyirt/issues/85)）。ウェイト付きの推定結果での項目適合度・$M_2$・局所依存・DIF
+- ウェイト付きの推定結果での項目適合度・$M_2$・局所依存・DIF
 - 単一群・1 次元・正規潜在分布以外のモデルでのジャックナイフ傾き指標
 - ユーザー定義の項目モデルのための公開拡張 API（[#86](https://github.com/takuizum/flexpyirt/issues/86)）
 

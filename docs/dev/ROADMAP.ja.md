@@ -111,10 +111,15 @@
      欠測、FIPC）。BIC はウェイトの和を使う。Oakes / Hessian の SE は警告つき（度数ウェイトでのみ正しい）。
      mirt の `survey.weights` と V34 で照合（2PL、GRM、2 群、FIPC、双因子）。標本設計に整合する SE は #85 で扱う。
      項目適合度、M2、局所依存、JSI、DIF はウェイト付きの推定結果に対してエラーを出す。
+   - [ ] 標本設計に基づく SE: $\sum_iw_i^2s_is_i^\top$ による `fit(..., weights=, se="sandwich")`（DESIGN §17.6）。
+     V57 で照合（夜間の CI が通ったらチェックする）。
 5. [ ] ロバスト標準誤差: sandwich と cross-product（#85）。
    - [x] 標本ウェイトなし: `fit(se="sandwich" | "crossprod")`。単一群・多母集団、FIPC、EH、2〜3 因子、事前分布
      （Davidian 曲線・正規混合・双因子・two-tier モデルでは不可）。V35 で mirt の `SE.type = "sandwich"` / `"crossprod"` と照合済み。
-     ウェイト付き・クラスタロバスト版は未実装。
+   - [ ] 標本ウェイトとクラスタ: 重み付きサンドイッチ、ウェイトつき `crossprod`（mirt の定義、度数ウェイトの
+     警告つき）、$G/(G-1)$ によるクラスタロバストなサンドイッチ `fit(..., cluster=)`（DESIGN §17.6）。mirt の
+     重み付き Oakes 共分散と numDeriv の個人スコアから作った R の参照値と V57 で照合（夜間の CI が通ったら
+     チェックする）。
 - **受け入れ基準**: mirt の `bfactor()`、`residuals()`、`iteminfo()` / `testinfo()` / `marginal_rxx()` /
   `fscores(method = "EAPsum")`、`survey.weights`、`SE.type = "sandwich"` / `"crossprod"` との V 番号つき照合。
 

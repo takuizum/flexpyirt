@@ -67,6 +67,7 @@ The largest differences allowed by the tests. In practice most cases agree far m
 | Model comparison (`compare_fits`) | `anova(mod1, mod2, ...)` for Rasch / 2PL / 3PL, PCM / GPCM and nested two-group models: the whole table to $10^{-10}$ |
 | Simulation (`simulate_responses`) | Random numbers cannot match R's, so: the same parameters, $\theta$ and uniform numbers give `probtrace()`'s probabilities and the same responses as in R; simulated category and summed-score distributions agree with the model within Monte Carlo error, and refitting recovers the parameters |
 | Robust standard errors | `mirt(..., SE.type = "crossprod")` and `SE.type = "sandwich"`: whole covariance matrices at mirt's estimates, and standard errors from a full fit |
+| Robust standard errors with sampling weights and clusters | mirt has neither the design-based weighted sandwich nor a cluster-robust one, so the reference is computed in R from mirt's weighted Oakes covariance and per-person scores obtained by numerical differentiation (`numDeriv`, checked against mirt's `estfun()`), summed by school for the cluster version (single-group 2PL with 40 schools, two groups with anchors and schools spanning the groups); `se="crossprod"` with weights against `mirt(..., survey.weights = w, SE.type = "crossprod")` |
 | SQUAREM | every comparison above is repeated with `BAEM(squarem=True)` |
 | Unconstrained M-step scale | the comparisons of 3PL, 4PL, priors and MAP, missing responses, multiple groups, fixed item parameter calibration and confirmatory 2–3 factor models are repeated with `BAEM(m_step_scale="unconstrained")` at the same tolerances |
 | `LogitNormalPrior` | the default `mode_scale="natural"` has no mirt equivalent, so it is checked independently: the density against SciPy (it integrates to 1, and logit $X$ has the stated mean and variance), and the MAP estimate as a stationary point of the log posterior written from the formula, to $10^{-6}$. `mode_scale="logit"` matches mirt's `norm` prior on `g` (log-likelihood and log posterior to $10^{-9}$ relative, $a$, $d$, $g$ to $10^{-6}$, Oakes SEs to $10^{-5}$ relative) and flexMIRT's logit-metric mode computed independently |
@@ -157,11 +158,19 @@ Tolerances of the cases that are not plain comparisons of fitted models with mir
 | Comparison data: PAF; population from the same draws; rank-sum $p$; mean RMSE | $10^{-12}$; exact; $10^{-10}$ (relative); 15% (relative) for the retained $k$, 60% for the next |
 | DIMTEST (small rerun of the simulation study): rejections at .05 under the null / power | at most 3 of 20 / at least 8 of 10 |
 | Cross-product / sandwich covariance at mirt's estimates (entries relative to $\sqrt{v_{ii}v_{jj}}$); parameters / SEs end to end | $10^{-9}$ / $10^{-6}$; $10^{-6}$ / $10^{-5}$ (relative) |
+| Weighted and cluster sandwich: middle matrices at mirt's estimates (relative to $\sqrt{m_{ii}m_{jj}}$); parameters / SEs end to end | $10^{-7}$ (observed $\le1.2\times10^{-9}$); $10^{-6}$ / $10^{-5}$ (relative; observed $\le1.7\times10^{-7}$) |
 
 ## Known differences from mirt
 
 These differences are intentional: flexpyirt maximizes exactly the quantity it reports. They are
 small or absent in typical use, but you may see them when comparing the two programs.
+
+- **Sandwich standard errors with sampling weights.** With `survey.weights`, mirt's
+  `SE.type = "sandwich"` puts $\sum_iw_is_is_i^\top$ between the inverse information matrices,
+  so multiplying all weights by $k$ divides its covariance by $k$. flexpyirt's `se="sandwich"`
+  uses $\sum_iw_i^2s_is_i^\top$, the design-based variance (Binder, 1983), which does not depend
+  on the scale of the weights ([Theory, section 14](theory.md#14-sampling-weights)). The two agree
+  only when every weight is 1. flexpyirt's `se="crossprod"` with weights is the same as mirt's.
 
 - **Latent mean and variance on a finite grid.** mirt updates a normal latent distribution with
   the mean and variance of the expected counts; flexpyirt maximizes the discretized likelihood

@@ -106,6 +106,8 @@ res = fit(
     se="oakes",  # "oakes" | "hessian" | "crossprod" | "sandwich" | None
     verbose=False,
 )
+# 標本ウェイトとクラスタ抽出（学校の中の生徒）: 標本設計に基づくサンドイッチ SE。
+res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
 res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_change)
 ```
 

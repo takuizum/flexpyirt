@@ -92,6 +92,7 @@
 | V54 | モデル比較表（V11a のデータで Rasch・2PL・3PL、V8b のデータで PCM・GPCM、V4 のデータで全項目不変の 2 群 2PL とアンカーのみのモデル・最後の項目だけ自由なモデル）と回答データのシミュレーション（2PL・Rasch・3PL・4PL・GRM・GPCM・名義反応の 1 次元と 2 因子での決定的な逆変換、潜在分布ごとの分布と復元の確認） | `anova(mod1, mod2, ...)`。同じ $\theta$ と一様乱数での `probtrace()`（乱数列は `simdata()` と一致させられない） | #109 |
 | V55 | 群ブロック化した E-step での多数の群: 2PL、大きさの異なる 10 群（200–470）、15 項目、q01–q06 を不変なアンカー、q07–q15 は群ごとに自由、焦点群の平均・分散は自由、5% MCAR 欠測。ブロック化した E-step と平坦な E-step の回帰 | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`、`fscores(extract.group(m, g), method = "EAP")`。回帰は平坦な経路 | #79 |
 | V56 | 群ごとの `DavidianCurve` と `NormalMixture`: (a) 2PL、3 群（二峰・右に歪む・左に歪む）、`DavidianCurve(2)`、q01–q06 がアンカー、3% 欠測。(b) 2PL $J=15$、2 群、`NormalMixture(2)`、全項目不変。(c) FIPC、2 群、`DavidianCurve(2)`、全潜在パラメタ自由。推定値、R の Hessian による SE、EAP、群ごとの S-X2 | 格子上で正規化した標準化密度（`dcurver::ddc`）による `multipleGroup(customGroup = createGroup(...))` を独立な R の周辺対数尤度上の Newton で磨く。R の Richardson Hessian による SE、R で計算した EAP、各群の推定値で固定した 1 群オブジェクトでの `itemfit(use_dentype_estimate = TRUE)` | #75 |
+| V57 | 重み付き・クラスタロバストなサンドイッチ SE: (a) 2PL $J=10$、25 人 × 40 校で $\theta$ に学校効果、不均等なウェイト、3% 欠測、(b) 2PL $J=8$、アンカー q01–q05 の参照群 / 焦点群で焦点群の平均・分散は自由、群をまたぐ 30 校。mirt の推定値での中央の行列（重み付き、クラスタ、ウェイトなしのクラスタ、1 人 1 クラスタ）、ウェイトつきの `se="crossprod"`、mirt の重み付きサンドイッチの再現、通しの SE | `survey.weights` つきの `mirt()` / `multipleGroup()`、`SE.type = "Oakes"`（ブレッド）・`"crossprod"`・`"sandwich"`。mirt のグリッド上で `numDeriv::jacobian` による個人ごとのスコア（`estfun.AllModelClass` と照合）。$H^{-1}BH^{-1}$ は R で計算 | #84, #85 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -1131,8 +1132,7 @@
   **対象外。** `DavidianCurve`・`NormalMixture`: mirt はどちらの種類も計算しないので、flexpyirt は
   `SpecificationError` を出す。双因子・two-tier モデルも `SpecificationError`（mirt は対応している。スコアのカーネルが
   次元縮約にまだ対応していない）。多母集団の多次元モデルと 4PL・PCM・Rasch の項目は同じコードを通るが、V35 に
-  専用のケースはない。標本ウェイトつきの版とクラスタロバスト版は未実装で、`weights=` と併用すると
-  `SpecificationError` を出す。
+  専用のケースはない。標本ウェイトつきの版とクラスタロバスト版は V57。
   テスト: `tests/test_mirt_m7_robust_se.py`。単体テスト（`tests/test_m7_robust_se.py`）: チャンク分割した
   スコアと密な前向き自動微分のヤコビアンの一致（任意のチャンクサイズ。欠測、事前分布付きの混合形式、
   共有パラメタのある 2 群、2 因子、EH）、$\sum_p c_ps_p$ と勾配の一致、正しいモデルで $N=20{,}000$ のとき
@@ -1248,6 +1248,34 @@
   相対 $10^{-3}$、$10^{-5}$、$10^{-4}$。内部の検査（`tests/test_multigroup_latent_shapes.py`）: Oakes = Hessian の SE、
   `phi_*` をすべて 0 に固定した Davidian モデルが 2 群の `Normal` モデルを対数尤度 $10^{-8}$ で再現、`link()` の既定の重みと
   空パターンの EAP が各群の密度を使う、群ごとの混合の警告、JSON の往復（スキーマ 8）、アンカーつきの点から始めた FIPC。
+
+- **重み付き・クラスタロバストなサンドイッチ（V57、#84、#85。DESIGN §17.6）**:
+  `tests/test_mirt_v57_weighted_cluster_se.py`（参照値 `validation/r/v57_weighted_cluster_se_reference.R`。
+  mirt 1.48、`optimizer = "NR"`、`TOL = 1e-10`、$[-6, 6]$ 上の 61 点）。mirt には標本設計に基づく重み付き
+  サンドイッチがなく（`survey.weights` つきの `SE.type = "sandwich"` は中央の行列が $\sum_iw_is_is_i^\top$。
+  R スクリプトはこの読みを $1.3\times10^{-10}$ で確認する）、クラスタロバスト版もないので、参照値は R で計算する。
+  ブレッドは mirt の重み付き Oakes 共分散、個人ごとのスコアは mirt のグリッドと正規化した正規事前分布の上での
+  各人の周辺対数尤度の `numDeriv::jacobian`（Richardson）で、mirt の微分のコードとは独立に書いた
+  （`estfun.AllModelClass` と $4.8\times10^{-9}$ 以内で一致し、重み付きスコアの和は $\le10^{-4}$）。群間で
+  等値制約したパラメタのスコアは合計する。保存するもの: `weighted` $H^{-1}(\sum_iw_i^2s_is_i^\top)H^{-1}$、
+  $\frac{G}{G-1}\sum_cu_cu_c^\top$ を使う `cluster`、ウェイトなしのクラスタの中央の行列、`singleton`（1 人
+  1 クラスタ、$\frac{N}{N-1}\sum_iw_i^2s_is_i^\top$）、mirt の Oakes・crossprod・sandwich。ケース:
+  (a) `school_2pl`、2PL $J=10$、25 人 × 40 校で $\theta$ に学校効果（SD 0.6）、ウェイト = 学校の係数 × 個人の
+  係数、3% MCAR、(b) `twogroup`、2PL $J=8$、40 人 × 30 校の中で参照群 / 焦点群を無作為に割り当て、アンカー
+  q01–q05、焦点群の平均・分散は自由、焦点群のウェイトは 1.5 倍。mirt の推定値での検査（mirt の値で
+  flexpyirt の問題をコンパイルし、`fit()` 自身の `_sandwich_meat` を使う）: 参照値から戻した中央の行列
+  （$M=V_{\mathrm{oakes}}^{-1}VV_{\mathrm{oakes}}^{-1}$。mirt の差分によるブレッドからスコアを切り離す）は
+  $\sqrt{m_{ii}m_{jj}}$ に対して $10^{-7}$ 以内（実測 $\le1.2\times10^{-9}$）、ウェイトつきの `se="crossprod"` は
+  mirt と $10^{-9}$ 以内（実測 $4.4\times10^{-10}$）、flexpyirt の Oakes ブレッド × 重み付きクロス積 × ブレッドは
+  mirt の重み付きサンドイッチと $10^{-6}$ 以内（実測 $1.4\times10^{-9}$）。通し
+  （`fit(..., weights=, cluster=, se="sandwich")`、`BAEM(tol=1e-10)`）: 対数尤度は相対 $10^{-9}$、推定値は
+  $10^{-6}$ 以内（実測 $7\times10^{-8}$）、SE は相対 $10^{-5}$ 以内（実測 $1.7\times10^{-7}$）。クラスタ / 重み付きの
+  SE の比は 0.74〜2.13。単体テスト（`tests/test_weighted_cluster_se.py`）: 二乗ウェイトとクラスタのカーネルを
+  密な前進モードの個人スコアと照合（2 群、群をまたぐクラスタ、複数チャンク）、1 人 1 クラスタ
+  $=\frac{N}{N-1}\times$ 重み付きサンドイッチ（$10^{-10}$）、単位ウェイトはウェイトなしのサンドイッチ（クラスタ
+  ありも）、ウェイトの定数倍への不変性、ウェイト 0 の行はクラスタごと除く、クラスタのラベルの付け替え、
+  クラスタの中央の行列への事前分布の曲率の加算、ウェイトつき `crossprod` $=(\sum_iw_is_is_i^\top)^{-1}$、警告、
+  エラー、summary、JSON（スキーマ 9、`n_clusters`）。
 
 ## 照合以外の検証
 - **古典的項目分析（V46、flexpyctt、#101）**:

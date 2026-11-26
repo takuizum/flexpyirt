@@ -97,6 +97,7 @@ English | [日本語](VALIDATION.ja.md)
 | V54 | Model-comparison table (Rasch vs 2PL vs 3PL on the V11a data; PCM vs GPCM on the V8b data; a fully invariant two-group 2PL vs the anchored model and vs the model with the last item free, V4 data) and simulation of responses (deterministic inversion for 2PL, Rasch, 3PL, 4PL, GRM, GPCM and nominal items, unidimensional and two-factor; distributional and recovery checks per latent distribution) | `anova(mod1, mod2, ...)`; `probtrace()` with the same $\theta$ and uniform numbers (random streams cannot match `simdata()`) | #109 |
 | V55 | Many groups with the group-blocked E-step: 2PL, 10 groups of unequal size (200–470), 15 items, anchors q01–q06 invariant, q07–q15 free per group, focal means and variances free, 5% MCAR missing; regression of the blocked against the flat E-step | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`, `fscores(extract.group(m, g), method = "EAP")`; the flat path for the regression | #79 |
 | V56 | `DavidianCurve` and `NormalMixture` per group: (a) 2PL, three groups (bimodal, right-, left-skewed), `DavidianCurve(2)`, anchors q01–q06, 3% missing; (b) 2PL $J=15$, two groups, `NormalMixture(2)`, every item invariant; (c) FIPC, two groups, `DavidianCurve(2)`, every latent free. Estimates, R Hessian SEs, EAP, S-X2 per group | `multipleGroup(customGroup = createGroup(...))` with the standardized densities normalized on the grid (`dcurver::ddc`), Newton-polished on an independent R marginal log-likelihood; R Richardson-Hessian SEs; EAP in R; `itemfit(use_dentype_estimate = TRUE)` on single-group objects fixed at each group's estimates | #75 |
+| V57 | Weighted and cluster-robust sandwich SEs: (a) 2PL $J=10$, 40 schools of 25 with a school effect in $\theta$, unequal weights, 3% missing; (b) 2PL $J=8$, ref/focal with anchors q01–q05, focal mean and variance free, 30 schools spanning the groups. Middle matrices (weighted, cluster, unweighted cluster, singleton clusters) at mirt's estimates, `se="crossprod"` with weights, mirt's weighted sandwich reproduced, SEs end to end | `mirt()` / `multipleGroup()` with `survey.weights`, `SE.type = "Oakes"` (bread), `"crossprod"`, `"sandwich"`; per-person scores by `numDeriv::jacobian` on mirt's grid (checked against `estfun.AllModelClass`); $H^{-1}BH^{-1}$ computed in R | #84, #85 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -1147,8 +1148,7 @@ English | [日本語](VALIDATION.ja.md)
   flexpyirt raises `SpecificationError`. Bifactor and two-tier models raise `SpecificationError` as well (mirt supports them; the
   score kernel does not use the dimension reduction yet). Multiple-group multidimensional models, 4PL, PCM and
   Rasch items go through the same code but have no V35 case of their own. Sampling-weighted and
-  cluster-robust versions are not implemented; `weights=` with either option raises
-  `SpecificationError`.
+  cluster-robust versions are V57.
   Tests: `tests/test_mirt_m7_robust_se.py`. Unit tests (`tests/test_m7_robust_se.py`): the
   chunked scores against a dense forward-mode Jacobian for any chunk size (missing data, mixed
   formats with priors, two groups with shared parameters, two factors, EH), $\sum_p c_ps_p$
@@ -1331,6 +1331,41 @@ English | [日本語](VALIDATION.ja.md)
   `Normal` model to $10^{-8}$ in log-likelihood, `link()`'s default weights and EAP of an empty
   pattern use each group's density, per-group mixture warnings, JSON round trip (schema 8), FIPC
   from the anchored point.
+
+- **Weighted and cluster-robust sandwich (V57, #84, #85; DESIGN §17.6)**:
+  `tests/test_mirt_v57_weighted_cluster_se.py` (reference
+  `validation/r/v57_weighted_cluster_se_reference.R`; mirt 1.48, `optimizer = "NR"`,
+  `TOL = 1e-10`, 61 points on $[-6, 6]$). mirt has no design-based weighted sandwich (its
+  `SE.type = "sandwich"` with `survey.weights` has the middle matrix $\sum_iw_is_is_i^\top$; the R
+  script confirms this reading to $1.3\times10^{-10}$) and no cluster-robust one, so the
+  references are computed in R: the bread is mirt's weighted Oakes covariance, and the per-person
+  scores are `numDeriv::jacobian` (Richardson) of each person's marginal log-likelihood on mirt's
+  grid and normalized normal prior, written independently of mirt's derivative code (they agree
+  with `estfun.AllModelClass` within $4.8\times10^{-9}$; the weighted score sums to
+  $\le10^{-4}$). Scores of parameters constrained equal across groups are summed. Stored:
+  `weighted` $H^{-1}(\sum_iw_i^2s_is_i^\top)H^{-1}$, `cluster` with
+  $\frac{G}{G-1}\sum_cu_cu_c^\top$, the unweighted cluster middle matrix, `singleton` (one person
+  per cluster, $\frac{N}{N-1}\sum_iw_i^2s_is_i^\top$), mirt's Oakes, crossprod and sandwich. Cases:
+  (a) `school_2pl`, 2PL $J=10$, 40 schools × 25 with a school effect (SD 0.6) in $\theta$,
+  weights = school factor × individual factor, 3% MCAR; (b) `twogroup`, 2PL $J=8$, ref/focal
+  assigned at random within 30 schools of 40, anchors q01–q05, focal mean and variance free, focal
+  weights 1.5 times larger. Checks at mirt's estimates (flexpyirt's problem compiled with mirt's
+  values; `fit()`'s own `_sandwich_meat`): the middle matrices recovered from the references
+  ($M=V_{\mathrm{oakes}}^{-1}VV_{\mathrm{oakes}}^{-1}$, which isolates the scores from mirt's
+  finite-difference bread) within $10^{-7}$ relative to $\sqrt{m_{ii}m_{jj}}$ (observed
+  $\le1.2\times10^{-9}$); `se="crossprod"` with weights against mirt's within $10^{-9}$ (observed
+  $4.4\times10^{-10}$); flexpyirt's Oakes bread × weighted cross-product × bread against mirt's
+  weighted sandwich within $10^{-6}$ (observed $1.4\times10^{-9}$). End to end
+  (`fit(..., weights=, cluster=, se="sandwich")`, `BAEM(tol=1e-10)`): log-likelihood $10^{-9}$
+  relative, estimates within $10^{-6}$ (observed $7\times10^{-8}$) and SEs within $10^{-5}$
+  relative (observed $1.7\times10^{-7}$). Cluster / weighted SE ratios range from 0.74 to 2.13.
+  Unit tests (`tests/test_weighted_cluster_se.py`): the squared-weight and cluster kernels against
+  dense forward-mode person scores (two groups, clusters spanning groups, several chunks);
+  singleton clusters $=\frac{N}{N-1}\times$ the weighted sandwich to $10^{-10}$; unit weights give
+  the unweighted sandwich (also clustered); invariance to rescaling the weights; zero-weight rows
+  dropped with their clusters; relabelling the clusters; prior curvature added to the cluster
+  meat; `crossprod` with weights $=(\sum_iw_is_is_i^\top)^{-1}$; warnings, errors, summary and JSON
+  (schema 9, `n_clusters`).
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)
