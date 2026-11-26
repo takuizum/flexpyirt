@@ -41,7 +41,14 @@ from flexpyirt._linking import (
 )
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import ConvergenceWarning, SpecificationError
-from flexpyirt.items import GPCMKernel, ItemKernel, NominalKernel
+from flexpyirt.items import (
+    GPCMKernel,
+    ItemKernel,
+    NominalKernel,
+    irt_names,
+    irt_thresholds,
+    is_builtin_item_model,
+)
 from flexpyirt.latent import davidian_param_names, latent_param_names, mixture_param_names
 from flexpyirt.result import _HTML_STYLE, FitResult, _frame_to_html_table
 
@@ -321,8 +328,8 @@ def _mean_mean_start(
                 bs = np.array([-float(src_est[s][-1]) / (top * float(src_est[s][0]))])
                 bt = np.array([-float(tgt_est[t][-1]) / (top * float(tgt_est[t][0]))])
             else:
-                bs = np.asarray(k.irt_thresholds(jnp.asarray(src_est[s])), dtype=float)
-                bt = np.asarray(k.irt_thresholds(jnp.asarray(tgt_est[t])), dtype=float)
+                bs = np.asarray(irt_thresholds(k, jnp.asarray(src_est[s])), dtype=float)
+                bt = np.asarray(irt_thresholds(k, jnp.asarray(tgt_est[t])), dtype=float)
             if np.all(np.isfinite(bs)) and np.all(np.isfinite(bt)):
                 b_src.extend(bs.tolist())
                 b_tgt.extend(bt.tolist())
@@ -423,14 +430,14 @@ def _transformed_items_table(
     )
     irt_cols = list(
         dict.fromkeys(
-            p for _, m in source._model.items for p in source._model.item_kernel(m).irt_names
+            p for _, m in source._model.items for p in irt_names(source._model.item_kernel(m))
         )
     )
     rows: list[dict[str, Any]] = []
     for name, item_model in source._model.items:
         kernel = source._model.item_kernel(item_model)
         xi_star = transform(kernel, jnp.asarray(src_est[name], dtype=jnp.float64), a_arr, b_arr)
-        b_star = kernel.irt_thresholds(xi_star)
+        b_star = irt_thresholds(kernel, xi_star)
         row: dict[str, Any] = {
             "item": name,
             "model": item_model.name,
@@ -442,7 +449,7 @@ def _transformed_items_table(
             row[p] = float(val)
         for col in irt_cols:
             row[col] = math.nan
-        for p, val in zip(kernel.irt_names, np.asarray(b_star, dtype=float), strict=True):
+        for p, val in zip(irt_names(kernel), np.asarray(b_star, dtype=float), strict=True):
             row[p] = float(val)
         rows.append(row)
     return pd.DataFrame(rows, columns=["item", "model", "common", *param_cols, *irt_cols])
@@ -875,13 +882,21 @@ def link(
         If either input is not a :class:`FitResult`, the two models have different numbers of
         factors or use dimension reduction (bifactor, two-tier), a multiple-group fit is passed
         without selecting a group, no common items exist, common items have mismatched
-        kernels/categories, or options/nodes/weights are invalid.
+        kernels/categories, an item uses a user-defined item model (DESIGN.md §20), or
+        options/nodes/weights are invalid.
     """
     check_x64()
     if not isinstance(source, FitResult):
         raise SpecificationError(f"source must be a FitResult, got {type(source).__name__}.")
     if not isinstance(target, FitResult):
         raise SpecificationError(f"target must be a FitResult, got {type(target).__name__}.")
+    for label, res in (("source", source), ("target", target)):
+        custom = [n for n, m in res._model.items if not is_builtin_item_model(m)]
+        if custom:
+            raise SpecificationError(
+                f"link() needs the scale transformation of every item model; {label} items "
+                f"{custom} use user-defined item models (DESIGN.md §20)."
+            )
     if source._model.is_reduced or target._model.is_reduced:
         raise SpecificationError("link() does not support bifactor or two-tier models.")
     n_factors = source._model.n_factors

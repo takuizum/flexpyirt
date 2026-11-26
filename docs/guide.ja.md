@@ -25,7 +25,8 @@ flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめ�
 17. [次元数](#17-次元数)
 18. [局所依存と次元性のレポート](#18-局所依存と次元性のレポート)
 19. [DETECT](#19-detect)
-20. [エラーと警告](#20-エラーと警告)
+20. [ユーザー定義の項目モデル](#20-ユーザー定義の項目モデル)
+21. [エラーと警告](#21-エラーと警告)
 
 ## 1. 準備
 
@@ -126,7 +127,8 @@ print(spec.item_names[:3], mixed.item_names)
 （mirt は logit 尺度で最適化するが、内点の最尤推定値は一致する）。多値項目のカテゴリは 0 始まり（mirt の
 `Science` のように 1 始まりのデータは 1 を引く）。`Nominal` には表示用の `b` 列がない。カテゴリに順序がない
 ため $\theta$ 尺度の隣接カテゴリ閾値は一般には定義できず（$\mathrm{ak}_k=\mathrm{ak}_{k-1}$ で特異になる）、mirt の
-`coef(m, IRTpars = TRUE)` も代わりに Bock のゼロ和の傾きと切片を返す。
+`coef(m, IRTpars = TRUE)` も代わりに Bock のゼロ和の傾きと切片を返す。表にないモデルはユーザーが書ける
+（[20 節](#20-ユーザー定義の項目モデル)）。
 
 ```python
 theta3 = rng.normal(0, 1, 2000)
@@ -1208,7 +1210,10 @@ print(report)
   傾きが下がるので、そのペアは両方向に大きな値を持つ（`folded` は両方を足したもの）。決まったカットオフはないので、
   他より目立つペアを探す。既定では mirt の `residuals(type = "JSI")` と同じく、項目ごとにモデルを推定し直す。
   `method="one_step"` は推定し直さず（全項目モデルからの Taylor 近似 1 ステップ）、長いテストではずっと速い。15 項目
-  程度から既定の値とよく一致するが、短いテストでは一致せず、警告を出す。
+  程度から既定の値とよく一致するが、短いテストでは一致せず、警告を出す。JSI は単一群・1 次元のモデルについてのみ
+  定義されている。多次元・多母集団への拡張は研究されておらず、参照となる実装もないので、多母集団・多次元（双因子・
+  two-tier を含む）・`Normal` 以外の潜在分布のモデルでは `jsi()` は `SpecificationError` を出す。これらのモデルでは
+  `local_dependence()` を使う。
 - `model_parallel_analysis()` は推定したモデルからデータをシミュレーションし、観測された第 2 固有値がモデルの生む
   値より大きいかを調べる（Drasgow & Lissak, 1983）。モデルを同じデータに当てはめているので $p$ 値は保守的になる。
   小さい値は第 2 の次元の証拠になるが、大きい値（この例では 1）は一次元性の証明ではない。
@@ -1242,7 +1247,108 @@ print(test.assessment_items, round(test.statistic, 3), round(test.p_value, 3))
   3 分の 1 で検定用の部分テストを選び、残りで検定する。保守的なので、小さい $p$ は第 2 の次元の強い証拠だが、大きい
   $p$ は一次元性の弱い証拠にとどまる。
 
-## 20. エラーと警告
+## 20. ユーザー定義の項目モデル
+
+flexpyirt にない項目モデルも、Python で書けば組み込みのモデルと同じように使えます。`flexpyirt.items` の
+プロトコル `ItemKernel` と `ItemModel` に沿って小さなクラスを 2 つ書きます（契約の全体は
+[API リファレンス](reference.ja.md#ユーザー定義の項目モデル)）。
+
+- **カーネル**は反応関数を持ちます。`log_prob(theta, params)` は形 `(Q, D)` の節点 `theta` での
+  `(Q, n_categories)` の対数確率を `jax.numpy` で計算して返します。勾配とヘッセ行列は自動微分で求めるので、
+  ほかに導出するものはありません。パラメタの名前（`param_names`。`D` 個の傾きが先頭。`slope_params`、
+  `intercept_params`）と、`D` 因子用のコピーを返す `with_factors` も持ちます。ハッシュ可能であること
+  （frozen dataclass にする）。
+- **項目モデル**は、表に表示する `name`、`kernel`、既定で推定するパラメタ、項目の反応と残余得点からの初期値、
+  上下限を与えます。
+
+例では 2PL を実装し直すので、結果を `TwoPL` と照らし合わせられます。
+
+```python
+from dataclasses import dataclass
+from typing import ClassVar
+
+import jax.numpy as jnp
+
+from flexpyirt.items import register_item_model
+
+
+@dataclass(frozen=True)
+class LogisticKernel:
+    """The pure log-probability function of P(y = 1 | theta) = sigmoid(a'theta + d)."""
+
+    n_factors: int = 1
+    n_categories: ClassVar[int] = 2
+
+    def with_factors(self, n_factors):
+        return LogisticKernel(n_factors)
+
+    @property
+    def param_names(self):
+        if self.n_factors == 1:
+            return ("a", "d")
+        return (*(f"a{m}" for m in range(1, self.n_factors + 1)), "d")
+
+    @property
+    def slope_params(self):
+        return self.param_names[: self.n_factors]
+
+    @property
+    def intercept_params(self):
+        return ("d",)
+
+    def log_prob(self, theta, params):
+        z = theta @ params[: self.n_factors] + params[self.n_factors]  # theta: (Q, D)
+        return jnp.stack([jax.nn.log_sigmoid(-z), jax.nn.log_sigmoid(z)], axis=-1)
+
+
+@dataclass(frozen=True)
+class MyTwoPL:
+    """The item model: name, kernel, free pattern, starting values and bounds."""
+
+    name: ClassVar[str] = "My2PL"
+
+    @property
+    def kernel(self):
+        return LogisticKernel()
+
+    def default_free(self):
+        return (True, True)
+
+    def start_values(self, item, rest):
+        p = np.clip(item.mean(), 0.01, 0.99)
+        return np.array([1.0, np.log(p / (1.0 - p))])
+
+    def bounds(self):
+        return (-np.inf, -np.inf), (np.inf, np.inf)
+
+
+custom = fit(Model.uniform(MyTwoPL(), items=items), df, method=BAEM(tol=1e-6, squarem=True))
+print(custom.items.head(3))
+gap = (custom.parameters["estimate"] - res_sq.parameters["estimate"]).abs().max()
+print(f"largest difference from the built-in TwoPL: {gap:.1e}")
+```
+
+2 つの推定は同じ最大点に達します。わずかな差は収束判定と初期値の違いによるものです（テストでは、2PL と GRM の
+再実装が組み込みのモデルと推定値・標準誤差・得点まで機械精度で一致することを確かめています）。
+
+反応関数を評価する機能はすべてユーザー定義モデルで使えます。標準誤差、スコアリング、項目適合度、M2、情報量、
+多母集団、事前分布、多次元モデルなどです。`link()` と `fix_from(..., parameterization="irt")` はモデルごとの変換が
+必要なので `SpecificationError` を出します。ML と WLE のスコアリングは反応カテゴリが $\theta$ とともに上がることを
+仮定します。表示用の閾値（`b` 列）は、カーネルが任意のメンバ `irt_names`、`irt_dependency_indices`、
+`irt_thresholds` を定義したときだけ表示されます。
+
+推定結果を JSON に保存するには、先にクラスを登録します。新しいセッションでファイルを読むときも、その前に登録し直します。
+
+```python
+register_item_model(MyTwoPL)  # or use @register_item_model on the class
+restored = FitResult.from_json(custom.to_json())
+print(restored.items.equals(custom.items))
+```
+
+flexpyirt が確かめるのは仕組みであり、あなたのモデルではありません。ユーザー定義モデルの正しさは `log_prob` の
+正しさで決まります。新しいモデルは、頼る前に独立な実装と照らし合わせてください。
+
+## 21. エラーと警告
 
 | 種類 | いつ出るか |
 |---|---|

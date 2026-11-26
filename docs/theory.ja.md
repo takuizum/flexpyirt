@@ -3,7 +3,7 @@
 [English](theory.md) | 日本語
 
 flexpyirt の背後にある考え方の要点: どんなモデルか、何を最大化するか、EM アルゴリズムがそれをどう行うか、
-標準誤差・スコア・適合度統計量・リンキング係数がどこから来るか。各節の最後に、コード例のある
+標準誤差・スコア・適合度統計量・リンキング係数・合計得点の換算表・次元性の検討がどこから来るか。各節の最後に、コード例のある
 [ユーザーガイド](guide.ja.md) の節を示す。詳しくは末尾の参考文献（Baker & Kim, 2004; Chalmers, 2012 など）を参照。
 
 1. [項目反応モデル](#1-項目反応モデル)
@@ -18,6 +18,10 @@ flexpyirt の背後にある考え方の要点: どんなモデルか、何を�
 10. [受検者のスコアリング](#10-受検者のスコアリング)
 11. [モデル適合と DIF](#11-モデル適合と-dif)
 12. [尺度リンキング](#12-尺度リンキング)
+13. [双因子モデルと two-tier モデル](#13-双因子モデルと-two-tier-モデル)
+14. [標本ウェイト](#14-標本ウェイト)
+15. [合計得点・情報量・信頼性](#15-合計得点情報量信頼性)
+16. [局所依存と次元性](#16-局所依存と次元性)
 
 **記法.** 受検者 $i=1,\dots,N$、項目 $j=1,\dots,J$、反応 $y_{ij}\in\{0,\dots,K_j-1\}$、潜在特性 $\theta$
 （多次元モデルではベクトル $\boldsymbol\theta$）、群 $g=1,\dots,G$。$\sigma(z)=1/(1+e^{-z})$ はロジスティック関数。
@@ -50,11 +54,12 @@ flexpyirt の傾きの $1/1.7$ になる。
 
 **多次元モデル.** 因子が $D$ 個のとき、$z=\mathbf a^\top\boldsymbol\theta+d$ で因子ごとに傾き
 （$a_1,\dots,a_D$）を持ち、$\boldsymbol\theta$ は多変量正規分布に従う。*確認的*モデルでは各項目は指定した因子にだけ
-負荷し、ほかの傾きは 0 に固定される。
+負荷し、ほかの傾きは 0 に固定される。双因子モデルと two-tier モデルは、多くの因子を扱える構造を持つ確認的モデルである
+（[13 節](#13-双因子モデルと-two-tier-モデル)）。
 
 **情報量.** 項目の Fisher 情報量は、その項目が各 $\theta$ でどれだけ精密に測れるかを表す。2PL では
 $I_j(\theta)=a_j^2P_j(\theta)\{1-P_j(\theta)\}$ で、$\theta=b_j$ で最大になる。テスト情報量
-$I(\theta)=\sum_jI_j(\theta)$ は WLE に現れる（[10 節](#10-受検者のスコアリング)）。
+$I(\theta)=\sum_jI_j(\theta)$ は WLE（[10 節](#10-受検者のスコアリング)）と信頼性（[15 節](#15-合計得点情報量信頼性)）に現れる。
 
 ガイド: [3 節](guide.ja.md#3-モデルを指定する)。
 
@@ -220,7 +225,7 @@ $$\operatorname{Var}(\hat\eta)\approx I(\hat\eta)^{-1}\,B\,I(\hat\eta)^{-1}$$
 になる。情報等式のもとでは $I^{-1}$ に一致する。MAP では、事前分布の曲率
 $-\partial^2\log\pi/\partial\eta\,\partial\eta^\top$ を $I$ と同じように $B$ にも加えるので、モデルが正しければ
 3 つの推定はやはり一致する。スコアは厳密である（各応答パターンの周辺尤度の自動微分）。受検者は互いに独立と
-仮定する。
+仮定する。標本ウェイトについては [14 節](#14-標本ウェイト) を参照。
 
 **デルタ法.** $b=-d/a$ のような関数 $b=h(\eta)$ について
 $\operatorname{Var}(\hat b)\approx\nabla h^\top\,\operatorname{Var}(\hat\eta)\,\nabla h$。flexpyirt は表示用の IRT 閾値と、
@@ -310,25 +315,199 @@ $d^*=d-\mathbf a^{*\top}\boldsymbol\beta$ になる（Oshima, Davey & Lee, 2000�
 
 ガイド: [15 節](guide.ja.md#15-尺度リンキング)。
 
+## 13. 双因子モデルと two-tier モデル
+
+**モデル.** テストは項目のまとまり（テストレット）でできていることが多い。1 つの読解文についての複数の設問や、
+共通の場面設定を持つ項目などである。このときまとまりの中の反応は、主な特性で説明される以上に似通う。
+**双因子モデル**は、すべての項目に 1 つの一般因子 $\theta_0$ への傾きを持たせ、まとまりに属する項目にはさらに
+1 つの特殊因子 $\theta_s$ への傾きを持たせる:
+$$z_j=a_{j0}\theta_0+a_{js}\theta_{s(j)}+d_j .$$
+因子はすべて互いに独立な $N(0,1)$ である。どのまとまりにも属さない項目は $\theta_0$ にだけ負荷し、
+特殊因子にはそれぞれ 2 項目以上が必要である。**two-tier モデル**（Cai, 2010）は、一般因子を互いに相関してよい
+$P$ 個の主因子 $\boldsymbol\theta_0$ に置き換える（flexpyirt では $P=1$ または $2$）。特殊因子はほかのすべての因子と
+直交したままである。双因子モデルは、主因子が 1 つですべての項目がそれに負荷する two-tier モデルにあたる。
+
+**次元縮約.** 特殊因子が $S$ 個あるとモデルは $1+S$ 次元になり、1 次元あたり $n$ 点の直積求積格子は
+$n^{1+S}$ 個の節点を持つ。まとまりが 2〜3 個を超えると計算できない。各項目が依存するのは $\theta_0$ と高々 1 つの
+$\theta_s$ だけで、特殊因子は互いに独立なので、周辺尤度は一般因子を与えたもとで分解できる
+（Gibbons & Hedeker, 1992）:
+$$L(\mathbf y_i)=\sum_g w^{(0)}_g\prod_{s=1}^{S}\Big[\sum_t w^{(s)}_t\prod_{j\in s}P_j(y_{ij}\mid\theta_g,\theta_t)\Big]\prod_{j\in s_\varnothing}P_j(y_{ij}\mid\theta_g).$$
+ここで $\{\theta_g\}$ と $\{\theta_t\}$ は正規化した重み $w^{(0)}$・$w^{(s)}$ を持つ 1 次元の格子、$s_\varnothing$ は
+一般因子にだけ負荷する項目の集合である。応答パターンあたりの計算量は $O(n^{1+S})$ から $O(S\,n^2)$ に下がる。
+two-tier モデルでは一般因子の節点が $P$ 次元の主因子格子の節点に置き換わり、その重みは主因子間の相関に依存する
+多変量正規の重みになる。計算量は $O(S\,n^{P+1})$ である（Cai, 2010）。1 次元あたりの点数は全体の直積格子より
+少なくてよく、既定は mirt の `bfactor()` と同じく $P=1$ で 31 点、$P=2$ で 15 点である。flexpyirt はどちらの
+モデルも単一群で推定する。
+
+**EM と標準誤差.** 受検者の事後分布も同じように分解できるので、E-step は各項目について、その項目のブロック格子
+（一般因子 × 特殊因子の 2 次元）上の期待度数を与え、[4 節](#4-bockaitkin-em-アルゴリズム)の項目ごとの M-step は
+そのまま使える。two-tier モデルでは、主因子格子の重みの対数の期待値を最大化して主因子間の相関を更新するので、
+EM の単調性は保たれる。標準誤差は、縮約した周辺対数尤度の Hessian、または縮約した E-step を通して微分した
+Oakes の恒等式から求める。どちらも自動微分で厳密である。受検者は分解した事後分布の EAP でスコアリングする。
+
+**結果の読み方.** 特殊因子がまとまりの中の依存を吸収するので、一般因子の傾きはその依存で膨らまない。
+双因子モデルの局所依存の統計量（[16 節](#16-局所依存と次元性)）は、特殊因子*を超える*依存をペアごとに調べる。
+指定から漏れたまとまりは、その中の大きな正の残差相関として現れる。
+
+ガイド: [双因子モデル](guide.ja.md#双因子モデル)、[two-tier モデル](guide.ja.md#two-tier-モデル)。
+
+## 14. 標本ウェイト
+
+調査では受検者が等しくない確率で抽出され、各受検者がウェイト $w_i$（おおよそ、その受検者が代表する母集団の
+人数）を持つことがある。このとき flexpyirt は**重み付き周辺対数尤度**（擬似尤度; Skinner, 1989）を最大化する:
+$$\ell_w(\eta)=\sum_iw_i\log L(\mathbf y_i;\eta)=\sum_pc_p\log L_p(\eta),\qquad c_p=\sum_{i:\,\mathbf y_i=p}w_i .$$
+同じ応答パターンの受検者は、人数を数える代わりにウェイトを合計してまとめるので、EM・多母集団・FIPC・
+すべての潜在分布がそのまま動く。ウェイトは与えられたまま使う（尺度を変えない）。ウェイトが整数なら、
+推定結果は行 $i$ を $w_i$ 回繰り返したデータへの推定と完全に一致する（*度数ウェイト*）。対数尤度はウェイトの
+尺度で表され、BIC は mirt と同じく $\log N$ の代わりに $\log\sum_iw_i$ を使う。
+
+**標準誤差.** 情報行列 $-\nabla^2\ell_w$ の逆行列は、度数ウェイトでは正しい共分散だが、抽出ウェイトでは
+正しくない。抽出デザインのもとでの推定量の分散はサンドイッチ
+$$\operatorname{Var}(\hat\eta)\approx H^{-1}\Big(\sum_iw_i^2s_is_i^\top\Big)H^{-1},\qquad H=-\nabla^2\ell_w(\hat\eta)$$
+である（$s_i$ は受検者 $i$ のスコア; Binder, 1983）。クラスター抽出では外積をクラスター内で合計する。
+このデザインに基づく標準誤差はまだ実装していないので、ウェイトと標準誤差を一緒に求めると flexpyirt は
+警告を出す。項目適合度・$M_2$・局所依存・DIF は重みのない度数を前提とするので、ウェイト付きの推定結果には
+使えない。
+
+ガイド: [標本ウェイト](guide.ja.md#標本ウェイト)。
+
+## 15. 合計得点・情報量・信頼性
+
+**情報量.** どの項目モデルでも、$\theta$ についての Fisher 情報量は
+$$I_j(\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\theta)\Big(\frac{\partial\log P_{jk}(\theta)}{\partial\theta}\Big)^2$$
+である（Birnbaum, 1968; Samejima, 1969）。2PL では $a_j^2P_j(1-P_j)$ になる。flexpyirt は各項目モデルの
+カテゴリ確率を自動微分してこの微分を求めるので、同じコードがすべてのモデルに使える。テスト情報量
+$I(\theta)=\sum_jI_j(\theta)$ から、$\theta$ の効率的な推定量の条件付き標準誤差 $\mathrm{SE}(\theta)=I(\theta)^{-1/2}$
+が得られる。カテゴリを $0,\dots,K_j-1$ と得点化すると、**期待得点** $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ と
+**テスト特性曲線** $T(\theta)=\sum_jE_j(\theta)$ が $\theta$ を合計得点の尺度に写す。
+
+**合計得点の分布.** $\theta$ を与えると項目得点は独立なので、合計得点 $S=\sum_jX_j$ の分布は畳み込みであり、
+**Lord–Wingersky 再帰**（Lord & Wingersky, 1984。多値項目は Thissen, Pommerich, Billeaud & Williams, 1995）で
+計算する:
+$$L_0(0)=1,\qquad L_j(s)=\sum_kL_{j-1}(s-k)\,P_{jk}(\theta),\qquad s=0,\dots,\textstyle\sum_j(K_j-1).$$
+2 値項目ではこれは**Poisson 二項分布**、すなわち成功確率の異なる独立な Bernoulli 変数の和の分布である
+（González, Wiberg & von Davier, 2016）。再帰の各項は非負なので、裾でも相対誤差が小さい。対数空間版は
+倍精度の最小値より小さい確率も保つ。ほかの方法として、特性関数の離散 Fourier 変換（Hong, 2013）は
+絶対誤差 $10^{-16}$ 程度まで厳密だが、そのため裾の確率には向かない。2 値項目には正規近似・精密化正規近似
+（Volkova, 1996）・Poisson 近似（Le Cam, 1960）もある。
+
+**周辺信頼性.** $\theta$ での誤差分散を $1/I(\theta)$ とすると、得点の条件付き信頼性は
+$\sigma^2I(\theta)/\{\sigma^2I(\theta)+1\}$ で、その母集団での期待値は
+$$\bar\rho=\int\frac{\sigma^2I(\theta)}{\sigma^2I(\theta)+1}\,\phi(\theta;\mu,\sigma^2)\,d\theta$$
+である（Green, Bock, Humphreys, Linn & Reckase, 1984; Thissen & Wainer, 2001）。この形は潜在尺度の線形変換で
+変わらず、$\mu=0$・$\sigma^2=1$ では mirt の `marginal_rxx()` と一致する。標本の**経験的信頼性**は、EAP スコアと
+その事後標準偏差から $s^2_{\hat\theta}/(s^2_{\hat\theta}+\overline{\mathrm{SE}^2})$ とする。スコアの分散が真の得点の
+分散を、事後分散の平均が誤差分散を推定する。
+
+**合計得点による EAP**（Thissen et al., 1995）. 同じ合計得点の受検者に同じスコアを与えたいとき（換算表や
+報告）は、応答パターンを与えた事後分布の代わりに合計得点を与えた事後分布を使う。推定結果の潜在分布の重み
+$w_q$ を使って
+$$P(s)=\sum_qL(s\mid\theta_q)\,w_q,\qquad \hat\theta(s)=\frac{\sum_q\theta_q\,L(s\mid\theta_q)\,w_q}{P(s)}$$
+とし、事後標準偏差も同様に求める。$P(s)$ はモデルが示す合計得点の分布である。欠測反応のある受検者は
+この尺度の合計得点を持たないので、スコアは与えない。
+
+ガイド: [合計得点の分布](guide.ja.md#合計得点の分布)、
+[情報関数・期待得点・信頼性](guide.ja.md#情報関数期待得点信頼性)、
+[合計得点による EAP](guide.ja.md#合計得点による-eap)。
+
+## 16. 局所依存と次元性
+
+1 次元の IRT は、1 つの特性が項目間の関連を説明すると仮定する（局所独立、[2 節](#2-周辺尤度)）。これを調べる
+問いは 2 つあり、両方をまとめて多数決しても意味がないので分けて扱う。項目に**いくつの次元**が必要か（整数）と、
+データが**本質的に 1 次元**か（Stout, 1990）、すなわち小さな依存を除いて 1 つの支配的な特性が残るか（判定や指標）
+である。
+
+**ポリコリック相関.** 順序的な項目得点の Pearson 相関は減衰し、項目の難しさに依存するので、見かけの
+「困難度因子」を生むことがある。ポリコリック相関は、項目 $j$ と $j'$ への反応が 2 変量正規の組を閾値 $\tau_{jk}$
+で切って得られると仮定し、その組の相関 $\rho$ を求める（2 値項目どうしならテトラコリック相関）。2 段階法
+（Olsson, 1979）では、閾値を周辺分布から $\hat\tau_{jk}=\Phi^{-1}(\hat P(Y_j\le k))$ と求め、$\rho$ は
+$\sum_{ab}n_{ab}\log\pi_{ab}(\rho)$ を最大化する。$\pi_{ab}$ はセル $(a,b)$ の長方形の 2 変量正規確率である。
+ペアごとに推定した行列は正定値とは限らないので、そのときは固有値を通して平滑化する。
+
+**次元数.** 次の方法は（ポリコリック）相関行列にもとづく:
+
+- **平行分析**（Horn, 1965）: 共通因子のないデータ（正規データ、または各項目を独立に並べ替えた観測データ）の
+  固有値を上回る先頭の固有値を残す。ここでは 95 パーセンタイルを基準にする（Glorfeld, 1995;
+  Garrido, Abad & Ponsoda, 2013）。
+- **Velicer の MAP**（Velicer, 1976; Velicer, Eaton & Fava, 2000）: $m$ 個の成分を偏相関で取り除き、偏相関の
+  2 乗（または 4 乗）の平均を最小にする $m$ を選ぶ。
+- **経験的カイザー基準**（Braeken & van Assen, 2017）: 標本誤差と、すでに説明された分散を考慮した基準値と
+  固有値を比べる。
+- **Hull 法**（Lorenzo-Seva, Timmerman & Kiers, 2011）: 適合度を自由度に対してプロットした凸包の肘にあたる
+  因子解を選ぶ。
+- **比較データ法**（Ruscio & Roche, 2012）: 観測された相関と周辺分布を再現する $k$ 因子の母集団を生成し、
+  観測された固有値を有意によりよく再現する間 $k$ を増やす。
+
+**推定したモデルの残差の関連.** 次の統計量は、モデルを推定したあとも関連が残る項目のペアを探す:
+
+- **Q3**（Yen, 1984）: 2 項目の残差 $d_{ij}=x_{ij}-E(X_j\mid\hat\theta_i)$ の受検者間の相関。モデルが正しくても
+  Q3 は平均してわずかに負なので、**Q3\*** は非対角の Q3 の平均を引く（Christensen, Makransky & Horton, 2017）。
+- **LD $X^2$ と $G^2$**（Chen & Thissen, 1997）: ペアの観測された $K_i\times K_j$ 表を、モデルが示す表
+  $E_{ab}=n_{ij}\sum_qP_{ia}(\theta_q)P_{jb}(\theta_q)w_q$ と比べる。符号付きの Cramér の $V$ は、ペアの関連が
+  モデルの予測より強い（正）か弱いかを示す。
+- **ジャックナイフ傾き指標**（Edwards, Houts & Cai, 2018）: 項目 $j$ を除いてモデルを推定し直す。項目 $j$ が
+  項目 $i$ と局所依存していれば $i$ の傾きが下がり、$(\hat a_i-\hat a_i^{(-j)})/\mathrm{SE}(\hat a_i^{(-j)})$ が
+  目立って大きくなる。flexpyirt は再推定の 1 ステップ近似と Newton 近似も提供する。15 項目程度以上で精度がよい。
+- **モデルに基づく平行分析**（Drasgow & Lissak, 1983）: 観測されたポリコリック行列の第 2 固有値を、推定した
+  1 次元モデルから生成したデータでの分布と比べる。パラメタを同じデータから推定しているので、$p$ 値は保守的である。
+
+**条件付き共分散.** 本質的に 1 次元なら、特性の値が等しい受検者の間で 2 項目の共分散はほぼ 0 になる。
+ノンパラメトリックな方法は、特性の代わりに合計得点を使う（Stout, 1987）:
+
+- **DETECT**（Zhang & Stout, 1999; Zhang, 2007）: 項目をクラスターに分割したとき、項目ペアについて
+  $\mathrm{DETECT}=100\cdot\overline{\delta_{ij}\,\widehat{\mathrm{Cov}}(X_i,X_j\mid S)}$ とする。$\delta_{ij}$ は同じ
+  クラスターのペアで $+1$、それ以外で $-1$。同じクラスターの項目が正に、異なるクラスターの項目が負に共変すると
+  大きくなる。おおよそ 0.2 未満なら本質的に 1 次元とみなす（Jang & Roussos, 2007）。探索的な版は、標本の半分で
+  クラスタリングして分割を求め、残りの半分で評価する。
+- **DIMTEST**（Stout, 1987; Nandakumar & Stout, 1993）: 本質的な 1 次元性の検定。テストの残りの部分の得点が等しい
+  群の中で評価用の部分テストの分散を求め、1 次元のときの値と比べる。偏りは、観測された項目反応関数から
+  リサンプリングした 1 次元データで取り除く（Stout, Froelich & Gao, 2001）。検定は保守的である（flexpyirt の
+  シミュレーションでは第 1 種の誤りが名目水準を下回る）。小さい $p$ 値は多次元性の強い証拠だが、大きい $p$ 値は
+  1 次元性の弱い証拠にすぎない。
+
+単独で信頼できる方法はない（Auerswald & Moshagen, 2019）。`dimensionality()` はそれぞれの問いについて複数の方法を
+実行し、問いごとに別々の合意を報告する。
+
+ガイド: [16 節](guide.ja.md#16-ポリコリック相関)、[17 節](guide.ja.md#17-次元数)、
+[18 節](guide.ja.md#18-局所依存と次元性のレポート)、[19 節](guide.ja.md#19-detect)。
+
 ## 参考文献
 
+- Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Baker, F. B., & Kim, S.-H. (2004). *Item Response Theory: Parameter Estimation Techniques* (2nd ed.). Marcel Dekker.
+- Binder, D. A. (1983). On the variances of asymptotically normal estimators from complex surveys. *International Statistical Review*, 51(3), 279–292.
 - Birnbaum, A. (1968). Some latent trait models and their use in inferring an examinee's ability. In F. M. Lord & M. R. Novick, *Statistical Theories of Mental Test Scores*. Addison-Wesley.
 - Bock, R. D. (1972). Estimating item parameters and latent ability when responses are scored in two or more nominal categories. *Psychometrika*, 37, 29–51.
 - Bock, R. D., & Aitkin, M. (1981). Marginal maximum likelihood estimation of item parameters: Application of an EM algorithm. *Psychometrika*, 46, 443–459.
 - Bock, R. D., & Lieberman, M. (1970). Fitting a response model for n dichotomously scored items. *Psychometrika*, 35, 179–197.
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6, 431–444.
 - Bock, R. D., & Zimowski, M. F. (1997). Multiple group IRT. In W. J. van der Linden & R. K. Hambleton (Eds.), *Handbook of Modern Item Response Theory*. Springer.
+- Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
+- Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
+- Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
+- Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
 - Dempster, A. P., Laird, N. M., & Rubin, D. B. (1977). Maximum likelihood from incomplete data via the EM algorithm. *JRSS B*, 39, 1–38.
+- Drasgow, F., & Lissak, R. I. (1983). Modified parallel analysis: A procedure for examining the latent dimensionality of dichotomously scored item responses. *Journal of Applied Psychology*, 68(3), 363–373.
+- Edwards, M. C., Houts, C. R., & Cai, L. (2018). A diagnostic procedure to detect departures from local independence in item response theory models. *Psychological Methods*, 23(1), 138–149.
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80, 27–38.
+- Garrido, L. E., Abad, F. J., & Ponsoda, V. (2013). A new look at Horn's parallel analysis with ordinal variables. *Psychological Methods*, 18(4), 454–474.
+- Gibbons, R. D., & Hedeker, D. R. (1992). Full-information item bi-factor analysis. *Psychometrika*, 57(3), 423–436.
+- Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
+- González, J., Wiberg, M., & von Davier, A. A. (2016). A note on the Poisson's binomial distribution in item response theory. *Applied Psychological Measurement*, 40(4), 302–310.
+- Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22, 144–149.
+- Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
+- Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
+- Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43, 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking* (3rd ed.). Springer.
+- Le Cam, L. (1960). An approximation theorem for the Poisson binomial distribution. *Pacific Journal of Mathematics*, 10(4), 1181–1197.
 - Li, Y. H., & Lissitz, R. W. (2000). An evaluation of the accuracy of multidimensional IRT linking. *Applied Psychological Measurement*, 24, 115–138.
 - Lord, F. M., & Wingersky, M. S. (1984). Comparison of IRT true-score and equipercentile observed-score "equatings". *Applied Psychological Measurement*, 8, 453–461.
+- Lorenzo-Seva, U., Timmerman, M. E., & Kiers, H. A. L. (2011). The Hull method for selecting the number of common factors. *Multivariate Behavioral Research*, 46(2), 340–364.
 - Louis, T. A. (1982). Finding the observed information matrix when using the EM algorithm. *JRSS B*, 44, 226–233.
 - Masters, G. N. (1982). A Rasch model for partial credit scoring. *Psychometrika*, 47, 149–174.
 - Maydeu-Olivares, A., & Joe, H. (2005). Limited- and full-information estimation and goodness-of-fit testing in $2^n$ contingency tables. *Journal of the American Statistical Association*, 100, 1009–1020.
@@ -337,18 +516,33 @@ $d^*=d-\mathbf a^{*\top}\boldsymbol\beta$ になる（Oshima, Davey & Lee, 2000�
 - Mislevy, R. J. (1986). Bayes modal estimation in item response models. *Psychometrika*, 51, 177–195.
 - Mislevy, R. J. (1991). Randomization-based inference about latent variables from complex samples. *Psychometrika*, 56, 177–196.
 - Muraki, E. (1992). A generalized partial credit model: Application of an EM algorithm. *Applied Psychological Measurement*, 16, 159–176.
+- Nandakumar, R., & Stout, W. (1993). Refinements of Stout's procedure for assessing latent trait unidimensionality. *Journal of Educational Statistics*, 18(1), 41–68.
 - Oakes, D. (1999). Direct calculation of the information matrix via the EM algorithm. *JRSS B*, 61, 479–482.
 - Ogasawara, H. (2001). Standard errors of item response theory equating/linking by response function methods. *Applied Psychological Measurement*, 25, 53–67.
-- Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37, 357–373.
+- Olsson, U. (1979). Maximum likelihood estimation of the polychoric correlation coefficient. *Psychometrika*, 44(4), 443–460.
 - Orlando, M., & Thissen, D. (2000). Likelihood-based item-fit indices for dichotomous item response theory models. *Applied Psychological Measurement*, 24, 50–64.
+- Oshima, T. C., Davey, T. C., & Lee, K. (2000). Multidimensional linking: Four practical approaches. *Journal of Educational Measurement*, 37, 357–373.
 - Rasch, G. (1960). *Probabilistic Models for Some Intelligence and Attainment Tests*. Danish Institute for Educational Research.
 - Rubin, D. B. (1976). Inference and missing data. *Biometrika*, 63, 581–592.
+- Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Skinner, C. J. (1989). Domain means, regression and multivariate analysis. In C. J. Skinner, D. Holt & T. M. F. Smith (Eds.), *Analysis of Complex Surveys* (pp. 59–87). Wiley.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7, 201–210.
+- Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
+- Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.
+- Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
+- Thissen, D., & Wainer, H. (Eds.). (2001). *Test Scoring*. Lawrence Erlbaum Associates.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
+- Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scandinavian Journal of Statistics*, 35, 335–353.
+- Velicer, W. F. (1976). Determining the number of components from the matrix of partial correlations. *Psychometrika*, 41(3), 321–327.
+- Velicer, W. F., Eaton, C. A., & Fava, J. L. (2000). Construct explication through factor or component analysis: A review and evaluation of alternative procedures for determining the number of factors or components. In R. D. Goffin & E. Helmes (Eds.), *Problems and Solutions in Human Assessment* (pp. 41–71). Kluwer.
+- Volkova, A. Y. (1996). A refinement of the central limit theorem for sums of independent random indicators. *Theory of Probability and Its Applications*, 40(4), 791–794.
 - Warm, T. A. (1989). Weighted likelihood estimation of ability in item response theory. *Psychometrika*, 54, 427–450.
 - White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1–25.
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
+- Yen, W. M. (1984). Effects of local item dependence on the fit and equating performance of the three-parameter logistic model. *Applied Psychological Measurement*, 8(2), 125–145.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
+- Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.
+- Zhang, J., & Stout, W. (1999). The theoretical DETECT index of dimensionality and its application to approximate simple structure. *Psychometrika*, 64(2), 213–249.
