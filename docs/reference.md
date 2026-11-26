@@ -22,7 +22,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
 - Correlations (flexpyctt): [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
-- Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`expected_score`](#expected_score), [`reliability`](#reliability)
+- Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - Plots: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
 - IRT equating: [`irt_equate`](#irt_equate), [`IRTEquatingResult`](#irtequatingresult), [`score_distribution`](#score_distribution), [`scale_table`](#scale_table)
@@ -1326,40 +1326,81 @@ Runs several diagnostics and reports them side by side, with two separate consen
 
 ## Information and reliability
 
-Functions of a fitted unidimensional model ([guide section 5](guide.md#information-expected-score-and-reliability)).
-All raise `SpecificationError` for a multidimensional model.
+Functions of a fitted model ([guide section 5](guide.md#information-expected-score-and-reliability)).
+The information functions and `expected_score` work for unidimensional, confirmatory
+multidimensional, bifactor and two-tier models
+([guide section 14](guide.md#information-of-multidimensional-models)); `reliability` and the
+summed-score functions raise `SpecificationError` for a multidimensional model.
+
+For a model with $D$ factors, `theta` is an array of shape `(T, D)`, a DataFrame whose columns are
+exactly the factor names (in any order), or one point as a 1-D array of length $D$; results are
+indexed by a `MultiIndex` whose level names are the factor names. For a unidimensional model
+`theta` is a number or 1-D array and the index is named `theta`.
 
 ### `item_information`
 
 ```text
-item_information(res, theta, *, group=None) -> DataFrame
+item_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 Fisher information of every item at the latent trait values `theta`,
 $I_j(\theta)=\sum_kP_{jk}(\theta)\,(\partial\log P_{jk}(\theta)/\partial\theta)^2$ (Birnbaum, 1968;
 Samejima, 1969), computed for every item model by automatic differentiation. It is what mirt's
-`iteminfo()` returns.
+`iteminfo()` returns. For a multidimensional model it is the directional information
+$\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u$ along the unit vector
+$\mathbf u$ = `direction` / ‖`direction`‖, with the item information matrix of
+[`information_matrix`](#information_matrix) (Reckase & McKinley, 1991); mirt's
+`iteminfo(..., degrees = )` is `direction=np.cos(np.radians(degrees))` when
+$\sum_m\cos^2\alpha_m=1$ (mirt does not normalize the direction).
 
 | Argument | Type | Description |
 |---|---|---|
-| `res` | `FitResult` | A fitted unidimensional model |
-| `theta` | float / 1-D array | Latent trait values (finite) |
+| `res` | `FitResult` | A fitted model |
+| `theta` | float / array / DataFrame | Latent trait values (finite; see above) |
+| `direction` | 1-D array of length $D$, optional | Direction in the latent space, normalized to length 1; required for a multidimensional model, not allowed for a unidimensional one |
 | `group` | str, optional | Group name; required for a multiple-group model |
 
-**Returns**: `DataFrame` with one row per value of `theta` (the index, named `theta`) and one
-column per item.
+**Returns**: `DataFrame` with one row per point of `theta` and one column per item.
 
 ### `test_information`
 
 ```text
-test_information(res, theta, *, group=None) -> DataFrame
+test_information(res, theta, *, direction=None, group=None) -> DataFrame
 ```
 
 Test information $I(\theta)=\sum_jI_j(\theta)$ and the conditional standard error
-$1/\sqrt{I(\theta)}$ (mirt's `testinfo()`). Arguments as for
-[`item_information`](#item_information).
+$1/\sqrt{I(\theta)}$ (mirt's `testinfo()`). For a multidimensional model, the directional test
+information $\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$ (mirt's `testinfo(..., degrees = )`)
+and the standard error of the estimate of the composite $\mathbf u^\top\boldsymbol\theta$,
+$\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$, which equals $1/\sqrt{I(\theta)}$
+in one dimension. This is not mirt's `plot(type = "SE")`, which draws $1/\sqrt{\mathbf u^\top\mathbf I\mathbf u}$
+(`1 / np.sqrt(information)`). Arguments as for [`item_information`](#item_information).
 
-**Returns**: `DataFrame` indexed by `theta` with the columns `information` and `se`.
+**Returns**: `DataFrame` indexed like [`item_information`](#item_information) with the columns
+`information` and `se` (infinite where the information is 0 or the information matrix is
+singular).
+
+### `information_matrix`
+
+```text
+information_matrix(res, theta, *, item=None, group=None) -> ndarray
+```
+
+Fisher information matrix
+$\mathbf I_j(\boldsymbol\theta)=\sum_kP_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}\,\nabla_{\boldsymbol\theta}\log P_{jk}^\top$
+of one item, or the test information matrix $\sum_j\mathbf I_j$, at each point of `theta`
+(Reckase, 2009), by automatic differentiation. It is mirt's `iteminfo(..., multidim_matrix = TRUE)`
+(summed over items for the test).
+
+| Argument | Type | Description |
+|---|---|---|
+| `res` | `FitResult` | A fitted model |
+| `theta` | float / array / DataFrame | Latent trait values (finite; see above) |
+| `item` | str, optional | Item name; by default the test information matrix |
+| `group` | str, optional | Group name; required for a multiple-group model |
+
+**Returns**: array of shape `(T, D, D)`, one symmetric positive semi-definite matrix per point,
+rows and columns in the order of the model's factors (`(T, 1, 1)` for a unidimensional model).
 
 ### `expected_score`
 
@@ -1369,11 +1410,11 @@ expected_score(res, theta, *, group=None) -> DataFrame
 
 Expected item scores $E_j(\theta)=\sum_kk\,P_{jk}(\theta)$ and the test characteristic curve
 $T(\theta)=\sum_jE_j(\theta)$, with categories scored $0,\dots,K_j-1$ as in the data (mirt's
-`expected.item()` and `expected.test()`). Arguments as for
-[`item_information`](#item_information).
+`expected.item()` and `expected.test()`); $\theta$ is a vector for a multidimensional model.
+Arguments `res`, `theta` and `group` as for [`item_information`](#item_information).
 
-**Returns**: `DataFrame` indexed by `theta` with one column per item and the column `total`. An
-item named `total` raises `SpecificationError`.
+**Returns**: `DataFrame` indexed like [`item_information`](#item_information) with one column per
+item and the column `total`. An item named `total` raises `SpecificationError`.
 
 ### `reliability`
 

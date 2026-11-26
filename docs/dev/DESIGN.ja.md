@@ -1774,8 +1774,8 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    **精度と速度の実測**は VALIDATION.md（V36）に記録する。
 
 2. **情報関数・期待得点・信頼性・合計得点 EAP（#82、V37）**:
-   **範囲。** 1 次元モデル（単一群・多母集団）。多次元モデルではどの関数も `SpecificationError`
-   （情報行列と方向別の情報量は別の変更で扱う）。
+   **範囲。** 1 次元モデル（単一群・多母集団）。多次元モデルの情報行列と方向別の情報量は項目 3 で扱う。
+   信頼性と合計得点の関数は、多次元モデルでは `SpecificationError`。
    **API（決定、オーナー 2026-11-25）。** `link()` や `dimensionality()` と同じく、推定結果を第 1 引数に
    とるモジュール関数にする: `item_information(res, theta, *, group=None)`、
    `test_information(res, theta, *, group=None)`、`expected_score(res, theta, *, group=None)`、
@@ -1847,6 +1847,67 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    正規の事前分布を使うため）。
    **`FitResult` に新しく保存するものはない。** `schema_version` は変えない。
    **一致の実測値**は VALIDATION.md（V37）に記録する。
+
+3. **多次元モデルの情報行列と方向別の情報量（#82、V43）**:
+   **範囲。** `with_factors` による確認的モデル（2–3 因子、交差負荷を含む任意の負荷パターン）、
+   bifactor モデル（`with_bifactor`）と two-tier モデル（`with_two_tier`）。単一群と多母集団。
+   `item_information`・`test_information`・`expected_score` がこれらを受け付け、新しい
+   `information_matrix` が行列そのものを返す。`reliability`・`summed_score_table`・
+   `score(method="EAPsum")` は 1 次元のまま（多次元の合計得点 EAP や合成得点の周辺信頼性は別の問題で、
+   mirt の参照値もない）。
+   **情報行列。** $\boldsymbol\theta\in\mathbb R^D$ について、項目 $j$ の Fisher 情報行列とテスト情報行列は
+   $$\mathbf I_j(\boldsymbol\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)\,
+     \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)^\top,\qquad
+     \mathbf I(\boldsymbol\theta)=\sum_j\mathbf I_j(\boldsymbol\theta)$$
+   （Reckase, 2009, 5 章）。項目 2 と同じく項目カーネルのカテゴリ対数確率の前進モード自動微分で求め、
+   今度は $D$ 個の座標すべてで微分する（`jax.jacfwd` が $K_j\times D$ のヤコビ行列を返す）。組み込みの
+   項目族ではどれも $P_{jk}$ が $\boldsymbol\theta$ に $\mathbf a_j^\top\boldsymbol\theta$ を通してだけ
+   依存するので、$\mathbf I_j=c_j(\boldsymbol\theta)\,\mathbf a_j\mathbf a_j^\top$ は階数 1 になる。
+   コードはこの性質を使わない（利用者定義のカーネルが満たすとは限らない）。1 次元モデルでは $D=1$ で、
+   行列は項目 2 のスカラーそのもの。コードの経路は 1 つ。bifactor と two-tier モデルでは、カーネルを
+   $D$ 次元ベクトル全体で評価する。§17 の次元縮約は $\boldsymbol\theta$ についての積分だけの話で、
+   ここでは関係しない。
+   **方向別の情報量。** 単位ベクトル $\mathbf u$（$\|\mathbf u\|=1$）の方向について
+   $$I_{j,\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u,\qquad
+     I_{\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u$$
+   （Reckase & McKinley, 1991; Ackerman, 1994）。$\boldsymbol\theta$ が $\mathbf u$ に沿って動くときの
+   情報量である。mirt の `iteminfo(..., degrees = )` / `testinfo(..., degrees = )` は各軸との角度
+   $\alpha_m$ をとり、正規化せずに $u_m=\cos\alpha_m$ を使う。flexpyirt は方向ベクトルをとって
+   **正規化する**ので、角度が整合していれば（$\sum_m\cos^2\alpha_m=1$）両者は一致し、mirt の角度は
+   `direction=np.cos(np.radians(degrees))` にあたる。
+   **API（決定、2026-11-26）。**
+   - 多次元モデルの `theta` は `(T, D)` の配列様のもの、または列がちょうど因子名である DataFrame
+     （順序は任意で、モデルの順に並べ替える）。長さ $D$ の 1 次元配列は 1 点を表す。1 次元モデルは
+     項目 2 の 1 次元の `theta` のまま。結果のインデックスは、水準名が因子名の `MultiIndex`（1 次元
+     モデルではこれまでどおり名前 `theta` のインデックス）。
+   - `item_information(res, theta, *, direction=None, group=None)` と
+     `test_information(res, theta, *, direction=None, group=None)`: 多次元モデルでは `direction`
+     （1 次元、長さ $D$、有限、0 でない。正規化する）が**必須**。自然な既定の方向がないため（mirt も
+     `degrees` を必須にしている）。列はそれぞれ項目ごとに 1 列、`information` と `se`。1 次元モデルでは
+     `direction` は `None` でなければならない。1 回の呼び出しで方向は 1 つ。複数の方向は複数回呼ぶ。
+   - `test_information` の `se` は $\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}$、
+     つまり合成値 $\mathbf u^\top\boldsymbol\theta$ の ML 推定量の漸近的な条件付き標準誤差で、$D=1$ では
+     $I(\theta)^{-1/2}$ になる。$I_{\mathbf u}^{-1/2}$ ではない（こちらは $\mathbf u$ に直交する座標が既知の
+     ときの標準誤差）。両者が一致するのは $\mathbf u$ が $\mathbf I$ の固有ベクトルのときだけ。
+     $\mathbf I(\boldsymbol\theta)$ が数値的に特異な（最小固有値が最大固有値の $D\varepsilon$ 倍
+     以下。$\varepsilon$ は倍精度の機械イプシロン。たとえば一次独立な傾きベクトルが因子数より少ない）
+     点では、1 次元で $I=0$ のときと同じく `se` は $+\infty$。項目の行列は $(\mathbf M+\mathbf M^\top)/2$
+     で対称化し、厳密に対称にする。**mirt とは異なる**: mirt の `testinfo()` に SE はないが、2・3 因子モデルの
+     `plot(type = "SE")` / `type = "infoSE"` は $1/\sqrt{I_{\mathbf u}}$（`1/sqrt(testinfo(x, Theta, degrees = ))`、
+     上の「他の座標が既知」の値）を描く。flexpyirt は推定可能な量の標準誤差であり $D=1$ で 1 次元の SE に一致する
+     合成値の SE を返す。$1/\sqrt{I_{\mathbf u}}$ は同じ DataFrame の `1 / np.sqrt(information)`。参照値は R で
+     mirt の項目情報行列の和を逆行列にして作る。
+   - `information_matrix(res, theta, *, item=None, group=None)` は形 `(T, D, D)` の NumPy 配列を返す:
+     テスト情報行列、または `item=`（項目名）を与えればその項目の行列。DataFrame ではなく配列にするのは、
+     点ごとの $D\times D$ 行列には引きやすい平らな配置がないため。行と列は推定したモデルの `Model.factor_names` の順。
+     1 次元モデルでは `(T, 1, 1)`。mirt の `iteminfo(..., multidim_matrix = TRUE)`（点ごと）にあたり、
+     テストはその項目についての和。
+   - `expected_score(res, theta, *, group=None)`: $E_j(\boldsymbol\theta)=\sum_kk\,P_{jk}(\boldsymbol\theta)$
+     と `total`。項目 2 と同じで、`theta` が多次元になるだけ。$D$ 列の `Theta` を与えた mirt の
+     `expected.item()` / `expected.test()` にあたる。
+   **`FitResult` に新しく保存するものはない。** `schema_version` は変えない。
+   **一致の実測値**は VALIDATION.md（V43）に記録する。
 
 ## 19. 多次元尺度リンキング（M6）
 
@@ -2142,6 +2203,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    V51 で照合。
 
 ## 参考文献
+- Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -2218,6 +2280,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Press, W. H., Teukolsky, S. A., Vetterling, W. T., & Flannery, B. P. (2007). *Numerical Recipes: The Art of Scientific Computing* (3rd ed.). Cambridge University Press.
 - Ramsay, J. O. (1991). Kernel smoothing approaches to nonparametric item characteristic curve estimation. *Psychometrika*, 56(4), 611–630.
 - Reckase, M. D. (2009). *Multidimensional Item Response Theory*. Springer.
+- Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Revelle, W. (2024). *psych: Procedures for psychological, psychometric, and personality research* (R package). Northwestern University.
 - Roberts, J. S., Donoghue, J. R., & Laughlin, J. E. (2000). A general item response theory model for unfolding unidimensional polytomous responses. *Applied Psychological Measurement*, 24(1), 3–32.
 - Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor models: Calculating and interpreting statistical indices. *Psychological Methods*, 21(2), 137–150.

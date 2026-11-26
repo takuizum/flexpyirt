@@ -47,6 +47,7 @@ from flexpyirt.equating import IRTEquatingResult, irt_equate, scale_table, score
 from flexpyirt.fit import fit
 from flexpyirt.information import (
     expected_score,
+    information_matrix,
     item_information,
     reliability,
     summed_score_table,
@@ -117,6 +118,7 @@ __all__ = [
     "exploratory_detect",
     "fit",
     "hull",
+    "information_matrix",
     "irt_equate",
     "item_information",
     "item_probabilities",
