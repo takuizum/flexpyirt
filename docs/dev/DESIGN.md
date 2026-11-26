@@ -97,6 +97,9 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   $\dim\xi_j\le 5$ or so). Items of the same item model ("item family") are stacked and `vmap`ed.
   A backtracking line search guarantees that $Q_j$ increases (monotone, as a generalized EM). The
   M-step need not converge fully; a few Newton steps are enough.
+  The Newton runs on the natural scale with a bounded active set (§15.2) by default;
+  `BAEM(m_step_scale="unconstrained")` runs it on logit/log scales of the bounded coordinates
+  instead, with the same objective (§15.47).
 - Fixed parameters are not part of $\eta$ (they come from the ParameterTable as constants).
 - **Equality constraints across items** (e.g. one common $a$ for all items) break the
   decomposition. **Decision (M5, §16.1)**: items connected by shared `free_id`s form a component
@@ -216,6 +219,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   posterior than $\theta_2$, $\alpha$ is stepped back towards $-1$ up to a fixed number of halvings;
   if still unacceptable, $\theta_2$ is used directly, guaranteeing monotone log posterior
   (§15.11–§15.12, §15.17).
+  SQUAREM always works on the natural scale, whatever `m_step_scale` is (§15.47).
 - Both plain EM and SQUAREM run entirely on device in `lax.while_loop` (no Python iteration loop or
   host callbacks). Optional progress output with `jax.debug.callback` is left for later.
 
@@ -227,8 +231,12 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   a Jacobian term (the posterior mode on the natural scale; verified against R mirt 1.46's
   `LL.Priors`, where `expbeta` evaluates `dbeta(plogis(logit_g), a, b, log = TRUE)` with no logit
   Jacobian; see VALIDATION.md).
-- Even if optimization ran on a transformed scale, the objective is evaluated with the
-  natural-scale prior.
+- Even if optimization runs on a transformed scale (`BAEM(m_step_scale="unconstrained")`,
+  §15.47), the objective is evaluated with the natural-scale prior.
+- **Decision (#15, §15.48)**: `LogitNormalPrior(mean_logit, sd_logit)` is a fourth prior, a
+  distribution on $(0,1)$ with $\operatorname{logit}X\sim N(\mu,s^2)$. Its natural-scale density
+  contains the logit Jacobian because that is part of the density of $X$ itself, not a change
+  of optimization scale.
 - Fixed parameters ignore their priors; a parameter shared across groups (same `free_id`) is
   counted **once**. Priors on latent-distribution parameters are out of scope (`SpecificationError`).
 - Results report `loglik` (likelihood only) and `log_posterior` (equal to `loglik` without priors)
@@ -514,6 +522,8 @@ data-independent shapes (§15.21).
    coordinate within $10^{-8}$ of a bound whose gradient points outwards is held for that step
    ($\varepsilon$-active set; Bertsekas, 1982) so a boundary asymptote does not block `a` and `d`
    from converging. The objective-ascent check still guarantees EM monotonicity.
+   `BAEM(m_step_scale="unconstrained")` replaces this box with logit/log coordinates (§15.47);
+   the default stays this active-set Newton.
 3. **Numerical stability at $g=0$ and $u=1$**: log-probabilities are computed as
    $$\log P_1 = \operatorname{logaddexp}\big(\log g,\ \log(u-g)+\log\sigma(z)\big),\qquad
    \log P_0 = \operatorname{logaddexp}\big(\log(1-u),\ \log(u-g)+\log\sigma(-z)\big)$$
@@ -1059,6 +1069,73 @@ data-independent shapes (§15.21).
     and in `LinkResult.A`/`B` (the linking constants of Kolen & Brennan, 2014), and the port of
     mirt's cell collapsing (`_itemfit.collapse_cells`) keeps mirt's local names so it can be
     compared line by line.
+47. **Optional unconstrained M-step scale (`BAEM(m_step_scale="unconstrained")`, #15, V45)**:
+    $\eta$, the ParameterTable, priors, standard errors and SQUAREM all stay on the natural scale
+    (§4.7, §15.2). Only the masked Newton of the M-step (`_newton.newton_ascent`, used by the
+    item-wise, coupled, latent and two-tier latent M-steps) can run on an unconstrained scale.
+    `BAEM.m_step_scale: Literal["natural", "unconstrained"]` defaults to `"natural"`, the bounded
+    active-set Newton of §15.2, so existing results do not change.
+    - **Which coordinates.** With `"unconstrained"`, each free coordinate of the M-step box
+      `(lower, upper)` (the table bounds intersected with the prior support, §15.16) is mapped by
+      $$z=\begin{cases}\operatorname{logit}\frac{x-l}{u-l}, & l,u\text{ finite},\\
+      \log(x-l), & \text{only } l \text{ finite},\\ \log(u-x), & \text{only } u \text{ finite},\\
+      x, & \text{unbounded},\end{cases}$$
+      with inverses $x=l+(u-l)\,\sigma(z)$, $x=l+e^{z}$, $x=u-e^{z}$. This gives logit($g$),
+      logit($u$), log($\sigma^2$) for latent variances (also the mixture `rvar_c`), and
+      $2\operatorname{atanh}(\rho)$ for MVN correlations in $(-1,1)$. The rule follows the bounds, not
+      the parameter name: slopes keep $(-\infty,\infty)$ and are **not** transformed (an
+      $\exp(a)$ scale would add the constraint $a>0$, while negative slopes are legitimate), but
+      a slope whose box is $(0,\infty)$ because of a `LogNormalPrior` or user-edited bounds is
+      optimized on $\log a$, which adds no constraint the box did not already impose.
+    - **Objective and step.** The Newton step maximizes $f(T^{-1}(z))$, where $f$ is the same
+      natural-scale objective (expected complete-data log-likelihood plus the natural-scale log
+      prior). Gradient and Hessian in $z$ come from autodiff through $T^{-1}$ (the chain rule; no
+      Jacobian term is added, because the objective is not a density in $z$). The step is the
+      same as §15.2 without the box: Newton direction on $z$, gradient fallback if it is not an
+      ascent direction, and halving $2^{-k}$ for $k<30$. A candidate is accepted iff its
+      natural-scale value $x=T^{-1}(z)$ lies strictly inside `(lower, upper)` on the free
+      coordinates (a saturated $\sigma(z)$ that rounds onto a bound is rejected), the objective
+      is finite, and $f(x_{\text{cand}})\ge f(x)$. The iterate is carried on the natural scale
+      and the comparison uses $f(x)$ itself, so a rejected step returns $x$ bit for bit and EM
+      stays monotone exactly as in §15.2.
+    - **Interior and boundary solutions.** $T$ is a monotone bijection of the open box, so
+      interior fixed points of EM are the same on both scales (only the path differs, because
+      the M-step is a partial Newton maximization). A boundary optimum cannot be reached:
+      $z\to\pm\infty$, the natural-scale change per iteration shrinks geometrically, and EM
+      stops by the $\max|\Delta\eta|<$ `tol` rule with the parameter close to but not at the
+      bound, often after many more iterations than the active-set Newton. `HeywoodWarning`
+      (§15.6) still uses the natural-scale distance $<10^{-4}$, so it fires only once the
+      parameter has drifted that close; a slow drift that is stopped earlier by `tol` can end
+      without the warning. That is why `"natural"` stays the default.
+    - **SQUAREM** (§15.11–§15.12) is unchanged: it extrapolates the natural-scale $\eta$ and
+      checks the same natural-scale bounds. `m_step_scale` only changes the EM map $F$ it calls.
+    - **Not changed**: the ParameterTable (`value`, `lower`, `upper`), standard errors (Oakes,
+      Hessian, cross-product and sandwich are all on natural $\eta$, so Wald intervals of $g$ are
+      not confined to $(0,1)$ by this option), priors, and the stopping rule. `BAEM` is saved in
+      the JSON (schema version 8 adds the `m_step_scale` key; versions $\le 7$ read as
+      `"natural"`).
+48. **Logit-normal prior (`LogitNormalPrior(mean_logit, sd_logit)`, #15, V45)**: a prior on a
+    parameter in $(0,1)$ (usually $g$ or $u$) under which $\operatorname{logit}X\sim
+    N(\mu,s^2)$ (Aitchison & Shen, 1980). On the natural scale, as every
+    prior in §4.7, its density includes the Jacobian of the logit:
+    $$\log\pi(x)=-\log x-\log(1-x)-\log s-\tfrac12\log(2\pi)-\frac{(\operatorname{logit}x-\mu)^2}{2s^2},\qquad 0<x<1,$$
+    and $-\infty$ outside $(0,1)$. The support is $(0,1)$, so it is intersected with the box like
+    `BetaPrior` (§15.16); the Core code is `PRIOR_LOGITNORMAL = 4` in `eval_log_prior`; a starting
+    value outside the box moves to the prior median $\sigma(\mu)$.
+    - **Relation to flexMIRT.** flexMIRT (Houts & Cai) estimates the 3PL lower asymptote on the
+      logit metric, $\lambda=\log[g/(1-g)]$, and its `Prior ..., Guessing : Normal(μ, s);` (e.g.
+      `Normal(-1.09, 0.5)` for $g\approx 1/4$) is a normal prior on $\lambda$. Its posterior mode
+      maximizes $\ell+\log\phi(\lambda;\mu,s)$ over $\lambda$, which is the mode over $g$ of
+      $\ell+\log\phi(\operatorname{logit}g;\mu,s)$ — the same normal kernel **without** the
+      $-\log g-\log(1-g)$ term. `LogitNormalPrior` is the proper density on $g$, so its natural-scale
+      MAP (§4.7) differs from flexMIRT's estimate by that term. The term grows towards both bounds,
+      so the `LogitNormalPrior` mode lies further from $1/2$ than flexMIRT's; the prior itself (as a
+      distribution of $g$) is the same.
+      R mirt's `norm` prior on `g` acts on mirt's internal logit($g$) and behaves like flexMIRT's.
+      Reproducing flexMIRT's or mirt's logit-scale mode is out of scope here.
+    - The hyperparameters are validated like `LogNormalPrior` (`mean_logit` finite, `sd_logit`
+      positive and finite). JSON registers it as `"LogitNormalPrior"` with keys `mean_logit` and
+      `sd_logit` (schema version 8).
 
 ## 16. Implementation decisions (M5)
 1. **Equality constraints across items (`Model.equal_across_items`, shared `free_id`s)**:
@@ -2567,6 +2644,7 @@ data-independent shapes (§15.21).
    the score table does not carry).
 
 ## References
+- Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
 - Auerswald, M., & Moshagen, M. (2019). How to determine the number of factors to retain in exploratory factor analysis: A comparison of extraction methods under realistic conditions. *Psychological Methods*, 24(4), 468–491.
 - Barton, M. A., & Lord, F. M. (1981). An upper asymptote for the three-parameter logistic item-response model. *ETS Research Report Series*, RR-81-20.
 - Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate: A practical and powerful approach to multiple testing. *JRSS B*, 57(1), 289–300.
@@ -2605,6 +2683,7 @@ data-independent shapes (§15.21).
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
 - Horn, J. L. (1965). A rationale and test for the number of factors in factor analysis. *Psychometrika*, 30(2), 179–185.
+- Houts, C. R., & Cai, L. (n.d.). *flexMIRT user's manual: Flexible multilevel multidimensional item analysis and test scoring* (versions 3.5–3.7). Vector Psychometric Group.
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
