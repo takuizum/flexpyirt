@@ -83,6 +83,7 @@ English | [日本語](VALIDATION.ja.md)
 | V43 | Information matrix, directional information and expected scores of multidimensional models at chosen parameters (two correlated factors with 2PL, 3PL, 4PL, GRM, GPCM and nominal items and four cross-loadings; three factors with 2PL, 3PL, GRM and GPCM and two cross-loadings; bifactor 2PL + GRM with three specific factors; two-tier 2PL + GRM with two correlated primary factors and two specific factors) | `iteminfo(item, Theta, multidim_matrix = TRUE)`, `iteminfo(item, Theta, degrees = )`, `testinfo(m, Theta, degrees = )`, `expected.item()`, `expected.test()` on `mirt()` / `bfactor()` objects built with `pars =` and `TOL = NaN` | M7 |
 | V45 | Optional unconstrained M-step scale (`BAEM(m_step_scale="unconstrained")`) on the V3, V4, V5, V7, V9, V11 and V14 cases; `LogitNormalPrior` (`"natural"`: no mirt equivalent, independent numerical check; `mode_scale="logit"`: mirt `norm` on `g`) | the existing references of those cases; SciPy (`stats.norm`, `integrate.quad`) and a stationarity condition written from the formula; `v45_3pl_logit_norm_map.json` (mirt) and the flexMIRT logit-metric mode computed in the test | #15 |
 | V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
+| V50 | Common-item screening for linking (#105): robust z (Huynh & Meyer, 2010), displacement and RMSD of expected item score curves; removal order, linking constants at every purification step and the final item table (2PL; mixed 2PL + GRM + GPCM) | separate `mirt()` calibrations + base-R recomputation (`median()`, `quantile(type = 7)`, `expected.item()`, V20 linking); `equateIRT::dif.test` as a cross-check of the drifted items | field |
 | V52 | Classification accuracy and consistency for cut scores (#107): Lee (summed-score cuts) and Rudner ($\theta$ cuts), D and P approaches, one to three cuts, non-integer cuts, both cut-scale conversions (3PL $J=20$; GRM $K=4$, $J=10$; two-group 2PL $J=15$, focal mean and variance free) | cacIRT 1.4 `class.Lee()`, `Lee.poly.D()` / `Lee.poly.P()`, `Rud.D()` / `Rud.P()` with mirt's `testinfo()` SE; independent recomputation from mirt `probtrace()` / `expected.test()` / `testinfo()` (kappa, false positive / negative rates, per-category indices, tables) | field |
 
 ## mirt settings and known differences (found in M1)
@@ -703,6 +704,40 @@ English | [日本語](VALIDATION.ja.md)
   closed forms, the one-factor criterion equal to §16.5's, finite-difference gradients, exact
   recovery of known transformations for two and three factors, the delta-method Jacobian
   against re-solving the linking, `transform_theta`, errors): `tests/test_m6_linking_multidim.py`.
+- **Common-item screening (V50, #105)**: no R package implements the robust z, the displacement
+  or the expected-score RMSD together with characteristic-curve linking and purification, so
+  `validation/r/v50_screening_reference.R` (→ `tests/reference/v50_screening.json`, mirt 1.48,
+  equateIRT 2.5.2) recomputes the rules of DESIGN §22 in base R: each form is calibrated with
+  `mirt` (`optimizer = "NR"`, `accelerate = "none"`, `TOL = 1e-10`, 61 nodes on $[-6, 6]$, latent
+  $N(0, 1)$); the linking on each anchor set is the V20 base-R Stocking–Lord / Haebara (asserted
+  `max |grad| < 1e-9`); locations, `log_ratio_a`, robust z (`median()`,
+  `quantile(type = 7)`, `IQR()`), displacement and the RMSD of `expected.item()` curves on the
+  target grid follow the formulas, and the purification loop is written out with the same removal
+  rule. `tests/test_r_v50_screening.py` runs `screen_common_items()` on `FitResult`s fixed at
+  mirt's estimates and compares the removal order, $(A, B)$ and the criterion at every step, the
+  final item table, the flags and the `ScreeningWarning`. Source populations $N(0.4, 1.2^2)$ on
+  the target scale; drift planted in the source form.
+  - **V50a (`v50a_2pl`, 2PL, 12 common + 8 unique items per form, $N=2000$/form; drift: `c01`
+    $b + 0.8$, `c02` $a \times 1.8$, `c03` $b - 0.6$)**: seven variants (robust z with
+    `removal="largest"` and `"all"`, displacement, RMSD, displacement with symmetric Haebara,
+    robust z with `max_iter=1`, RMSD 0.02 with `min_items=11`). Removal orders agree exactly
+    (robust z removes `c02, c01, c03, c10`; displacement and RMSD `c01, c03`); over all steps
+    `max |Δ(A, B)| = 2.3e-11`, per-item quantities `5.0e-12`, robust z `2.7e-10`.
+    `equateIRT::dif.test` (Lord's Wald test after Stocking–Lord linking, with purification,
+    $\alpha = 0.05$) flags `c01, c02, c03, c12`: the three planted drifts, which robust z also
+    removes first.
+  - **V50b (`v50b_mixed`, 2PL + GRM $K=4$ + GPCM $K=4$, 6 + 3 + 3 common, $N=2500$/form; drift:
+    `d01` $b + 0.7$, `g01` thresholds $+0.6$, `p02` $a \times 0.5$)**: four variants (robust z,
+    displacement, RMSD, RMSD with Haebara and `removal="all"`). Removal orders agree exactly
+    (robust z `p02, d01, g01`; RMSD `g01, p02, d01`; displacement `d01, g01`);
+    `max |Δ(A, B)| = 1.0e-11`, per-item quantities `4.8e-12`, robust z `3.4e-10`.
+  Tolerances: $(A, B)$ `1e-9`, criterion rel `1e-7`, per-item quantities `1e-9`, robust z
+  `1e-8`. **Checked only independently** (unit tests in `tests/test_screening.py`): the
+  location of 4PL and nominal items ($b^* = A\,b + B$ for every kernel), the RMSD against a direct
+  evaluation of the moved source curve, exact recovery of $(A, B)$ on drift-free items, the removal of
+  planted drifts among slightly perturbed items, the NaN robust z of Rasch slope ratios, the `items=`
+  subset and `stack_screening_tables()`. The thresholds are conventions (DESIGN §22); V50 checks
+  that the rules are computed as specified, not that the thresholds are good.
 - **Classification accuracy and consistency (V52, #107)**: DESIGN §18.4 in
   `tests/test_r_classification.py` (slow tier; generator `validation/r/classification_reference.R`
   → `tests/reference/v52_classification.json`, mirt 1.48, cacIRT 1.4, 61 points on $[-6, 6]$).

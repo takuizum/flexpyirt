@@ -2261,6 +2261,58 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    （`empirical_item_curve`, `wright_map_table`, `plot_item_curves`, `plot_wright_map`。
    `reliability` や `score` と同じ）では `data` の各行の群ラベル。
 
+## 22. 共通項目の点検と項目パラメータドリフト（#105）
+
+1. **`screen_common_items()`（V50、#105）**: 1 次元リンキング（§16.5）の共通項目について項目パラメータドリフトを点検し、
+   動いた項目を外してリンキングをやり直す。`link()` の引数ではなく別の関数にする。`link()` はアンカー集合を与えられたまま使い、
+   点検は純化の各段階で `link()` を 1 回呼ぶ。対象は `link()` が受け付ける項目モデル（2PL・Rasch・3PL・4PL・GRM・GPCM・PCM・
+   名義・混在）の 1 因子モデルで、多群の推定結果は `source_group` / `target_group` で群を選ぶ。多次元モデルは
+   `SpecificationError`。
+   **項目ごとの量**（現在のリンキング $(A, B)$ の下で、`source` の項目を `target` の尺度へ変換した $\xi_j^*$（§16.5）を使う）:
+   - 傾きの比 $\ell_j = \log|a_j^{*}| - \log|a_j^{\mathrm{tgt}}|$（`log_ratio_a`）。$a_j^* = a_j^{\mathrm{src}}/A$。
+     傾きが 0 なら NaN。
+   - 位置の差 $\delta_j = b_j^{*} - b_j^{\mathrm{tgt}}$（`difference_b`、source − target）。項目の**位置** $b_j$ は、
+     2PL・Rasch・3PL・4PL では表示用の困難度 $-d/a$、GRM と GPCM・PCM では表示用閾値の平均
+     $\bar b_j = \frac{1}{K_j-1}\sum_k b_{jk}$（GPCM はステップ困難度）、名義モデルでは $-d_{K-1}/((K-1)\,a)$
+     （最初と最後のカテゴリ曲線の交点。§16.5 の Mean/Mean 初期値と同じ）。どれも $b^* = A\,b + B$ と変換されるので
+     $\delta_j = A\,b_j^{\mathrm{src}} + B - b_j^{\mathrm{tgt}}$（#105 の未決事項 4 の決定: 閾値の平均を使えば 1 項目 1 つの
+     位置になり、多値項目が中央値と IQR に $K_j - 1$ 回数えられない）。
+   - 変位 $|\delta_j|$（`displacement`）。
+   - $\mathrm{RMSD}_j = \big\{\sum_q w_q^{(t)}\,[E_j^{*}(\theta_q) - E_j^{\mathrm{tgt}}(\theta_q)]^2\big\}^{1/2}$（`rmsd`）。
+     期待項目得点曲線 $E_j(\theta) = \sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)$（カテゴリ番号を得点とする。§16.5 の Stocking–Lord の
+     TCC と同じ）の差の二乗平均平方根を、`target` 群の推定済み格子 $(\theta_q^{(t)}, w_q^{(t)})$（`link()` の既定の格子）で
+     とる。$E_j^*(\theta) = E_j^{\mathrm{src}}((\theta - B)/A)$。2 つのモデル曲線の比較であり、項目適合度の観測値対モデルの
+     RMSD ではない。項目の得点の尺度（$0$ 〜 $K_j - 1$）のままで、$K_j - 1$ で割らない。
+   **頑健 z**（Huynh & Meyer, 2010）: $x \in \{\ell, \delta\}$ と共通項目 $\mathcal C$ について
+   $$z_j = \frac{x_j - \operatorname{median}_{i\in\mathcal C} x_i}{0.74\,\mathrm{IQR}_{i\in\mathcal C}(x_i)}.$$
+   IQR は線形補間の分位点（R の `quantile(type = 7)`、NumPy の既定 `linear`）。$0.74 \approx 1/1.349$ により
+   $0.74\,\mathrm{IQR}$ は正規分布の標準偏差の一致推定量になる。中央値と IQR は除外した項目も含む**すべての**共通項目でとり、
+   リンキングをやり直すたびに計算し直すのは差だけにする。中央値と IQR はもともとドリフトした項目に頑健であり、縮んでいくアンカー集合で
+   推定し直すと IQR が縮んで段階ごとに別の項目にフラグが立つ（V50a のシミュレーションでは、12 個の共通項目に 3 個のドリフトを
+   仕込んだところ、`min_items` で止まるまでに 10 項目を外した）。
+   IQR が正でない（$10^{-12}$ 未満。たとえば Rasch 項目の傾きの比はすべて $-\log A$）ときその z は NaN とし、フラグに
+   使わない。Huynh & Meyer は 2 回の推定の生のパラメータで計算するが、ここではリンキング後の $b^*$・$a^*$ で計算する。
+   傾きの統計量はどちらでも同じ（$\log A$ はすべての $\ell_j$ を同じだけずらす）で、位置の統計量は $A = 1$（Rasch）なら同じ。
+   それ以外では変換後のほうが両方の位置を `target` の尺度にそろえ、変位と同じ尺度になる。
+   **統計量とフラグ。** `statistic="robust_z"`: $s_j = \max(|z_{a,j}|, |z_{b,j}|)$（NaN は無視）、既定の閾値 1.645
+   （Huynh & Meyer, 2010）。`"displacement"`: $s_j = |\delta_j|$、既定 0.3 ロジット。`"rmsd"`: $s_j = \mathrm{RMSD}_j$、
+   既定 0.1。$s_j > $ `threshold` の項目にフラグを立てる。変位と RMSD の既定値は #105 で合意した慣行であり、導出された値では
+   ない。運用ごとに決める。
+   **純化**（`purify=True`。Candell & Drasgow, 1988 の意味での反復リンキング）: 段階 0 ですべての共通項目でリンクする。
+   各段階で現在のリンキングとアンカー集合の下で統計量を計算し直し、残っている項目にフラグがなければ終える。そうでなければ
+   `removal="largest"` はフラグの立った項目のうち $s_j$ が最大のもの（同値なら項目順で先のもの）を、`removal="all"` はフラグの
+   立った項目をすべて $s_j$ の大きい順に外し、残りの項目でリンキングをやり直す。アンカー集合が `min_items`（既定 2）を下回る
+   除外はしない。外せる項目がないときは `ScreeningWarning` を出して終え、`max_iter` 回の除外を使い切ってもフラグの立った
+   項目が残るときも同じ。`purify=False` は全共通項目でのリンキングの下で統計量を 1 回計算し、何も外さない。
+   **結果**（`CommonItemScreeningResult`）: `table`（最終のリンキングの下での共通項目ごとの行: `item`、`target_item`、`model`、
+   `a_source` / `b_source`（変換後）、`a_target` / `b_target`、`log_ratio_a`、`difference_b`、`displacement`、`robust_z_a`、
+   `robust_z_b`、`rmsd`、`statistic`、`flagged`、`kept`、`iteration_removed`（欠測可の整数））、`link`（最終の `LinkResult`）、
+   `initial_link`、`kept_items`、`removed_items`（外した順）、`history`（段階ごとの行: `iteration`、`n_items`、`A`、`B`、
+   `criterion`、`converged`、`removed`）。`stack_screening_tables({実施回: 結果, ...})` は、1 つの基準フォームに対して点検した
+   複数の実施回の表を、先頭に `administration` 列を付けて積む。
+   **含めないもの**: 1 つの多群推定の中での尤度比・Wald の DIF 検定（`FitResult.dif()`、#104）、項目を外さずに重みを下げる
+   頑健なリンキング基準、連鎖リンキングの誤差、多次元の点検。
+
 ## 参考文献
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
@@ -2279,6 +2331,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
 - Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
+- Candell, G. L., & Drasgow, F. (1988). An iterative procedure for linking metrics and assessing item bias in item response theory. *Applied Psychological Measurement*, 12(3), 253–260.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
@@ -2307,6 +2360,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Houts, C. R., & Cai, L. (n.d.). *flexMIRT user's manual: Flexible multilevel multidimensional item analysis and test scoring* (versions 3.5–3.7). Vector Psychometric Group.
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
+- Huynh, H., & Meyer, P. (2010). Use of robust z in detecting unstable items in item response theory models. *Practical Assessment, Research & Evaluation*, 15(2).
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.

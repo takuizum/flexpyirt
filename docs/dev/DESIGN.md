@@ -3012,6 +3012,76 @@ data-independent shapes (§15.21).
    rows of `data` where `data` is taken (`empirical_item_curve`, `wright_map_table`,
    `plot_item_curves`, `plot_wright_map`, like `reliability` and `score`).
 
+## 22. Common-item screening and item parameter drift (#105)
+
+1. **`screen_common_items()` (V50, #105)**: screens the common items of a unidimensional linking
+   (§16.5) for item parameter drift and repeats the linking without the items that moved. It is a
+   separate function, not an argument of `link()`: `link()` takes the anchor set as given, and the
+   screening calls `link()` once per purification step. Models: one-factor fits with the item
+   families `link()` accepts (2PL, Rasch, 3PL, 4PL, GRM, GPCM, PCM, nominal, mixed); multiple-group
+   fits through `source_group` / `target_group`. Multidimensional fits raise
+   `SpecificationError`.
+   **Per-item quantities** under the current linking $(A, B)$, with the source item transformed
+   to the target scale ($\xi_j^* $ of §16.5):
+   - slope ratio $\ell_j = \log|a_j^{*}| - \log|a_j^{\mathrm{tgt}}|$ (`log_ratio_a`), with
+     $a_j^* = a_j^{\mathrm{src}}/A$; NaN when a slope is 0;
+   - location difference $\delta_j = b_j^{*} - b_j^{\mathrm{tgt}}$ (`difference_b`, source minus
+     target), where the **location** $b_j$ of an item is its display difficulty $-d/a$ for 2PL /
+     Rasch / 3PL / 4PL, the mean of its display thresholds $\bar b_j = \frac{1}{K_j-1}\sum_k b_{jk}$
+     for GRM and GPCM / PCM (the step difficulties for GPCM), and $-d_{K-1}/((K-1)\,a)$ for the
+     nominal model (the crossing point of its first and last category curves, as in the Mean/Mean
+     start of §16.5). Every one of these transforms as $b^* = A\,b + B$, so
+     $\delta_j = A\,b_j^{\mathrm{src}} + B - b_j^{\mathrm{tgt}}$ (decision for #105 open question 4:
+     the mean threshold keeps one location per item, so a polytomous item is not counted
+     $K_j - 1$ times in the median and IQR);
+   - displacement $|\delta_j|$ (`displacement`);
+   - $\mathrm{RMSD}_j = \big\{\sum_q w_q^{(t)}\,[E_j^{*}(\theta_q) - E_j^{\mathrm{tgt}}(\theta_q)]^2\big\}^{1/2}$
+     (`rmsd`), the root mean squared difference of the expected item score curves
+     $E_j(\theta) = \sum_{k=0}^{K_j-1} k\,P_{jk}(\theta)$ (category index as score, as in the
+     Stocking–Lord TCC of §16.5) on the target group's fitted grid $(\theta_q^{(t)}, w_q^{(t)})$ (the
+     default grid of `link()`). $E_j^*(\theta) = E_j^{\mathrm{src}}((\theta - B)/A)$. It compares two
+     model curves; it is not the observed-versus-model RMSD of item fit. It is on the item's score
+     scale ($0$ to $K_j - 1$) and is not divided by $K_j - 1$.
+   **Robust z** (Huynh & Meyer, 2010): for $x \in \{\ell, \delta\}$ over the common items $\mathcal C$,
+   $$z_j = \frac{x_j - \operatorname{median}_{i\in\mathcal C} x_i}{0.74\,\mathrm{IQR}_{i\in\mathcal C}(x_i)},$$
+   with the IQR from linearly interpolated quantiles (R `quantile(type = 7)`, NumPy's default
+   `linear`); $0.74 \approx 1/1.349$ makes $0.74\,\mathrm{IQR}$ a consistent estimate of a normal
+   standard deviation. The median and IQR are taken over **all** common items, removed ones
+   included, and only the differences are recomputed after each relinking: both are robust to the
+   drifted items by construction, whereas re-estimating them on the shrinking anchor set shrinks
+   the IQR and flags further items at every step (in the V50a simulation, with three planted
+   drifts among 12 common items, it removed 10 items before `min_items` stopped it). When the IQR is not positive (below $10^{-12}$, e.g. the slope ratios of Rasch items, which
+   are all $-\log A$), that z is NaN and does not flag. Huynh & Meyer compute the statistic on the
+   two calibrations' raw parameters; here it is computed after the linking, on $b^*$ and $a^*$. The
+   slope statistic is the same either way ($\log A$ shifts every $\ell_j$ equally), and the location
+   statistic is the same when $A = 1$ (Rasch); otherwise the transformed version keeps both
+   locations on the target scale, which is also the scale of the displacement.
+   **Statistic and flag.** `statistic="robust_z"`: $s_j = \max(|z_{a,j}|, |z_{b,j}|)$ (NaN entries
+   ignored), default threshold 1.645 (Huynh & Meyer, 2010); `"displacement"`: $s_j = |\delta_j|$,
+   default 0.3 logits; `"rmsd"`: $s_j = \mathrm{RMSD}_j$, default 0.1. An item is flagged when
+   $s_j > $ `threshold`. The defaults of displacement and RMSD are conventions agreed in #105, not
+   derived values; programmes set their own.
+   **Purification** (`purify=True`; iterative linking in the sense of Candell & Drasgow, 1988):
+   step 0 links on all common items. At each step the statistics are recomputed under the current
+   linking and anchor set; if no kept item is flagged the loop stops. Otherwise
+   `removal="largest"` removes the flagged item with the largest $s_j$ (ties: the first in item
+   order) and `removal="all"` removes every flagged item, in decreasing $s_j$; the linking is
+   repeated on the remaining items. Removals never take the anchor set below `min_items` (default
+   2): when no item can be removed the loop stops with a `ScreeningWarning`, and so it does when
+   `max_iter` removal steps are used while kept items are still flagged. `purify=False` computes the
+   statistics once, under the linking on all common items, and removes nothing.
+   **Result** (`CommonItemScreeningResult`): `table` (one row per common item under the final
+   linking: `item`, `target_item`, `model`, `a_source` / `b_source` (transformed), `a_target` /
+   `b_target`, `log_ratio_a`, `difference_b`, `displacement`, `robust_z_a`, `robust_z_b`, `rmsd`,
+   `statistic`, `flagged`, `kept`, `iteration_removed` (nullable integer)), `link` (final
+   `LinkResult`), `initial_link`, `kept_items`, `removed_items` (in removal order), `history` (one row
+   per step: `iteration`, `n_items`, `A`, `B`, `criterion`, `converged`, `removed`).
+   `stack_screening_tables({administration: result, ...})` stacks the tables of several
+   administrations screened against one base form, with an `administration` column first.
+   **Not included**: likelihood-ratio or Wald DIF tests inside one multiple-group fit
+   (`FitResult.dif()`, #104), robust linking criteria that down-weight instead of removing items,
+   linking error over chains, multidimensional screening.
+
 ## References
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
@@ -3030,6 +3100,7 @@ data-independent shapes (§15.21).
 - Bolt, D. M., Cohen, A. S., & Wollack, J. A. (2001). A mixture item response model for multiple-choice data. *Journal of Educational and Behavioral Statistics*, 26(4), 381–409.
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
 - Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
+- Candell, G. L., & Drasgow, F. (1988). An iterative procedure for linking metrics and assessing item bias in item response theory. *Applied Psychological Measurement*, 12(3), 253–260.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
@@ -3058,6 +3129,7 @@ data-independent shapes (§15.21).
 - Houts, C. R., & Cai, L. (n.d.). *flexMIRT user's manual: Flexible multilevel multidimensional item analysis and test scoring* (versions 3.5–3.7). Vector Psychometric Group.
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
+- Huynh, H., & Meyer, P. (2010). Use of robust z in detecting unstable items in item response theory models. *Practical Assessment, Research & Evaluation*, 15(2).
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.

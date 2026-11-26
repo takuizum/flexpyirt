@@ -78,6 +78,7 @@
 | V43 | 指定したパラメタでの多次元モデルの情報行列・方向別の情報量・期待得点（相関する 2 因子で 2PL・3PL・4PL・GRM・GPCM・名義の項目と交差負荷 4 項目。3 因子で 2PL・3PL・GRM・GPCM と交差負荷 2 項目。特殊因子 3 の双因子 2PL + GRM。相関する主因子 2 と特殊因子 2 の two-tier 2PL + GRM） | `pars =` と `TOL = NaN` で作った `mirt()` / `bfactor()` のオブジェクトでの `iteminfo(item, Theta, multidim_matrix = TRUE)`、`iteminfo(item, Theta, degrees = )`、`testinfo(m, Theta, degrees = )`、`expected.item()`、`expected.test()` | M7 |
 | V45 | M-step の非拘束尺度（任意、`BAEM(m_step_scale="unconstrained")`）を V3・V4・V5・V7・V9・V11・V14 のケースで照合。`LogitNormalPrior`（`"natural"` は mirt に同等なものがないため独立な数値検証。`mode_scale="logit"` は mirt の `g` への `norm`） | 各ケースの既存の参照値。SciPy（`stats.norm`、`integrate.quad`）と式から書いた停留条件。`v45_3pl_logit_norm_map.json`（mirt）とテスト内で計算した flexMIRT の logit 尺度のモード | #15 |
 | V48 | mirt の推定値での図の数値（2PL $J=10$、$N=1003$。欠測 10% の 2PL。GRM $K=4$、$J=6$。2PL + 3PL + GPCM + 名義の混合 $J=10$。2 群の 2PL + GRM で焦点群の平均・分散を推定。TAM の GPCM $K=4$、$J=6$）: 経験的項目曲線、トレースライン、サーストン閾値 | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))`（群ごとは `extract.group()`）、`probtrace()`、`probtrace()` に対する `uniroot()`、`coef(IRTpars = TRUE)`。TAM `tam.threshold()` | #103 |
+| V50 | リンキングの共通項目の点検（#105）: 頑健 z（Huynh & Meyer, 2010）・変位・期待項目得点曲線の RMSD。除外の順序、純化の各段階のリンキング係数、最終の項目表（2PL、2PL + GRM + GPCM 混在） | 個別の `mirt()` 推定 + 素の R による再計算（`median()`、`quantile(type = 7)`、`expected.item()`、V20 のリンキング）。ドリフト項目の照合に `equateIRT::dif.test` | 現場向け |
 | V52 | カット得点による分類の正確さと一貫性（#107）: Lee（合計得点のカット）と Rudner（$\theta$ のカット）、D 法と P 法、カット 1〜3 個、整数でないカット、両方向のカット尺度の変換（3PL $J=20$、GRM $K=4$・$J=10$、2 群の 2PL $J=15$・焦点群の平均と分散は自由） | cacIRT 1.4 `class.Lee()`、`Lee.poly.D()` / `Lee.poly.P()`、mirt の `testinfo()` の SE を与えた `Rud.D()` / `Rud.P()`。mirt の `probtrace()` / `expected.test()` / `testinfo()` からの独立な再計算（κ、偽陽性・偽陰性率、カテゴリごとの指標、表） | field |
 
 ## mirt 側の設定と既知の差（M1 で判明）
@@ -609,6 +610,31 @@
   - **照合していないもの**: `sirt::class.accuracy.rasch`（Rasch、$\theta$ 上のカット）は cacIRT が
     同じ指標を扱うので使っていない。`Normal` 以外の潜在分布（同じ重みのコード経路だが R とは
     比べていない）。
+
+- **共通項目の点検（V50、#105）**: 頑健 z・変位・期待得点の RMSD を特性曲線リンキングと純化と組み合わせて実装した R パッケージは
+  ないので、`validation/r/v50_screening_reference.R`（→ `tests/reference/v50_screening.json`、mirt 1.48、equateIRT 2.5.2）が
+  DESIGN §22 の規則を素の R で計算し直す。各フォームを `mirt`（`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、
+  $[-6, 6]$ 上 61 節点、潜在分布 $N(0, 1)$）で推定し、各アンカー集合のリンキングは V20 の素の R の Stocking–Lord / Haebara
+  （`max |grad| < 1e-9` を確認）。位置、`log_ratio_a`、頑健 z（`median()`、`quantile(type = 7)`、`IQR()`）、変位、
+  `target` の格子上の `expected.item()` 曲線の RMSD は式どおりに計算し、純化のループも同じ除外規則で書き下す。
+  `tests/test_r_v50_screening.py` は mirt の推定値に固定した `FitResult` で `screen_common_items()` を実行し、除外の順序、
+  各段階の $(A, B)$ と規準値、最終の項目表、フラグ、`ScreeningWarning` を比較する。`source` の母集団は `target` の尺度で
+  $N(0.4, 1.2^2)$。ドリフトは `source` のフォームに仕込む。
+  - **V50a（`v50a_2pl`、2PL、各フォーム共通 12 + 固有 8 項目、各フォーム $N=2000$。ドリフト: `c01` $b + 0.8$、
+    `c02` $a \times 1.8$、`c03` $b - 0.6$）**: 7 通り（頑健 z の `removal="largest"` と `"all"`、変位、RMSD、対称 Haebara での
+    変位、`max_iter=1` の頑健 z、`min_items=11` の RMSD 0.02）。除外の順序は完全に一致（頑健 z は `c02, c01, c03, c10`、変位と
+    RMSD は `c01, c03`）。全段階で `max |Δ(A, B)| = 2.3e-11`、項目ごとの量 `5.0e-12`、頑健 z `2.7e-10`。
+    `equateIRT::dif.test`（Stocking–Lord リンキング後の Lord の Wald 検定、純化あり、$\alpha = 0.05$）は `c01, c02, c03, c12`
+    にフラグを立てる。仕込んだ 3 項目であり、頑健 z も最初にこの 3 項目を外す。
+  - **V50b（`v50b_mixed`、2PL + GRM $K=4$ + GPCM $K=4$、共通 6 + 3 + 3 項目、各フォーム $N=2500$。ドリフト: `d01`
+    $b + 0.7$、`g01` 閾値 $+0.6$、`p02` $a \times 0.5$）**: 4 通り（頑健 z、変位、RMSD、Haebara と `removal="all"` の RMSD）。
+    除外の順序は完全に一致（頑健 z は `p02, d01, g01`、RMSD は `g01, p02, d01`、変位は `d01, g01`）。
+    `max |Δ(A, B)| = 1.0e-11`、項目ごとの量 `4.8e-12`、頑健 z `3.4e-10`。
+  許容誤差: $(A, B)$ `1e-9`、規準値は相対 `1e-7`、項目ごとの量 `1e-9`、頑健 z `1e-8`。**独立にのみ確認したもの**
+  （`tests/test_screening.py` の単体テスト）: 4PL と名義項目の位置（すべてのカーネルで $b^* = A\,b + B$）、移した `source`
+  曲線の直接評価との RMSD の一致、ドリフトのない項目での $(A, B)$ の厳密な回復、わずかに揺らした項目に仕込んだドリフトの除外、Rasch の傾きの比の頑健 z が
+  NaN になること、`items=` による部分集合、`stack_screening_tables()`。閾値は慣行であり（DESIGN §22）、V50 が確かめるのは
+  規則が仕様どおりに計算されることで、閾値のよさではない。
 
 - **混合正規潜在分布（V22、M5）**: flexpyirt の `NormalMixture`（DESIGN §16.7）は形状に mirt のクラスのパラメタ化を
   使い、混合を解析的に標準化する。したがって格子 $\theta_q$ 上では、像の格子 $z_q=M+\sqrt V\theta_q$ 上の mirt の

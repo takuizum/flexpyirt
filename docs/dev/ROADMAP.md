@@ -159,6 +159,9 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   matplotlib from the optional extra `flexpyirt[plot]`. Unidimensional models, every item family, single
   and multiple groups; validated in V48 against mirt `itemfit(return.tables = TRUE)`, `probtrace()`,
   `coef(IRTpars = TRUE)` and TAM `tam.threshold()`.
+- [x] Common-item screening for linking and item parameter drift (#105; `screen_common_items()`,
+  `CommonItemScreeningResult`, `stack_screening_tables()`: robust z, displacement and
+  expected-score RMSD with iterative purification, unidimensional; validated in V50).
 - [x] Classification accuracy and consistency for cut scores (#107; `classification_accuracy()`,
   `ClassificationResult`: Lee, 2010, on summed-score cuts and Rudner, 2001, 2005, on $\theta$
   cuts, D and P approaches, kappa, per-cut false positive / negative rates, unidimensional models,

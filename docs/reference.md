@@ -19,7 +19,7 @@ random numbers; flexpyirt's take a JAX PRNG `key`.
 Apart from the first one or two, arguments of public functions are keyword-only (after `*`).
 
 - Fitting: [`fit`](#fit), [`FitResult`](#fitresult)
-- Scale linking: [`link`](#link), [`LinkResult`](#linkresult)
+- Scale linking: [`link`](#link), [`LinkResult`](#linkresult), [`screen_common_items`](#screen_common_items), [`CommonItemScreeningResult`](#commonitemscreeningresult), [`stack_screening_tables`](#stack_screening_tables)
 - Correlations (flexpyctt): [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - Number of dimensions (flexpyctt, except `model_parallel_analysis` and `dimensionality`): [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) and their results
 - Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
@@ -974,6 +974,74 @@ Returned by `link()`. Immutable.
 | `transform_theta(theta)` | scalar / ndarray / Series / DataFrame | Transform source-scale ability scores via $\theta^* = A\theta + B$ (`theta` and all `pv1..` columns of a scoring DataFrame; `se` $\mapsto A\,\mathrm{se}$, excluding linking error). For $D > 1$ factors: the `theta_<factor>` / `pv<m>_<factor>` columns or an array whose last axis has length $D$; `se_<factor>` is rescaled under a diagonal $\mathbf A$ and NaN otherwise |
 | `summary(*, digits=4)` | str | Readable plain-text summary (Jupyter displays HTML via `_repr_html_()`) |
 
+### `screen_common_items`
+
+```text
+screen_common_items(source, target, *, items=None, method="stocking_lord", symmetric=False,
+                    statistic="robust_z", threshold=None, purify=True, removal="largest",
+                    min_items=2, max_iter=10, source_group=None,
+                    target_group=None) -> CommonItemScreeningResult
+```
+
+Screen the common items of a unidimensional linking for item parameter drift and link again
+without the items that moved ([guide section 15](guide.md#screening-the-common-items)). Each
+step links with [`link`](#link) on the current anchor set, transforms the source items
+($a^* = a/A$, location $b^* = A\,b + B$) and computes per common item the robust z of the log
+slope ratio and of the location difference, $(x - \mathrm{median}) / (0.74\,\mathrm{IQR})$ over
+all common items (Huynh & Meyer, 2010), the displacement $|b^* - b^{\mathrm{tgt}}|$ and the RMSD of
+the expected item score curves on the target's fitted grid. The location is the difficulty of a
+dichotomous item, the mean display threshold of a GRM / GPCM / PCM item and
+$-d_{K-1}/((K-1)a)$ of a nominal item. Items whose statistic exceeds `threshold` are flagged and,
+with `purify=True`, removed and the linking repeated (Candell & Drasgow, 1988). Validated against
+a base-R recomputation on mirt calibrations (2PL; mixed 2PL + GRM + GPCM).
+
+| Argument | Type | Description |
+|---|---|---|
+| `source`, `target` | `FitResult` | Unidimensional fits on the source (new) and target (base) scales |
+| `items` | iterable[str] / Mapping[str, str], optional | Common items, as in `link()` |
+| `method`, `symmetric` | | Linking criterion, passed to `link()` |
+| `statistic` | `"robust_z"` / `"displacement"` / `"rmsd"` | Screening statistic: $\max(\lvert z_a\rvert, \lvert z_b\rvert)$ (default), $\lvert b^* - b^{\mathrm{tgt}}\rvert$, or the expected-score RMSD |
+| `threshold` | float, optional | Flag when the statistic exceeds it (default 1.645, 0.3 or 0.1) |
+| `purify` | bool | Remove flagged items and relink (default `True`); `False` only reports |
+| `removal` | `"largest"` / `"all"` | Per step, remove the flagged item with the largest statistic (default; ties: first in item order) or every flagged item |
+| `min_items` | int | Smallest anchor set a removal may leave (default 2) |
+| `max_iter` | int | Maximum number of removal steps (default 10) |
+| `source_group`, `target_group` | str, optional | Group names for multiple-group fits |
+
+**Returns**: [`CommonItemScreeningResult`](#commonitemscreeningresult)
+
+**Raises**: `PrecisionError`, `SpecificationError` (non-`FitResult` or multidimensional input,
+invalid options, or anything `link()` rejects).
+
+**Warns**: `ScreeningWarning` when the loop stops with kept items still flagged (`max_iter` used
+up, or a removal would leave fewer than `min_items`); `ConvergenceWarning` from `link()`.
+
+### `CommonItemScreeningResult`
+
+Returned by `screen_common_items()`. Immutable.
+
+| Attribute / method | Type | Description |
+|---|---|---|
+| `table` | DataFrame | One row per common item under the final linking: `item`, `target_item`, `model`, `a_source`, `b_source` (transformed), `a_target`, `b_target`, `log_ratio_a`, `difference_b` ($b^* - b^{\mathrm{tgt}}$), `displacement`, `robust_z_a`, `robust_z_b`, `rmsd`, `statistic`, `flagged`, `kept`, `iteration_removed` (nullable integer) |
+| `link` | `LinkResult` | Linking on the kept items |
+| `initial_link` | `LinkResult` | Linking on all common items |
+| `kept_items`, `removed_items` | tuple[str, ...] | Source names of the kept items and of the removed items in removal order |
+| `flagged_items` | tuple[str, ...] | Items flagged under the final linking |
+| `history` | DataFrame | One row per step: `iteration`, `n_items`, `A`, `B`, `criterion`, `converged`, `removed` |
+| `statistic`, `threshold`, `removal`, `purify` | | The options used |
+| `summary(*, digits=4)` | str | Readable plain-text summary (Jupyter displays HTML via `_repr_html_()`) |
+
+### `stack_screening_tables`
+
+```text
+stack_screening_tables(results) -> DataFrame
+```
+
+Stack the `table`s of several administrations screened against one base form, from a mapping
+`{administration: CommonItemScreeningResult}`, with `administration` first and the final
+constants `A`, `B` after `model`. Raises `SpecificationError` for an empty mapping or a value that
+is not a screening result.
+
 ## Correlations
 
 Package: flexpyctt (`from flexpyctt import polychoric`).
@@ -1797,3 +1865,8 @@ deviation below half the grid spacing, or mean outside the grid, or two coincidi
 #### `NotPositiveDefiniteWarning`
 
 Emitted by `polychoric()` when the pairwise matrix is not positive definite and `smooth=True` smoothed it.
+
+#### `ScreeningWarning`
+
+Emitted by `screen_common_items()` when purification stops while kept anchor items are still
+flagged: `max_iter` removal steps were used, or a removal would leave fewer than `min_items` items.

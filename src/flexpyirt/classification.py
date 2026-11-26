@@ -411,7 +411,9 @@ def classification_accuracy(
             true_score = np.einsum("tjk,k->t", probs, np.arange(probs.shape[-1], dtype=np.float64))
             true = np.asarray(_classification.categories(jnp.asarray(true_score), cuts_j))
         else:
-            information = np.asarray(_item_curves(prob, eta, theta_j)[0])[g].sum(axis=1)
+            information = np.asarray(_item_curves(prob, eta, theta_j.reshape(-1, 1))[0])[
+                g, :, :, 0, 0
+            ].sum(axis=1)
             with np.errstate(divide="ignore"):
                 se = 1.0 / np.sqrt(information)
             p_cat = np.asarray(_rudner_probabilities(theta_j, jnp.asarray(se), cuts_j))
