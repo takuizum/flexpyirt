@@ -38,6 +38,9 @@ English | [日本語](VALIDATION.ja.md)
 - **Current references**: R 4.6.2, mirt 1.48.5 at `2b342bb` (philchalmers/mirt, 2026-11-23).
   Before #74 they came from CRAN mirt 1.46.1 (V1–V13, `v14_mirt2d`, V16–V20, V22, V23, `v26_local_dependence`, V31, V32, V43) and
   1.48 (the rest).
+  The flexpyctt references V24 (`v24_polychoric`) and V27 (`v27_detect`) load mirt only for its
+  bundled LSAT7 / Science data (the values come from lavaan, psych and sirt), so they are not
+  regenerated on mirt HEAD and do not record `mirt_sha`.
 - **Drift found when regenerating on mirt 1.48.5 (`2b342bb`, #74)**: all references were
   regenerated and compared with the committed ones (`scripts/compare_references.py`). Item
   parameters, latent parameters, SEs, log-likelihoods, EAPs and fit statistics of every case

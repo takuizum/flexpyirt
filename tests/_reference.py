@@ -25,14 +25,17 @@ def check_reference_meta(
     *,
     require_richardson: bool = False,
     require_grid_check: bool = False,
+    mirt_estimates: bool = True,
 ) -> None:
     """Assert that mirt reference metadata records converged fits and the requested grid.
 
     A meta that records ``mirt_version`` must also record ``mirt_sha``, the commit of the GitHub
-    mirt the reference was generated with (VALIDATION.md, "R and mirt versions").
+    mirt the reference was generated with (VALIDATION.md, "R and mirt versions"). Pass
+    ``mirt_estimates=False`` for a flexpyctt reference that loads mirt only for its bundled data
+    sets (V24: the values come from lavaan and psych), which is not regenerated on mirt HEAD.
     """
     case = meta.get("case", "<unknown>")
-    if "mirt_version" in meta:
+    if mirt_estimates and "mirt_version" in meta:
         sha = meta.get("mirt_sha")
         assert isinstance(sha, str) and MIRT_SHA.fullmatch(sha), (
             f"Reference {case!r}: meta.mirt_sha must be the commit SHA of a GitHub mirt, got "
