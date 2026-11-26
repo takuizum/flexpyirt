@@ -1488,6 +1488,46 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     1 次元の結果はビット単位で変わらない（$D=1$ の同じコードパス）。
     **照合（V39）**: V14 の 4 モデルで mirt 1.48 と照合した。VALIDATION.md を参照。
 
+20. **古典的項目分析（flexpyctt、#101、V46）**: `flexpyctt/item_analysis.py`（NumPy / SciPy / pandas）。flexpyirt
+    からも再公開する。API は issue で提案し、オーナーが承認したもの（2026-11-26）: `score_responses()`、
+    `item_analysis()`、`coefficient_alpha()`（`AlphaResult`）、`coefficient_omega()`（`OmegaResult`）、
+    `distractor_analysis()`。名前は flexpyirt のモデルに基づく `reliability()` と重ならない。**issue の案からの変更**
+    （シグネチャは変えていない）: `AlphaResult` に `confidence_level` を加え、`if_deleted` は `alpha` と
+    `standardized_alpha` の両方を持つ。`OmegaResult` に当てはめた相関行列 `correlation` を加えた。`score_responses()`
+    はキーを列の順の列としても受け取る。
+    **欠測**（オーナーの決定事項 2。issue の既定 `"pairwise"`）: すべてペアワイズの共分散行列 $C$（R の
+    `cov(use = "pairwise")`）から計算し、標準化 α と ω にはペアワイズの相関行列（R の `cor(use = "pairwise")`。
+    `cov2cor(C)` ではない）を使う。psych の `alpha()` と同じ。`"listwise"` では先に欠測のある行を除く。どちらでも
+    1 つも回答のない行は除くので、`n_obs`（Feldt の $n$）は 1 つ以上回答した回答者の数になる。psych は `nrow(x)`。
+    **項目–合計・項目–残りの相関**は $c_j=\sum_l C_{jl}$ として $c_j/\sqrt{C_{jj}\,\mathbf 1^\top C\mathbf 1}$ と
+    $(c_j-C_{jj})/\sqrt{C_{jj}(\mathbf 1^\top C\mathbf 1-2c_j+C_{jj})}$。欠測がなければ $T$ と $T-x_j$ との Pearson 相関。
+    psych の `r.drop` は同じ式だが、`raw.r` は `rowSums(x, na.rm = TRUE)` との相関で、欠測を合計の 0 点として
+    扱うので α の元になる量ではない。flexpyctt は両方の列を $C$ から求め、`alpha`・`alpha_if_deleted` と同じ行列を
+    表すようにした。欠測時の `raw.r` との違いはテストし、文書に書いた。
+    **多分系列・双列相関**（`correlation="polyserial"`）: Olsson, Drasgow & Dorans (1982) の 2 段階推定量
+    $\hat\rho=r\,\sigma_j/\sum_k\phi(\tau_{jk})$。$\sigma_j$ は項目の SD（分母 $n$）、$\tau_{jk}$ は累積割合の
+    $\Phi^{-1}$ で、どちらも項目の観測された得点から求める。$r$ は上の Pearson の項目–合計（–残り）相関。polycor の
+    `polyserial(ML = FALSE)`、欠測のないときの psych の `polyserial()` と同じで、2 カテゴリでは
+    $r\sqrt{pq}/\phi(\Phi^{-1}(p))$。issue の「周辺から閾値、次に $\rho$」はこの推定量を指す。polycor の 2 段階版は
+    $\rho$ について最大化しない（最尤の多分系列相関 `ML = TRUE` は提供しない）。psych の `biserial()` は $p,q$ を
+    使いながら合計の分母 $n-1$ の SD で割るので、この値の $\sqrt{(n-1)/n}$ 倍になる（テスト済み）。$[-1,1]$ の外の
+    推定値は psych と同じく $\pm1$ にし、`HeywoodWarning` を出す。`difficulty` は平均を観測された最大得点で割るので、
+    得点は 0 以上とする。
+    **ω**: 1 因子の ULS 解（`efa()` のカーネル `_efa.fit_factors`）から $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf 1^\top
+    R\mathbf 1$。分母に観測された合計の分散を使う psych の `omega.tot`（Revelle & Zinbarg, 2009）と同じ。モデルが
+    含意する形 $(\sum\lambda)^2/((\sum\lambda)^2+\sum\psi)$ は完全に適合するときだけ一致し、返さない。`efa()` ではなく
+    カーネルを呼ぶので 3 項目でも計算できる（丁度識別のモデルで、`efa()` は自由度 0 として受け付けない）。Pearson の
+    行列が正定値でないとき（ペアワイズの行列ではありうる）は、`polychoric()` と同じく `smooth_correlation` で平滑化
+    する。issue に挙げた lavaan の 1 因子 CFA は参照に使わなかった。共分散行列への ML で、推定量も尺度も違う。
+    **キーによる採点と選択肢**: 選択肢はセルごとに `==` で比べるので、どの型のコードでもよい。誰も選ばない正答
+    選択肢は警告する（キーのコードや型の違いであることが多い）。`distractor_analysis()` では無回答は $T$ で 0 点。
+    各選択肢の統計量はその項目に答えた回答者で計算し、誰も選ばなくても正答は行に含める。得点群は R の
+    `cut(T, quantile(T, 0:G/G), include.lowest = TRUE)`（type 7 の分位点。同点は分けない）。分位点が重なったら、
+    黙って群を併合せずにエラーにする。
+    **照合（V46）**: `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R`。VALIDATION.md を参照。
+    **範囲外**（issue と同じ）: 階層 $\omega$、折半法、Guttman の $\lambda$、glb、上位下位 27% の識別指数、図（#103）、
+    ウェイト。
+
 ## 17. 実装上の決定（M7）
 
 1. **Gibbons–Hedeker の次元縮約による双因子モデル（`Model.with_bifactor`、V32）**:

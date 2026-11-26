@@ -30,6 +30,7 @@
 | CD: 主因子法の $\Lambda\Lambda^\top$、同じ乱数による 1 因子の母集団、順位和の $p$、平均 RMSE（採用された $k$ / 棄却された追加の $k$） | 1e-12、厳密、1e-10（相対）、15% / 60%（相対） |
 | DIMTEST（シミュレーション研究。テストではその小さい版）: .05 での第 1 種の誤り / 検出力 | 20 回中 $\le 0.15$ / 10 回中 $\ge 8$ |
 | mirt の推定値でのクロス積／サンドイッチの共分散（各要素を $\sqrt{v_{ii}v_{jj}}$ で割った差）。通しで当てはめたときのパラメタ／SE | 1e-9 / 1e-6、1e-6 / 1e-5（相対） |
+| 古典的項目分析（α、標準化 α、項目を除いたときの値、Feldt の区間、項目–合計・項目–残りの相関、点双列相関、2 段階の多分系列・双列相関、キーによる得点、選択肢の統計量）と psych / ltm / polycor / 素の R。ω total とその負荷量と psych | 1e-12（得点は完全一致）。1e-6 / 1e-5 |
 
 ## ケース一覧（マイルストーンと対応）
 | ID | 内容 | mirt 側の呼び出し | MS |
@@ -75,6 +76,7 @@
 | V38 | mirt の推定値での双因子・two-tier モデルの局所依存（双因子 2PL、$J=11$、特殊因子 3、一般因子のみの項目 2、欠測 3%。双因子 GRM $K=3$、$J=8$。two-tier 2PL、$J=10$、相関する主因子 2（交差負荷 1 項目）と特殊因子 2） | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`、two-tier は `bfactor(model2 = )`。Q3 は `Theta = fscores(m, quadpts = <適合時の値>)` | M7 |
 | V39 | 確認的多次元モデルの $M_2$ / $M_2^*$ と S-X2（V14 の 4 モデル: 2D 2PL 単純構造、交差負荷のある 2D 2PL、2D GRM $K=4$、3D 2PL。因子間相関あり。GRM は `mincell` 1 と 3） | mirt の V14 の推定値での `M2(m, quadpts =, theta_lim =)`、`itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)`。加えて、相関の列を $\Delta_2$ に入れた $M_2^*$ を R で厳密に計算した値 | M6 |
 | V40 | 4PL・名義反応モデル・2PL + 名義混在の共通項目の尺度リンキング。多次元リンキング $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$（対角・直交・斜交の $\mathbf A$。2 因子の 2PL と GRM、3 因子の 2PL）。Haebara・Stocking–Lord（非対称・対称）と Ogasawara の共分散 | 個別の `mirt()` 推定 + `probtrace()` / `expected.item()` による素の R の規準を `optim()` で最小化 | M6 |
+| V46 | 古典的項目分析（flexpyctt）: キーによる採点、α（ペアワイズとリストワイズ）、項目統計量、点双列・双列・多分系列相関、ω total（Pearson とポリコリック）、選択肢分析。シミュレーションによる 10 項目の多肢選択データ（欠測なし、5% MCAR）と 6 項目の 0〜4 のデータ（欠測なし、6% MCAR） | なし（mirt ではない）: psych `alpha()`、`score.multiple.choice()`、`responseFrequency()`、`polyserial()`、`biserial()`、`fa()`、`omega(nfactors = 1)`。ltm `cronbach.alpha()`、`biserial.cor()`。polycor `polyserial(ML = FALSE)`。lavaan `lavCor()`。選択肢の統計量は素の R | flexpyctt |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -939,6 +941,26 @@
   JSON の往復、拒否するケース。
 
 ## 照合以外の検証
+- **古典的項目分析（V46、flexpyctt、#101）**:
+  `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R`（psych 2.6.5、ltm 1.2.0、polycor 0.8.2、
+  lavaan 0.7.2）が `packages/flexpyctt/tests/reference/v46_item_analysis.json` を書き、
+  `packages/flexpyctt/tests/test_item_analysis.py` で照合する。シミュレーションの 4 例: 多肢選択 10 項目（$N=500$、
+  正答と誤答の引きつけ方を変え、1 項目は 5 選択肢）の欠測なしと 5% MCAR、0〜4 で採点する 6 項目（$N=300$、
+  段階反応モデル）の欠測なしと 6% MCAR。ほかに丁度識別の ω を見る 3 項目。観測された差: 閉じた式（α、標準化 α、
+  項目を除いたときの値、Feldt の上下限、平均、SD、項目–合計・項目–残りの相関、点双列・多分系列・双列相関、
+  選択肢の割合・点双列相関・平均得点・群ごとの割合）は $5\times10^{-15}$ 以下、キーによる得点は完全一致、
+  ω total は $7\times10^{-8}$ 以下、負荷量は $1.4\times10^{-6}$ 以下（psych の `fa()` が minres の最適化を早く
+  止めるため）、lavaan とのポリコリック行列は $2.3\times10^{-8}$ 以下。既知の違い（それぞれテストで確かめる）:
+  (1) psych の `raw.r` は `rowSums(na.rm = TRUE)` との相関なので、欠測があるときは R で求めた $C$ に基づく
+  `colSums(C)/sqrt(diag(C) * sum(C))` と比べ、`raw.r` そのものとは欠測なし・リストワイズのときだけ比べる
+  （DESIGN §16.20）。`r.drop` は psych でも $C$ に基づくので全例で比べる。(2) ltm の素の
+  `cronbach.alpha(na.rm = TRUE)` は合計の分散を欠測のない行から、項目の分散をすべての観測された得点から求め、
+  どちらの規則でもない。欠測のないデータでだけ比べる（標準化 α は欠測のない行を使い、`"listwise"` と一致する）。
+  (3) psych の `biserial()` は 2 段階の双列相関の $\sqrt{(n-1)/n}$ 倍になる。(4) psych の `polyserial()` は欠測の
+  ある行も $n$ に数えるので、欠測のないデータで比べる。欠測があるときは 2 段階の係数 $\sigma_j/\sum_k\phi(\tau_{jk})$
+  を R で計算し直して比べる。(5) 選択肢の統計量にはインストール済みの R 実装がない（TAM の `tam.ctt3` は未導入）。
+  スクリプトが定義どおり素の R で計算し、選択肢の割合は psych の `responseFrequency()` とも一致する。issue に挙げた
+  lavaan の 1 因子 CFA は使わなかった（共分散行列への ML は推定量も尺度も違う）。
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。
 - **SE の内部整合**: Oakes の SE と、収束点での周辺対数尤度の直接 `jax.hessian` による SE が一致すること（小規模ケース）。

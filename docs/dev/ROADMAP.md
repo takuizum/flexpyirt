@@ -149,3 +149,5 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).
 - [ ] Public extension API for user-defined item models, with docs examples (#86). New item models
   (e.g. GGUM) are added as validated examples of this API rather than as built-ins.
+- [x] flexpyctt: classical item analysis (keyed scoring, item statistics, alpha / omega, option
+  analysis; #101), validated in V46 against psych, ltm and polycor.

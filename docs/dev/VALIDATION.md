@@ -35,6 +35,7 @@ English | [日本語](VALIDATION.ja.md)
 | CD: PAF $\Lambda\Lambda^\top$; one-factor population from the same draws; rank-sum $p$; mean RMSE (retained $k$ / the rejected extra $k$) | 1e-12; exact; 1e-10 (relative); 15% / 60% (relative) |
 | DIMTEST (simulation study; small version in the tests): type I error at .05 / power | $\le 0.15$ of 20 / $\ge 8$ of 10 |
 | Cross-product / sandwich covariance at mirt's estimates (entries relative to $\sqrt{v_{ii}v_{jj}}$); parameters / SEs end-to-end | 1e-9 / 1e-6; 1e-6 / 1e-5 (relative) |
+| Classical item analysis (alpha, standardized alpha, if-deleted values, Feldt interval, item–total / item–rest, point-biserial, two-step polyserial / biserial, keyed scores, option statistics) vs psych / ltm / polycor / base R; omega total and its loadings vs psych | 1e-12 (scores exact); 1e-6 / 1e-5 |
 
 ## Cases (by milestone)
 | ID | Contents | mirt call | MS |
@@ -80,6 +81,7 @@ English | [日本語](VALIDATION.ja.md)
 | V38 | Local dependence for bifactor and two-tier models at mirt's estimates (bifactor 2PL, $J=11$, three specific factors, two general-only items, 3% MCAR; bifactor GRM $K=3$, $J=8$; two-tier 2PL, $J=10$, two correlated primary factors with a cross-loading item and two specific factors) | `residuals(bfactor(...), type = "LD" / "LDG2" / "Q3")`, `bfactor(model2 = )` for two-tier; Q3 with `Theta = fscores(m, quadpts = <the fit's>)` | M7 |
 | V39 | $M_2$ / $M_2^*$ and S-X2 for confirmatory multidimensional models (the four V14 models: 2D 2PL simple structure, 2D 2PL with a cross-loading, 2D GRM $K=4$, 3D 2PL; correlated factors; `mincell` 1 and 3 for the GRM) | `M2(m, quadpts =, theta_lim =)`, `itemfit(m, fit_stats = "S_X2", quadpts =, theta_lim =)` at mirt's V14 estimates, plus an exact R $M_2^*$ with the correlation columns in $\Delta_2$ | M6 |
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
+| V46 | Classical item analysis (flexpyctt): keyed scoring, alpha (pairwise and listwise), item statistics, point-biserial / biserial / polyserial correlations, omega total (Pearson and polychoric), option analysis; simulated 10-item multiple-choice (complete, 5% MCAR) and 6-item 0–4 data (complete, 6% MCAR) | none (not mirt): psych `alpha()`, `score.multiple.choice()`, `responseFrequency()`, `polyserial()`, `biserial()`, `fa()`, `omega(nfactors = 1)`; ltm `cronbach.alpha()`, `biserial.cor()`; polycor `polyserial(ML = FALSE)`; lavaan `lavCor()`; base R for option statistics | flexpyctt |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -1169,6 +1171,32 @@ English | [日本語](VALIDATION.ja.md)
   0.5–1.0% (conservative; the bootstrap removes the bias but $T$'s SD under the null is about 0.72)
   and the power 0.99–1.00. Rerun with `uv run python packages/flexpyctt/validation/simulation/dimtest_study.py`
   (about 4 minutes); the tests run 20 null and 10 alternative replications.
+- **Classical item analysis (V46, flexpyctt, #101)**:
+  `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R` (psych 2.6.5, ltm 1.2.0,
+  polycor 0.8.2, lavaan 0.7.2) writes `packages/flexpyctt/tests/reference/v46_item_analysis.json`;
+  `packages/flexpyctt/tests/test_item_analysis.py` compares. Four simulated cases: 10
+  multiple-choice items ($N=500$, keys and distractors of varying pull, one item with five
+  options) complete and with 5% MCAR, and 6 items scored 0–4 ($N=300$, graded model) complete and
+  with 6% MCAR; plus three items for a just-identified omega. Observed differences: closed forms
+  (alpha, standardized alpha, if-deleted values, Feldt bounds, means, SDs, item–total and
+  item–rest correlations, point-biserial, polyserial and biserial, option proportions,
+  point-biserials, mean scores and group proportions) $\le5\times10^{-15}$; keyed scores
+  identical; omega total $\le7\times10^{-8}$ and loadings $\le1.4\times10^{-6}$ (psych's `fa()`
+  stops its minres optimization earlier); polychoric matrices against lavaan $\le2.3\times10^{-8}$.
+  Known differences, each asserted in the tests: (1) psych's `raw.r` correlates with
+  `rowSums(na.rm = TRUE)`, so with missing data it is compared with the $C$-based
+  `colSums(C)/sqrt(diag(C) * sum(C))` computed in R, and `raw.r` itself only on complete or
+  listwise data (DESIGN §16.20); `r.drop` is $C$-based in psych too and is compared in every
+  case. (2) ltm's raw `cronbach.alpha(na.rm = TRUE)` takes the total variance from complete rows
+  and the item variances from all observed scores, which is neither rule; it is compared on
+  complete data only (its standardized alpha uses complete rows and matches `"listwise"`).
+  (3) psych's `biserial()` equals the two-step biserial times $\sqrt{(n-1)/n}$. (4) psych's
+  `polyserial()` counts missing rows in its $n$, so it is compared on complete data; with missing
+  data the two-step factor $\sigma_j/\sum_k\phi(\tau_{jk})$ is recomputed in R. (5) Option
+  statistics have no installed R implementation (TAM's `tam.ctt3` is not installed); the script
+  computes them in base R from their definitions, and option proportions also match psych's
+  `responseFrequency()`. lavaan's one-factor CFA, listed in the issue, was not used (ML on the
+  covariance matrix is another estimator and scale).
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is
