@@ -149,6 +149,12 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   `SE.type = "sandwich"` / `"crossprod"`.
 
 ## Field features
+- [x] Plots (#103): `item_probabilities()`, `empirical_item_curve()` and `wright_map_table()` return
+  the numbers behind the figures; `flexpyirt.plotting` (`plot_item_curves` with observed proportions and
+  per-group curves for DIF, `plot_information`, `plot_expected_score`, `plot_wright_map`) draws them with
+  matplotlib from the optional extra `flexpyirt[plot]`. Unidimensional models, every item family, single
+  and multiple groups; validated in V48 against mirt `itemfit(return.tables = TRUE)`, `probtrace()`,
+  `coef(IRTpars = TRUE)` and TAM `tam.threshold()`.
 - [x] Classification accuracy and consistency for cut scores (#107; `classification_accuracy()`,
   `ClassificationResult`: Lee, 2010, on summed-score cuts and Rudner, 2001, 2005, on $\theta$
   cuts, D and P approaches, kappa, per-cut false positive / negative rates, unidimensional models,

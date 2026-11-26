@@ -164,6 +164,8 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `detect`, `exploratory_detect` | 関数 | 確認的・探索的 DETECT。`DetectResult`, `ExploratoryDetectResult` を返す |
 | `model_parallel_analysis`, `dimensionality` | 関数 | `FitResult` のモデルに基づく平行分析と、まとめのレポート。`ModelParallelAnalysisResult`, `DimensionalityResult` を返す |
 | `item_information`, `test_information`, `expected_score` | 関数 | 1 次元の `FitResult` の、与えた `theta` での項目・テスト情報量（条件付き SE つき）と期待得点。`theta` をインデックスにした DataFrame を返す（DESIGN §18.2） |
+| `item_probabilities`, `empirical_item_curve`, `wright_map_table` | 関数 | 図の元になる数値: トレースライン（縦長の DataFrame）、EAP の $\theta$ の等人数区間ごとの観測カテゴリ比率とモデルの確率、Wright マップの受検者の推定値と項目のサーストン閾値（`WrightMapTable(persons, items)`）（DESIGN §21） |
+| `flexpyirt.plotting` | モジュール | `plot_item_curves`（観測比率つき。群ごとの曲線が DIF の図）、`plot_information`、`plot_expected_score`、`plot_wright_map`。matplotlib は任意依存 `flexpyirt[plot]` から遅延 import（なければ `MissingDependencyError`）（DESIGN §21） |
 | `reliability`, `summed_score_table` | 関数 | 周辺信頼性・経験的信頼性と、合計得点 EAP の表（`FitResult.score(method="EAPsum")` も）。DataFrame を返す |
 | `summed_score_distribution` | 関数 | カテゴリ確率に対する Lord–Wingersky / Poisson 二項分布のカーネル（DESIGN §18.1） |
 | `classification_accuracy` | 関数 | カット得点による分類の正確さと一貫性（合計得点上の Lee, 2010、$\theta$ 上の Rudner, 2001, 2005。D 法と P 法）。1 次元の `FitResult` に対し `ClassificationResult`（`summary`、`by_category`、`by_cut`、`conditional`、`accuracy_table`、`consistency_table`。DESIGN §18.3）を返す |

@@ -107,6 +107,11 @@
   `fscores(method = "EAPsum")`、`survey.weights`、`SE.type = "sandwich"` / `"crossprod"` との V 番号つき照合。
 
 ## 現場向け機能
+- [x] 図（#103）: `item_probabilities()`、`empirical_item_curve()`、`wright_map_table()` が図の元になる数値を
+  返し、`flexpyirt.plotting`（観測比率と群ごとの曲線（DIF）つきの `plot_item_curves`、`plot_information`、
+  `plot_expected_score`、`plot_wright_map`）が任意依存 `flexpyirt[plot]` の matplotlib で描く。1 次元モデル、
+  全項目族、単一群・多母集団。V48 で mirt の `itemfit(return.tables = TRUE)`、`probtrace()`、
+  `coef(IRTpars = TRUE)` と TAM の `tam.threshold()` に照合。
 - [x] カット得点による分類の正確さと一貫性（#107。`classification_accuracy()`、`ClassificationResult`: 合計得点上の
   カットの Lee, 2010 と $\theta$ 上のカットの Rudner, 2001, 2005、D 法と P 法、κ、カットごとの偽陽性・偽陰性率。
   1 次元モデル、単一群と多母集団。V52 で cacIRT と mirt からの再計算と照合）。

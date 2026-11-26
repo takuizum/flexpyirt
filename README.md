@@ -47,6 +47,7 @@ calibration and fixed item parameter calibration (FIPC).
 | Item fit | Orlando–Thissen S-X2 (`FitResult.item_fit()`, per group for multiple groups; also confirmatory 2–3 factor models, single group) with mirt's cell collapsing, df, RMSEA and p-values | ✓ |
 | Summed scores | Distribution of the summed score given the item category probabilities (`summed_score_distribution()`): Lord–Wingersky recursion (Poisson-binomial distribution for dichotomous items), also in log space, an FFT method, and normal / refined normal / Poisson approximations; works with `jit`, `vmap` and autodiff | ✓ |
 | Information and reliability | Item and test information for every item model by automatic differentiation (`item_information()`, `test_information()` with the conditional standard error), expected scores and the test characteristic curve (`expected_score()`), marginal and empirical reliability (`reliability()`), the summed-score EAP table (`summed_score_table()`) and `score(method="EAPsum")`; unidimensional models, single and multiple groups | ✓ |
+| Plots | Item characteristic curves with observed proportions in bins of EAP $\theta$ (also per group, the DIF plot), item / test information with the standard error, the test characteristic curve and Wright maps (`flexpyirt.plotting`, matplotlib from `flexpyirt[plot]`); the numbers come from `item_probabilities()`, `empirical_item_curve()` and `wright_map_table()`, checked against mirt's `itemfit()` tables, `probtrace()` and TAM's `tam.threshold()`; unidimensional models | ✓ |
 | Classification accuracy | Classification accuracy and consistency of cut scores with Cohen's kappa, per-cut false positive / negative rates and per-category indices (`classification_accuracy()`: Lee, 2010, on summed-score cuts and Rudner, 2001, 2005, on $\theta$ cuts; integrated over the fitted latent distribution or averaged over respondents' estimates); unidimensional models, single and multiple groups | ✓ |
 | Limited-information fit | Maydeu-Olivares & Joe M2 / M2* (`FitResult.m2()`; unidimensional and confirmatory 2–3 factor models, single group) with df, p-value, RMSEA + CI, SRMSR and dichotomous TLI / CFI | ✓ |
 | DIF | Multiple-group likelihood-ratio DIF tests (`FitResult.dif()`, mirt's `DIF()` schemes `add` / `drop`, AIC/SABIC/HQ/BIC differences, Holm or BH adjusted p-values) | ✓ |
@@ -89,7 +90,7 @@ equates score distributions (linear, equipercentile and kernel equating). It is 
 flexpyirt and is not installed with it: `pip install flexpyequate`
 ([documentation](https://takuizum.github.io/flexpyirt/equating/)).
 
-For polars input, install `flexpyirt[polars]`. For GPUs, install a CUDA build of `jax` first
+For polars input, install `flexpyirt[polars]`; for the plots (`flexpyirt.plotting`), `flexpyirt[plot]`. For GPUs, install a CUDA build of `jax` first
 (see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)).
 
 flexpyirt computes in **64-bit floating point**. The JAX setting belongs to you, so the library
