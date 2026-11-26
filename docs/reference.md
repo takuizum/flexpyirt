@@ -27,6 +27,7 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 - Information and reliability: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - Summed scores: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
 - Plots: [`item_probabilities`](#item_probabilities), [`empirical_item_curve`](#empirical_item_curve), [`wright_map_table`](#wright_map_table), [`WrightMapTable`](#wrightmaptable), [`flexpyirt.plotting`](#flexpyirtplotting)
+- Model comparison and simulation: [`compare_fits`](#compare_fits), [`simulate_responses`](#simulate_responses), [`SimulatedData`](#simulateddata)
 - Model: [`Model`](#model)
 - Item models: [`TwoPL`](#twopl), [`Rasch`](#rasch), [`ThreePL`](#threepl), [`FourPL`](#fourpl), [`GRM`](#grm), [`GPCM`](#gpcm), [`PCM`](#pcm), [`Nominal`](#nominal), [user-defined item models](#user-defined-item-models)
 - Priors: [`NormalPrior`](#normalprior), [`LogNormalPrior`](#lognormalprior), [`BetaPrior`](#betaprior), [`LogitNormalPrior`](#logitnormalprior)
@@ -1709,6 +1710,92 @@ function works inside `jax.jit` and `jax.vmap` and can be differentiated; values
 tail probabilities that would underflow to 0 (it is slower); for the other methods the logarithm
 of the result is taken. Raises `SpecificationError` for a wrong shape, an unknown `method`, or an
 approximation with `K != 2`.
+
+---
+
+## Model comparison and simulation
+
+### `compare_fits`
+
+```text
+compare_fits(*results, names=None) -> DataFrame
+```
+
+Information criteria and likelihood-ratio tests for two or more fits of the same data, ordered
+from the most restricted model to the least restricted ([guide section 5](guide.md#comparing-models-aic-bic-likelihood-ratio-tests)).
+With $\ell$ the marginal log-likelihood, $k$ the number of free parameters and $N$ the number of
+respondents (the sum of the weights for a weighted fit):
+$\mathrm{AIC}=-2\ell+2k$ (Akaike, 1974), $\mathrm{SABIC}=-2\ell+k\log\frac{N+2}{24}$ (Sclove,
+1987), $\mathrm{HQ}=-2\ell+2k\log\log N$ (Hannan & Quinn, 1979), $\mathrm{BIC}=-2\ell+k\log N$
+(Schwarz, 1978). Each row after the first is tested against the previous one by
+$X^2=2(\ell_m-\ell_{m-1})$ on $\mathit{df}=k_m-k_{m-1}$ degrees of freedom (Wilks, 1938). This is
+mirt's `anova(mod1, mod2, ...)`.
+
+| Argument | Type | Description |
+|---|---|---|
+| `*results` | `FitResult` | Two or more fits of the same responses, most restricted first |
+| `names` | list[str], optional | Labels for the `model` column (default `model1`, `model2`, ...) |
+
+**Returns**: `DataFrame` with one row per fit: `model`, `n_params`, `loglik`, `aic`, `sabic`,
+`hq`, `bic`, `x2`, `df`, `p`. `x2`, `df` and `p` are NaN in the first row; `p` is NaN when
+`df <= 0`.
+
+**Raises**: `SpecificationError` for fewer than two fits, an argument that is not a `FitResult`,
+`names` that are not one distinct label per fit, or fits with different numbers of respondents.
+
+**Warns**: `FlexpyirtWarning` when the number of parameters does not increase, when the
+log-likelihood decreases while parameters are added, or when a fit has priors.
+
+Nesting cannot be checked and is the caller's responsibility; no boundary correction is made
+(a variance fixed at 0, fewer mixture components, `DavidianCurve` against `Normal`).
+
+### `simulate_responses`
+
+```text
+simulate_responses(source, *, n_obs=None, key, parameters=None, theta=None, group=None)
+    -> SimulatedData
+```
+
+Simulated item responses from a fitted model or from a `Model` with given item parameters
+([guide section 5](guide.md#simulating-responses)). Each respondent's $\boldsymbol\theta_i$ is
+drawn from their group's latent distribution (or taken from `theta`), and each response by
+inversion of a uniform number, $X_{ij}=\min\{k: u_{ij}\le\sum_{c\le k}P_{jc}(\boldsymbol\theta_i)\}$
+(Devroye, 1986). Latent draws: `Normal` with the fitted means, variances and correlations;
+`NormalMixture` by component; `DavidianCurve` from its continuous density (inverse CDF on a fine
+grid); `EmpiricalHistogram` at the quadrature nodes with the fitted weights (a discrete
+distribution, as fitted). Every item model and every model structure (unidimensional,
+`with_factors`, bifactor, two-tier, multiple groups) is supported.
+
+| Argument | Type | Description |
+|---|---|---|
+| `source` | `FitResult` / `Model` | A fit (its estimates are used) or a specification |
+| `n_obs` | int / dict[str, int], optional | Number of respondents; per group for a multiple-group model, or a mapping group → number. Required unless `theta` is given |
+| `key` | `jax.Array` | JAX PRNG key (`jax.random.key(0)`); the same key gives the same data |
+| `parameters` | DataFrame, optional | With a `Model` (required): an item bank as for `Model.fix_from()` in the slope–intercept parameterization, with every item parameter |
+| `theta` | array, optional | Latent traits to use instead of draws: `(N,)` for one factor, `(N, D)` otherwise |
+| `group` | array, optional | With `theta` for a multiple-group model: the group label of each row |
+
+From a `Model`, the latent distribution is the specification's: a `Normal`'s `mean` and `var`
+(factor correlations 0) or a `NormalMixture`'s `means`, `variances` and `weights`.
+`EmpiricalHistogram` and `DavidianCurve` have no shape before fitting, so they need `theta`.
+
+**Returns**: [`SimulatedData`](#simulateddata).
+
+**Raises**: `PrecisionError` without 64-bit JAX; `SpecificationError` for an invalid `key`,
+`n_obs`, `theta`, `group` or `parameters` (for example an item parameter missing from the bank).
+
+Missing responses are not simulated: set entries of `responses` to NaN for a test design or a
+missing-data mechanism.
+
+### `SimulatedData`
+
+Frozen dataclass returned by [`simulate_responses`](#simulate_responses).
+
+| Attribute | Type | Description |
+|---|---|---|
+| `responses` | DataFrame | One `int64` column per item (the model's item names), codes `0..K-1`; accepted by `fit()` |
+| `theta` | ndarray | Latent traits, `(N,)` for one factor or `(N, D)` |
+| `group` | ndarray or None | Group label of each row (multiple-group model), else `None` |
 
 ---
 

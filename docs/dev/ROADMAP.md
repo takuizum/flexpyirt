@@ -167,6 +167,10 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 - [x] Common-item screening for linking and item parameter drift (#105; `screen_common_items()`,
   `CommonItemScreeningResult`, `stack_screening_tables()`: robust z, displacement and
   expected-score RMSD with iterative purification, unidimensional; validated in V50).
+- [ ] Model-comparison table and simulation of responses (#109): `compare_fits()` (AIC, SABIC, HQ,
+  BIC, likelihood-ratio tests; mirt's `anova()`) and `simulate_responses()` / `SimulatedData` (from
+  a `FitResult` or a `Model` with an item bank; every item model, latent distribution and model
+  structure; JAX key). Validated in V54; checked once the comparison passes the nightly CI.
 
 ## Ongoing
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).

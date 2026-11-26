@@ -86,6 +86,7 @@ English | [日本語](VALIDATION.ja.md)
 | V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `packages/flexpyctt/validation/r/ctt_dif_reference.R`; the worked example of Liu & Agresti (1996, Table 1) | — |
 | V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
 | V50 | Common-item screening for linking (#105): robust z (Huynh & Meyer, 2010), displacement and RMSD of expected item score curves; removal order, linking constants at every purification step and the final item table (2PL; mixed 2PL + GRM + GPCM) | separate `mirt()` calibrations + base-R recomputation (`median()`, `quantile(type = 7)`, `expected.item()`, V20 linking); `equateIRT::dif.test` as a cross-check of the drifted items | field |
+| V54 | Model-comparison table (Rasch vs 2PL vs 3PL on the V11a data; PCM vs GPCM on the V8b data; a fully invariant two-group 2PL vs the anchored model and vs the model with the last item free, V4 data) and simulation of responses (deterministic inversion for 2PL, Rasch, 3PL, 4PL, GRM, GPCM and nominal items, unidimensional and two-factor; distributional and recovery checks per latent distribution) | `anova(mod1, mod2, ...)`; `probtrace()` with the same $\theta$ and uniform numbers (random streams cannot match `simdata()`) | #109 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -1047,6 +1048,40 @@ English | [日本語](VALIDATION.ja.md)
   local dependence, JSI, DIF and model-based parallel analysis raise an error for a weighted fit.
   Tests: `tests/test_mirt_m7_weights.py`. Reference generator:
   `validation/r/m7_weights_reference.R`.
+- **Model comparison and simulation of responses (V54, #109; DESIGN §24)**:
+  - **`compare_fits()` against `anova()`**: every model is fitted by mirt (`optimizer = "NR"`,
+    `accelerate = "none"`, `TOL = 1e-10`) and by flexpyirt (`BAEM(tol=1e-9)`) on the same grid,
+    and the whole table is compared: Rasch / 2PL / 3PL on the V11a data (61 points on
+    $[-6, 6]$), PCM / GPCM on the V8b data, and the fully invariant two-group 2PL (focal mean and
+    variance free) against the model with anchors q01–q05 only and against the model with only
+    the last item free across groups (V4 data, 81 points on $[-8, 8]$; $p=0.188$, so the
+    $p$-value is checked away from 0). `n_params` equals mirt's `nest` exactly; log-likelihoods
+    and the four criteria agree to $5\times10^{-11}$, $X^2$ to $1.4\times10^{-11}$ and $p$ to
+    $7\times10^{-13}$ (tolerances $10^{-7}$, $10^{-7}$, $10^{-9}$, absolute). mirt prints
+    $p=0$ where $p<10^{-16}$ (`1 - pchisq()`); flexpyirt reports the upper tail.
+  - **`simulate_responses()`, deterministic part**: random streams cannot match R's
+    (`simdata()` uses R's generator), so the reference fixes the item parameters, $\theta$ and
+    the uniform numbers. For 9 items (Rasch, 2PL ×2, 3PL, 4PL, graded $K=3,4$, GPCM $K=4$,
+    nominal $K=4$ with free scoring coefficients) at 400 values of $\theta$ (including
+    $\pm6$, $\pm3$, 0) and for a two-factor model (2PL, graded $K=3$, 3PL; one cross-loading
+    item) at 300 points, flexpyirt's category probabilities equal `probtrace()` to $10^{-12}$
+    and the responses obtained in R by $x=\#\{k<K-1: u>F_k\}$ are reproduced exactly.
+  - **`simulate_responses()`, distributional part** (Monte Carlo, $|z|<4.5$): category
+    proportions and the summed-score distribution of 60 000 simulated respondents (mixed
+    Rasch, 2PL, 3PL, 4PL, GRM, GPCM and nominal items, $N(0.3, 1.4)$) and of two groups
+    (30 000 and 40 000) agree with the model-implied marginals (81-point Gauss–Hermite
+    quadrature of the same kernels and of the Lord–Wingersky recursion, V36); the latent draws
+    have the specified covariance (two factors; bifactor with two specific factors, where items
+    sharing a specific factor are more correlated); `NormalMixture` and fitted `DavidianCurve`
+    draws pass a Kolmogorov–Smirnov test (0.1% level) against the exact CDF; fitted
+    `EmpiricalHistogram` draws are grid nodes with frequencies matching the fitted weights.
+  - **Recovery**: `fit()` on 20 000 simulated respondents (the mixed-format test) returns every
+    item parameter within 4.5 SEs of the generating value, and a two-group fit on 8 000 per
+    group recovers the focal mean and variance (0.5, 1.3) within 4.5 SEs. A `FitResult` and a
+    `Model` with the fit's estimates produce identical data from the same key, and data are
+    reproducible from `key`.
+  Tests: `tests/test_mirt_v54_compare_fits.py`, `tests/test_v54_simulate.py`. Reference generator:
+  `validation/r/v54_compare_simulate_reference.R`.
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)

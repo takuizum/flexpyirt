@@ -184,6 +184,8 @@ one (DESIGN.md §16.18).
 | `flexpyirt.plotting` | module | `plot_item_curves` (with observed proportions; one curve per group = DIF plot), `plot_information`, `plot_expected_score`, `plot_wright_map`; matplotlib from the optional extra `flexpyirt[plot]`, imported lazily (`MissingDependencyError` without it) (DESIGN §21) |
 | `reliability`, `summed_score_table` | function | Marginal and empirical reliability; the summed-score EAP table (also `FitResult.score(method="EAPsum")`). Return DataFrames |
 | `summed_score_distribution` | function | Lord–Wingersky / Poisson-binomial kernel on category probabilities (DESIGN §18.1) |
+| `compare_fits` | function | Model-comparison table over fits of the same data: `n_params`, `loglik`, AIC, SABIC, HQ, BIC and likelihood-ratio tests against the previous row (mirt's `anova()`; DESIGN §24.1) |
+| `simulate_responses`, `SimulatedData` | function, frozen dataclass | Simulated responses from a `FitResult` or a `Model` + item bank, with a JAX `key`; returns `responses`, `theta`, `group` (DESIGN §24.2) |
 | `LocalDependenceResult` | frozen dataclass | Returned by `FitResult.local_dependence()` (`pairs`, `q3`, `q3_mean`, `max_q3_star`) |
 | `JSIResult` | frozen dataclass | Returned by `FitResult.jsi()` (`matrix`, `pairs`, `method`, `converged`) |
 | `PolychoricResult` | frozen dataclass | `correlation`, `unsmoothed_correlation`, `thresholds`, `categories`, `n_obs`, per-pair `converged` / `at_boundary` / `zero_cell_corrected`, `smoothed`, `min_eigenvalue` |

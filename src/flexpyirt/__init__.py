@@ -17,6 +17,7 @@ from flexpyctt.dif import (
     mantel_haenszel,
 )
 from flexpyirt import errors
+from flexpyirt.comparison import compare_fits
 from flexpyirt.correlation import PolychoricResult, polychoric
 from flexpyirt.curves import (
     WrightMapTable,
@@ -72,6 +73,7 @@ from flexpyirt.screening import (
     screen_common_items,
     stack_screening_tables,
 )
+from flexpyirt.simulate import SimulatedData, simulate_responses
 from flexpyirt.sumscore import summed_score_distribution
 
 try:
@@ -115,10 +117,12 @@ __all__ = [
     "PolychoricResult",
     "Quadrature",
     "Rasch",
+    "SimulatedData",
     "ThreePL",
     "TwoPL",
     "WrightMapTable",
     "__version__",
+    "compare_fits",
     "comparison_data",
     "detect",
     "dimensionality",
@@ -144,6 +148,7 @@ __all__ = [
     "polychoric",
     "reliability",
     "screen_common_items",
+    "simulate_responses",
     "stack_screening_tables",
     "summed_score_distribution",
     "summed_score_table",
