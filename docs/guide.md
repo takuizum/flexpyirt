@@ -507,17 +507,36 @@ identically $M_2$ for dichotomous items), together with RMSEA and its confidence
 (`ci=0.90` by default), SRMSR, and — for dichotomous models — TLI and CFI against the independence
 null model (polytomous models report `NaN` for `tli` and `cfi`, because the independence null
 model is defined for dichotomous items only).
-It requires complete data and a single-group `Normal` MLE fit (no priors), unidimensional or
-confirmatory with two or three factors (`with_factors()`). With free factor correlations the value
-is slightly smaller than mirt's `M2()`, which leaves the correlations out of the derivative matrix
-while counting them in the degrees of freedom. Bifactor and two-tier models are not supported yet
-by `m2()` or `item_fit()`.
+It needs a `Normal` latent distribution and works for unidimensional models and confirmatory
+models with two or three factors (`with_factors()`), with one group or several. With free factor
+correlations (or a free latent mean or variance) the value is slightly smaller than mirt's `M2()`,
+which leaves these parameters out of the derivative matrix while counting them in the degrees of
+freedom. Bifactor and two-tier models are not supported yet by `m2()` or `item_fit()`.
 
 ```python
 m2_table = res.m2(df)  # m2, df, p, rmsea, rmsea_5, rmsea_95, srmsr, tli, cfi
 print(m2_table.round(3))
 ```
 
+- **Multiple groups**: pass `group=` as for `fit()`. The statistic stacks the margins of all
+  groups, so `df` is the number of groups times $J+\binom J2$ minus the number of free
+  parameters; RMSEA uses the total sample size, and SRMSR is reported per group
+  (`srmsr_<group>` columns). When parameters are equal across groups of different sizes,
+  flexpyirt weights each group's rows of the derivative matrix by its share of the sample, as the
+  asymptotic theory requires; mirt does not, so the two values differ slightly.
+- **Missing responses**: each mean and cross-product is computed from the respondents who answered
+  the item (or both items), and the covariance of these statistics accounts for how many
+  respondents answered each combination of items. The $p$-value is valid when responses are missing
+  completely at random (MCAR, for example randomly assigned booklets or skipped items unrelated to
+  ability); when missingness depends on the observed responses it is not. Every pair of items must
+  have been answered together by at least one respondent; designs where some items are never given
+  together raise `SpecificationError`. mirt's `M2()` uses an approximate weighting here, so its value
+  can differ noticeably from flexpyirt's.
+- **MAP fits** (`prior()`): the statistic is evaluated at the MAP estimates, and every free
+  parameter counts against the degrees of freedom, as in mirt. The reference distribution still
+  holds because priors do not change the large-sample behaviour of the estimates; a strong prior
+  on a weakly determined parameter (such as a 3PL lower asymptote) makes the test conservative in
+  small samples.
 ### Comparing models (AIC, BIC, likelihood-ratio tests)
 
 `compare_fits()` puts several fits of the same data in one table, ordered from the most
