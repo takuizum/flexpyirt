@@ -10,6 +10,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 from flexpyirt import errors
+from flexpyirt.comparison import compare_fits
 from flexpyirt.correlation import PolychoricResult, polychoric
 from flexpyirt.dimensionality import (
     ComparisonDataResult,
@@ -53,6 +54,7 @@ from flexpyirt.model import Model
 from flexpyirt.priors import BetaPrior, LogNormalPrior, NormalPrior
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
+from flexpyirt.simulate import SimulatedData, simulate_responses
 from flexpyirt.sumscore import summed_score_distribution
 
 try:
@@ -93,9 +95,11 @@ __all__ = [
     "PolychoricResult",
     "Quadrature",
     "Rasch",
+    "SimulatedData",
     "ThreePL",
     "TwoPL",
     "__version__",
+    "compare_fits",
     "comparison_data",
     "detect",
     "dimensionality",
@@ -113,6 +117,7 @@ __all__ = [
     "parallel_analysis",
     "polychoric",
     "reliability",
+    "simulate_responses",
     "summed_score_distribution",
     "summed_score_table",
     "test_information",
