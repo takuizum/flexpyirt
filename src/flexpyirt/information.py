@@ -1,7 +1,9 @@
 r"""Information functions, expected scores, reliability and the summed-score EAP table.
 
-Result / Python shell layer (DESIGN.md §18.2) for unidimensional models. Every function takes
-a :class:`~flexpyirt.FitResult` as its first argument and returns a DataFrame.
+Result / Python shell layer (DESIGN.md §18.2, §18.3). Every function takes a
+:class:`~flexpyirt.FitResult` as its first argument. Information and expected scores serve
+unidimensional and multidimensional models; reliability and the summed-score table are
+unidimensional.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from flexpyirt.result import FitResult
 
 __all__ = [
     "expected_score",
+    "information_matrix",
     "item_information",
     "reliability",
     "summed_score_table",
@@ -40,10 +43,7 @@ def _require_unidimensional(res: FitResult, what: str) -> None:
     if not isinstance(res, FitResult):
         raise SpecificationError(f"{what} needs a FitResult, got {type(res).__name__}.")
     if res._model.is_multidimensional:
-        raise SpecificationError(
-            f"{what} supports unidimensional models only; information for multidimensional "
-            "models is not available yet."
-        )
+        raise SpecificationError(f"{what} supports unidimensional models only.")
 
 
 def _require_normal(res: FitResult, what: str) -> None:
@@ -75,6 +75,11 @@ def _resolve_group(res: FitResult, group: str | None, what: str) -> int:
     return 0
 
 
+def _require_fit(res: FitResult, what: str) -> None:
+    if not isinstance(res, FitResult):
+        raise SpecificationError(f"{what} needs a FitResult, got {type(res).__name__}.")
+
+
 def _coerce_theta(theta: Any) -> np.ndarray:
     """Validate ``theta`` and return it as a non-empty finite 1-D float64 array."""
     try:
@@ -90,6 +95,75 @@ def _coerce_theta(theta: Any) -> np.ndarray:
     return values
 
 
+def _coerce_theta_points(res: FitResult, theta: Any) -> tuple[np.ndarray, pd.Index]:
+    """Return ``theta`` as a ``(T, D)`` float64 array and the index of the result.
+
+    Unidimensional models take a number or 1-D array (index ``theta``); multidimensional models
+    take a ``(T, D)`` array, a DataFrame whose columns are the factor names, or one point as a
+    1-D array of length ``D`` (a ``MultiIndex`` named by the factors).
+    """
+    model = res._model
+    if not model.is_multidimensional:
+        values = _coerce_theta(theta)
+        return values[:, None], pd.Index(values, name="theta")
+    names = list(model.factor_names)
+    n_dims = len(names)
+    if isinstance(theta, pd.DataFrame):
+        if sorted(map(str, theta.columns)) != sorted(names) or len(theta.columns) != n_dims:
+            raise SpecificationError(
+                f"A theta DataFrame must have exactly the factor columns {names}, got "
+                f"{list(theta.columns)}."
+            )
+        theta = theta[names]
+    try:
+        values = np.asarray(theta, dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise SpecificationError("theta must be an array of numbers.") from exc
+    if values.ndim == 1:
+        values = values[None, :]
+    if values.ndim != 2 or values.shape[0] == 0 or values.shape[1] != n_dims:
+        raise SpecificationError(
+            f"theta of a model with {n_dims} factors must have shape (T, {n_dims}) (or be one "
+            f"point of length {n_dims}), got shape {np.shape(theta)}."
+        )
+    if not np.all(np.isfinite(values)):
+        raise SpecificationError("theta must be finite.")
+    index = pd.MultiIndex.from_arrays([values[:, m] for m in range(n_dims)], names=names)
+    return values, index
+
+
+def _coerce_direction(res: FitResult, direction: Any, what: str) -> np.ndarray | None:
+    """Return the normalized direction (``None`` for a unidimensional model)."""
+    model = res._model
+    if not model.is_multidimensional:
+        if direction is not None:
+            raise SpecificationError(
+                f"direction= is only used for multidimensional models; {what} of a "
+                "unidimensional model takes no direction."
+            )
+        return None
+    names = list(model.factor_names)
+    if direction is None:
+        raise SpecificationError(
+            f"{what} of a multidimensional model needs direction= (a vector of length "
+            f"{len(names)} over the factors {names}); use information_matrix() for the full "
+            "matrix."
+        )
+    try:
+        values = np.asarray(direction, dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise SpecificationError("direction must be a 1-D array of numbers.") from exc
+    if values.shape != (len(names),):
+        raise SpecificationError(
+            f"direction must have length {len(names)} (one entry per factor {names}), got "
+            f"shape {values.shape}."
+        )
+    norm = float(np.linalg.norm(values)) if np.all(np.isfinite(values)) else float("nan")
+    if not np.isfinite(norm) or norm == 0.0:
+        raise SpecificationError("direction must be finite and non-zero.")
+    return values / norm
+
+
 def _problem(res: FitResult) -> tuple[_core.CompiledProblem, jax.Array]:
     """Compile ``res`` on one placeholder response pattern per group."""
     model = res._model
@@ -102,15 +176,43 @@ def _problem(res: FitResult) -> tuple[_core.CompiledProblem, jax.Array]:
     return compiled.problem, jnp.asarray(res._eta)
 
 
-def _curves(res: FitResult, theta: np.ndarray, group_index: int) -> tuple[np.ndarray, np.ndarray]:
-    """``(T, J)`` item information and expected item scores of one group at ``theta``."""
+def _matrices(res: FitResult, theta: np.ndarray, group_index: int) -> tuple[np.ndarray, np.ndarray]:
+    """``(T, J, D, D)`` item information matrices and ``(T, J)`` expected item scores."""
     prob, eta = _problem(res)
     information, expected = _item_curves(prob, eta, jnp.asarray(theta))
     return np.asarray(information[group_index]), np.asarray(expected[group_index])
 
 
-def item_information(res: FitResult, theta: Any, *, group: str | None = None) -> pd.DataFrame:
-    r"""Return the item information functions of a fitted unidimensional model.
+def _curves(res: FitResult, theta: np.ndarray, group_index: int) -> tuple[np.ndarray, np.ndarray]:
+    """``(T, J)`` item information and expected item scores of a unidimensional model."""
+    information, expected = _matrices(res, theta[:, None], group_index)
+    return information[:, :, 0, 0], expected
+
+
+def _directional(matrices: np.ndarray, direction: np.ndarray | None) -> np.ndarray:
+    r"""Return :math:`\mathbf u^\top\mathbf I\mathbf u` on the last two axes."""
+    if direction is None:
+        return matrices[..., 0, 0]
+    return np.asarray(np.einsum("m,...mn,n->...", direction, matrices, direction))
+
+
+def _composite_se(matrices: np.ndarray, direction: np.ndarray) -> np.ndarray:
+    r"""Return :math:`\sqrt{\mathbf u^\top\mathbf I^{-1}\mathbf u}` per point (inf if not PD)."""
+    out = np.full(matrices.shape[0], np.inf)
+    for t, matrix in enumerate(matrices):
+        try:
+            chol = np.linalg.cholesky(matrix)
+        except np.linalg.LinAlgError:
+            continue
+        half = np.linalg.solve(chol, direction)
+        out[t] = float(np.sqrt(half @ half))
+    return out
+
+
+def item_information(
+    res: FitResult, theta: Any, *, direction: Any = None, group: str | None = None
+) -> pd.DataFrame:
+    r"""Return the item information functions of a fitted model.
 
     The Fisher information of item :math:`j` about :math:`\theta` is
 
@@ -120,85 +222,173 @@ def item_information(res: FitResult, theta: Any, *, group: str | None = None) ->
 
     (Birnbaum, 1968; Samejima, 1969), computed for every item family by automatic
     differentiation of the category log-probabilities. It is what mirt's ``iteminfo()``
-    returns.
+    returns. For a multidimensional model it is the directional information
+
+    .. math::
+        I_{j,\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I_j(\boldsymbol\theta)\mathbf u
+
+    along the unit vector :math:`\mathbf u` = ``direction / ||direction||``, with the item
+    information matrix :math:`\mathbf I_j` of :func:`information_matrix` (Reckase & McKinley,
+    1991). mirt's ``iteminfo(..., degrees = )`` is ``direction = cos(degrees)``.
 
     Parameters
     ----------
     res : FitResult
-        A fitted unidimensional model.
-    theta : float or array-like, shape (T,)
-        Latent trait values.
+        A fitted model (unidimensional, confirmatory multidimensional, bifactor or two-tier).
+    theta : float or array-like
+        Latent trait values: shape ``(T,)`` for a unidimensional model; for a model with
+        ``D`` factors an array of shape ``(T, D)``, a DataFrame whose columns are the factor
+        names, or one point of length ``D``.
+    direction : array-like, shape (D,), optional
+        Direction in the latent space (normalized to unit length; mirt ``degrees`` →
+        ``cos(degrees)``). Required for a multidimensional model, not allowed for a
+        unidimensional one.
     group : str, optional
         Group name; required for a multiple-group model.
 
     Returns
     -------
     DataFrame
-        One row per value of ``theta`` (the index, named ``theta``) and one column per item.
+        One row per point of ``theta`` and one column per item. The index is named ``theta``
+        for a unidimensional model and is a ``MultiIndex`` with the factor names as level names
+        for a multidimensional model.
 
     Raises
     ------
     PrecisionError
         If JAX is not configured for 64-bit floating point.
     SpecificationError
-        For a multidimensional model, a missing or unknown ``group``, or a ``theta`` that is
-        not a finite number or 1-D array.
+        For a missing or unknown ``group``, an invalid ``theta``, or a ``direction`` that is
+        missing (multidimensional), given (unidimensional), of the wrong length or zero.
     """
     check_x64()
-    _require_unidimensional(res, "item_information()")
+    _require_fit(res, "item_information()")
     group_index = _resolve_group(res, group, "item_information()")
-    values = _coerce_theta(theta)
-    information, _ = _curves(res, values, group_index)
+    values, index = _coerce_theta_points(res, theta)
+    direction_u = _coerce_direction(res, direction, "item_information()")
+    matrices, _ = _matrices(res, values, group_index)
     return pd.DataFrame(
-        information, index=pd.Index(values, name="theta"), columns=list(res._model.item_names)
+        _directional(matrices, direction_u), index=index, columns=list(res._model.item_names)
     )
 
 
-def test_information(res: FitResult, theta: Any, *, group: str | None = None) -> pd.DataFrame:
+def test_information(
+    res: FitResult, theta: Any, *, direction: Any = None, group: str | None = None
+) -> pd.DataFrame:
     r"""Return the test information function and the conditional standard error.
 
     .. math::
         I(\theta)=\sum_jI_j(\theta),\qquad \mathrm{SE}(\theta)=I(\theta)^{-1/2}
 
     with the item information :math:`I_j` of :func:`item_information` (Birnbaum, 1968). It is
-    mirt's ``testinfo()``.
+    mirt's ``testinfo()``. For a multidimensional model, with the test information matrix
+    :math:`\mathbf I=\sum_j\mathbf I_j` and the unit vector :math:`\mathbf u`,
+
+    .. math::
+        I_{\mathbf u}(\boldsymbol\theta)=\mathbf u^\top\mathbf I(\boldsymbol\theta)\mathbf u,
+        \qquad
+        \mathrm{SE}_{\mathbf u}(\boldsymbol\theta)
+            =\sqrt{\mathbf u^\top\mathbf I(\boldsymbol\theta)^{-1}\mathbf u}
+
+    (Reckase & McKinley, 1991; Reckase, 2009): the directional information and the asymptotic
+    standard error of the ML estimate of the composite :math:`\mathbf u^\top\boldsymbol\theta`
+    (not :math:`I_{\mathbf u}^{-1/2}`, which assumes the orthogonal coordinates known).
 
     Parameters
     ----------
     res : FitResult
-        A fitted unidimensional model.
-    theta : float or array-like, shape (T,)
-        Latent trait values.
+        A fitted model (unidimensional, confirmatory multidimensional, bifactor or two-tier).
+    theta : float or array-like
+        Latent trait values, as in :func:`item_information`.
+    direction : array-like, shape (D,), optional
+        Direction in the latent space (normalized to unit length). Required for a
+        multidimensional model, not allowed for a unidimensional one.
     group : str, optional
         Group name; required for a multiple-group model.
 
     Returns
     -------
     DataFrame
-        One row per value of ``theta`` (the index, named ``theta``) with the columns
-        ``information`` and ``se`` (infinite where the information is 0).
+        One row per point of ``theta`` (indexed as in :func:`item_information`) with the
+        columns ``information`` and ``se`` (infinite where the information is 0 or, for a
+        multidimensional model, where the information matrix is not positive definite).
 
     Raises
     ------
     PrecisionError
         If JAX is not configured for 64-bit floating point.
     SpecificationError
-        For a multidimensional model, a missing or unknown ``group``, or a ``theta`` that is
-        not a finite number or 1-D array.
+        As :func:`item_information`.
     """
     check_x64()
-    _require_unidimensional(res, "test_information()")
+    _require_fit(res, "test_information()")
     group_index = _resolve_group(res, group, "test_information()")
-    values = _coerce_theta(theta)
-    information, _ = _curves(res, values, group_index)
-    total = information.sum(axis=1)
-    with np.errstate(divide="ignore"):
-        se = 1.0 / np.sqrt(total)
-    return pd.DataFrame({"information": total, "se": se}, index=pd.Index(values, name="theta"))
+    values, index = _coerce_theta_points(res, theta)
+    direction_u = _coerce_direction(res, direction, "test_information()")
+    matrices, _ = _matrices(res, values, group_index)
+    total_matrix = matrices.sum(axis=1)
+    total = _directional(total_matrix, direction_u)
+    if direction_u is None:
+        with np.errstate(divide="ignore"):
+            se = 1.0 / np.sqrt(total)
+    else:
+        se = _composite_se(total_matrix, direction_u)
+    return pd.DataFrame({"information": total, "se": se}, index=index)
 
 
 # pytest would otherwise collect this public function as a test when a test module imports it.
 test_information.__test__ = False  # type: ignore[attr-defined]
+
+
+def information_matrix(
+    res: FitResult, theta: Any, *, item: str | None = None, group: str | None = None
+) -> np.ndarray:
+    r"""Return the test (or one item's) Fisher information matrix at each point of ``theta``.
+
+    .. math::
+        \mathbf I_j(\boldsymbol\theta)=\sum_{k=0}^{K_j-1}P_{jk}(\boldsymbol\theta)\,
+            \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)\,
+            \nabla_{\boldsymbol\theta}\log P_{jk}(\boldsymbol\theta)^\top,\qquad
+        \mathbf I(\boldsymbol\theta)=\sum_j\mathbf I_j(\boldsymbol\theta)
+
+    (Reckase, 2009, ch. 5), by automatic differentiation of the category log-probabilities.
+    It is mirt's ``iteminfo(..., multidim_matrix = TRUE)``, summed over items for the test.
+
+    Parameters
+    ----------
+    res : FitResult
+        A fitted model (unidimensional, confirmatory multidimensional, bifactor or two-tier).
+    theta : float or array-like
+        Latent trait values, as in :func:`item_information`.
+    item : str, optional
+        Item name; by default the test information matrix (the sum over items).
+    group : str, optional
+        Group name; required for a multiple-group model.
+
+    Returns
+    -------
+    ndarray, shape (T, D, D)
+        One symmetric positive semi-definite matrix per point of ``theta``, rows and columns
+        in the order of the model's factors (``D = 1`` for a unidimensional model).
+
+    Raises
+    ------
+    PrecisionError
+        If JAX is not configured for 64-bit floating point.
+    SpecificationError
+        For a missing or unknown ``group``, an invalid ``theta`` or an unknown ``item``.
+    """
+    check_x64()
+    _require_fit(res, "information_matrix()")
+    group_index = _resolve_group(res, group, "information_matrix()")
+    values, _ = _coerce_theta_points(res, theta)
+    names = list(res._model.item_names)
+    if item is not None and item not in names:
+        raise SpecificationError(f"Unknown item={item!r}; available items: {names}.")
+    matrices, _ = _matrices(res, values, group_index)
+    if item is None:
+        return matrices.sum(axis=1)
+    return matrices[:, names.index(item)].copy()
 
 
 def expected_score(res: FitResult, theta: Any, *, group: str | None = None) -> pd.DataFrame:
@@ -207,34 +397,34 @@ def expected_score(res: FitResult, theta: Any, *, group: str | None = None) -> p
     .. math::
         E_j(\theta)=\sum_{k=0}^{K_j-1}k\,P_{jk}(\theta),\qquad T(\theta)=\sum_jE_j(\theta)
 
-    with categories scored :math:`0,\dots,K_j-1` as in the data. They are mirt's
-    ``expected.item()`` and ``expected.test()``.
+    with categories scored :math:`0,\dots,K_j-1` as in the data, and :math:`\theta` a vector
+    for a multidimensional model. They are mirt's ``expected.item()`` and ``expected.test()``.
 
     Parameters
     ----------
     res : FitResult
-        A fitted unidimensional model.
-    theta : float or array-like, shape (T,)
-        Latent trait values.
+        A fitted model (unidimensional, confirmatory multidimensional, bifactor or two-tier).
+    theta : float or array-like
+        Latent trait values, as in :func:`item_information`.
     group : str, optional
         Group name; required for a multiple-group model.
 
     Returns
     -------
     DataFrame
-        One row per value of ``theta`` (the index, named ``theta``), one column per item with
-        its expected score, and the column ``total`` with the expected test score.
+        One row per point of ``theta`` (indexed as in :func:`item_information`), one column
+        per item with its expected score, and the column ``total`` with the expected test
+        score.
 
     Raises
     ------
     PrecisionError
         If JAX is not configured for 64-bit floating point.
     SpecificationError
-        For a multidimensional model, a missing or unknown ``group``, a ``theta`` that is not
-        a finite number or 1-D array, or an item named ``total``.
+        For a missing or unknown ``group``, an invalid ``theta``, or an item named ``total``.
     """
     check_x64()
-    _require_unidimensional(res, "expected_score()")
+    _require_fit(res, "expected_score()")
     names = list(res._model.item_names)
     if "total" in names:
         raise SpecificationError(
@@ -242,9 +432,9 @@ def expected_score(res: FitResult, theta: Any, *, group: str | None = None) -> p
             "item called 'total'."
         )
     group_index = _resolve_group(res, group, "expected_score()")
-    values = _coerce_theta(theta)
-    _, expected = _curves(res, values, group_index)
-    out = pd.DataFrame(expected, index=pd.Index(values, name="theta"), columns=names)
+    values, index = _coerce_theta_points(res, theta)
+    _, expected = _matrices(res, values, group_index)
+    out = pd.DataFrame(expected, index=index, columns=names)
     out["total"] = expected.sum(axis=1)
     return out
 
