@@ -96,7 +96,11 @@ def _closed_form(y: np.ndarray, theta: np.ndarray, method: str) -> dict[str, np.
 def test_person_fit_matches_2pl_closed_form(method: str) -> None:
     res = _true_model_fit()
     data = _simulate(400, 0, missing=0.05)
-    got = res.person_fit(data, method=method, statistics=("lz", "lz_star", "infit", "outfit"))
+    got = res.person_fit(
+        data,
+        method=method,  # type: ignore[arg-type]
+        statistics=("lz", "lz_star", "infit", "outfit"),
+    )
     theta = got["theta"].to_numpy()
     finite = np.isfinite(theta)
     want = _closed_form(data.to_numpy(), np.where(finite, theta, 0.0), method)

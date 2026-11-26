@@ -756,7 +756,7 @@ class FitResult:
         self,
         data: Any,
         *,
-        statistics: Sequence[ItemFitStatistic] = ("s_x2",),
+        statistics: ItemFitStatistic | Sequence[ItemFitStatistic] = ("s_x2",),
         method: ScoreMethod = "EAP",
         min_cell: float = 1.0,
         group: Any = None,
@@ -810,8 +810,8 @@ class FitResult:
         data : DataFrame or array-like
             Responses on the fitted items (typically the fitting data). S-X2 needs complete
             responses; infit / outfit skip missing ones (NaN).
-        statistics : sequence of {"s_x2", "infit", "outfit"}, default ("s_x2",)
-            Statistics to compute.
+        statistics : str or sequence of {"s_x2", "infit", "outfit"}, default ("s_x2",)
+            Statistics to compute (a single name counts as one).
         method : {"EAP", "MAP", "ML", "WLE"}, default "EAP"
             Ability estimator for infit / outfit (ignored for S-X2). Respondents whose estimate
             is infinite (ML on an all-lowest or all-highest pattern) are left out.
@@ -932,7 +932,7 @@ class FitResult:
         method: ScoreMethod = "EAP",
         group: Any = None,
         item_names: list[str] | None = None,
-        statistics: Sequence[PersonFitStatistic] = ("lz", "infit", "outfit"),
+        statistics: PersonFitStatistic | Sequence[PersonFitStatistic] = ("lz", "infit", "outfit"),
     ) -> pd.DataFrame:
         r"""Person fit: :math:`l_z`, :math:`l_z^*` and person infit / outfit (DESIGN.md §20).
 
@@ -987,8 +987,9 @@ class FitResult:
             evaluated with that group's item parameters and latent distribution.
         item_names : list of str, optional
             Column names when ``data`` is an array.
-        statistics : sequence of {"lz", "lz_star", "infit", "outfit"}
-            Statistics to compute (default ``("lz", "infit", "outfit")``).
+        statistics : str or sequence of {"lz", "lz_star", "infit", "outfit"}
+            Statistics to compute (default ``("lz", "infit", "outfit")``; a single name counts
+            as one).
 
         Returns
         -------

@@ -40,6 +40,7 @@ from flexpyirt import (
     fit,
 )
 from flexpyirt.items import ItemModel
+from flexpyirt.result import PersonFitStatistic
 from tests._reference import REFERENCE_DIR, check_reference_meta
 
 pytestmark = pytest.mark.slow
@@ -224,7 +225,9 @@ def test_person_fit_end_to_end(name: str, method: str) -> None:
     """``person_fit()`` with flexpyirt's own estimates agrees with the references."""
     ref = _ref(name)["persons"][method]
     data, groups = _stored(name)
-    stats = ("lz", "infit", "outfit") + (("lz_star",) if method != "EAP" else ())
+    stats: tuple[PersonFitStatistic, ...] = ("lz", "infit", "outfit")
+    if method != "EAP":
+        stats = (*stats, "lz_star")
     got = _at_mirt(name).person_fit(
         data,
         method=method,  # type: ignore[arg-type]
