@@ -313,7 +313,7 @@ def test_sandwich_with_weights_does_not_warn_but_the_others_do() -> None:
         fit(spec, data, weights=weights, cluster=school, method=method, se="sandwich")
     for se in ("oakes", "hessian", "crossprod"):
         with pytest.warns(FlexpyirtWarning, match="use se='sandwich'"):
-            fit(spec, data, weights=weights, method=method, se=se)  # type: ignore[arg-type]
+            fit(spec, data, weights=weights, method=method, se=se)
 
 
 @pytest.mark.slow
