@@ -142,3 +142,5 @@
   `register_item_model`、ガイドの 2PL の実例（DESIGN §20）。2PL / GRM の再実装は組み込みと機械精度で一致する。
 - [ ] 組み込みでないモデルの照合済みの例（GGUM を mirt の `itemtype = "ggum"` と照合、V44 など）。新しい項目モデルは
   本体に組み込まず、このように追加する。
+- [x] flexpyctt: 古典的項目分析（キーによる採点、項目統計量、α / ω、選択肢分析。#101）。V46 で psych・ltm・polycor
+  と照合済み。

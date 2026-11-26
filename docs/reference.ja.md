@@ -7,7 +7,7 @@ flexpyirt の公開 API（`from flexpyirt import ...` で使えるもの）と�
 各関数の docstring にも同じ内容と対応する式・出典がある（`help(flexpyirt.fit)` など）。
 
 **flexpyctt** は、推定済みのモデルを使わない道具をまとめたパッケージである。[相関](#相関)、[次元数](#次元数)のうち
-モデルを使わないもの、[観測得点による DIF](#観測得点による特異項目機能dif) が入る（どちらのパッケージのものかは各項目に書く）。依存は NumPy、SciPy、pandas だけなので、
+モデルを使わないもの、[古典的項目分析](#古典的項目分析)、[観測得点による DIF](#観測得点による特異項目機能dif) が入る（どちらのパッケージのものかは各項目に書く）。依存は NumPy、SciPy、pandas だけなので、
 JAX なしでインストールでき（`pip install flexpyctt`）、64 ビットの設定も要らない。flexpyirt をインストールすると
 一緒に入る。関数は `from flexpyctt import ...` で使う。flexpyirt も同じ名前で再公開しているが、`polychoric` だけは
 別で、`flexpyirt.polychoric` は同じ推定量の JAX による実装である。乱数を使う関数は、flexpyctt では `rng`（整数の
@@ -20,6 +20,7 @@ JAX なしでインストールでき（`pip install flexpyctt`）、64 ビッ�
 - 尺度リンキング: [`link`](#link), [`LinkResult`](#linkresult), [`screen_common_items`](#screen_common_items), [`CommonItemScreeningResult`](#commonitemscreeningresult), [`stack_screening_tables`](#stack_screening_tables)
 - 相関（flexpyctt）: [`polychoric`](#polychoric), [`PolychoricResult`](#polychoricresult)
 - 次元数（`model_parallel_analysis` と `dimensionality` 以外は flexpyctt）: [`parallel_analysis`](#parallel_analysis), [`velicer_map`](#velicer_map), [`empirical_kaiser`](#empirical_kaiser), [`efa`](#efa), [`hull`](#hull), [`comparison_data`](#comparison_data), [`model_parallel_analysis`](#model_parallel_analysis), [`detect`](#detect), [`exploratory_detect`](#exploratory_detect), [`dimtest`](#dimtest), [`dimensionality`](#dimensionality) とその結果
+- 古典的項目分析（flexpyctt）: [`score_responses`](#score_responses), [`item_analysis`](#item_analysis), [`coefficient_alpha`](#coefficient_alpha), [`coefficient_omega`](#coefficient_omega), [`distractor_analysis`](#distractor_analysis) とその結果
 - 観測得点による DIF（flexpyctt）: [`mantel_haenszel`](#mantel_haenszel), [`mantel`](#mantel), [`generalized_mantel_haenszel`](#generalized_mantel_haenszel), [`logistic_dif`](#logistic_dif), [`DIFResult`](#difresult)
 - 情報関数と信頼性: [`item_information`](#item_information), [`test_information`](#test_information), [`information_matrix`](#information_matrix), [`expected_score`](#expected_score), [`reliability`](#reliability)
 - 合計得点: [`summed_score_table`](#summed_score_table), [`summed_score_distribution`](#summed_score_distribution)
@@ -1438,6 +1439,109 @@ dimensionality(data, *, key, fit=None, n_replications=100, zero_cell_correction=
 
 ---
 
+## 古典的項目分析
+
+パッケージ: flexpyctt（`from flexpyctt import item_analysis, ...`）。モデルを使わない項目統計量、信頼性係数、
+選択肢の分析（[ガイド 21 節](guide.ja.md#21-古典的項目分析)）。欠測は NaN。
+
+### `score_responses`
+
+```text
+score_responses(data, *, key, missing="incorrect") -> DataFrame
+```
+
+正答キーで生の回答を採点する。その項目の正答選択肢を選んでいれば 1、そうでなければ 0
+（psych の `score.multiple.choice(score = FALSE)`）。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `data` | DataFrame / 2 次元配列 | 1 行が 1 回答者、1 列が 1 項目。選んだ選択肢（数値でも文字列でもよい）。NaN / None は欠測 |
+| `key` | mapping / Series / sequence | 項目ごとの正答選択肢（項目名で、または列の順に）。`==` で比べるので、データと同じコードと型で書く |
+| `missing` | `"incorrect"` / `"keep"` | 無回答を 0 点にする（結果は整数）か NaN のまま残す（結果は浮動小数点）（既定 `"incorrect"`） |
+
+**例外**: `SpecificationError`（キーの項目がデータの項目と一致しない、キーに欠測がある）。**警告**:
+`FlexpycttWarning`（誰も選んでいない正答選択肢がある。キーのコードが違うことが多い）。
+
+### `item_analysis`
+
+```text
+item_analysis(data, *, correlation="pearson", missing="pairwise") -> DataFrame
+```
+
+項目ごとに 1 行: `item`、`n`（観測された得点の数）、`n_categories`（観測された得点の種類数）、`mean`、`sd`
+（分母 $n-1$）、`difficulty`（平均を観測された最大得点で割ったもの。最上位のカテゴリに誰も届かない項目では、
+小さい最大値で割ることになる。0 / 1 項目では正答率）、`item_total`、
+`item_rest`（合計得点との相関と、その項目を除いた合計との相関）、`alpha_if_deleted`（2 項目では NaN）。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `data` | DataFrame / 2 次元配列 | 項目得点（0 / 1 または順序カテゴリの得点。0 以上）。2 項目以上 |
+| `correlation` | `"pearson"` / `"polyserial"` | Pearson 相関（0 / 1 項目では点双列相関）か多分系列相関（0 / 1 項目では双列相関）。多分系列相関は 2 段階推定量 $r\,\sigma_j/\sum_k\phi(\tau_{jk})$（Olsson, Drasgow & Dorans, 1982）で、polycor の `polyserial(ML = FALSE)` と同じ（既定 `"pearson"`） |
+| `missing` | `"pairwise"` / `"listwise"` | ペアワイズの共分散と各項目の観測された得点を使うか、欠測のない行だけを使うか（既定 `"pairwise"`） |
+
+相関は項目の共分散行列 $C$ から $c_j/\sqrt{C_{jj}\,\mathbf 1^\top C\mathbf 1}$ と、項目 $j$ を除いた対応する式で
+計算する。欠測がなければ合計得点・残りの合計との Pearson 相関に等しい。欠測があるとき、psych の `alpha()` は
+`r.drop` は同じ値を返すが、`raw.r` は回答者ごとの観測された得点の和との相関になる。
+
+**例外**: `SpecificationError`（数値でない・負の得点、一定の項目、両方に答えた回答者が 2 人未満の項目の組）。
+**警告**: `HeywoodWarning`（多分系列相関の推定値が $[-1, 1]$ の外に出た。$\pm1$ にする）。
+
+### `coefficient_alpha`
+
+```text
+coefficient_alpha(data, *, missing="pairwise", confidence_level=0.95) -> AlphaResult
+```
+
+α 係数（Cronbach, 1951。0 / 1 項目では KR-20）
+$\alpha=\frac{k}{k-1}\bigl(1-\operatorname{tr}C/\mathbf 1^\top C\mathbf 1\bigr)$、相関行列から求める標準化 α、
+Feldt の信頼区間 $\bigl[1-(1-\alpha)F_{1-\gamma/2},\,1-(1-\alpha)F_{\gamma/2}\bigr]$（$F$ は自由度
+$(n-1,(n-1)(k-1))$ の分位点。Feldt, Woodruff & Salih, 1987）。psych の `alpha()` と一致する。`missing` は
+`item_analysis()` と同じ。`"pairwise"` では Feldt の $n$ は 1 つ以上回答した回答者の数。
+
+### `AlphaResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `alpha`, `standardized_alpha` | float | α と標準化 α |
+| `confidence_interval`, `confidence_level` | tuple, float | Feldt の（下限, 上限）とその信頼水準 |
+| `n_items`, `n_obs` | int | 使った項目数と回答者数（回答が 1 つもない行は除く。psych はすべての行を数える） |
+| `if_deleted` | DataFrame | 項目ごとに、その項目を除いた `alpha` と `standardized_alpha`（2 項目では NaN） |
+
+### `coefficient_omega`
+
+```text
+coefficient_omega(data, *, correlation="pearson") -> OmegaResult
+```
+
+1 因子モデルの ω total。項目の相関行列 $R$ に ULS（minres）で当てはめた負荷量 $\lambda_j$ から
+$s_j=\operatorname{sign}(\lambda_j)$ として $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf s^\top R\mathbf s$
+（McDonald, 1999; Revelle & Zinbarg, 2009）を求める。既定の `flip = TRUE` での psych の
+`omega(nfactors = 1)$omega.tot` と同じ。つまり負の負荷量の項目は反転する（`FlexpycttWarning` を出し、
+`reversed_items` に挙げる）。採点したままの合計の ω が欲しいときは、先にその項目を逆転採点するか除く。`correlation` は `"pearson"`（ペアワイズ）か
+`"polychoric"`（既定の設定の [`polychoric`](#polychoric)）。正定値でない行列は平滑化し、
+`NotPositiveDefiniteWarning` を出す。3 項目以上。階層 ω は提供しない。
+
+### `OmegaResult`
+
+| 属性 | 型 | 説明 |
+|---|---|---|
+| `omega` | float | $\omega_t$ |
+| `loadings`, `uniquenesses` | Series | 1 因子の負荷量（和が非負になる向き）と $1-\lambda_j^2$ |
+| `correlation` | DataFrame | 因子を当てはめた相関行列（採点したままの項目） |
+| `reversed_items` | tuple of str | 負の負荷量を持ち、`omega` の計算前に反転した項目 |
+
+### `distractor_analysis`
+
+```text
+distractor_analysis(data, *, key, n_groups=3) -> DataFrame
+```
+
+多肢選択の回答の選択肢分析。`key` で採点し（無回答は 0 点）、合計得点 $T$ を求める。項目と選択肢（観測された
+選択肢と正答）の組ごとに 1 行: `item`、`option`、`is_key`、`n`、`proportion`（その項目に答えた人のうちの割合）、
+`point_biserial`（その選択肢を選んだかどうかと残りの合計 $T - x_j$ との点双列相関）、`mean_score`（選んだ人の
+$T$ の平均）、`proportion_group_1` … `proportion_group_<n_groups>`（得点の低い群から高い群へ、各群で選んだ割合）。
+群は $T$ の分位点で、R の `cut(T, quantile(T, 0:G / G), include.lowest = TRUE)` と同じく区切る（同点は同じ群に
+入る）。分位点が重なると `SpecificationError`（群の数を減らす）。
 ## 観測得点による特異項目機能（DIF）
 
 パッケージ: flexpyctt（`from flexpyctt import mantel_haenszel, ...`）。IRT モデルを使わない DIF の検出で、回答者を

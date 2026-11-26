@@ -36,6 +36,7 @@ English | [日本語](VALIDATION.ja.md)
 | DIMTEST (simulation study; small version in the tests): type I error at .05 / power | $\le 0.15$ of 20 / $\ge 8$ of 10 |
 | Observed-score DIF: MH / GMH statistics, $\hat\alpha_{MH}$, its log variance, Mantel statistic, cumulative odds ratio and its SE; logistic LRT, $\Delta R^2$, coefficients / SEs and Wald; flags and purification paths | 1e-10 (relative); 1e-8 / 1e-6 (relative); equal |
 | Cross-product / sandwich covariance at mirt's estimates (entries relative to $\sqrt{v_{ii}v_{jj}}$); parameters / SEs end-to-end | 1e-9 / 1e-6; 1e-6 / 1e-5 (relative) |
+| Classical item analysis (alpha, standardized alpha, if-deleted values, Feldt interval, item–total / item–rest, point-biserial, two-step polyserial / biserial, keyed scores, option statistics) vs psych / ltm / polycor / base R; omega total and its loadings vs psych | 1e-12 (scores exact); 1e-6 / 1e-5 |
 | Person / item fit at mirt's $\theta$ ($l_z$, infit, outfit, $z$); $l_z^*$ vs the R recomputation; end-to-end with flexpyirt's own estimates | 1e-9 (relative); 1e-7; 1e-4 |
 
 ## Cases (by milestone)
@@ -84,6 +85,7 @@ English | [日本語](VALIDATION.ja.md)
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
 | V43 | Information matrix, directional information and expected scores of multidimensional models at chosen parameters (two correlated factors with 2PL, 3PL, 4PL, GRM, GPCM and nominal items and four cross-loadings; three factors with 2PL, 3PL, GRM and GPCM and two cross-loadings; bifactor 2PL + GRM with three specific factors; two-tier 2PL + GRM with two correlated primary factors and two specific factors) | `iteminfo(item, Theta, multidim_matrix = TRUE)`, `iteminfo(item, Theta, degrees = )`, `testinfo(m, Theta, degrees = )`, `expected.item()`, `expected.test()` on `mirt()` / `bfactor()` objects built with `pars =` and `TOL = NaN` | M7 |
 | V45 | Optional unconstrained M-step scale (`BAEM(m_step_scale="unconstrained")`) on the V3, V4, V5, V7, V9, V11 and V14 cases; `LogitNormalPrior` (`"natural"`: no mirt equivalent, independent numerical check; `mode_scale="logit"`: mirt `norm` on `g`) | the existing references of those cases; SciPy (`stats.norm`, `integrate.quad`) and a stationarity condition written from the formula; `v45_3pl_logit_norm_map.json` (mirt) and the flexMIRT logit-metric mode computed in the test | #15 |
+| V46 | Classical item analysis (flexpyctt): keyed scoring, alpha (pairwise and listwise), item statistics, point-biserial / biserial / polyserial correlations, omega total (Pearson and polychoric), option analysis; simulated 10-item multiple-choice (complete, 5% MCAR) and 6-item 0–4 data (complete, 6% MCAR) | none (not mirt): psych `alpha()`, `score.multiple.choice()`, `responseFrequency()`, `polyserial()`, `biserial()`, `fa()`, `omega(nfactors = 1)`; ltm `cronbach.alpha()`, `biserial.cor()`; polycor `polyserial(ML = FALSE)`; lavaan `lavCor()`; base R for option statistics | flexpyctt |
 | V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `packages/flexpyctt/validation/r/ctt_dif_reference.R`; the worked example of Liu & Agresti (1996, Table 1) | — |
 | V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
 | V49 | DIF screening with anchor purification (all others as anchors, sequential freeing, sequential constraining; two groups, 8 2PL + 4 GRM $K=3$; three groups 2PL), Wald DIF tests, signed / unsigned expected-score differences, DTF, ESSD / ETSSD and RMSD at mirt's estimates | `DIF(scheme = "drop" / "drop_sequential" / "add_sequential", seq_stat = 0.05, p.adjust = "BH", max_run = )`, `DIF(Wald = TRUE)`, `mirt:::calc_DRFs(best_fitting = TRUE)` (behind `DRF()`), `empirical_ES()`, `RMSD_DIF(probfun = FALSE)` | M5 |
@@ -1480,6 +1482,35 @@ English | [日本語](VALIDATION.ja.md)
   0.5–1.0% (conservative; the bootstrap removes the bias but $T$'s SD under the null is about 0.72)
   and the power 0.99–1.00. Rerun with `uv run python packages/flexpyctt/validation/simulation/dimtest_study.py`
   (about 4 minutes); the tests run 20 null and 10 alternative replications.
+- **Classical item analysis (V46, flexpyctt, #101)**:
+  `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R` (R 4.6.2, psych 2.6.9, ltm
+  1.2.0, polycor 0.8.2, lavaan 0.7.3) writes `packages/flexpyctt/tests/reference/v46_item_analysis.json`;
+  `packages/flexpyctt/tests/test_item_analysis.py` compares. Four simulated cases: 10
+  multiple-choice items ($N=500$, keys and distractors of varying pull, one item with five
+  options) complete and with 5% MCAR, and 6 items scored 0–4 ($N=300$, graded model) complete and
+  with 6% MCAR; plus three items for a just-identified omega and the complete 0–4 data with one
+  item reverse-scored, where psych's default `flip = TRUE` reverses it (its `flip = FALSE` value
+  is also recorded, 0.18 lower, and equals the unreversed formula). Observed differences: closed forms
+  (alpha, standardized alpha, if-deleted values, Feldt bounds, means, SDs, item–total and
+  item–rest correlations, point-biserial, polyserial and biserial, option proportions,
+  point-biserials, mean scores and group proportions) $\le6\times10^{-15}$; keyed scores
+  identical; omega total $\le7\times10^{-8}$ and loadings $\le1.4\times10^{-6}$ (psych's `fa()`
+  stops its minres optimization earlier); polychoric matrices against lavaan $\le2\times10^{-8}$; the reversed item is the one psych
+  reverses, and omega with it reversed equals omega of the data reverse-scored by hand.
+  Known differences, each asserted in the tests: (1) psych's `raw.r` correlates with
+  `rowSums(na.rm = TRUE)`, so with missing data it is compared with the $C$-based
+  `colSums(C)/sqrt(diag(C) * sum(C))` computed in R, and `raw.r` itself only on complete or
+  listwise data (DESIGN §16.21); `r.drop` is $C$-based in psych too and is compared in every
+  case. (2) ltm's raw `cronbach.alpha(na.rm = TRUE)` takes the total variance from complete rows
+  and the item variances from all observed scores, which is neither rule; it is compared on
+  complete data only (its standardized alpha uses complete rows and matches `"listwise"`).
+  (3) psych's `biserial()` equals the two-step biserial times $\sqrt{(n-1)/n}$. (4) psych's
+  `polyserial()` counts missing rows in its $n$, so it is compared on complete data; with missing
+  data the two-step factor $\sigma_j/\sum_k\phi(\tau_{jk})$ is recomputed in R. (5) Option
+  statistics have no installed R implementation (TAM's `tam.ctt3` is not installed); the script
+  computes them in base R from their definitions, and option proportions also match psych's
+  `responseFrequency()`. lavaan's one-factor CFA, listed in the issue, was not used (ML on the
+  covariance matrix is another estimator and scale).
 - **Observed-score DIF (V47, flexpyctt, #102)**: references from difR 6.1.0 and base R,
   committed in `packages/flexpyctt/tests/reference/v47_dif.json`. Measured agreement: MH
   $\chi^2$, $\hat\alpha_{MH}$ and Phillips–Holland variance, GMH statistics (difGMH and

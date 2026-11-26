@@ -1,7 +1,8 @@
 """flexpyirt: Bock–Aitkin EM estimation for item response theory models, built on JAX.
 
-The model-free tools (``parallel_analysis``, ``efa``, ``detect``, ``mantel_haenszel``, ...) are
-defined in flexpyctt and re-exported here; ``polychoric`` is flexpyirt's JAX implementation
+The model-free tools (``parallel_analysis``, ``efa``, ``detect``, ``item_analysis``,
+``mantel_haenszel``, ...) are defined in flexpyctt and re-exported here; ``polychoric`` is
+flexpyirt's JAX implementation
 (DESIGN.md §16.18).
 """
 
@@ -15,6 +16,15 @@ from flexpyctt.dif import (
     logistic_dif,
     mantel,
     mantel_haenszel,
+)
+from flexpyctt.item_analysis import (
+    AlphaResult,
+    OmegaResult,
+    coefficient_alpha,
+    coefficient_omega,
+    distractor_analysis,
+    item_analysis,
+    score_responses,
 )
 from flexpyirt import errors
 from flexpyirt.classification import ClassificationResult, classification_accuracy
@@ -89,6 +99,7 @@ __all__ = [
     "GPCM",
     "GRM",
     "PCM",
+    "AlphaResult",
     "BetaPrior",
     "ClassificationResult",
     "CommonItemScreeningResult",
@@ -119,6 +130,7 @@ __all__ = [
     "Normal",
     "NormalMixture",
     "NormalPrior",
+    "OmegaResult",
     "ParallelAnalysisResult",
     "PolychoricResult",
     "Quadrature",
@@ -129,6 +141,8 @@ __all__ = [
     "WrightMapTable",
     "__version__",
     "classification_accuracy",
+    "coefficient_alpha",
+    "coefficient_omega",
     "compare_fits",
     "comparison_data",
     "detect",
@@ -136,6 +150,7 @@ __all__ = [
     "dif_screen",
     "dimensionality",
     "dimtest",
+    "distractor_analysis",
     "efa",
     "empirical_item_curve",
     "empirical_kaiser",
@@ -147,6 +162,7 @@ __all__ = [
     "hull",
     "information_matrix",
     "irt_equate",
+    "item_analysis",
     "item_information",
     "item_probabilities",
     "link",
@@ -159,6 +175,7 @@ __all__ = [
     "reliability",
     "scale_table",
     "score_distribution",
+    "score_responses",
     "screen_common_items",
     "simulate_responses",
     "stack_screening_tables",

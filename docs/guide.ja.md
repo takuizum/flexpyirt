@@ -26,7 +26,8 @@ flexpyirt で IRT モデルを指定・推定・解釈する手順をまとめ�
 18. [局所依存と次元性のレポート](#18-局所依存と次元性のレポート)
 19. [DETECT](#19-detect)
 20. [ユーザー定義の項目モデル](#20-ユーザー定義の項目モデル)
-21. [エラーと警告](#21-エラーと警告)
+21. [古典的項目分析](#21-古典的項目分析)
+22. [エラーと警告](#22-エラーと警告)
 
 ## 1. 準備
 
@@ -1472,7 +1473,7 @@ print(linked_md.transform_theta(res_mirt_new.score(new_mirt_df.iloc[:3])).round(
 
 ## 16. ポリコリック相関
 
-16、17、19 節では **flexpyctt** を使う。推定済みのモデルを使わない分析のための、flexpyirt と対になるパッケージで
+16、17、19、21 節では **flexpyctt** を使う。推定済みのモデルを使わない分析のための、flexpyirt と対になるパッケージで
 ある。flexpyirt と一緒にインストールされる。JAX を入れたくない環境では単独でインストールできる
 （`pip install flexpyctt`）。依存は NumPy、SciPy、pandas だけで、64 ビットの設定も要らない。乱数を使う関数は
 `rng`（整数のシードまたは `numpy.random.Generator`）を受け取る。
@@ -1701,7 +1702,56 @@ print(restored.items.equals(custom.items))
 flexpyirt が確かめるのは仕組みであり、あなたのモデルではありません。ユーザー定義モデルの正しさは `log_prob` の
 正しさで決まります。新しいモデルは、頼る前に独立な実装と照らし合わせてください。
 
-## 21. エラーと警告
+## 21. 古典的項目分析
+
+IRT モデルを当てはめる前に（または当てはめずに）、古典的な項目統計量で問題のある項目を探せる。モデルを使わないので
+flexpyctt に入っている。
+
+```python
+from flexpyctt import (
+    coefficient_alpha,
+    coefficient_omega,
+    distractor_analysis,
+    item_analysis,
+    score_responses,
+)
+
+# 多肢選択の生の回答: 正答は "B"、誤答は A・C・D に散らばる。
+choice_rng = np.random.default_rng(20)
+wrong = choice_rng.choice(np.array(["A", "C", "D"]), size=df.shape)
+raw = pd.DataFrame(np.where(df.to_numpy() == 1, "B", wrong), columns=items)
+key = {item: "B" for item in items}
+
+scores = score_responses(raw, key=key)
+print(item_analysis(scores).round(3).head())
+alpha = coefficient_alpha(scores)
+print(round(alpha.alpha, 3), np.round(alpha.confidence_interval, 3))
+print(round(coefficient_omega(scores, correlation="polychoric").omega, 3))
+options = distractor_analysis(raw, key=key)
+print(options[options["item"] == items[0]].round(3))
+```
+
+- `score_responses()` は選んだ選択肢を 0 / 1 の得点にする。選択肢は `==` で比べるので、キーはデータと同じ
+  コードと型で書く（`1` と `"1"` は一致しない。誰も選んでいない正答選択肢があると警告が出る）。無回答は 0 点、
+  `missing="keep"` なら NaN のまま。
+- `item_analysis()` は項目ごとに 1 行を返す。`difficulty`（平均を最大得点で割ったもの。0 / 1 項目では正答率）、
+  `item_total` と `item_rest`（合計得点との相関と、その項目を除いた合計との相関。0 / 1 項目では点双列相関）、
+  `alpha_if_deleted`。見るのは `item_rest` のほう。`item_total` は項目自身を含むので、項目数が少ないと大きく出る。
+  `correlation="polyserial"` にすると、2 段階推定による多分系列相関（0 / 1 項目では双列相関）を返す。
+- `coefficient_alpha()` は 0 / 1 項目では KR-20 になる。標準化 α、Feldt の信頼区間、各項目を除いたときの α
+  （`alpha.if_deleted`）も返す。
+- `coefficient_omega()` は項目間相関に 1 因子モデルを（ULS で）当てはめ、ω total を返す。
+  psych の `omega()` と同じく、負の負荷量の項目は反転する（警告を出し、`reversed_items` に挙げる）。報告する合計が
+  採点したままの項目を使うなら、その項目は自分で逆転採点しておく。
+  `correlation="polychoric"` では、観測された合計得点ではなく、カテゴリの背後にある潜在反応についての値になる。
+- 欠測（NaN）は既定ではペアワイズに使う。共分散・相関のそれぞれを、両方の項目に答えた回答者から計算する。
+  `missing="listwise"` なら欠測のない行だけを使う。
+- `distractor_analysis()` は項目と選択肢の組ごとに 1 行を返す。うまく働いている誤答選択肢は、得点の高い群ほど
+  選ばれにくく（`proportion_group_1` が得点の最も低い 3 分の 1）、残りの項目の合計との点双列相関
+  （`point_biserial`）が負になる。正答はその逆になるはず。この例では誤答を無作為に選ばせたので、同じ項目の誤答
+  選択肢どうしは似た値になる。
+
+## 22. エラーと警告
 
 | 種類 | いつ出るか |
 |---|---|

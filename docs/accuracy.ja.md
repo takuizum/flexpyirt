@@ -76,8 +76,9 @@ $10^{-8}$ 程度）。
 | DETECT（確認的・探索的） | 同じ分割での sirt の `conf.detect(use_sum_score = TRUE, smooth = FALSE)` と `expl.detect(use_sum_score = TRUE)`。条件付き共分散・指標・分割が $10^{-12}$ まで |
 | 観測得点による DIF（Mantel–Haenszel、Mantel、一般化 MH、ロジスティック回帰） | difR の `difMH()`、`difGMH()`、`difLogistic()`（統計量、オッズ比とその分散、$\Delta R^2$、係数、純化の経過と検出結果）と R の `mantelhaen.test()`: $10^{-10}$ まで、ロジスティック回帰は $10^{-8}$ まで（標準誤差と Wald 統計量は $10^{-6}$）。Mantel の統計量と累積オッズ比は `difMantel.poly()` / `liu_agresti_ccor()` と R での直接の実装と照合 |
 | 尺度リンキング（Haebara、Stocking–Lord。1 次元と確認的多次元モデル） | mirt の反応関数を使って規準を計算する R の独立な実装（mirt 自体に特性曲線法のリンキングはない） |
+| 古典的項目分析（キーによる採点、α、項目–合計・項目–残りの相関、点双列・双列・多分系列相関、ω total、選択肢の統計量） | psych の `alpha()`、`score.multiple.choice()`、`polyserial()`、`biserial()`、`omega()`、ltm の `cronbach.alpha()` と `biserial.cor()`、polycor の `polyserial()`、素の R。閉じた式は $10^{-12}$、ω は $10^{-6}$ まで |
 
-ポリコリック相関、平行分析、MAP、経験的カイザー基準、因子分析、Hull 法、比較データ法、DETECT、DIMTEST、観測得点による DIF は、対になる
+ポリコリック相関、平行分析、MAP、経験的カイザー基準、因子分析、Hull 法、比較データ法、DETECT、DIMTEST、古典的項目分析、観測得点による DIF は、対になる
 パッケージ flexpyctt（NumPy / SciPy。JAX は使わない）の関数である。flexpyirt 自身の `polychoric()` は同じ推定量の
 JAX による実装で、同じ照合を通り、すべての照合ケースで 2 つは $10^{-9}$ まで一致する。
 
@@ -196,6 +197,13 @@ mirt で推定したモデルとの単純な比較ではないケースの許容
   だと、sirt 4.2 は総得点を標準化してから 2 項目の得点を引くため、「残りの得点」の群が残りの得点の群にならず、
   指標が変わる（あるテストケースで DETECT 1.60 が 6.73 になる）。`smooth = FALSE` と `expl.detect()` では sirt と
   flexpyirt は一致する。
+- **psych の `alpha()` と ltm の `cronbach.alpha()` の欠測の扱い。** 欠測があるとき、psych の `raw.r` は各項目と
+  観測された得点の和（欠測は 0 点）との相関で、α と `r.drop` はペアワイズの共分散を使う。flexpyctt の `item_total`
+  はそのペアワイズの共分散から求める相関なので `raw.r` とは違う（欠測 6% のテストケースで最大 0.014）。ltm の素の α は
+  `na.rm = TRUE` のとき合計の分散を欠測のない行から、項目の分散をすべての回答から求める。flexpyctt の
+  `missing="listwise"` はどちらも欠測のない行から求める。欠測がなければすべて一致する。
+- **psych の `biserial()`** は合計得点の分母 $n-1$ の標準偏差で割るので、2 段階の双列相関（polycor の値）より
+  $\sqrt{(n-1)/n}$ 倍小さい。
 - **difR の Liu–Agresti オッズ比の標準誤差。** difR 6.1 の `liu_agresti_ccor()`（`difMantel.poly()` が使う）が
   `SE_log_Psi` として返すデルタ法の値は、焦点群の度数による微分の符号が誤っており、割る和も違うため、
   $\ln\hat\psi$ の標準誤差でも $\hat\psi$ の標準誤差でもない。flexpyctt の `mantel()` は Liu & Agresti（1996）自身の
