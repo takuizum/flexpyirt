@@ -58,6 +58,8 @@
   - [x] D5a flexpyirt に実装した ULS / ML の EFA（`efa()`。`factor_analyzer` は scikit-learn 1.8 以降で失敗する。DESIGN §16.8）と Hull 法（`hull()`）。V28 で EFAtools の `EFA` / `HULL` と `psych::fa` と照合済み。
   - [x] D5b 比較データ法（`comparison_data()`。V29 で EFAtools の `CD()` とその生成器と照合済み）。
   - [x] D6 ブートストラップでバイアス補正する DIMTEST（`dimtest()`。V30 のシミュレーション研究で受け入れ済み: .05 での第 1 種の誤り 0.5〜1.0%（保守的）、検出力 0.99〜1.00）。
+- [x] flexpyctt の観測得点による DIF（#102、DESIGN §16.20）: ETS 分類つきの Mantel–Haenszel（`mantel_haenszel()`）、順序のある項目の Mantel 検定（`mantel()`）、一般化 MH（`generalized_mantel_haenszel()`）、ロジスティック回帰（`logistic_dif()`）。純化つき。V47 で difR と `mantelhaen.test()` に照合済み。
+- [ ] 順序ロジスティック回帰による DIF（#102 の 2 本目の PR。参照は `difR::difPolyLogistic`）。
 
 ## M6 単一群・1 次元の制限をなくす
 各項目は mirt（または独立な実装）との照合が通って完了とする。参照先は issue に書く。

@@ -34,6 +34,7 @@ English | [日本語](VALIDATION.ja.md)
 | EFA implied $\Lambda\Lambda^\top$ / communalities; CAF, CFI, RMSEA; $\chi^2$; Hull fit / $st$ | 1e-4; 2e-4; 1e-4 (relative); 1e-5 / 1e-2 (relative) |
 | CD: PAF $\Lambda\Lambda^\top$; one-factor population from the same draws; rank-sum $p$; mean RMSE (retained $k$ / the rejected extra $k$) | 1e-12; exact; 1e-10 (relative); 15% / 60% (relative) |
 | DIMTEST (simulation study; small version in the tests): type I error at .05 / power | $\le 0.15$ of 20 / $\ge 8$ of 10 |
+| Observed-score DIF: MH / GMH statistics, $\hat\alpha_{MH}$, its log variance, Mantel statistic, cumulative odds ratio and its SE; logistic LRT, $\Delta R^2$, coefficients / SEs and Wald; flags and purification paths | 1e-10 (relative); 1e-8 / 1e-6 (relative); equal |
 | Cross-product / sandwich covariance at mirt's estimates (entries relative to $\sqrt{v_{ii}v_{jj}}$); parameters / SEs end-to-end | 1e-9 / 1e-6; 1e-6 / 1e-5 (relative) |
 
 ## Cases (by milestone)
@@ -82,6 +83,7 @@ English | [日本語](VALIDATION.ja.md)
 | V40 | Scale linking for 4PL, nominal and mixed 2PL + nominal common items; multidimensional linking $\boldsymbol\theta^*=\mathbf A\boldsymbol\theta+\boldsymbol\beta$ (diagonal, orthogonal, oblique $\mathbf A$) for two-factor 2PL and GRM and three-factor 2PL; Haebara & Stocking–Lord (non-symmetric & symmetric) + Ogasawara covariances | separate `mirt()` calibrations + base-R criteria via `probtrace()` / `expected.item()` minimized with `optim()` | M6 |
 | V43 | Information matrix, directional information and expected scores of multidimensional models at chosen parameters (two correlated factors with 2PL, 3PL, 4PL, GRM, GPCM and nominal items and four cross-loadings; three factors with 2PL, 3PL, GRM and GPCM and two cross-loadings; bifactor 2PL + GRM with three specific factors; two-tier 2PL + GRM with two correlated primary factors and two specific factors) | `iteminfo(item, Theta, multidim_matrix = TRUE)`, `iteminfo(item, Theta, degrees = )`, `testinfo(m, Theta, degrees = )`, `expected.item()`, `expected.test()` on `mirt()` / `bfactor()` objects built with `pars =` and `TOL = NaN` | M7 |
 | V45 | Optional unconstrained M-step scale (`BAEM(m_step_scale="unconstrained")`) on the V3, V4, V5, V7, V9, V11 and V14 cases; `LogitNormalPrior` (`"natural"`: no mirt equivalent, independent numerical check; `mode_scale="logit"`: mirt `norm` on `g`) | the existing references of those cases; SciPy (`stats.norm`, `integrate.quad`) and a stationarity condition written from the formula; `v45_3pl_logit_norm_map.json` (mirt) and the flexMIRT logit-metric mode computed in the test | #15 |
+| V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `packages/flexpyctt/validation/r/ctt_dif_reference.R`; the worked example of Liu & Agresti (1996, Table 1) | — |
 | V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
 | V50 | Common-item screening for linking (#105): robust z (Huynh & Meyer, 2010), displacement and RMSD of expected item score curves; removal order, linking constants at every purification step and the final item table (2PL; mixed 2PL + GRM + GPCM) | separate `mirt()` calibrations + base-R recomputation (`median()`, `quantile(type = 7)`, `expected.item()`, V20 linking); `equateIRT::dif.test` as a cross-check of the drifted items | field |
 | V52 | Classification accuracy and consistency for cut scores (#107): Lee (summed-score cuts) and Rudner ($\theta$ cuts), D and P approaches, one to three cuts, non-integer cuts, both cut-scale conversions (3PL $J=20$; GRM $K=4$, $J=10$; two-group 2PL $J=15$, focal mean and variance free) | cacIRT 1.4 `class.Lee()`, `Lee.poly.D()` / `Lee.poly.P()`, `Rud.D()` / `Rud.P()` with mirt's `testinfo()` SE; independent recomputation from mirt `probtrace()` / `expected.test()` / `testinfo()` (kappa, false positive / negative rates, per-category indices, tables) | field |
@@ -1331,6 +1333,39 @@ English | [日本語](VALIDATION.ja.md)
   0.5–1.0% (conservative; the bootstrap removes the bias but $T$'s SD under the null is about 0.72)
   and the power 0.99–1.00. Rerun with `uv run python packages/flexpyctt/validation/simulation/dimtest_study.py`
   (about 4 minutes); the tests run 20 null and 10 alternative replications.
+- **Observed-score DIF (V47, flexpyctt, #102)**: references from difR 6.1.0 and base R,
+  committed in `packages/flexpyctt/tests/reference/v47_dif.json`. Measured agreement: MH
+  $\chi^2$, $\hat\alpha_{MH}$ and Phillips–Holland variance, GMH statistics (difGMH and
+  `mantelhaen.test()` on groups x categories x strata tables), Mantel statistics and odds ratios
+  to $10^{-10}$ relative (the computations are closed form); purification paths (`difPur`),
+  iteration counts, convergence flags and final flags equal. Logistic regression: `difLogistic()`
+  calls `glm()` with its default `epsilon = 1e-8`, which leaves the coefficients and statistics
+  up to $2\times10^{-4}$ (relative) from the MLE on these data, so the script replaces
+  `stats::glm.control` by one with `epsilon = 1e-14`; then LRT statistics, $\Delta R^2$ and
+  coefficients agree to $10^{-8}$ and SEs and Wald statistics to $10^{-6}$ (`glm()`'s `vcov()`
+  uses the IRLS weights of the previous iterate; the deviance criterion stops at a step of about
+  $\sqrt{\epsilon}$). Known differences, checked in the tests: (1) `mantelhaen.test()` drops the
+  continuity correction when $\lvert\sum A-\sum E(A)\rvert<1/2$ (difR and flexpyctt do not; three
+  items of the simulated set); (2) `difMantel.poly()` rounds its output (statistic to 3, odds
+  ratio to 4 decimals) and its purification removes a flagged item from its own matching
+  score, so Mantel's statistic and its purification path are recomputed in R with difR's rule
+  for the other methods, and `difMantel.poly()` is a rounded cross-check; (3)
+  `liu_agresti_ccor(se = "liu_agresti")` differentiates $T=\sum ad/N-\hat\psi\sum bc/N$ with
+  respect to the focal cumulative count as $a/N-\hat\psi b/N$ (the sign of $a/N$ is wrong) and
+  divides by $\sum bc/N$ instead of $\sum ad/N$, so its `SE_log_Psi` is neither
+  $SE(\ln\hat\psi)$ nor $SE(\hat\psi)$ (0.031 against a Monte Carlo SD of 0.0296 for $\psi=1.48$,
+  300 replications of $N=20000$ in three strata; 0.14 against the Phillips–Holland 0.36 on a
+  `verbal` item). flexpyctt and the R script's `la_eq3()` use instead Liu & Agresti's (1996)
+  eq. 3, which stays valid with many small strata (DESIGN §16.20). Its R implementation, written
+  in the paper's notation and independently of the Python one, reproduces the paper's worked
+  example (Table 1, 28 centres: $\ln\hat\theta=-1.153$, SE .571), and the Python tests check
+  the same published values, Mantel's 4.84 included. A plug-in delta method (used before
+  review; 0.0291 against the Monte Carlo 0.0296 with large strata) gives 0.375 there and is about
+  40% too small with four respondents per stratum. A Python Monte Carlo test (150 strata of 4
+  and of 10 respondents, a four-category proportional-odds item, 400 replications) checks that
+  the mean eq. 3 SE is within 10% of the Monte Carlo SD of $\ln\hat\psi$, and another checks
+  that for 0 / 1 items with large strata it is within 1% of the Phillips–Holland SE. (4) `liu_agresti_ccor()` reports $1/\hat\psi$ of
+  flexpyctt (difR's orientation: above 1 favours the focal group).
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **Unconstrained M-step scale and `LogitNormalPrior` (V45, #15)**: DESIGN §15.47–§15.48.

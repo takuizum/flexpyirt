@@ -794,6 +794,43 @@ fig_dif = plot_item_curves(mg, items[6:9], data=mg_df, group=group)
 
 ![群ごとの項目特性曲線（DIF の図）](images/plots/dif.png)
 
+### 観測得点による DIF（Mantel–Haenszel、ロジスティック回帰）
+
+flexpyctt は IRT モデルを推定せずに DIF のある項目を探せる。回答者を合計得点（または `anchor_items` の合計、外部の
+`matching` 変数）でそろえ、得点ごとに群を比べる。`mantel_haenszel()` は Mantel–Haenszel の $\chi^2$、共通オッズ比
+$\hat\alpha_{MH}$、ETS のデルタ $\Delta_{MH}=-2.35\ln\hat\alpha_{MH}$ と ETS の A / B / C 分類を、`logistic_dif()` は
+入れ子のロジスティック回帰で均一・不均一 DIF を検定し、Nagelkerke の $\Delta R^2$ を返す。`mantel()`（順序のある
+多値項目）と `generalized_mantel_haenszel()`（複数の焦点群、順序のないカテゴリ）も同じ引数をとる。`purify=True`
+では、検出された項目をマッチング得点から外し、検出される項目の組が繰り返すまで検定をやり直す。
+
+```python
+from flexpyctt import logistic_dif, mantel_haenszel
+
+# 2 値項目 20 個。焦点群は平均が低く、項目 q03 と q07 は焦点群にとって難しい（均一 DIF）。
+dif_rng = np.random.default_rng(7)
+dif_theta = np.concatenate([dif_rng.normal(0.0, 1.0, 1200), dif_rng.normal(-0.5, 1.0, 800)])
+dif_group = np.repeat(["ref", "focal"], [1200, 800])
+dif_shift = np.where(dif_group[:, None] == "focal", np.isin(np.arange(20), [2, 6]) * 0.8, 0.0)
+dif_prob = 1 / (1 + np.exp(-1.2 * (dif_theta[:, None] - np.linspace(-1.5, 1.5, 20) - dif_shift)))
+dif_df = pd.DataFrame(
+    (dif_rng.random((2000, 20)) < dif_prob).astype(int),
+    columns=[f"q{j:02d}" for j in range(1, 21)],
+)
+
+mh = mantel_haenszel(dif_df, group=dif_group, focal="focal", purify=True, p_adjust="holm")
+print(mh.table[["item", "chi2", "delta", "ets_class", "adj_p", "flagged"]].round(3).head(8))
+print(mh.flagged_items, mh.n_iter, mh.converged)
+lr = logistic_dif(dif_df, group=dif_group, focal="focal", purify=True, p_adjust="holm")
+print(lr.table.loc[lr.table["flagged"], ["item", "chi2", "delta_r2", "jodoin_gierl_class"]])
+```
+
+- $\Delta_{MH}<0$ は、同じ合計得点で項目が焦点群にとって難しいことを表す。C 分類（ここでは q03 と q07）には
+  $|\Delta_{MH}|\ge1.5$ かつ 1 より有意に大きいことが要る。A 分類は $|\Delta_{MH}|<1$ または有意でないこと。
+  `classification="effect_size"` は閾値だけを使う。
+- 観測した合計得点でそろえるので、群の能力差が大きく項目が少ないと、DIF のない項目が検出されることがある（ここでは
+  q17。効果量は無視できる大きさ）。p 値だけでなく効果量も見る。
+- マッチングに使う項目は欠測がないこと。欠測のある行は先に除く。
+
 ## 10. 固定項目パラメタ推定（FIPC）
 
 既に尺度化された項目バンクの値で一部の項目を固定し、新しい項目と潜在分布を推定する。固定項目が尺度を
