@@ -243,6 +243,28 @@ def test_fix_from_3pl_and_4pl() -> None:
         Model.uniform(FourPL(), items=["q01", "q02"]).fix_from(bank_3pl, parameterization="irt")
 
 
+def test_fix_from_rejects_several_rows_per_item() -> None:
+    # Issue #145: the last row won silently, e.g. with the items table of a multiple-group fit.
+    bank = pd.DataFrame(
+        {
+            "group": ["g1", "g1", "g2", "g2"],
+            "item": ["q01", "q02", "q01", "q02"],
+            "a": [1.0, 1.2, 1.5, 0.7],
+            "d": [0.0, 0.3, 0.1, -0.2],
+        }
+    )
+    spec = Model.uniform(TwoPL(), items=["q01", "q02", "q03"])
+    with pytest.raises(SpecificationError, match=r"several rows for \['q01', 'q02'\]"):
+        spec.fix_from(bank)
+    # Duplicates of items that are not fixed do not matter.
+    with pytest.raises(SpecificationError, match=r"several rows for \['q02'\]"):
+        spec.fix_from(bank.iloc[1:])
+    one = spec.fix_from(bank.iloc[[1, 0, 3]], items=["q01"])
+    assert {(i, p): v for i, p, v in one.fixed} == {("q01", "a"): 1.0, ("q01", "d"): 0.0}
+    per_group = spec.fix_from(bank[bank["group"] == "g2"])
+    assert dict(((i, p), v) for i, p, v in per_group.fixed)[("q02", "a")] == 0.7
+
+
 def test_fix_from_mixed_bank_nan_and_missing_slope() -> None:
     # Mixed Rasch/3PL/4PL bank: NaN cells for omitted default-fixed parameters (Rasch a, 3PL u)
     # are treated as not given.

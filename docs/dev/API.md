@@ -4,7 +4,7 @@ English | [日本語](API.ja.md)
 
 > **For the implemented API, see the [API reference](../reference.md) and the [user guide](../guide.md).**
 > This file is the design-stage sketch and still includes a few features that are not implemented yet
-> (EH, Gauss–Hermite, `TruncNormal`, M4 scoring/MIRT, ...).
+> (`TruncNormal`, ...).
 
 > Goal: separate "specification (Spec), estimation (fit), result (FitResult)". A specification is
 > an immutable object, and method chaining returns a new specification.
@@ -67,12 +67,12 @@ spec = (
     .equal_across_groups(items=anchors)  # anchor items: all parameters equal across groups
 )
 res = fit(spec, df.drop(columns="form"), group=df["form"])
-res.latent  # DataFrame: group, mean, sd, se
+res.latent  # DataFrame: group, mean, var, mean_se, var_se
 res.items  # with a group column (equal items have equal values)
 ```
 
-For EH use `focal=EmpiricalHistogram()`. For an EH reference group as well,
-`ref=EmpiricalHistogram(standardize=True)`.
+For EH use `EmpiricalHistogram()` for every group (EH and `Normal` cannot be mixed across groups);
+the reference group's histogram is standardized.
 
 ## 4. Fixed item parameter calibration (FIPC)
 
@@ -107,11 +107,14 @@ res = fit(
     method=BAEM(tol=1e-4, max_iter=2000, squarem=True, m_step_newton_steps=5),
     quadrature=Quadrature.equispaced(61, bounds=(-6, 6)),  # or Quadrature.gauss_hermite(41)
     se="oakes",  # "oakes" | "hessian" | "crossprod" | "sandwich" | None
-    verbose=False,
 )
 # Sampling weights and clustered samples (students within schools): design-based sandwich SEs.
 res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
-res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_change)
+(
+    res.converged,
+    res.n_iter,
+    res.history,
+)  # history: DataFrame(iter, loglik, log_posterior, max_change, ...)
 ```
 
 ## 6.1 Implemented as of M1
@@ -167,10 +170,10 @@ one (DESIGN.md §16.18).
 | `Rasch`, `TwoPL`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`, `Nominal` | frozen dataclass (satisfies `ItemModel`) | Item models |
 | `items.ItemModel`, `items.ItemKernel`, `items.register_item_model` | Protocols, function | User-defined item models and their JSON registration (DESIGN §20) |
 | `Normal`, `EmpiricalHistogram`, `DavidianCurve`, `NormalMixture` | frozen dataclass (satisfies `LatentDist`) | Latent distributions. `Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)`, `NormalMixture(n_components)` |
-| `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
+| `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `LogitNormalPrior`, `TruncNormal` (not implemented) | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
 | `fit` | function | Estimation; returns a `FitResult` |
-| `FitResult` | class | Result (`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `person_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
+| `FitResult` | class | Result (`items`, `latent`, `parameters`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `person_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
 | `dif_screen`, `dif_effect_sizes` | function | DIF workflow for unidimensional multiple-group models: screening every item with anchor purification (`strategy="all_others"` / `"sequential_free"` / `"sequential_constrain"`, likelihood-ratio or Wald tests; returns a `DIFScreenResult` with `table`, `history`, `flagged_items`, `anchor_items` and the final `fit`) and effect sizes (signed / unsigned expected-score differences, ESSD, RMSD, a test row). `FitResult.dif(..., test="wald")` adds Wald tests (DESIGN §16.22) |
 | `link` | function | Differentiable IRT scale linking (Haebara / Stocking–Lord, non-symmetric & symmetric; `transformation=` for a diagonal, orthogonal or oblique $\mathbf A$ in multidimensional models); returns a `LinkResult` |
 | `LinkResult` | class | Scale-linking result (`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `transformation`, `items`, `transform_theta`, `summary`) |

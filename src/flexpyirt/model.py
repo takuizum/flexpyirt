@@ -329,8 +329,9 @@ class Model:
         Raises
         ------
         SpecificationError
-            If the bank lacks a needed column or item, if ``parameterization="irt"`` is used
-            with a multidimensional model, or if ``parameterization="irt"`` is used for a
+            If the bank lacks a needed column or item, if it has several rows for an item to
+            fix (e.g. the ``items`` table of a multiple-group fit), if ``parameterization="irt"``
+            is used with a multidimensional model, or if ``parameterization="irt"`` is used for a
             ``Nominal`` item (the nominal model has no IRT thresholds).
         """
         if self.is_multidimensional and parameterization == "irt":
@@ -344,6 +345,13 @@ class Model:
         chosen = (
             tuple(i for i in self.item_names if i in rows) if items is None else self._select(items)
         )
+        counts = bank["item"].astype(str).value_counts()
+        duplicated = [i for i in chosen if counts.get(i, 0) > 1]
+        if duplicated:
+            raise SpecificationError(
+                f"The item bank has several rows for {duplicated}; it needs one row per item "
+                "(from the items table of a multiple-group fit, keep the rows of one group)."
+            )
         missing = [i for i in chosen if i not in rows]
         if missing:
             raise SpecificationError(f"Items not found in the bank: {missing}.")

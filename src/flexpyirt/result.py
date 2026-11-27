@@ -1301,7 +1301,9 @@ class FitResult:
             )
             residuals = np.where(y_g >= 0, y_g - expected, np.nan)
             q3 = _local_dependence.q3_matrix(residuals)
-            q3_mean = float(np.mean(q3[upper]))
+            # Pairs without two common respondents have no Q3; the mean is over the others.
+            defined = q3[upper][np.isfinite(q3[upper])]
+            q3_mean = float(defined.mean()) if defined.size else float("nan")
             if red is None:
                 ld = _local_dependence.ld_pairs(y_g, [t[g] for t in on_grid], weights[g])
             else:
@@ -1420,7 +1422,8 @@ class FitResult:
             If JAX is not configured for 64-bit floating point.
         SpecificationError
             For multiple-group, multidimensional or non-``Normal`` latent models, fewer than
-            three items, invalid options, or ``method="one_step"`` without a covariance matrix.
+            three items, invalid options, or ``method="one_step"`` on a fit without
+            ``se="oakes"`` or ``se="hessian"``.
 
         Warns
         -----
@@ -1489,16 +1492,20 @@ class FitResult:
             row = (item_col == name) & (params["param"].to_numpy() == slope[0]) & free
             if row.any():
                 slope_id[k] = fid[row][0]
-        a_full = np.where(slope_id >= 0, eta[np.maximum(slope_id, 0)], np.nan)
+        has_free_slope = slope_id >= 0
+        a_full = np.full(n_items, np.nan)
+        a_full[has_free_slope] = eta[slope_id[has_free_slope]]
 
         out = np.full((n_items, n_items), np.nan)
         converged = np.ones(n_items, dtype=bool)
-        if method == "one_step":
+        # Without a free slope (Rasch / PCM, or every slope fixed) no index is defined: all NaN.
+        removed = list(enumerate(names)) if has_free_slope.any() else []
+        if method == "one_step" and removed:
             assert self.vcov is not None
             grads = np.asarray(_jsi.gradients_without(prob, jnp.asarray(eta), jnp.arange(n_items)))
             vcov_full = np.asarray(self.vcov, dtype=np.float64)
             se_full = np.sqrt(np.clip(np.diag(vcov_full), 0.0, None))
-        for j, name in enumerate(names):
+        for j, name in removed:
             keep = np.unique(fid[free & (item_col != name)])
             if method == "one_step":
                 grad = np.zeros_like(eta)

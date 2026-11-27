@@ -65,15 +65,10 @@ calibration and fixed item parameter calibration (FIPC).
 These are planned and tracked in the
 [roadmap](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/ROADMAP.md).
 
-- Davidian curves and normal mixtures in multiple-group models ([#75](https://github.com/takuizum/flexpyirt/issues/75))
-- $M_2$ for multiple groups, missing responses and MAP fits ([#76](https://github.com/takuizum/flexpyirt/issues/76)); $M_2$ and S-X2 for
-  bifactor, two-tier and multiple-group multidimensional models
-- Many-group fits with per-group latent distributions vmapped over groups ([#79](https://github.com/takuizum/flexpyirt/issues/79))
-- Information matrices and directional information for multidimensional models
+- $M_2$ and S-X2 for bifactor, two-tier and multiple-group multidimensional models
 - Item fit, $M_2$, local dependence and DIF for weighted fits
 - The jackknife slope index beyond single-group unidimensional models with a normal latent
   distribution
-- A public extension API for user-defined item models ([#86](https://github.com/takuizum/flexpyirt/issues/86))
 
 ## Installation
 

@@ -332,7 +332,8 @@ def classification_accuracy(
     data : DataFrame or array-like, optional
         Responses on the fitted items (NaN is missing). When given, the indices are averaged
         over the respondents' estimates (the P approach) instead of integrated over the fitted
-        latent distribution (the D approach).
+        latent distribution (the D approach). Each row counts once: the sampling weights of a
+        weighted fit are not applied.
     group : array-like, optional
         Group label of each row of ``data`` (required with ``data`` for a multiple-group
         model). Without ``data``, every group of a multiple-group model is reported.
