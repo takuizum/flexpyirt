@@ -790,12 +790,9 @@
   （`global = TRUE` の psych は補正しない）。カテゴリ数が異なると psych はペアごとの閾値を使い、欠測があると結果が
   ずれる（MCAR のケースで 6e-3）ため、そのケースは lavaan とだけ比べる。さらに各ペアの two-step の勾配が推定値で
   0 になることも確かめる。2 変量正規分布の分布関数は Plackett の積分と単体テストで比べる。
-- **次元数（V25、M5）**: 決定的な量は V24 の lavaan の行列から R で計算するので、両側が同じ入力を見る。
-  EFA.dimensions と EFAtools を両方読み込むと EFA.dimensions の `PARALLEL()` が EFAtools のものを隠すため、
-  スクリプトでは `EFAtools::` を明示する。EFA.dimensions の 4 乗版 MAP は $(\operatorname{tr}(R^{*4})-p)/(p(p-1))$
-  （行列のべき乗。このデータで 1 を超える）なので、4 乗版は要素ごとの独立な実装と比べ、EFA.dimensions の値は記録
-  するだけにする。正規データの参照は両側とも確率的なので、テストは固定のキーを使い、平均は $z$（反復から求めた標準
-  誤差、独立な 2 つの平均なので $\sqrt2$ 倍）で、95 パーセンタイルは絶対誤差で比べる。
+- **flexpyctt のケース（V25、V27〜V30、V46、V47）**: これらのケースについての記述は、2026-11-27 に flexpyctt の
+  設計文書（[DESIGN.ja.md §10](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.ja.md)）に移した。V24 は両方に書いてある。flexpyirt の JAX 版
+  `polychoric()` を、その参照値のコピーで照合しているためである。
 - **局所依存とモデルに基づく平行分析（V26、M5）**: mirt の推定は `quadpts = 61`、`TOL = 1e-10`、
   `optimizer = "NR"`。flexpyirt は `BAEM(tol=1e-9)` で推定し直すので、比較には推定の一致（対数尤度は相対 $10^{-9}$）
   も含まれる。ltm は独自の `Science` と `LSAT` のデータ（因子型）を持つので、スクリプトでは mirt のデータを
@@ -868,25 +865,6 @@
   Gauss–Hermite 格子（mirt の `residuals()` は等間隔）。**実装していないもの**: これらのモデルの `jsi()`
   （1 項目が主因子と特殊因子の傾きを持ち、mirt の `type = "JSI"` は 1 因子を要求する）。多母集団（双因子・two-tier
   モデルは単一群のみ）。
-- **DETECT（V27、M5）**: sirt の `conf.detect()` は `smooth = FALSE` で呼ぶ。既定の `smooth = TRUE` で
-  `use_sum_score = TRUE` だと、標準化した総得点から生の項目得点を引くので、残りの得点の群が誤る（DESIGN §16.13）。
-  `expl.detect()` は自分で `smooth = FALSE` にする。その戻り値の `detect.unweighted` は検証用の半分の指標だけを
-  持つので、推定用の半分の指標はスクリプトで推定用の行に `conf.detect()` を当てて計算し直す。
-- **EFA と Hull（V28、M5）**: 回転しない負荷量は、含意する $\Lambda\Lambda^\top$（列の符号と等しい固有値の順に
-  よらない）で比べる。`HULL()` の上限 $J$ は乱数を使う平行分析から決まるので、スクリプトは `settings$n_fac_max` を
-  記録し、テストはそれを `max_factors` として渡す。EFAtools の `optim()` による解は flexpyirt より収束が粗いので、
-  テストでは EFAtools の $\psi=1-h^2$ での目的関数値を flexpyirt の値が上回らないことも確かめる。残る差は Heywood の解
-  （独自性が境界にある）で最も大きく、Hull は真の因子数を超える $k$ でそれを含む。
-- **比較データ法（V29、M5）**: CD は両側とも乱数を使う。生成器は、EFAtools の乱数を R で再現し（`set.seed` の
-  あと、生成器と同じ順に `sample()` / `rnorm()` を呼ぶ）、書き出して flexpyirt に与えることで厳密に確かめる。負荷量の
-  符号が生成器で決まる 1 因子では厳密に一致する。選択は答えがはっきりしたデータで確かめ、平均 RMSE は各側が別の
-  母集団を引くので緩く比べる（採用された因子数では 15%。棄却された追加の因子では 60%。こちらは 1 つの母集団による
-  ばらつきがずっと大きく、EFAtools の値 0.048 に対して 6 つのシードで 0.044〜0.072 になる）。JSON の `auto_unbox` は要素が 1 つの $p$ 値のベクトルをスカラーにするので、スクリプトは
-  `as.list()` で書く。
-- **DIMTEST（V30、M5）**: 参照値との照合ではなくシミュレーション研究で受け入れる（表は DESIGN §16.16）。200 反復で
-  .05 での第 1 種の誤りは 0.5〜1.0%（保守的。ブートストラップは偏りを除くが、帰無仮説の下での $T$ の SD は 0.72 程度）、
-  検出力は 0.99〜1.00。`uv run python flexpyctt/validation/simulation/dimtest_study.py`（約 4 分）で再実行できる。テストは帰無
-  20 反復と対立 10 反復を実行する。
 - **双因子モデル（V32、M7）**: シミュレーション 2 例を `tests/test_mirt_m7_bifactor.py` で照合する（通常の EM と
   SQUAREM。生成スクリプト `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`、mirt 1.46.1 の
   `bfactor()`、`optimizer = "NR"`、`accelerate = "none"`、`TOL = 1e-10`、`SE.type = "Oakes"`、$[-6, 6]$ 上で次元あたり
@@ -1295,53 +1273,6 @@
   エラー、summary、JSON（スキーマ 9、`n_clusters`）。
 
 ## 照合以外の検証
-- **古典的項目分析（V46、flexpyctt、#101）**:
-  `flexpyctt/validation/r/ctt_item_analysis_reference.R`（R 4.6.2、psych 2.6.9、ltm 1.2.0、
-  polycor 0.8.2、lavaan 0.7.3）が `flexpyctt/tests/reference/v46_item_analysis.json` を書き、
-  `flexpyctt/tests/test_item_analysis.py` で照合する。シミュレーションの 4 例: 多肢選択 10 項目（$N=500$、
-  正答と誤答の引きつけ方を変え、1 項目は 5 選択肢）の欠測なしと 5% MCAR、0〜4 で採点する 6 項目（$N=300$、
-  段階反応モデル）の欠測なしと 6% MCAR。ほかに丁度識別の ω を見る 3 項目と、0〜4 の欠測なしデータの 1 項目を逆転採点したもの（psych の既定の
-  `flip = TRUE` がその項目を反転する。`flip = FALSE` の値も記録し、0.18 低く、反転しない式と一致する）。観測された差: 閉じた式（α、標準化 α、
-  項目を除いたときの値、Feldt の上下限、平均、SD、項目–合計・項目–残りの相関、点双列・多分系列・双列相関、
-  選択肢の割合・点双列相関・平均得点・群ごとの割合）は $6\times10^{-15}$ 以下、キーによる得点は完全一致、
-  ω total は $7\times10^{-8}$ 以下、負荷量は $1.4\times10^{-6}$ 以下（psych の `fa()` が minres の最適化を早く
-  止めるため）、lavaan とのポリコリック行列は $2\times10^{-8}$ 以下。反転する項目は psych が反転するものと一致し、反転したときの ω は
-  手で逆転採点したデータの ω と一致する。既知の違い（それぞれテストで確かめる）:
-  (1) psych の `raw.r` は `rowSums(na.rm = TRUE)` との相関なので、欠測があるときは R で求めた $C$ に基づく
-  `colSums(C)/sqrt(diag(C) * sum(C))` と比べ、`raw.r` そのものとは欠測なし・リストワイズのときだけ比べる
-  （DESIGN §16.21）。`r.drop` は psych でも $C$ に基づくので全例で比べる。(2) ltm の素の
-  `cronbach.alpha(na.rm = TRUE)` は合計の分散を欠測のない行から、項目の分散をすべての観測された得点から求め、
-  どちらの規則でもない。欠測のないデータでだけ比べる（標準化 α は欠測のない行を使い、`"listwise"` と一致する）。
-  (3) psych の `biserial()` は 2 段階の双列相関の $\sqrt{(n-1)/n}$ 倍になる。(4) psych の `polyserial()` は欠測の
-  ある行も $n$ に数えるので、欠測のないデータで比べる。欠測があるときは 2 段階の係数 $\sigma_j/\sum_k\phi(\tau_{jk})$
-  を R で計算し直して比べる。(5) 選択肢の統計量にはインストール済みの R 実装がない（TAM の `tam.ctt3` は未導入）。
-  スクリプトが定義どおり素の R で計算し、選択肢の割合は psych の `responseFrequency()` とも一致する。issue に挙げた
-  lavaan の 1 因子 CFA は使わなかった（共分散行列への ML は推定量も尺度も違う）。
-- **観測得点による DIF（V47、flexpyctt、#102）**: 参照値は difR 6.1.0 と base R によるもので、
-  `flexpyctt/tests/reference/v47_dif.json` にコミットする。一致の程度: MH の $\chi^2$、$\hat\alpha_{MH}$ と
-  Phillips–Holland の分散、一般化 MH の統計量（difGMH と、群 x カテゴリ x 層の表への `mantelhaen.test()`）、Mantel の
-  統計量とオッズ比は相対 $10^{-10}$ まで（どれも閉じた式）。純化の経過（`difPur`）、反復回数、収束の判定、最終的な
-  検出結果は一致。ロジスティック回帰: `difLogistic()` は既定の `epsilon = 1e-8` で `glm()` を呼ぶので、このデータでは
-  係数と統計量が最尤推定値から相対 $2\times10^{-4}$ までずれる。そこでスクリプトは `stats::glm.control` を
-  `epsilon = 1e-14` のものに置き換える。すると尤度比統計量、$\Delta R^2$、係数は $10^{-8}$ まで、標準誤差と Wald
-  統計量は $10^{-6}$ まで一致する（`glm()` の `vcov()` は 1 つ前の反復の IRLS の重みを使い、逸脱度の基準は
-  $\sqrt{\epsilon}$ 程度のステップで止まる）。テストで確認している既知の差: (1) `mantelhaen.test()` は
-  $\lvert\sum A-\sum E(A)\rvert<1/2$ のとき連続修正を省く（difR と flexpyctt は省かない。シミュレーションのデータで
-  3 項目）。(2) `difMantel.poly()` は出力を丸め（統計量は小数 3 桁、オッズ比は 4 桁）、純化では検出された項目を
-  その項目自身のマッチング得点からも外す。そこで Mantel の統計量と純化の経過は、difR のほかの方法と同じ規則で R で
-  計算し直し、`difMantel.poly()` は丸めた値での照合にとどめる。(3) `liu_agresti_ccor(se = "liu_agresti")` は
-  $T=\sum ad/N-\hat\psi\sum bc/N$ の焦点群の累積度数による微分を $a/N-\hat\psi b/N$ としており（$a/N$ の符号が誤り）、
-  $\sum ad/N$ ではなく $\sum bc/N$ で割るので、その `SE_log_Psi` は $SE(\ln\hat\psi)$ でも $SE(\hat\psi)$ でもない
-  （$\psi=1.48$、3 層、$N=20000$ を 300 反復したモンテカルロの SD 0.0296 に対して 0.031。`verbal` のある項目で
-  Phillips–Holland の 0.36 に対して 0.14）。flexpyctt と R スクリプトの `la_eq3()` は代わりに Liu & Agresti（1996）の
-  式 (3) を使う。小さな層が多数ある場合にも妥当な推定量である（DESIGN §16.20）。R の実装は論文の記法で Python とは
-  独立に書いたもので、論文の計算例（表 1、28 施設: $\ln\hat\theta=-1.153$、SE .571）を再現する。Python のテストも
-  Mantel の 4.84 を含めて同じ公表値を確認する。推定値を代入するデルタ法（レビュー前の実装。層が大きい確認では
-  モンテカルロの 0.0296 に対して 0.0291）はこの例で 0.375 になり、1 層 4 人では約 40% 過小になる。Python の
-  モンテカルロのテスト（4 人と 10 人の層が 150 個、4 カテゴリの比例オッズの項目、400 反復）で式 (3) の SE の平均が
-  $\ln\hat\psi$ のモンテカルロ SD と 10% 以内で一致すること、別のテストで層が大きい 0 / 1 項目では
-  Phillips–Holland の標準誤差と 1% 以内で一致することを確認する。
-  (4) `liu_agresti_ccor()` は flexpyctt の $1/\hat\psi$ を返す（difR の向き: 1 より大きいと焦点群に有利）。
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **M-step の非拘束尺度と `LogitNormalPrior`（V45、#15）**: DESIGN §15.47–§15.48。
   1. *両方の M-step 尺度での内点解*: V3・V4・V5・V9（`tests/test_mirt_m2.py`: 対数尤度、項目と潜在分布のパラメタ。

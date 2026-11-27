@@ -1195,31 +1195,9 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    含む極端な 2 値項目、LSAT7、Science。lavaan と $3.1\times10^{-8}$ 以内（その `nlminb` の許容誤差。flexpyirt の
    ペアごとの勾配は $10^{-7}n$ まで 0）、閾値は $10^{-12}$ 以内、psych とは補正したペアを除く欠測のないデータで
    $2\times10^{-5}$ 以内（その `optimize()` の許容誤差）、`cor.smooth` とは $10^{-12}$ 以内で一致する。
-10. **平行分析・MAP・EKC（`parallel_analysis()`、`velicer_map()`、`empirical_kaiser()`、§16.8 の D2、V25）**:
-    `dimensionality.py`（シェル。$p\times p$ の線形代数は NumPy、正規の参照データは JAX の `vmap`。現在は
-    flexpyctt にあり、乱数は NumPy、`key` の代わりに `rng` を取る。§16.18）に置く。3 つとも
-    問い (A) に答え、`n_factors` をもつ変更不可の結果を返す。行列の入力（DataFrame、配列、`PolychoricResult`）は
-    正方・有限・対称・対角 1・$p\ge3$ であること。**数え方**: 参照を厳密に上回る固有値を先頭から数え、最初に下回った
-    ところで止める（psych・EFAtools と同じ逐次の規則）。**SMC の固有値**: 対角を $h_j=1-1/(R^{-1})_{jj}$ にした $R$
-    （Humphreys & Ilgen, 1969）。psych・EFAtools の EFA の共通性を使う版は EFA 連携（D5）を待つ。**平行分析の参照**:
-    `"permutation"`（既定）は JAX の PRNG キーで各項目を独立に並べ替え（入れ子の `vmap` で `(R, p, N)` の置換）、
-    周辺分布と欠測を保ったまま、反復ごとに照合済みの `polychoric()`（またはペアごとの Pearson）で相関を求め直す
-    （警告は抑える）。並べ替えたペアが推定できない反復（欠測による）は飛ばして数え、`FlexpyirtWarning` を出す。
-    使える反復が 2 つ未満なら `SpecificationError`。`"normal"` は同じ $N\times p$ の独立な $N(0,1)$ データ（欠測のある
-    行も数える）の Pearson 相関で、`vmap` を分割して計算する。分位点は NumPy の既定（線形補間、R の type 7）。既定の
-    分位点 0.95（Glorfeld, 1995）、PCA の固有値、ポリコリック相関での並べ替えの参照は Garrido, Abad & Ponsoda (2013)
-    に従う。**MAP**: 主成分の負荷量 $V_m\Lambda_m^{1/2}$（負の固有値は 0 に切る）で $m=0,\dots,p-1$ の $f_m$ を
-    求める。4 乗は要素ごと（O'Connor, 2000）で、推奨される改訂版（Velicer, Eaton & Fava, 2000）なので既定にした。
-    偏分散が $10^{-10}$ 以下になったところで NaN として打ち切り、最小値は NaN を除いて探す。EFA.dimensions の 4 乗の
-    統計量は行列のべき乗である（記録するが従わない）。**EKC**: EFAtools と同じ Braeken & van Assen (2017)（残りの
-    分散の項に観測固有値を使う）。`PolychoricResult` を渡して `n_obs` を省くと、ペアごとの $n$ の最小値を使う
-    （欠測があるときに保守的）。
-    **照合（V25）**: `flexpyctt/validation/r/m5_dimensionality_reference.R` は V24 の lavaan のポリコリック行列 6 つを EFAtools
-    1.1.0（`EKC`）、psych 2.6.9（`vss()$map`）、EFA.dimensions 0.1.9.3（`MAP`）、両方の MAP のべきの R による独立な
-    実装、PCA・SMC の固有値には `eigen()` に与える。選ばれる因子数も含めすべて $10^{-11}$ 以内で一致する。正規の
-    参照固有値（3 つの大きさ x PCA・SMC、各 20000 データセット）は EFAtools の `PARALLEL` と Monte Carlo 誤差の範囲で
-    一致する（固定のキーで平均は $|z|\le4.5$、95 パーセンタイルは $6\times10^{-3}$）。並べ替えの経路は性質（独立な
-    置換、2 因子の回復、キーによる再現性）で確かめる。
+10. **平行分析・MAP・EKC（`parallel_analysis()`、`velicer_map()`、`empirical_kaiser()`、§16.8 の D2、V25）**: 2026-11-27 に flexpyctt が自分のリポジトリを持ったとき（§16.24）、flexpyctt の設計文書
+    （[DESIGN.ja.md §3](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.ja.md)）に移した。
+
 11. **局所依存とモデルに基づく平行分析（`FitResult.local_dependence()`、`model_parallel_analysis()`、§16.8 の D3、
     V26）**: どちらも単一群・1 次元・`Normal` 潜在分布のモデルを要する（`FitResult._require_unidimensional_normal`）。
     `FitResult._traces(prob, nodes)` は `CompiledProblem.nodes` を差し替えて（カーネルが読むのはノードだけ）任意の
@@ -1289,119 +1267,19 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     表示する。モジュールと関数が同じ名前 `dimensionality` を持つ（`fit` と同じ）ので、`flexpyirt.dimensionality` は
     関数を指す。テストではモジュールを `importlib.import_module` で取得する。`tests/test_m5_ensemble.py` で、各行を
     個々の関数と同じキーで計算し直して確かめる。
-13. **DETECT（`detect()`、`exploratory_detect()`、§16.8 の D4、V27）**: `_detect.py`（NumPy。現在は flexpyctt に
-    ある。§16.18）。
-    **条件付き共分散**: Zhang & Stout (1999)。各ペアについて、総得点 $S$ が等しい群と残りの得点 $S-X_i-X_j$ が等しい
-    群のそれぞれで最尤の共分散を求め、群の割合で平均し、さらに 2 つを平均する（総得点による推定は負に、残りの得点に
-    よる推定は正に偏る）。群は `np.unique` と `np.bincount` でペアごとに 1 回で作る。生の項目得点を使い（多値項目も
-    可）、欠測のないデータを要する（そうでなければ得点が定義できない）。そのため `dimensionality()` は欠測があると
-    DETECT を使えないと示す。**指標**（sirt の `detect.index`）: DETECT $=100\,\overline{\delta\,\mathrm{ccov}}$、ASSI、
-    RATIO、MADCOV100、MCOV100 の、重みなしと $\sqrt{n_{ij}}$ で重み付けした版（欠測がなければ同じ。sirt の形に合わせて
-    残す）。sirt の既定の `conf.detect` の平滑化した（カーネルによる）条件付き共分散は実装しない。**探索的**: 行を半分に
-    分け（JAX のキーで `floor(N/2)` 行を推定用に、または指定）、推定用の半分の行列から作る
-    $d=\max(\mathrm{ccov})-\mathrm{ccov}$（最大値は sirt の `create.ccov` と同じく 0 の対角を含む）に Ward 法を当てる。
-    R の `hclust(method = "ward.D")` は Lance–Williams の Ward の更新を $d$ そのものに当て、SciPy の `"ward"` は 2 乗距離に
-    当てるので、SciPy には $\sqrt d$ を渡す（併合の高さは 2 乗すると R と同じ）。`cutree` はクラスタを最初に現れた順に
-    番号付けするので、SciPy の `fcluster` の出力も同じく付け直す。$k=2..$`max_clusters` の各分割を両方の半分で評価し、
-    `n_clusters` は推定用の半分での DETECT を最大にする（sirt と同じ選び方）。Zhang & Stout の遺伝的アルゴリズムによる
-    分割の探索は実装しない。**閾値**（docstring、ガイド）: DETECT $<0.2$ / $0.4$ / $1$、ASSI $0.25$、RATIO $0.36$
-    （Jang & Roussos, 2007; Zhang, 2007。§16.8 の 0.1 / 0.5 / 1 はここで訂正した）。**アンサンブル**:
-    `dimensionality()` は選んだ分割の検証用の半分での DETECT を問い (B) の行として加える（`detect_threshold` $=0.2$
-    未満なら支持）。`fit` がなくても使える。キーは 3 つ（平行分析、モデルに基づく平行分析、DETECT）に分ける。
-    **照合（V27）**: `flexpyctt/validation/r/m5_detect_reference.R`（sirt 4.2.133）。シミュレーションの 2 次元（正しい分割と
-    誤った分割）、1 次元、Science（多値）のデータで `conf.detect(use_sum_score = TRUE, bias_corr = TRUE, smooth = FALSE)`、
-    3 クラスタのデータで `expl.detect(use_sum_score = TRUE, estsample = )`。条件付き共分散、5 つの指標（両方の
-    重み付け）、分割、両方の半分での指標は $10^{-12}$（実測 $10^{-14}$）で、Ward の併合の高さは $10^{-12}$ で一致する。
-    既定の `smooth = TRUE` のままだと、sirt の `conf.detect(use_sum_score = TRUE)` は総得点を標準化してから生の項目得点を
-    引いて残りの得点とするので、残りの得点の群が誤る（`sim_2d` で DETECT 1.60 が 6.73 になる）。精度のページに記録し、
-    従わない。
-14. **EFA と Hull 法（`efa()`、`hull()`、§16.8 の D5、V28）**: `_efa.py`（NumPy / SciPy。現在は flexpyctt に
-    ある。§16.18）。
-    **推定**: 独自性 $\Psi$ から回転しない解を求め、SciPy の L-BFGS-B（`ftol=1e-15`、`gtol=1e-11`）で
-    $\psi_i=1-\mathrm{SMC}_i$ から $[0.005,\max(1,\mathrm{SMC})]$ の範囲（psych・EFAtools と同じ境界）で最小化する。
-    ULS: $F=\tfrac12\lVert R-\Psi-\Lambda\Lambda^\top\rVert_F^2$。$\Lambda$ は $R-\Psi$ の先頭の固有ベクトルを
-    $\sqrt{\max(\lambda,0)}$ でスケールしたもので、勾配は $\operatorname{diag}(\Lambda\Lambda^\top+\Psi-R)$（psych の
-    `FAgr.minres` で、この $F$ の厳密な勾配）。psych の minres、EFAtools の ULS と同じ（psych の `fit.residuals` は
-    非対角の残差だけを足すが、内点では最小点が同じ）。ML: $\Psi^{-1/2}R\Psi^{-1/2}$ の固有値による Jöreskog の
-    集約した不一致度で、勾配は $\operatorname{diag}(\Lambda\Lambda^\top+\Psi-R)/\psi^2$（psych の `FAfn` / `FAgr`）。
-    列は和が非負になるよう符号をそろえ、回転はしない。独自性が下限にあれば Heywood ケース（`efa()` は
-    `HeywoodWarning`）。許容誤差は R の `optim()` の既定より厳しいので、flexpyirt の目的関数値は EFAtools の解での値を
-    上回らない（テストで確認）。**適合度**（EFAtools の `.gof`）: CAF $=1-$（対角を 1 にした残差行列の KMO）。
-    $\chi^2$ は Bartlett の乗数 $N-1-(2p+5)/6-2k/3$ を使い、その $p$ 値も求める。CFI と RMSEA は補正しない
-    $F(N-1)$ と独立モデルの $-\log|R|(N-1)$（$df_0=p(p-1)/2$）から求める。$df=((p-k)^2-(p+k))/2$。
-    **Hull**（EFAtools の `HULL` / `.hull_calc`）: $k=0..J$ の行で、適合度は CAF、CFI、$1-$RMSEA のいずれか
-    （$k=0$ は $1-$KMO($R$)、0、$1-$RMSEA$_0$ と $df_0$）。適合度が増えない解を除き、両隣を結ぶ弦以下の内点が
-    なくなるまで除き、残った内点で scree 値 $st$ を求めて最大のものを選ぶ（凸包上の点が 3 未満なら、警告を出して
-    適合度が最大の解）。既定の $J$ は、正規データの SMC 固有値と平均の基準による平行分析（EFAtools の `efa_parallel`
-    の既定。ここでは JAX のキーで 1000 反復）の結果に 1 を足し、$df>0$ となる最大の $k$ で上を抑え、
-    $\min(3,\text{上限})$ 以上にする。`max_factors` を与えればその $J$ をそのまま使う。変数は 6 つ以上。表には解ごとの
-    `heywood` と `converged` を記録し、選ばれた解が不適切なら EFAtools と同じく `HeywoodWarning` を出す。
-    **アンサンブル**: 項目が 6 つ以上なら、`dimensionality()` は問い (A) に Hull（CAF、ULS、キーの 4 つ目の分割による
-    既定の $J$）を加える。
-    **照合（V28）**: `flexpyctt/validation/r/m5_efa_hull_reference.R`（EFAtools 1.1.0、psych 2.6.9）。V24 のポリコリック行列のうち
-    変数が 6 つ以上のものと、シミュレーションの Pearson 行列 2 つ（3 因子、$N=500$。弱い 2 因子、$N=300$）。
-    $k\le J$ のすべてで ULS と ML について、含意する $\Lambda\Lambda^\top$ と共通性は $10^{-4}$（実測 $7\times10^{-5}$
-    以下で、最大は Heywood の解）、CAF / CFI / RMSEA は $2\times10^{-4}$、$\chi^2$ は相対 $10^{-4}$、$df$ は厳密に一致。
-    3 因子の行列での psych の `fa()` とも $10^{-4}$ で一致する。Hull は行列 x 推定法 x 適合度のすべてで EFAtools が
-    記録した $J$ を使い、選ばれる $k$ と凸包上の点は同じ、適合度は $10^{-5}$（実測 $1.4\times10^{-6}$ 以下）、$st$ は
-    相対 1%（小さな差の比なので。実測は絶対 $3.5\times10^{-3}$ 以下）で一致する。比較データ法は §16.15。
+13. **DETECT（`detect()`、`exploratory_detect()`、§16.8 の D4、V27）**: 2026-11-27 に flexpyctt が自分のリポジトリを持ったとき（§16.24）、flexpyctt の設計文書
+    （[DESIGN.ja.md §4](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.ja.md)）に移した。
+
+14. **EFA と Hull 法（`efa()`、`hull()`、§16.8 の D5、V28）**: 2026-11-27 に flexpyctt が自分のリポジトリを持ったとき（§16.24）、flexpyctt の設計文書
+    （[DESIGN.ja.md §5](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.ja.md)）に移した。
+
 15. **比較データ法（`comparison_data()`、§16.8 の D5b、V29。現在は flexpyctt にあり、`key` の代わりに `rng` を
-    取る。§16.18）**: `_comparison_data.py`（NumPy。乱数を引数で渡すので、それを与えれば生成は決定的）。$k=1..K$（$K$ は $df$ が正になる最大の $k$、または
-    `max_factors`）について、各変数の観測値を `n_population` 回復元抽出して並べ、標準正規の $F$ $(N,k)$ と
-    $E$ $(N,p)$ を引き、母集団を生成する（Ruscio & Kaczetow, 2008。EFAtools の `.simulate_cfm_empirical` と同じ）。
-    中間の $R^*$ を主因子法（EFAtools の `.paf_iter`。共通性の初期値は 1、固有値は絶対値、最大の変化に対する
-    基準 $10^{-3}$、`max_iter` 50）で分解し、負荷量を $[-1,1]$ に切り、最初の負荷量が負なら符号を反転して、得点
-    $F\Lambda^\top+E\,\mathrm{diag}(\sqrt{\max(1-h^2,0)})$ を作る。そのあと列ごとに順に、その列で行を並べ替え（安定な
-    整列）、その列を並べた復元抽出値で置き換える。$R^*$ は $R$ から始め、下三角の残差の RMSE が（1 から）改善する
-    限り残差 $R-R_{\text{rep}}$ だけ動かし、改善しなければ最良の $R^*$ からステップを半分にし、5 回続けて失敗したら
-    止める。母集団からデータと同じ大きさの標本を `n_samples` 個引き、Pearson 相関の固有値と観測固有値の RMSE を
-    記録する。$k$ 因子での RMSE が $k-1$ 因子より小さいと片側の Mann–Whitney 検定（連続性と同順位の補正を含む正規
-    近似で、$n\ge50$ での R の `wilcox.test` と同じ）が $\alpha=0.30$（Ruscio & Roche の推奨）で言う限り $k$ を
-    残し、最後に残した $k$ を結果とする。Pearson 相関のみ（Ruscio & Roche、EFAtools と同じ）、欠測のないデータ。
-    主因子法の負荷量は列の和が非負になるよう符号をそろえる。EFAtools は LAPACK の符号をそのまま使うが、効くのは
-    $k\ge2$ のときだけで、母集団の分布は変わらない。**アンサンブル**: 欠測がなければ `dimensionality()` は問い (A) に
-    CD を加える（キーの 5 つ目の分割）。**照合（V29）**: `flexpyctt/validation/r/m5_comparison_data_reference.R`（EFAtools 1.1.0）。
-    $k=1..3$ の主因子法の負荷量は $\Lambda\Lambda^\top$ で $10^{-12}$、EFAtools 自身の乱数（同じシードで再現して
-    書き出す）による 1 因子の母集団は完全に同じ、EFAtools の RMSE の列に対する順位和の $p$ 値は相対 $10^{-10}$ で
-    一致する。3 因子、2 因子の順序、1 因子の 2 値のデータでの `CD()` とは、それぞれ 2 つのキーで同じ提案、平均 RMSE は
-    15% 以内（母集団の乱数が違うため）で一致する。
-16. **DIMTEST（`dimtest()`、§16.8 の D6、V30）**: `_dimtest.py`（NumPy。乱数は引数で渡す。現在は flexpyctt に
-    あり、`key` の代わりに `rng` を取る。§16.18）。
-    欠測のない 2 値データ、項目は 4 つ以上。**統計量**（Nandakumar & Stout, 1993）: 回答者を PT の得点で群に分け、
-    `min_group`（20）未満の群と $S_k\le0$ の群を除く。$T_L=K^{-1/2}\sum_k(\hat\sigma_k^2-\hat\sigma_{U,k}^2)/S_k$。
-    $\hat\sigma_k^2$ は AT の得点の（$J_k$ で割る）分散、$\hat\sigma_{U,k}^2=\sum_i\hat p_{ik}(1-\hat p_{ik})$、
-    $S_k^2=(\hat\mu_{4,k}-\hat\sigma_k^4+\hat\delta_{4,k})/J_k$、$\hat\delta_{4,k}=\sum_i\hat p_{ik}(1-\hat p_{ik})
-    (1-2\hat p_{ik})^2$。**バイアス補正**（Stout, Froelich & Gao, 2001）: 検定用の標本のカーネル平滑化した IRF（能力は
-    総得点の順位の $\Phi^{-1}(r/(N+1))$ で同順位は一様乱数で分け、$[-4,4]$ の 161 点上で帯域幅 $1.1N^{-1/5}$ の
-    ガウスカーネル。Ramsay, 1991）から、$\theta\sim N(0,1)$ と線形補間した IRF で検定用の標本と同じ大きさの 1 次元
-    データを $B$（100）個作り、$T=(T_L-\bar T_G)/\sqrt{1+1/B}$、$p=1-\Phi(T)$。**AT の選択**: `assessment_items` を
-    与えれば標本全体で検定する。与えなければ無作為な 3 分の 1（`training_fraction`）で AT を選び、残りで検定する
-    （Froelich & Habing, 2008 は別の部分標本を使う）。訓練用の条件付き共分散（§16.13）の Ward 法で 2〜6 群に分けた
-    ときのクラスタのうち、要素が 2 から `max_assessment_size`（項目の半分）までで、{AT, 残り} への分割の DETECT が
-    最大のもの。Froelich & Habing の条件付き共分散による AT の選択の考え方に沿うが、彼らの ATFIND そのものではなく、
-    そう明記する。**アンサンブル**: 欠測のない 2 値データなら `dimensionality()` は問い (B) に DIMTEST（$p\ge\alpha$）を
-    加える（キーの 6 つ目の分割）。そうでなければ使えない行とする。**照合（V30）**: 単独のプログラム DIMPACK 以外に
-    実装がないので、`flexpyctt/validation/simulation/dimtest_study.py`（結果は `dimtest_study.json`）のシミュレーション研究で
-    受け入れる。2PL のデータ（傾き $U(0.8,1.8)$、切片 $N(0,0.8)$、項目を半分ずつ相関 $\rho$ の次元に置く）、各条件
-    200 反復、すべて既定値:
+    取る。§16.18）**: 2026-11-27 に flexpyctt が自分のリポジトリを持ったとき（§16.24）、flexpyctt の設計文書
+    （[DESIGN.ja.md §6](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.ja.md)）に移した。
 
-    | データ | $N$ | $J$ | $\rho$ | $T$ の平均 | $T$ の SD | .05 で棄却 | .10 で棄却 |
-    |---|---|---|---|---|---|---|---|
-    | 1 次元 | 1000 | 20 | 1 | -0.07 | 0.72 | 0.005 | 0.020 |
-    | 1 次元 | 2000 | 20 | 1 | -0.12 | 0.71 | 0.010 | 0.030 |
-    | 1 次元 | 2000 | 30 | 1 | -0.03 | 0.73 | 0.010 | 0.025 |
-    | 2 次元 | 1000 | 20 | 0.7 | 4.85 | 0.97 | 0.990 | 0.995 |
-    | 2 次元 | 2000 | 20 | 0.7 | 6.94 | 0.88 | 1.000 | 1.000 |
-    | 2 次元 | 2000 | 30 | 0.8 | 6.50 | 0.86 | 1.000 | 1.000 |
+16. **DIMTEST（`dimtest()`、§16.8 の D6、V30）**: 2026-11-27 に flexpyctt が自分のリポジトリを持ったとき（§16.24）、flexpyctt の設計文書
+    （[DESIGN.ja.md §7](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.ja.md)）に移した。
 
-    （2026-11-25 に flexpyctt の NumPy の生成器で再実行した値。§16.18。移す前の JAX のキーでは、.05 での棄却率は
-    0.020、0.005、0.000 と 0.990、1.000、1.000 だった。）
-
-    検定は保守的である。$\bar T_G$ は $T_L$ の偏りを除く（$T$ の平均は 0 に近い）が、帰無仮説の下での $T_L$ の標準
-    偏差は 1 ではなく 0.72 程度なので、第 1 種の誤りは名目水準を下回る。相関 0.7〜0.8 の 2 次元に対する検出力は 0.99〜1。
-    したがって小さい $p$ は多次元性の強い証拠であり、大きい $p$ は一次元性の弱い証拠にとどまる（docstring とガイドに
-    書く）。$T_G$ のブートストラップ SD で標準化し直せば較正できるが、公表された統計量から離れるので行わない。各部分は
-    直接の計算と単体テストで比べ、`flexpyctt/tests/test_dimtest.py` で研究の小さい版（帰無 20 反復、対立 10 反復）を実行する。
 17. **ジャックナイフ傾き指標（`FitResult.jsi()`、V31）**: `_jsi.py`。**定義**（Edwards, Houts & Cai, 2018。mirt の
     `residuals(type = "JSI")` と同じ）: ジャックナイフは回答者ではなく項目について行う（11 項の以前の版は「部分群」と
     書いていたので直した）。各項目 $j$ について項目 $j$ を除いてモデルを推定し直し、他のすべての項目 $i$ について
@@ -1486,18 +1364,9 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     （`docs/equating.md`）で、`scripts/mkdocs_hooks.py` がそこにパッケージの README（PyPI のページ）を入れる。文章は
     1 か所にしかない。
 
-    **ポリコリック相関の 2 つの実装。** `flexpyctt.polychoric()` は §16.9 の推定量を NumPy / SciPy で新しく実装した
-    もの（定義、引数、既定値、警告、`PolychoricResult` は同じ）:
-    - $\Phi_2$ は Owen (1956) の $T$ 関数（`scipy.special.owens_t`）で計算する:
-      $\Phi_2(h,k;\rho)=\tfrac12\Phi(h)+\tfrac12\Phi(k)-T(h,a_h)-T(k,a_k)-\beta$、
-      $a_h=(k-\rho h)/(h\sqrt{1-\rho^2})$、$a_k=(h-\rho k)/(k\sqrt{1-\rho^2})$、$\beta$ は $hk>0$ または
-      （$hk=0$ かつ $h+k\ge0$）のとき 0、それ以外は $\tfrac12$。$\Phi_2(0,0;\rho)=\tfrac14+\arcsin\rho/(2\pi)$。
-      無限大の限界は正確に扱う。JAX 版の Genz (2004) の求積とは独立な計算なので、2 つの一致は意味のある確認になる。
-    - $z=\operatorname{atanh}\rho$ についての Newton 法を、すべてのペアについて同時に行う（配列演算。ペアについての
-      Python ループは無い）。微分は解析的: $\partial_\rho\pi_{ab}=\Delta\phi_2$（Plackett, 1954）、
-      $\partial_\rho\phi_2=\phi_2\,[\rho/s+(hk(1+\rho^2)-\rho(h^2+k^2))/s^2]$、$s=1-\rho^2$。ステップの規則（凹なら
-      Newton、そうでなければ勾配方向に 0.5。ステップは $\pm2$ に制限。ステップ半減）、境界 $|z|\le8$、収束判定、境界解の
-      判定は §16.9 と同じ。
+    **ポリコリック相関の 2 つの実装。** `flexpyctt.polychoric()` は §16.9 の推定量を NumPy / SciPy で実装した
+    ものである（定義、オプション、既定値、警告、`PolychoricResult` は同じ）。アルゴリズムは flexpyctt の設計文書
+    （[DESIGN.ja.md §2](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.ja.md)）に書いてある。
 
     `flexpyirt.polychoric()` は JAX 版のまま（`_polychoric.py`、`correlation.py`）公開し、動作は変えない。返す
     `PolychoricResult` は同じクラス（flexpyctt で定義）なので、どちらの結果も `velicer_map()`、`efa()` などに渡せる。
@@ -1581,123 +1450,12 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     1 次元の結果はビット単位で変わらない（$D=1$ の同じコードパス）。
     **照合（V39）**: V14 の 4 モデルで mirt 1.48 と照合した。VALIDATION.md を参照。
 20. **flexpyctt の観測得点による DIF（`mantel_haenszel()`、`mantel()`、
-    `generalized_mantel_haenszel()`、`logistic_dif()`、`DIFResult`。issue #102、V47）**: IRT モデルを使わない DIF の
-    検出。`flexpyctt.dif`（公開層: 入力の検査、マッチング得点、純化、表の組み立て）と `flexpyctt._dif`（検定する
-    1 項目についての NumPy のカーネル）に置く。API は #102 で承認されたもので、変更点は最後に挙げる。
+    `generalized_mantel_haenszel()`、`logistic_dif()`、`DIFResult`。issue #102、V47）**: 2026-11-27 に flexpyctt が自分のリポジトリを持ったとき（§16.24）、flexpyctt の設計文書
+    （[DESIGN.ja.md §8](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.ja.md)）に移した。
 
-    **共通の引数。** `data`、キーワード専用の `group`（行ごとに 1 つのラベル）、`focal`（ラベル 1 つ。一般化 MH では
-    リスト。それ以外の行はすべて参照群で、difR の `focal.name` と同じ）、`items=None`（検定する項目）、
-    `anchor_items=None`（合計をマッチング得点にする項目）、`matching=None`（外部のマッチング変数。`anchor_items`・
-    `purify` とは併用不可）、`purify=False`、`max_iter=10`、`p_adjust="none"`（`"holm"`、`"BH"`。有限の p 値に対する
-    R の `p.adjust`）、`alpha=0.05`。**マッチング**: アンカー項目の合計に、検定する項目がアンカーでなければそれを加える
-    （difR の規則）。異なる値ごとに 1 つの層（得点をまとめない）。検定する項目・アンカー項目の**欠測**は
-    `SpecificationError`（#102 のオーナー判断 3: 黙って行を除かずエラーにする。difR の `rowSums(na.rm = TRUE)` は
-    異なる項目の組の合計を混ぜてしまう）。
+21. **古典的項目分析（flexpyctt、#101、V46）**: 2026-11-27 に flexpyctt が自分のリポジトリを持ったとき（§16.24）、flexpyctt の設計文書
+    （[DESIGN.ja.md §9](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.ja.md)）に移した。
 
-    **純化**（difR の `purify = TRUE`、`puriadjType = "simple"`）: 第 0 段階は与えたアンカーですべての項目を検定する。
-    検出された項目（補正前の $p<\alpha$）がある間、次の段階はアンカーから検出された検定項目を除いたものを使う。検出
-    された組が直前と等しくなれば終わり（`converged=True`）、`max_iter` 段階で打ち切る（`ConvergenceWarning`。表は最後
-    の段階のもので、そのアンカーは 1 つ前の段階で検出された項目を除いたもの。difR と同じ）。第 0 段階で何も検出され
-    なければ `n_iter=0`、`converged=True`。利用者が `anchor_items` を与えたときは、その組からだけ検出された項目を
-    除く（difR は `anchor` を与えると `purify` を無視する。これは自然な拡張で、最終的なアンカーで直接呼んだ結果と一致
-    することをテストする）。最終的な `flagged` は `adj_p < alpha`。`flag_history` は difR の `difPur`（段階ごとに 1 行）。
-
-    **Mantel–Haenszel**（Mantel & Haenszel, 1959; Holland & Thayer, 1988）: $T_k>1$ の層を使う。
-    $\chi^2_{MH}=(\lvert\sum A-\sum E(A)\rvert-c)^2/\sum\operatorname{Var}(A)$ で、`continuity_correction=True` では
-    **常に** $c=1/2$（Holland & Thayer、difR。R の `mantelhaen.test()` は差が $1/2$ 未満なら $c=0$ にするので、DIF の
-    ない項目の統計量だけが変わる）。$\hat\alpha_{MH}=\sum AD/T/\sum BC/T$ で $A,B$ は参照群の正答・誤答数（したがって
-    $\hat\alpha_{MH}>1$ は参照群に有利）。$\ln\hat\alpha_{MH}$ の分散は Phillips & Holland (1987)。
-    $\Delta_{MH}=-2.35\ln\hat\alpha_{MH}$、$SE(\Delta)=2.35\,SE(\ln\hat\alpha)$。**ETS 分類**（オーナー判断 2: 既定は
-    本来の規則。Zieky, 1993; Zwick, 2012）: $\lvert\Delta\rvert<1$ または $\chi^2_{MH}$ が有意でない（`p_adjust` で
-    調整した p 値、つまり `flagged` と同じ値で $p\ge\alpha$。B と C の項目は必ず検出される。調整しなければ通常の $p$）なら A、
-    $\lvert\Delta\rvert\ge1.5$ かつ $(\lvert\Delta\rvert-1)/SE(\Delta)>z_{1-\alpha}$（$\lvert\Delta\rvert>1$ の片側検定。
-    $\alpha=0.05$ で 1.645。1.96 を使う文献もある）なら C、それ以外は B。
-    `classification="effect_size"`: A $<1\le$ B $<1.5\le$ C（difR が表示する分類は右閉区間で、ちょうど境界の値だけが
-    異なる）。$\hat\alpha_{MH}$ が 0 または無限大なら `FlexpycttWarning`（difR の "sparse data" の警告）。
-
-    順序のある項目の **Mantel**（1963）: 焦点群の得点の和をその超幾何分布の期待値と比べる。$df=1$、得点は項目の値。
-    0 / 1 項目では連続修正なしの $\chi^2_{MH}$ に等しい。**Liu–Agresti**（1996）の累積共通オッズ比
-    $\hat\psi=\sum_k\sum_{j<L}b_{jk}c_{jk}/T_k\big/\sum_k\sum_{j<L}a_{jk}d_{jk}/T_k$（$a,c$: カテゴリ $j$ 以下の参照群・
-    焦点群の人数）は **$\hat\alpha_{MH}$ と同じ向き**にする（0 / 1 項目では $\hat\alpha_{MH}$ になる。difR の
-    `liu_agresti_ccor()` はその逆数を返す）。標準誤差は **Liu & Agresti（1996）の式 (3)**。Robins, Breslow & Greenland
-    (1986) を一般化したもので、大きな層が一定数ある場合にも、小さな層が多数ある場合にも一致する（dually consistent）。
-    焦点群を彼らの第 1 行として
-    $\widehat{\operatorname{Var}}(\ln\hat\psi)=\sum_k\hat\xi_k\big/(\sum_k\sum_jb_{jk}c_{jk}/T_k)^2$、
-    $\hat\xi_k=\sum_j\hat\phi_{jjk}+2\sum_{j<s}\hat\phi_{jsk}$、
-    $\hat\phi_{jsk}=\frac{n_{Fk}n_{Rk}}{T_k^2}\{\hat\psi d_{sk}a_{jk}/n_{Fk}\,[1+(\hat\psi-1)a_{sk}/n_{Rk}]
-    +c_{jk}b_{sk}/n_{Rk}\,[\hat\psi-(\hat\psi-1)c_{sk}/n_{Fk}]\}$（$j\le s$）。合計得点でマッチングすると小さな層が
-    多数でき、層が大きいことを前提にしたデルタ法（多項分布の分散に推定値を代入した $\operatorname{Var}(S-\hat\psi R)/S^2$。
-    レビュー前の実装）はそこで大きく過小になる（1 層 4 人で約 40%）。この推定量はカテゴリの順序を逆にすると値が変わる。
-    Liu & Agresti は両方の順序の平均をとれるとし、実際の差はわずかだと述べている。flexpyctt は論文どおりカテゴリを
-    昇順に並べ、平均はとらない。difR 自身の標準誤差は誤っている（VALIDATION V47）。
-
-    **一般化 MH**（Landis, Heyman & Koch, 1978; Somes, 1986; Penfield, 2001）: 層（$T_k>1$）ごとの群 x 観測カテゴリの
-    $G\times C$ 表。カテゴリ $1..C-1$ の焦点群の度数を $T\,\mathbf p\otimes\mathbf q$ と比べ、共分散はそれらのセルに
-    制限した $T^2/(T-1)\,(D_p-pp^\top)\otimes(D_q-qq^\top)$。$df=(G-1)(C-1)$。合計した共分散行列が特異なとき（あるカテ
-    ゴリまたは群が情報のあるどの層にも現れない）は擬似逆行列を使い、$df$ をその階数にして `FlexpycttWarning` を出す。
-    複数の焦点群の 0 / 1 項目（difR の `difGMH()`）と名義カテゴリ（$I\times J\times K$ 表への `mantelhaen.test()`）の
-    両方に使う。
-
-    **ロジスティック回帰**（Swaminathan & Rogers, 1990; Zumbo, 1999）: モデル $S$、$S+G$、$S+G+SG$ を NumPy の
-    Newton–Raphson で推定する（依存を増やさない）。$\beta=0$ から、相対的なステップの最大値が $10^{-12}$ を下回るまで
-    （最大 100 回。分離などで情報行列が特異になると止め、`ConvergenceWarning` と擬似逆行列の共分散を返す）。尤度比
-    検定は逸脱度の差、Wald 検定は大きいほうのモデルで加えた係数について（difR の `criterion = "Wald"`）。Nagelkerke の
-    $R^2$ は $N$ = 行数、$\Delta R^2$ = 大きいモデル − 小さいモデル。Zumbo–Thomas（0.13、0.26）と Jodoin–Gierl
-    （0.035、0.07）の分類は $\Delta R^2$ だけによる（difR の表示と同じ。原典の規則は有意性も加えるが、それは `flagged`
-    列にある）。ETS の既定と違って有意性を組み込まないのは、これらの区切りが検定と並べて読む効果量として提案された
-    ためである。
-
-    **#102 で提案した API からの変更。** (1) `mantel()`: 標準誤差は対数のものなので、`cumulative_odds_ratio_se` を
-    `log_cumulative_odds_ratio_se` にし、新たに `log_cumulative_odds_ratio` を加えた（`mantel_haenszel()` の
-    `log_odds_ratio_se` と同じ）。(2) `mantel()`、`generalized_mantel_haenszel()`、`logistic_dif()` に `df` 列がある
-    （$df$ が固定の方法にもつけ、方法の違う表の列をそろえる）。(3) `DIFResult` に `flag_history`、`method` と
-    プロパティ `flagged_items` を加えた。(4) ロジスティック回帰の係数の列名は `group_coefficient`、
-    `group_coefficient_se`、`interaction_coefficient`、`interaction_coefficient_se`。(5) オーナー判断 4（標準化法、
-    STD P-DIF）: #102 の範囲の一覧どおり含めない。**この PR に含めないもの**: 順序ロジスティック回帰による DIF（#102 の
-    2 本目の PR）。
-21. **古典的項目分析（flexpyctt、#101、V46）**: `flexpyctt/item_analysis.py`（NumPy / SciPy / pandas）。flexpyirt
-    からも再公開する。API は issue で提案し、オーナーが承認したもの（2026-11-26）: `score_responses()`、
-    `item_analysis()`、`coefficient_alpha()`（`AlphaResult`）、`coefficient_omega()`（`OmegaResult`）、
-    `distractor_analysis()`。名前は flexpyirt のモデルに基づく `reliability()` と重ならない。**issue の案からの変更**
-    （シグネチャは変えていない）: `AlphaResult` に `confidence_level` を加え、`if_deleted` は `alpha` と
-    `standardized_alpha` の両方を持つ。`OmegaResult` に当てはめた相関行列 `correlation` と、ω の計算前に反転した `reversed_items` を加えた。`score_responses()`
-    はキーを列の順の列としても受け取る。
-    **欠測**（オーナーの決定事項 2。issue の既定 `"pairwise"`）: すべてペアワイズの共分散行列 $C$（R の
-    `cov(use = "pairwise")`）から計算し、標準化 α と ω にはペアワイズの相関行列（R の `cor(use = "pairwise")`。
-    `cov2cor(C)` ではない）を使う。psych の `alpha()` と同じ。`"listwise"` では先に欠測のある行を除く。どちらでも
-    1 つも回答のない行は除くので、`n_obs`（Feldt の $n$）は 1 つ以上回答した回答者の数になる。psych は `nrow(x)`。
-    **項目–合計・項目–残りの相関**は $c_j=\sum_l C_{jl}$ として $c_j/\sqrt{C_{jj}\,\mathbf 1^\top C\mathbf 1}$ と
-    $(c_j-C_{jj})/\sqrt{C_{jj}(\mathbf 1^\top C\mathbf 1-2c_j+C_{jj})}$。欠測がなければ $T$ と $T-x_j$ との Pearson 相関。
-    psych の `r.drop` は同じ式だが、`raw.r` は `rowSums(x, na.rm = TRUE)` との相関で、欠測を合計の 0 点として
-    扱うので α の元になる量ではない。flexpyctt は両方の列を $C$ から求め、`alpha`・`alpha_if_deleted` と同じ行列を
-    表すようにした。欠測時の `raw.r` との違いはテストし、文書に書いた。
-    **多分系列・双列相関**（`correlation="polyserial"`）: Olsson, Drasgow & Dorans (1982) の 2 段階推定量
-    $\hat\rho=r\,\sigma_j/\sum_k\phi(\tau_{jk})$。$\sigma_j$ は項目の SD（分母 $n$）、$\tau_{jk}$ は累積割合の
-    $\Phi^{-1}$ で、どちらも項目の観測された得点から求める。$r$ は上の Pearson の項目–合計（–残り）相関。polycor の
-    `polyserial(ML = FALSE)`、欠測のないときの psych の `polyserial()` と同じで、2 カテゴリでは
-    $r\sqrt{pq}/\phi(\Phi^{-1}(p))$。issue の「周辺から閾値、次に $\rho$」はこの推定量を指す。polycor の 2 段階版は
-    $\rho$ について最大化しない（最尤の多分系列相関 `ML = TRUE` は提供しない）。psych の `biserial()` は $p,q$ を
-    使いながら合計の分母 $n-1$ の SD で割るので、この値の $\sqrt{(n-1)/n}$ 倍になる（テスト済み）。$[-1,1]$ の外の
-    推定値は psych と同じく $\pm1$ にし、`HeywoodWarning` を出す。`difficulty` は平均を観測された最大得点で割るので、
-    得点は 0 以上とする。
-    **ω**: 1 因子の ULS 解（`efa()` のカーネル `_efa.fit_factors`）から、$s_j=\operatorname{sign}(\lambda_j)$（負荷量
-    0 なら $+1$）として $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf s^\top R\mathbf s$。分母に観測された合計の分散を使う、
-    既定の `flip = TRUE` での psych の `omega.tot`（Revelle & Zinbarg, 2009）と同じ。負の負荷量の項目は psych と同じく
-    反転する（#127 のレビュー）。反転しないと、逆転項目が 1 つあるだけで $\mathbf 1^\top R\mathbf 1$ が小さくなり、誰も
-    使わない合計の ω になる。反転は黙って行わない。`FlexpycttWarning` で項目名を示し、`OmegaResult.reversed_items` に
-    挙げる。`loadings` と `correlation` は採点したままの項目のもの。先に項目を逆転採点しても同じ ω になる（テスト済み）。モデルが
-    含意する形 $(\sum\lambda)^2/((\sum\lambda)^2+\sum\psi)$ は完全に適合するときだけ一致し、返さない。`efa()` ではなく
-    カーネルを呼ぶので 3 項目でも計算できる（丁度識別のモデルで、`efa()` は自由度 0 として受け付けない）。Pearson の
-    行列が正定値でないとき（ペアワイズの行列ではありうる）は、`polychoric()` と同じく `smooth_correlation` で平滑化
-    する。issue に挙げた lavaan の 1 因子 CFA は参照に使わなかった。共分散行列への ML で、推定量も尺度も違う。
-    **キーによる採点と選択肢**: 選択肢はセルごとに `==` で比べるので、どの型のコードでもよい。誰も選ばない正答
-    選択肢は警告する（キーのコードや型の違いであることが多い）。`distractor_analysis()` では無回答は $T$ で 0 点。
-    各選択肢の統計量はその項目に答えた回答者で計算し、誰も選ばなくても正答は行に含める。得点群は R の
-    `cut(T, quantile(T, 0:G/G), include.lowest = TRUE)`（type 7 の分位点。同点は分けない）。分位点が重なったら、
-    黙って群を併合せずにエラーにする。
-    **照合（V46）**: `flexpyctt/validation/r/ctt_item_analysis_reference.R`。VALIDATION.md を参照。
-    **範囲外**（issue と同じ）: 階層 $\omega$、折半法、Guttman の $\lambda$、glb、上位下位 27% の識別指数、図（#103）、
-    ウェイト。
 22. **DIF の分析手順: アンカーの純化つきスクリーニング、Wald 検定、効果量（#104、V49）**: Result 層での推定後の
     処理（`dif.py`、`_dif.py`）。`jit` で動くのは推定し直しだけ。範囲: 1 次元の多母集団モデル（2 群以上、全項目モデル、
     全潜在分布）、MLE のみ（事前分布なし）、標本ウェイトなし、仕様に項目間の等値制約がないこと。検定はすべて全群に
@@ -1862,8 +1620,11 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     再生成したら、ここにもコピーする。この文書と VALIDATION.md で `flexpyctt/` から始まるパスは、flexpyctt の
     リポジトリの中のパスである。
 
-    **文書。** flexpyctt の道具の設計の記録はこの文書（§16.8〜§16.16、§16.18、§16.20、§16.21）に、照合ケースは
-    VALIDATION.md に残し、flexpyctt のリポジトリからここにリンクする。移すのは見送る。flexpyequate は自分の
+    **文書。** flexpyctt の道具の設計の記録（§16.10、§16.13〜§16.16、§16.20、§16.21 と、§16.18 のうち NumPy 版
+    ポリコリックのアルゴリズム）と、その照合ケースについての記述は、flexpyctt の
+    [docs/DESIGN.ja.md](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.ja.md) に移した。この文書では項目の番号を残し、移した先を示す。
+    ここに残すのは、計画（§16.8）、ポリコリックの推定量とその JAX による実装（§16.9）、推定済みのモデルが要る道具
+    （§16.11、§16.12、§16.17）、パッケージについての 2 つの決定（§16.18 とこの項目）である。flexpyequate は自分の
     リポジトリに設計文書を持つ。ドキュメントサイトでは、flexpyctt の道具はユーザーガイドと API リファレンスに
     残す（flexpyirt が再公開しているため）。flexpyequate のページは削除し、ホームからそのリポジトリにリンクする。
 
