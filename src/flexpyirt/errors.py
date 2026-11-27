@@ -2,9 +2,23 @@
 
 All errors raised intentionally by the library derive from :class:`FlexpyirtError`, and all
 warnings from :class:`FlexpyirtWarning`, so callers can catch them as a family (DESIGN.md §10).
+
+The classes shared with flexpyctt (``SpecificationError`` and the warnings) are defined there and
+re-exported here; ``FlexpyirtError`` and ``FlexpyirtWarning`` are flexpyctt's base classes under
+flexpyirt's names, so catching them also catches what a flexpyctt function raises
+(DESIGN.md §16.18).
 """
 
 from __future__ import annotations
+
+from flexpyctt.errors import (
+    ConvergenceWarning,
+    FlexpycttError,
+    FlexpycttWarning,
+    HeywoodWarning,
+    NotPositiveDefiniteWarning,
+    SpecificationError,
+)
 
 __all__ = [
     "ConvergenceWarning",
@@ -12,21 +26,19 @@ __all__ = [
     "FlexpyirtWarning",
     "HeywoodWarning",
     "IdentificationError",
+    "MissingDependencyError",
+    "NotPositiveDefiniteWarning",
     "PrecisionError",
+    "ScreeningWarning",
     "SpecificationError",
 ]
 
 
-class FlexpyirtError(Exception):
-    """Base class for all errors raised by flexpyirt."""
+FlexpyirtError = FlexpycttError
+"""Base class for all errors raised by flexpyirt (``flexpyctt.FlexpycttError``)."""
 
-
-class SpecificationError(FlexpyirtError, ValueError):
-    """The model specification is inconsistent with itself or with the data.
-
-    Examples: fixing a parameter of an item that does not exist, or a category count that does not
-    match the observed responses. Raised before estimation starts.
-    """
+FlexpyirtWarning = FlexpycttWarning
+"""Base class for all warnings emitted by flexpyirt (``flexpyctt.FlexpycttWarning``)."""
 
 
 class IdentificationError(FlexpyirtError, ValueError):
@@ -34,6 +46,14 @@ class IdentificationError(FlexpyirtError, ValueError):
 
     Example: freeing the mean and variance of a focal group without any anchor item. Raised before
     estimation starts.
+    """
+
+
+class MissingDependencyError(FlexpyirtError, ImportError):
+    """An optional dependency needed by the called function is not installed.
+
+    Example: a function of :mod:`flexpyirt.plotting` without matplotlib (install
+    ``flexpyirt[plot]``). ``import flexpyirt`` never needs the optional dependencies.
     """
 
 
@@ -45,13 +65,9 @@ class PrecisionError(FlexpyirtError, RuntimeError):
     """
 
 
-class FlexpyirtWarning(UserWarning):
-    """Base class for all warnings emitted by flexpyirt."""
+class ScreeningWarning(FlexpyirtWarning):
+    """Common-item purification stopped while kept anchor items were still flagged.
 
-
-class ConvergenceWarning(FlexpyirtWarning):
-    """Estimation stopped without meeting the convergence criterion (e.g. ``max_iter`` reached)."""
-
-
-class HeywoodWarning(FlexpyirtWarning):
-    """A boundary solution was reached (e.g. guessing parameter near 0, diverging slope)."""
+    Emitted by :func:`flexpyirt.screen_common_items` when ``max_iter`` removal steps are used up or
+    a removal would take the anchor set below ``min_items`` (DESIGN.md §22).
+    """

@@ -166,6 +166,7 @@ def _load_fitted_case(name: str) -> tuple[_core.CompiledProblem, jax.Array]:
     raise KeyError(name)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", VALIDATION_CASES)
 def test_oakes_matches_reference_on_validation_cases(name: str) -> None:
     """New Oakes and chunked Hessian agree with reference implementations across V1–V11."""
@@ -173,6 +174,7 @@ def test_oakes_matches_reference_on_validation_cases(name: str) -> None:
     _assert_matches_reference(prob, eta)
 
 
+@pytest.mark.slow
 def test_oakes_matches_reference_mixed_multigroup_missing_priors_away_from_mle() -> None:
     """Exact match on mixed families + 2 groups + anchors + missing data + all 3 prior types."""
     rng = np.random.default_rng(123)
@@ -281,6 +283,7 @@ def test_oakes_prior_hessian_is_added_once_per_shared_free_id() -> None:
     _assert_matches_reference(prob_prior, eta)
 
 
+@pytest.mark.slow
 def test_oakes_many_chunks_two_groups_and_padding(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exercise multi-chunk accumulation with several groups and all-padding chunks.
 

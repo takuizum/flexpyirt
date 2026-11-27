@@ -1,8 +1,9 @@
-"""Item fit: Orlando & Thissen's S-X2 (Result layer, DESIGN.md §15.40).
+"""Item fit: Orlando & Thissen's S-X2 (Result layer, DESIGN.md §15.40, §16.19).
 
 Post-fit bookkeeping on NumPy arrays (summed-score tables and cell collapsing are data dependent,
 so they run outside ``jit``); the item category probabilities on the quadrature grid come from
-the JAX item kernels.
+the JAX item kernels. The functions only see a list of ``Q`` nodes and their weights, so for a
+multidimensional model ``Q`` is the flattened product grid.
 """
 
 from __future__ import annotations
@@ -10,6 +11,8 @@ from __future__ import annotations
 import math
 
 import numpy as np
+
+from flexpyirt.sumscore import summed_score_distribution
 
 __all__ = [
     "collapse_cells",
@@ -40,15 +43,18 @@ def lord_wingersky(traces: list[np.ndarray]) -> np.ndarray:
     ndarray, shape (S + 1, Q)
         :math:`L(s\mid\theta_q)` for summed scores :math:`s = 0,\dots,S`, :math:`S=\sum_j(K_j-1)`.
     """
-    n_nodes = traces[0].shape[0] if traces else 1
-    lik = np.ones((1, n_nodes))
-    for tr in traces:
-        k_j = tr.shape[1]
-        new = np.zeros((lik.shape[0] + k_j - 1, n_nodes))
-        for k in range(k_j):
-            new[k : k + lik.shape[0]] += lik * tr[:, k][None, :]
-        lik = new
-    return lik
+    if not traces:
+        return np.ones((1, 1))
+    n_nodes = traces[0].shape[0]
+    max_categories = max(tr.shape[1] for tr in traces)
+    # One padded (Q, J, K) array for the shared kernel (DESIGN.md §18.1); scores above this item
+    # set's own maximum come back as exact zeros and are dropped.
+    probs = np.zeros((n_nodes, len(traces), max(max_categories, 2)))
+    for j, tr in enumerate(traces):
+        probs[:, j, : tr.shape[1]] = tr
+    total = sum(tr.shape[1] - 1 for tr in traces)
+    lik = np.asarray(summed_score_distribution(probs))[:, : total + 1]
+    return np.ascontiguousarray(lik.T)
 
 
 def observed_tables(y: np.ndarray, n_categories: list[int]) -> list[np.ndarray]:
@@ -76,7 +82,9 @@ def s_x2_expected_tables(traces: list[np.ndarray], weights: np.ndarray) -> list[
 
     (Orlando & Thissen, 2000, 2003), where :math:`L_{-j}` leaves item :math:`j` out and
     :math:`w_q` are the latent quadrature weights. Impossible cells (:math:`s-k` outside the
-    range of :math:`L_{-j}`) are NaN. Rows are summed scores ``1 .. S - 1``.
+    range of :math:`L_{-j}`) are NaN. Rows are summed scores ``1 .. S - 1``. With
+    :math:`\theta_q` the nodes of a product grid and :math:`w_q` the multivariate weights, the
+    sums integrate over all factors (multidimensional S-X2, as mirt's ``itemfit()``).
     """
     lik_all = lord_wingersky(traces)
     denom = lik_all @ weights  # (S + 1,)

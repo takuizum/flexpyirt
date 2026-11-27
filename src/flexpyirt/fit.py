@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import warnings
 from typing import Any, Literal
 
@@ -10,8 +11,8 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from flexpyirt import _core
-from flexpyirt._compile import LATENT_ITEM, compile_problem, prepare
+from flexpyirt import _core, _robust_se
+from flexpyirt._compile import LATENT_ITEM, Prepared, compile_problem, meat_patterns, prepare
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import (
     ConvergenceWarning,
@@ -28,7 +29,8 @@ from flexpyirt.result import FitResult
 
 __all__ = ["fit"]
 
-SEMethod = Literal["oakes", "hessian"]
+SEMethod = Literal["oakes", "hessian", "sandwich", "crossprod"]
+_SE_METHODS: tuple[str, ...] = ("oakes", "hessian", "sandwich", "crossprod")
 
 HEYWOOD_BOUND_TOL = 1e-4
 """Distance to a finite bound below which a free parameter is reported as a boundary solution."""
@@ -47,12 +49,18 @@ SQUAREM_FALLBACK_WARN_MIN = 5
 SQUAREM_FALLBACK_WARN_RATE = 0.5
 """Fallback fraction above which a ``ConvergenceWarning`` is emitted on a converged fit."""
 
-_em = jax.jit(_core.em, static_argnames=("max_iter", "n_newton"))
-_squarem = jax.jit(_core.squarem, static_argnames=("max_iter", "n_newton"))
+_em = jax.jit(_core.em, static_argnames=("max_iter", "n_newton", "unconstrained"))
+_squarem = jax.jit(_core.squarem, static_argnames=("max_iter", "n_newton", "unconstrained"))
 _information = {
     "oakes": jax.jit(_core.information_oakes),
     "hessian": jax.jit(_core.information_hessian),
+    "crossprod": jax.jit(_robust_se.information_cross_product),
 }
+_score_cross_product = jax.jit(_robust_se.score_cross_product)
+_score_cluster_cross_product = jax.jit(
+    _robust_se.score_cluster_cross_product, static_argnames=("n_clusters",)
+)
+_prior_curvature = jax.jit(lambda prob, eta: -jax.hessian(lambda e: _core.log_prior(prob, e))(eta))
 
 
 def fit(
@@ -65,6 +73,8 @@ def fit(
     method: BAEM | None = None,
     quadrature: Quadrature | None = None,
     se: SEMethod | None = "oakes",
+    weights: Any = None,
+    cluster: Any = None,
 ) -> FitResult:
     r"""Estimate an IRT model by MMLE or MAP with Bock–Aitkin EM.
 
@@ -72,7 +82,10 @@ def fit(
     ``prior`` column of ``table``), EM finds the Bayes modal (MAP) estimate on the natural
     parameter scale without a Jacobian term (DESIGN.md §4.7). Standard errors come from Oakes'
     identity (Oakes, 1999) or the direct Hessian of the log-likelihood (or log posterior with
-    priors), both by automatic differentiation (DESIGN.md §4.8).
+    priors), both by automatic differentiation (DESIGN.md §4.8). ``se="sandwich"`` and
+    ``se="crossprod"`` use the cross-product of the per-pattern scores (DESIGN.md §17.5); with
+    ``weights`` or ``cluster``, ``se="sandwich"`` is the design-based (cluster-robust) covariance
+    (DESIGN.md §17.6).
 
     Parameters
     ----------
@@ -93,8 +106,36 @@ def fit(
     quadrature : Quadrature, optional
         Quadrature grid (default: 61 points on [-6, 6] for 1 factor, 31 per dimension for 2
         factors, and 15 per dimension for 3 factors, matching mirt's defaults).
-    se : {"oakes", "hessian"} or None
-        Standard-error method, or ``None`` to skip.
+    se : {"oakes", "hessian", "sandwich", "crossprod"} or None
+        Standard-error method, or ``None`` to skip. ``"oakes"`` (Oakes, 1999) and ``"hessian"``
+        invert the observed information :math:`H`. ``"crossprod"`` inverts the cross-product of
+        the per-pattern scores :math:`B=\sum_p c_p s_p s_p^\top` (mirt
+        ``SE.type = "crossprod"``), and ``"sandwich"`` is the robust covariance
+        :math:`H^{-1}BH^{-1}` (Huber, 1967; White, 1982; mirt ``SE.type = "sandwich"``), which
+        stays valid when the model is misspecified. With priors, the prior curvature is added
+        to :math:`B` as it is to :math:`H`. Both are unavailable for ``DavidianCurve`` and
+        ``NormalMixture`` latent distributions and for bifactor and two-tier models. With
+        ``weights``, ``"sandwich"`` uses :math:`B=\sum_i w_i^2 s_i s_i^\top`, the design-based
+        variance of a weighted estimator (Binder, 1983), whereas ``"crossprod"`` (like mirt)
+        uses :math:`\sum_i w_i s_i s_i^\top`; with ``cluster``, the scores are summed within
+        clusters (see ``cluster``).
+    weights : array-like, optional
+        Sampling (survey) weights, one finite non-negative number per row (mirt
+        ``survey.weights``). The estimates maximize the weighted marginal log-likelihood
+        :math:`\sum_i w_i\log L_i` (DESIGN.md §17.4). Weights are used as given (not rescaled):
+        ``loglik``, AIC and BIC are on the scale of the weights, and BIC uses
+        :math:`\log\sum_i w_i`. Rows with weight 0 are ignored. Integer weights are equivalent
+        to repeating rows. With weights, ``se="oakes"``, ``se="hessian"`` and
+        ``se="crossprod"`` estimate the inverse information of the weighted log-likelihood, which
+        is a valid variance estimate only for frequency weights (repeated rows), not for sampling
+        weights; a ``FlexpyirtWarning`` says so. Use ``se="sandwich"`` for sampling weights.
+    cluster : array-like, optional
+        Cluster label of each row (for example the school), any hashable values, for the
+        cluster-robust sandwich (requires ``se="sandwich"``). The weighted scores
+        :math:`w_i s_i` are summed within each cluster, :math:`u_c=\sum_{i\in c}w_i s_i`, and
+        the middle matrix is :math:`\frac{G}{G-1}\sum_c u_c u_c^\top` over the :math:`G`
+        clusters (Binder, 1983; Williams, 2000). At least two clusters are required. Clusters
+        may span the groups of a multiple-group model.
 
     Returns
     -------
@@ -108,14 +149,51 @@ def fit(
         If the specification is invalid, before estimation starts.
     """
     check_x64()
-    if se not in (None, "oakes", "hessian"):
-        raise SpecificationError(f"Unknown se={se!r}; use 'oakes', 'hessian' or None.")
+    if se is not None and se not in _SE_METHODS:
+        raise SpecificationError(
+            f"Unknown se={se!r}; use 'oakes', 'hessian', 'sandwich', 'crossprod' or None."
+        )
+    if se in ("sandwich", "crossprod") and (spec.is_davidian or spec.is_mixture):
+        latent_name = "DavidianCurve" if spec.is_davidian else "NormalMixture"
+        raise SpecificationError(
+            f"se={se!r} is not available with a {latent_name} latent distribution; "
+            "use se='oakes' or se='hessian'."
+        )
+    if se in ("sandwich", "crossprod") and spec.is_reduced:
+        raise SpecificationError(
+            f"se={se!r} is not available for bifactor and two-tier models; "
+            "use se='oakes' or se='hessian'."
+        )
     method = BAEM() if method is None else method
-    quadrature = Quadrature.default(spec.n_factors) if quadrature is None else quadrature
+    if quadrature is None:
+        quadrature = Quadrature.default(spec.quadrature_dimension)
 
-    prep = prepare(spec, data, group=group, item_names=item_names, table=table)
+    if cluster is not None and se != "sandwich":
+        raise SpecificationError(
+            f"cluster= is only used by se='sandwich' (the cluster-robust sandwich), not se={se!r}."
+        )
+    prep = prepare(
+        spec,
+        data,
+        group=group,
+        item_names=item_names,
+        table=table,
+        weights=weights,
+        cluster=cluster,
+    )
     final_table = prep.table
-    compiled = compile_problem(spec, prep.y, prep.group, final_table, quadrature)
+    if prep.weights is not None and se in ("oakes", "hessian", "crossprod"):
+        warnings.warn(
+            f"se={se!r} with weights= estimates the inverse information of the weighted "
+            "log-likelihood. That is a valid variance estimate only when the weights are "
+            "frequencies (repeated rows); under sampling weights use se='sandwich' (the "
+            "design-based sandwich, optionally with cluster=).",
+            FlexpyirtWarning,
+            stacklevel=2,
+        )
+    compiled = compile_problem(
+        spec, prep.y, prep.group, final_table, quadrature, weights=prep.weights
+    )
     problem = compiled.problem
 
     runner = _squarem if method.squarem else _em
@@ -125,6 +203,7 @@ def fit(
         tol=method.tol,
         max_iter=method.max_iter,
         n_newton=method.m_step_newton_steps,
+        unconstrained=method.m_step_scale == "unconstrained",
     )
     eta = np.asarray(out.eta)
     converged = bool(out.converged)
@@ -169,8 +248,13 @@ def fit(
     if eh_weights is not None:
         _check_eh_reference_moments(problem, eh_weights[0])
     if se is not None and eta.shape[0] > 0:
-        info = np.asarray(_information[se](problem_fin, out.eta))
-        vcov = _invert_information(info)
+        if se == "sandwich":
+            bread = _invert_information(np.asarray(_information["oakes"](problem_fin, out.eta)))
+            meat = _sandwich_meat(problem_fin, out.eta, prep)
+            vcov = bread @ (0.5 * (meat + meat.T)) @ bread
+            vcov = 0.5 * (vcov + vcov.T)
+        else:
+            vcov = _invert_information(np.asarray(_information[se](problem_fin, out.eta)))
         se_values = np.sqrt(np.clip(np.diag(vcov), 0.0, None))
 
     params = final_table.copy()
@@ -213,7 +297,39 @@ def fit(
         _quadrature=quadrature,
         _method=method,
         _eh_weights=eh_weights,
+        _sum_weights=None if prep.weights is None else float(prep.weights.sum()),
+        _n_clusters=prep.n_clusters if se == "sandwich" else None,
     )
+
+
+def _sandwich_meat(problem: _core.CompiledProblem, eta: jax.Array, prep: Prepared) -> np.ndarray:
+    r"""Return the middle matrix of ``se="sandwich"`` (DESIGN.md §17.5, §17.6).
+
+    Unweighted and unclustered: :math:`\sum_p c_p s_p s_p^\top` (mirt's). With weights:
+    :math:`\sum_i w_i^2 s_i s_i^\top`; with clusters:
+    :math:`\frac{G}{G-1}\sum_c u_c u_c^\top`, :math:`u_c=\sum_{i\in c}w_i s_i` (Binder, 1983).
+    The prior curvature :math:`-\nabla^2\log\pi` is added in every case.
+    """
+    if prep.weights is None and prep.cluster is None:
+        return np.asarray(_information["crossprod"](problem, eta))
+    rows = meat_patterns(prep.y, prep.group, prep.weights, prep.cluster, prep.n_clusters)
+    meat_problem = dataclasses.replace(
+        problem,
+        y=jnp.asarray(rows.y, dtype=jnp.int32),
+        group=jnp.asarray(rows.group, dtype=jnp.int32),
+        counts=jnp.asarray(rows.counts, dtype=jnp.float64),
+        blocks=None,
+    )
+    if rows.cluster is None or rows.n_clusters is None:
+        scores = np.asarray(_score_cross_product(meat_problem, eta))
+    else:
+        n_clusters = rows.n_clusters
+        scores = (n_clusters / (n_clusters - 1)) * np.asarray(
+            _score_cluster_cross_product(
+                meat_problem, eta, jnp.asarray(rows.cluster), n_clusters=n_clusters
+            )
+        )
+    return scores + np.asarray(_prior_curvature(problem, eta))
 
 
 def _warn_heywood(params: pd.DataFrame, spec: Model) -> None:
@@ -312,29 +428,36 @@ def _warn_mixture_degenerate(params: pd.DataFrame, spec: Model, quadrature: Quad
     variances both differ by less than ``MIXTURE_COLLAPSE_TOL`` (a collapsed mixture).
     """
     names = list(mixture_param_names(spec.mixture_components))
-    lat = params[params["item"] == LATENT_ITEM].set_index("param")["estimate"]
-    pi, means, variances = (
-        np.asarray(x, dtype=float)
-        for x in mixture_components(jnp.asarray(lat.loc[names].to_numpy(dtype=float)))
-    )
     nodes = np.sort(np.asarray(quadrature.nodes(), dtype=float))
     spacing = float(np.min(np.diff(nodes)))
     issues: list[str] = []
-    for c in range(len(pi)):
-        label = f"component {c + 1} (pi={pi[c]:.3g}, mean={means[c]:.4g}, var={variances[c]:.3g})"
-        if pi[c] < MIXTURE_MIN_WEIGHT:
-            issues.append(f"{label}: weight below {MIXTURE_MIN_WEIGHT}")
-        if not variances[c] >= (0.5 * spacing) ** 2:
-            issues.append(f"{label}: sd below half the grid spacing {spacing:.3g}")
-        if not nodes[0] <= means[c] <= nodes[-1]:
-            issues.append(f"{label}: mean outside the grid [{nodes[0]:g}, {nodes[-1]:g}]")
-    for c in range(len(pi)):
-        for c2 in range(c + 1, len(pi)):
-            if (
-                abs(means[c] - means[c2]) < MIXTURE_COLLAPSE_TOL
-                and abs(variances[c] - variances[c2]) < MIXTURE_COLLAPSE_TOL
-            ):
-                issues.append(f"components {c + 1} and {c2 + 1} coincide")
+    latent_rows = params[params["item"] == LATENT_ITEM]
+    for group_name, rows in latent_rows.groupby("group", sort=False):
+        # Each group's mixture is checked on its own (DESIGN.md §27).
+        where = f"group {group_name!r} " if spec.is_multigroup else ""
+        lat = rows.set_index("param")["estimate"]
+        pi, means, variances = (
+            np.asarray(x, dtype=float)
+            for x in mixture_components(jnp.asarray(lat.loc[names].to_numpy(dtype=float)))
+        )
+        for c in range(len(pi)):
+            label = (
+                f"{where}component {c + 1} "
+                f"(pi={pi[c]:.3g}, mean={means[c]:.4g}, var={variances[c]:.3g})"
+            )
+            if pi[c] < MIXTURE_MIN_WEIGHT:
+                issues.append(f"{label}: weight below {MIXTURE_MIN_WEIGHT}")
+            if not variances[c] >= (0.5 * spacing) ** 2:
+                issues.append(f"{label}: sd below half the grid spacing {spacing:.3g}")
+            if not nodes[0] <= means[c] <= nodes[-1]:
+                issues.append(f"{label}: mean outside the grid [{nodes[0]:g}, {nodes[-1]:g}]")
+        for c in range(len(pi)):
+            for c2 in range(c + 1, len(pi)):
+                if (
+                    abs(means[c] - means[c2]) < MIXTURE_COLLAPSE_TOL
+                    and abs(variances[c] - variances[c2]) < MIXTURE_COLLAPSE_TOL
+                ):
+                    issues.append(f"{where}components {c + 1} and {c2 + 1} coincide")
     if issues:
         warnings.warn(
             "Degenerate normal-mixture solution: "

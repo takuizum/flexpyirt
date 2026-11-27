@@ -29,6 +29,7 @@
 #        own BFGS output under `mirt_bfgs` for documentation.
 #    (d) SE.type = "Richardson" (mirt:::BL.LL) omits LL.Priors completely and computes the
 #        likelihood-only Hessian at the MAP estimate rather than the posterior Hessian.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -215,7 +216,7 @@ res1 <- list(
     description = "V7a: 2PL MAP, J=15, N=1000, a~NormalPrior(1.2, 0.5), d~NormalPrior(0, 2)",
     itemtype = "2PL",
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     TOL = 1e-10,
     quadpts = quad$quadpts,
     theta_lim = quad$theta_lim,
@@ -295,7 +296,7 @@ res2 <- list(
     description = "V7b: 2PL MAP, J=15, N=1000, a~LogNormal(0.2, 0.3), d~NormalPrior(0, 2)",
     itemtype = "2PL",
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     TOL = 1e-10,
     quadpts = quad$quadpts,
     theta_lim = quad$theta_lim,
@@ -427,7 +428,7 @@ res3 <- list(
     description = "V7c: 3PL MAP, J=15, N=1000, a~LogNormal(0.2, 0.3), d~NormalPrior(0, 2), g~Beta(5, 17)",
     itemtype = "3PL",
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     TOL = 1e-10,
     quadpts = quad$quadpts,
     theta_lim = quad$theta_lim,

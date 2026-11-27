@@ -74,6 +74,26 @@ Python と R が完全に同一の反応行列を推定するよう、固定の 
   - 反復回数、flexpyirt の EM 写像評価回数・SQUAREM 安全装置作動回数、収束状態、および
     flexpyirt と `mirt` の周辺対数尤度差 $|\Delta \log L|$ を記録する。
 
+## 多数の群（#79）
+
+全項目を群間で不変にし、焦点群の平均・分散を自由にした 3 ケース（`manygroups_2pl_g10`・`_g50`・`_g200`。群あたり
+200 人、2PL 20 項目）。既定のスイートとは別に実行する（50 群で mirt は 1 回の推定に 10〜40 分ほどかかる）:
+
+```bash
+uv run python benchmarks/data.py --many-groups
+uv run python benchmarks/run_flexpyirt.py --quick --many-groups
+Rscript benchmarks/run_mirt.R --quick --cases manygroups_2pl_g10
+Rscript benchmarks/run_mirt.R --quick --cases manygroups_2pl_g50 --algos default
+Rscript benchmarks/run_mirt.R --quick --cases manygroups_2pl_g200 --algos default --se none
+```
+
+生データにあれば、`report.py` はコンパイル時間（コールド − ウォーム）とピークメモリ（flexpyirt は `ru_maxrss`、mirt は
+R の `gc()` の "max used"）も表にする。結果: [results/2026-11-26-many-groups.md](results/2026-11-26-many-groups.md)。
+クイックモード（ウォーム 1 回）で、他のジョブで高負荷の共有 16 コア Xeon で計測したので、時間は目安。SQUAREM を使うと
+flexpyirt のウォーム時間は 10・50・200 群で 0.5 秒・7 秒・91 秒、mirt の既定は 10・50 群で 31 秒・626 秒。コンパイル時間は
+1〜5 秒のまま、200 群でもピークメモリは 1 GiB 未満。比較として、#79 以前の E-step（すべてのパターンをすべての群で評価）は、
+同じマシンで当時、群ブロック化した E-step が 23 秒で終えた 50 群の通常 EM の推定に 86 秒かかった（DESIGN §26）。
+
 ## 注意点
 
 - **コンパイル時間と warm 時間の差**: JAX は `(項目 family, パディング後のパターンバケット, se)` ごとに
@@ -83,7 +103,7 @@ Python と R が完全に同一の反応行列を推定するよう、固定の 
   ノートブックやシミュレーションのように繰り返し推定するセッションでは、2 回目以降は warm 時間のみとなる。
 - **CPU 専用とスレッド数**: `run_flexpyirt.py` は `JAX_PLATFORMS=cpu` を固定する。XLA CPU は内部で
   複数スレッドを使うことがある一方、R `mirt` は `mirtCluster()` を設定しない限り既定で単一スレッドで
-  動く。GPU 実行はここでは測っていない（[DESIGN §9](../docs/DESIGN.ja.md#9-性能方針)）。
+  動く。GPU 実行はここでは測っていない（[DESIGN §9](../docs/dev/DESIGN.ja.md#9-性能方針)）。
 - **環境依存性**: 絶対時間や比率は CPU アーキテクチャ、メモリ帯域、OS、BLAS/XLA、各ライブラリの
   バージョンに強く依存する。コミット済みの表は 1 環境の計測例として扱い、性能判断には手元の環境で
   再実行すること。

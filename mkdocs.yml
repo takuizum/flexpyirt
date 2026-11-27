@@ -27,24 +27,30 @@ theme:
         name: Switch to light mode
 
 # The site is built from the same Markdown files that GitHub renders (X.md / X.ja.md).
-# scripts/mkdocs_hooks.py drops the in-page language links and points links outside docs/ to GitHub.
+# scripts/mkdocs_hooks.py drops the in-page language links and points links outside docs/ to
+# GitHub.
 hooks:
   - scripts/mkdocs_hooks.py
+
+# docs/dev/ holds developer documents (design, validation plan, roadmap). They are read on GitHub
+# and are not part of the user-facing site.
+exclude_docs: |
+  dev/
 
 nav:
   - Home: index.md
   - User guide: guide.md
+  - Theory: theory.md
   - API reference: reference.md
-  - Validation: VALIDATION.md
-  - Design: DESIGN.md
-  - API overview: API.md
-  - Roadmap: ROADMAP.md
+  - Accuracy and validation: accuracy.md
 
 plugins:
   - search
   - i18n:
       docs_structure: suffix
-      fallback_to_default: false
+      # Lets the Japanese pages use the figures in docs/images (they have no .ja version). Every
+      # page has a Japanese version (tests/test_docs.py), so no page falls back to English.
+      fallback_to_default: true
       reconfigure_material: true
       reconfigure_search: true
       languages:
@@ -59,11 +65,9 @@ plugins:
           nav_translations:
             Home: ホーム
             User guide: ユーザーガイド
+            Theory: 理論
             API reference: API リファレンス
-            Validation: 検証（R mirt との照合）
-            Design: 設計
-            API overview: API 概要
-            Roadmap: ロードマップ
+            Accuracy and validation: 精度と検証
 
 markdown_extensions:
   - admonition

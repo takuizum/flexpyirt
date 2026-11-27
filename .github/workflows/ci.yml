@@ -1,29 +1,77 @@
 name: CI
 
+# Test tiers (CONTRIBUTING.md, "Tests"):
+# - fast (`-m "not slow"`): every PR and every push to develop/main.
+# - full (everything, including the mirt reference comparisons), split into shards: nightly on
+#   develop, on release PRs (develop -> main), and on manual runs.
 on:
   push:
     branches: [main, develop]
   pull_request:
+  schedule:
+    - cron: "37 17 * * *"  # 02:37 JST; scheduled runs test the develop branch
   workflow_dispatch:
+    inputs:
+      tier:
+        description: "Test tier"
+        type: choice
+        options: [full, fast]
+        default: full
 
 permissions:
   contents: read
 
 # A new push to the same PR cancels the run in progress (pushes to develop/main always finish).
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # Persistent JAX compilation cache, restored and saved with actions/cache below. Roughly halves
+  # the time of the many small fits (later modules recompile after conftest clears JAX's caches).
+  JAX_COMPILATION_CACHE_DIR: ${{ github.workspace }}/.jax-cache
+  JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
+  JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES: "0"
+  # Keeps the cache from growing without bound across runs (least recently used entries go).
+  JAX_COMPILATION_CACHE_MAX_SIZE: "1500000000"
+
 jobs:
-  test:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.tier.outputs.full }}
+      ref: ${{ steps.tier.outputs.ref }}
+    steps:
+      - id: tier
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          TIER: ${{ inputs.tier }}
+        run: |
+          full=false
+          if [ "$EVENT" = schedule ] || { [ "$EVENT" = workflow_dispatch ] && [ "$TIER" = full ]; } \
+             || { [ "$EVENT" = pull_request ] && [ "$BASE" = main ]; }; then
+            full=true
+          fi
+          ref=""
+          if [ "$EVENT" = schedule ]; then ref=develop; fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "full tier: $full; ref: ${ref:-(event default)}"
+
+  # Lint, types and the install smoke test; runs alongside the fast-tier shards below.
+  checks:
+    needs: plan
+    name: checks (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.plan.outputs.ref }}
           fetch-depth: 0  # hatch-vcs derives the version from tags
       - uses: astral-sh/setup-uv@v6
         with:
@@ -37,17 +85,134 @@ jobs:
         run: uv run ruff format --check .
       - name: Mypy
         run: uv run mypy
-      # PRs skip @pytest.mark.slow tests; pushes to develop/main and manual runs run everything.
-      # Parallelism (pytest-xdist, -n auto) is set in pyproject.toml.
-      # Interim (#43): Python 3.11 runs serially. With 4 workers its runner is shut down near the end
-      # of the full suite (3.11 resolves an older, slower JAX). Remove when 3.11 is dropped (#44).
-      - name: Pytest
-        env:
-          MARKEXPR: ${{ github.event_name == 'pull_request' && 'not slow' || '' }}
-          WORKERS: ${{ matrix.python-version == '3.11' && '0' || 'auto' }}
-        run: uv run pytest --durations=15 -m "$MARKEXPR" -n "$WORKERS"
+      # The isolated env has no extras, hence no matplotlib: `import flexpyirt` and
+      # `import flexpyirt.plotting` must work and the plot functions must raise
+      # MissingDependencyError (DESIGN.md §21).
       - name: Editable install smoke test (isolated env)
-        run: uv run --isolated --no-project --with-editable . python -c "import flexpyirt; print(flexpyirt.__version__)"
+        run: |
+          uv run --isolated --no-project --with-editable . \
+            python -c "import flexpyctt, flexpyirt; print(flexpyctt.__version__, flexpyirt.__version__)"
+          uv run --isolated --no-project --with-editable . \
+            python scripts/check_plotting_without_matplotlib.py
+
+  # flexpyirt's fast tier, split into 3 shards of about equal duration (tests/durations-fast.json).
+  fast:
+    needs: plan
+    name: fast (${{ matrix.python-version }}, ${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+          fetch-depth: 0  # hatch-vcs derives the version from tags
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked --all-extras --dev
+      - name: Restore JAX compilation cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .jax-cache
+          key: jax-fast${{ matrix.shard }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            jax-fast${{ matrix.shard }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-
+            jax-fast${{ matrix.shard }}-py${{ matrix.python-version }}-
+            jax-fast-py${{ matrix.python-version }}-
+      # Parallelism (pytest-xdist, -n auto) is set in pyproject.toml.
+      - name: Pytest (fast tier, shard ${{ matrix.shard }}/3)
+        run: |
+          uv run pytest --durations=15 -m "not slow" --shard "${{ matrix.shard }}/3" \
+            --durations-file tests/durations-fast.json \
+            --write-durations "durations-fast-${{ matrix.shard }}.json"
+      - name: Save JAX compilation cache
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: .jax-cache
+          key: jax-fast${{ matrix.shard }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-${{ github.run_id }}
+      # Measured seconds per module, to refresh tests/durations-fast.json (CONTRIBUTING.md, "Tests").
+      - name: Upload module durations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: durations-fast-py${{ matrix.python-version }}-shard${{ matrix.shard }}
+          path: durations-fast-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+
+  # The required status checks ("test (3.12)", "test (3.13)") of the develop and main rulesets:
+  # pass when the checks and every fast-tier shard passed.
+  test:
+    needs: [checks, fast]
+    if: always()
+    name: test (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - name: Checks and fast-tier shards passed
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          FAST: ${{ needs.fast.result }}
+        run: |
+          echo "checks: $CHECKS, fast: $FAST"
+          test "$CHECKS" = success && test "$FAST" = success
+
+  # The whole suite, split into shards of about equal duration (tests/durations.json).
+  test-full:
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
+    name: test-full (${{ matrix.python-version }}, ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked --all-extras --dev
+      - name: Restore JAX compilation cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .jax-cache
+          key: jax-full${{ matrix.shard }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            jax-full${{ matrix.shard }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-
+            jax-full${{ matrix.shard }}-py${{ matrix.python-version }}-
+      - name: Pytest (full tier, shard ${{ matrix.shard }}/4)
+        run: |
+          uv run pytest --durations=15 --shard "${{ matrix.shard }}/4" \
+            --write-durations "durations-${{ matrix.shard }}.json"
+      - name: Save JAX compilation cache
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: .jax-cache
+          key: jax-full${{ matrix.shard }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-${{ github.run_id }}
+      # Measured seconds per module, to refresh tests/durations.json (CONTRIBUTING.md, "Tests").
+      - name: Upload module durations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: durations-py${{ matrix.python-version }}-shard${{ matrix.shard }}
+          path: durations-${{ matrix.shard }}.json
+          if-no-files-found: ignore
 
   build:
     runs-on: ubuntu-latest
@@ -60,10 +225,13 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: Build sdist and wheel
-        run: uv build
+        run: |
+          uv build
+          ls dist
       - name: Check metadata (PyPI rendering of README.md)
         run: uvx twine check --strict dist/*
+      # flexpyctt comes from PyPI, within the range that flexpyirt requires.
       - name: Smoke test the wheel (isolated env)
         run: |
-          uv run --isolated --no-project --with dist/*.whl python -c \
-            "import flexpyirt; print(flexpyirt.__version__)"
+          uv run --isolated --no-project --with dist/flexpyirt-*.whl \
+            python -c "import flexpyirt, flexpyctt; print(flexpyirt.__version__, flexpyctt.__version__)"

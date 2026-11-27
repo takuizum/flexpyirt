@@ -2,6 +2,30 @@
 
 [English](CONTRIBUTING.md) | 日本語
 
+## 関連パッケージ
+
+関連する 3 つのパッケージは、それぞれ自分のリポジトリとバージョンを持つ（DESIGN.md §16.18、§16.24）。このリポジトリに
+あるのは flexpyirt だけである。
+
+| パッケージ | リポジトリ | 内容 |
+|---|---|---|
+| `flexpyirt` | [takuizum/flexpyirt](https://github.com/takuizum/flexpyirt)（ここ） | 推定と、推定済みのモデルを使うものすべて。JAX と flexpyctt に依存する |
+| `flexpyctt` | [takuizum/flexpyctt](https://github.com/takuizum/flexpyctt) | 推定済みのモデルを使わない項目・テスト分析。依存は NumPy、SciPy、pandas だけ |
+| `flexpyequate` | [takuizum/flexpyequate](https://github.com/takuizum/flexpyequate) | 得点分布の等化。依存は NumPy、SciPy、pandas だけ。他の 2 つとは独立 |
+
+- **flexpyirt は `flexpyctt>=0.X,<0.(X+1)` に依存する**（`pyproject.toml`）。1.0 より前は flexpyctt のマイナー
+  バージョンを互換性の単位とし、flexpyctt のパッチリリースは公開 API を変えない。flexpyctt のマイナーバージョンが
+  上がったら、ここで範囲を上げる PR を作り、CI が通ることを確かめる（`tests/test_packaging.py` が範囲の形を確認する）。
+- `FitResult` が要る道具は flexpyirt に、データだけで済む道具は flexpyctt に置く。flexpyirt は flexpyctt の公開名を
+  再公開する（再公開する名前は `src/flexpyirt/__init__.py` に明示してある）。
+- flexpyirt は flexpyctt の非公開ヘルパーを 4 つ import している（`_coerce_ordinal`、`_observed_correlation`、
+  `_eigenvalues`、`_descending_eigenvalues`）。flexpyctt のテストがそのシグネチャを守っている。
+- **両方にまたがる変更**は、先に flexpyctt のリポジトリで変更してリリースし、そのあとここで依存の範囲を上げる。
+- `tests/reference/flexpyctt/v24_polychoric.json` と `v27_detect.json` は flexpyctt の参照値のコピーである。flexpyctt で
+  再生成したら、ここにもコピーする。
+- 項目パラメータを使う等化は flexpyirt に置く。flexpyirt は flexpyequate に依存しない（開発用の依存にだけ
+  入れている。`tests/test_equating.py` が独立した実装として照合に使う）。
+
 ## ブランチ
 
 | ブランチ | 役割 | 作り方 / マージ先 |
@@ -18,10 +42,10 @@
 
 ## PR とレビュー
 
-- すべての変更は PR で入れる。`main` と `develop` はルールセットで保護され、CI（`test (3.11/3.12/3.13)`）と
+- すべての変更は PR で入れる。`main` と `develop` はルールセットで保護され、CI（`test (3.12/3.13)`）と
   `pr-rules` が通らないとマージできない。
 - PR はリポジトリのオーナーがレビューしてからマージする（自動マージしない）。
-- 数値計算に関わる変更は、R mirt との照合テスト（[docs/VALIDATION.ja.md](docs/VALIDATION.ja.md)）が通ることが前提。
+- 数値計算に関わる変更は、R mirt との照合テスト（[docs/dev/VALIDATION.ja.md](docs/dev/VALIDATION.ja.md)）が通ることが前提。
 
 ## リリース
 
@@ -34,13 +58,15 @@
 2. マージされると `.github/workflows/release.yml` が動く:
    1. `plan` ジョブ: PR タイトルと最新の `vX.Y.Z` タグから次のバージョンを決める。
    2. `publish` ジョブ: **`release` 環境の承認待ちになる**。オーナーが Actions 画面で承認すると、
-      `main` にタグ `vX.Y.Z` を打って `uv build` し、GitHub Release を作成する（wheel / sdist 添付、
+      `main` にタグ `vX.Y.Z` を打ってビルドし（`uv build`）、GitHub Release を作成する（wheel / sdist 添付、
       リリースノート自動生成）。このリリースに含まれる fix PR が `Closes` していた issue を閉じる。
-   3. `pypi` ジョブ: 同じ wheel / sdist を **PyPI に公開する**（`pypi` 環境、Trusted Publishing。
-      API トークンは使わない）。
+   3. `pypi` ジョブ: 同じ wheel / sdist を **PyPI に公開する**（`pypi` 環境、Trusted Publishing。API トークンは
+      使わない）。
    4. 同じ `main` への push で `.github/workflows/docs.yml` がドキュメントサイトを GitHub Pages に公開する。
 3. **最初のリリース**（`v*` タグがまだない）は、タイトルの上げ方に関係なく **v0.0.1**。
 4. 手動実行（`workflow_dispatch`）は dry run 専用で、次のバージョンの計算とビルドだけを行う。
+5. **リリースの前に、依存の範囲に入る flexpyctt が PyPI にあること**（`publish` ジョブは、ビルドした wheel を
+   PyPI の flexpyctt と一緒にインストールして確かめる）。
 
 `main` へのマージコミットは `develop` に戻さない（`develop` は保護されていて、ボットは push できない）。
 このため `develop` 上の開発版の番号は直前のリリースタグを参照しないことがあるが、リリースには影響しない。
@@ -54,9 +80,9 @@
   マージできる管理者だけ。
 - **`publish` ジョブは `release` 環境で動き、指定レビュアー（オーナー）の承認が必要**。環境は `main` からしか
   デプロイできないので、他のブランチやフォークからはタグも Release も作れない。
-- **PyPI への公開は Trusted Publishing**（OIDC）。PyPI 側には「リポジトリ `takuizum/flexpyirt`、
-  ワークフロー `release.yml`、環境 `pypi`」だけを信頼する publisher を登録しているので、API トークンは
-  リポジトリに置かない。`pypi` 環境もデプロイ元を `main` に限定しておく。PyPI に一度上げた番号は
+- **PyPI への公開は Trusted Publishing**（OIDC）。PyPI のプロジェクト `flexpyirt` は
+  「リポジトリ `takuizum/flexpyirt`、ワークフロー `release.yml`、環境 `pypi`」という publisher だけを信頼するので、
+  API トークンはリポジトリに置かない。`pypi` 環境もデプロイ元を `main` に限定しておく。PyPI に一度上げた番号は
   削除しても再利用できない。
 - ワークフローの `GITHUB_TOKEN` は既定で読み取り専用（`permissions: contents: read`）。書き込みは
   `publish` ジョブだけ。フォークからの PR は読み取り専用トークンで CI と PR rules だけが走る。
@@ -71,16 +97,41 @@ uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
 
-テストは pytest-xdist で並列に走る（`-n auto`）。直列にしたいときは `-n 0` を付ける。
-10 秒程度を超えるテストには `@pytest.mark.slow` を付ける。PR の CI はこれを飛ばし（`-m "not slow"`）、
-`develop`/`main` への push では全テストを走らせる。手元で素早く確かめるなら `uv run pytest -m "not slow"`。新しく 10 秒を超えるテストを書いたら `slow` を付ける。
+### テスト
 
-mirt の参照値を作り直すとき（R 4.4+ と mirt が必要）:
+テストは pytest-xdist で並列に走る（`-n auto`、1 モジュールを 1 ワーカーで実行）。直列にしたいときは `-n 0` を付ける。
+テストは 2 層に分かれる。
+
+| 層 | 内容 | 実行するタイミング |
+|---|---|---|
+| fast | `-m "not slow"`：単体テスト、ドキュメント、M1 の mirt スモークテスト。Python ごとに 3 シャードに分割（CI で数分） | すべての PR、`develop`/`main` へのすべての push |
+| full | mirt 参照値との照合をすべて含む全テスト。Python ごとに 4 シャードに分割 | `develop` の夜間実行、リリース PR（`develop` → `main`）、手動実行（*Run workflow*） |
+
+mirt 参照値との照合は、full 層（夜間実行またはリリース PR）が通って初めて完了とする。ROADMAP の項目にチェックを付ける前に夜間実行の結果を確認する。
+
+- 約 5 秒を超えるテストには `@pytest.mark.slow` を付ける。`functools.cache` で共有するフィッティングの時間も含める（そのフィッティングを最初に使うテストが時間を払う）。
+  fast 層の結果の最後に、`slow` なしで 5 秒を超えたテストが一覧される（"tests over 5 s not marked slow"）。
+- `tests/test_mirt_*.py` はモジュールごと slow にする（`pytestmark = pytest.mark.slow`）。`test_mirt_m1.py` だけは例外。
+- 1 モジュールは 1 ワーカーで走るので、数分かかるフィッティングは専用のモジュールに分ける（`tests/_mirt_multigroup.py` と `tests/test_mirt_m4_multigroup_*.py` を参照）。
+- CI は JAX の永続コンパイルキャッシュ（`JAX_COMPILATION_CACHE_DIR`）を実行間で引き継ぐ。
+- full 層のシャードは `tests/durations.json`、fast 層のシャードは `tests/durations-fast.json`（`--durations-file`）に記録したモジュールごとの秒数で均等に分ける。重いモジュールを足したり分けたりしたら更新する：
+  `uv run pytest --write-durations tests/durations.json` と `uv run pytest -m "not slow" -n 4 --write-durations tests/durations-fast.json`（または CI 実行が残す `durations-*` アーティファクトをまとめる）。ファイルにないモジュールは 1 テスト 1 秒として扱う。
+- CI の required check `test (3.12)` と `test (3.13)` は、`checks` ジョブ（ruff・mypy）と `fast` の全シャードが通ったときに通る。
+
+手元で素早く確かめるなら `uv run pytest -m "not slow"`。CI と同じ full 層の 1 シャードだけ走らせるなら `uv run pytest --shard 2/4`（fast 層なら `uv run pytest -m "not slow" --shard 2/3 --durations-file tests/durations-fast.json`）。
+
+mirt の参照値を作り直すとき（R 4.4+ が必要。mirt は GitHub の `philchalmers/mirt` からユーザーライブラリか
+`FLEXPYIRT_R_LIB` に入れる。[VALIDATION.ja.md](docs/dev/VALIDATION.ja.md)「R と mirt の版」）:
 
 ```bash
-Rscript validation/r/m1_reference.R
-Rscript validation/r/m2_reference.R
+Rscript validation/r/install_mirt.R
+validation/r/run_references.sh
 ```
+
+1 本だけ作り直すなら `validation/r/run_references.sh m1 m2`。mirt を使うスクリプトを新しく足すときは
+`validation/r/setup.R` を `source` し、`run_references.sh` の段のリストに加える。
+
+flexpyctt と flexpyequate の参照値のスクリプトは、それぞれのリポジトリの `validation/r/` にある。
 
 R `mirt` との wall time ベンチマークを再実行するとき（詳細と `--quick` モードは
 [benchmarks/README.ja.md](benchmarks/README.ja.md) を参照）:
@@ -133,5 +184,11 @@ uv run --group docs mkdocs build --strict  # CI と同じ検査（リンク切�
 - 文書内のリンクは相対リンクで書く（GitHub でもサイトでも動く）。`docs/` の外を指すリンクは、サイトでは
   GitHub 上のファイルに書き換わる（`scripts/mkdocs_hooks.py`）。
 - `README.md` / `README.ja.md` は PyPI のプロジェクトページにも表示されるので、リンクは絶対 URL で書く
-  （文書はサイトの URL、それ以外は GitHub の URL）。
+  （文書はサイトの URL、それ以外は GitHub の URL）。README はパッケージ利用者だけに向けたもので、開発環境の
+  準備、テストや CI の詳細、ブランチ運用、マイルストーン、CONTRIBUTING や `docs/dev/` へのリンクは書かない。
 - `docs/` に文書を足したら `mkdocs.yml` の `nav`（と日本語の `nav_translations`）にも足す。
+- サイトはパッケージ利用者向け: 使い方（`guide`, `reference`）、理論（`theory`）、結果の検証方法
+  （`accuracy`）。開発者向けの文書は `docs/dev/` に置く（[設計](docs/dev/DESIGN.ja.md)、
+  [API スケッチ](docs/dev/API.ja.md)、[検証計画](docs/dev/VALIDATION.ja.md)、
+  [ロードマップ](docs/dev/ROADMAP.ja.md)）。これらはサイトから除外されるので、サイトのページから相対リンクで
+  指さない（必要なら GitHub の URL）。マイルストーン、設計書の節番号、照合ケース ID は利用者向けページに書かない。

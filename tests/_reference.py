@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,17 @@ import numpy as np
 import pandas as pd
 
 REFERENCE_DIR = Path(__file__).parent / "reference"
+CTT_REFERENCE_DIR = REFERENCE_DIR / "flexpyctt"
+"""Copies of the flexpyctt reference values that flexpyirt's tests use (V24, V27).
+
+The files are generated in the flexpyctt repository (``validation/r/m5_polychoric_reference.R``
+and ``m5_detect_reference.R``, written to its ``tests/reference/``) and copied here unchanged
+(DESIGN.md §16.24). They are in a directory of their own because they are not mirt references:
+the checks that every file in ``tests/reference/`` records mirt's commit do not apply to them.
+"""
+
+MIRT_SHA = re.compile(r"[0-9a-f]{40}")
+"""Commit SHA of the GitHub mirt a reference was made with (VALIDATION.md, mirt versions)."""
 
 
 def check_reference_meta(
@@ -19,9 +31,22 @@ def check_reference_meta(
     *,
     require_richardson: bool = False,
     require_grid_check: bool = False,
+    mirt_estimates: bool = True,
 ) -> None:
-    """Assert that mirt reference metadata records converged fits and the requested grid."""
+    """Assert that mirt reference metadata records converged fits and the requested grid.
+
+    A meta that records ``mirt_version`` must also record ``mirt_sha``, the commit of the GitHub
+    mirt the reference was generated with (VALIDATION.md, "R and mirt versions"). Pass
+    ``mirt_estimates=False`` for a flexpyctt reference that loads mirt only for its bundled data
+    sets (V24: the values come from lavaan and psych), which is not regenerated on mirt HEAD.
+    """
     case = meta.get("case", "<unknown>")
+    if mirt_estimates and "mirt_version" in meta:
+        sha = meta.get("mirt_sha")
+        assert isinstance(sha, str) and MIRT_SHA.fullmatch(sha), (
+            f"Reference {case!r}: meta.mirt_sha must be the commit SHA of a GitHub mirt, got "
+            f"{sha!r} (validation/r/install_mirt.R, run_references.sh)."
+        )
     assert meta.get("converged") is True, f"Reference {case!r}: Oakes fit did not converge."
     if require_richardson or "converged_richardson" in meta:
         assert meta.get("converged_richardson") is True, (

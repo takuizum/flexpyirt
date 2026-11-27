@@ -47,6 +47,7 @@ def _sim_gpcm(
 # ---- GPCMKernel ----------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 @settings(deadline=None)
 @given(
     a=st.floats(-3.0, 3.0),
@@ -97,6 +98,7 @@ def test_gpcm_two_categories_equals_2pl_kernel() -> None:
         np.testing.assert_allclose(np.asarray(lp_gpcm), np.asarray(lp_2pl), rtol=1e-12, atol=1e-14)
 
 
+@pytest.mark.slow
 def test_gpcm_two_categories_equals_2pl_fit() -> None:
     """With n_categories = 2, GPCM matches 2PL and PCM matches Rasch in estimates, SEs, and EAP."""
     a = np.array([1.1, 1.4, 0.9, 1.3, 1.0, 1.2])
@@ -182,6 +184,7 @@ def test_gpcm_unobserved_category_is_rejected() -> None:
 # ---- Step difficulties, mixed models, and fix_from -----------------------------------------
 
 
+@pytest.mark.slow
 def test_mixed_gpcm_pcm_twopl_grm_model() -> None:
     """Mix GPCM, PCM, 2PL, Rasch, and GRM items (and distinct n_categories) in one model."""
     rng = np.random.default_rng(303)

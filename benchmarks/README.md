@@ -74,6 +74,30 @@ All datasets are simulated with fixed NumPy seeds so Python and R fit identical 
   - Reports iterations, flexpyirt EM map evaluations and SQUAREM safeguard counts, convergence
     status, and $|\Delta \log L|$ between flexpyirt and `mirt`.
 
+## Many groups (#79)
+
+Three cases with every item invariant across groups and free focal means and variances
+(`manygroups_2pl_g10`, `_g50`, `_g200`: 200 respondents per group, 20 2PL items), run separately
+from the default suite (mirt needs about 10–40 minutes per fit at 50 groups):
+
+```bash
+uv run python benchmarks/data.py --many-groups
+uv run python benchmarks/run_flexpyirt.py --quick --many-groups
+Rscript benchmarks/run_mirt.R --quick --cases manygroups_2pl_g10
+Rscript benchmarks/run_mirt.R --quick --cases manygroups_2pl_g50 --algos default
+Rscript benchmarks/run_mirt.R --quick --cases manygroups_2pl_g200 --algos default --se none
+```
+
+`report.py` adds compile time (cold minus warm) and peak memory (`ru_maxrss` for flexpyirt; R's
+`gc()` "max used" for mirt) when the raw files have them. Results:
+[results/2026-11-26-many-groups.md](results/2026-11-26-many-groups.md), measured in quick mode
+(one warm repeat) on a shared 16-core Xeon that other jobs loaded heavily, so treat the times as
+rough. With SQUAREM, flexpyirt's warm fit is 0.5 s, 7 s and 91 s for 10, 50 and 200 groups against
+31 s and 626 s for mirt's default at 10 and 50 groups; compile time stays at 1–5 s and peak
+memory below 1 GiB at 200 groups. For comparison, the E-step before #79 (every pattern under every
+group) took 86 s warm for a 50-group plain-EM fit that the group-blocked E-step ran in 23 s on the
+same machine at the time (DESIGN §26).
+
 ## Caveats
 
 - **Compile time vs. warm time**: JAX compiles each `(model family, padded pattern bucket, se)`
@@ -85,7 +109,7 @@ All datasets are simulated with fixed NumPy seeds so Python and R fit identical 
 - **CPU only and threading**: `run_flexpyirt.py` forces `JAX_PLATFORMS=cpu`. XLA CPU may use
   multiple threads internally, whereas R `mirt` runs single-threaded by default unless
   `mirtCluster()` is configured. GPU acceleration is not measured here; see
-  [DESIGN §9](../docs/DESIGN.md#9-performance).
+  [DESIGN §9](../docs/dev/DESIGN.md#9-performance).
 - **Machine dependence**: Absolute times and ratios depend strongly on CPU architecture, memory
   bandwidth, OS, BLAS/XLA backend, and library versions. Treat the committed table as one hardware
   data point and rerun on your own machine when making performance decisions.

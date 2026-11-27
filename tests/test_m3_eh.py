@@ -93,11 +93,11 @@ def test_eh_min_weight_exceeds_grid_raises() -> None:
 def test_mixing_eh_and_normal_across_groups_raises() -> None:
     items = ["q1", "q2", "q3"]
     base = Model.uniform(TwoPL(), items=items)
-    with pytest.raises(SpecificationError, match="Cannot mix EmpiricalHistogram and Normal"):
+    with pytest.raises(SpecificationError, match="same latent distribution family"):
         base.with_groups(ref=EmpiricalHistogram(), focal=Normal.free())
-    with pytest.raises(SpecificationError, match="Cannot mix EmpiricalHistogram and Normal"):
+    with pytest.raises(SpecificationError, match="same latent distribution family"):
         base.with_groups(ref=Normal.standard(), focal=EmpiricalHistogram())
-    with pytest.raises(SpecificationError, match="Cannot mix EmpiricalHistogram and Normal"):
+    with pytest.raises(SpecificationError, match="same latent distribution family"):
         Model(
             items=base.items,
             groups=(("ref", EmpiricalHistogram()), ("focal", Normal.standard())),
@@ -244,6 +244,7 @@ def test_eh_constrained_weights_boundary_case_is_not_hidden() -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_reference_mean_zero_var_one_after_every_iteration() -> None:
     """Reference group EH satisfies mean=0, var=1 after EVERY EM iteration."""
     df, _, _ = _skewed_2pl_data(seed=101, n=800, j=8)
@@ -299,6 +300,7 @@ def test_fipc_does_not_standardize_and_recovers_shifted_moments() -> None:
     assert lat["skewness"] > 0.3  # skewed gamma recovered
 
 
+@pytest.mark.slow
 def test_rasch_and_pcm_with_eh_standardize_mean_only() -> None:
     """With fixed slopes (Rasch/PCM), EH standardizes mean=0 only and leaves variance free."""
     rng = np.random.default_rng(303)
@@ -322,6 +324,7 @@ def test_rasch_and_pcm_with_eh_standardize_mean_only() -> None:
     assert abs(lat["var"] - 1.96) < 0.35  # free variance recovered, not forced to 1
 
 
+@pytest.mark.slow
 def test_eh_monotone_and_squarem_matches_plain_em() -> None:
     """Plain EM and logit-scale SQUAREM are monotone; SQUAREM reaches the EM limit faster.
 
@@ -355,6 +358,7 @@ def test_eh_monotone_and_squarem_matches_plain_em() -> None:
     np.testing.assert_allclose(res_sq.items["d"], res_em.items["d"], atol=5e-3)
 
 
+@pytest.mark.slow
 def test_eh_n_params_aic_bic_and_oakes_equals_hessian() -> None:
     """Verify n_params, AIC/BIC, and exact Oakes == Hessian conditional SEs on 1G and 2G EH."""
     df, _, _ = _skewed_2pl_data(seed=505, n=1000, j=8)
@@ -392,6 +396,7 @@ def test_eh_n_params_aic_bic_and_oakes_equals_hessian() -> None:
     assert abs(res2_o.latent["var"].to_numpy(dtype=float)[ref_row] - 1.0) < 1e-7
 
 
+@pytest.mark.slow
 def test_eh_works_with_all_families_missing_and_priors() -> None:
     """EH works with mixed families (2PL, Rasch, 3PL, 4PL, GRM, GPCM, PCM), missing, and priors."""
     rng = np.random.default_rng(606)
@@ -453,6 +458,7 @@ def test_eh_works_with_all_families_missing_and_priors() -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_eh_scoring_methods() -> None:
     """EAP, ML, WLE, PV work with EH (PV matches EAP); MAP raises SpecificationError."""
     df, _, _ = _skewed_2pl_data(seed=707, n=1000, j=8)
@@ -484,6 +490,7 @@ def test_eh_scoring_methods() -> None:
     np.testing.assert_allclose(pv_sds, eap_s["se"].iloc[:3].to_numpy(), atol=0.04)
 
 
+@pytest.mark.slow
 def test_eh_summary_html_and_json_roundtrip(tmp_path: Path) -> None:
     """summary(), _repr_html_(), and strict JSON round-trip preserve EH results identically."""
     df, _, _ = _skewed_2pl_data(seed=808, n=800, j=6)
@@ -580,6 +587,7 @@ def test_eh_summary_html_and_json_roundtrip(tmp_path: Path) -> None:
         FitResult.from_json(json.dumps(norm_parsed))
 
 
+@pytest.mark.slow
 def test_eh_variance_only_standardization_is_rejected() -> None:
     """Fixed intercepts without a fixed nonzero slope would need a nonlinear variance constraint."""
     df, _, _ = _skewed_2pl_data(seed=11, n=300, j=6)

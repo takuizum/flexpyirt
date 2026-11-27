@@ -38,6 +38,7 @@ def two_groups() -> tuple[pd.DataFrame, np.ndarray]:
 # ---- GRM kernel ----------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 @settings(deadline=None)
 @given(
     a=st.floats(0.2, 3.0),
@@ -92,6 +93,7 @@ def test_equal_across_groups_shares_free_ids(two_groups: tuple[pd.DataFrame, np.
     assert fid[("ref", "i5", "d")] != fid[("focal", "i5", "d")]
 
 
+@pytest.mark.slow
 def test_two_identical_groups_reproduce_single_group(
     two_groups: tuple[pd.DataFrame, np.ndarray],
 ) -> None:

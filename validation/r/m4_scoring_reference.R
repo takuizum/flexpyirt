@@ -17,6 +17,7 @@
 #     where nlm's finite-difference Hessian turns <= 0, mirt leaves F1 ~ -17 with SE = NA instead
 #     of setting -Inf; (b, observed; cause unconfirmed in mirt's R source) with missing data on the last item column, mirt's tabdata[, -ncol()]
 #     undercounts NAs and leaves all-extreme rows at ~20 with SE = NA.)
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -339,7 +340,7 @@ out <- list(
     case = "v13_fscores",
     description = "V13: Ability scoring (EAP, MAP, ML, WLE) across 2PL, GRM, GPCM, 3PL, two-group, and missing data",
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     TOL = 1e-10,
     quadpts = default_quad$quadpts,
     theta_lim = default_quad$theta_lim,

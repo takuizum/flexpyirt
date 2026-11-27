@@ -3,7 +3,7 @@ name = "flexpyirt"
 dynamic = ["version"]
 description = "Bock–Aitkin EM estimation for item response theory models, built on JAX."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "takuizum" }]
@@ -21,13 +21,15 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Typing :: Typed",
 ]
 dependencies = [
+    # flexpyctt is released from its own repository. Before 1.0 its minor version is the unit of
+    # compatibility: a patch release keeps the public API (DESIGN.md §16.24).
+    "flexpyctt>=0.1,<0.2",
     "jax>=0.4.30",
     "numpy>=1.26",
     "scipy>=1.11",
@@ -43,6 +45,8 @@ Releases = "https://github.com/takuizum/flexpyirt/releases"
 
 [project.optional-dependencies]
 polars = ["polars>=1.0"]
+# flexpyirt.plotting (imported lazily; DESIGN.md §21).
+plot = ["matplotlib>=3.8"]
 
 [dependency-groups]
 dev = [
@@ -52,6 +56,10 @@ dev = [
     "mypy>=1.11",
     "pandas-stubs>=2.1",
     "pytest-xdist>=3.8.0",
+    "matplotlib>=3.8",
+    # For development only: tests/test_equating.py checks the equipercentile kernel against it.
+    # flexpyirt itself does not depend on it.
+    "flexpyequate>=0.1,<0.2",
 ]
 docs = [
     "mkdocs-material>=9.5",
@@ -75,11 +83,17 @@ packages = ["src/flexpyirt"]
 # The sdist carries the sources, tests (with the mirt reference values), R validation scripts,
 # benchmarks and documentation; repository tooling stays out.
 [tool.hatch.build.targets.sdist]
-exclude = ["/.github", "/.python-version", "/CLAUDE.md", "/uv.lock", "/site"]
+exclude = [
+    "/.github",
+    "/.python-version",
+    "/CLAUDE.md",
+    "/uv.lock",
+    "/site",
+]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -96,7 +110,7 @@ convention = "numpy"
 "tests/**" = ["D"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 files = ["src/flexpyirt", "tests", "scripts"]
 
@@ -108,10 +122,10 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 pythonpath = ["."]
 # Parallel by default (pytest-xdist). `loadfile` keeps each module on one worker so JAX
-# compilations are reused within a module (conftest clears the cache between modules).
-# Use `-n 0` to run serially, e.g. when debugging.
+# compilations and cached fits are reused within a module (conftest clears the cache between
+# modules). Use `-n 0` to run serially, e.g. when debugging.
 addopts = ["-ra", "--strict-markers", "--strict-config", "-n", "auto", "--dist", "loadfile"]
 markers = [
-    "slow: long-running (>~10 s) test; skipped on PR CI, run on pushes to develop/main. Deselect locally with -m 'not slow'.",
+    "slow: takes more than ~5 s (with its share of a cached fit), or a mirt reference comparison; skipped on PR/push CI, run nightly and on release PRs. Deselect locally with -m 'not slow'.",
 ]
 xfail_strict = true

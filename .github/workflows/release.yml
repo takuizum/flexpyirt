@@ -4,6 +4,9 @@ name: Release
 # decides the bump from the latest vX.Y.Z tag; the first release is v0.0.1.
 # The version comes from git tags (hatch-vcs), so releasing = tagging main; nothing is committed.
 #
+# flexpyirt depends on flexpyctt, which is released from its own repository (takuizum/flexpyctt).
+# A flexpyctt version inside the required range must be on PyPI before flexpyirt is released.
+#
 # Security (CONTRIBUTING.md): only repository admins can update main (ruleset
 # "main-release-gate"), and the publish job runs in the "release" environment, which needs the
 # owner's approval and only deploys from main. The pypi job uploads the same files to PyPI with
@@ -43,7 +46,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Find the release PR and the next version
         id: plan
         env:
@@ -86,6 +89,8 @@ jobs:
         run: |
           uv build
           ls dist
+          test -f "dist/flexpyirt-$SETUPTOOLS_SCM_PRETEND_VERSION-py3-none-any.whl"
+          test -f "dist/flexpyirt-$SETUPTOOLS_SCM_PRETEND_VERSION.tar.gz"
           uvx twine check --strict dist/*
 
   publish:
@@ -103,7 +108,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Tag and build
         env:
           VERSION: ${{ needs.plan.outputs.version }}
@@ -117,6 +122,7 @@ jobs:
           test -f "dist/flexpyirt-$VERSION-py3-none-any.whl"
           test -f "dist/flexpyirt-$VERSION.tar.gz"
           uvx twine check --strict dist/*
+          # flexpyctt is installed from PyPI (it must already be there in the required range).
           uv run --isolated --no-project --with "dist/flexpyirt-$VERSION-py3-none-any.whl" \
             python -c "import flexpyirt; assert flexpyirt.__version__ == '$VERSION'"
       - uses: actions/upload-artifact@v4

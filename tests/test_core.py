@@ -66,6 +66,7 @@ def test_e_step_conserves_counts() -> None:
     assert float(ll) == pytest.approx(float(_core.marginal_loglik(prob, eta)))
 
 
+@pytest.mark.slow
 def test_oakes_identity_holds_away_from_the_mle() -> None:
     """Oakes' identity is exact at any eta, not only at the MLE."""
     df = load("v2_lsat7_rasch").data

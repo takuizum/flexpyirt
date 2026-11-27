@@ -83,16 +83,21 @@ def _at_mirt(res: FitResult, estimates: dict[str, Any]) -> FitResult:
     return dataclasses.replace(res, _eta=eta)
 
 
+@pytest.mark.slow
 def test_science_fit_matches_mirt() -> None:
     ref = _bundle()["science_grm_2g"]
     res, _, _ = _case("science_grm_2g")
     assert res.loglik == pytest.approx(ref["loglik"], rel=1e-9)
     assert res.loglik > ref["loglik"]
     latent = res.latent.set_index("group")
-    assert latent.loc["focal", "mean"] == pytest.approx(ref["estimates"]["focal"]["mean"], abs=1e-5)
-    assert latent.loc["focal", "var"] == pytest.approx(ref["estimates"]["focal"]["var"], abs=1e-5)
+    # mirt stops on a flat ridge short of the MLE (see the module docstring), and where it stops
+    # depends on the mirt version: the focal mean is 8.2e-6 from flexpyirt's on mirt 1.48 and
+    # 1.9e-5 on 1.48.5 (#143). 5e-5 covers that; the log-likelihood checks above stay strict.
+    assert latent.loc["focal", "mean"] == pytest.approx(ref["estimates"]["focal"]["mean"], abs=5e-5)
+    assert latent.loc["focal", "var"] == pytest.approx(ref["estimates"]["focal"]["var"], abs=5e-5)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", CASES)
 def test_s_x2_per_group_matches_mirt(name: str) -> None:
     ref = _bundle()[name]
@@ -111,6 +116,7 @@ def test_s_x2_per_group_matches_mirt(name: str) -> None:
         np.testing.assert_allclose(got["p"], expected["p"], rtol=1e-4, atol=1e-12)
 
 
+@pytest.mark.slow
 def test_requires_groups_and_all_categories_per_group() -> None:
     res, df, grp = _case("science_grm_2g")
     with pytest.raises(SpecificationError, match="group"):

@@ -111,6 +111,7 @@ def test_delta_se_2pl_matches_analytic_and_includes_covariance() -> None:
     assert cov_matters
 
 
+@pytest.mark.slow
 def test_delta_se_rasch_and_fixed_slope() -> None:
     case = load("v2_lsat7_rasch")
     res = fit(Model.uniform(Rasch(), items=case.items), case.data, method=BAEM(tol=1e-8))
@@ -128,6 +129,7 @@ def test_delta_se_rasch_and_fixed_slope() -> None:
     )
 
 
+@pytest.mark.slow
 def test_delta_se_grm_matches_analytic() -> None:
     rng = np.random.default_rng(4001)
     theta = rng.normal(0.0, 1.0, 600)
@@ -150,6 +152,7 @@ def test_delta_se_grm_matches_analytic() -> None:
             assert _cell(items, name, f"b{k}_se") == pytest.approx(expected, rel=1e-12)
 
 
+@pytest.mark.slow
 def test_delta_se_gpcm_and_pcm_include_step_covariances() -> None:
     rng = np.random.default_rng(4002)
     theta = rng.normal(0.0, 1.0, 700)
@@ -203,6 +206,7 @@ def test_delta_se_gpcm_and_pcm_include_step_covariances() -> None:
         assert _cell(items_p, name, "b3_se") == pytest.approx(expected_b3, rel=1e-12)
 
 
+@pytest.mark.slow
 def test_delta_se_gpcm2_equals_2pl_and_pcm2_equals_rasch() -> None:
     case = load("v1_lsat7_2pl")
     r_2pl = fit(Model.uniform(TwoPL(), items=case.items), case.data, method=BAEM(tol=1e-9))
@@ -214,6 +218,7 @@ def test_delta_se_gpcm2_equals_2pl_and_pcm2_equals_rasch() -> None:
     np.testing.assert_allclose(r_pcm.items["b1_se"], r_rasch.items["b_se"], rtol=1e-7)
 
 
+@pytest.mark.slow
 def test_delta_se_3pl_4pl_and_fixed_a_d_free_g() -> None:
     rng = np.random.default_rng(4003)
     theta = rng.normal(0.0, 1.0, 1500)
@@ -276,6 +281,7 @@ def test_delta_se_3pl_4pl_and_fixed_a_d_free_g() -> None:
         assert _cell(items4, name, "b_se") == pytest.approx(expected, rel=1e-12)
 
 
+@pytest.mark.slow
 def test_delta_se_fixed_items_fixed_d_and_vcov_none_or_nan() -> None:
     case = load("v1_lsat7_2pl")
     # FIPC: first 2 items fixed, latent free.
@@ -315,6 +321,7 @@ def test_delta_se_fixed_items_fixed_d_and_vcov_none_or_nan() -> None:
     assert res_nan.items["b_se"].isna().all()
 
 
+@pytest.mark.slow
 def test_delta_se_multigroup_shared_and_partial_equality() -> None:
     rng = np.random.default_rng(4004)
     n_g = 600
@@ -371,6 +378,7 @@ def test_delta_se_multigroup_shared_and_partial_equality() -> None:
             assert _cell(items, (g_name, item), "b_se") == pytest.approx(expected, rel=1e-12)
 
 
+@pytest.mark.slow
 def test_delta_se_mixed_models_and_oakes_equals_hessian() -> None:
     rng = np.random.default_rng(4005)
     n = 600
@@ -491,6 +499,7 @@ def test_summary_and_repr_html_map_priors_warning_and_no_extra_warning() -> None
         assert "MAP estimate" in out
 
 
+@pytest.mark.slow
 def test_summary_and_repr_html_multigroup_and_mixed() -> None:
     rng = np.random.default_rng(4006)
     n_g = 300
@@ -520,6 +529,7 @@ def test_summary_and_repr_html_multigroup_and_mixed() -> None:
         assert "b1_se" in out
 
 
+@pytest.mark.slow
 def test_summary_and_repr_html_squarem_nonconverged_se_none_and_digits() -> None:
     case = load("v1_lsat7_2pl")
     spec = Model.uniform(TwoPL(), items=case.items)
@@ -548,6 +558,7 @@ def test_summary_and_repr_html_squarem_nonconverged_se_none_and_digits() -> None
         res_sq.summary(digits=True)
 
 
+@pytest.mark.slow
 def test_repr_html_escapes_special_characters() -> None:
     case = load("v1_lsat7_2pl")
     tricky = ['q<1>&"a"', "q2", "q3", "q4", "q5"]

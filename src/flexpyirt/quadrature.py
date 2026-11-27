@@ -9,10 +9,14 @@ import numpy as np
 
 from flexpyirt.errors import SpecificationError
 
-__all__ = ["DEFAULT_N_POINTS", "MAX_FACTORS", "Quadrature"]
+__all__ = ["DEFAULT_N_POINTS", "MAX_FACTORS", "MAX_KERNEL_FACTORS", "Quadrature"]
 
 MAX_FACTORS = 3
 """Maximum number of latent dimensions supported with product quadrature (DESIGN.md §4.9)."""
+
+MAX_KERNEL_FACTORS = 32
+"""Maximum number of slopes per item kernel; bifactor models reach it with 31 specific factors
+because their E-step uses (1+1)-dimensional grids (DESIGN.md §17.1)."""
 
 DEFAULT_N_POINTS: dict[int, int] = {1: 61, 2: 31, 3: 15}
 """Default equispaced points per dimension, matching mirt's ``select_quadpts``."""

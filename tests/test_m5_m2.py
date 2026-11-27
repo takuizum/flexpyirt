@@ -20,7 +20,6 @@ from flexpyirt import (
     Model,
     Normal,
     NormalPrior,
-    Quadrature,
     Rasch,
     ThreePL,
     TwoPL,
@@ -76,11 +75,12 @@ def _brute_xi(m1: np.ndarray, m2: np.ndarray, w: np.ndarray, e: np.ndarray) -> n
     return out - np.outer(e, e)
 
 
+@pytest.mark.slow
 def test_m2_rejects_unsupported_models_and_inputs() -> None:
     df = _sim_2pl(n_obs=300, n_items=6, seed=1)
     items = list(df.columns)
 
-    # Multiple-group model.
+    # Multiple-group model: group labels are required and every group needs 2 respondents.
     grp = np.repeat(["ref", "focal"], len(df) // 2)
     spec_mg = (
         Model.uniform(TwoPL(), items=items)
@@ -88,39 +88,31 @@ def test_m2_rejects_unsupported_models_and_inputs() -> None:
         .equal_across_groups(items=items[:3])
     )
     res_mg = fit(spec_mg, df, group=grp, method=BAEM(tol=1e-4, squarem=True), se=None)
-    with pytest.raises(SpecificationError, match="single-group unidimensional"):
+    with pytest.raises(SpecificationError, match="pass group="):
         res_mg.m2(df)
+    with pytest.raises(SpecificationError, match="absent from the data"):
+        res_mg.m2(df, group=np.repeat("ref", len(df)))
+    grp_one = np.where(np.arange(len(df)) == 0, "focal", "ref")
+    with pytest.raises(SpecificationError, match="2 respondents in group 'focal'"):
+        res_mg.m2(df, group=grp_one)
 
     # EmpiricalHistogram latent distribution.
     spec_eh = Model.uniform(TwoPL(), items=items).with_latent(EmpiricalHistogram())
     res_eh = fit(spec_eh, df, method=BAEM(tol=1e-3, max_iter=50, squarem=True), se=None)
-    with pytest.raises(SpecificationError, match="single-group unidimensional"):
+    with pytest.raises(SpecificationError, match="Normal latent distributions"):
         res_eh.m2(df)
 
-    # 2-factor multidimensional model.
-    spec_2d = Model.uniform(TwoPL(), items=items).with_factors({"F1": items[:3], "F2": items[3:]})
-    res_2d = fit(
-        spec_2d,
-        df,
-        method=BAEM(tol=1e-4, squarem=True),
-        quadrature=Quadrature.equispaced(11, bounds=(-4, 4)),
-        se=None,
-    )
-    with pytest.raises(SpecificationError, match="single-group unidimensional"):
-        res_2d.m2(df)
-
-    # MAP fit (with priors).
-    spec_map = Model.uniform(TwoPL(), items=items).prior(param="d", dist=NormalPrior(0.0, 2.0))
-    res_map = fit(spec_map, df, method=BAEM(tol=1e-4, squarem=True), se=None)
-    with pytest.raises(SpecificationError, match="MLE fit without priors"):
-        res_map.m2(df)
-
-    # Standard 2PL fit: missing data, invalid ci, too few respondents.
+    # Standard 2PL fit: a pair nobody answered together, invalid ci, too few respondents.
     res = fit(Model.uniform(TwoPL(), items=items), df, method=BAEM(tol=1e-4, squarem=True), se=None)
-    df_miss = df.astype(float)
-    df_miss.iloc[0, 0] = np.nan
-    with pytest.raises(SpecificationError, match="complete data"):
-        res.m2(df_miss)
+    df_split = df.astype(float)
+    df_split.loc[: len(df) // 2, "q01"] = np.nan
+    df_split.loc[len(df) // 2 :, "q02"] = np.nan
+    with pytest.raises(SpecificationError, match="items 'q01' and 'q02'"):
+        res.m2(df_split)
+    df_empty = df.astype(float)
+    df_empty["q03"] = np.nan
+    with pytest.raises(SpecificationError, match="item 'q03'"):
+        res.m2(df_empty)
 
     for bad_ci in (0.0, 1.0, -0.5, 1.5, True, float("nan")):
         with pytest.raises(SpecificationError, match="ci must be"):
@@ -140,6 +132,7 @@ def test_m2_rejects_unsupported_models_and_inputs() -> None:
         res_1item.m2(df[["q01"]])
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("n_items,expected_df", [(3, 0), (2, -1)])
 def test_m2_nonpositive_df_returns_nan_indices(n_items: int, expected_df: int) -> None:
     df = _sim_2pl(n_obs=400, n_items=n_items, seed=2)
@@ -164,6 +157,7 @@ def test_m2_nonpositive_df_returns_nan_indices(n_items: int, expected_df: int) -
     assert np.isfinite(row["srmsr"]) and row["srmsr"] >= 0.0
 
 
+@pytest.mark.slow
 def test_m2_nonpositive_df_with_low_rank_and_rank_deficient_positive_df() -> None:
     """Both df <= 0 with rank < s and df > 0 with rank < n_cols warn and return NaN M2."""
     # Case 1: df <= 0 with rank(Delta_2) < s (3 GPCM(4) items with slopes fixed at 0:
@@ -204,6 +198,7 @@ def test_m2_nonpositive_df_with_low_rank_and_rank_deficient_positive_df() -> Non
     assert np.isfinite(row_rd["srmsr"])
 
 
+@pytest.mark.slow
 def test_m2_invariant_to_item_order() -> None:
     df2 = _sim_2pl(n_obs=500, n_items=6, seed=3)
     perm = ["q05", "q02", "q06", "q01", "q04", "q03"]
@@ -297,6 +292,7 @@ def test_rmsea_and_rmsea_ci_against_hand_values() -> None:
     assert lo95 < lo < hi < hi95
 
 
+@pytest.mark.slow
 def test_xi_is_symmetric_psd_and_matches_brute_force() -> None:
     df_bin = _sim_2pl(n_obs=300, n_items=7, seed=5)
     df_poly = _sim_grm(n_obs=300, n_items=6, n_categories=4, seed=6)
@@ -328,6 +324,7 @@ def test_xi_is_symmetric_psd_and_matches_brute_force() -> None:
         assert float(eigvals.min()) >= -1e-13
 
 
+@pytest.mark.slow
 def test_m2_custom_ci_array_input_and_equality_constraints() -> None:
     df = _sim_2pl(n_obs=400, n_items=6, seed=7)
     items = list(df.columns)
@@ -356,6 +353,7 @@ def test_m2_custom_ci_array_input_and_equality_constraints() -> None:
     assert out95["rmsea_97.5"].iloc[0] >= out90["rmsea_95"].iloc[0]
 
 
+@pytest.mark.slow
 def test_m2_all_fixed_and_null_warning() -> None:
     """All-fixed model (n_params=0) works; a badly misspecified model triggers the null warning."""
     df = _sim_2pl(n_obs=400, n_items=5, seed=8)
@@ -379,6 +377,7 @@ def test_m2_all_fixed_and_null_warning() -> None:
     assert np.isnan(row["cfi"])
 
 
+@pytest.mark.slow
 def test_null_m2_matches_explicit_independence_model() -> None:
     """Closed-form null_m2 equals m2_statistic on an explicit a=0 dichotomous independence model."""
     df = _sim_2pl(n_obs=500, n_items=6, seed=9)
@@ -410,6 +409,7 @@ def test_null_m2_matches_explicit_independence_model() -> None:
     np.testing.assert_allclose(closed_stat, explicit.m2, rtol=1e-12)
 
 
+@pytest.mark.slow
 def test_m2_fourpl_and_pcm() -> None:
     """FourPL (dichotomous) and PCM (polytomous Rasch with free latent variance) work cleanly."""
     # FourPL with J=10: s = 55, q = 40 -> df = 15.
@@ -465,3 +465,121 @@ def test_m2_fourpl_and_pcm() -> None:
         _latent_in_delta=False,
     )
     assert abs(float(out_pcm["m2"]) - nolat.m2) > 1e-6
+
+
+# ---- multiple groups, missing data and MAP fits (DESIGN.md §16.23) ----------------------------
+
+
+def test_sample_margins_match_brute_force_with_missing() -> None:
+    rng = np.random.default_rng(21)
+    y = rng.integers(0, 3, size=(40, 4))
+    y[rng.random(y.shape) < 0.3] = -1
+    smp = _m2.sample_margins(y)
+    ii, jj = _m2._pairs(4)
+    margins = [(j,) for j in range(4)] + list(zip(ii.tolist(), jj.tolist(), strict=True))
+    for a, items_a in enumerate(margins):
+        rows_a = np.all(y[:, list(items_a)] >= 0, axis=1)
+        assert smp.count[a] == rows_a.sum()
+        np.testing.assert_allclose(smp.obs[a], np.prod(y[rows_a][:, list(items_a)], axis=1).mean())
+        for b, items_b in enumerate(margins):
+            both = np.all(y[:, list(set(items_a) | set(items_b))] >= 0, axis=1)
+            assert smp.joint is not None
+            assert smp.joint[a, b] == both.sum()
+    # Pairwise-available covariance (mirt's SRMSR input).
+    for i, j in zip(ii, jj, strict=True):
+        rows = (y[:, i] >= 0) & (y[:, j] >= 0)
+        expected = (y[rows, i] * y[rows, j]).mean() - (
+            y[y[:, i] >= 0, i].mean() * y[y[:, j] >= 0, j].mean()
+        )
+        np.testing.assert_allclose(smp.cov[i, j], expected)
+    # Complete data: no joint counts, covariance is the biased sample covariance.
+    full = rng.integers(0, 2, size=(30, 3))
+    smp_full = _m2.sample_margins(full)
+    assert smp_full.joint is None
+    np.testing.assert_allclose(smp_full.cov, np.cov(full, rowvar=False, bias=True), atol=1e-15)
+
+
+def test_null_m2_generic_matches_closed_form_per_group() -> None:
+    rng = np.random.default_rng(22)
+    ys = [rng.integers(0, 2, size=(n, 5)) for n in (120, 45)]
+    samples = [_m2.sample_margins(y) for y in ys]
+    stat, df = _m2._null_m2(samples, 5, mirt_convention=False)
+    closed = [_m2.null_m2(y) for y in ys]
+    assert df == sum(c[1] for c in closed) == 20
+    np.testing.assert_allclose(stat, sum(c[0] for c in closed), rtol=1e-10)
+    # mirt's convention coincides for complete data (the null model has no shared parameters).
+    np.testing.assert_allclose(_m2._null_m2(samples, 5, mirt_convention=True)[0], stat, rtol=1e-10)
+
+
+@pytest.mark.slow
+def test_m2_invariant_to_all_missing_rows_and_map_fit_runs() -> None:
+    df = _sim_2pl(n_obs=400, n_items=6, seed=23)
+    items = list(df.columns)
+    df_miss = df.astype(float)
+    rng = np.random.default_rng(23)
+    df_miss[rng.random(df_miss.shape) < 0.2] = np.nan
+    res = fit(Model.uniform(TwoPL(), items=items), df_miss, method=BAEM(tol=1e-8), se=None)
+    base = res.m2(df_miss).iloc[0]
+    padded = pd.concat([df_miss, pd.DataFrame(np.nan, index=range(50), columns=items)])
+    more = res.m2(padded.reset_index(drop=True)).iloc[0]
+    # The statistic and SRMSR depend only on the margins and their counts.
+    np.testing.assert_allclose(more["m2"], base["m2"], rtol=1e-10)
+    np.testing.assert_allclose(more["srmsr"], base["srmsr"], rtol=1e-12)
+    np.testing.assert_allclose(more["tli"], base["tli"], rtol=1e-10)
+    assert int(more["df"]) == int(base["df"]) == 21 - 12
+
+    spec_map = Model.uniform(TwoPL(), items=items).prior(param="d", dist=NormalPrior(0.0, 2.0))
+    res_map = fit(spec_map, df, method=BAEM(tol=1e-8), se=None)
+    row = res_map.m2(df).iloc[0]
+    assert int(row["df"]) == 21 - res_map.n_params
+    for col in ("m2", "p", "rmsea", "srmsr", "tli", "cfi"):
+        assert np.isfinite(row[col])
+
+
+@pytest.mark.slow
+def test_m2_with_mcar_missing_follows_chi2_at_true_parameters() -> None:
+    """Calibration of the MCAR covariance (DESIGN.md §16.23) with every parameter fixed at truth.
+
+    With ``n_params = 0`` the statistic is :math:`r^\\top\\Gamma^{-1}r` with ``df = s``, so its
+    distribution checks :math:`\\Gamma` alone; mirt's weighting is visibly off.
+    """
+    n_items, n_obs, n_rep = 5, 500, 300
+    a = np.array([1.2, 0.8, 1.5, 1.0, 0.7])
+    d = np.array([-0.5, 0.3, 0.0, 0.8, -1.0])
+    rates = np.array([0.0, 0.1, 0.3, 0.5, 0.6])
+    items = [f"q{j + 1}" for j in range(n_items)]
+    rng = np.random.default_rng(24)
+
+    def draw() -> np.ndarray:
+        theta = rng.normal(0.0, 1.0, n_obs)
+        p = 1.0 / (1.0 + np.exp(-(np.outer(theta, a) + d)))
+        y = (rng.random(p.shape) < p).astype(np.int64)
+        y[rng.random(y.shape) < rates] = -1
+        return np.asarray(y)
+
+    spec = Model.uniform(TwoPL(), items=items)
+    y0 = draw()
+    table = spec.parameter_table(pd.DataFrame(np.where(y0 < 0, np.nan, y0), columns=items))
+    table["free"] = False
+    for j, item in enumerate(items):
+        table.loc[(table["item"] == item) & (table["param"] == "a"), "value"] = a[j]
+        table.loc[(table["item"] == item) & (table["param"] == "d"), "value"] = d[j]
+    res = fit(spec, pd.DataFrame(np.where(y0 < 0, np.nan, y0), columns=items), table=table, se=None)
+    eta = jnp.asarray(res._eta)
+    stats_exact: list[float] = []
+    stats_mirt: list[float] = []
+    for _ in range(n_rep):
+        y = draw()
+        codes = np.zeros(n_obs, dtype=np.int32)
+        prob = compile_problem(res._model, y, codes, res.parameters, res._quadrature).problem
+        for out, conv in ((stats_exact, False), (stats_mirt, True)):
+            r = _m2.m2_statistic(
+                prob, eta, y, n_params=0, n_categories=[2] * n_items, _mirt_convention=conv
+            )
+            out.append(r.m2)
+    df = n_items + n_items * (n_items - 1) // 2
+    exact = np.asarray(stats_exact)
+    se_mean = np.sqrt(2.0 * df / n_rep)
+    assert abs(exact.mean() - df) < 3.0 * se_mean
+    assert stats.kstest(stats.chi2.sf(exact, df), "uniform").pvalue > 0.01
+    assert abs(np.mean(stats_mirt) - df) > 3.0 * se_mean

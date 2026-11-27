@@ -65,6 +65,7 @@ def _run_isolated(code: str, *, x64: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+@pytest.mark.slow
 def test_import_does_not_touch_global_x64() -> None:
     proc = _run_isolated(
         """
@@ -77,6 +78,7 @@ def test_import_does_not_touch_global_x64() -> None:
     assert proc.returncode == 0, proc.stderr
 
 
+@pytest.mark.slow
 def test_fit_raises_precision_error_without_x64() -> None:
     proc = _run_isolated(
         """

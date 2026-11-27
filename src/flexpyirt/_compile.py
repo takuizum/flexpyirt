@@ -17,10 +17,12 @@ import numpy as np
 import pandas as pd
 
 from flexpyirt._core import (
+    BifactorBlock,
     CompiledProblem,
     CoupledBlock,
     CoupledMember,
     FamilyBlock,
+    GroupBlocks,
     LatentBlock,
     PriorBlock,
 )
@@ -41,6 +43,7 @@ from flexpyirt.items import (
     _gpcm_intercept_starts,
     _intercept_start,
     _slope_start,
+    is_builtin_item_model,
 )
 from flexpyirt.latent import (
     DavidianCurve,
@@ -50,13 +53,13 @@ from flexpyirt.latent import (
     correlation_matrix_is_positive_definite,
     davidian_param_names,
     eh_project_floor,
-    latent_param_names,
     mixture_param_names,
 )
 from flexpyirt.model import LATENT_ITEM
 from flexpyirt.priors import (
     PRIOR_TYPES,
     BetaPrior,
+    LogitNormalPrior,
     LogNormalPrior,
     NormalPrior,
     Prior,
@@ -65,6 +68,8 @@ from flexpyirt.priors import (
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
+    from jax import Array
+
     from flexpyirt.model import Model
 
 __all__ = [
@@ -72,6 +77,7 @@ __all__ = [
     "TABLE_COLUMNS",
     "Compiled",
     "Prepared",
+    "build_group_blocks",
     "build_table",
     "coerce_groups",
     "coerce_responses",
@@ -203,13 +209,75 @@ def coerce_groups(
     return np.array([lookup[v] for v in labels], dtype=np.int32), names
 
 
+def coerce_weights(weights: Any, n: int) -> np.ndarray | None:
+    """Return sampling weights as an ``(N,)`` float array, or ``None`` when not given (§17.4).
+
+    Raises
+    ------
+    SpecificationError
+        Wrong length or shape, non-numeric, non-finite or negative values, or a zero total.
+    """
+    if weights is None:
+        return None
+    if hasattr(weights, "to_numpy"):
+        weights = weights.to_numpy()
+    try:
+        w = np.asarray(weights, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise SpecificationError("weights= must be numeric (one weight per row).") from exc
+    if w.ndim != 1 or w.shape[0] != n:
+        raise SpecificationError(f"weights= must have one weight per row ({n}), got {w.shape}.")
+    if not np.isfinite(w).all():
+        raise SpecificationError("weights= must be finite (no NaN or infinite values).")
+    if (w < 0).any():
+        raise SpecificationError("weights= must be non-negative.")
+    if not w.sum() > 0:
+        raise SpecificationError("weights= must have a positive total.")
+    return w
+
+
+def coerce_clusters(cluster: Any, n: int) -> tuple[np.ndarray, int] | None:
+    """Return integer cluster codes (``(N,)``, ``0..G-1``) and ``G``, or ``None`` (§17.6).
+
+    Labels can be any hashable values (array-like with one label per row, like ``group=``).
+
+    Raises
+    ------
+    SpecificationError
+        Wrong length or shape, or a missing label (NaN / None).
+    """
+    if cluster is None:
+        return None
+    if isinstance(cluster, str):
+        raise SpecificationError(
+            "cluster= must be an array-like with one label per row, not a column name."
+        )
+    values = cluster.to_numpy() if hasattr(cluster, "to_numpy") else cluster
+    labels = np.asarray(values, dtype=object) if not isinstance(values, np.ndarray) else values
+    if labels.shape != (n,):
+        raise SpecificationError(f"cluster= must have one label per row ({n}), got {labels.shape}.")
+    codes, uniques = pd.factorize(pd.Series(labels, dtype=object), sort=False)
+    if np.any(codes < 0):
+        raise SpecificationError("cluster= has missing labels (NaN or None).")
+    return codes.astype(np.int32), len(uniques)
+
+
 def compress_patterns(
-    y: np.ndarray, group: np.ndarray
+    y: np.ndarray, group: np.ndarray, weights: np.ndarray | None = None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return unique (group, pattern) rows, their groups, counts and each row's index (§4.1)."""
+    """Return unique (group, pattern) rows, their groups, counts and each row's index (§4.1).
+
+    With ``weights``, a pattern's count is the sum of its rows' weights (§17.4).
+    """
     keyed = np.column_stack([group, y])
-    uniq, inverse, counts = np.unique(keyed, axis=0, return_inverse=True, return_counts=True)
-    return uniq[:, 1:], uniq[:, 0], counts.astype(float), inverse.reshape(-1)
+    uniq, inverse, n_rows = np.unique(keyed, axis=0, return_inverse=True, return_counts=True)
+    inverse = inverse.reshape(-1)
+    counts: np.ndarray = (
+        n_rows.astype(float)
+        if weights is None
+        else np.bincount(inverse, weights=weights, minlength=uniq.shape[0]).astype(float)
+    )
+    return uniq[:, 1:], uniq[:, 0], counts, inverse
 
 
 def pad_patterns(
@@ -226,13 +294,104 @@ def pad_patterns(
     )
 
 
+@dataclass(frozen=True)
+class MeatPatterns:
+    """Padded patterns of the sandwich's middle matrix (DESIGN.md §17.6).
+
+    Without clusters, one row per (group, pattern) with ``counts`` the sum of the squared weights
+    of its rows; with clusters, one row per (group, cluster, pattern) with ``counts`` the sum of
+    the weights and ``cluster`` the cluster code of each row (0 on padding rows).
+    """
+
+    y: np.ndarray
+    group: np.ndarray
+    counts: np.ndarray
+    cluster: np.ndarray | None = None
+    n_clusters: int | None = None
+
+
+def meat_patterns(
+    y: np.ndarray,
+    group: np.ndarray,
+    weights: np.ndarray | None,
+    cluster: np.ndarray | None = None,
+    n_clusters: int | None = None,
+) -> MeatPatterns:
+    """Compress the rows for the middle matrix of the weighted / cluster sandwich (§17.6)."""
+    w = np.ones(y.shape[0]) if weights is None else np.asarray(weights, dtype=float)
+    if cluster is None:
+        patterns, pat_groups, _, inverse = compress_patterns(y, group)
+        counts = np.bincount(inverse, weights=w**2, minlength=patterns.shape[0]).astype(float)
+        patterns, pat_groups, counts = pad_patterns(patterns, pat_groups, counts)
+        return MeatPatterns(y=patterns, group=pat_groups, counts=counts)
+    keyed = np.column_stack([group, cluster, y])
+    uniq, inverse = np.unique(keyed, axis=0, return_inverse=True)
+    inverse = inverse.reshape(-1)
+    counts = np.bincount(inverse, weights=w, minlength=uniq.shape[0]).astype(float)
+    n_real = uniq.shape[0]
+    patterns, pat_groups, counts = pad_patterns(uniq[:, 2:], uniq[:, 0], counts)
+    codes = np.zeros(patterns.shape[0], dtype=np.int32)
+    codes[:n_real] = uniq[:, 1]
+    return MeatPatterns(
+        y=patterns, group=pat_groups, counts=counts, cluster=codes, n_clusters=n_clusters
+    )
+
+
+GROUP_BLOCK_MIN_GROUPS = 2
+"""Smallest number of groups that uses the group-blocked E-step (DESIGN.md §26)."""
+_BLOCK_SIZES = tuple(1 << k for k in range(3, 11))
+"""Candidate group-block sizes ``B`` (8 to 1024; DESIGN.md §26)."""
+_BLOCK_OVERHEAD_ROWS = 64
+"""Per-block overhead, in rows, of the block-size cost (DESIGN.md §26)."""
+
+
+def build_group_blocks(pattern_groups: np.ndarray, n_groups: int, n_rows: int) -> GroupBlocks:
+    """Split each group's pattern rows into equal-size blocks, group-major (DESIGN.md §26).
+
+    ``pattern_groups`` are the groups of the real (unpadded) pattern rows ``0..n_real-1``;
+    ``n_rows`` is the padded number of rows ``P``, used as the sentinel row index. The block
+    size minimizes the padded rows plus a per-block overhead.
+    """
+    sizes = np.bincount(pattern_groups, minlength=n_groups)
+
+    def cost(b: int) -> int:
+        n_blocks = int(np.sum(-(-sizes // b)))
+        return n_blocks * b + _BLOCK_OVERHEAD_ROWS * n_blocks
+
+    block = min(_BLOCK_SIZES, key=lambda b: (cost(b), -b))
+    rows: list[np.ndarray] = []
+    groups: list[int] = []
+    last: list[bool] = []
+    for g in range(n_groups):
+        idx = np.flatnonzero(pattern_groups == g)
+        n_blocks = -(-idx.size // block)
+        padded = np.full(n_blocks * block, n_rows, dtype=np.int32)
+        padded[: idx.size] = idx
+        rows.extend(padded.reshape(n_blocks, block))
+        groups.extend([g] * n_blocks)
+        last.extend([False] * (n_blocks - 1) + [True] * (n_blocks > 0))
+    return GroupBlocks(
+        rows=jnp.asarray(np.stack(rows), dtype=jnp.int32),
+        group=jnp.asarray(groups, dtype=jnp.int32),
+        last=jnp.asarray(last, dtype=jnp.bool_),
+    )
+
+
 # --------------------------------------------------------------------------------------------
 # Parameter table
 # --------------------------------------------------------------------------------------------
 
 
-def _non_slope_starts(item_model: ItemModel, item: np.ndarray, a_eff: float) -> list[float]:
-    """Return classical starting values for non-slope parameters given effective slope ``a_eff``."""
+def _non_slope_starts(
+    item_model: ItemModel, item: np.ndarray, rest: np.ndarray, a_eff: float
+) -> list[float]:
+    """Return classical starting values for non-slope parameters given effective slope ``a_eff``.
+
+    A user-defined item model (DESIGN.md §20) uses its own ``start_values(item, rest)[1:]``
+    computed from the rest score on all items, ignoring ``a_eff``.
+    """
+    if not is_builtin_item_model(item_model):
+        return [float(v) for v in np.asarray(item_model.start_values(item, rest))[1:]]
     p = float(item.mean())
     if isinstance(item_model, (ThreePL, FourPL)):
         g, u = _asymptote_starts(p, free_upper=isinstance(item_model, FourPL))
@@ -281,31 +440,50 @@ def _start_values(model: Model, y: np.ndarray) -> dict[str, np.ndarray]:
         scores[:, [col_of[item_name] for item_name in assigned]].sum(axis=1)
         for _, assigned in model.factors
     ]
+    total_all = scores.sum(axis=1)
     out = {}
     for j, (name, item_model) in enumerate(model.items):
         rows = obs[:, j]
         loaded = model.item_factors(name)
         slopes = np.zeros(n_factors, dtype=float)
+        builtin = is_builtin_item_model(item_model)
+        fixed_slope = not item_model.default_free()[0]
         if rows.sum() < 2:
             placeholder = np.array([0.0, 1.0])
+            placeholder_rest = np.zeros(2)
             for m in loaded:
-                slopes[m] = (
-                    1.0 if isinstance(item_model, (Rasch, PCM)) else 1.0 / math.sqrt(len(loaded))
-                )
+                if builtin:
+                    slopes[m] = (
+                        1.0
+                        if isinstance(item_model, (Rasch, PCM))
+                        else 1.0 / math.sqrt(len(loaded))
+                    )
+                else:
+                    slopes[m] = (
+                        float(item_model.start_values(placeholder, placeholder_rest)[0])
+                        if fixed_slope
+                        else 1.0 / math.sqrt(len(loaded))
+                    )
             a_eff = max(float(np.linalg.norm(slopes)), 0.25)
-            out[name] = np.array([*slopes, *_non_slope_starts(item_model, placeholder, a_eff)])
+            out[name] = np.array(
+                [*slopes, *_non_slope_starts(item_model, placeholder, placeholder_rest, a_eff)]
+            )
             continue
         item = y[rows, j].astype(float)
+        rest = (total_all - scores[:, j])[rows].astype(float)
         for m in loaded:
-            if isinstance(item_model, (Rasch, PCM)):
+            if builtin and isinstance(item_model, (Rasch, PCM)):
                 slopes[m] = 1.0
+            elif not builtin and fixed_slope:
+                # A fixed slope keeps the model's own starting (fixed) value on every factor.
+                slopes[m] = float(item_model.start_values(item, rest)[0])
             else:
                 rest_m = (factor_totals[m] - scores[:, j])[rows].astype(float)
                 slopes[m] = float(
                     np.clip(_slope_start(item, rest_m) / math.sqrt(len(loaded)), 0.25, 3.0)
                 )
         a_eff = max(float(np.linalg.norm(slopes)), 0.25)
-        out[name] = np.array([*slopes, *_non_slope_starts(item_model, item, a_eff)])
+        out[name] = np.array([*slopes, *_non_slope_starts(item_model, item, rest, a_eff)])
     return out
 
 
@@ -320,6 +498,8 @@ def _prior_center(pri: Prior) -> float | None:
             return None
     if isinstance(pri, BetaPrior):
         return pri.a / (pri.a + pri.b)
+    if isinstance(pri, LogitNormalPrior):
+        return 1.0 / (1.0 + math.exp(-pri.mean_logit)) if pri.mean_logit > -700 else None
     return None
 
 
@@ -551,10 +731,13 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
                     for m in range(1, n_factors + 1)
                 ),
                 *((f"var_{m}", var0, free_var, 0.0, np.inf) for m in range(1, n_factors + 1)),
+                # Bifactor factors are orthogonal: no correlation rows (DESIGN.md §17.1).
+                # Two-tier models correlate the primary factors only (§17.2).
                 *(
                     (f"cor_{i}{j}", 0.0, model.correlated_factors, -1.0, 1.0)
                     for i in range(1, n_factors + 1)
                     for j in range(i + 1, n_factors + 1)
+                    if not model.is_reduced or j <= model.n_primary
                 ),
             ]
             lat_model = "MVN"
@@ -659,7 +842,7 @@ def model_parameter_schema(model: Model) -> pd.DataFrame:
             rows.append((group_name, LATENT_ITEM, "mean", "Normal", -np.inf, np.inf))
             rows.append((group_name, LATENT_ITEM, "var", "Normal", 0.0, np.inf))
             continue
-        for lat_param in latent_param_names(model.n_factors):
+        for lat_param in model.latent_parameter_names():
             if lat_param.startswith("var_"):
                 lo_hi = (0.0, np.inf)
             elif lat_param.startswith("cor_"):
@@ -828,7 +1011,7 @@ def validate_table_constraints(
             if not isinstance(pri, PRIOR_TYPES):
                 raise SpecificationError(
                     f"Invalid prior {pri!r} at {where}; "
-                    "use NormalPrior, LogNormalPrior, BetaPrior or None."
+                    "use NormalPrior, LogNormalPrior, BetaPrior, LogitNormalPrior or None."
                 )
             if free[i]:
                 p_lo, p_hi = pri.support
@@ -885,15 +1068,18 @@ def validate_table(
     free = t["free"].to_numpy(dtype=bool)
     # Positive-definite latent correlation matrix and nonzero starting slopes per factor (D > 1).
     if model.is_multidimensional:
-        n_factors = model.n_factors
+        # Reduced models correlate their primary factors only (DESIGN.md §17.1, §17.2).
+        n_correlated = model.n_primary if model.is_reduced else model.n_factors
         cor_names = [
-            f"cor_{i}{j}" for i in range(1, n_factors + 1) for j in range(i + 1, n_factors + 1)
+            f"cor_{i}{j}"
+            for i in range(1, n_correlated + 1)
+            for j in range(i + 1, n_correlated + 1)
         ]
-        lat_sub = t[t["item"] == LATENT_ITEM]
+        lat_sub = t[t["item"] == LATENT_ITEM] if cor_names else t.iloc[:0]
         for grp_lat, rows_g in lat_sub.groupby("group", sort=False):
             vals_g = dict(zip(rows_g["param"], rows_g["value"], strict=True))
             cors = [float(vals_g[c]) for c in cor_names]
-            if not correlation_matrix_is_positive_definite(cors, n_factors):
+            if not correlation_matrix_is_positive_definite(cors, n_correlated):
                 raise SpecificationError(
                     f"Latent correlation matrix is not positive definite for group {grp_lat!r}: "
                     f"{dict(zip(cor_names, cors, strict=True))}."
@@ -1009,6 +1195,14 @@ def eh_param_count(t: pd.DataFrame, model: Model, quad: Quadrature) -> int:
 
 def _check_identification(t: pd.DataFrame, model: Model) -> None:
     """Scale identification rules of DESIGN.md §4.5, §14.5, and §15.31 (necessary conditions)."""
+    if model.is_reduced:
+        lat_rows = t[t["item"] == LATENT_ITEM]
+        moments = lat_rows["param"].str.startswith(("mean_", "var_"))
+        if bool(lat_rows.loc[moments, "free"].any()):
+            raise SpecificationError(
+                "Bifactor and two-tier models do not support free latent means or variances "
+                "yet; keep every mean_m and var_m fixed (DESIGN.md §17.1, §17.2)."
+            )
     if model.is_multidimensional:
         _check_identification_mirt(t, model)
         return
@@ -1218,7 +1412,7 @@ def _check_identification_mirt_group(t: pd.DataFrame, model: Model, *, check_sca
         free_cors = sum(
             1
             for other in range(1, n_factors + 1)
-            if other != m and lat_free[f"cor_{min(m, other)}{max(m, other)}"]
+            if other != m and lat_free.get(f"cor_{min(m, other)}{max(m, other)}", False)
         )
         if n_fixed_slopes[m - 1] < free_cors:
             raise IdentificationError(
@@ -1333,6 +1527,9 @@ class Prepared:
     group: np.ndarray
     group_names: tuple[str, ...]
     table: pd.DataFrame
+    weights: np.ndarray | None = None
+    cluster: np.ndarray | None = None
+    n_clusters: int | None = None
 
 
 def prepare(
@@ -1342,13 +1539,48 @@ def prepare(
     group: Any,
     item_names: Sequence[str] | None,
     table: pd.DataFrame | None,
+    weights: Any = None,
+    cluster: Any = None,
 ) -> Prepared:
-    """Coerce data and build/validate the parameter table."""
+    """Coerce data and build/validate the parameter table.
+
+    With ``weights``, rows of weight 0 are dropped first, so they affect nothing (starting values,
+    estimability checks, ``y``); the returned ``y``, ``group``, ``weights`` and ``cluster`` hold
+    the remaining rows (DESIGN.md §17.4). ``cluster`` labels are coded ``0..G-1`` over the
+    remaining rows, and at least two clusters are required (§17.6).
+    """
     y = coerce_responses(data, model, item_names=item_names)
     codes, names = coerce_groups(group, model, y.shape[0])
+    w = coerce_weights(weights, y.shape[0])
+    clusters = coerce_clusters(cluster, y.shape[0])
+    cl = None if clusters is None else clusters[0]
+    if w is not None:
+        keep = w > 0
+        y, codes, w = y[keep], codes[keep], w[keep]
+        cl = None if cl is None else cl[keep]
+        empty = [g for k, g in enumerate(names) if not np.any(codes == k)]
+        if empty:
+            raise SpecificationError(f"Groups whose weights are all zero: {empty}.")
+    n_clusters = None
+    if cl is not None:
+        _, cl_codes = np.unique(cl, return_inverse=True)
+        cl = cl_codes.reshape(-1).astype(np.int32)
+        n_clusters = int(cl.max()) + 1
+        if n_clusters < 2:
+            raise SpecificationError(
+                "cluster= needs at least two clusters (among the rows with a positive weight)."
+            )
     default = build_table(model, y)
     final = validate_table(default if table is None else table, default, model, y, codes)
-    return Prepared(y=y, group=codes, group_names=names, table=final)
+    return Prepared(
+        y=y,
+        group=codes,
+        group_names=names,
+        table=final,
+        weights=w,
+        cluster=cl,
+        n_clusters=n_clusters,
+    )
 
 
 @dataclass(frozen=True)
@@ -1361,6 +1593,64 @@ class Compiled:
     n_patterns: int
 
 
+def _bifactor_block(
+    model: Model, quad: Quadrature, families: Sequence[FamilyBlock]
+) -> tuple[BifactorBlock, Array, Array]:
+    r"""Build the dimension reduction of a bifactor or two-tier model (DESIGN.md §17.1, §17.2).
+
+    The first :math:`P` factors are primary (the general factor of a bifactor model) and share
+    a product grid of :math:`Q_p=n^P` nodes. Block :math:`s = 0..S-1` holds the items of specific
+    factor :math:`s+1`; block :math:`S` holds the items without a specific factor. Each block's
+    ``(Q_p n, D)`` nodes put the primary node in columns :math:`0..P-1` and the specific node in
+    column :math:`P+s` (primary index major), so the item kernels evaluate
+    :math:`P_j(\boldsymbol\theta_g, \theta_t)` unchanged.
+
+    Returns the block, the primary grid embedded in ``D`` columns (``CompiledProblem.nodes``)
+    and its base log weights.
+    """
+    assert model.factors is not None
+    n_factors = model.n_factors
+    n_primary = model.n_primary
+    n_specific = n_factors - n_primary
+    axis = np.asarray(quad.nodes(), dtype=float)
+    n_pts = axis.shape[0]
+    primary = np.asarray(quad.grid(n_primary), dtype=float)  # (Q_p, P)
+    n_prim = primary.shape[0]
+    block_nodes = np.zeros((n_specific + 1, n_prim * n_pts, n_factors))
+    block_nodes[:, :, :n_primary] = np.repeat(primary, n_pts, axis=0)
+    for s_idx in range(n_specific):
+        block_nodes[s_idx, :, n_primary + s_idx] = np.tile(axis, n_prim)
+    block_of: dict[str, int] = {}
+    for s_idx, (_, assigned) in enumerate(model.factors[n_primary:]):
+        for item in assigned:
+            block_of[item] = s_idx
+    family_block = tuple(
+        jnp.asarray(
+            [block_of.get(model.items[int(j)][0], n_specific) for j in np.asarray(fam.columns)],
+            dtype=jnp.int32,
+        )
+        for fam in families
+    )
+    primary_base = quad.base_log_weights(n_primary)
+    embedded = np.zeros((n_prim, n_factors))
+    embedded[:, :n_primary] = primary
+    block = BifactorBlock(
+        block_nodes=jnp.asarray(block_nodes, dtype=jnp.float64),
+        primary_nodes=jnp.asarray(primary, dtype=jnp.float64),
+        primary_base=jnp.asarray(primary_base, dtype=jnp.float64),
+        nodes_1d=jnp.asarray(axis, dtype=jnp.float64),
+        base_1d=jnp.asarray(quad.base_log_weights(1), dtype=jnp.float64),
+        family_block=family_block,
+        n_specific=n_specific,
+        n_primary=n_primary,
+    )
+    return (
+        block,
+        jnp.asarray(embedded, dtype=jnp.float64),
+        jnp.asarray(primary_base, dtype=jnp.float64),
+    )
+
+
 def compile_problem(
     model: Model,
     y: np.ndarray,
@@ -1369,9 +1659,13 @@ def compile_problem(
     quad: Quadrature,
     *,
     eh_weights: np.ndarray | None = None,
+    weights: np.ndarray | None = None,
 ) -> Compiled:
-    """Turn a validated table and responses into a :class:`CompiledProblem` (§5.2, §14.1–14.2)."""
-    patterns, pat_groups, counts, inverse = compress_patterns(y, group)
+    """Turn a validated table and responses into a :class:`CompiledProblem` (§5.2, §14.1–14.2).
+
+    ``weights`` are the rows' sampling weights (already validated; §17.4).
+    """
+    patterns, pat_groups, counts, inverse = compress_patterns(y, group, weights)
     n_patterns = patterns.shape[0]
     patterns, pat_groups, counts = pad_patterns(patterns, pat_groups, counts)
     n_free = int(table["free_id"].max()) + 1 if table["free"].any() else 0
@@ -1466,7 +1760,12 @@ def compile_problem(
             )
         )
 
-    nodes = jnp.asarray(quad.grid(model.n_factors), dtype=jnp.float64)
+    if model.is_reduced:
+        reduction, nodes, node_log_base = _bifactor_block(model, quad, families)
+    else:
+        reduction = None
+        nodes = jnp.asarray(quad.grid(model.n_factors), dtype=jnp.float64)
+        node_log_base = jnp.asarray(quad.base_log_weights(model.n_factors), dtype=jnp.float64)
     resolved = model.resolved_groups()
     if model.is_empirical_histogram and quad.kind != "equispaced":
         raise SpecificationError(
@@ -1558,7 +1857,7 @@ def compile_problem(
             davidian_degree=degree,
         )
     else:
-        lat_params = latent_param_names(model.n_factors)
+        lat_params = model.latent_parameter_names()
         lat_vals = np.array(
             [[lookup[(g, LATENT_ITEM, p)][:4] for p in lat_params] for g in groups], dtype=float
         )
@@ -1579,16 +1878,30 @@ def compile_problem(
         param1=jnp.asarray(prior_p1, dtype=jnp.float64),
         param2=jnp.asarray(prior_p2, dtype=jnp.float64),
     )
+    blocks = (
+        build_group_blocks(pat_groups[:n_patterns], n_groups, patterns.shape[0])
+        if n_groups >= GROUP_BLOCK_MIN_GROUPS and reduction is None
+        else None
+    )
     problem = CompiledProblem(
         y=jnp.asarray(patterns, dtype=jnp.int32),
         counts=jnp.asarray(counts, dtype=jnp.float64),
         group=jnp.asarray(pat_groups, dtype=jnp.int32),
         nodes=nodes,
-        node_log_base=jnp.asarray(quad.base_log_weights(model.n_factors), dtype=jnp.float64),
+        node_log_base=node_log_base,
         families=tuple(families),
         latent=latent,
         priors=priors_block,
         n_groups=n_groups,
         coupled=_coupled_blocks(family_free_index, slot_bounds),
+        reduction=reduction,
+        blocks=blocks,
     )
+    if model.is_reduced and bool(
+        np.any(np.asarray(latent.free_index)[:, : 2 * model.n_factors] >= 0)
+    ):
+        raise SpecificationError(
+            "Bifactor and two-tier models do not support free latent means or variances yet; "
+            "keep every mean_m and var_m fixed (DESIGN.md §17.1, §17.2)."
+        )
     return Compiled(problem=problem, eta0=eta0, inverse=inverse, n_patterns=n_patterns)

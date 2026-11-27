@@ -54,6 +54,9 @@ from flexpyirt.errors import HeywoodWarning
 from flexpyirt.priors import Prior
 from tests._reference import check_reference_meta
 
+# mirt reference comparison: nightly and release-PR CI only (CONTRIBUTING.md, "Tests").
+pytestmark = pytest.mark.slow
+
 REFERENCE_DIR = Path(__file__).parent / "reference"
 SQUAREM = (False, True)
 TOL_LOGLIK_REL = 1e-6
@@ -118,15 +121,24 @@ def load(name: str) -> Case:
     return Case(name, raw, spec, Quadrature.equispaced())
 
 
+# (squarem, m_step_scale): the unconstrained M-step scale must reach the same solution (V45).
+RUNS = [(False, "natural"), (True, "natural"), (False, "unconstrained")]
+
+
 @cache
-def _fit(name: str, se: str, squarem: bool = False) -> FitResult:
+def _fit(name: str, se: str, squarem: bool = False, scale: str = "natural") -> FitResult:
     case = load(name)
     with warnings.catch_warnings():
         warnings.simplefilter("error", HeywoodWarning)
         return fit(
             case.spec,
             case.data,
-            method=BAEM(tol=1e-9, max_iter=20000, squarem=squarem),
+            method=BAEM(
+                tol=1e-9,
+                max_iter=20000,
+                squarem=squarem,
+                m_step_scale=scale,  # type: ignore[arg-type]
+            ),
             quadrature=case.quadrature,
             se=se,  # type: ignore[arg-type]
         )
@@ -162,10 +174,10 @@ def _log_posterior_at_reference(name: str) -> float:
     return float(_core.log_posterior(comp.problem, jnp.asarray(comp.eta0)))
 
 
-@pytest.mark.parametrize("squarem", SQUAREM)
+@pytest.mark.parametrize(("squarem", "scale"), RUNS)
 @pytest.mark.parametrize("name", CASES)
-def test_loglik_and_log_posterior(name: str, squarem: bool) -> None:
-    case, res = load(name), _fit(name, "oakes", squarem)
+def test_loglik_and_log_posterior(name: str, squarem: bool, scale: str) -> None:
+    case, res = load(name), _fit(name, "oakes", squarem, scale)
     assert res.converged
     ref_ll = float(case.raw["loglik"])
     ref_lp = float(case.raw["log_posterior"])
@@ -174,22 +186,24 @@ def test_loglik_and_log_posterior(name: str, squarem: bool) -> None:
     assert _fixed_at_reference(name).loglik == pytest.approx(ref_ll, rel=1e-12)
     assert res.log_posterior >= _log_posterior_at_reference(name) - 1e-8
     if name == "v7_3pl_map":
-        # mirt 1.46's BFGS stops at a strictly lower log-posterior due to its expbeta gradient bug.
+        # mirt 1.46-1.48's BFGS stopped 40.9 below the MAP (expbeta derivatives without the logit
+        # chain rule, issue #20 item 1); fixed on mirt's GitHub HEAD (commit eedbd05, mirt 1.48.5),
+        # whose BFGS reaches the same log-posterior (VALIDATION.md, "R and mirt versions").
         mirt_bfgs_lp = float(case.raw["meta"]["mirt_bfgs_diagnostic"]["log_posterior"])
-        assert res.log_posterior > mirt_bfgs_lp + 1.0
+        assert abs(res.log_posterior - mirt_bfgs_lp) <= TOL_LOGLIK_REL * abs(mirt_bfgs_lp)
 
 
-@pytest.mark.parametrize("squarem", SQUAREM)
+@pytest.mark.parametrize(("squarem", "scale"), RUNS)
 @pytest.mark.parametrize("name", CASES)
-def test_parameters(name: str, squarem: bool) -> None:
-    case, res = load(name), _fit(name, "oakes", squarem)
+def test_parameters(name: str, squarem: bool, scale: str) -> None:
+    case, res = load(name), _fit(name, "oakes", squarem, scale)
     ref = case.params()
     ours = res.items.set_index("item").loc[ref.index]
     for p in case.param_names:
         np.testing.assert_allclose(ours[p], ref[p].astype(float), rtol=0, atol=TOL_PARAM)
 
 
-@pytest.mark.parametrize("squarem", SQUAREM)
+@pytest.mark.parametrize(("squarem", "scale"), RUNS)
 @pytest.mark.parametrize(
     ("name", "se", "key"),
     [
@@ -203,8 +217,8 @@ def test_parameters(name: str, squarem: bool) -> None:
         ("v7_3pl_map", "hessian", "se_posterior_exact"),
     ],
 )
-def test_standard_errors(name: str, se: str, key: str, squarem: bool) -> None:
-    case, res = load(name), _fit(name, se, squarem)
+def test_standard_errors(name: str, se: str, key: str, squarem: bool, scale: str) -> None:
+    case, res = load(name), _fit(name, se, squarem, scale)
     ref = case.params(key)
     ours = res.items.set_index("item").loc[ref.index]
     for p in case.param_names:

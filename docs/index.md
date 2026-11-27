@@ -5,19 +5,28 @@ English | [日本語](index.ja.md)
 Item response theory (IRT) estimation in Python, built on JAX: marginal maximum likelihood with
 the Bock–Aitkin EM algorithm, multiple-group calibration, fixed item parameter calibration (FIPC),
 and more. Every supported feature is checked numerically against R `mirt`
-(see [validation](VALIDATION.md)).
+(see [accuracy and validation](accuracy.md)).
 
 > Under development (0.x). The public API may change before 1.0.0.
 
 ## Installation
 
-Python 3.11 or later.
+Python 3.12 or later.
 
 ```bash
 pip install flexpyirt  # or: uv add flexpyirt
 ```
 
-For polars input, install `flexpyirt[polars]`. For GPUs, install a CUDA build of `jax` first
+Installing flexpyirt also installs **flexpyctt**, its companion package for analyses that need no
+fitted model (polychoric correlations, number of dimensions, DETECT, DIMTEST, classical item
+analysis, observed-score DIF). flexpyctt depends on NumPy, SciPy and pandas only; install it alone
+with `pip install flexpyctt` where JAX is not wanted.
+
+[flexpyequate](https://github.com/takuizum/flexpyequate), a separate package, equates score
+distributions (linear, equipercentile and kernel equating). It is independent of flexpyirt and is
+not installed with it: `pip install flexpyequate`.
+
+For polars input, install `flexpyirt[polars]`; for the plots (`flexpyirt.plotting`), `flexpyirt[plot]`. For GPUs, install a CUDA build of `jax` first
 (see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)).
 
 flexpyirt computes in **64-bit floating point**. The JAX setting belongs to you, so the library
@@ -52,8 +61,9 @@ scores = res.score(df)  # EAP and posterior SD per respondent
 
 - [User guide](guide.md): specifying models, multiple groups, FIPC, scoring, item fit, DIF,
   linking and estimation options.
+- [Theory](theory.md): the models and algorithms behind flexpyirt, in brief (IRT models, marginal
+  likelihood, the EM algorithm, identification, standard errors, scoring, fit and linking).
 - [API reference](reference.md): every public class and function.
-- [Validation](VALIDATION.md): how results are checked against R mirt, tolerances and known
-  differences.
-- [Design](DESIGN.md) and [roadmap](ROADMAP.md).
+- [Accuracy and validation](accuracy.md): how results are checked against R mirt, tolerances and
+  known differences from mirt.
 - Source code, issues and releases: [GitHub](https://github.com/takuizum/flexpyirt).

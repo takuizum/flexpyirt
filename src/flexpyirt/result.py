@@ -6,7 +6,7 @@ import html
 import os
 import warnings
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -16,7 +16,15 @@ import numpy as np
 import pandas as pd
 from jax import Array
 
-from flexpyirt import _core, _itemfit, _m2, _scoring
+from flexpyirt import (
+    _core,
+    _information,
+    _itemfit,
+    _local_dependence,
+    _m2,
+    _personfit,
+    _scoring,
+)
 from flexpyirt._compile import (
     LATENT_ITEM,
     coerce_groups,
@@ -27,11 +35,10 @@ from flexpyirt._compile import (
 from flexpyirt._json import dump_fit_result, load_fit_result
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
-from flexpyirt.items import ItemKernel
+from flexpyirt.items import ItemKernel, irt_dependency_indices, irt_names, irt_thresholds
 from flexpyirt.latent import (
     davidian_param_names,
     eh_moments,
-    latent_param_names,
     mixture_components,
     mixture_param_names,
 )
@@ -39,19 +46,36 @@ from flexpyirt.method import BAEM
 from flexpyirt.quadrature import Quadrature
 
 if TYPE_CHECKING:
-    from flexpyirt._dif import DIFScheme, PAdjust
+    from flexpyirt._dif import DIFScheme, DIFTest, PAdjust
+    from flexpyirt.dimensionality import JSIMethod, JSIResult, LocalDependenceResult
     from flexpyirt.model import Model
 
 __all__ = ["FitResult"]
 
-ScoreMethod = Literal["EAP", "MAP", "ML", "WLE", "PV"]
-_SCORE_METHODS: tuple[str, ...] = ("EAP", "MAP", "ML", "WLE", "PV")
+_JSI_APPROXIMATION_MIN_ITEMS = 10
+"""Below this many items ``jsi(method="newton" | "one_step")`` warns (DESIGN.md §16.17)."""
+
+ScoreMethod = Literal["EAP", "MAP", "ML", "WLE", "PV", "EAPsum"]
+_SCORE_METHODS: tuple[str, ...] = ("EAP", "MAP", "ML", "WLE", "PV", "EAPsum")
 
 _eap = jax.jit(_core.eap)
 _map = jax.jit(_scoring.map_scores)
 _ml = jax.jit(_scoring.ml_scores)
 _wle = jax.jit(_scoring.wle_scores)
 _pv = jax.jit(_scoring.plausible_values, static_argnames=("n_draws",))
+_summed_score_eap = jax.jit(_information.summed_score_eap)
+_person_statistics = jax.jit(_personfit.pattern_statistics, static_argnames=("correction",))
+
+PersonFitStatistic = Literal["lz", "lz_star", "infit", "outfit"]
+_PERSON_FIT_STATISTICS: tuple[str, ...] = ("lz", "lz_star", "infit", "outfit")
+ItemFitStatistic = Literal["s_x2", "infit", "outfit"]
+_ITEM_FIT_STATISTICS: tuple[str, ...] = ("s_x2", "infit", "outfit")
+_RESIDUAL_FIT_METHODS: tuple[str, ...] = ("EAP", "MAP", "ML", "WLE")
+_LZ_STAR_CORRECTION = {
+    "ML": _personfit.CORRECTION_ML,
+    "MAP": _personfit.CORRECTION_MAP,
+    "WLE": _personfit.CORRECTION_WLE,
+}
 
 
 def _is_prng_key(key: Any) -> bool:
@@ -103,11 +127,15 @@ def _mixture_derived(
 @cache
 def _irt_val_and_jac(kernel: ItemKernel) -> Callable[[Array], tuple[Array, Array]]:
     """Return a jitted ``(irt_thresholds, jacfwd(irt_thresholds))`` pair for ``kernel``."""
-    jac_fn = jax.jacfwd(kernel.irt_thresholds)
+
+    def thresholds(params: Array) -> Array:
+        return irt_thresholds(kernel, params)
+
+    jac_fn = jax.jacfwd(thresholds)
 
     @jax.jit
     def fn(params: Array) -> tuple[Array, Array]:
-        return kernel.irt_thresholds(params), jac_fn(params)
+        return thresholds(params), jac_fn(params)
 
     return fn
 
@@ -137,7 +165,7 @@ def _delta_irt_thresholds(
     b_ses = np.full(b_vals.shape, np.nan, dtype=float)
     if vcov is None:
         return b_vals, b_ses
-    for m, deps in enumerate(kernel.irt_dependency_indices):
+    for m, deps in enumerate(irt_dependency_indices(kernel)):
         active = [p for p in deps if fids[p] >= 0]
         if not active:
             continue
@@ -227,6 +255,19 @@ _HTML_STYLE = """<style>
 </style>"""
 
 
+def _check_statistics(
+    statistics: Sequence[str] | str, allowed: tuple[str, ...], what: str
+) -> tuple[str, ...]:
+    """Validate a ``statistics=`` argument; a single string counts as one statistic."""
+    stats = (statistics,) if isinstance(statistics, str) else tuple(statistics)
+    if not stats:
+        raise SpecificationError(f"{what}: statistics must name at least one of {allowed}.")
+    unknown = [s for s in stats if s not in allowed]
+    if unknown:
+        raise SpecificationError(f"{what}: unknown statistics {unknown!r}; use any of {allowed}.")
+    return stats
+
+
 def _frame_to_html_table(df: pd.DataFrame, *, digits: int = 4) -> str:
     """Render a DataFrame as an escaped plain HTML table with tabular numeric formatting."""
     is_num = [pd.api.types.is_numeric_dtype(df[col].dtype) for col in df.columns]
@@ -257,7 +298,7 @@ def _frame_to_html_table(df: pd.DataFrame, *, digits: int = 4) -> str:
 
 @dataclass(frozen=True)
 class FitResult:
-    """Result of :func:`flexpyirt.fit`.
+    r"""Result of :func:`flexpyirt.fit`.
 
     Attributes
     ----------
@@ -289,7 +330,16 @@ class FitResult:
     se_method : str or None
         How ``vcov`` was computed.
     n_obs : int
-        Number of respondents.
+        Number of respondents (with ``weights=``, the rows with a positive weight).
+
+    Notes
+    -----
+    A fit with sampling weights (``fit(..., weights=...)``) keeps the sum of the weights
+    :math:`W=\sum_i w_i`; BIC then uses :math:`\log W` in place of :math:`\log N` (as mirt does
+    with ``survey.weights``; DESIGN.md §17.4), and the data-based diagnostics (``item_fit``,
+    ``m2``, ``local_dependence``, ``jsi``, ``dif``) raise ``SpecificationError``. A fit with
+    ``fit(..., cluster=..., se="sandwich")`` keeps the number of clusters, shown by ``summary()``
+    (DESIGN.md §17.6).
     """
 
     parameters: pd.DataFrame
@@ -308,8 +358,18 @@ class FitResult:
     _quadrature: Quadrature = field(repr=False)
     _method: BAEM = field(default_factory=BAEM, repr=False)
     _eh_weights: np.ndarray | None = field(default=None, repr=False)
+    _sum_weights: float | None = field(default=None, repr=False)
+    _n_clusters: int | None = field(default=None, repr=False)
 
     # ---- summaries ---------------------------------------------------------------------------
+
+    def _se_label(self) -> str:
+        """Return the standard-error method shown by ``summary()`` (with the clusters, §17.6)."""
+        if self.se_method is None:
+            return "None"
+        if self._n_clusters is not None:
+            return f"{self.se_method} (cluster-robust, {self._n_clusters} clusters)"
+        return self.se_method
 
     @property
     def _has_priors(self) -> bool:
@@ -328,7 +388,30 @@ class FitResult:
         return -2.0 * self.loglik + 2.0 * self.n_params
 
     def _bic_value(self) -> float:
-        return -2.0 * self.loglik + self.n_params * float(np.log(self.n_obs))
+        size = self.n_obs if self._sum_weights is None else self._sum_weights
+        return -2.0 * self.loglik + self.n_params * float(np.log(size))
+
+    @property
+    def _is_weighted(self) -> bool:
+        """Whether the model was fitted with sampling weights (DESIGN.md §17.4)."""
+        return self._sum_weights is not None
+
+    def _require_unweighted(self, what: str) -> None:
+        """Raise for a fit with sampling weights (statistics not validated under weights)."""
+        if self._is_weighted:
+            raise SpecificationError(
+                f"{what} is not available for a model fitted with sampling weights (weights=): "
+                "the statistic and its reference distribution are defined for unweighted data."
+            )
+
+    def _data_label(self) -> str:
+        n_items = len(self._model.item_names)
+        weighted = ""
+        if self._sum_weights is not None:
+            weighted = f" (weighted, sum of weights {self._sum_weights:.6g})"
+        return (
+            f"{self.n_obs} observations{weighted}, {n_items} items, {self.n_params} free parameters"
+        )
 
     @property
     def aic(self) -> float:
@@ -344,7 +427,10 @@ class FitResult:
 
     @property
     def bic(self) -> float:
-        r""":math:`-2\ell+k\log N` (warns with ``FlexpyirtWarning`` under MAP)."""
+        r""":math:`-2\ell+k\log N` (warns with ``FlexpyirtWarning`` under MAP).
+
+        For a fit with sampling weights, :math:`N` is the sum of the weights.
+        """
         if self._has_priors:
             warnings.warn(
                 "BIC uses the marginal log-likelihood evaluated at the MAP estimate rather than "
@@ -381,7 +467,7 @@ class FitResult:
         kernels = {name: self._model.item_kernel(m) for name, m in self._model.items}
         irt_cols = list(
             dict.fromkeys(
-                name for _, m in self._model.items for name in self._model.item_kernel(m).irt_names
+                name for _, m in self._model.items for name in irt_names(self._model.item_kernel(m))
             )
         )
         if irt_cols:
@@ -397,7 +483,7 @@ class FitResult:
                 xi = est_ord.loc[(grp, itm), p_names].to_numpy(dtype=float)
                 fids = fids_ord.loc[(grp, itm), p_names].to_numpy(dtype=int)
                 b_vals, b_ses = _delta_irt_thresholds(kernel, xi, fids, self.vcov)
-                for name, val, se_val in zip(kernel.irt_names, b_vals, b_ses, strict=True):
+                for name, val, se_val in zip(irt_names(kernel), b_vals, b_ses, strict=True):
                     b_data[name][row_idx] = val
                     b_data[f"{name}_se"][row_idx] = se_val
             for col, arr in b_data.items():
@@ -448,7 +534,7 @@ class FitResult:
         elif self._model.is_mixture:
             lat_cols = list(mixture_param_names(self._model.mixture_components))
         else:
-            lat_cols = list(latent_param_names(self._model.n_factors))
+            lat_cols = list(self._model.latent_parameter_names())
         est = p.pivot(index="group", columns="param", values="estimate")[lat_cols]
         se = p.pivot(index="group", columns="param", values="se")[lat_cols].add_suffix("_se")
         out = pd.concat([est, se], axis=1).loc[groups]
@@ -499,8 +585,8 @@ class FitResult:
     ) -> pd.DataFrame:
         r"""Score respondents on the fitted model.
 
-        Supports five scoring methods (DESIGN.md §8, §15.21–§15.25), all dropping missing
-        responses from the likelihood:
+        Supports six scoring methods (DESIGN.md §8, §15.21–§15.25, §18.2). All but ``"EAPsum"``
+        drop missing responses from the likelihood:
 
         - ``"EAP"``: expected a posteriori :math:`\hat\theta=\sum_q\theta_q h_{pq}` and posterior
           SD on the fitted model's quadrature grid using the respondent's group's estimated latent
@@ -528,12 +614,18 @@ class FitResult:
           posterior on a fine equispaced grid with piecewise-linear inverse-CDF interpolation
           (Mislevy, 1991). Requires an explicit JAX PRNG ``key`` and is deterministic given
           ``key``.
+        - ``"EAPsum"``: summed-score EAP (Thissen, Pommerich, Billeaud & Williams, 1995): the
+          posterior mean and SD of :math:`\theta` given the respondent's summed score, looked up
+          in :func:`flexpyirt.summed_score_table` (of the respondent's group). A respondent with
+          any missing response gets ``NaN`` (as in mirt), because a summed score over fewer
+          items is not on the scale of the table. Unidimensional models with ``Normal`` latent
+          distributions only.
 
         Parameters
         ----------
         data : DataFrame or array-like
             Responses on the fitted items (NaN is missing).
-        method : {"EAP", "MAP", "ML", "WLE", "PV"}, default "EAP"
+        method : {"EAP", "MAP", "ML", "WLE", "PV", "EAPsum"}, default "EAP"
             Scoring method.
         group : array-like, optional
             Group labels (required for a multiple-group model).
@@ -548,12 +640,12 @@ class FitResult:
         Returns
         -------
         DataFrame
-            For unidimensional ``"EAP"``, ``"MAP"``, ``"ML"``, and ``"WLE"``: columns ``theta``
-            and ``se``. For unidimensional ``"PV"``: columns ``pv1`` .. ``pv{n_draws}``. For
-            multidimensional ``"EAP"`` and ``"MAP"``: columns ``theta_<factor>`` and
-            ``se_<factor>`` for each declared factor (``"ML"``, ``"WLE"`` and ``"PV"`` raise
-            :class:`SpecificationError` for ``D > 1``). One row per respondent; index follows
-            ``data`` when it is a DataFrame.
+            For unidimensional ``"EAP"``, ``"MAP"``, ``"ML"``, ``"WLE"`` and ``"EAPsum"``: columns
+            ``theta`` and ``se``. For unidimensional ``"PV"``: columns ``pv1`` ..
+            ``pv{n_draws}``. For multidimensional ``"EAP"`` and ``"MAP"``: columns
+            ``theta_<factor>`` and ``se_<factor>`` for each declared factor (``"ML"``, ``"WLE"``
+            and ``"PV"`` raise :class:`SpecificationError` for ``D > 1``). One row per
+            respondent; index follows ``data`` when it is a DataFrame.
 
         Raises
         ------
@@ -561,7 +653,9 @@ class FitResult:
             If JAX is not configured for 64-bit floating point.
         SpecificationError
             If ``method`` is unknown, ``key`` is missing or invalid for ``"PV"``, ``key`` is
-            supplied for a non-PV method, or ``n_draws`` is not a positive integer.
+            supplied for a non-PV method, ``n_draws`` is not a positive integer, or
+            ``method="EAPsum"`` is used with a multidimensional model or a latent distribution
+            other than ``Normal``.
         """
         check_x64()
         if method not in _SCORE_METHODS:
@@ -584,6 +678,16 @@ class FitResult:
                 "multimodal, so the posterior mode need not be unique); use method='EAP', 'ML', "
                 "'WLE', or 'PV'."
             )
+        if method == "EAPsum" and (
+            self._model.is_multidimensional
+            or self._model.is_empirical_histogram
+            or self._model.is_davidian
+            or self._model.is_mixture
+        ):
+            raise SpecificationError(
+                "method='EAPsum' supports unidimensional models with Normal latent "
+                "distributions only."
+            )
         if method == "PV":
             if key is None:
                 raise SpecificationError(
@@ -598,6 +702,11 @@ class FitResult:
         elif key is not None:
             raise SpecificationError(f"key= is only used with method='PV', not {method!r}.")
 
+        if self._model.is_reduced and method != "EAP":
+            raise SpecificationError(
+                f"method={method!r} is not supported for bifactor and two-tier models yet; use "
+                "method='EAP' (DESIGN.md §17.1, §17.2)."
+            )
         y = coerce_responses(data, self._model, item_names=item_names)
         codes, _ = coerce_groups(group, self._model, y.shape[0], require_all=False)
         compiled = compile_problem(
@@ -628,6 +737,20 @@ class FitResult:
             cols = [f"pv{m}" for m in range(1, n_draws + 1)]
             return pd.DataFrame(draws, columns=cols, index=index)
 
+        if method == "EAPsum":
+            _, table_theta, table_se = (
+                np.asarray(a) for a in _summed_score_eap(compiled.problem, eta)
+            )
+            complete = (y >= 0).all(axis=1)
+            sums = np.where(y >= 0, y, 0).sum(axis=1)
+            return pd.DataFrame(
+                {
+                    "theta": np.where(complete, table_theta[codes, sums], np.nan),
+                    "se": np.where(complete, table_se[codes, sums], np.nan),
+                },
+                index=index,
+            )
+
         scorer = {"EAP": _eap, "MAP": _map, "ML": _ml, "WLE": _wle}[method]
         theta, se = scorer(compiled.problem, eta)
         if self._model.is_multidimensional:
@@ -648,11 +771,17 @@ class FitResult:
         self,
         data: Any,
         *,
+        statistics: ItemFitStatistic | Sequence[ItemFitStatistic] = ("s_x2",),
+        method: ScoreMethod = "EAP",
         min_cell: float = 1.0,
         group: Any = None,
         item_names: list[str] | None = None,
     ) -> pd.DataFrame:
-        r"""Orlando–Thissen S-X2 item fit statistics (DESIGN.md §15.40).
+        r"""Item fit statistics: Orlando–Thissen S-X2 and infit / outfit (DESIGN.md §15.40, §25).
+
+        ``statistics`` selects what is computed; the default is S-X2 only.
+
+        **S-X2** (``"s_x2"``).
 
         For each item :math:`j`, compares observed and model-implied counts of each category at
         each summed score :math:`s=1,\dots,S-1` (Orlando & Thissen, 2000, 2003):
@@ -669,17 +798,46 @@ class FitResult:
         :math:`df_j = \#\text{cells} - \#\text{rows} - p_j - p_{\text{latent}}`
         (free parameters of item :math:`j` and of the latent distribution, mirt's convention).
 
+        For a confirmatory multidimensional model (:meth:`Model.with_factors`, DESIGN.md
+        §16.19) the nodes :math:`\boldsymbol\theta_q` run over the fitted product grid and
+        :math:`w_q` are the normalized multivariate-normal weights, so the recursion is carried
+        at every node of the grid and the sum over :math:`q` integrates over all factors; the
+        summed score is still the total over all items, and :math:`p_{\text{latent}}` counts the
+        free factor correlations.
+
+        **Infit / outfit** (``"infit"``, ``"outfit"``). Each respondent :math:`i` is scored by
+        ``method`` (as :meth:`score`), and with category scores :math:`0,\dots,K_j-1`,
+        :math:`r_{ij}=y_{ij}-E_j(\hat\theta_i)`, :math:`W_{ij}` and :math:`C_{ij}` the
+        conditional variance and fourth central moment of the item score at
+        :math:`\hat\theta_i`, over the :math:`N_j` respondents who answered item :math:`j`:
+
+        .. math::
+            \mathrm{outfit}_j=\frac1{N_j}\sum_i\frac{r_{ij}^2}{W_{ij}},\qquad
+            \mathrm{infit}_j=\frac{\sum_i r_{ij}^2}{\sum_i W_{ij}},
+
+        with the Wilson–Hilferty :math:`z` values of Wright & Masters (1982) (DESIGN.md §25).
+        They are computed for every item family (as mirt's ``itemfit(fit_stats = "infit")``);
+        their reference distribution is derived for Rasch-family models, and for other models
+        they are descriptive. Missing responses are skipped.
+
         Parameters
         ----------
         data : DataFrame or array-like
-            Complete responses on the fitted items (typically the fitting data).
+            Responses on the fitted items (typically the fitting data). S-X2 needs complete
+            responses; infit / outfit skip missing ones (NaN).
+        statistics : str or sequence of {"s_x2", "infit", "outfit"}, default ("s_x2",)
+            Statistics to compute (a single name counts as one).
+        method : {"EAP", "MAP", "ML", "WLE"}, default "EAP"
+            Ability estimator for infit / outfit (ignored for S-X2). Respondents whose estimate
+            is infinite (ML on an all-lowest or all-highest pattern) are left out.
         min_cell : float, default 1.0
-            Minimum expected count per cell before collapsing (mirt's ``min_cell``).
+            Minimum expected count per cell before collapsing S-X2 tables (mirt ``mincell``).
         group : array-like, optional
-            Group labels (required for a multiple-group model). S-X2 is computed within each
-            group from that group's responses, item parameters and latent distribution, with
-            :math:`df` net of that group's free item and latent parameters (shared anchors count
-            in every group), as mirt's ``itemfit()`` does for ``multipleGroup`` fits.
+            Group labels (required for a multiple-group model). Statistics are computed within
+            each group from that group's responses, item parameters and latent distribution;
+            for S-X2, :math:`df` is net of that group's free item and latent parameters (shared
+            anchors count in every group), as mirt's ``itemfit()`` does for ``multipleGroup``
+            fits.
         item_names : list of str, optional
             Column names when ``data`` is an array.
 
@@ -687,28 +845,54 @@ class FitResult:
         -------
         DataFrame
             One row per item (per group and item, with a leading ``group`` column, in a
-            multiple-group model): ``item``, ``s_x2``, ``df``, ``rmsea``, ``p``. Items whose
-            collapsed table leaves ``df <= 0`` get ``df = 0`` and NaN statistics.
+            multiple-group model): ``item``, then ``s_x2``, ``df``, ``rmsea``, ``p`` for S-X2,
+            ``infit``, ``z_infit`` for infit and ``outfit``, ``z_outfit`` for outfit. Items
+            whose collapsed S-X2 table leaves ``df <= 0`` get ``df = 0`` and NaN statistics.
 
         Raises
         ------
         PrecisionError
             If JAX is not configured for 64-bit floating point.
         SpecificationError
-            For multidimensional, ``EmpiricalHistogram``, ``DavidianCurve`` or ``NormalMixture``
-            models (not yet supported), data with missing responses, or an item with an unobserved
-            category (within a group).
+            For an unknown or empty ``statistics``; for S-X2: bifactor, two-tier,
+            multiple-group multidimensional, ``EmpiricalHistogram``, ``DavidianCurve`` or
+            ``NormalMixture`` models (not yet supported), data with missing responses, or an
+            item with an unobserved category (within a group); for infit / outfit:
+            multidimensional models or a ``method`` other than EAP, MAP, ML or WLE.
         """
         check_x64()
+        self._require_unweighted("item_fit()")
+        stats = _check_statistics(statistics, _ITEM_FIT_STATISTICS, "item_fit()")
+        table = None
+        if "s_x2" in stats:
+            table = self._s_x2(data, min_cell=min_cell, group=group, item_names=item_names)
+        if "infit" in stats or "outfit" in stats:
+            residual = self._residual_item_fit(
+                data, method=method, group=group, item_names=item_names
+            )
+            keys = ["group", "item"] if self._model.is_multigroup else ["item"]
+            if "infit" not in stats:
+                residual = residual.drop(columns=["infit", "z_infit"])
+            if "outfit" not in stats:
+                residual = residual.drop(columns=["outfit", "z_outfit"])
+            table = residual if table is None else table.merge(residual, on=keys, how="left")
+        assert table is not None
+        return table
+
+    def _s_x2(
+        self, data: Any, *, min_cell: float, group: Any, item_names: list[str] | None
+    ) -> pd.DataFrame:
+        """S-X2 table of :meth:`item_fit` (DESIGN.md §15.40)."""
         model = self._model
-        if (
-            model.is_multidimensional
-            or model.is_empirical_histogram
-            or model.is_davidian
-            or model.is_mixture
-        ):
+        if model.is_reduced or (model.is_multidimensional and model.is_multigroup):
             raise SpecificationError(
-                "item_fit() supports unidimensional models with Normal latent distributions only."
+                "item_fit() does not support bifactor, two-tier or multiple-group "
+                "multidimensional models yet (single-group with_factors() models are supported)."
+            )
+        if model.is_empirical_histogram:
+            raise SpecificationError(
+                "item_fit() supports Normal, DavidianCurve and NormalMixture latent "
+                "distributions (not EmpiricalHistogram)."
             )
         if isinstance(min_cell, bool) or not (isinstance(min_cell, (int, float)) and min_cell > 0):
             raise SpecificationError(f"min_cell must be a positive number, got {min_cell!r}.")
@@ -757,10 +941,624 @@ class FitResult:
                 rows.append({"group": g_name, **row} if model.is_multigroup else row)
         return pd.DataFrame(rows)
 
+    def person_fit(
+        self,
+        data: Any,
+        *,
+        method: ScoreMethod = "EAP",
+        group: Any = None,
+        item_names: list[str] | None = None,
+        statistics: PersonFitStatistic | Sequence[PersonFitStatistic] = ("lz", "infit", "outfit"),
+    ) -> pd.DataFrame:
+        r"""Person fit: :math:`l_z`, :math:`l_z^*` and person infit / outfit (DESIGN.md §25).
+
+        Each respondent is scored by ``method`` (as :meth:`score`), and the statistics are
+        evaluated at the estimate :math:`\hat\theta` over the answered items :math:`A`
+        (missing responses are skipped). With :math:`P_{jk}=P_{jk}(\hat\theta)`:
+
+        - ``"lz"``: the standardized log-likelihood (Drasgow, Levine & Williams, 1985)
+
+          .. math::
+              l_z = \frac{l_0 - \mathrm E(l_0)}{\sqrt{\mathrm{Var}(l_0)}},\quad
+              l_0=\sum_{j\in A}\log P_{jy_j},\quad
+              \mathrm E(l_0)=\sum_{j\in A}\sum_k P_{jk}\log P_{jk},
+
+          with :math:`\mathrm{Var}(l_0)=\sum_j[\sum_k P_{jk}(\log P_{jk})^2-(\sum_k
+          P_{jk}\log P_{jk})^2]` (mirt's ``Zh``). Large negative values flag aberrant
+          response vectors.
+        - ``"lz_star"``: :math:`l_z` corrected for the use of :math:`\hat\theta` in place of
+          :math:`\theta` (Snijders, 2001; polytomous items: Sinharay, 2016),
+
+          .. math::
+              l_z^* = \frac{l_0-\mathrm E(l_0)+c\,r_0(\hat\theta)}{\tau},\quad
+              c=\frac{\sum_j\sum_k P'_{jk}\log P_{jk}}{\sum_j I_j},\quad
+              \tau^2=\mathrm{Var}(l_0)-2c\sum_j\sum_k P'_{jk}\log P_{jk}+c^2\sum_j I_j,
+
+          where :math:`r_0` is the estimator's term in its estimating equation
+          :math:`\partial\log L/\partial\theta + r_0(\theta) = 0`: 0 for ML,
+          :math:`-(\theta-\mu_g)/\sigma_g^2` for MAP and :math:`I'(\theta)/(2I(\theta))` for
+          WLE. Asymptotically standard normal under the model; defined for ``method`` ML, MAP
+          and WLE only.
+        - ``"infit"`` / ``"outfit"``: the information-weighted and unweighted mean squares of
+          the residuals :math:`r_j=y_j-E_j(\hat\theta)` of the item scores
+          :math:`0,\dots,K_j-1`,
+
+          .. math::
+              \mathrm{outfit}=\frac1{n}\sum_{j\in A}\frac{r_j^2}{W_j},\qquad
+              \mathrm{infit}=\frac{\sum_{j\in A} r_j^2}{\sum_{j\in A} W_j},
+
+          with :math:`W_j` the conditional variance of the item score, and their
+          Wilson–Hilferty :math:`z` values (Wright & Masters, 1982). Values near 1 are
+          expected; their reference distribution is derived for Rasch-family models, and for
+          other models they are descriptive.
+
+        Parameters
+        ----------
+        data : DataFrame or array-like
+            Responses on the fitted items (NaN is missing).
+        method : {"EAP", "MAP", "ML", "WLE"}, default "EAP"
+            Ability estimator (as :meth:`score`).
+        group : array-like, optional
+            Group labels (required for a multiple-group model); each respondent is scored and
+            evaluated with that group's item parameters and latent distribution.
+        item_names : list of str, optional
+            Column names when ``data`` is an array.
+        statistics : str or sequence of {"lz", "lz_star", "infit", "outfit"}
+            Statistics to compute (default ``("lz", "infit", "outfit")``; a single name counts
+            as one).
+
+        Returns
+        -------
+        DataFrame
+            One row per respondent (index follows ``data`` when it is a DataFrame): ``theta``,
+            then ``lz``, ``lz_star``, ``infit``, ``z_infit``, ``outfit``, ``z_outfit`` for the
+            requested statistics, and ``n_items`` (answered items). Rows whose estimate is not
+            finite (all-missing rows, ML on an all-lowest or all-highest pattern) get NaN
+            statistics.
+
+        Raises
+        ------
+        PrecisionError
+            If JAX is not configured for 64-bit floating point.
+        SpecificationError
+            For an unknown or empty ``statistics``, a multidimensional model, a ``method``
+            other than EAP, MAP, ML or WLE (or one :meth:`score` rejects for this model), or
+            ``"lz_star"`` with ``method="EAP"``.
+        """
+        check_x64()
+        stats = _check_statistics(statistics, _PERSON_FIT_STATISTICS, "person_fit()")
+        if "lz_star" in stats and method not in _LZ_STAR_CORRECTION:
+            raise SpecificationError(
+                f"'lz_star' corrects for an ML, MAP or WLE ability estimate; method={method!r} "
+                "has no estimating equation (use method='ML', 'MAP' or 'WLE')."
+            )
+        theta, per_row, _, _ = self._residual_rows(
+            data, method=method, group=group, item_names=item_names
+        )
+        out: dict[str, np.ndarray] = {"theta": theta}
+        if "lz" in stats:
+            out["lz"] = per_row["lz"]
+        if "lz_star" in stats:
+            out["lz_star"] = per_row["lz_star"]
+        if "infit" in stats or "outfit" in stats:
+            infit, z_infit, outfit, z_outfit = _personfit.mean_square(
+                per_row["resid2"], per_row["w"], per_row["c"], axis=1
+            )
+            if "infit" in stats:
+                out["infit"], out["z_infit"] = infit, z_infit
+            if "outfit" in stats:
+                out["outfit"], out["z_outfit"] = outfit, z_outfit
+        out["n_items"] = per_row["n_items"].astype(np.int64)
+        index = data.index if isinstance(data, pd.DataFrame) else None
+        return pd.DataFrame(out, index=index)
+
+    def _residual_rows(
+        self,
+        data: Any,
+        *,
+        method: ScoreMethod,
+        group: Any,
+        item_names: list[str] | None,
+        theta: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, dict[str, np.ndarray], np.ndarray, list[Any]]:
+        """Ability estimates and per-row person-fit quantities (DESIGN.md §25).
+
+        Returns ``(theta, per_row, codes, group_names)``; ``per_row`` holds the arrays of
+        :func:`_personfit.pattern_statistics` expanded to one entry per row of ``data``.
+        ``theta`` (one value per row; rows with equal responses and group must share it)
+        replaces the ``method`` estimates, which then only choose the :math:`l_z^*` term.
+        """
+        model = self._model
+        if model.is_multidimensional:
+            raise SpecificationError(
+                "person_fit() and infit / outfit support unidimensional models only."
+            )
+        if method not in _RESIDUAL_FIT_METHODS:
+            raise SpecificationError(
+                f"Person and residual item fit need a point estimate of theta; method must be "
+                f"one of {_RESIDUAL_FIT_METHODS}, got {method!r}."
+            )
+        if theta is None:
+            theta = self.score(data, method=method, group=group, item_names=item_names)[
+                "theta"
+            ].to_numpy()
+        theta = np.asarray(theta, dtype=np.float64)
+        y = coerce_responses(data, model, item_names=item_names)
+        codes, group_names = coerce_groups(group, model, y.shape[0], require_all=False)
+        compiled = compile_problem(
+            model, y, codes, self.parameters, self._quadrature, eh_weights=self._eh_weights
+        )
+        prob = compiled.problem
+        theta_pattern = np.zeros(prob.y.shape[0])
+        theta_pattern[compiled.inverse] = theta
+        correction = _LZ_STAR_CORRECTION.get(method, _personfit.CORRECTION_NONE)
+        stats = _person_statistics(
+            prob, jnp.asarray(self._eta), jnp.asarray(theta_pattern), correction=correction
+        )
+        per_row = {
+            name: np.asarray(value)[: compiled.n_patterns][compiled.inverse]
+            for name, value in stats.items()
+        }
+        return theta, per_row, codes, list(group_names)
+
+    def _residual_item_fit(
+        self, data: Any, *, method: ScoreMethod, group: Any, item_names: list[str] | None
+    ) -> pd.DataFrame:
+        """Item infit / outfit table of :meth:`item_fit` (DESIGN.md §25)."""
+        _, per_row, codes, group_names = self._residual_rows(
+            data, method=method, group=group, item_names=item_names
+        )
+        rows = []
+        for g, g_name in enumerate(group_names):
+            in_group = codes == g
+            if not in_group.any():
+                continue
+            infit, z_infit, outfit, z_outfit = _personfit.mean_square(
+                per_row["resid2"][in_group], per_row["w"][in_group], per_row["c"][in_group], axis=0
+            )
+            for j, (name, _) in enumerate(self._model.items):
+                row = {
+                    "item": name,
+                    "infit": float(infit[j]),
+                    "z_infit": float(z_infit[j]),
+                    "outfit": float(outfit[j]),
+                    "z_outfit": float(z_outfit[j]),
+                }
+                rows.append({"group": g_name, **row} if self._model.is_multigroup else row)
+        return pd.DataFrame(rows)
+
+    def _require_unidimensional_normal(self, what: str) -> None:
+        """Raise unless the model is single-group, unidimensional with a ``Normal`` latent."""
+        model = self._model
+        if (
+            model.is_multidimensional
+            or model.is_multigroup
+            or model.is_empirical_histogram
+            or model.is_davidian
+            or model.is_mixture
+        ):
+            raise SpecificationError(
+                f"{what} supports single-group unidimensional models with a Normal latent "
+                "distribution only."
+            )
+
+    def _group_traces(
+        self, prob: _core.CompiledProblem, nodes: np.ndarray | None = None
+    ) -> list[np.ndarray]:
+        """Per item, ``(G, Q, K_j)`` category probabilities at ``nodes`` (default: the grid).
+
+        ``nodes`` is ``(Q,)`` for one factor or ``(Q, D)``; the kernels only read
+        ``CompiledProblem.nodes``, so any set of points can stand in for the grid. Without
+        ``nodes``, a bifactor or two-tier model gives each item on its own block grid,
+        ``(G, Q_p n, K_j)`` (DESIGN.md §17.1).
+        """
+        if nodes is not None:
+            n_factors = int(prob.nodes.shape[1])
+            # Without the reduction the kernels read ``nodes`` for bifactor / two-tier models
+            # too (``_family_nodes``; DESIGN.md §17.3).
+            prob = replace(
+                prob,
+                nodes=jnp.asarray(nodes, dtype=jnp.float64).reshape(-1, n_factors),
+                reduction=None,
+            )
+        log_probs = _core._item_log_probs(prob, jnp.asarray(self._eta))
+        traces: list[np.ndarray] = [np.empty(0)] * len(self._model.items)
+        for fam, lp in zip(prob.families, log_probs, strict=True):
+            lp_np = np.exp(np.asarray(lp))
+            for pos, col in enumerate(np.asarray(fam.columns)):
+                traces[int(col)] = lp_np[:, pos]
+        return traces
+
+    def _traces(
+        self, prob: _core.CompiledProblem, nodes: np.ndarray | None = None
+    ) -> list[np.ndarray]:
+        """Per item, ``(Q, K_j)`` category probabilities of group 0 at ``nodes`` (default: grid)."""
+        return [trace[0] for trace in self._group_traces(prob, nodes)]
+
+    def _compiled_for(self, y: np.ndarray) -> _core.CompiledProblem:
+        codes, _ = coerce_groups(None, self._model, y.shape[0], require_all=False)
+        return compile_problem(self._model, y, codes, self.parameters, self._quadrature).problem
+
+    def _simulate_responses(self, key: Any, missing: np.ndarray) -> np.ndarray:
+        r"""Simulate responses from the fitted model, NaN where ``missing`` (``(N, J)`` bool).
+
+        :math:`\theta_i\sim N(\hat\mu,\hat\sigma^2)` (the fitted latent distribution), then each
+        response is drawn from :math:`P_{jk}(\theta_i)` by inversion of a uniform draw.
+        """
+        latent = self.latent.iloc[0]
+        n, n_items = missing.shape
+        k_theta, k_unif = jax.random.split(key)
+        theta = float(latent["mean"]) + np.sqrt(float(latent["var"])) * np.asarray(
+            jax.random.normal(k_theta, (n,), dtype=jnp.float64)
+        )
+        unif = np.asarray(jax.random.uniform(k_unif, (n, n_items), dtype=jnp.float64))
+        prob = self._compiled_for(np.zeros((1, n_items), dtype=np.int64))
+        traces = self._traces(prob, theta)
+        out = np.empty((n, n_items), dtype=np.float64)
+        for j, trace in enumerate(traces):
+            cum = np.cumsum(trace, axis=1)[:, :-1]
+            out[:, j] = (unif[:, j : j + 1] > cum).sum(axis=1)
+        out[missing] = np.nan
+        return out
+
+    def local_dependence(
+        self,
+        data: Any,
+        *,
+        group: Any = None,
+        item_names: list[str] | None = None,
+    ) -> LocalDependenceResult:
+        r"""Local-dependence statistics for every item pair (DESIGN.md §16.11).
+
+        * **Q3** (Yen, 1984): the correlation over respondents of the residuals
+          :math:`d_{ij}=x_{ij}-E(X_j\mid\hat{\boldsymbol\theta}_i)` with EAP
+          :math:`\hat{\boldsymbol\theta}_i` (pairwise-complete), and **Q3\***
+          :math:`=Q3-\overline{Q3}` with :math:`\overline{Q3}` the mean off-diagonal Q3
+          (Christensen, Makransky & Horton, 2017).
+        * **LD** :math:`X^2` and :math:`G^2` (Chen & Thissen, 1997) comparing each pair's
+          table with :math:`E_{ab}=n_{ij}\sum_q P_{ia}(\boldsymbol\theta_q)
+          P_{jb}(\boldsymbol\theta_q)w_q` on the fitted grid, with :math:`df=(K_i-1)(K_j-1)`,
+          :math:`p`-values and the signed Cramér's :math:`V` (sign of
+          :math:`\gamma_O-\gamma_E`), as mirt's ``residuals(type = "LD" / "LDG2" / "Q3")``.
+
+        The weights :math:`w_q` and the EAP prior are the fitted latent distribution on the
+        fitted grid: Normal, ``EmpiricalHistogram``, ``DavidianCurve`` or ``NormalMixture``,
+        and the multivariate Normal on the product grid for a model with 2 or 3 factors. For
+        bifactor and two-tier models (:meth:`Model.with_bifactor`, :meth:`Model.with_two_tier`)
+        the expected tables are summed on the reduced grids (DESIGN.md §17.3): over the primary
+        factors and the shared specific factor for a pair within one specific factor, and over
+        the primary factors only, with each item's specific factor integrated out first, for
+        any other pair. Q3 uses the EAP of all factors. A pair within a specific factor is
+        therefore tested for dependence beyond that factor. In a
+        multiple-group model every statistic is computed within a group, from that group's
+        respondents, item parameters and latent distribution (as mirt does for
+        ``multipleGroup`` fits).
+
+        For ``dentype = "EH"`` and ``"Davidian-k"`` fits mirt uses a standard Normal prior by
+        default; the calls that use the fitted density, as here, are
+        ``residuals(m, type = "LD", use_dentype_estimate = TRUE)`` and
+        ``residuals(m, type = "Q3", Theta = fscores(m, use_dentype_estimate = TRUE))``.
+
+        Parameters
+        ----------
+        data : DataFrame or array-like
+            Responses on the fitted items (typically the fitting data); missing as NaN.
+        group : array-like, optional
+            Group labels (required for a multiple-group model).
+        item_names : list of str, optional
+            Column names when ``data`` is an array.
+
+        Returns
+        -------
+        LocalDependenceResult
+            For a multiple-group model ``pairs`` has a leading ``group`` column, ``q3`` is
+            indexed by ``(group, item)`` and ``q3_mean`` is a Series indexed by group.
+
+        Raises
+        ------
+        PrecisionError
+            If JAX is not configured for 64-bit floating point.
+        SpecificationError
+            For invalid data or group labels.
+        """
+        from flexpyirt.dimensionality import LocalDependenceResult
+
+        check_x64()
+        self._require_unweighted("local_dependence()")
+        model = self._model
+        y = coerce_responses(data, model, item_names=item_names)
+        codes, group_names = coerce_groups(group, model, y.shape[0], require_all=False)
+        names = [name for name, _ in model.items]
+        compiled = compile_problem(
+            model, y, codes, self.parameters, self._quadrature, eh_weights=self._eh_weights
+        )
+        prob = compiled.problem
+        eta = jnp.asarray(self._eta)
+        eap = np.asarray(_eap(prob, eta)[0])[: compiled.n_patterns][compiled.inverse]
+        at_eap = self._group_traces(prob, eap)  # per item (G, N, K_j)
+        on_grid = self._group_traces(prob)  # per item (G, Q, K_j)
+        red = prob.reduction
+        if red is None:
+            weights = np.exp(np.asarray(_core._latent_log_weights(prob, eta)))  # (G, Q)
+        else:
+            log_primary, log_block = _core._bifactor_log_weights(prob, eta)
+            primary_weights = np.exp(np.asarray(log_primary))  # (G, Q_p)
+            block_weights = np.exp(np.asarray(log_block))  # (G, S + 1, n)
+            item_block = np.empty(len(names), dtype=np.int64)
+            for fam, blocks in zip(prob.families, red.family_block, strict=True):
+                item_block[np.asarray(fam.columns)] = np.asarray(blocks)
+        upper = np.triu_indices(len(names), k=1)
+        pair_frames: list[pd.DataFrame] = []
+        q3_frames: list[pd.DataFrame] = []
+        q3_means: dict[str, float] = {}
+        for g, g_name in enumerate(group_names):
+            rows = codes == g
+            if not rows.any():
+                continue
+            y_g = y[rows]
+            expected = np.column_stack(
+                [t[g][rows] @ np.arange(t.shape[2], dtype=np.float64) for t in at_eap]
+            )
+            residuals = np.where(y_g >= 0, y_g - expected, np.nan)
+            q3 = _local_dependence.q3_matrix(residuals)
+            # Pairs without two common respondents have no Q3; the mean is over the others.
+            defined = q3[upper][np.isfinite(q3[upper])]
+            q3_mean = float(defined.mean()) if defined.size else float("nan")
+            if red is None:
+                ld = _local_dependence.ld_pairs(y_g, [t[g] for t in on_grid], weights[g])
+            else:
+                n_primary_nodes = primary_weights.shape[1]
+                block_traces = [
+                    t[g].reshape(n_primary_nodes, -1, t.shape[2]) for t in on_grid
+                ]  # per item (Q_p, n, K_j), the primary index major
+                ld = _local_dependence.ld_pairs_from_tables(
+                    y_g,
+                    _local_dependence.reduced_pair_probabilities(
+                        block_traces, item_block, primary_weights[g], block_weights[g]
+                    ),
+                )
+            pairs = pd.DataFrame(
+                {
+                    "item_i": [names[int(i)] for i in ld["i"]],
+                    "item_j": [names[int(j)] for j in ld["j"]],
+                    "n": ld["n"].astype(np.int64),
+                    "q3": q3[upper],
+                    "q3_star": q3[upper] - q3_mean,
+                    "x2": ld["x2"],
+                    "g2": ld["g2"],
+                    "df": ld["df"].astype(np.int64),
+                    "p_x2": ld["p_x2"],
+                    "p_g2": ld["p_g2"],
+                    "cramer_v": ld["cramer_v"],
+                }
+            )
+            q3_frame = pd.DataFrame(q3, index=names, columns=names)
+            if model.is_multigroup:
+                pairs.insert(0, "group", g_name)
+                q3_frame.index = pd.MultiIndex.from_product(
+                    [[g_name], names], names=["group", "item"]
+                )
+            pair_frames.append(pairs)
+            q3_frames.append(q3_frame)
+            q3_means[g_name] = q3_mean
+        if not model.is_multigroup:
+            return LocalDependenceResult(
+                pairs=pair_frames[0], q3=q3_frames[0], q3_mean=q3_means[group_names[0]]
+            )
+        return LocalDependenceResult(
+            pairs=pd.concat(pair_frames, ignore_index=True),
+            q3=pd.concat(q3_frames),
+            q3_mean=pd.Series(q3_means, name="q3_mean").rename_axis("group"),
+        )
+
+    def jsi(
+        self,
+        data: Any,
+        *,
+        item_names: list[str] | None = None,
+        method: JSIMethod = "refit",
+        newton_steps: int = 1,
+        tol: float = 1e-8,
+        max_iter: int = 100,
+    ) -> JSIResult:
+        r"""Jackknife slope index (Edwards, Houts & Cai, 2018; DESIGN.md §16.17).
+
+        For every item :math:`j` the model is re-estimated without item :math:`j`, and for
+        every other item :math:`i`
+
+        .. math::
+            \mathrm{JSI}_{ji}=\frac{\hat a_i-\hat a_i^{(-j)}}
+            {\mathrm{SE}\bigl(\hat a_i^{(-j)}\bigr)}.
+
+        A large positive value means item :math:`i`'s slope was inflated by item :math:`j`, a
+        sign of local dependence between the two. There is no fixed cutoff: look for values that
+        stand out from the rest of the matrix.
+
+        JSI is defined only for single-group unidimensional models with a ``Normal`` latent
+        distribution. Its extension to multiple groups, multidimensional (including bifactor
+        and two-tier) models and non-Normal latent distributions has not been studied, and
+        there is no reference implementation to validate one against, so those models raise
+        ``SpecificationError``.
+
+        Removing item :math:`j` is done by treating its responses as missing, so the latent
+        distribution, constraints across items and priors of the remaining parameters stay as
+        fitted. The three methods differ only in how :math:`\hat\eta^{(-j)}` is obtained, all
+        starting from the full-model estimates :math:`\hat\eta`:
+
+        * ``"refit"`` (as mirt's ``residuals(type = "JSI")``): Newton–Raphson with step
+          halving on :math:`\ell_{(-j)}` until the largest step is below ``tol``; the SE is
+          from the observed information at the refit.
+        * ``"newton"``: ``newton_steps`` Newton steps (a Taylor approximation of the refit),
+          the SE from the information at the last evaluation. One step usually agrees with
+          the refit to a few hundredths; two steps to about 0.01.
+        * ``"one_step"``: one step with the full model's covariance matrix,
+          :math:`\hat\eta^{(-j)}\approx\hat\eta+V\nabla\ell_{(-j)}(\hat\eta)`, and the full
+          model's SE in the denominator. It needs only :math:`J` gradients (one ``vmap``), but
+          the different denominator makes it differ from the refit by up to about 0.1 in small
+          samples.
+
+        Parameters
+        ----------
+        data : DataFrame or array-like
+            The fitting data; missing as NaN.
+        item_names : list of str, optional
+            Column names when ``data`` is an array.
+        method : {"refit", "newton", "one_step"}
+            How the estimates without each item are obtained.
+        newton_steps : int
+            Steps for ``method="newton"`` (at least 1).
+        tol : float
+            Convergence tolerance on the largest step for ``method="refit"``.
+        max_iter : int
+            Maximum Newton steps for ``method="refit"``.
+
+        Returns
+        -------
+        JSIResult
+
+        Raises
+        ------
+        PrecisionError
+            If JAX is not configured for 64-bit floating point.
+        SpecificationError
+            For multiple-group, multidimensional or non-``Normal`` latent models, fewer than
+            three items, invalid options, or ``method="one_step"`` on a fit without
+            ``se="oakes"`` or ``se="hessian"``.
+
+        Warns
+        -----
+        ConvergenceWarning
+            If a refit does not converge in ``max_iter`` steps.
+        """
+        from flexpyirt import _jsi
+        from flexpyirt.dimensionality import JSIResult
+        from flexpyirt.errors import ConvergenceWarning
+
+        check_x64()
+        self._require_unweighted("jsi()")
+        model = self._model
+        if (
+            model.is_multidimensional
+            or model.is_multigroup
+            or model.is_empirical_histogram
+            or model.is_davidian
+            or model.is_mixture
+        ):
+            raise SpecificationError(
+                "jsi() is defined only for single-group unidimensional models with a Normal "
+                "latent distribution: its multiple-group / multidimensional extension has not "
+                "been studied and there is no reference implementation (DESIGN.md §16.17)."
+            )
+        if method not in ("refit", "newton", "one_step"):
+            raise SpecificationError(
+                f"Unknown method={method!r}; use 'refit', 'newton' or 'one_step'."
+            )
+        if method == "newton" and (int(newton_steps) != newton_steps or newton_steps < 1):
+            raise SpecificationError("newton_steps must be a positive integer.")
+        if method == "refit" and (not tol > 0 or int(max_iter) != max_iter or max_iter < 1):
+            raise SpecificationError("tol must be positive and max_iter a positive integer.")
+        if method == "one_step" and self.vcov is None:
+            raise SpecificationError("method='one_step' needs a fit with standard errors (se).")
+        if method == "one_step" and self.se_method not in ("oakes", "hessian"):
+            raise SpecificationError(
+                "method='one_step' takes a Newton step with the inverse observed information; "
+                f"it needs a fit with se='oakes' or se='hessian', not se={self.se_method!r}."
+            )
+        names = [name for name, _ in self._model.items]
+        n_items = len(names)
+        if n_items < 3:
+            raise SpecificationError("jsi() needs at least three items.")
+        if method != "refit" and n_items < _JSI_APPROXIMATION_MIN_ITEMS:
+            warnings.warn(
+                f"With {n_items} items, removing one changes the estimates too much for "
+                f"method={method!r} to approximate the refit; use method='refit'.",
+                FlexpyirtWarning,
+                stacklevel=2,
+            )
+        y = coerce_responses(data, self._model, item_names=item_names)
+        prob = self._compiled_for(y)
+        eta = np.asarray(self._eta, dtype=np.float64)
+
+        params = self.parameters
+        free = params["free"].to_numpy(dtype=bool)
+        fid = params["free_id"].to_numpy(dtype=np.int64)
+        item_col = params["item"].to_numpy()
+        lookup = dict(self._model.items)
+        slope_id = np.full(n_items, -1, dtype=np.int64)
+        for k, name in enumerate(names):
+            slope = self._model.item_kernel(lookup[name]).slope_params
+            if not slope:
+                continue
+            row = (item_col == name) & (params["param"].to_numpy() == slope[0]) & free
+            if row.any():
+                slope_id[k] = fid[row][0]
+        has_free_slope = slope_id >= 0
+        a_full = np.full(n_items, np.nan)
+        a_full[has_free_slope] = eta[slope_id[has_free_slope]]
+
+        out = np.full((n_items, n_items), np.nan)
+        converged = np.ones(n_items, dtype=bool)
+        # Without a free slope (Rasch / PCM, or every slope fixed) no index is defined: all NaN.
+        removed = list(enumerate(names)) if has_free_slope.any() else []
+        if method == "one_step" and removed:
+            assert self.vcov is not None
+            grads = np.asarray(_jsi.gradients_without(prob, jnp.asarray(eta), jnp.arange(n_items)))
+            vcov_full = np.asarray(self.vcov, dtype=np.float64)
+            se_full = np.sqrt(np.clip(np.diag(vcov_full), 0.0, None))
+        for j, name in removed:
+            keep = np.unique(fid[free & (item_col != name)])
+            if method == "one_step":
+                grad = np.zeros_like(eta)
+                grad[keep] = grads[j, keep]
+                eta_j = eta + vcov_full @ grad
+                se_j = se_full
+            else:
+                outcome = _jsi.newton_without(
+                    prob,
+                    eta,
+                    j,
+                    keep,
+                    max_steps=int(max_iter if method == "refit" else newton_steps),
+                    tol=tol if method == "refit" else None,
+                )
+                converged[j] = outcome.converged
+                eta_j = outcome.eta
+                se_j = np.full(eta.size, np.nan)
+                se_j[keep] = np.sqrt(np.clip(np.diag(outcome.vcov), 0.0, None))
+            for i in range(n_items):
+                sid = slope_id[i]
+                if i == j or sid < 0 or sid not in keep:
+                    continue
+                out[j, i] = (a_full[i] - eta_j[sid]) / se_j[sid]
+        if not converged.all():
+            bad = [names[k] for k in np.flatnonzero(~converged)]
+            warnings.warn(
+                f"The refit without items {bad} did not converge in {max_iter} steps.",
+                ConvergenceWarning,
+                stacklevel=2,
+            )
+        upper_i, upper_j = np.triu_indices(n_items, k=1)
+        pairs = pd.DataFrame(
+            {
+                "item_i": [names[int(i)] for i in upper_i],
+                "item_j": [names[int(j)] for j in upper_j],
+                "jsi_ij": out[upper_j, upper_i],
+                "jsi_ji": out[upper_i, upper_j],
+            }
+        )
+        pairs["folded"] = pairs["jsi_ij"] + pairs["jsi_ji"]
+        return JSIResult(
+            matrix=pd.DataFrame(out, index=pd.Index(names, name="removed"), columns=names),
+            pairs=pairs,
+            method=method,
+            converged=pd.Series(converged, index=names, name="converged"),
+        )
+
     def m2(
         self,
         data: Any,
         *,
+        group: Any = None,
         item_names: list[str] | None = None,
         ci: float = 0.90,
     ) -> pd.DataFrame:
@@ -786,10 +1584,41 @@ class FitResult:
         model (polytomous models return ``NaN`` for ``tli`` and ``cfi`` because the null
         :math:`\Delta_2` is rank-deficient under item-score moments; see DESIGN.md §16.3).
 
+        For a confirmatory multidimensional model (:meth:`Model.with_factors`, DESIGN.md
+        §16.19) the margins, :math:`\Xi_2` and :math:`\Delta_2` are integrated over the fitted
+        product grid with the normalized multivariate-normal weights, and :math:`\Delta_2` has
+        one column per free factor correlation. (mirt's ``M2()`` leaves the latent columns out
+        of :math:`\Delta_2` while counting them in ``df``, so its value is slightly larger for
+        models with free correlations.)
+
+        **Multiple groups** (DESIGN.md §16.23): the residuals
+        :math:`\sqrt{N_g}(\hat p_g-\pi_g)` of the :math:`G` groups are stacked, their covariance
+        is block-diagonal, the rows of group :math:`g` in :math:`\Delta_2` are scaled by
+        :math:`\sqrt{N_g/N}` (a parameter equal across groups is one column), and
+        :math:`df = G(J+\binom J2) - q`, as mirt's ``M2()`` on a ``multipleGroup`` fit. RMSEA
+        uses the total :math:`N` and SRMSR is reported per group. mirt leaves the group rows
+        unscaled, so its value differs when parameters are equal across groups of unequal size.
+
+        **Missing responses**: each margin is the mean over the respondents who answered the
+        item (or both items of the pair), and :math:`\Xi_2` is rescaled to the exact covariance
+        of these pairwise-available means, :math:`N N_{ab}\Xi_{ab}/(N_aN_b)`, where
+        :math:`N_{ab}` counts the respondents who answered every item of both margins. The
+        reference :math:`\chi^2` holds when responses are missing completely at random (MCAR);
+        under MAR that is not MCAR the available-case margins are biased and the test is not
+        valid. Every item pair must have been answered together by someone.
+
+        **MAP fits** (priors): the statistic is evaluated at the MAP estimates with every free
+        parameter counted in :math:`q`, as mirt does. Its :math:`\chi^2` reference only needs
+        :math:`\sqrt N`-consistent estimates, which priors preserve; with a strong prior on a
+        weakly identified parameter the test is conservative in finite samples, and a parameter
+        identified only by its prior makes :math:`\Delta_2` rank-deficient (``NaN`` result).
+
         Parameters
         ----------
         data : DataFrame or array-like
-            Complete responses on the fitted items (typically the fitting data).
+            Responses on the fitted items (typically the fitting data); missing as NaN.
+        group : array-like, optional
+            Group labels (required for a multiple-group model).
         item_names : list of str, optional
             Column names when ``data`` is an array.
         ci : float, default 0.90
@@ -800,50 +1629,53 @@ class FitResult:
         -------
         DataFrame
             One-row DataFrame with columns ``m2``, ``df``, ``p``, ``rmsea``, ``rmsea_<lo>``,
-            ``rmsea_<hi>``, ``srmsr``, ``tli``, ``cfi``. When ``df <= 0`` or :math:`\Delta_2` is
-            rank-deficient (the model is not locally identified from first- and second-order
-            moments), a :class:`FlexpyirtWarning` is emitted and ``m2``, ``p``, RMSEA, its CI,
-            ``tli`` and ``cfi`` are ``NaN`` (``df`` and ``srmsr`` remain finite).
+            ``rmsea_<hi>``, ``srmsr``, ``tli``, ``cfi`` (for a multiple-group model ``srmsr`` is
+            replaced by one ``srmsr_<group>`` column per group). When ``df <= 0`` or
+            :math:`\Delta_2` is rank-deficient (the model is not locally identified from first-
+            and second-order moments), a :class:`FlexpyirtWarning` is emitted and ``m2``,
+            ``p``, RMSEA, its CI, ``tli`` and ``cfi`` are ``NaN`` (``df`` and ``srmsr`` remain
+            finite).
 
         Raises
         ------
         PrecisionError
             If JAX is not configured for 64-bit floating point.
         SpecificationError
-            For multidimensional, multiple-group, ``EmpiricalHistogram``, ``NormalMixture``, or MAP
-            (with priors) models, missing responses, invalid ``ci``, or fewer than 2 items or
-            respondents.
+            For bifactor, two-tier, ``EmpiricalHistogram`` or ``NormalMixture`` models, a
+            multiple-group ``DavidianCurve`` model, weighted fits, invalid ``ci`` or group
+            labels, fewer than 2 items or than 2 respondents in a group, or an item or item pair
+            that nobody answered (in some group).
         """
         check_x64()
+        self._require_unweighted("m2()")
         model = self._model
+        if model.is_reduced:
+            raise SpecificationError(
+                "m2() does not support bifactor or two-tier models yet (with_factors() models "
+                "are supported)."
+            )
         if (
-            model.is_multidimensional
-            or model.is_multigroup
-            or model.is_empirical_histogram
+            model.is_empirical_histogram
             or model.is_mixture
+            or (model.is_multigroup and model.is_davidian)
         ):
             raise SpecificationError(
-                "m2() supports single-group unidimensional models with a Normal latent "
-                "distribution only."
-            )
-        if self._has_priors:
-            raise SpecificationError(
-                "m2() requires an MLE fit without priors (MAP fits are not supported)."
+                "m2() supports Normal latent distributions (and single-group DavidianCurve) only."
             )
         if isinstance(ci, bool) or not isinstance(ci, (int, float)) or not (0.0 < float(ci) < 1.0):
             raise SpecificationError(f"ci must be strictly between 0 and 1, got {ci!r}.")
         ci_f = float(ci)
         y = coerce_responses(data, model, item_names=item_names)
-        if (y < 0).any():
-            raise SpecificationError(
-                "m2() requires complete data; M2 is not defined with missing responses."
-            )
-        if y.shape[0] < 2:
-            raise SpecificationError("m2() requires at least 2 respondents.")
         if y.shape[1] < 2:
             raise SpecificationError("m2() requires at least 2 items.")
+        codes, group_names = coerce_groups(group, model, y.shape[0], require_all=True)
+        sizes = np.bincount(codes, minlength=len(group_names))
+        if (sizes < 2).any():
+            where = (
+                f" in group {group_names[int(np.argmin(sizes))]!r}" if model.is_multigroup else ""
+            )
+            raise SpecificationError(f"m2() requires at least 2 respondents{where}.")
 
-        codes, _ = coerce_groups(None, model, y.shape[0], require_all=False)
         compiled = compile_problem(model, y, codes, self.parameters, self._quadrature)
         n_categories = [m.kernel.n_categories for _, m in model.items]
         res = _m2.m2_statistic(
@@ -852,9 +1684,16 @@ class FitResult:
             y,
             n_params=self.n_params,
             n_categories=n_categories,
+            groups=codes,
+            item_names=[name for name, _ in model.items],
             level=ci_f,
         )
         lo_col, hi_col = _m2.ci_column_names(ci_f)
+        srmsr_cols = (
+            {f"srmsr_{g}": v for g, v in zip(group_names, res.srmsr_by_group, strict=True)}
+            if model.is_multigroup
+            else {"srmsr": res.srmsr}
+        )
         return pd.DataFrame(
             [
                 {
@@ -864,7 +1703,7 @@ class FitResult:
                     "rmsea": res.rmsea,
                     lo_col: res.rmsea_lower,
                     hi_col: res.rmsea_upper,
-                    "srmsr": res.srmsr,
+                    **srmsr_cols,
                     "tli": res.tli,
                     "cfi": res.cfi,
                 }
@@ -873,38 +1712,54 @@ class FitResult:
 
     def dif(
         self,
-        data: Any,
+        data: Any = None,
         *,
-        group: Any,
+        group: Any = None,
         items: Iterable[str],
         params: Sequence[str] | None = None,
         scheme: DIFScheme = "add",
+        test: DIFTest = "likelihood_ratio",
         p_adjust: PAdjust = "holm",
         item_names: list[str] | None = None,
     ) -> pd.DataFrame:
-        r"""Likelihood-ratio DIF tests across the groups of a multiple-group model (§16.2).
+        r"""Likelihood-ratio or Wald DIF tests across the groups of a multiple-group model.
 
-        For each item, refits the model with its ``params`` made equal across groups
-        (``scheme="add"``, from this fit as the baseline) or freed in every group
-        (``scheme="drop"``), with the same estimation settings and quadrature, and compares the
-        marginal log-likelihoods (Thissen, Steinberg & Wainer, 1993):
+        With ``test="likelihood_ratio"`` (DESIGN.md §16.2), refits the model for each item with
+        its ``params`` made equal across groups (``scheme="add"``, from this fit as the
+        baseline) or freed in every group (``scheme="drop"``), with the same estimation settings
+        and quadrature, and compares the marginal log-likelihoods (Thissen, Steinberg & Wainer,
+        1993):
 
         .. math::
             X^2 = 2\,(\ell_{\text{free}} - \ell_{\text{constrained}}),\qquad
             df = |k_{\text{base}} - k_{\text{new}}|,\qquad p = P(\chi^2_{df} > X^2).
 
+        With ``test="wald"`` (DESIGN.md §16.22; ``scheme="add"`` only), no refit: the
+        contrasts :math:`\mathbf L\boldsymbol\eta` between the item's parameters in the
+        groups are tested with the covariance matrix :math:`\mathbf V` of this fit (Wald, 1943;
+        Lord, 1980), as mirt's ``DIF(Wald = TRUE)``:
+
+        .. math::
+            W=(\mathbf L\boldsymbol\eta)^\top(\mathbf L\mathbf V\mathbf L^\top)^{-1}
+              (\mathbf L\boldsymbol\eta),\qquad df=\text{rows of }\mathbf L.
+
         Parameters
         ----------
-        data : DataFrame or array-like
-            The responses this result was fitted to.
-        group : array-like
-            Group label of each row (as passed to :func:`~flexpyirt.fit`).
+        data : DataFrame or array-like, optional
+            The responses this result was fitted to (required for the likelihood-ratio test).
+        group : array-like, optional
+            Group label of each row (as passed to :func:`~flexpyirt.fit`; required for the
+            likelihood-ratio test).
         items : iterable of str
-            Items to test, one refit each.
+            Items to test, one refit each for the likelihood-ratio test.
         params : sequence of str, optional
             Internal parameters to test (default: every parameter of each item).
         scheme : {"add", "drop"}, default "add"
             ``"add"`` constrains the item's parameters to equality; ``"drop"`` frees them.
+        test : {"likelihood_ratio", "wald"}, default "likelihood_ratio"
+            The Wald test needs ``vcov`` (``fit(..., se=...)``). It is on flexpyirt's natural
+            parameters, so 3PL/4PL ``g`` / ``u`` give a different statistic from mirt's (logit
+            scale there).
         p_adjust : {"holm", "BH", "none"}, default "holm"
             Multiple-testing adjustment of ``adj_p`` over the tested items (Holm, 1979;
             Benjamini & Hochberg, 1995); ``"holm"`` is mirt's default.
@@ -914,17 +1769,25 @@ class FitResult:
         Returns
         -------
         DataFrame
-            One row per item: ``item``, ``converged``, ``aic``, ``sabic``, ``hq``, ``bic``
-            (information criteria of the model with the item free minus the constrained one, as
-            mirt's ``DIF()``; negative values favour DIF), ``x2``, ``df``, ``p`` and ``adj_p``.
+            Likelihood ratio: one row per item: ``item``, ``converged``, ``aic``, ``sabic``,
+            ``hq``, ``bic`` (information criteria of the model with the item free minus the
+            constrained one, as mirt's ``DIF()``; negative values favour DIF), ``x2``, ``df``,
+            ``p`` and ``adj_p``. Wald: ``item``, ``x2`` (the statistic :math:`W`), ``df``,
+            ``p`` and ``adj_p``.
 
         Raises
         ------
         SpecificationError
-            For single-group models, MAP fits with priors, unknown items or parameters, or an
-            item with nothing to test under ``scheme``.
+            For single-group models, MAP fits with priors, unknown items or parameters, an item
+            with nothing to test under ``scheme``, a Wald test without ``vcov`` or with
+            ``scheme="drop"``, or a likelihood-ratio test without ``data`` / ``group``.
         IdentificationError
             If a refitted model is not identified (e.g. freeing the only anchors).
+
+        See Also
+        --------
+        flexpyirt.dif_screen : screen every item with anchor purification.
+        flexpyirt.dif_effect_sizes : signed / unsigned differences, ESSD and RMSD.
         """
         from flexpyirt._dif import dif_tests
 
@@ -935,6 +1798,7 @@ class FitResult:
             items=items,
             params=params,
             scheme=scheme,
+            test=test,
             p_adjust=p_adjust,
             item_names=item_names,
         )
@@ -972,6 +1836,14 @@ class FitResult:
         """Concise description of the quadrature grid."""
         quad = self._quadrature
         d = self._model.n_factors
+        if self._model.is_reduced:
+            kind = "Gauss-Hermite" if quad.kind == "gauss_hermite" else "equispaced"
+            dim = self._model.quadrature_dimension
+            label = "bifactor" if self._model.bifactor else "two-tier"
+            return (
+                f"{quad.n_points}^{dim} = {quad.n_points**dim} {kind} nodes per specific factor "
+                f"on [{quad.lower:g}, {quad.upper:g}]^{dim} ({label} dimension reduction)"
+            )
         if d == 1:
             return f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
         total = quad.n_points**d
@@ -983,6 +1855,14 @@ class FitResult:
     def _factors_label(self) -> str:
         """Concise description of latent factors for multidimensional models."""
         fnames = self._model.factor_names
+        if self._model.bifactor:
+            return f"bifactor: general {fnames[0]}; specific {', '.join(fnames[1:])}"
+        if self._model.n_primary_factors:
+            n_primary = self._model.n_primary_factors
+            return (
+                f"two-tier: primary {', '.join(fnames[:n_primary])}; "
+                f"specific {', '.join(fnames[n_primary:])}"
+            )
         return f"{len(fnames)} ({', '.join(fnames)})"
 
     def summary(self, *, digits: int = 4) -> str:
@@ -1005,9 +1885,8 @@ class FitResult:
         if isinstance(digits, bool) or not isinstance(digits, int) or digits < 0:
             raise SpecificationError(f"digits must be a non-negative integer, got {digits!r}.")
         est_kind = "MAP, priors active" if self._has_priors else "MMLE"
-        se_label = "None" if self.se_method is None else self.se_method
+        se_label = self._se_label()
         quad_label = self._quadrature_label()
-        n_items = len(self._model.item_names)
         aic_val = self._aic_value()
         bic_val = self._bic_value()
 
@@ -1021,8 +1900,7 @@ class FitResult:
             "flexpyirt FitResult",
             "===================",
             f"Model:          {self._model_label()} ({est_kind})",
-            f"Data:           {self.n_obs} observations, {n_items} items, "
-            f"{self.n_params} free parameters",
+            f"Data:           {self._data_label()}",
             *(
                 [f"Factors:        {self._factors_label()}"]
                 if self._model.is_multidimensional
@@ -1089,16 +1967,12 @@ class FitResult:
         """Return an HTML rendering of the summary for Jupyter notebooks (no external assets)."""
         digits = 4
         est_kind = "MAP, priors active" if self._has_priors else "MMLE"
-        se_label = "None" if self.se_method is None else self.se_method
+        se_label = self._se_label()
         quad_label = self._quadrature_label()
-        n_items = len(self._model.item_names)
 
         meta_rows = [
             ("Model", f"{self._model_label()} ({est_kind})"),
-            (
-                "Data",
-                f"{self.n_obs} observations, {n_items} items, {self.n_params} free parameters",
-            ),
+            ("Data", self._data_label()),
             *([("Factors", self._factors_label())] if self._model.is_multidimensional else []),
             ("Groups", self._groups_label()),
             ("Convergence", self._convergence_label()),
@@ -1172,7 +2046,7 @@ class FitResult:
         """Serialize this result to a strict JSON string, optionally writing it to ``path``.
 
         Writes plain, versioned RFC 8259 JSON (no ``pickle``) with top-level
-        ``"format": "flexpyirt.FitResult"``, ``"schema_version": 1``, and the ``flexpyirt``
+        ``"format": "flexpyirt.FitResult"``, the current ``"schema_version"``, and the ``flexpyirt``
         version (DESIGN.md §15.26–§15.28). Finite IEEE-754 float64 values are written as
         ``repr``-exact JSON numbers and non-finite values (``NaN``, ``+inf``, ``-inf``) are
         encoded explicitly as ``"NaN"``, ``"Infinity"``, and ``"-Infinity"`` in float-typed

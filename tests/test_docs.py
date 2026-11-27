@@ -6,6 +6,9 @@
 - Every document has its counterpart (``X.md`` <-> ``X.ja.md``).
 - Every public name in ``flexpyirt.__all__`` and ``flexpyirt.errors.__all__`` is documented in
   docs/reference.md and docs/reference.ja.md.
+- The package README that a page of the site includes (``<!-- include: ... -->``, see
+  scripts/mkdocs_hooks.py) exists in the same language and has the title and switcher lines the
+  hook removes.
 - Japanese documents link to Japanese documents (except the language switcher), including absolute
   links to GitHub files and to the documentation site (README links are absolute so they work on
   PyPI).
@@ -39,11 +42,12 @@ PAIRED = [
     "CONTRIBUTING",
     "benchmarks/README",
     *(f"docs/{p.stem}" for p in (ROOT / "docs").glob("*.md")),
+    *(f"docs/dev/{p.stem}" for p in (ROOT / "docs" / "dev").glob("*.md")),
 ]
 
 
 def _blocks(path: Path) -> list[str]:
-    return BLOCK_RE.findall(path.read_text())
+    return BLOCK_RE.findall(path.read_text(encoding="utf-8"))
 
 
 def _code_only(block: str) -> list[str]:
@@ -57,7 +61,11 @@ def _code_only(block: str) -> list[str]:
     return out
 
 
-@pytest.mark.parametrize("doc", RUNNABLE)
+@pytest.mark.parametrize(
+    "doc",
+    # The user guide fits many models (minutes on CI): slow. README and docs/index stay on PR CI.
+    [pytest.param(d, marks=pytest.mark.slow) if "guide" in d else d for d in RUNNABLE],
+)
 def test_code_blocks_run(doc: str, capsys: pytest.CaptureFixture[str]) -> None:
     blocks = _blocks(ROOT / doc)
     assert blocks, f"{doc} has no python blocks"
@@ -67,7 +75,10 @@ def test_code_blocks_run(doc: str, capsys: pytest.CaptureFixture[str]) -> None:
         warnings.simplefilter("error", errors.HeywoodWarning)
         for i, code in enumerate(blocks):
             try:
-                exec(compile(code, f"{doc}[block {i}]", "exec"), namespace)
+                # dont_inherit: run the blocks as a plain script, without this module's
+                # ``from __future__ import annotations`` (string annotations break dataclasses
+                # defined in a namespace that is not in sys.modules).
+                exec(compile(code, f"{doc}[block {i}]", "exec", dont_inherit=True), namespace)
             except Exception as e:  # pragma: no cover - message for the failing block
                 raise AssertionError(f"{doc} block {i} failed:\n{code}") from e
     capsys.readouterr()
@@ -96,17 +107,25 @@ def test_translations_have_the_same_code(stem: str) -> None:
 
 @pytest.mark.parametrize("doc", ["docs/reference.md", "docs/reference.ja.md"])
 def test_reference_covers_public_api(doc: str) -> None:
-    text = (ROOT / doc).read_text()
+    text = (ROOT / doc).read_text(encoding="utf-8")
     names = [n for n in flexpyirt.__all__ if not n.startswith("_") and n != "errors"]
     names += list(errors.__all__)
     missing = [n for n in names if not re.search(rf"^#+ .*`{re.escape(n)}\b", text, re.M)]
     assert not missing, f"Not documented in {doc}: {missing}"
 
 
-@pytest.mark.parametrize("doc", sorted(str(p.relative_to(ROOT)) for p in ROOT.rglob("*.ja.md")))
+@pytest.mark.parametrize(
+    "doc",
+    sorted(
+        str(p.relative_to(ROOT))
+        for p in ROOT.rglob("*.ja.md")
+        # Skip hidden directories (.venv, local worktrees under .claude/, ...): not the repo's docs.
+        if not any(part.startswith(".") for part in p.relative_to(ROOT).parts)
+    ),
+)
 def test_japanese_docs_link_to_japanese_docs(doc: str) -> None:
     doc_path = ROOT / doc
-    lines = doc_path.read_text().splitlines()
+    lines = doc_path.read_text(encoding="utf-8").splitlines()
     body = [line for line in lines if not line.startswith("[English](")]
     text = "\n".join(body)
     links = re.findall(r"\]\(([^)#\s]+\.md)(?:#[^)]*)?\)", text)

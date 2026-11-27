@@ -125,6 +125,7 @@ def test_quadrature_defaults_and_product_grid_shapes() -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("n_factors", [2, 3])
 def test_multidimensional_kernels_sum_to_one_and_differentiate(n_factors: int) -> None:
     rng = np.random.default_rng(100 + n_factors)
@@ -180,6 +181,7 @@ def test_multidimensional_kernels_sum_to_one_and_differentiate(n_factors: int) -
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_mvn_log_weights_match_scipy_2d_and_3d() -> None:
     q2 = Quadrature.equispaced(11, bounds=(-4.0, 4.0)).grid(2)
     params2 = jnp.array([0.3, -0.2, 1.4, 0.8, 0.55])
@@ -235,6 +237,7 @@ def test_mvn_log_weights_rejects_non_pd_inputs() -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_unidimensional_model_stays_unchanged() -> None:
     c = load_m1("v1_lsat7_2pl")
     spec = Model.uniform(TwoPL(), items=c.items)
@@ -254,6 +257,7 @@ def test_unidimensional_model_stays_unchanged() -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_2d_2pl_monotone_oakes_equals_hessian_and_eap() -> None:
     a = np.array(
         [
@@ -366,6 +370,7 @@ def test_2d_2pl_monotone_oakes_equals_hessian_and_eap() -> None:
     assert "Factors" in html_out and "math, verbal" in html_out and "cor_12" in html_out
 
 
+@pytest.mark.slow
 def test_2d_orthogonal_rasch_grm_mixed_priors_and_fix() -> None:
     # Orthogonal 2D Rasch: variances free, correlation fixed at 0
     a_r = np.array([[1.0, 0.0]] * 4 + [[0.0, 1.0]] * 4)
@@ -429,6 +434,7 @@ def test_2d_orthogonal_rasch_grm_mixed_priors_and_fix() -> None:
         spec_fix.fix_from(bank, parameterization="irt")
 
 
+@pytest.mark.slow
 def test_2d_mixed_item_families() -> None:
     rng = np.random.default_rng(104)
     n = 500
@@ -472,6 +478,7 @@ def test_2d_mixed_item_families() -> None:
     assert np.all(np.diff(ll) >= -1e-9 * np.abs(ll[1:]))
 
 
+@pytest.mark.slow
 def test_3d_2pl_oakes_equals_hessian_and_monotone() -> None:
     a = np.array(
         [
@@ -652,6 +659,7 @@ def test_all_loadings_fixed_at_zero_is_identification_error() -> None:
         fit(spec, df)
 
 
+@pytest.mark.slow
 def test_proportional_fixed_loadings_are_identification_error() -> None:
     df = _binary_df(6)
     items = list(df.columns)

@@ -23,6 +23,7 @@
 #       because |db2/dd1| = |1| = |-1| = |db1/dd1|.
 #   For GPCM we store both mirt's raw IRTpars output and exact_delta_se computed directly from
 #   vcov(m) in R, and assert the exact bug formula matches mirt's raw b1_se to < 1e-9.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -270,7 +271,7 @@ out <- list(
     case = "v12_irtpars",
     description = "V12: Delta-method SEs for display IRT parameterization (2PL, Rasch, GRM, GPCM, PCM, 2-group 2PL)",
     r_version = R.version.string,
-    mirt_version = as.character(packageVersion("mirt")),
+    mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     TOL = 1e-10,
     quadpts = default_quad$quadpts,
     theta_lim = default_quad$theta_lim,

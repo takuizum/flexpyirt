@@ -5,6 +5,7 @@
 # Reuses the V4 data (2PL, groups ref/focal, anchors q01-q05, focal mean and variance free) and the
 # V4 grid (81 points on [-8, 8]). Every fit, including DIF()'s refits, uses optimizer = "NR",
 # accelerate = "none" and TOL = 1e-10.
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -49,7 +50,7 @@ cases <- list(
 )
 res <- list(
   meta = list(case = "v17_dif", source = "v4_twogroup_2pl", r_version = R.version.string,
-              mirt_version = as.character(packageVersion("mirt")), TOL = 1e-10, quadpts = 81,
+              mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(), TOL = 1e-10, quadpts = 81,
               theta_lim = c(-8, 8), grid_check = range(base_add@Model$Theta),
               accelerate = "none", optimizer = "NR", converged = TRUE),
   anchors = anchors,

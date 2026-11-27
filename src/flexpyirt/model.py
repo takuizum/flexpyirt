@@ -10,10 +10,26 @@ from typing import Any, Literal
 import pandas as pd
 
 from flexpyirt.errors import SpecificationError
-from flexpyirt.items import PCM, GPCMKernel, ItemKernel, ItemModel, NominalKernel, Rasch
-from flexpyirt.latent import DavidianCurve, EmpiricalHistogram, LatentSpec, Normal, NormalMixture
+from flexpyirt.items import (
+    PCM,
+    GPCMKernel,
+    ItemKernel,
+    ItemModel,
+    NominalKernel,
+    Rasch,
+    check_item_model,
+    is_builtin_item_model,
+)
+from flexpyirt.latent import (
+    DavidianCurve,
+    EmpiricalHistogram,
+    LatentSpec,
+    Normal,
+    NormalMixture,
+    latent_param_names,
+)
 from flexpyirt.priors import PRIOR_TYPES, Prior
-from flexpyirt.quadrature import MAX_FACTORS
+from flexpyirt.quadrature import MAX_FACTORS, MAX_KERNEL_FACTORS
 
 __all__ = ["LATENT_ITEM", "SINGLE_GROUP", "Model"]
 
@@ -56,6 +72,13 @@ class Model:
         ``None`` means unidimensional.
     correlated_factors : bool
         Whether factor correlations are free by default when ``factors`` is set.
+    bifactor : bool
+        Whether ``factors`` is a bifactor structure from :meth:`with_bifactor` (the first factor
+        is the general factor; the E-step uses Gibbons–Hedeker dimension reduction, DESIGN.md
+        §17.1).
+    n_primary_factors : int
+        Number of leading primary factors of a two-tier structure from :meth:`with_two_tier`
+        (DESIGN.md §17.2); 0 for every other model.
     """
 
     items: tuple[tuple[str, ItemModel], ...]
@@ -67,30 +90,40 @@ class Model:
     priors: tuple[tuple[str, str, Prior], ...] = ()
     factors: tuple[tuple[str, tuple[str, ...]], ...] | None = None
     correlated_factors: bool = True
+    bifactor: bool = False
+    n_primary_factors: int = 0
 
     def __post_init__(self) -> None:
         """Validate item names and group latent-distribution consistency."""
         if not self.items:
             raise SpecificationError("A model needs at least one item.")
+        if self.bifactor and self.factors is None:
+            raise SpecificationError("A bifactor model needs factors; use with_bifactor().")
+        if self.n_primary_factors < 0 or (self.bifactor and self.n_primary_factors):
+            raise SpecificationError(
+                "n_primary_factors must be 0 for bifactor models and non-negative otherwise."
+            )
+        if self.n_primary_factors and (
+            self.factors is None or len(self.factors) <= self.n_primary_factors
+        ):
+            raise SpecificationError(
+                "A two-tier model needs primary and specific factors; use with_two_tier()."
+            )
+        if self.is_reduced and self.groups is not None:
+            raise SpecificationError(
+                "Bifactor and two-tier models do not support multiple groups yet (DESIGN.md "
+                "§17.1, §17.2)."
+            )
         names = [name for name, _ in self.items]
         if LATENT_ITEM in names:
             raise SpecificationError(f"Item name {LATENT_ITEM!r} is reserved.")
         dup = sorted({n for n in names if names.count(n) > 1})
         if dup:
             raise SpecificationError(f"Duplicated item names: {dup}.")
+        for name, item_model in self.items:
+            check_item_model(name, item_model)
         if self.groups is not None:
-            kinds = {type(dist) for _, dist in self.groups}
-            for single_only in (DavidianCurve, NormalMixture):
-                if single_only in kinds:
-                    raise SpecificationError(
-                        f"{single_only.__name__} is only supported for single-group models; use "
-                        "Model.with_latent() instead of with_groups()."
-                    )
-            if EmpiricalHistogram in kinds and len(kinds) > 1:
-                raise SpecificationError(
-                    "Cannot mix EmpiricalHistogram and Normal across groups; when "
-                    "EmpiricalHistogram is specified, every group must use EmpiricalHistogram."
-                )
+            _check_group_latent_family(self.groups)
 
     # ---- constructors ------------------------------------------------------------------------
 
@@ -157,6 +190,52 @@ class Model:
     def factor_names(self) -> tuple[str, ...]:
         """Declared factor names in order (empty tuple for a unidimensional model)."""
         return () if self.factors is None else tuple(name for name, _ in self.factors)
+
+    @property
+    def is_reduced(self) -> bool:
+        """Whether the E-step uses dimension reduction (bifactor or two-tier; DESIGN.md §17)."""
+        return self.bifactor or self.n_primary_factors > 0
+
+    @property
+    def n_primary(self) -> int:
+        """Number of primary factors of a reduced model.
+
+        1 for bifactor (the general factor), ``n_primary_factors`` for two-tier, and 0 for
+        models without dimension reduction.
+        """
+        return 1 if self.bifactor else self.n_primary_factors
+
+    @property
+    def quadrature_dimension(self) -> int:
+        """Dimension of the quadrature grid the E-step integrates over.
+
+        ``n_factors`` for product grids; ``n_primary + 1`` for bifactor and two-tier models,
+        whose E-step uses the grid of the primary factors and one specific factor (DESIGN.md
+        §17.1, §17.2).
+        """
+        return self.n_primary + 1 if self.is_reduced else self.n_factors
+
+    def latent_parameter_names(self) -> tuple[str, ...]:
+        """Return the names of the Normal latent parameters of each group (DESIGN.md §15.30).
+
+        ``("mean", "var")`` for one factor, ``(mean_1..D, var_1..D, cor_ij...)`` for 2–3 factors,
+        ``(mean_1..D, var_1..D)`` for bifactor models, whose factors are orthogonal
+        (DESIGN.md §17.1), and ``(mean_1..D, var_1..D, cor_ij...)`` with correlations among the
+        primary factors only (``i < j <= P``) for two-tier models (DESIGN.md §17.2).
+        """
+        if self.is_reduced:
+            d = self.n_factors
+            n_primary = self.n_primary
+            return (
+                *(f"mean_{m}" for m in range(1, d + 1)),
+                *(f"var_{m}" for m in range(1, d + 1)),
+                *(
+                    f"cor_{i}{j}"
+                    for i in range(1, n_primary + 1)
+                    for j in range(i + 1, n_primary + 1)
+                ),
+            )
+        return latent_param_names(self.n_factors)
 
     def item_kernel(self, item_model: ItemModel) -> ItemKernel:
         """Return ``item_model``'s kernel adapted to this model's dimensionality."""
@@ -250,8 +329,9 @@ class Model:
         Raises
         ------
         SpecificationError
-            If the bank lacks a needed column or item, if ``parameterization="irt"`` is used
-            with a multidimensional model, or if ``parameterization="irt"`` is used for a
+            If the bank lacks a needed column or item, if it has several rows for an item to
+            fix (e.g. the ``items`` table of a multiple-group fit), if ``parameterization="irt"``
+            is used with a multidimensional model, or if ``parameterization="irt"`` is used for a
             ``Nominal`` item (the nominal model has no IRT thresholds).
         """
         if self.is_multidimensional and parameterization == "irt":
@@ -265,6 +345,13 @@ class Model:
         chosen = (
             tuple(i for i in self.item_names if i in rows) if items is None else self._select(items)
         )
+        counts = bank["item"].astype(str).value_counts()
+        duplicated = [i for i in chosen if counts.get(i, 0) > 1]
+        if duplicated:
+            raise SpecificationError(
+                f"The item bank has several rows for {duplicated}; it needs one row per item "
+                "(from the items table of a multiple-group fit, keep the rows of one group)."
+            )
         missing = [i for i in chosen if i not in rows]
         if missing:
             raise SpecificationError(f"Items not found in the bank: {missing}.")
@@ -284,6 +371,11 @@ class Model:
             row = rows[item]
             item_model = lookup[item]
             kernel = self.item_kernel(item_model)
+            if parameterization == "irt" and not is_builtin_item_model(item_model):
+                raise SpecificationError(
+                    f"parameterization='irt' is not supported for the user-defined item model "
+                    f"{item_model.name!r} of item {item!r}; use parameterization='slope_intercept'."
+                )
             if parameterization == "irt" and isinstance(kernel, NominalKernel):
                 raise SpecificationError(
                     f"parameterization='irt' is not supported for Nominal item {item!r}; "
@@ -368,6 +460,11 @@ class Model:
             any factor is empty or lists unknown/duplicated items, any model item loads on no
             factor, or ``with_groups()`` / ``with_latent()`` is already set.
         """
+        if self.is_reduced:
+            raise SpecificationError(
+                "This model is a bifactor or two-tier model; with_factors() cannot be combined "
+                "with with_bifactor() or with_two_tier()."
+            )
         if self.groups is not None and any(
             isinstance(dist, EmpiricalHistogram) for _, dist in self.groups
         ):
@@ -415,20 +512,26 @@ class Model:
             raise SpecificationError(f"Items not assigned to any factor: {unassigned}.")
 
         candidate = replace(self, factors=tuple(resolved), correlated_factors=bool(correlated))
+        self._check_parameter_names(candidate, "with_factors")
+        return candidate
+
+    def _check_parameter_names(self, candidate: Model, builder: str) -> None:
+        """Check that fixed values, priors and equalities name parameters of ``candidate``."""
+        n_factors = candidate.n_factors
         lookup = dict(self.items)
         for item, param, _ in self.fixed:
             valid = candidate.item_kernel(lookup[item]).param_names
             if param not in valid:
                 raise SpecificationError(
                     f"Fixed parameter {item!r}.{param} is not valid for a {n_factors}-factor "
-                    f"model (available: {list(valid)}); call with_factors() before fix()."
+                    f"model (available: {list(valid)}); call {builder}() before fix()."
                 )
         for item, param, _ in self.priors:
             valid = candidate.item_kernel(lookup[item]).param_names
             if param not in valid:
                 raise SpecificationError(
                     f"Prior on {item!r}.{param} is not valid for a {n_factors}-factor model "
-                    f"(available: {list(valid)}); call with_factors() before prior()."
+                    f"(available: {list(valid)}); call {builder}() before prior()."
                 )
         for eq_items, eq_params in self.equal_items:
             for item in eq_items:
@@ -437,9 +540,235 @@ class Model:
                 if bad:
                     raise SpecificationError(
                         f"Equality on {item!r}.{bad} is not valid for a {n_factors}-factor model "
-                        f"(available: {list(valid)}); call with_factors() before "
+                        f"(available: {list(valid)}); call {builder}() before "
                         "equal_across_items()."
                     )
+
+    def with_bifactor(
+        self,
+        *,
+        specific: Mapping[str, ItemSelector],
+        general: str = "general",
+    ) -> Model:
+        r"""Return a bifactor model: one general factor plus specific factors (DESIGN.md §17.1).
+
+        Every item loads on the general factor and on at most one specific factor; items listed
+        under no specific factor load on the general factor only. Factors are orthogonal
+        standard normals. Item parameters are ``a1`` (general), ``a2``..``aD`` (specific, in the
+        order of ``specific``; slopes on other specific factors are fixed at 0) and ``d`` (or
+        ``d1``..), matching the columns of mirt's ``bfactor()`` (Chalmers, 2012).
+
+        The marginal likelihood is integrated by Gibbons and Hedeker's (1992) dimension
+        reduction: because item :math:`j` depends on :math:`(\theta_0, \theta_{s(j)})` only,
+
+        .. math::
+            L_p=\sum_g w^{(0)}_g\prod_{s}\Big[\sum_t w^{(s)}_t
+            \prod_{j\in s}P_j(y_{pj}\mid\theta_g,\theta_t)\Big],
+
+        so each E-step needs one :math:`(1+1)`-dimensional grid per specific factor instead of a
+        :math:`(1+S)`-dimensional product grid.
+
+        Parameters
+        ----------
+        specific : mapping of str to iterable of item names or callable
+            Specific factor names (in order, at least one) mapped to their items; each needs at
+            least two items and an item may appear under at most one specific factor.
+        general : str, default "general"
+            Name of the general factor.
+
+        Raises
+        ------
+        SpecificationError
+            If factor names are empty or duplicated, a specific factor has fewer than two items or
+            lists unknown items, an item is under two specific factors, the model already has
+            factors, groups or a latent distribution, or any item is :class:`Rasch` or
+            :class:`PCM` (the factor variances would have to be free; not supported yet).
+        """
+        if self.factors is not None:
+            raise SpecificationError(
+                "This model already has factors; call with_bifactor() on a model without "
+                "with_factors(), with_bifactor() or with_two_tier()."
+            )
+        self._check_reducible("with_bifactor", "Bifactor", specific)
+        if not isinstance(general, str) or not general.strip():
+            raise SpecificationError("The general factor name must be a non-empty string.")
+        resolved: list[tuple[str, tuple[str, ...]]] = [(general, self.item_names)]
+        resolved.extend(self._resolve_specific(specific, {general}))
+        if len(resolved) > MAX_KERNEL_FACTORS:
+            raise SpecificationError(
+                f"with_bifactor() supports at most {MAX_KERNEL_FACTORS - 1} specific factors, got "
+                f"{len(resolved) - 1}."
+            )
+        candidate = replace(self, factors=tuple(resolved), correlated_factors=False, bifactor=True)
+        self._check_parameter_names(candidate, "with_bifactor")
+        return candidate
+
+    def _check_reducible(self, builder: str, label: str, specific: object) -> None:
+        """Run the checks shared by :meth:`with_bifactor` and :meth:`with_two_tier`."""
+        if self.groups is not None:
+            raise SpecificationError(
+                f"{label} models do not support multiple groups yet (DESIGN.md §17.1, §17.2)."
+            )
+        if self.latent is not None:
+            raise SpecificationError(
+                f"with_latent() is not supported for {label.lower()} models; their factors are "
+                "standard normals."
+            )
+        if not isinstance(specific, Mapping) or len(specific) == 0:
+            raise SpecificationError(
+                f"{builder}() requires a non-empty mapping specific factor name -> items."
+            )
+        rasch_like = [name for name, m in self.items if isinstance(m, (Rasch, PCM))]
+        if rasch_like:
+            raise SpecificationError(
+                f"{label} models need free slopes; Rasch / PCM items {rasch_like} are not "
+                "supported yet (their factor variances would have to be free)."
+            )
+
+    def _resolve_specific(
+        self, specific: Mapping[str, ItemSelector], seen: set[str]
+    ) -> list[tuple[str, tuple[str, ...]]]:
+        """Resolve specific factors: at least two items each, each item under at most one."""
+        seen = set(seen)
+        resolved: list[tuple[str, tuple[str, ...]]] = []
+        owner: dict[str, str] = {}
+        for raw_name, selector in specific.items():
+            name = str(raw_name)
+            if not name.strip():
+                raise SpecificationError("Factor names must be non-empty strings.")
+            if name in seen:
+                raise SpecificationError(f"Duplicated factor name: {name!r}.")
+            seen.add(name)
+            if isinstance(selector, str):
+                raise SpecificationError(
+                    f"Factor {name!r} items must be an iterable of item names or a callable, "
+                    f"not a single string {selector!r}."
+                )
+            chosen = self._select(selector)
+            if len(set(chosen)) != len(chosen):
+                dup = sorted({i for i in chosen if chosen.count(i) > 1})
+                raise SpecificationError(f"Factor {name!r} lists duplicated items: {dup}.")
+            if len(chosen) < 2:
+                raise SpecificationError(
+                    f"Specific factor {name!r} needs at least two items, got {len(chosen)} "
+                    "(a one-item specific slope is not identified)."
+                )
+            for item in chosen:
+                if item in owner:
+                    raise SpecificationError(
+                        f"Item {item!r} is listed under specific factors {owner[item]!r} and "
+                        f"{name!r}; each item loads on at most one specific factor."
+                    )
+                owner[item] = name
+            resolved.append((name, chosen))
+        return resolved
+
+    def with_two_tier(
+        self,
+        *,
+        primary: Mapping[str, ItemSelector],
+        specific: Mapping[str, ItemSelector],
+        correlated: bool = True,
+    ) -> Model:
+        r"""Return a two-tier model: correlated primary factors plus specific factors (§17.2).
+
+        Every item loads on at least one primary factor (cross-loadings among primary factors
+        are allowed) and on at most one specific factor. Primary factors are standard normal
+        and may correlate with each other; specific factors are standard normal and orthogonal
+        to every other factor. Item parameters are ``a1``..``aP`` (primary, in the order of
+        ``primary``), ``a(P+1)``..``aD`` (specific, in the order of ``specific``; slopes an item
+        does not load on are fixed at 0) and ``d`` (or ``d1``..), matching the columns of mirt's
+        ``bfactor(data, model, model2 = )`` (Chalmers, 2012).
+
+        The marginal likelihood is integrated with Cai's (2010) dimension reduction: with the
+        primary product grid :math:`\boldsymbol\theta_g` and its multivariate-normal weights
+        :math:`w^{(0)}_g`,
+
+        .. math::
+            L_p=\sum_g w^{(0)}_g\prod_{s}\Big[\sum_t w^{(s)}_t
+            \prod_{j\in s}P_j(y_{pj}\mid\boldsymbol\theta_g,\theta_t)\Big],
+
+        so each E-step needs one :math:`(P+1)`-dimensional grid per specific factor instead of a
+        :math:`(P+S)`-dimensional product grid. A bifactor model (:meth:`with_bifactor`) is the
+        case of one primary factor on every item.
+
+        Parameters
+        ----------
+        primary : mapping of str to iterable of item names or callable
+            Primary factor names (in order, 1 or 2 factors) mapped to the items loading on each.
+            Every model item must load on at least one primary factor.
+        specific : mapping of str to iterable of item names or callable
+            Specific factor names (in order, at least one) mapped to their items; each needs at
+            least two items and an item may appear under at most one specific factor.
+        correlated : bool, default True
+            Whether the correlations among primary factors are estimated (mirt's ``COV =
+            F1*F2`` in ``model2``); ``False`` fixes them at 0.
+
+        Raises
+        ------
+        SpecificationError
+            If there are no or more than two primary factors, factor names are empty or
+            duplicated, a primary factor is empty or lists unknown/duplicated items, an item
+            loads on no primary factor, a specific factor has fewer than two items, an item is
+            under two specific factors, the model already has factors, groups or a latent
+            distribution, or any item is :class:`Rasch` or :class:`PCM`.
+        """
+        if self.factors is not None:
+            raise SpecificationError(
+                "This model already has factors; call with_two_tier() on a model without "
+                "with_factors(), with_bifactor() or with_two_tier()."
+            )
+        self._check_reducible("with_two_tier", "Two-tier", specific)
+        if not isinstance(primary, Mapping) or len(primary) == 0:
+            raise SpecificationError(
+                "with_two_tier() requires a non-empty mapping primary factor name -> items."
+            )
+        if len(primary) > MAX_FACTORS - 1:
+            raise SpecificationError(
+                f"with_two_tier() supports 1 to {MAX_FACTORS - 1} primary factors, got "
+                f"{len(primary)} (the reduced grid has one more dimension than the primary "
+                "factors; DESIGN.md §17.2)."
+            )
+        resolved: list[tuple[str, tuple[str, ...]]] = []
+        seen: set[str] = set()
+        assigned_all: set[str] = set()
+        for raw_name, selector in primary.items():
+            name = str(raw_name)
+            if not name.strip():
+                raise SpecificationError("Factor names must be non-empty strings.")
+            if name in seen:
+                raise SpecificationError(f"Duplicated factor name: {name!r}.")
+            seen.add(name)
+            if isinstance(selector, str):
+                raise SpecificationError(
+                    f"Factor {name!r} items must be an iterable of item names or a callable, "
+                    f"not a single string {selector!r}."
+                )
+            chosen = self._select(selector)
+            if not chosen:
+                raise SpecificationError(f"Factor {name!r} must have at least one item.")
+            if len(set(chosen)) != len(chosen):
+                dup = sorted({i for i in chosen if chosen.count(i) > 1})
+                raise SpecificationError(f"Factor {name!r} lists duplicated items: {dup}.")
+            resolved.append((name, chosen))
+            assigned_all.update(chosen)
+        unassigned = [i for i in self.item_names if i not in assigned_all]
+        if unassigned:
+            raise SpecificationError(f"Items not assigned to any primary factor: {unassigned}.")
+        n_primary = len(resolved)
+        resolved.extend(self._resolve_specific(specific, seen))
+        if len(resolved) > MAX_KERNEL_FACTORS:
+            raise SpecificationError(
+                f"with_two_tier() supports at most {MAX_KERNEL_FACTORS} factors in total, got "
+                f"{len(resolved)}."
+            )
+        candidate = replace(
+            self,
+            factors=tuple(resolved),
+            correlated_factors=bool(correlated) and n_primary > 1,
+            n_primary_factors=n_primary,
+        )
+        self._check_parameter_names(candidate, "with_two_tier")
         return candidate
 
     def with_latent(self, dist: LatentSpec) -> Model:
@@ -455,13 +784,21 @@ class Model:
             )
         return replace(self, latent=dist)
 
-    def with_groups(self, **latents: LatentSpec) -> Model:
+    def with_groups(
+        self, groups: Mapping[str, LatentSpec] | None = None, /, **latents: LatentSpec
+    ) -> Model:
         """Return a multiple-group model; keyword order defines the groups, the first is reference.
 
-        Every group must use ``Normal`` or every group must use ``EmpiricalHistogram`` (mixing
-        them across groups raises :class:`~flexpyirt.errors.SpecificationError`; DESIGN.md §4.4).
-        :class:`~flexpyirt.DavidianCurve` and :class:`~flexpyirt.NormalMixture` are single-group
-        only.
+        The groups are given either as keywords or as one positional mapping (insertion order),
+        which suits many groups and labels that are not Python identifiers (DESIGN.md §26):
+        ``with_groups({"ref": Normal.standard()} | {s: Normal.free() for s in schools})``.
+
+        Every group uses the same latent family: ``Normal``, ``EmpiricalHistogram``,
+        :class:`~flexpyirt.DavidianCurve` (same ``degree``) or :class:`~flexpyirt.NormalMixture`
+        (same ``n_components``); mixing them raises :class:`~flexpyirt.errors.SpecificationError`
+        (DESIGN.md §4.4, §27). In a Davidian model, a group that should stay normal gets its
+        ``phi_*`` rows fixed at 0 in the parameter table (a Davidian curve with all angles 0 is the
+        normal density).
 
         Examples
         --------
@@ -472,27 +809,26 @@ class Model:
         factor: ``Normal.free()`` frees all of that group's factor means and variances, and the
         factor correlations follow ``with_factors(correlated=...)`` in every group (§15.43).
         """
+        if groups is not None:
+            if latents:
+                raise SpecificationError(
+                    "with_groups() takes the groups as one mapping or keywords, not both."
+                )
+            if not isinstance(groups, Mapping):
+                raise SpecificationError("with_groups() expects a mapping of group name to latent.")
+            latents = {str(name): dist for name, dist in groups.items()}
         if len(latents) < 2:
             raise SpecificationError("with_groups() needs at least two groups.")
         for name, dist in latents.items():
-            if isinstance(dist, (DavidianCurve, NormalMixture)):
-                raise SpecificationError(
-                    f"{type(dist).__name__} is only supported for single-group models "
-                    f"(group {name!r}); "
-                    "use Model.with_latent() instead of with_groups()."
-                )
-            if not isinstance(dist, (Normal, EmpiricalHistogram)):
+            if not isinstance(dist, (Normal, EmpiricalHistogram, DavidianCurve, NormalMixture)):
                 raise SpecificationError(f"Unsupported latent distribution for group {name!r}.")
         kinds = {type(dist) for dist in latents.values()}
-        if self.is_multidimensional and EmpiricalHistogram in kinds:
+        if self.is_multidimensional and kinds != {Normal}:
             raise SpecificationError(
-                "EmpiricalHistogram is only supported for unidimensional models."
+                "EmpiricalHistogram, DavidianCurve and NormalMixture are only supported for "
+                "unidimensional models."
             )
-        if EmpiricalHistogram in kinds and len(kinds) > 1:
-            raise SpecificationError(
-                "Cannot mix EmpiricalHistogram and Normal across groups; when EmpiricalHistogram "
-                "is specified, every group must use EmpiricalHistogram."
-            )
+        _check_group_latent_family(tuple(latents.items()))
         if self.latent is not None:
             raise SpecificationError("Use with_groups() instead of with_latent() for groups.")
         return replace(self, groups=tuple(latents.items()))
@@ -571,7 +907,7 @@ class Model:
         param : str
             Internal item parameter name (e.g. ``"a"``, ``"a1"``, ``"d"``, ``"g"``, ``"u"``,
             ``"d1"``).
-        dist : NormalPrior, LogNormalPrior, or BetaPrior
+        dist : NormalPrior, LogNormalPrior, BetaPrior, or LogitNormalPrior
             Prior distribution on the natural parameter scale.
         items : iterable of str or callable, optional
             Items to attach the prior to (default: every item in the model).
@@ -579,7 +915,7 @@ class Model:
         if not isinstance(dist, PRIOR_TYPES):
             raise SpecificationError(
                 f"Unsupported prior distribution {dist!r}; "
-                "use NormalPrior, LogNormalPrior or BetaPrior."
+                "use NormalPrior, LogNormalPrior, BetaPrior or LogitNormalPrior."
             )
         latent_prefixes = ("mean_", "var_", "cor_", "phi_", "rmean_", "rvar_", "logit_")
         if param in ("mean", "var") or param.startswith(latent_prefixes):
@@ -619,3 +955,27 @@ class Model:
             item_names=None if item_names is None else list(item_names),
             table=None,
         ).table
+
+
+def _check_group_latent_family(groups: tuple[tuple[str, LatentSpec], ...]) -> None:
+    """Raise unless every group uses one latent family (and one degree / size; DESIGN.md §27)."""
+    kinds = {type(dist) for _, dist in groups}
+    if len(kinds) > 1:
+        names = ", ".join(sorted(k.__name__ for k in kinds))
+        hint = (
+            " To keep a group normal in a Davidian model, use DavidianCurve for every group and "
+            "fix that group's phi_* rows at 0 in the parameter table (DESIGN.md §27)."
+            if DavidianCurve in kinds
+            else ""
+        )
+        raise SpecificationError(
+            f"Every group must use the same latent distribution family; got {names}.{hint}"
+        )
+    sizes = {
+        dist.degree if isinstance(dist, DavidianCurve) else dist.n_components
+        for _, dist in groups
+        if isinstance(dist, (DavidianCurve, NormalMixture))
+    }
+    if len(sizes) > 1:
+        what = "degree" if DavidianCurve in kinds else "n_components"
+        raise SpecificationError(f"Every group must use the same {what}; got {sorted(sizes)}.")

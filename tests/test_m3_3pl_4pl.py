@@ -51,6 +51,7 @@ def test_fourpl_probabilities_sum_to_one(a: float, d: float, g: float, u: float)
     np.testing.assert_allclose(p[:, 1], expected_p1, rtol=1e-11, atol=1e-14)
 
 
+@pytest.mark.slow
 @settings(deadline=None)
 @given(
     a=st.floats(-4.0, 4.0),
@@ -97,6 +98,7 @@ def test_threepl_fixed_g0_equals_2pl_kernel() -> None:
         np.testing.assert_array_equal(np.asarray(lp_4pl), np.asarray(lp_2pl))
 
 
+@pytest.mark.slow
 def test_threepl_fixed_g0_equals_2pl_fit() -> None:
     a = np.array([1.1, 1.4, 0.9, 1.3, 1.0, 1.2])
     d = np.array([-0.6, 0.3, -0.2, 0.5, 0.0, -0.4])
@@ -164,6 +166,7 @@ def test_heywood_warning_on_steep_slope() -> None:
 # ---- Mixed models, FIPC, identification, validation ----------------------------------------
 
 
+@pytest.mark.slow
 def test_mixed_twopl_threepl_fourpl_model() -> None:
     a = np.array([1.5, 1.6, 1.8, 1.7, 2.2, 2.1, 1.8, 1.6])
     d = np.array([0.2, -0.3, -0.6, -0.7, 0.0, -0.1, -0.5, 0.4])
@@ -238,6 +241,28 @@ def test_fix_from_3pl_and_4pl() -> None:
     # Missing u for a 4PL item raises SpecificationError.
     with pytest.raises(SpecificationError, match="no column 'u'"):
         Model.uniform(FourPL(), items=["q01", "q02"]).fix_from(bank_3pl, parameterization="irt")
+
+
+def test_fix_from_rejects_several_rows_per_item() -> None:
+    # Issue #145: the last row won silently, e.g. with the items table of a multiple-group fit.
+    bank = pd.DataFrame(
+        {
+            "group": ["g1", "g1", "g2", "g2"],
+            "item": ["q01", "q02", "q01", "q02"],
+            "a": [1.0, 1.2, 1.5, 0.7],
+            "d": [0.0, 0.3, 0.1, -0.2],
+        }
+    )
+    spec = Model.uniform(TwoPL(), items=["q01", "q02", "q03"])
+    with pytest.raises(SpecificationError, match=r"several rows for \['q01', 'q02'\]"):
+        spec.fix_from(bank)
+    # Duplicates of items that are not fixed do not matter.
+    with pytest.raises(SpecificationError, match=r"several rows for \['q02'\]"):
+        spec.fix_from(bank.iloc[1:])
+    one = spec.fix_from(bank.iloc[[1, 0, 3]], items=["q01"])
+    assert {(i, p): v for i, p, v in one.fixed} == {("q01", "a"): 1.0, ("q01", "d"): 0.0}
+    per_group = spec.fix_from(bank[bank["group"] == "g2"])
+    assert dict(((i, p), v) for i, p, v in per_group.fixed)[("q02", "a")] == 0.7
 
 
 def test_fix_from_mixed_bank_nan_and_missing_slope() -> None:
@@ -363,6 +388,7 @@ def test_edited_table_bounds_validated_against_model_domain() -> None:
     assert float(prepared.table.loc[row_var, "lower"].iloc[0]) == 0.1
 
 
+@pytest.mark.slow
 def test_fixed_asymptote_adjusts_free_asymptote_start_value() -> None:
     a = np.array([1.4, 1.5, 1.3, 1.6, 1.4, 1.5])
     d = np.array([0.0, -0.3, -0.5, -0.2, -0.4, -0.1])

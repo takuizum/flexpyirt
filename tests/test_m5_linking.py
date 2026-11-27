@@ -22,6 +22,7 @@ from flexpyirt import (
     FourPL,
     LinkResult,
     Model,
+    Nominal,
     Normal,
     Quadrature,
     Rasch,
@@ -39,7 +40,15 @@ from flexpyirt._linking import (
     transform_kernel_params,
 )
 from flexpyirt.errors import ConvergenceWarning, SpecificationError
-from flexpyirt.items import DichotomousKernel, FourPLKernel, GPCMKernel, GradedKernel, ItemModel
+from flexpyirt.items import (
+    DichotomousKernel,
+    FourPLKernel,
+    GPCMKernel,
+    GradedKernel,
+    ItemModel,
+    NominalKernel,
+    irt_thresholds,
+)
 
 METHODS: tuple[LinkMethod, ...] = ("stocking_lord", "haebara")
 
@@ -109,6 +118,8 @@ def _make_fixed_fit(
         (GRM(n_categories=4), np.array([1.3, 1.4, 0.1, -1.2])),
         (GPCM(n_categories=4), np.array([1.2, 0.8, 0.2, -0.9])),
         (PCM(n_categories=3), np.array([1.0, 0.5, -0.4])),
+        (Nominal(n_categories=4), np.array([1.1, 2.3, -0.4, 0.6, 0.9, -0.7])),
+        (Nominal(n_categories=2), np.array([0.8, 0.3])),
     ],
 )
 @pytest.mark.parametrize(("a_const", "b_const"), [(1.35, 0.6), (0.75, -1.1), (2.2, 2.5)])
@@ -126,8 +137,8 @@ def test_transform_kernel_params_preserves_icc_and_irt_thresholds(
     np.testing.assert_allclose(np.asarray(p_star), np.asarray(p_orig), rtol=0, atol=1e-14)
 
     # Display IRT thresholds transform linearly: b* = A * b + B.
-    b_orig = np.asarray(kernel.irt_thresholds(jnp.asarray(params)))
-    b_star = np.asarray(kernel.irt_thresholds(xi_star))
+    b_orig = np.asarray(irt_thresholds(kernel, jnp.asarray(params)))
+    b_star = np.asarray(irt_thresholds(kernel, xi_star))
     np.testing.assert_allclose(b_star, a_const * b_orig + b_const, rtol=1e-13, atol=1e-13)
 
 
@@ -148,6 +159,18 @@ def test_transform_kernel_params_preserves_asymptotes_and_grm_order() -> None:
     np.testing.assert_allclose(
         np.asarray(out_gpcm),
         np.array([1.2 / 1.5, 0.5 - shift, -0.2 - 2 * shift, -1.0 - 3 * shift]),
+        atol=1e-15,
+    )
+
+
+def test_transform_kernel_params_nominal_keeps_scoring_coefficients() -> None:
+    # Nominal: a* = a / A, ak* = ak, d_k* = d_k - ak_k * a * B / A with ak_{K-1} = K - 1.
+    xi = jnp.array([1.1, 2.3, -0.4, 0.6, 0.9, -0.7])
+    out = transform_kernel_params(NominalKernel(4), xi, jnp.array(1.5), jnp.array(0.6))
+    shift = 1.1 * 0.6 / 1.5
+    np.testing.assert_allclose(
+        np.asarray(out),
+        np.array([1.1 / 1.5, 2.3, -0.4, 0.6 - 2.3 * shift, 0.9 + 0.4 * shift, -0.7 - 3.0 * shift]),
         atol=1e-15,
     )
 
@@ -208,6 +231,7 @@ def test_criterion_autodiff_gradient_matches_finite_differences(
 # ---- Identity and exact transformation recovery across all 7 models + mixed formats --------------
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("method", METHODS)
 @pytest.mark.parametrize("symmetric", [False, True])
 def test_identity_source_equals_target_mixed_format(method: LinkMethod, symmetric: bool) -> None:
@@ -243,6 +267,7 @@ def test_identity_source_equals_target_mixed_format(method: LinkMethod, symmetri
     assert math.isnan(linked.A_se) and math.isnan(linked.B_se)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("method", METHODS)
 @pytest.mark.parametrize("symmetric", [False, True])
 def test_exact_recovery_of_known_transformation_all_models(
@@ -256,6 +281,7 @@ def test_exact_recovery_of_known_transformation_all_models(
         "c_4pl": FourPL(),
         "c_grm": GRM(n_categories=4),
         "c_gpcm": GPCM(n_categories=4),
+        "c_nom": Nominal(n_categories=4),
     }
     tgt_model = Model.from_items({**common_spec, "t_only": TwoPL()})
     src_model = Model.from_items({**common_spec, "s_only": GRM(n_categories=3)})
@@ -266,6 +292,7 @@ def test_exact_recovery_of_known_transformation_all_models(
         "c_4pl": np.array([1.3, -0.2, 0.12, 0.92]),
         "c_grm": np.array([1.1, 1.4, 0.2, -1.1]),
         "c_gpcm": np.array([1.0, 0.8, 0.1, -0.9]),
+        "c_nom": np.array([0.9, 2.2, 0.6, 0.7, 0.4, -0.8]),
         "t_only": np.array([0.9, 0.5]),
     }
     # Target -> Source is the inverse transform (1/A, -B/A).
@@ -291,7 +318,7 @@ def test_exact_recovery_of_known_transformation_all_models(
     assert linked.criterion == pytest.approx(0.0, abs=1e-22)
     assert linked.common_items == tuple(common_spec.keys())
     assert list(linked.items["item"]) == [*common_spec.keys(), "s_only"]
-    assert list(linked.items["common"]) == [True, True, True, True, True, False]
+    assert list(linked.items["common"]) == [True, True, True, True, True, True, False]
 
     # Common items transformed onto the target scale reproduce target parameters identically.
     items_idx = linked.items.set_index("item")
@@ -300,6 +327,12 @@ def test_exact_recovery_of_known_transformation_all_models(
             assert items_idx.loc[name, p] == pytest.approx(float(val), abs=1e-11)
 
     # Transformed item table works directly with Model.fix_from() in both parameterizations.
+    # (The nominal model has no IRT parameterization, so it is left out of the "irt" check.)
+    fipc_si = Model.from_items(common_spec).fix_from(
+        linked.items, parameterization="slope_intercept"
+    )
+    assert len(fipc_si.fixed) == sum(len(m.kernel.param_names) for m in common_spec.values())
+    common_spec = {k: v for k, v in common_spec.items() if k != "c_nom"}
     fipc_si = Model.from_items(common_spec).fix_from(
         linked.items, parameterization="slope_intercept"
     )
@@ -307,6 +340,7 @@ def test_exact_recovery_of_known_transformation_all_models(
     assert len(fipc_si.fixed) == len(fipc_irt.fixed)
 
 
+@pytest.mark.slow
 def test_newton_converges_from_perturbed_starting_point() -> None:
     """Verify solve_linking converges from a far-off initial (A, B), not just Mean/Mean."""
     nodes = jnp.linspace(-5.0, 5.0, 41)
@@ -373,6 +407,7 @@ def fitted_2pl_pair() -> tuple[FitResult, FitResult, pd.DataFrame]:
     return res_src, res_tgt, df_src
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("method", METHODS)
 def test_symmetric_linking_is_exactly_reversible(
     fitted_2pl_pair: tuple[FitResult, FitResult, pd.DataFrame], method: LinkMethod
@@ -386,6 +421,7 @@ def test_symmetric_linking_is_exactly_reversible(
     assert rev.criterion == pytest.approx(fwd.criterion, rel=1e-10)
 
 
+@pytest.mark.slow
 def test_items_mapping_and_custom_nodes_weights(
     fitted_2pl_pair: tuple[FitResult, FitResult, pd.DataFrame],
 ) -> None:
@@ -524,6 +560,7 @@ def test_summary_str_and_html(
 # ---- Ogasawara (2001) delta-method SE validation (finite differences + Monte Carlo) -------------
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("method", METHODS)
 @pytest.mark.parametrize("symmetric", [False, True])
 def test_ogasawara_se_matches_central_finite_differences(
@@ -695,6 +732,7 @@ def test_ogasawara_se_monte_carlo_linearization_check(
     assert linked.B_se == pytest.approx(float(boot_se[1]), rel=0.06)
 
 
+@pytest.mark.slow
 def test_se_none_and_multigroup_and_eh(
     fitted_2pl_pair: tuple[FitResult, FitResult, pd.DataFrame],
 ) -> None:
@@ -747,6 +785,7 @@ def test_se_none_and_multigroup_and_eh(
 # ---- Validation and error handling ---------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_errors_and_validation(
     fitted_2pl_pair: tuple[FitResult, FitResult, pd.DataFrame],
 ) -> None:
@@ -836,9 +875,10 @@ def test_errors_and_validation(
             quadrature=Quadrature.equispaced(7, bounds=(-3, 3)),
             se=None,
         )
-    with pytest.raises(SpecificationError, match="unidimensional"):
+    # A multidimensional fit links only with a fit of the same number of factors (DESIGN §19).
+    with pytest.raises(SpecificationError, match="same number of factors"):
         link(res_md, res_tgt)
-    with pytest.raises(SpecificationError, match="unidimensional"):
+    with pytest.raises(SpecificationError, match="same number of factors"):
         link(res_src, res_md)
 
     # transform_theta errors & summary digits validation.
@@ -882,6 +922,7 @@ def multigroup_anchor_fit() -> FitResult:
     return fit(spec, df, group=grp, method=BAEM(tol=1e-8, squarem=True), se="oakes")
 
 
+@pytest.mark.slow
 def test_same_multigroup_fit_uses_joint_vcov(multigroup_anchor_fit: FitResult) -> None:
     """One FitResult on both sides: cross-covariance from the joint vcov enters the SEs."""
     res = multigroup_anchor_fit
@@ -968,6 +1009,7 @@ def test_same_multigroup_fit_uses_joint_vcov(multigroup_anchor_fit: FitResult) -
     assert not np.allclose(indep, expected, rtol=1e-3, atol=0.0)
 
 
+@pytest.mark.slow
 def test_link_requires_x64() -> None:
     code = (
         "import flexpyirt\n"
@@ -1009,6 +1051,7 @@ def test_fitted_grid_keeps_gauss_hermite_base_weights(mean: float, var: float) -
         assert float(w @ nodes**2) == pytest.approx(1.0, abs=1e-13)
 
 
+@pytest.mark.slow
 def test_fitted_grid_uses_the_fitted_davidian_density() -> None:
     from flexpyirt import DavidianCurve
     from flexpyirt.latent import davidian_log_weights, davidian_param_names

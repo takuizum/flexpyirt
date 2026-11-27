@@ -10,6 +10,7 @@
 # scale, so V6 compares FIPC fits: one group, and two groups with the free items equal across
 # groups. Settings as in m2_reference.R: optimizer = "NR", accelerate = "none", 61 points on
 # [-6, 6] (theta_lim inside `technical`).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -66,7 +67,7 @@ write_case <- function(case, description, dat, group, fit_fun, richardson = TRUE
   prior <- extract.mirt(m_oakes, "Prior")
   res <- list(
     meta = list(case = case, description = description,
-                r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+                r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
                 TOL = TOL, quadpts = quad$quadpts, theta_lim = quad$theta_lim,
                 grid_check = range(m_oakes@Model$Theta),
                 accelerate = "none", optimizer = "NR", dentype = "EH",

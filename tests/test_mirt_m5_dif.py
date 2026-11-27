@@ -20,6 +20,9 @@ import pytest
 from flexpyirt import BAEM, FitResult, Model, Normal, Quadrature, TwoPL, fit
 from tests._reference import check_reference_meta
 
+# mirt reference comparison: nightly and release-PR CI only (CONTRIBUTING.md, "Tests").
+pytestmark = pytest.mark.slow
+
 REFERENCE_DIR = Path(__file__).parent / "reference"
 WIDE = Quadrature.equispaced(81, bounds=(-8, 8))
 TOL_X2 = 1e-5

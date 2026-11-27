@@ -15,6 +15,7 @@
 #
 # Grid: v8_sim_pcm has a free latent variance (generating var = 1.5), so it uses 81 points on
 # [-8, 8] (same 0.2 spacing) to make grid truncation negligible (DESIGN.md §14.9, VALIDATION.md).
+source(file.path("validation", "r", "setup.R"))  # mirt from GitHub; mirt_version / mirt_sha
 suppressMessages({
   library(mirt)
   library(jsonlite)
@@ -71,7 +72,7 @@ write_case <- function(case, description, dat, itemtype, quad, n_cat, extra = li
                 quadpts = quad$quadpts, theta_lim = quad$theta_lim)
   res <- c(list(
     meta = list(case = case, description = description, itemtype = itemtype, n_cat = n_cat,
-                r_version = R.version.string, mirt_version = as.character(packageVersion("mirt")),
+                r_version = R.version.string, mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
                 TOL = 1e-10, quadpts = quad$quadpts, theta_lim = quad$theta_lim,
                 grid_check = range(m_oakes@Model$Theta),
                 accelerate = "none", optimizer = "NR",

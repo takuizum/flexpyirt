@@ -10,5 +10,5 @@ Closes #
 
 ## Checks / 確認
 - [ ] `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest` passes / が通る
-- [ ] Numerical changes come with mirt agreement tests (docs/VALIDATION.md) / 数値計算の変更なら mirt 照合テストを追加・更新した
+- [ ] Numerical changes come with mirt agreement tests (docs/dev/VALIDATION.md) / 数値計算の変更なら mirt 照合テストを追加・更新した
 - [ ] Public API changes are reflected in docs/reference and README, in English and Japanese / 公開 API を変えたなら docs/reference と README を英日で更新した

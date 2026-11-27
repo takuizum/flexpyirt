@@ -97,12 +97,12 @@ def test_model_unsupported_combinations() -> None:
     items = ["q1", "q2", "q3", "q4"]
     base = Model.uniform(TwoPL(), items=items)
 
-    with pytest.raises(SpecificationError, match="single-group"):
-        base.with_groups(ref=DavidianCurve(3), focal=DavidianCurve(3))
-    with pytest.raises(SpecificationError, match="single-group"):
+    # One family and one degree across groups (DESIGN.md §27).
+    assert base.with_groups(ref=DavidianCurve(3), focal=DavidianCurve(3)).is_davidian
+    with pytest.raises(SpecificationError, match="phi_\\* rows at 0"):
         base.with_groups(ref=Normal.standard(), focal=DavidianCurve(3))
-    with pytest.raises(SpecificationError, match="single-group"):
-        Model(items=base.items, groups=(("ref", DavidianCurve(2)), ("focal", DavidianCurve(2))))
+    with pytest.raises(SpecificationError, match="same degree"):
+        Model(items=base.items, groups=(("ref", DavidianCurve(2)), ("focal", DavidianCurve(3))))
 
     with pytest.raises(SpecificationError, match="unidimensional"):
         base.with_factors({"F1": ["q1", "q2"], "F2": ["q3", "q4"]}).with_latent(DavidianCurve(2))
@@ -217,6 +217,7 @@ def test_degree_nesting() -> None:
     )
 
 
+@pytest.mark.slow
 def test_finite_gradients_and_polynomial_root_guard() -> None:
     nodes = jnp.linspace(-6.0, 6.0, 61, dtype=jnp.float64)
     n_bar = jnp.exp(-0.5 * (nodes - 0.3) ** 2)
@@ -258,6 +259,7 @@ def test_finite_gradients_and_polynomial_root_guard() -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_identification_errors_and_rasch_fipc() -> None:
     df, a_true, d_true = _skewed_2pl_data(n_obs=500, n_items=8)
     with pytest.raises(IdentificationError, match="variance"):
@@ -338,6 +340,7 @@ def test_plain_em_vs_squarem_monotonicity_and_oakes_equals_hessian() -> None:
     np.testing.assert_allclose(oakes, hess, rtol=1e-9, atol=1e-9 * np.abs(hess).max())
 
 
+@pytest.mark.slow
 def test_fixed_zero_angles_match_normal_fit() -> None:
     df, _, _ = _skewed_2pl_data(n_obs=400, n_items=6)
     spec_nm = Model.uniform(TwoPL(), items=df.columns)
@@ -357,6 +360,7 @@ def test_fixed_zero_angles_match_normal_fit() -> None:
     np.testing.assert_allclose(res_dc.vcov, res_nm.vcov, rtol=1e-7, atol=1e-9)
 
 
+@pytest.mark.slow
 def test_scoring_reporting_item_fit_and_json_roundtrip(tmp_path: Path) -> None:
     df, res = _fitted_dc3()
     sub = df.iloc[:30]
@@ -413,11 +417,10 @@ def test_scoring_reporting_item_fit_and_json_roundtrip(tmp_path: Path) -> None:
     np.testing.assert_allclose(pv_means, eap_dc["theta"].to_numpy()[:5], atol=0.05)
     np.testing.assert_allclose(pv_sds, eap_dc["se"].to_numpy()[:5], atol=0.05)
 
-    # MAP and item_fit raise SpecificationError.
+    # MAP raises SpecificationError; item_fit() integrates over the fitted curve (DESIGN §27).
     with pytest.raises(SpecificationError, match="MAP"):
         res.score(sub, method="MAP")
-    with pytest.raises(SpecificationError, match="Normal"):
-        res.item_fit(df)
+    assert list(res.item_fit(df)["item"]) == list(df.columns)
 
     # JSON round trip preserves everything bit-for-bit (and keeps schema_version == 3).
     out_path = tmp_path / "dc3.json"
@@ -470,6 +473,7 @@ def test_start_angles_match_total_score_skewness(degree: int) -> None:
     assert any(abs(s) > 0.0 for s in starts)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("degree", [1, 10])
 def test_fit_degree_extremes(degree: int) -> None:
     df, _, _ = _skewed_2pl_data()
@@ -486,6 +490,7 @@ def test_fit_degree_extremes(degree: int) -> None:
     assert res.n_params == 2 * df.shape[1] + degree
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("free_phi", [False, True])
 def test_fit_with_polynomial_root_on_a_quadrature_node(free_phi: bool) -> None:
     # degree=1, phi_1 = pi/2 -> P_1(z) = z, whose root z = 0 is the grid node theta = 0, so
@@ -511,6 +516,7 @@ def test_fit_with_polynomial_root_on_a_quadrature_node(free_phi: bool) -> None:
         assert float(res.latent["phi_1_se"].iloc[0]) > 0.0
 
 
+@pytest.mark.slow
 def test_malformed_davidian_json() -> None:
     _, res = _fitted_dc3()
     payload = json.loads(res.to_json())
