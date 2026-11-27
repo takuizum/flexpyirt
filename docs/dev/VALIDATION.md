@@ -1556,14 +1556,9 @@ English | [日本語](VALIDATION.ja.md)
   per-pair thresholds, which differs under missing data (6e-3 on the MCAR case), so that case is
   lavaan-only. A further self-check confirms that each pair's two-step gradient vanishes at the
   estimate. The bivariate normal CDF is unit-tested against Plackett's integral.
-- **Number of dimensions (V25, M5)**: deterministic quantities are computed in R from the V24
-  lavaan matrices, so both sides see the same input. EFA.dimensions' `PARALLEL()` masks
-  EFAtools' when both are attached; the script calls `EFAtools::` explicitly. EFA.dimensions'
-  fourth-power MAP is $(\operatorname{tr}(R^{*4})-p)/(p(p-1))$ (a matrix power; it exceeds 1 on
-  these data), so the fourth power is compared with an independent elementwise implementation
-  and EFA.dimensions' values are only recorded. Normal-data references are stochastic on both
-  sides; the test uses a fixed key and compares the means by $z$ (standard error from the
-  replications, $\sqrt2$ for two independent means) and the 95th percentiles in absolute value.
+- **Cases of flexpyctt (V25, V27–V30, V46, V47)**: the notes on these cases moved to flexpyctt's
+  design document ([DESIGN.md §10](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.md)) on 2026-11-27. V24 is described in both
+  places, because flexpyirt's JAX `polychoric()` is checked on a copy of its reference file.
 - **Local dependence and model-based PA (V26, M5)**: mirt fits use `quadpts = 61`, `TOL = 1e-10`,
   `optimizer = "NR"`; flexpyirt refits with `BAEM(tol=1e-9)`, so the comparison includes the
   estimation agreement (log-likelihoods to $10^{-9}$ relative). ltm ships its own `Science` and
@@ -1647,95 +1642,6 @@ English | [日本語](VALIDATION.ja.md)
   **Not implemented**: `jsi()` for these models (an item has a primary and a specific slope,
   and mirt's `type = "JSI"` requires one factor); multiple groups (bifactor and two-tier models
   are single-group).
-- **DETECT (V27, M5)**: sirt's `conf.detect()` is called with `smooth = FALSE`; with the
-  default `smooth = TRUE` and `use_sum_score = TRUE` it subtracts raw item scores from the
-  standardized total score, which mis-forms the rest-score groups (DESIGN §16.13). `expl.detect()`
-  forces `smooth = FALSE` itself. Its returned `detect.unweighted` holds only the validation-half
-  indices, so the script recomputes the estimation-half indices with `conf.detect()` on the
-  estimation rows.
-- **EFA and Hull (V28, M5)**: unrotated loadings are compared through the implied
-  $\Lambda\Lambda^\top$ (invariant to column signs and to the order of equal eigenvalues).
-  `HULL()`'s bound $J$ comes from a random parallel analysis, so the script records
-  `settings$n_fac_max` and the test passes it as `max_factors`. EFAtools' `optim()`-based solutions
-  are less tightly converged than flexpyirt's, so the test also checks that flexpyirt's objective is
-  not above EFAtools' at EFAtools' $\psi=1-h^2$; the remaining differences are largest at Heywood
-  solutions (bounded uniquenesses), which Hull includes for $k$ beyond the true number of factors.
-- **Comparison data (V29, M5)**: CD is random on both sides. The generator is checked
-  exactly by reproducing EFAtools' random draws in R (`set.seed`, then the same `sample()` /
-  `rnorm()` calls in the generator's order), exporting them and feeding them to flexpyirt; this is
-  exact for one factor, where the loadings' sign is fixed by the generator. The selection is
-  checked on data sets where the answer is clear; the mean RMSEs are compared loosely because
-  each side draws its own populations: 15% for the retained numbers of factors, and 60% for the
-  rejected extra factor, whose single population varies much more (0.044 to 0.072 over six seeds
-  where EFAtools' draw gave 0.048). JSON `auto_unbox` would turn a one-element $p$-value vector
-  into a scalar, so the script writes `as.list()`.
-- **DIMTEST (V30, M5)**: accepted on a simulation study instead of a reference
-  comparison (DESIGN §16.16 has the table): with 200 replications the type I error at .05 is
-  0.5–1.0% (conservative; the bootstrap removes the bias but $T$'s SD under the null is about 0.72)
-  and the power 0.99–1.00. Rerun with `uv run python flexpyctt/validation/simulation/dimtest_study.py`
-  (about 4 minutes); the tests run 20 null and 10 alternative replications.
-- **Classical item analysis (V46, flexpyctt, #101)**:
-  `flexpyctt/validation/r/ctt_item_analysis_reference.R` (R 4.6.2, psych 2.6.9, ltm
-  1.2.0, polycor 0.8.2, lavaan 0.7.3) writes `flexpyctt/tests/reference/v46_item_analysis.json`;
-  `flexpyctt/tests/test_item_analysis.py` compares. Four simulated cases: 10
-  multiple-choice items ($N=500$, keys and distractors of varying pull, one item with five
-  options) complete and with 5% MCAR, and 6 items scored 0–4 ($N=300$, graded model) complete and
-  with 6% MCAR; plus three items for a just-identified omega and the complete 0–4 data with one
-  item reverse-scored, where psych's default `flip = TRUE` reverses it (its `flip = FALSE` value
-  is also recorded, 0.18 lower, and equals the unreversed formula). Observed differences: closed forms
-  (alpha, standardized alpha, if-deleted values, Feldt bounds, means, SDs, item–total and
-  item–rest correlations, point-biserial, polyserial and biserial, option proportions,
-  point-biserials, mean scores and group proportions) $\le6\times10^{-15}$; keyed scores
-  identical; omega total $\le7\times10^{-8}$ and loadings $\le1.4\times10^{-6}$ (psych's `fa()`
-  stops its minres optimization earlier); polychoric matrices against lavaan $\le2\times10^{-8}$; the reversed item is the one psych
-  reverses, and omega with it reversed equals omega of the data reverse-scored by hand.
-  Known differences, each asserted in the tests: (1) psych's `raw.r` correlates with
-  `rowSums(na.rm = TRUE)`, so with missing data it is compared with the $C$-based
-  `colSums(C)/sqrt(diag(C) * sum(C))` computed in R, and `raw.r` itself only on complete or
-  listwise data (DESIGN §16.21); `r.drop` is $C$-based in psych too and is compared in every
-  case. (2) ltm's raw `cronbach.alpha(na.rm = TRUE)` takes the total variance from complete rows
-  and the item variances from all observed scores, which is neither rule; it is compared on
-  complete data only (its standardized alpha uses complete rows and matches `"listwise"`).
-  (3) psych's `biserial()` equals the two-step biserial times $\sqrt{(n-1)/n}$. (4) psych's
-  `polyserial()` counts missing rows in its $n$, so it is compared on complete data; with missing
-  data the two-step factor $\sigma_j/\sum_k\phi(\tau_{jk})$ is recomputed in R. (5) Option
-  statistics have no installed R implementation (TAM's `tam.ctt3` is not installed); the script
-  computes them in base R from their definitions, and option proportions also match psych's
-  `responseFrequency()`. lavaan's one-factor CFA, listed in the issue, was not used (ML on the
-  covariance matrix is another estimator and scale).
-- **Observed-score DIF (V47, flexpyctt, #102)**: references from difR 6.1.0 and base R,
-  committed in `flexpyctt/tests/reference/v47_dif.json`. Measured agreement: MH
-  $\chi^2$, $\hat\alpha_{MH}$ and Phillips–Holland variance, GMH statistics (difGMH and
-  `mantelhaen.test()` on groups x categories x strata tables), Mantel statistics and odds ratios
-  to $10^{-10}$ relative (the computations are closed form); purification paths (`difPur`),
-  iteration counts, convergence flags and final flags equal. Logistic regression: `difLogistic()`
-  calls `glm()` with its default `epsilon = 1e-8`, which leaves the coefficients and statistics
-  up to $2\times10^{-4}$ (relative) from the MLE on these data, so the script replaces
-  `stats::glm.control` by one with `epsilon = 1e-14`; then LRT statistics, $\Delta R^2$ and
-  coefficients agree to $10^{-8}$ and SEs and Wald statistics to $10^{-6}$ (`glm()`'s `vcov()`
-  uses the IRLS weights of the previous iterate; the deviance criterion stops at a step of about
-  $\sqrt{\epsilon}$). Known differences, checked in the tests: (1) `mantelhaen.test()` drops the
-  continuity correction when $\lvert\sum A-\sum E(A)\rvert<1/2$ (difR and flexpyctt do not; three
-  items of the simulated set); (2) `difMantel.poly()` rounds its output (statistic to 3, odds
-  ratio to 4 decimals) and its purification removes a flagged item from its own matching
-  score, so Mantel's statistic and its purification path are recomputed in R with difR's rule
-  for the other methods, and `difMantel.poly()` is a rounded cross-check; (3)
-  `liu_agresti_ccor(se = "liu_agresti")` differentiates $T=\sum ad/N-\hat\psi\sum bc/N$ with
-  respect to the focal cumulative count as $a/N-\hat\psi b/N$ (the sign of $a/N$ is wrong) and
-  divides by $\sum bc/N$ instead of $\sum ad/N$, so its `SE_log_Psi` is neither
-  $SE(\ln\hat\psi)$ nor $SE(\hat\psi)$ (0.031 against a Monte Carlo SD of 0.0296 for $\psi=1.48$,
-  300 replications of $N=20000$ in three strata; 0.14 against the Phillips–Holland 0.36 on a
-  `verbal` item). flexpyctt and the R script's `la_eq3()` use instead Liu & Agresti's (1996)
-  eq. 3, which stays valid with many small strata (DESIGN §16.20). Its R implementation, written
-  in the paper's notation and independently of the Python one, reproduces the paper's worked
-  example (Table 1, 28 centres: $\ln\hat\theta=-1.153$, SE .571), and the Python tests check
-  the same published values, Mantel's 4.84 included. A plug-in delta method (used before
-  review; 0.0291 against the Monte Carlo 0.0296 with large strata) gives 0.375 there and is about
-  40% too small with four respondents per stratum. A Python Monte Carlo test (150 strata of 4
-  and of 10 respondents, a four-category proportional-odds item, 400 replications) checks that
-  the mean eq. 3 SE is within 10% of the Monte Carlo SD of $\ln\hat\psi$, and another checks
-  that for 0 / 1 items with large strata it is within 1% of the Phillips–Holland SE. (4) `liu_agresti_ccor()` reports $1/\hat\psi$ of
-  flexpyctt (difR's orientation: above 1 favours the focal group).
 - **Parameter-recovery simulations**: bias / RMSE over conditions (N, J, number of groups, number
   of anchors) × 100 replications, with results and figures in `validation/recovery/`.
 - **Unconstrained M-step scale and `LogitNormalPrior` (V45, #15)**: DESIGN §15.47–§15.48.

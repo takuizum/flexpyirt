@@ -1701,40 +1701,9 @@ data-independent shapes (§15.21).
    $10^{-7}n$), thresholds to $10^{-12}$; psych to $\le 2\times10^{-5}$ on complete data without
    corrected pairs (its `optimize()` tolerance); `cor.smooth` to $10^{-12}$.
 10. **Parallel analysis, MAP and EKC (`parallel_analysis()`, `velicer_map()`,
-    `empirical_kaiser()`, D2 of §16.8, V25)**: in `dimensionality.py` (shell; NumPy for the
-    $p\times p$ linear algebra, JAX `vmap` for normal reference data; now in flexpyctt with NumPy
-    random numbers and `rng` instead of `key`, §16.18). All three answer question
-    (A) and return frozen results with `n_factors`. Matrix inputs (DataFrame, array or
-    `PolychoricResult`) must be square, finite, symmetric, unit-diagonal, $p\ge3$.
-    **Counting**: leading eigenvalues strictly above the reference, stopping at the first miss
-    (psych's and EFAtools' sequential rule). **SMC eigenvalues**: $R$ with $h_j=1-1/(R^{-1})_{jj}$
-    on the diagonal (Humphreys & Ilgen, 1969); the EFA-communality variant of psych /
-    EFAtools waits for the EFA bridge (D5). **Parallel analysis references**: `"permutation"`
-    (default) permutes each item independently with a JAX PRNG key (`(R, p, N)` permutations by
-    nested `vmap`), so marginals and missingness are kept, then recomputes the correlation with
-    the validated `polychoric()` (or pairwise Pearson) per replication, warnings silenced; a
-    replication whose permuted pair is not estimable (missing data) is skipped and counted, with a
-    `FlexpyirtWarning`, and fewer than two usable replications raise `SpecificationError`.
-    `"normal"`: i.i.d. $N(0,1)$ data of the same $N\times p$ (rows of incomplete data count),
-    Pearson correlations, chunked `vmap`. Quantiles use NumPy's default (linear interpolation, R's
-    type 7). Default quantile 0.95 (Glorfeld, 1995), PCA eigenvalues and the permutation
-    reference with polychoric correlations, following Garrido, Abad & Ponsoda (2013).
-    **MAP**: $f_m$ for $m=0,\dots,p-1$ with principal-component loadings
-    $V_m\Lambda_m^{1/2}$ (negative eigenvalues clipped at 0); power 4 is elementwise (O'Connor,
-    2000), and the default because the revised test is the recommended one (Velicer, Eaton &
-    Fava, 2000). The loop stops with NaN once a partial variance is $\le10^{-10}$ and the minimum
-    ignores NaN. EFA.dimensions' fourth-power statistic is a matrix power (documented, not
-    followed). **EKC**: Braeken & van Assen (2017) as in EFAtools (observed eigenvalues in the
-    remaining-variance term); with a `PolychoricResult` and no `n_obs`, the smallest pairwise
-    $n$ is used (conservative under missing data).
-    **Validation (V25)**: `flexpyctt/validation/r/m5_dimensionality_reference.R` feeds the six lavaan
-    polychoric matrices of V24 to EFAtools 1.1.0 (`EKC`), psych 2.6.9 (`vss()$map`),
-    EFA.dimensions 0.1.9.3 (`MAP`) and an independent R implementation of both MAP powers, plus
-    `eigen()` for PCA / SMC eigenvalues: all agree to $10^{-11}$, including the selected numbers of
-    factors. Normal reference eigenvalues (3 sizes x PCA / SMC, 20000 data sets each) agree with
-    EFAtools' `PARALLEL` within Monte Carlo error ($|z|\le4.5$ for the means with a fixed key,
-    $6\times10^{-3}$ for the 95th percentiles). The permutation path is checked by properties
-    (independent permutations, recovery of two factors, reproducibility by key).
+    `empirical_kaiser()`, D2 of §16.8, V25)**: moved to flexpyctt's design document ([DESIGN.md §3](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.md)) on 2026-11-27, when
+    flexpyctt got its own repository (§16.24).
+
 11. **Local dependence and model-based parallel analysis (`FitResult.local_dependence()`,
     `model_parallel_analysis()`, D3 of §16.8, V26)**: both need a single-group unidimensional
     model with a `Normal` latent distribution (`FitResult._require_unidimensional_normal`).
@@ -1825,149 +1794,19 @@ data-independent shapes (§15.21).
     the name `dimensionality` (as `fit`), so `flexpyirt.dimensionality` is the function; tests
     reach the module with `importlib.import_module`. Checked in `tests/test_m5_ensemble.py` by
     recomputing each row with the individual functions and the same keys.
-13. **DETECT (`detect()`, `exploratory_detect()`, D4 of §16.8, V27)**: `_detect.py` (NumPy; now
-    in flexpyctt, §16.18).
-    **Conditional covariances**: Zhang & Stout (1999): for each pair the ML covariance within
-    groups of equal total score $S$ and within groups of equal rest score $S-X_i-X_j$, each
-    averaged with the group proportions, then the two averaged (the total-score estimate is biased
-    negatively, the rest-score one positively). Groups are formed with `np.unique` and
-    `np.bincount`, one pass per pair. Raw item scores are used (polytomous items allowed);
-    complete data are required (the scores are undefined otherwise), so `dimensionality()`
-    reports DETECT as unavailable with missing data. **Indices** (sirt's `detect.index`):
-    DETECT $=100\,\overline{\delta\,\mathrm{ccov}}$, ASSI, RATIO, MADCOV100, MCOV100, unweighted
-    and weighted by $\sqrt{n_{ij}}$ (identical with complete data; kept for sirt's layout). The
-    smoothed (kernel) conditional covariances of sirt's default `conf.detect` are not
-    implemented. **Exploratory**: rows split into halves (`floor(N/2)` estimation rows from a JAX
-    key, or given), Ward clustering of the estimation-half matrix
-    $d=\max(\mathrm{ccov})-\mathrm{ccov}$ (the maximum includes the zero diagonal, as sirt's
-    `create.ccov`). R's `hclust(method = "ward.D")` applies the Lance–Williams Ward update to $d$;
-    SciPy's `"ward"` applies it to squared distances, so SciPy gets $\sqrt d$ (merge heights are
-    R's after squaring). `cutree` labels clusters by first appearance; flexpyirt relabels SciPy's
-    `fcluster` output the same way. Each partition $k=2..$`max_clusters` is scored on both halves;
-    `n_clusters` maximizes the estimation-half DETECT (sirt's choice). Zhang & Stout's genetic
-    partition search is not implemented. **Thresholds** (docstrings, guide): DETECT $<0.2$ / $0.4$
-    / $1$, ASSI $0.25$, RATIO $0.36$ (Jang & Roussos, 2007; Zhang, 2007; §16.8 had 0.1 / 0.5 / 1,
-    corrected here). **Ensemble**: `dimensionality()` adds the validation-half DETECT of the selected
-    partition as a question-(B) row (supports when $<$ `detect_threshold` $=0.2$), available
-    without `fit`; the key is split three ways (parallel analysis, model-based PA, DETECT).
-    **Validation (V27)**: `flexpyctt/validation/r/m5_detect_reference.R` (sirt 4.2.133): simulated
-    two-dimensional (true and wrong partitions), unidimensional and Science (polytomous) data with
-    `conf.detect(use_sum_score = TRUE, bias_corr = TRUE, smooth = FALSE)`, and a three-cluster data
-    set with `expl.detect(use_sum_score = TRUE, estsample = )`: conditional covariances,
-    all five indices (both weightings), partitions and both halves' indices agree to
-    $10^{-12}$ (observed $10^{-14}$), and Ward merge heights to $10^{-12}$. With the default
-    `smooth = TRUE`, sirt's `conf.detect(use_sum_score = TRUE)` standardizes the total score and then
-    subtracts raw item scores for the rest score, so its rest-score groups are wrong (DETECT 6.73
-    instead of 1.60 for `sim_2d`); recorded on the accuracy page, not followed.
-14. **EFA and the Hull method (`efa()`, `hull()`, D5 of §16.8, V28)**: `_efa.py` (NumPy / SciPy;
-    now in flexpyctt, §16.18).
-    **Estimation**: unrotated solutions from the uniquenesses $\Psi$, minimized by SciPy L-BFGS-B
-    (`ftol=1e-15`, `gtol=1e-11`) from $\psi_i=1-\mathrm{SMC}_i$ within $[0.005,\max(1,\mathrm{SMC})]$
-    (psych / EFAtools' bounds). ULS: $F=\tfrac12\lVert R-\Psi-\Lambda\Lambda^\top\rVert_F^2$, with
-    $\Lambda$ the leading eigenvectors of $R-\Psi$ scaled by $\sqrt{\max(\lambda,0)}$, gradient
-    $\operatorname{diag}(\Lambda\Lambda^\top+\Psi-R)$ (psych's `FAgr.minres`, which is the exact
-    gradient of this $F$); this is psych's minres and EFAtools' ULS (psych's `fit.residuals` sums
-    only off-diagonal residuals, which has the same minimizer in the interior). ML: Jöreskog's
-    concentrated discrepancy on the eigenvalues of $\Psi^{-1/2}R\Psi^{-1/2}$ with gradient
-    $\operatorname{diag}(\Lambda\Lambda^\top+\Psi-R)/\psi^2$ (psych's `FAfn` / `FAgr`). Columns are
-    signed to non-negative sums; no rotation. A uniqueness at the floor is a Heywood case
-    (`HeywoodWarning` from `efa()`). The tolerances are tighter than R's `optim()` defaults, so the
-    flexpyirt objective is never above EFAtools' at its solution (checked in the tests).
-    **Fit indices** (EFAtools' `.gof`): CAF $=1-$KMO of the residual matrix with unit diagonal;
-    $\chi^2$ with Bartlett's multiplier $N-1-(2p+5)/6-2k/3$ and its $p$; CFI and RMSEA from the
-    uncorrected $F(N-1)$ and the null $-\log|R|(N-1)$, $df_0=p(p-1)/2$; $df=((p-k)^2-(p+k))/2$.
-    **Hull** (EFAtools' `HULL` / `.hull_calc`): rows $k=0..J$ with fit CAF, CFI or $1-$RMSEA
-    ($k=0$: $1-$KMO($R$), 0, $1-$RMSEA$_0$; $df_0$); drop solutions whose fit does not increase,
-    remove interior points on or below the chord of their neighbours until none is, scree values
-    $st$ on the remaining interior, select the largest $st$ (fewer than three hull points: the best
-    fit, with a warning). Default $J$: one more than parallel analysis with SMC eigenvalues of normal
-    data and the mean rule (EFAtools' `efa_parallel` defaults, here 1000 replications from a JAX key),
-    capped at the largest $k$ with $df>0$ and raised to at least $\min(3,\text{cap})$; with
-    `max_factors` given, $J$ is taken as is. At least 6 variables. The table records `heywood` and
-    `converged` per solution, and a `HeywoodWarning` is emitted when the selected one is
-    inadmissible (as EFAtools). **Ensemble**: `dimensionality()` adds Hull (CAF, ULS, default $J$ from a
-    fourth split of the key) to question (A) when there are at least 6 items.
-    **Validation (V28)**: `flexpyctt/validation/r/m5_efa_hull_reference.R` (EFAtools 1.1.0, psych 2.6.9) on the
-    V24 polychoric matrices with $\ge6$ variables and two simulated Pearson matrices (3 factors,
-    $N=500$; 2 weak factors, $N=300$): every $k\le J$ with ULS and ML — implied
-    $\Lambda\Lambda^\top$ and communalities to $10^{-4}$ (observed $\le7\times10^{-5}$, the largest at
-    Heywood solutions), CAF / CFI / RMSEA to $2\times10^{-4}$, $\chi^2$ to $10^{-4}$ relative, $df$
-    exactly; psych's `fa()` on the 3-factor matrix to $10^{-4}$. Hull for every matrix x estimator x
-    fit index with EFAtools' recorded $J$: the selected $k$ and the hull membership identical, the
-    fit values to $10^{-5}$ (observed $\le1.4\times10^{-6}$), $st$ to 1% relative (a ratio of small
-    differences; observed $\le3.5\times10^{-3}$ absolute). Comparison data is §16.15.
+13. **DETECT (`detect()`, `exploratory_detect()`, D4 of §16.8, V27)**: moved to flexpyctt's design document ([DESIGN.md §4](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.md)) on 2026-11-27, when
+    flexpyctt got its own repository (§16.24).
+
+14. **EFA and the Hull method (`efa()`, `hull()`, D5 of §16.8, V28)**: moved to flexpyctt's design document ([DESIGN.md §5](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.md)) on 2026-11-27, when
+    flexpyctt got its own repository (§16.24).
+
 15. **Comparison data (`comparison_data()`, D5b of §16.8, V29; now in flexpyctt with `rng`
-    instead of `key`, §16.18)**: `_comparison_data.py` (NumPy;
-    random draws from a JAX key are passed in, so the generator is deterministic given them).
-    For $k=1..K$ ($K$ = largest $k$ with positive $df$, or `max_factors`): resample each variable's
-    observed values `n_population` times and sort them; draw $F$ $(N,k)$ and $E$ $(N,p)$ standard
-    normal; generate the population (Ruscio & Kaczetow, 2008, as EFAtools'
-    `.simulate_cfm_empirical`): principal axis factoring of an intermediate $R^*$ (EFAtools'
-    `.paf_iter`: unit starting communalities, absolute eigenvalues, criterion $10^{-3}$ on the
-    largest change, `max_iter` 50), loadings clipped to $[-1,1]$ and flipped when the first is
-    negative, scores $F\Lambda^\top+E\,\mathrm{diag}(\sqrt{\max(1-h^2,0)})$, then for each column in
-    turn the rows are reordered by that column (stable sort) and the column replaced by its sorted
-    resampled values; $R^*$ starts at $R$ and moves by the residual $R-R_{\text{rep}}$ while the RMSE
-    of the lower-triangle residuals improves (from 1), otherwise halves the step from the best
-    $R^*$, stopping after 5 failures in a row. `n_samples` bootstrap samples of the data's size are
-    drawn from the population, and the RMSE of their Pearson-correlation eigenvalues against the
-    observed ones is recorded. $k$ is kept while the one-sided Mann–Whitney test (normal
-    approximation with continuity and tie corrections, as R's `wilcox.test` for $n\ge50$) says
-    the RMSE with $k$ factors is smaller than with $k-1$ at $\alpha=0.30$ (Ruscio & Roche's
-    recommendation); the result is the last kept $k$. Pearson correlations only (as Ruscio & Roche
-    and EFAtools); complete data. PAF loadings are signed to non-negative column sums: EFAtools
-    takes LAPACK's signs, which only matter for $k\ge2$ and do not change the population's
-    distribution. **Ensemble**: `dimensionality()` adds CD to question (A) with complete data
-    (fifth split of the key). **Validation (V29)**: `flexpyctt/validation/r/m5_comparison_data_reference.R`
-    (EFAtools 1.1.0): PAF loadings for $k=1..3$ to $10^{-12}$ in $\Lambda\Lambda^\top$; the one-factor
-    population from EFAtools' own random draws (reproduced with the same seed and exported)
-    identical; the rank-sum $p$-values on EFAtools' RMSE columns to $10^{-10}$ relative; `CD()` on a
-    3-factor, a 2-factor ordinal and a 1-factor binary data set: the same suggestion for two keys
-    each and mean RMSEs within 15% (different random populations).
-16. **DIMTEST (`dimtest()`, D6 of §16.8, V30)**: `_dimtest.py` (NumPy; random draws are
-    arguments; now in flexpyctt with `rng` instead of `key`, §16.18). Binary complete data, at least 4 items. **Statistic** (Nandakumar & Stout,
-    1993): respondents grouped by the PT score; groups smaller than `min_group` (20) or with
-    $S_k\le0$ dropped; $T_L=K^{-1/2}\sum_k(\hat\sigma_k^2-\hat\sigma_{U,k}^2)/S_k$ with
-    $\hat\sigma_k^2$ the (divide-by-$J_k$) variance of the AT score, $\hat\sigma_{U,k}^2=\sum_i\hat
-    p_{ik}(1-\hat p_{ik})$ and $S_k^2=(\hat\mu_{4,k}-\hat\sigma_k^4+\hat\delta_{4,k})/J_k$,
-    $\hat\delta_{4,k}=\sum_i\hat p_{ik}(1-\hat p_{ik})(1-2\hat p_{ik})^2$. **Bias correction**
-    (Stout, Froelich & Gao, 2001): kernel-smoothed IRFs of the test sample (abilities
-    $\Phi^{-1}(r/(N+1))$ of total-score ranks with ties broken by uniform draws, Gaussian kernel
-    with bandwidth $1.1N^{-1/5}$ on 161 points of $[-4,4]$; Ramsay, 1991), $B$ (100) unidimensional
-    data sets of the test sample's size with $\theta\sim N(0,1)$ and IRFs interpolated linearly,
-    $T=(T_L-\bar T_G)/\sqrt{1+1/B}$, $p=1-\Phi(T)$. **AT selection**: with `assessment_items` the
-    whole sample is tested; otherwise a random third (`training_fraction`) selects the AT and the
-    rest is tested (Froelich & Habing, 2008, use a separate subsample): among the clusters of the
-    Ward clusterings into 2–6 groups of the training conditional covariances (§16.13), with 2 to
-    `max_assessment_size` (half the items) members, the one whose split {AT, rest} has the largest
-    DETECT. This is in the spirit of Froelich & Habing's conditional-covariance AT selection, not
-    their exact ATFIND, and is documented as such. **Ensemble**: `dimensionality()` adds DIMTEST
-    ($p\ge\alpha$) to question (B) for complete binary data (sixth split of the key), otherwise an
-    unavailable row. **Validation (V30)**: no implementation outside the stand-alone DIMPACK, so the
-    test is accepted on `flexpyctt/validation/simulation/dimtest_study.py` (results in
-    `dimtest_study.json`): 2PL data, slopes $U(0.8,1.8)$, intercepts $N(0,0.8)$, items in two halves
-    on dimensions correlated $\rho$, 200 replications per condition, defaults throughout:
+    instead of `key`, §16.18)**: moved to flexpyctt's design document ([DESIGN.md §6](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.md)) on 2026-11-27, when
+    flexpyctt got its own repository (§16.24).
 
-    | Data | $N$ | $J$ | $\rho$ | mean $T$ | SD $T$ | reject at .05 | reject at .10 |
-    |---|---|---|---|---|---|---|---|
-    | unidimensional | 1000 | 20 | 1 | -0.07 | 0.72 | 0.005 | 0.020 |
-    | unidimensional | 2000 | 20 | 1 | -0.12 | 0.71 | 0.010 | 0.030 |
-    | unidimensional | 2000 | 30 | 1 | -0.03 | 0.73 | 0.010 | 0.025 |
-    | two-dimensional | 1000 | 20 | 0.7 | 4.85 | 0.97 | 0.990 | 0.995 |
-    | two-dimensional | 2000 | 20 | 0.7 | 6.94 | 0.88 | 1.000 | 1.000 |
-    | two-dimensional | 2000 | 30 | 0.8 | 6.50 | 0.86 | 1.000 | 1.000 |
+16. **DIMTEST (`dimtest()`, D6 of §16.8, V30)**: moved to flexpyctt's design document ([DESIGN.md §7](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.md)) on 2026-11-27, when
+    flexpyctt got its own repository (§16.24).
 
-    (Rerun on 2026-11-25 with flexpyctt's NumPy generator, §16.18. With the JAX keys used before
-    the move the rejection rates at .05 were 0.020, 0.005, 0.000 and 0.990, 1.000, 1.000.)
-
-    The test is conservative: $\bar T_G$ removes the bias of $T_L$ (mean $T$ near 0) but $T_L$'s
-    standard deviation under the null is about 0.72 rather than 1, so the type I error is below the
-    nominal level; power against two dimensions correlated 0.7–0.8 is 0.99–1. A small $p$ is
-    therefore strong evidence of multidimensionality, a large $p$ weak evidence for unidimensionality
-    (stated in the docstring and the guide). Standardizing by the bootstrap SD of $T_G$ instead would
-    recalibrate it but departs from the published statistic; not done. The pieces are unit-tested
-    against direct computations, and `flexpyctt/tests/test_dimtest.py` reruns a small version of the
-    study (20 null and 10 alternative replications).
 17. **Jackknife slope index (`FitResult.jsi()`, V31)**: `_jsi.py`. **Definition** (Edwards, Houts
     & Cai, 2018, as mirt's `residuals(type = "JSI")`): the jackknife is over items, not
     respondents (an earlier version of item 11 said "subgroups"; corrected). For each item $j$ the
@@ -2071,21 +1910,10 @@ data-independent shapes (§15.21).
     flexpyequate has one page, `docs/equating.md`, into which `scripts/mkdocs_hooks.py` puts the
     package README (the PyPI page), so the text exists once.
 
-    **Two polychoric implementations.** `flexpyctt.polychoric()` is a new NumPy / SciPy
+    **Two polychoric implementations.** `flexpyctt.polychoric()` is a NumPy / SciPy
     implementation of the estimator of §16.9 (same definition, options, defaults, warnings and
-    `PolychoricResult`):
-    - $\Phi_2$ by Owen's (1956) $T$ function (`scipy.special.owens_t`):
-      $\Phi_2(h,k;\rho)=\tfrac12\Phi(h)+\tfrac12\Phi(k)-T(h,a_h)-T(k,a_k)-\beta$ with
-      $a_h=(k-\rho h)/(h\sqrt{1-\rho^2})$, $a_k=(h-\rho k)/(k\sqrt{1-\rho^2})$, $\beta=0$ if
-      $hk>0$ or ($hk=0$ and $h+k\ge0$), else $\tfrac12$; $\Phi_2(0,0;\rho)=\tfrac14+
-      \arcsin\rho/(2\pi)$; infinite limits are exact. This is independent of the JAX kernel's
-      Genz (2004) quadrature, so the agreement of the two is a real check.
-    - Newton's method in $z=\operatorname{atanh}\rho$ for all pairs at once (array operations,
-      no Python loop over pairs), with the analytic derivatives
-      $\partial_\rho\pi_{ab}=\Delta\phi_2$ (Plackett, 1954) and
-      $\partial_\rho\phi_2=\phi_2\,[\rho/s+(hk(1+\rho^2)-\rho(h^2+k^2))/s^2]$, $s=1-\rho^2$; the
-      same step rule (Newton when concave, else a half step along the gradient; steps clipped to
-      $\pm2$; step halving), bound $|z|\le8$, convergence criterion and boundary check as §16.9.
+    `PolychoricResult`); its algorithm is described in flexpyctt's design document
+    ([DESIGN.md §2](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.md)).
 
     `flexpyirt.polychoric()` stays the JAX version (`_polychoric.py`, `correlation.py`), public
     and unchanged in behaviour; it returns the same `PolychoricResult` class (defined in
@@ -2190,154 +2018,12 @@ data-independent shapes (§15.21).
     Unidimensional results are unchanged bit for bit (the same code path with $D=1$).
     **Validation (V39)**: mirt 1.48 on the four V14 models, see VALIDATION.md.
 20. **Observed-score DIF in flexpyctt (`mantel_haenszel()`, `mantel()`,
-    `generalized_mantel_haenszel()`, `logistic_dif()`, `DIFResult`; issue #102, V47)**: DIF
-    screening without an IRT model, in `flexpyctt.dif` (public layer: input checks, matching
-    scores, purification, tables) and `flexpyctt._dif` (NumPy kernels for one studied item). The
-    API is the one approved on #102, with the changes listed at the end.
+    `generalized_mantel_haenszel()`, `logistic_dif()`, `DIFResult`; issue #102, V47)**: moved to flexpyctt's design document ([DESIGN.md §8](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.md)) on 2026-11-27, when
+    flexpyctt got its own repository (§16.24).
 
-    **Common arguments.** `data`, keyword-only `group` (one label per row), `focal` (one label;
-    a list for the generalized test; every other row is the reference group, as difR's
-    `focal.name`), `items=None` (tested items), `anchor_items=None` (items whose total is the
-    matching score), `matching=None` (external matching variable; not with `anchor_items` or
-    `purify`), `purify=False`, `max_iter=10`, `p_adjust="none"` (`"holm"`, `"BH"`; R's
-    `p.adjust` on the finite p-values), `alpha=0.05`. **Matching**: the total of the anchor
-    items, plus the studied item when it is not an anchor (difR's rule); every distinct value is
-    a stratum (no thick matching). **Missing values** on the tested or anchor items raise
-    `SpecificationError` (owner decision 3 of #102: error, not silent row deletion; difR's
-    `rowSums(na.rm = TRUE)` would mix totals over different item sets).
+21. **Classical item analysis (flexpyctt, #101, V46)**: moved to flexpyctt's design document ([DESIGN.md §9](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.md)) on 2026-11-27, when
+    flexpyctt got its own repository (§16.24).
 
-    **Purification** (difR `purify = TRUE`, `puriadjType = "simple"`): step 0 tests every item
-    on the given anchors; while the flagged set (unadjusted $p<\alpha$) is non-empty, the next
-    step uses the anchors minus the flagged tested items; it stops when the flagged set equals
-    the previous one (`converged=True`) or after `max_iter` steps (`ConvergenceWarning`; the table
-    is the last step, whose anchors exclude the items flagged one step earlier, as difR). Nothing
-    flagged at step 0 gives `n_iter=0`, `converged=True`. With user `anchor_items`, purification
-    removes flagged items from that set only (difR ignores `purify` when `anchor` is given; this
-    is the natural extension, tested against a direct call with the final anchors). The final
-    `flagged` is `adj_p < alpha`. `flag_history` keeps difR's `difPur` (one row per step).
-
-    **Mantel–Haenszel** (Mantel & Haenszel, 1959; Holland & Thayer, 1988): strata with
-    $T_k>1$; $\chi^2_{MH}=(\lvert\sum A-\sum E(A)\rvert-c)^2/\sum\operatorname{Var}(A)$ with
-    $c=1/2$ under `continuity_correction=True` **always** (Holland & Thayer, difR; R's
-    `mantelhaen.test()` sets $c=0$ when the difference is below $1/2$, which changes the statistic
-    of items without DIF only); $\hat\alpha_{MH}=\sum AD/T/\sum BC/T$ with $A,B$ the reference
-    right / wrong counts (so $\hat\alpha_{MH}>1$ favours the reference group); Phillips & Holland
-    (1987) variance of $\ln\hat\alpha_{MH}$; $\Delta_{MH}=-2.35\ln\hat\alpha_{MH}$,
-    $SE(\Delta)=2.35\,SE(\ln\hat\alpha)$. **ETS classes** (owner decision 2: the full rule by
-    default; Zieky, 1993; Zwick, 2012): A if $\lvert\Delta\rvert<1$ or $\chi^2_{MH}$ is not
-    significant ($p\ge\alpha$ on the `p_adjust`-adjusted p-value, the one `flagged` uses, so B
-    and C items are always flagged; without adjustment it is the plain $p$); C if
-    $\lvert\Delta\rvert\ge1.5$ and $(\lvert\Delta\rvert-1)/SE(\Delta)>z_{1-\alpha}$ (a one-sided
-    test that $\lvert\Delta\rvert>1$, 1.645 at $\alpha=0.05$; some authors use 1.96); B otherwise. `classification="effect_size"`: A $<1\le$ B $<1.5\le$ C
-    (difR's printed codes use right-closed intervals; only exact ties differ). A zero or infinite
-    $\hat\alpha_{MH}$ gives a `FlexpycttWarning` (difR's "sparse data" warning).
-
-    **Mantel** (1963) for ordered items: the focal score sum against its hypergeometric
-    expectation, $df=1$, item values as scores; equal to $\chi^2_{MH}$ without correction for 0 / 1
-    items. **Liu–Agresti** (1996) cumulative common odds ratio
-    $\hat\psi=\sum_k\sum_{j<L}b_{jk}c_{jk}/T_k\big/\sum_k\sum_{j<L}a_{jk}d_{jk}/T_k$ ($a,c$: reference
-    / focal counts at or below category $j$), **oriented as $\hat\alpha_{MH}$** (it reduces to
-    $\hat\alpha_{MH}$ for 0 / 1 items; difR's `liu_agresti_ccor()` reports the reciprocal). Its
-    SE is **Liu & Agresti's (1996) eq. 3**, which generalizes Robins, Breslow & Greenland (1986)
-    and is consistent both with a fixed number of large strata and with many sparse strata
-    ("dually consistent"). With the focal group as their row 1,
-    $\widehat{\operatorname{Var}}(\ln\hat\psi)=\sum_k\hat\xi_k\big/(\sum_k\sum_jb_{jk}c_{jk}/T_k)^2$,
-    $\hat\xi_k=\sum_j\hat\phi_{jjk}+2\sum_{j<s}\hat\phi_{jsk}$,
-    $\hat\phi_{jsk}=\frac{n_{Fk}n_{Rk}}{T_k^2}\{\hat\psi d_{sk}a_{jk}/n_{Fk}\,[1+(\hat\psi-1)a_{sk}/n_{Rk}]
-    +c_{jk}b_{sk}/n_{Rk}\,[\hat\psi-(\hat\psi-1)c_{sk}/n_{Fk}]\}$ ($j\le s$). Matching on a
-    total score gives many small strata, where a large-strata delta method
-    ($\operatorname{Var}(S-\hat\psi R)/S^2$ with plug-in multinomial variances, used before
-    review) is far too small: about 40% at four respondents per stratum. The estimator is not
-    invariant to reversing the category order; Liu & Agresti note that one can average the two
-    orderings and that the difference is trivial in practice. flexpyctt uses the categories in
-    increasing order as published, without averaging. difR's own SE is wrong (VALIDATION V47).
-
-    **Generalized MH** (Landis, Heyman & Koch, 1978; Somes, 1986; Penfield, 2001): per stratum
-    ($T_k>1$) the $G\times C$ table of groups x observed categories; observed focal counts for
-    categories $1..C-1$ against $T\,\mathbf p\otimes\mathbf q$, covariance
-    $T^2/(T-1)\,(D_p-pp^\top)\otimes(D_q-qq^\top)$ restricted to those cells; $df=(G-1)(C-1)$.
-    A singular summed covariance (a category or group absent from every informative stratum) is
-    handled with the pseudo-inverse and $df=$ rank, with a `FlexpycttWarning`. It serves both
-    several focal groups with 0 / 1 items (difR `difGMH()`) and nominal categories
-    (`mantelhaen.test()` on an $I\times J\times K$ table).
-
-    **Logistic regression** (Swaminathan & Rogers, 1990; Zumbo, 1999): models
-    $S$, $S+G$, $S+G+SG$ fitted by Newton–Raphson in NumPy (no new dependency), from
-    $\beta=0$, until the max relative step is below $10^{-12}$ (100 iterations at most; a
-    singular information matrix, as under separation, stops it with a `ConvergenceWarning` and a
-    pseudo-inverse covariance). LRT = difference of deviances; Wald on the added coefficients of
-    the larger model (difR's `criterion = "Wald"`). Nagelkerke $R^2$ with $N$ = rows, $\Delta R^2$
-    = larger minus smaller model. Zumbo–Thomas (0.13, 0.26) and Jodoin–Gierl (0.035, 0.07)
-    classes on $\Delta R^2$ only, as difR prints them (the published rules add significance,
-    which is the `flagged` column); unlike the ETS default, no significance is folded in because
-    the cut points were proposed as effect sizes to read next to the test.
-
-    **Changes from the API proposed on #102.** (1) `mantel()`: `cumulative_odds_ratio_se` became
-    `log_cumulative_odds_ratio_se`, next to a new `log_cumulative_odds_ratio`, because the SE is of
-    the log (as `log_odds_ratio_se` of `mantel_haenszel()`). (2) `mantel()`, `generalized_mantel_haenszel()`
-    and `logistic_dif()` have a `df` column (also for the fixed-$df$ methods, so tables of
-    different methods line up). (3) `DIFResult` also has `flag_history`, `method` and the property
-    `flagged_items`. (4) The logistic coefficient columns are named `group_coefficient`,
-    `group_coefficient_se`, `interaction_coefficient`, `interaction_coefficient_se`. (5) Owner
-    decision 4 (standardization, STD P-DIF): not included, as in the scope list of #102.
-    **Not in this PR**: ordinal logistic DIF (the second PR of #102).
-21. **Classical item analysis (flexpyctt, #101, V46)**: `flexpyctt/item_analysis.py` (NumPy /
-    SciPy / pandas), re-exported by flexpyirt. The API is the one proposed in the issue and approved
-    by the owner (2026-11-26): `score_responses()`, `item_analysis()`, `coefficient_alpha()`
-    (`AlphaResult`), `coefficient_omega()` (`OmegaResult`), `distractor_analysis()`. The names do not
-    clash with flexpyirt's model-based `reliability()`. **Changes from the issue's sketch** (no
-    signature changed): `AlphaResult` also carries `confidence_level` and `if_deleted` has both
-    `alpha` and `standardized_alpha`; `OmegaResult` also carries the `correlation` matrix it was
-    fitted to and the `reversed_items` reversed before computing omega; `score_responses()` also
-    accepts the key as a sequence in column order.
-    **Missing data** (owner decision 2: the issue's `"pairwise"` default): everything is computed
-    from the pairwise-complete covariance matrix $C$ (R's `cov(use = "pairwise")`) and, for
-    standardized alpha and omega, the pairwise-complete correlation matrix (R's
-    `cor(use = "pairwise")`, not `cov2cor(C)`), as psych's `alpha()`. `"listwise"` drops incomplete
-    rows first. Rows with no response are dropped in both cases, so `n_obs` (the Feldt $n$) counts
-    respondents with at least one response; psych uses `nrow(x)`.
-    **Item–total and item–rest correlations** are $c_j/\sqrt{C_{jj}\,\mathbf 1^\top C\mathbf 1}$ and
-    $(c_j-C_{jj})/\sqrt{C_{jj}(\mathbf 1^\top C\mathbf 1-2c_j+C_{jj})}$ with $c_j=\sum_l C_{jl}$,
-    the Pearson correlations with $T$ and $T-x_j$ on complete data. psych's `r.drop` is the same
-    formula; its `raw.r` correlates with `rowSums(x, na.rm = TRUE)`, which treats a missing
-    response as 0 in the total and so is not the quantity alpha is built from. flexpyctt keeps the
-    $C$-based definition for both columns so that they, `alpha` and `alpha_if_deleted` describe
-    the same matrix; the difference from `raw.r` under missing data is tested and documented.
-    **Polyserial / biserial** (`correlation="polyserial"`): the two-step estimator of Olsson,
-    Drasgow & Dorans (1982), $\hat\rho=r\,\sigma_j/\sum_k\phi(\tau_{jk})$, with $\sigma_j$ the
-    item's SD (denominator $n$) and $\tau_{jk}=\Phi^{-1}$ of its cumulative proportions, both over
-    the item's observed scores; $r$ is the Pearson item–total (–rest) correlation above. This is
-    polycor's `polyserial(ML = FALSE)`, psych's `polyserial()` on complete data and, for two
-    categories, $r\sqrt{pq}/\phi(\Phi^{-1}(p))$. The issue's "thresholds from the margins, then
-    $\rho$" means this estimator: polycor's two-step version does not maximize over $\rho$ (the
-    maximum-likelihood polyserial, `ML = TRUE`, is not provided). psych's `biserial()` divides by
-    the $n-1$ SD of the total while using $p,q$, so it is this value times $\sqrt{(n-1)/n}$
-    (tested). Estimates outside $[-1,1]$ are set to $\pm1$ with a `HeywoodWarning`, as psych does.
-    `difficulty` is the mean over the largest observed score, so scores must be $\ge0$.
-    **Omega**: $\omega_t=1-\sum_j(1-\lambda_j^2)/\mathbf s^\top R\mathbf s$ from the one-factor ULS
-    solution (`_efa.fit_factors`, the kernel of `efa()`), with $s_j=\operatorname{sign}(\lambda_j)$
-    ($+1$ for a zero loading), i.e. psych's `omega.tot` (Revelle & Zinbarg, 2009) with its default
-    `flip = TRUE` and the observed total variance in the denominator. Items that load negatively
-    are reversed, as psych does (review of #127): otherwise one reverse-keyed item makes
-    $\mathbf 1^\top R\mathbf 1$ small and omega describes a total nobody would use. The reversal is
-    not silent: a `FlexpycttWarning` names the items and `OmegaResult.reversed_items` lists them,
-    while `loadings` and `correlation` stay those of the items as scored; reverse-scoring the items
-    first gives the same omega (tested). The model-implied form
-    $(\sum\lambda)^2/((\sum\lambda)^2+\sum\psi)$ equals it only under perfect fit and is not
-    reported. Calling the kernel instead of `efa()` admits three items (a just-identified model,
-    which `efa()` rejects for having no degrees of freedom). The Pearson matrix is smoothed with
-    `smooth_correlation` when not positive definite (pairwise matrices may not be), as
-    `polychoric()` does. lavaan's one-factor CFA (listed in the issue) was not used as a reference:
-    it fits ML to the covariance matrix, a different estimator on a different scale.
-    **Keyed scoring and options**: options are compared with `==` per cell, so codes of any type
-    work; a key option never chosen warns (usually a key in the wrong codes or type). In
-    `distractor_analysis()` a missing response scores 0 in $T$; each option's statistics use the
-    item's respondents; the key is listed even if nobody chose it. Score groups follow R's
-    `cut(T, quantile(T, 0:G/G), include.lowest = TRUE)` (type-7 quantiles, ties never split); equal
-    quantiles raise instead of silently merging groups.
-    **Validation (V46)**: `flexpyctt/validation/r/ctt_item_analysis_reference.R`, see
-    VALIDATION.md. **Left out** (as in the issue): hierarchical $\omega$, split-half, Guttman
-    $\lambda$, glb, the upper–lower 27% index, plots (#103), weights.
 22. **DIF workflow: screening with anchor purification, Wald tests, effect sizes (#104, V49)**:
     post-fit orchestration in the Result layer (`dif.py`, `_dif.py`); only the refits run in
     `jit`. Scope: unidimensional multiple-group models (two or more groups, every item family,
@@ -2551,12 +2237,15 @@ data-independent shapes (§15.21).
     there. In this document and in VALIDATION.md, a path that starts with `flexpyctt/` is a path
     in the flexpyctt repository.
 
-    **Documents.** The design notes of flexpyctt's tools stay in this document (§16.8–§16.16,
-    §16.18, §16.20, §16.21) and their validation cases in VALIDATION.md, and flexpyctt's
-    repository links here; moving them is postponed. flexpyequate has its own design document
-    in its repository. On the documentation site flexpyctt's tools stay in the user guide and
-    the API reference (flexpyirt re-exports them); the page for flexpyequate is removed, and the
-    home page links to its repository.
+    **Documents.** The design notes of flexpyctt's tools (§16.10, §16.13–§16.16, §16.20, §16.21,
+    the NumPy polychoric algorithm of §16.18) and the notes on their validation cases moved to
+    flexpyctt's [docs/DESIGN.md](https://github.com/takuizum/flexpyctt/blob/develop/docs/DESIGN.md); the items keep their numbers here and point
+    there. What stays: the plan (§16.8), the polychoric estimator and its JAX implementation
+    (§16.9), the tools that need a fitted model (§16.11, §16.12, §16.17) and the two decisions on
+    packaging (§16.18, this item). flexpyequate has its own design document in its repository. On
+    the documentation site flexpyctt's tools stay in the user guide and the API reference
+    (flexpyirt re-exports them); the page for flexpyequate is removed, and the home page links to
+    its repository.
 
     **CI and release here.** No workspace: `uv build` builds flexpyirt only, the release workflow
     has one `pypi` job, and the CI jobs that tested the other two without JAX moved to their
