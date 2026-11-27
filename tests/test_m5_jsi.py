@@ -136,6 +136,12 @@ def test_rasch_has_no_slopes_and_shared_slopes_work() -> None:
     names = list(df.columns)
     rasch = fit(Model.uniform(Rasch(), items=names), df)
     assert np.isnan(rasch.jsi(df).matrix.to_numpy()).all()
+    # Issue #145: with every item parameter fixed (no free parameter at all) jsi() raised
+    # IndexError.
+    free = fit(Model.uniform(TwoPL(), items=names), df, se=None)
+    banked = fit(Model.uniform(TwoPL(), items=names).fix_from(free.items), df, se=None)
+    assert banked.n_params == 0
+    assert np.isnan(banked.jsi(df).matrix.to_numpy()).all()
     shared = fit(
         Model.uniform(TwoPL(), items=names).equal_across_items(items=names[2:], params=["a"]), df
     ).jsi(df)

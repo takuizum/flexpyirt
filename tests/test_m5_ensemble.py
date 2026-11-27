@@ -207,6 +207,26 @@ def test_ensemble_with_missing_data_keeps_m2() -> None:
     assert res.n_unidimensionality_methods == 3
 
 
+def test_ensemble_m2_without_degrees_of_freedom_is_not_a_vote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Issue #145: a NaN RMSEA (M2 with df <= 0) was counted as a vote against unidimensionality.
+    real_m2 = FitResult.m2
+
+    def m2_without_df(self: FitResult, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        table = real_m2(self, *args, **kwargs).copy()
+        table["df"] = 0
+        table[["m2", "p", "rmsea", "rmsea_5", "rmsea_95", "tli", "cfi"]] = np.nan
+        return table
+
+    monkeypatch.setattr(FitResult, "m2", m2_without_df)
+    res = dimensionality(_lsat7(), key=jax.random.key(3), fit=_fit(), n_replications=5)
+    row = res.unidimensionality.set_index("method").loc["M2 RMSEA"]
+    assert row["supports_unidimensionality"] is None
+    assert "df = 0" in row["detail"]
+    assert res.n_unidimensionality_methods == _ensemble().n_unidimensionality_methods - 1
+
+
 @pytest.mark.parametrize(
     ("kwargs", "match"),
     [
