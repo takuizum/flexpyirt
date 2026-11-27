@@ -15,6 +15,7 @@ from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
 
 from flexpyirt._newton import newton_ascent
@@ -71,6 +72,11 @@ class FamilyBlock:
         Bounds of each local slot.
     kernel : ItemKernel
         Static log-probability kernel.
+    invariant : tuple[bool, ...]
+        Static flag per item: its parameters are the same in every group (free parameters in the
+        same local slots, fixed ones at the same values), so its expected counts can be summed
+        over groups before its M-step and Oakes' own Hessian (DESIGN.md §26.9). Empty means no
+        item is pooled (one group, or a block built without the flag).
     """
 
     columns: Array
@@ -81,6 +87,7 @@ class FamilyBlock:
     slot_lower: Array
     slot_upper: Array
     kernel: ItemKernel = field(metadata={"static": True})
+    invariant: tuple[bool, ...] = field(default=(), metadata={"static": True})
 
 
 @jax.tree_util.register_dataclass
@@ -656,15 +663,35 @@ def _e_step_details(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, 
     return ExpectedCounts(r_bar, n_bar), loglik, h
 
 
+_E_STEP_BATCH_BYTES = 32 * 2**20
+"""Working-memory budget of one super-batch of the blocked E-step (DESIGN.md §26.10)."""
+
+
+def _super_batch_size(prob: CompiledProblem, n_nodes: int, itemsize: int) -> int:
+    """Return how many blocks ``M`` the blocked E-step evaluates together by ``vmap`` (§26.10).
+
+    Per block: the one-hots ``(B, J_f K_f)``, the log joint and posterior ``(B, Q)`` twice, the
+    gathered item tables ``(J_f, Q, K_f)`` and the expected-count contribution ``(J_f, K_f, Q)``.
+    """
+    blk = prob.blocks
+    assert blk is not None
+    n_blocks, size = blk.rows.shape
+    jk = sum(fam.columns.shape[0] * fam.kernel.n_categories for fam in prob.families)
+    per_block = itemsize * (size * (jk + 2 * n_nodes) + 2 * jk * n_nodes + n_nodes)
+    return max(1, min(n_blocks, _E_STEP_BATCH_BYTES // per_block))
+
+
 def _blocked_e_step(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, Array, Array]:
-    r"""E-step folded over single-group blocks with ``lax.scan`` (DESIGN.md §26).
+    r"""E-step over single-group blocks, ``vmap`` inside a short ``lax.scan`` (DESIGN.md §26).
 
     .. math::
         \bar n_{gq}=\sum_{b:g(b)=g}\sum_{p\in b}c_ph_{pq},\qquad
         \bar r_{gjkq}=\sum_{b:g(b)=g}\sum_{p\in b}c_ph_{pq}\mathbf 1[y_{pj}=k]
 
-    The counts are accumulated in place at each block's group, so peak memory does not grow
-    with the number of blocks. Returns ``(counts, loglik, h)`` with ``h`` on the flat rows.
+    The blocks are taken ``M`` at a time (a super-batch sized by :data:`_E_STEP_BATCH_BYTES`):
+    the ``M`` blocks of a step are evaluated together by ``vmap`` and their counts added in
+    place at each block's group, so peak memory does not grow with the number of blocks
+    (§26.10). Returns ``(counts, loglik, h)`` with ``h`` on the flat rows.
     """
     blk = prob.blocks
     assert blk is not None
@@ -673,6 +700,13 @@ def _blocked_e_step(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, 
     y_pad, c_pad = _padded_rows(prob)
     dtype = log_w.dtype
     n_groups, n_nodes = log_w.shape
+    n_blocks, size = blk.rows.shape
+    batch = _super_batch_size(prob, n_nodes, jnp.dtype(dtype).itemsize)
+    n_steps = -(-n_blocks // batch)
+    n_extra = n_steps * batch - n_blocks
+    # Padding blocks read only the sentinel row (count 0), so they add nothing.
+    rows = jnp.concatenate([blk.rows, jnp.full((n_extra, size), y_pad.shape[0] - 1, jnp.int32)])
+    groups = jnp.concatenate([blk.group, jnp.zeros((n_extra,), blk.group.dtype)])
     init = (
         jnp.zeros((n_groups, n_nodes), dtype=dtype),
         tuple(
@@ -682,24 +716,28 @@ def _blocked_e_step(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, 
         jnp.zeros((), dtype=dtype),
     )
 
+    def one_block(rows_b: Array, g: Array) -> tuple[Array, tuple[Array, ...], Array, Array]:
+        lam, one_hots = _block_log_joint(prob, log_probs, log_w, y_pad[rows_b], g)
+        c_b = c_pad[rows_b]
+        lse = jax.scipy.special.logsumexp(lam, axis=1)
+        h = jnp.exp(lam - lse[:, None])
+        weighted = c_b[:, None] * h
+        r_parts = tuple(jnp.einsum("pjk,pq->jkq", oh, weighted) for oh in one_hots)
+        return jnp.sum(weighted, axis=0), r_parts, jnp.sum(c_b * lse), h
+
     def body(
         carry: tuple[Array, tuple[Array, ...], Array], xs: tuple[Array, Array]
     ) -> tuple[tuple[Array, tuple[Array, ...], Array], Array]:
         n_acc, r_acc, ll = carry
-        rows, g = xs
-        lam, one_hots = _block_log_joint(prob, log_probs, log_w, y_pad[rows], g)
-        c_b = c_pad[rows]
-        lse = jax.scipy.special.logsumexp(lam, axis=1)
-        h = jnp.exp(lam - lse[:, None])
-        weighted = c_b[:, None] * h
-        n_acc = n_acc.at[g].add(jnp.sum(weighted, axis=0))
-        r_acc = tuple(
-            r.at[g].add(jnp.einsum("pjk,pq->jkq", oh, weighted))
-            for r, oh in zip(r_acc, one_hots, strict=True)
-        )
-        return (n_acc, r_acc, ll + jnp.sum(c_b * lse)), h
+        rows_m, g_m = xs
+        n_parts, r_parts, ll_parts, h = jax.vmap(one_block)(rows_m, g_m)
+        n_acc = n_acc.at[g_m].add(n_parts)
+        r_acc = tuple(r.at[g_m].add(part) for r, part in zip(r_acc, r_parts, strict=True))
+        return (n_acc, r_acc, ll + jnp.sum(ll_parts)), h
 
-    (n_bar, r_bar, loglik), h_blocks = jax.lax.scan(body, init, (blk.rows, blk.group))
+    xs = (rows.reshape(n_steps, batch, size), groups.reshape(n_steps, batch))
+    (n_bar, r_bar, loglik), h_steps = jax.lax.scan(body, init, xs)
+    h_blocks = h_steps.reshape(n_steps * batch, size, n_nodes)[:n_blocks]
     return ExpectedCounts(r_bar, n_bar), loglik, _unblock(prob, h_blocks)
 
 
@@ -778,6 +816,39 @@ def expected_complete_loglik(prob: CompiledProblem, eta: Array, counts: Expected
         counts.n, lat
     )
     return total + jnp.sum(q_lat)
+
+
+ItemSubset = tuple[np.ndarray | None, bool]
+"""Static ``(positions, pooled)`` of a family's items; ``None`` positions mean every item."""
+
+
+def _item_subsets(fam: FamilyBlock) -> list[ItemSubset]:
+    """Split a family's items into the invariant (pooled) and per-group subsets (§26.9).
+
+    Positions are static NumPy arrays; a subset covering the whole family has ``None``
+    positions so the common cases (no or every item invariant) need no gather.
+    """
+    flags = np.asarray(fam.invariant, dtype=bool)
+    if not flags.any():
+        return [(None, False)]
+    if flags.all():
+        return [(None, True)]
+    return [(np.flatnonzero(flags), True), (np.flatnonzero(~flags), False)]
+
+
+def _pool_groups(r_items: Array, local: Array, fixed: Array) -> tuple[Array, Array, Array]:
+    r"""Sum invariant items' expected counts over groups and keep one group's layout (§26.9).
+
+    For an item whose parameters :math:`\xi_j` are the same in every group,
+
+    .. math::
+        \sum_g\sum_{q,k}\bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j)
+        =\sum_{q,k}\Big(\sum_g\bar r_{gjkq}\Big)\log P_{jk}(\theta_q;\xi_j),
+
+    so its objective is evaluated once instead of :math:`G` times. Inputs are item-major
+    ``(J, G, ...)``; outputs keep a group axis of length 1.
+    """
+    return jnp.sum(r_items, axis=1, keepdims=True), local[:, :1], fixed[:, :1]
 
 
 def _coupled_masks(prob: CompiledProblem) -> list[Array]:
@@ -902,7 +973,7 @@ def _m_step_items(
 
             return newton_ascent(q_item, u, free, lo, hi, n_steps, unconstrained=unconstrained)
 
-        u_new = jax.vmap(solve_item, in_axes=(0,) * 10 + (axis,))(
+        item_args = (
             r_items,
             local,
             fixed,
@@ -913,9 +984,16 @@ def _m_step_items(
             slot_kind,
             slot_p1,
             slot_p2,
-            nodes,
         )
-        new_eta = _scatter(new_eta, u_new, fam.slot_free_index)
+        solve_items: Callable[..., Array] = jax.vmap(solve_item, in_axes=(0,) * 10 + (axis,))
+        for idx, pooled in _item_subsets(fam):
+            args: tuple[Array, ...] = item_args if idx is None else tuple(a[idx] for a in item_args)
+            if pooled:
+                args = _pool_groups(*args[:3]) + args[3:]
+            x = nodes if axis is None or idx is None else nodes[idx]
+            u_new = solve_items(*args, x)
+            fids = fam.slot_free_index if idx is None else fam.slot_free_index[idx]
+            new_eta = _scatter(new_eta, u_new, fids)
     if not prob.coupled:
         return new_eta
     return _m_step_coupled(prob, eta, new_eta, counts, n_steps, unconstrained)
@@ -1584,9 +1662,17 @@ def _oakes_own_hessian(prob: CompiledProblem, eta: Array, counts: ExpectedCounts
             out: Array = jax.hessian(q_item)(u)
             return out
 
-        h_items = jax.vmap(item_hess)(r_items, local, fixed, u0)  # (J_f, S_f, S_f)
-        idx = jnp.where(fam.slot_free_index >= 0, fam.slot_free_index, n_free)
-        h_own = h_own.at[idx[:, :, None], idx[:, None, :]].add(h_items, mode="drop")
+        hess_items: Callable[..., Array] = jax.vmap(item_hess)
+        for sub, pooled in _item_subsets(fam):
+            args: tuple[Array, ...] = (r_items, local, fixed, u0)
+            if sub is not None:
+                args = tuple(a[sub] for a in args)
+            if pooled:
+                args = _pool_groups(*args[:3]) + args[3:]
+            h_items = hess_items(*args)  # (J_f, S_f, S_f)
+            fids = fam.slot_free_index if sub is None else fam.slot_free_index[sub]
+            idx = jnp.where(fids >= 0, fids, n_free)
+            h_own = h_own.at[idx[:, :, None], idx[:, None, :]].add(h_items, mode="drop")
 
     lat_block = prob.latent
     if not lat_block.is_eh:
