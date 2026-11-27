@@ -1422,7 +1422,8 @@ class FitResult:
             If JAX is not configured for 64-bit floating point.
         SpecificationError
             For multiple-group, multidimensional or non-``Normal`` latent models, fewer than
-            three items, invalid options, or ``method="one_step"`` without a covariance matrix.
+            three items, invalid options, or ``method="one_step"`` on a fit without
+            ``se="oakes"`` or ``se="hessian"``.
 
         Warns
         -----

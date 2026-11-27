@@ -65,6 +65,7 @@ linear.slope, linear.intercept
 
 ```python
 x = fe.ScoreDistribution.from_scores(x_scores, score_range=(0, 40))
+y = fe.ScoreDistribution.from_scores(y_scores, score_range=(0, 40))
 xy = fe.BivariateScoreDistribution.from_scores(x_scores, y_scores, x_range=(0, 40), y_range=(0, 40))
 fe.equate(xy, method="equipercentile")  # 2 つの周辺分布を等化する
 ```

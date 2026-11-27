@@ -94,6 +94,8 @@ Bock–Aitkin EM による周辺最尤推定（事前分布を付けた場合は
 `weights` を付けて推定した結果は、`summary()` にウェイトの和を表示する。その `item_fit()`、`m2()`、
 `local_dependence()`、`jsi()`、`dif()` は `SpecificationError` を出す（これらの統計量はウェイトなしのデータに
 対して定義されている）。`model_parallel_analysis()` も同じ。`score()` はふだんどおり使える。
+`reliability(res, data)`、`classification_accuracy(res, data=...)`、`empirical_item_curve()`、
+`wright_map_table()` は `data` の各行を 1 人分としてそのまま集計する。推定に使ったウェイトは反映されない。
 
 #### `FitResult.log_posterior`
 
@@ -142,7 +144,8 @@ score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5) -
 宣言した因子順に `theta_<factor>`, `se_<factor>` 列（`"PV"` は `pv<m>_<factor>`）。
 
 **例外**: 不正な `method`、`EmpiricalHistogram`・`DavidianCurve`・`NormalMixture` で `method="MAP"` を指定した場合、`"PV"` で
-`key` が未指定・不正、決定的手法に `key` を渡した場合、または `n_draws` が正の整数でない場合に `SpecificationError`。
+`key` が未指定・不正、決定的手法に `key` を渡した場合、`n_draws` が正の整数でない場合、または多次元モデルか `Normal` 以外の
+潜在分布で `method="EAPsum"` を指定した場合に `SpecificationError`。
 
 #### `FitResult.item_fit`
 
@@ -264,6 +267,7 @@ local_dependence(data, *, group=None, item_names=None) -> LocalDependenceResult
 $x_{ij} - E(X_j \mid \hat\theta_i)$ の相関）、Q3\* $=$ Q3 $-$ Q3 の平均（Christensen, Makransky & Horton, 2017）、
 推定した格子でモデルが含意する分割表と比べる Chen & Thissen (1997) の LD $X^2$ / $G^2$（$df = (K_i-1)(K_j-1)$、
 $p$ 値、符号付きの Cramér の $V$）。mirt の `residuals(type = "Q3" / "LD" / "LDG2")` と同じ。欠測はペアごとに扱う。
+両方に回答した人が 1 人もいないペア（`n = 0`。冊子デザインなど）の統計量は NaN で、Q3 の平均は Q3 が求まるペアでとる。
 
 期待度数の表と EAP には、推定した格子の上の推定した潜在分布を使う。`Normal`、`EmpiricalHistogram`、
 `DavidianCurve`、`NormalMixture` と、2〜3 因子のモデルでは直積格子の上の多変量正規分布（EAP はベクトル）。
@@ -319,7 +323,7 @@ $$\mathrm{JSI}_{ji} = \frac{\hat a_i - \hat a_i^{(-j)}}{\mathrm{SE}(\hat a_i^{(-
 JSI は単一群・1 次元のモデルについてのみ定義されている。多次元・多母集団への拡張は研究されておらず、参照となる実装も
 ないので、ほかのモデルには使えない。
 
-**例外**: `PrecisionError`。多母集団・多次元（双因子・two-tier を含む）・`Normal` 以外の潜在分布のモデル、項目が 3 つ未満、不正な指定、標準誤差のない推定結果での `"one_step"` は
+**例外**: `PrecisionError`。多母集団・多次元（双因子・two-tier を含む）・`Normal` 以外の潜在分布のモデル、項目が 3 つ未満、不正な指定、`se="oakes"` / `se="hessian"` 以外の推定結果での `"one_step"` は
 `SpecificationError`。
 
 **警告**: 推定し直しが収束しなければ `ConvergenceWarning`。
@@ -443,6 +447,8 @@ model.fix_from(bank, *, items=None, parameterization="slope_intercept") -> Model
 ```
 
 項目バンクの値で項目パラメタを固定する（FIPC）。潜在分布を推定するには `.with_latent(Normal.free())` を併用する。
+バンクは 1 項目につき 1 行。固定する項目に複数の行があると（多母集団の推定結果の `items` 表など。1 つの群の行だけを
+渡す）`SpecificationError` を出す。
 
 | 引数 | 説明 |
 |---|---|

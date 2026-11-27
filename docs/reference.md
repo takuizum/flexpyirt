@@ -104,6 +104,9 @@ Returned by `fit()`. Immutable.
 A result fitted with `weights` shows the sum of the weights in `summary()`. Its `item_fit()`,
 `m2()`, `local_dependence()`, `jsi()` and `dif()` raise `SpecificationError` (these statistics are
 defined for unweighted data), as does `model_parallel_analysis()`; `score()` works as usual.
+`reliability(res, data)`, `classification_accuracy(res, data=...)`, `empirical_item_curve()` and
+`wright_map_table()` summarise the rows of `data` as they are, one respondent each: the sampling
+weights of the fit are not applied to them.
 
 #### `FitResult.log_posterior`
 
@@ -183,8 +186,6 @@ With `DavidianCurve` and `NormalMixture` latent distributions the weights are ea
 density and its free shape parameters count as latent parameters (DESIGN §27);
 `EmpiricalHistogram` raises `SpecificationError`.
 
-| Argument | Description |
-|---|---|
 **Infit / outfit** (`"infit"`, `"outfit"`): each respondent is scored by `method`, and over the
 $N_j$ respondents who answered item $j$, $\mathrm{outfit}_j=\frac1{N_j}\sum_i r_{ij}^2/W_{ij}$ and
 $\mathrm{infit}_j=\sum_i r_{ij}^2/\sum_i W_{ij}$, with $r_{ij}$ the residual of the item score
@@ -300,7 +301,9 @@ Yen's (1984) Q3 (correlation of residuals $x_{ij} - E(X_j \mid \hat\theta_i)$ wi
 $\hat\theta$), Q3\* $=$ Q3 $-$ mean Q3 (Christensen, Makransky & Horton, 2017), and Chen &
 Thissen's (1997) LD $X^2$ / $G^2$ against the model-implied table on the fitted grid, with
 $df = (K_i-1)(K_j-1)$, $p$-values and a signed Cramér's $V$, as mirt's
-`residuals(type = "Q3" / "LD" / "LDG2")`. Missing responses are allowed (pairwise).
+`residuals(type = "Q3" / "LD" / "LDG2")`. Missing responses are allowed (pairwise); a pair that
+nobody answered together (`n = 0`, e.g. in a booklet design) has NaN statistics, and the mean Q3
+is over the pairs that have one.
 
 The expected tables and the EAP use the fitted latent distribution on the fitted grid: `Normal`,
 `EmpiricalHistogram`, `DavidianCurve` or `NormalMixture`, and the multivariate Normal on the
@@ -501,7 +504,9 @@ model.fix_from(bank, *, items=None, parameterization="slope_intercept") -> Model
 ```
 
 Fix item parameters at item-bank values (FIPC). Combine with `.with_latent(Normal.free())` to
-estimate the latent distribution.
+estimate the latent distribution. The bank has one row per item: several rows for an item to fix
+(e.g. the `items` table of a multiple-group fit; keep the rows of one group) raise
+`SpecificationError`.
 
 | Argument | Description |
 |---|---|

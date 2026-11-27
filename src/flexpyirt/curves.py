@@ -200,7 +200,8 @@ def empirical_item_curve(
         A fitted unidimensional model.
     data : DataFrame or array-like
         Responses on the fitted items (NaN is missing; a respondent enters the bins of the items
-        they answered).
+        they answered). Each row counts once: the sampling
+        weights of a weighted fit are not applied.
     items : str or sequence of str, optional
         Items to include (default: all, in the model's order).
     n_bins : int, default 10
@@ -369,7 +370,8 @@ def wright_map_table(
     res : FitResult
         A fitted unidimensional model.
     data : DataFrame or array-like
-        Responses on the fitted items (NaN is missing).
+        Responses on the fitted items (NaN is missing). Each row counts once: the sampling
+        weights of a weighted fit are not applied.
     group : array-like, optional
         Group label of each row of ``data`` (required for a multiple-group model).
     item_names : list of str, optional
