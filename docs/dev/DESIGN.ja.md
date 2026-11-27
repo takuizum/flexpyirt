@@ -2040,7 +2040,10 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
      （その SE は上の注意を引き継ぐ）。データを使う診断にはウェイト付きの検証済みの形がない（統計量と参照分布が
      ウェイトなしの度数を前提とする）ので、`item_fit()`、`m2()`、`local_dependence()`、`jsi()`、`dif()`、
      `model_parallel_analysis()`、`dimensionality(fit=...)` はウェイト付きの推定結果に対して
-     `SpecificationError` を出す（`FitResult._require_unweighted`）。
+     `SpecificationError` を出す（`FitResult._require_unweighted`）。データの記述的な要約
+     （`reliability(res, data)`、`classification_accuracy(res, data=...)`、`empirical_item_curve()`、
+     `wright_map_table()`）はウェイトを受け取らず、推定のウェイトにかかわらず `data` の各行を 1 回ずつ数える。
+     ドキュメントにもそう書く（#145）。
    - **JSON**: `schema_version` 7 で、省略可能なトップレベルのキー `sum_weights` を加える（ウェイト付きの推定に
      だけ書く。正の有限な数）。version 6 以下のファイルにこのキーがあれば拒否し、version 6 以下のファイルは
      これまでどおり読める。ウェイトそのものは保存しない（データと同じ）。

@@ -269,7 +269,9 @@ print(res_cl.summary())  # "SE method: sandwich (cluster-robust, 40 clusters)"
 
 - Scoring (`res_w.score(...)`) works as usual. `item_fit()`, `m2()`, `local_dependence()`,
   `jsi()`, `dif()` and `model_parallel_analysis()` are not available for a weighted fit and raise
-  `SpecificationError`.
+  `SpecificationError`. Summaries of a data set (`reliability(res, data)`,
+  `classification_accuracy(res, data=...)`, `empirical_item_curve()`, `wright_map_table()`) count
+  each row once: the weights are not applied to them.
 
 ## 5. Reading the results
 
@@ -524,7 +526,7 @@ identically $M_2$ for dichotomous items), together with RMSEA and its confidence
 (`ci=0.90` by default), SRMSR, and — for dichotomous models — TLI and CFI against the independence
 null model (polytomous models report `NaN` for `tli` and `cfi`, because the independence null
 model is defined for dichotomous items only).
-It needs a `Normal` latent distribution and works for unidimensional models and confirmatory
+It needs a `Normal` latent distribution (or a `DavidianCurve` in a single-group model) and works for unidimensional models and confirmatory
 models with two or three factors (`with_factors()`), with one group or several. With free factor
 correlations (or a free latent mean or variance) the value is slightly smaller than mirt's `M2()`,
 which leaves these parameters out of the derivative matrix while counting them in the degrees of
@@ -1445,10 +1447,11 @@ print(res_bif.score(bif_df.iloc[:3]).round(3))  # theta_G, theta_s1, ..., se_G, 
 ```
 
 - **Supported**: every item model with free slopes (2PL, 3PL, 4PL, GRM, GPCM, nominal), Oakes and
-  Hessian SEs, `"EAP"` scoring (columns per factor), equality constraints, priors, and JSON.
+  Hessian SEs, `"EAP"` scoring (columns per factor), local dependence, equality constraints,
+  priors, and JSON.
 - **Not yet supported** (`SpecificationError`): multiple groups, Rasch / PCM items (their factor
   variances would have to be free), free latent means or variances, MAP / ML / WLE / PV scoring,
-  item fit, $M_2$, and local dependence.
+  item fit, and $M_2$.
 
 ### Two-tier models
 

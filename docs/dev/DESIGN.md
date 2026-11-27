@@ -2756,7 +2756,10 @@ data-independent shapes (§15.21).
      diagnostics have no validated weighted form (their statistics and reference distributions
      assume unweighted counts), so `item_fit()`, `m2()`, `local_dependence()`, `jsi()`, `dif()`,
      `model_parallel_analysis()` and `dimensionality(fit=...)` raise `SpecificationError` for a
-     weighted fit (`FitResult._require_unweighted`).
+     weighted fit (`FitResult._require_unweighted`). The descriptive summaries of a data set
+     (`reliability(res, data)`, `classification_accuracy(res, data=...)`,
+     `empirical_item_curve()`, `wright_map_table()`) take no weights: they count each row of
+     `data` once, whatever the fit was weighted with, and the documentation says so (#145).
    - **JSON**: `schema_version` 7 adds the optional top-level key `sum_weights` (present only
      for a weighted fit; a positive finite number); it is rejected in files of version $\le6$,
      which still load. The weights themselves are not stored (like the data).

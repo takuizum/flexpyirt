@@ -496,7 +496,8 @@ def reliability(
         A fitted unidimensional model with ``Normal`` latent distributions.
     data : DataFrame or array-like, optional
         Responses on the fitted items (NaN is missing). When given, the empirical reliability
-        of their EAP scores is added.
+        of their EAP scores is added. Each row counts once: the sampling
+        weights of a weighted fit are not applied.
     group : array-like, optional
         Group label of each row of ``data`` (required with ``data`` for a multiple-group
         model).

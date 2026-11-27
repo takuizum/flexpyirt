@@ -428,3 +428,26 @@ def test_unsupported_models_are_rejected() -> None:
         model_parallel_analysis(multi, df, key=jax.random.key(0))
     with pytest.raises(SpecificationError, match="single-group"):
         multi.jsi(df)
+
+
+def test_pair_never_answered_together_has_nan_statistics() -> None:
+    # Issue #145: a booklet design (i0 and i3 never administered together) raised
+    # ZeroDivisionError.
+    rng = np.random.default_rng(3)
+    theta = rng.normal(size=400)
+    slopes = np.array([1.0, 1.4, 0.8, 1.2])
+    y = (rng.random((400, 4)) < 1 / (1 + np.exp(-np.outer(theta, slopes)))).astype(float)
+    y[:200, 3] = np.nan
+    y[200:, 0] = np.nan
+    df = pd.DataFrame(y, columns=["i0", "i1", "i2", "i3"])
+    res = fit(Model.uniform(TwoPL(), items=list(df.columns)), df, se=None)
+    ld = res.local_dependence(df)
+    is_never = (ld.pairs["item_i"] == "i0") & (ld.pairs["item_j"] == "i3")
+    never = ld.pairs[is_never]
+    assert never["n"].tolist() == [0] and never["df"].tolist() == [1]
+    statistics = ["q3", "q3_star", "x2", "g2", "p_x2", "p_g2", "cramer_v"]
+    assert never[statistics].isna().to_numpy().all()
+    others = ld.pairs[~is_never]
+    assert np.isfinite(others[statistics].to_numpy(dtype=float)).all()
+    assert ld.q3_mean == pytest.approx(float(others["q3"].mean()))
+    assert np.isfinite(ld.max_q3_star)

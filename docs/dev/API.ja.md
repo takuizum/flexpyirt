@@ -3,7 +3,7 @@
 [English](API.md) | 日本語
 
 > **実装済みの API は [API リファレンス](../reference.ja.md) と [ユーザーガイド](../guide.ja.md) を参照。**
-> このファイルは設計段階のスケッチで、未実装の機能（EH、Gauss–Hermite、`TruncNormal`、M4 のスコアリング・MIRT など）も含む。
+> このファイルは設計段階のスケッチで、未実装の機能（`TruncNormal` など）も含む。
 
 > 目標: 「仕様（Spec）・推定（fit）・結果（FitResult）」を分ける。仕様は不変オブジェクトで、メソッドチェーンは新しい仕様を返す。
 > ここに書いたシグネチャは設計案。実装時に変える場合はこのファイルを先に更新する。
@@ -65,11 +65,11 @@ spec = (
     .equal_across_groups(items=anchors)  # アンカー項目は全パラメタ群間等値
 )
 res = fit(spec, df.drop(columns="form"), group=df["form"])
-res.latent  # DataFrame: group, mean, sd, se
+res.latent  # DataFrame: group, mean, var, mean_se, var_se
 res.items  # group 列つき（等値項目は同値）
 ```
 
-EH にしたい場合は `focal=EmpiricalHistogram()`。参照群も EH にする場合は `ref=EmpiricalHistogram(standardize=True)`。
+EH にしたい場合は全群を `EmpiricalHistogram()` にする（EH と `Normal` は群の間で混在できない）。参照群のヒストグラムは標準化される。
 
 ## 4. 固定パラメタ推定（FIPC）
 
@@ -104,11 +104,14 @@ res = fit(
     method=BAEM(tol=1e-4, max_iter=2000, squarem=True, m_step_newton_steps=5),
     quadrature=Quadrature.equispaced(61, bounds=(-6, 6)),  # または Quadrature.gauss_hermite(41)
     se="oakes",  # "oakes" | "hessian" | "crossprod" | "sandwich" | None
-    verbose=False,
 )
 # 標本ウェイトとクラスタ抽出（学校の中の生徒）: 標本設計に基づくサンドイッチ SE。
 res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
-res.converged, res.n_iter, res.history  # history: DataFrame(iter, loglik, max_change)
+(
+    res.converged,
+    res.n_iter,
+    res.history,
+)  # history: DataFrame(iter, loglik, log_posterior, max_change, ...)
 ```
 
 ## 6.1 M1 時点で実装済みの範囲
@@ -156,10 +159,10 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `Rasch`, `TwoPL`, `ThreePL`, `FourPL`, `GRM`, `GPCM`, `PCM`, `Nominal` | frozen dataclass（`ItemModel` を満たす） | 項目モデル |
 | `items.ItemModel`, `items.ItemKernel`, `items.register_item_model` | Protocol、関数 | ユーザー定義の項目モデルとその JSON 登録（DESIGN §20） |
 | `Normal`, `EmpiricalHistogram`, `DavidianCurve`, `NormalMixture` | frozen dataclass（`LatentDist` を満たす） | 潜在分布。`Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)`, `NormalMixture(n_components)` |
-| `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `TruncNormal` | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
+| `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `LogitNormalPrior`, `TruncNormal`（未実装） | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
 | `BAEM`, `Quadrature` | frozen dataclass | 推定設定 |
 | `fit` | 関数 | 推定。`FitResult` を返す |
-| `FitResult` | クラス | 結果（`items`, `latent`, `se`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `person_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`） |
+| `FitResult` | クラス | 結果（`items`, `latent`, `parameters`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `person_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`） |
 | `dif_screen`, `dif_effect_sizes` | 関数 | 1 次元の多母集団モデルの DIF の分析手順: アンカーの純化つきの全項目のスクリーニング（`strategy="all_others"` / `"sequential_free"` / `"sequential_constrain"`、尤度比検定または Wald 検定。`table`・`history`・`flagged_items`・`anchor_items`・最終モデル `fit` を持つ `DIFScreenResult` を返す）と効果量（期待得点の符号つき・符号なしの差、ESSD、RMSD、テストの行）。`FitResult.dif(..., test="wald")` で Wald 検定（DESIGN §16.22） |
 | `link` | 関数 | 微分可能な IRT 尺度リンキング（Haebara・Stocking–Lord の非対称・対称版。多次元モデルでは `transformation=` で対角・直交・斜交の $\mathbf A$ を選ぶ）。`LinkResult` を返す |
 | `LinkResult` | クラス | 尺度リンキング結果（`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `transformation`, `items`, `transform_theta`, `summary`） |
@@ -188,6 +191,7 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `classification_accuracy` | 関数 | カット得点による分類の正確さと一貫性（合計得点上の Lee, 2010、$\theta$ 上の Rudner, 2001, 2005。D 法と P 法）。1 次元の `FitResult` に対し `ClassificationResult`（`summary`、`by_category`、`by_cut`、`conditional`、`accuracy_table`、`consistency_table`。DESIGN §18.4）を返す |
 | `LocalDependenceResult` | frozen dataclass | `FitResult.local_dependence()` の戻り値（`pairs`, `q3`, `q3_mean`, `max_q3_star`） |
 | `JSIResult` | frozen dataclass | `FitResult.jsi()` の戻り値（`matrix`, `pairs`, `method`, `converged`） |
+| `PolychoricResult` | frozen dataclass | `correlation`, `unsmoothed_correlation`, `thresholds`, `categories`, `n_obs`、ペアごとの `converged` / `at_boundary` / `zero_cell_corrected`、`smoothed`, `min_eigenvalue` |
 
 ## 8. 設計上の約束
 - 公開関数は keyword-only を基本にする（`fit(spec, data, *, group=None, ...)`）。

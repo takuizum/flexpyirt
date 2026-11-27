@@ -60,14 +60,9 @@ JAX による項目反応理論（IRT）の推定ライブラリ。Bock–Aitkin
 
 いずれも[ロードマップ](https://github.com/takuizum/flexpyirt/blob/main/docs/dev/ROADMAP.ja.md)で予定・管理している。
 
-- 多母集団モデルでの Davidian 曲線・混合正規（[#75](https://github.com/takuizum/flexpyirt/issues/75)）
-- 多母集団・欠測・MAP 推定での $M_2$（[#76](https://github.com/takuizum/flexpyirt/issues/76)）。双因子・two-tier・多母集団の多次元モデルでの
-  $M_2$ と S-X2
-- 群ごとの潜在分布を群について vmap する多数群の推定（[#79](https://github.com/takuizum/flexpyirt/issues/79)）
-- 多次元モデルの情報行列と方向情報量
+- 双因子・two-tier・多母集団の多次元モデルでの $M_2$ と S-X2
 - ウェイト付きの推定結果での項目適合度・$M_2$・局所依存・DIF
 - 単一群・1 次元・正規潜在分布以外のモデルでのジャックナイフ傾き指標
-- ユーザー定義の項目モデルのための公開拡張 API（[#86](https://github.com/takuizum/flexpyirt/issues/86)）
 
 ## インストール
 

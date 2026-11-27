@@ -74,7 +74,8 @@ def ld_pairs_from_tables(
 
     with :math:`df=(K_i-1)(K_j-1)` and the sign from the difference of Goodman–Kruskal
     :math:`\gamma` of the observed and expected tables (positive when it is 0; :math:`V` is NaN when
-    a :math:`\gamma` is undefined), as in mirt's ``residuals(type = "LD")``.
+    a :math:`\gamma` is undefined), as in mirt's ``residuals(type = "LD")``. A pair that nobody
+    answered together (:math:`n_{ij}=0`) has NaN statistics.
 
     Parameters
     ----------
@@ -97,8 +98,16 @@ def ld_pairs_from_tables(
         for j in range(i + 1, n_items):
             both = (y[:, i] >= 0) & (y[:, j] >= 0)
             n = float(both.sum())
-            expected = n * pair_probabilities(i, j)
-            ki, kj = expected.shape
+            probabilities = pair_probabilities(i, j)
+            ki, kj = probabilities.shape
+            if n == 0:
+                # Nobody answered both items (e.g. a booklet design): no statistic for this pair.
+                for key, value in (("i", i), ("j", j), ("n", n), ("df", (ki - 1) * (kj - 1))):
+                    out[key].append(value)
+                for key in ("x2", "g2", "p_x2", "p_g2", "cramer_v"):
+                    out[key].append(float("nan"))
+                continue
+            expected = n * probabilities
             observed = np.zeros((ki, kj))
             np.add.at(observed, (y[both, i], y[both, j]), 1.0)
             x2 = float(np.sum((observed - expected) ** 2 / expected))

@@ -99,12 +99,14 @@ class LocalDependenceResult:
     pairs : pandas.DataFrame
         One row per item pair (per group and pair, with a leading ``group`` column, in a
         multiple-group model): ``item_i``, ``item_j``, ``n`` (respondents answering both),
-        ``q3``, ``q3_star``, ``x2``, ``g2``, ``df``, ``p_x2``, ``p_g2``, ``cramer_v``.
+        ``q3``, ``q3_star``, ``x2``, ``g2``, ``df``, ``p_x2``, ``p_g2``, ``cramer_v``. A pair
+        that nobody answered together (``n = 0``, e.g. in a booklet design) has NaN statistics.
     q3 : pandas.DataFrame
         Item x item Q3 matrix (unit diagonal); in a multiple-group model one matrix per group
         stacked on a ``(group, item)`` row index.
     q3_mean : float or pandas.Series
-        Mean off-diagonal Q3 (subtracted in ``q3_star``); in a multiple-group model a Series
+        Mean off-diagonal Q3 (subtracted in ``q3_star``; over the pairs that have a Q3, which
+        needs two respondents answering both items); in a multiple-group model a Series
         indexed by group, each group's ``q3_star`` using its own mean.
     """
 
@@ -650,7 +652,7 @@ def dimensionality(
                 "source": "Drasgow & Lissak (1983)",
             }
         )
-        worst = ld.pairs.iloc[int(np.argmax(ld.pairs["q3_star"].to_numpy()))]
+        worst = ld.pairs.iloc[int(np.nanargmax(ld.pairs["q3_star"].to_numpy()))]
         rows.append(
             {
                 "method": "largest Q3*",
@@ -683,8 +685,15 @@ def dimensionality(
                     "method": "M2 RMSEA",
                     "statistic": rmsea,
                     "threshold": rmsea_threshold,
-                    "supports_unidimensionality": bool(rmsea <= rmsea_threshold),
-                    "detail": f"RMSEA = {rmsea:.4f}, M2 p = {float(m2['p'].iloc[0]):.3g}",
+                    # NaN when M2 has no degrees of freedom: not available, not a vote against.
+                    "supports_unidimensionality": (
+                        bool(rmsea <= rmsea_threshold) if np.isfinite(rmsea) else None
+                    ),
+                    "detail": (
+                        f"RMSEA = {rmsea:.4f}, M2 p = {float(m2['p'].iloc[0]):.3g}"
+                        if np.isfinite(rmsea)
+                        else f"not available: M2 has df = {int(m2['df'].iloc[0])}"
+                    ),
                     "source": "Maydeu-Olivares & Joe (2014)",
                 }
             )

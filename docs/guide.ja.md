@@ -251,6 +251,8 @@ print(res_cl.summary())  # "SE method: sandwich (cluster-robust, 40 clusters)"
 
 - スコアリング（`res_w.score(...)`）はふだんどおり使える。`item_fit()`、`m2()`、`local_dependence()`、
   `jsi()`、`dif()`、`model_parallel_analysis()` はウェイト付きの推定結果には使えず、`SpecificationError` を出す。
+  データの要約（`reliability(res, data)`、`classification_accuracy(res, data=...)`、`empirical_item_curve()`、
+  `wright_map_table()`）は各行を 1 回ずつ数え、ウェイトは反映されない。
 
 ## 5. 結果を読む
 
@@ -480,7 +482,7 @@ fig_wright = plot_wright_map(res, df)  # 受検者と項目位置を並べる
 `m2(data)` は Maydeu-Olivares & Joe (2005, 2006) の限定情報の適合度統計量を、項目得点の平均とペアごとの交差積
 （mirt の既定 `M2(type = "M2*")`。2 値項目では厳密に $M_2$）から計算する。あわせて RMSEA とその信頼区間（既定
 `ci=0.90`）、SRMSR、および 2 値モデルでは独立帰無モデルに対する TLI と CFI を返す（多値モデルでは `tli`・`cfi` は
-`NaN`。独立帰無モデルは 2 値項目でのみ定義されるため）。潜在分布が `Normal` であることが必要で、1 次元モデルと
+`NaN`。独立帰無モデルは 2 値項目でのみ定義されるため）。潜在分布が `Normal`（単一群モデルでは `DavidianCurve` も可）であることが必要で、1 次元モデルと
 2〜3 因子の確認的モデル（`with_factors()`）に、単一群でも多母集団でも対応する。因子間相関（または潜在分布の平均・分散）を
 推定するモデルでは、値は mirt の `M2()` よりわずかに小さい（mirt はこれらを自由度では数えるが、微分の行列には入れない）。
 双因子モデルと two-tier モデルは、`m2()` も `item_fit()` もまだ対応していない。
@@ -1304,9 +1306,9 @@ print(res_bif.score(bif_df.iloc[:3]).round(3))  # theta_G, theta_s1, ..., se_G, 
 ```
 
 - **対応**: 傾きが自由な全項目モデル（2PL・3PL・4PL・GRM・GPCM・名義）、Oakes / Hessian SE、`"EAP"`
-  スコアリング（因子ごとの列）、等値制約、事前分布、JSON。
+  スコアリング（因子ごとの列）、局所依存、等値制約、事前分布、JSON。
 - **未対応**（`SpecificationError`）: 多母集団、Rasch / PCM 項目（因子分散を自由にする必要がある）、潜在平均・分散の
-  自由推定、MAP / ML / WLE / PV スコアリング、項目適合度、$M_2$、局所依存。
+  自由推定、MAP / ML / WLE / PV スコアリング、項目適合度、$M_2$。
 
 ### two-tier モデル
 
