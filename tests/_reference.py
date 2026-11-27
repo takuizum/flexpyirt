@@ -13,12 +13,13 @@ import numpy as np
 import pandas as pd
 
 REFERENCE_DIR = Path(__file__).parent / "reference"
-CTT_REFERENCE_DIR = REFERENCE_DIR
+CTT_REFERENCE_DIR = REFERENCE_DIR / "flexpyctt"
 """Copies of the flexpyctt reference values that flexpyirt's tests use (V24, V27).
 
 The files are generated in the flexpyctt repository (``validation/r/m5_polychoric_reference.R``
 and ``m5_detect_reference.R``, written to its ``tests/reference/``) and copied here unchanged
-(DESIGN.md §16.24).
+(DESIGN.md §16.24). They are in a directory of their own because they are not mirt references:
+the checks that every file in ``tests/reference/`` records mirt's commit do not apply to them.
 """
 
 MIRT_SHA = re.compile(r"[0-9a-f]{40}")

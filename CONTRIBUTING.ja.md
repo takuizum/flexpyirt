@@ -21,7 +21,7 @@
 - flexpyirt は flexpyctt の非公開ヘルパーを 4 つ import している（`_coerce_ordinal`、`_observed_correlation`、
   `_eigenvalues`、`_descending_eigenvalues`）。flexpyctt のテストがそのシグネチャを守っている。
 - **両方にまたがる変更**は、先に flexpyctt のリポジトリで変更してリリースし、そのあとここで依存の範囲を上げる。
-- `tests/reference/v24_polychoric.json` と `v27_detect.json` は flexpyctt の参照値のコピーである。flexpyctt で
+- `tests/reference/flexpyctt/v24_polychoric.json` と `v27_detect.json` は flexpyctt の参照値のコピーである。flexpyctt で
   再生成したら、ここにもコピーする。
 - 項目パラメータを使う等化は flexpyirt に置く。flexpyirt は flexpyequate に依存しない（開発用の依存にだけ
   入れている。`tests/test_equating.py` が独立した実装として照合に使う）。

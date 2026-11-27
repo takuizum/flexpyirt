@@ -2546,7 +2546,7 @@ data-independent shapes (§15.21).
 
     **Reference values.** flexpyirt's tests use two of flexpyctt's reference files (V24 for the
     JAX polychoric tests and the two-version agreement test, V27 for one ensemble test). They are
-    copied unchanged to `tests/reference/v24_polychoric.json` and `v27_detect.json`; the scripts
+    copied unchanged to `tests/reference/flexpyctt/v24_polychoric.json` and `v27_detect.json`; the scripts
     that write them are in flexpyctt's `validation/r/`. Copy them again when they are regenerated
     there. In this document and in VALIDATION.md, a path that starts with `flexpyctt/` is a path
     in the flexpyctt repository.

@@ -1857,7 +1857,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     なければならない。`publish` ジョブは、ビルドした wheel を PyPI の flexpyctt と一緒にインストールする。
 
     **参照値。** flexpyirt のテストは flexpyctt の参照値を 2 つ使う（JAX 版ポリコリックのテストと 2 つの実装の一致の
-    テストに V24、アンサンブルのテスト 1 つに V27）。これらを変更せずに `tests/reference/v24_polychoric.json` と
+    テストに V24、アンサンブルのテスト 1 つに V27）。これらを変更せずに `tests/reference/flexpyctt/v24_polychoric.json` と
     `v27_detect.json` にコピーする。書き出すスクリプトは flexpyctt の `validation/r/` にある。flexpyctt で
     再生成したら、ここにもコピーする。この文書と VALIDATION.md で `flexpyctt/` から始まるパスは、flexpyctt の
     リポジトリの中のパスである。

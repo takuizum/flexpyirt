@@ -2,8 +2,8 @@
 
 Unit tests of the bivariate normal distribution function and the shell layer, and the reference
 comparison against lavaan's ``lavCor`` (tight) and psych's ``polychoric`` (loose) from
-``tests/reference/v24_polychoric.json`` (a copy of flexpyctt's file, generated in the flexpyctt
-repository by ``validation/r/m5_polychoric_reference.R``). These tests cover flexpyirt's JAX
+``tests/reference/flexpyctt/v24_polychoric.json`` (a copy of flexpyctt's file, generated in the
+flexpyctt repository by ``validation/r/m5_polychoric_reference.R``). These tests cover flexpyirt's JAX
 implementation; flexpyctt's NumPy / SciPy implementation has the same tests in its own suite, and
 the two are required to agree here (DESIGN.md §16.18).
 """

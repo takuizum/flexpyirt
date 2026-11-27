@@ -25,7 +25,7 @@ This repository holds flexpyirt only.
   their signatures.
 - **A change that spans both**: change and release flexpyctt in its repository first, then raise
   the range here.
-- `tests/reference/v24_polychoric.json` and `v27_detect.json` are copies of flexpyctt's reference
+- `tests/reference/flexpyctt/v24_polychoric.json` and `v27_detect.json` are copies of flexpyctt's reference
   values. Copy them again when they are regenerated in flexpyctt.
 - Equating that needs item parameters belongs in flexpyirt. flexpyirt does not depend on
   flexpyequate (it is in the `dev` dependency group only: `tests/test_equating.py` uses it as
