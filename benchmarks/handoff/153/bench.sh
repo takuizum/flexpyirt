@@ -1,0 +1,6 @@
+set -e
+uptime
+for c in twogroup_2pl_n6000_j30 manygroups_2pl_g10 manygroups_2pl_g50 manygroups_2pl_g200; do
+  echo "== $c new"; (cd /Users/takumi_itamiya/Documents/GitHub_personal/flexpyirt/.claude/worktrees/153-manygroup-3b1ba1 && uv run python benchmarks/run_flexpyirt.py --quick --cases $c --data-dir /private/tmp/claude-501/-Users-takumi-itamiya-Documents-GitHub-personal-flexpyirt--claude-worktrees-153-manygroup-3b1ba1/a464467c-3ec1-4f47-ac31-75e8df8ebabb/scratchpad/data --out /private/tmp/claude-501/-Users-takumi-itamiya-Documents-GitHub-personal-flexpyirt--claude-worktrees-153-manygroup-3b1ba1/a464467c-3ec1-4f47-ac31-75e8df8ebabb/scratchpad/new_$c.json); uptime
+  echo "== $c base"; (cd /private/tmp/claude-501/-Users-takumi-itamiya-Documents-GitHub-personal-flexpyirt--claude-worktrees-153-manygroup-3b1ba1/a464467c-3ec1-4f47-ac31-75e8df8ebabb/scratchpad/base && uv run python benchmarks/run_flexpyirt.py --quick --cases $c --data-dir /private/tmp/claude-501/-Users-takumi-itamiya-Documents-GitHub-personal-flexpyirt--claude-worktrees-153-manygroup-3b1ba1/a464467c-3ec1-4f47-ac31-75e8df8ebabb/scratchpad/data --out /private/tmp/claude-501/-Users-takumi-itamiya-Documents-GitHub-personal-flexpyirt--claude-worktrees-153-manygroup-3b1ba1/a464467c-3ec1-4f47-ac31-75e8df8ebabb/scratchpad/base_$c.json); uptime
+done
