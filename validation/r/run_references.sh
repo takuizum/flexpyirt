@@ -8,7 +8,6 @@
 #
 # Stage 2 scripts read JSON written in stage 1 (data, and for some the fitted estimates), so they
 # start after stage 1 has finished. Logs go to $LOG_DIR (default: validation/r/logs, git-ignored).
-# The flexpyequate scripts (equate_*.R) do not use mirt and are not run here.
 # tests/test_reference_meta.py checks that every script that loads mirt is listed below.
 set -euo pipefail
 

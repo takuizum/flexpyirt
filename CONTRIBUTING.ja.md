@@ -2,31 +2,29 @@
 
 [English](CONTRIBUTING.md) | 日本語
 
-## パッケージ
+## 関連パッケージ
 
-このリポジトリは uv ワークスペースで、3 つの配布物を同じバージョンで公開する（DESIGN.md §16.18）。
+関連する 3 つのパッケージは、それぞれ自分のリポジトリとバージョンを持つ（DESIGN.md §16.18、§16.24）。このリポジトリに
+あるのは flexpyirt だけである。
 
-| 配布物 | 場所 | 内容 |
+| パッケージ | リポジトリ | 内容 |
 |---|---|---|
-| `flexpyirt` | リポジトリのルート（`pyproject.toml`、`src/flexpyirt/`、`tests/`、`validation/`） | 推定と、推定済みのモデルを使うものすべて。JAX と flexpyctt に依存する |
-| `flexpyctt` | `packages/flexpyctt/`（自分の `pyproject.toml`、`README.md`、`src/`、`tests/`、`validation/` を持つ） | 推定済みのモデルを使わない項目・テスト分析。依存は NumPy、SciPy、pandas だけ |
-| `flexpyequate` | `packages/flexpyequate/`（自分の `pyproject.toml`、`README.md`、`docs/DESIGN.md`、`src/`、`tests/` を持つ。参照値のスクリプトは `validation/r/equate_*.R`） | 得点分布の等化。依存は NumPy、SciPy、pandas だけで、他の 2 つとは独立 |
+| `flexpyirt` | [takuizum/flexpyirt](https://github.com/takuizum/flexpyirt)（ここ） | 推定と、推定済みのモデルを使うものすべて。JAX と flexpyctt に依存する |
+| `flexpyctt` | [takuizum/flexpyctt](https://github.com/takuizum/flexpyctt) | 推定済みのモデルを使わない項目・テスト分析。依存は NumPy、SciPy、pandas だけ |
+| `flexpyequate` | [takuizum/flexpyequate](https://github.com/takuizum/flexpyequate) | 得点分布の等化。依存は NumPy、SciPy、pandas だけ。他の 2 つとは独立 |
 
-- **flexpyctt は JAX も flexpyirt も import しない。** CI のジョブが flexpyctt だけをインストールし、JAX なしで
-  テストを実行する。関数は JAX のキーではなく `rng`（シードまたは `numpy.random.Generator`）を取る。
+- **flexpyirt は `flexpyctt>=0.X,<0.(X+1)` に依存する**（`pyproject.toml`）。1.0 より前は flexpyctt のマイナー
+  バージョンを互換性の単位とし、flexpyctt のパッチリリースは公開 API を変えない。flexpyctt のマイナーバージョンが
+  上がったら、ここで範囲を上げる PR を作り、CI が通ることを確かめる（`tests/test_packaging.py` が範囲の形を確認する）。
 - `FitResult` が要る道具は flexpyirt に、データだけで済む道具は flexpyctt に置く。flexpyirt は flexpyctt の公開名を
-  再公開する。
-- **flexpyequate は JAX も flexpyirt も flexpyctt も import しない。**その 2 つも flexpyequate に依存しない
-  （`uv sync` でインストールされるように、ルートの開発用の依存にだけ入れている）。CI のジョブが flexpyequate だけを
-  インストールしてテストを実行する。項目パラメータを使う等化は flexpyirt に置く。flexpyequate の設計は
-  [packages/flexpyequate/docs/DESIGN.ja.md](packages/flexpyequate/docs/DESIGN.ja.md) にある。
-- `packages/flexpyctt/README.md` と `packages/flexpyequate/README.md` は、それぞれのパッケージの PyPI のページに
-  なる。リンクは絶対 URL にし、開発関連の情報は置かない。ドキュメントサイトは flexpyequate の README を
-  「得点の等化」のページに表示する（`docs/equating.md`、`scripts/mkdocs_hooks.py`）。
-- flexpyirt と flexpyctt の lint と型チェックの設定は、ルートの `pyproject.toml` に 1 つだけある。flexpyequate は
-  自分の `[tool.ruff]` と `[tool.mypy]` を持つ（規則は同じ）。ルートで `ruff check .` を実行するとそのディレクトリには
-  その設定が使われ、mypy は `packages/flexpyequate/` で実行する。pytest の設定とテストのディレクトリはパッケージごとに
-  持つ。
+  再公開する（再公開する名前は `src/flexpyirt/__init__.py` に明示してある）。
+- flexpyirt は flexpyctt の非公開ヘルパーを 4 つ import している（`_coerce_ordinal`、`_observed_correlation`、
+  `_eigenvalues`、`_descending_eigenvalues`）。flexpyctt のテストがそのシグネチャを守っている。
+- **両方にまたがる変更**は、先に flexpyctt のリポジトリで変更してリリースし、そのあとここで依存の範囲を上げる。
+- `tests/reference/flexpyctt/v24_polychoric.json` と `v27_detect.json` は flexpyctt の参照値のコピーである。flexpyctt で
+  再生成したら、ここにもコピーする。
+- 項目パラメータを使う等化は flexpyirt に置く。flexpyirt は flexpyequate に依存しない（開発用の依存にだけ
+  入れている。`tests/test_equating.py` が独立した実装として照合に使う）。
 
 ## ブランチ
 
@@ -45,15 +43,14 @@
 ## PR とレビュー
 
 - すべての変更は PR で入れる。`main` と `develop` はルールセットで保護され、CI（`test (3.12/3.13)`）と
-  `pr-rules` が通らないとマージできない。CI では `flexpyctt without JAX (3.12/3.13)` と
-  `flexpyequate without JAX (3.12/3.13)` も走る。
+  `pr-rules` が通らないとマージできない。
 - PR はリポジトリのオーナーがレビューしてからマージする（自動マージしない）。
 - 数値計算に関わる変更は、R mirt との照合テスト（[docs/dev/VALIDATION.ja.md](docs/dev/VALIDATION.ja.md)）が通ることが前提。
 
 ## リリース
 
-バージョンは **git タグ**（`vX.Y.Z`）から決まる（hatch-vcs）。どの `pyproject.toml` にもバージョンを書かず、
-リリースはタグを打つことで行う。flexpyirt、flexpyctt、flexpyequate はいつも同じバージョンになる。タグのない開発中のコミットは `0.0.2.dev3+g1a2b3c4` のような開発版になる。
+バージョンは **git タグ**（`vX.Y.Z`）から決まる（hatch-vcs）。`pyproject.toml` にはバージョンを書かず、
+リリースはタグを打つことで行う。タグのない開発中のコミットは `0.0.2.dev3+g1a2b3c4` のような開発版になる。
 
 1. `develop` → `main` の PR を作る。**タイトルでバージョンの上げ方を決める**:
    - `release(major): ...` / `release(minor): ...` / `release(patch): ...`
@@ -61,15 +58,15 @@
 2. マージされると `.github/workflows/release.yml` が動く:
    1. `plan` ジョブ: PR タイトルと最新の `vX.Y.Z` タグから次のバージョンを決める。
    2. `publish` ジョブ: **`release` 環境の承認待ちになる**。オーナーが Actions 画面で承認すると、
-      `main` にタグ `vX.Y.Z` を打って 3 つの配布物をビルドし（`uv build --package flexpyctt`、
-      `uv build --package flexpyequate`、`uv build --package flexpyirt`）、GitHub Release を作成する（wheel / sdist 添付、リリースノート自動生成）。このリリースに含まれる fix PR が `Closes` していた issue を閉じる。
-   3. `pypi-flexpyctt` ジョブ、続いて `pypi` ジョブ。それと並んで `pypi-flexpyequate` ジョブ: 同じ wheel / sdist を
-      **PyPI に公開する**（`pypi` 環境、Trusted Publishing。API トークンは使わない）。PyPI のプロジェクトごとに
-      1 ジョブ。flexpyirt が flexpyctt に依存するので、flexpyctt を先に公開する。flexpyequate はどちらにも依存しない
-      ので、そのジョブは `publish` ジョブだけを待ち、失敗しても他の 2 つを止めない（失敗したジョブを再実行する）。
+      `main` にタグ `vX.Y.Z` を打ってビルドし（`uv build`）、GitHub Release を作成する（wheel / sdist 添付、
+      リリースノート自動生成）。このリリースに含まれる fix PR が `Closes` していた issue を閉じる。
+   3. `pypi` ジョブ: 同じ wheel / sdist を **PyPI に公開する**（`pypi` 環境、Trusted Publishing。API トークンは
+      使わない）。
    4. 同じ `main` への push で `.github/workflows/docs.yml` がドキュメントサイトを GitHub Pages に公開する。
 3. **最初のリリース**（`v*` タグがまだない）は、タイトルの上げ方に関係なく **v0.0.1**。
-4. 手動実行（`workflow_dispatch`）は dry run 専用で、次のバージョンの計算と 3 つの配布物のビルドだけを行う。
+4. 手動実行（`workflow_dispatch`）は dry run 専用で、次のバージョンの計算とビルドだけを行う。
+5. **リリースの前に、依存の範囲に入る flexpyctt が PyPI にあること**（`publish` ジョブは、ビルドした wheel を
+   PyPI の flexpyctt と一緒にインストールして確かめる）。
 
 `main` へのマージコミットは `develop` に戻さない（`develop` は保護されていて、ボットは push できない）。
 このため `develop` 上の開発版の番号は直前のリリースタグを参照しないことがあるが、リリースには影響しない。
@@ -83,9 +80,9 @@
   マージできる管理者だけ。
 - **`publish` ジョブは `release` 環境で動き、指定レビュアー（オーナー）の承認が必要**。環境は `main` からしか
   デプロイできないので、他のブランチやフォークからはタグも Release も作れない。
-- **PyPI への公開は Trusted Publishing**（OIDC）。PyPI のプロジェクト（`flexpyirt`、`flexpyctt`、`flexpyequate`）ごとに
-  「リポジトリ `takuizum/flexpyirt`、ワークフロー `release.yml`、環境 `pypi`」だけを信頼する publisher を登録するので、
-  API トークンはリポジトリに置かない。新しいプロジェクトは、最初のリリースの前に PyPI で pending publisher を登録する。`pypi` 環境もデプロイ元を `main` に限定しておく。PyPI に一度上げた番号は
+- **PyPI への公開は Trusted Publishing**（OIDC）。PyPI のプロジェクト `flexpyirt` は
+  「リポジトリ `takuizum/flexpyirt`、ワークフロー `release.yml`、環境 `pypi`」という publisher だけを信頼するので、
+  API トークンはリポジトリに置かない。`pypi` 環境もデプロイ元を `main` に限定しておく。PyPI に一度上げた番号は
   削除しても再利用できない。
 - ワークフローの `GITHUB_TOKEN` は既定で読み取り専用（`permissions: contents: read`）。書き込みは
   `publish` ジョブだけ。フォークからの PR は読み取り専用トークンで CI と PR rules だけが走る。
@@ -98,15 +95,7 @@ Python 環境は `uv` だけで管理する（pip は使わない）。
 ```bash
 uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
-uv run pytest packages/flexpyctt
-uv run pytest packages/flexpyequate
-(cd packages/flexpyequate && uv run mypy)
 ```
-
-`uv sync` は 3 つのパッケージを編集可能な形でインストールする。ruff はルートから 3 つすべてを、mypy は flexpyirt と
-flexpyctt を検査する。flexpyequate の mypy は最後の行で実行する。`uv run pytest` は flexpyirt のテスト、
-`uv run pytest packages/flexpyctt` は flexpyctt のテスト、`uv run pytest packages/flexpyequate` は flexpyequate の
-テストを実行する。
 
 ### テスト
 
@@ -127,7 +116,7 @@ mirt 参照値との照合は、full 層（夜間実行またはリリース PR�
 - CI は JAX の永続コンパイルキャッシュ（`JAX_COMPILATION_CACHE_DIR`）を実行間で引き継ぐ。
 - full 層のシャードは `tests/durations.json`、fast 層のシャードは `tests/durations-fast.json`（`--durations-file`）に記録したモジュールごとの秒数で均等に分ける。重いモジュールを足したり分けたりしたら更新する：
   `uv run pytest --write-durations tests/durations.json` と `uv run pytest -m "not slow" -n 4 --write-durations tests/durations-fast.json`（または CI 実行が残す `durations-*` アーティファクトをまとめる）。ファイルにないモジュールは 1 テスト 1 秒として扱う。
-- CI の required check `test (3.12)` と `test (3.13)` は、`checks` ジョブ（ruff・mypy・flexpyctt と flexpyequate のテスト）と `fast` の全シャードが通ったときに通る。
+- CI の required check `test (3.12)` と `test (3.13)` は、`checks` ジョブ（ruff・mypy）と `fast` の全シャードが通ったときに通る。
 
 手元で素早く確かめるなら `uv run pytest -m "not slow"`。CI と同じ full 層の 1 シャードだけ走らせるなら `uv run pytest --shard 2/4`（fast 層なら `uv run pytest -m "not slow" --shard 2/3 --durations-file tests/durations-fast.json`）。
 
@@ -142,9 +131,7 @@ validation/r/run_references.sh
 1 本だけ作り直すなら `validation/r/run_references.sh m1 m2`。mirt を使うスクリプトを新しく足すときは
 `validation/r/setup.R` を `source` し、`run_references.sh` の段のリストに加える。
 
-flexpyctt の参照値のスクリプトは `packages/flexpyctt/validation/r/` にあり、`packages/flexpyctt/tests/reference/` に
-書き出す。これらもリポジトリのルートから実行する。flexpyequate のスクリプトは `validation/r/equate_*.R` で、
-`packages/flexpyequate/tests/reference/` に書き出す。
+flexpyctt と flexpyequate の参照値のスクリプトは、それぞれのリポジトリの `validation/r/` にある。
 
 R `mirt` との wall time ベンチマークを再実行するとき（詳細と `--quick` モードは
 [benchmarks/README.ja.md](benchmarks/README.ja.md) を参照）:

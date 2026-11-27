@@ -59,8 +59,7 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "full tier: $full; ref: ${ref:-(event default)}"
 
-  # Lint, types, flexpyctt's and flexpyequate's suites and the install smoke test; runs alongside
-  # the fast-tier shards below.
+  # Lint, types and the install smoke test; runs alongside the fast-tier shards below.
   checks:
     needs: plan
     name: checks (${{ matrix.python-version }})
@@ -80,34 +79,21 @@ jobs:
           enable-cache: true
       - name: Install
         run: uv sync --locked --all-extras --dev
-      # Ruff reads packages/flexpyequate/pyproject.toml for that directory (same rules).
       - name: Ruff (lint)
         run: uv run ruff check .
       - name: Ruff (format)
         run: uv run ruff format --check .
       - name: Mypy
         run: uv run mypy
-      # flexpyequate has its own mypy configuration (packages/flexpyequate/pyproject.toml).
-      - name: Mypy (flexpyequate)
-        working-directory: packages/flexpyequate
-        run: uv run --no-sync mypy
-      # flexpyctt has its own pytest configuration (packages/flexpyctt/pyproject.toml).
-      - name: Pytest (flexpyctt)
-        run: uv run pytest packages/flexpyctt --durations=10
-      # So has flexpyequate (packages/flexpyequate/pyproject.toml).
-      - name: Pytest (flexpyequate)
-        run: uv run pytest packages/flexpyequate --durations=10
       # The isolated env has no extras, hence no matplotlib: `import flexpyirt` and
       # `import flexpyirt.plotting` must work and the plot functions must raise
       # MissingDependencyError (DESIGN.md §21).
       - name: Editable install smoke test (isolated env)
         run: |
-          uv run --isolated --no-project --with-editable ./packages/flexpyctt --with-editable . \
+          uv run --isolated --no-project --with-editable . \
             python -c "import flexpyctt, flexpyirt; print(flexpyctt.__version__, flexpyirt.__version__)"
-          uv run --isolated --no-project --with-editable ./packages/flexpyctt --with-editable . \
+          uv run --isolated --no-project --with-editable . \
             python scripts/check_plotting_without_matplotlib.py
-          uv run --isolated --no-project --with-editable ./packages/flexpyequate \
-            python -c "import flexpyequate; print(flexpyequate.__version__)"
 
   # flexpyirt's fast tier, split into 3 shards of about equal duration (tests/durations-fast.json).
   fast:
@@ -179,73 +165,6 @@ jobs:
           echo "checks: $CHECKS, fast: $FAST"
           test "$CHECKS" = success && test "$FAST" = success
 
-  # flexpyctt installed on its own: JAX must be absent, and the whole flexpyctt suite must pass
-  # without it (DESIGN.md §16.18).
-  flexpyctt:
-    name: flexpyctt without JAX (${{ matrix.python-version }})
-    needs: plan
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.plan.outputs.ref }}
-          fetch-depth: 0  # hatch-vcs derives the version from tags
-      - uses: astral-sh/setup-uv@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          enable-cache: true
-      - name: Install flexpyctt only
-        run: uv sync --locked --package flexpyctt
-      - name: JAX and flexpyirt are not installed, flexpyctt imports
-        run: |
-          uv run --no-sync python -c "
-          import importlib.util as u
-          present = [m for m in ('jax', 'jaxlib', 'flexpyirt') if u.find_spec(m) is not None]
-          assert not present, present
-          import flexpyctt
-          print(flexpyctt.__version__)
-          "
-      - name: Pytest (flexpyctt, without JAX)
-        run: uv run --no-sync pytest packages/flexpyctt --durations=10
-
-  # flexpyequate installed on its own: JAX, flexpyirt and flexpyctt must be absent, and the whole
-  # flexpyequate suite must pass without them (DESIGN.md §16.18).
-  flexpyequate:
-    name: flexpyequate without JAX (${{ matrix.python-version }})
-    needs: plan
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.plan.outputs.ref }}
-          fetch-depth: 0  # hatch-vcs derives the version from tags
-      - uses: astral-sh/setup-uv@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          enable-cache: true
-      - name: Install flexpyequate only
-        run: uv sync --locked --package flexpyequate
-      - name: JAX, flexpyirt and flexpyctt are not installed, flexpyequate imports
-        run: |
-          uv run --no-sync python -c "
-          import importlib.util as u
-          names = ('jax', 'jaxlib', 'flexpyirt', 'flexpyctt')
-          present = [m for m in names if u.find_spec(m) is not None]
-          assert not present, present
-          import flexpyequate
-          print(flexpyequate.__version__)
-          "
-      - name: Pytest (flexpyequate, without JAX)
-        run: uv run --no-sync pytest packages/flexpyequate --durations=10
-
   # The whole suite, split into shards of about equal duration (tests/durations.json).
   test-full:
     needs: plan
@@ -305,35 +224,14 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
-      - name: Build sdist and wheel of each package
+      - name: Build sdist and wheel
         run: |
-          uv build --package flexpyctt
-          uv build --package flexpyequate
-          uv build --package flexpyirt
+          uv build
           ls dist
-      - name: Check metadata (PyPI rendering of each README.md)
+      - name: Check metadata (PyPI rendering of README.md)
         run: uvx twine check --strict dist/*
-      - name: Smoke test the flexpyctt wheel alone (isolated env, no JAX)
+      # flexpyctt comes from PyPI, within the range that flexpyirt requires.
+      - name: Smoke test the wheel (isolated env)
         run: |
-          uv run --isolated --no-project --with dist/flexpyctt-*.whl python -c "
-          import importlib.util as u
-          assert u.find_spec('jax') is None
-          import flexpyctt
-          print(flexpyctt.__version__)
-          "
-      - name: Smoke test the flexpyequate wheel alone (isolated env, no JAX)
-        run: |
-          uv run --isolated --no-project --with dist/flexpyequate-*.whl python -c "
-          import importlib.util as u
-          present = [m for m in ('jax', 'flexpyirt', 'flexpyctt') if u.find_spec(m) is not None]
-          assert not present, present
-          import flexpyequate
-          print(flexpyequate.__version__)
-          "
-      # flexpyirt depends on flexpyctt, which may not be on PyPI at this version: install both wheels.
-      - name: Smoke test the flexpyirt wheel (isolated env)
-        run: |
-          uv run --isolated --no-project --with dist/flexpyctt-*.whl --with dist/flexpyirt-*.whl \
-            python -c "import flexpyirt, flexpyctt; assert flexpyirt.__version__ == flexpyctt.__version__; print(flexpyirt.__version__)"
-      - name: The three wheels have the same version
-        run: test "$(ls dist/*.whl | sed -E 's/.*-([^-]+)-py3-none-any\.whl/\1/' | sort -u | wc -l)" = 1
+          uv run --isolated --no-project --with dist/flexpyirt-*.whl \
+            python -c "import flexpyirt, flexpyctt; print(flexpyirt.__version__, flexpyctt.__version__)"

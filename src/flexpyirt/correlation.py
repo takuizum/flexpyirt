@@ -17,9 +17,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+from flexpyctt.correlation import PolychoricResult
 from scipy.special import ndtri
 
-from flexpyctt.correlation import PolychoricResult
 from flexpyirt._polychoric import fit_pairs
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import (

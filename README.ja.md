@@ -76,10 +76,9 @@ pip install flexpyirt  # または uv add flexpyirt
 パッケージである。依存は NumPy、SciPy、pandas だけなので、JAX を入れたくない環境では `pip install flexpyctt` で
 単独でインストールできる。
 
-同じリポジトリから公開している 3 つめのパッケージ [flexpyequate](https://pypi.org/project/flexpyequate/) は、
-得点分布の等化（線形等化、等パーセンタイル等化、カーネル等化）を行う。flexpyirt とは独立で、flexpyirt を
-インストールしても入らない（`pip install flexpyequate`。
-[ドキュメント](https://takuizum.github.io/flexpyirt/ja/equating/)）。
+別のパッケージ [flexpyequate](https://pypi.org/project/flexpyequate/) は、得点分布の等化（線形等化、
+等パーセンタイル等化、カーネル等化）を行う。flexpyirt とは独立で、flexpyirt をインストールしても入らない
+（`pip install flexpyequate`。[リポジトリ](https://github.com/takuizum/flexpyequate)）。
 
 polars の DataFrame を使う場合は `flexpyirt[polars]`、図（`flexpyirt.plotting`）を描く場合は `flexpyirt[plot]`。GPU を使う場合は、先に CUDA 版の `jax` を入れる
 （[JAX のインストール手順](https://docs.jax.dev/en/latest/installation.html)）。

@@ -82,10 +82,10 @@ This also installs [flexpyctt](https://pypi.org/project/flexpyctt/), the compani
 analyses that need no fitted model. It depends on NumPy, SciPy and pandas only; where JAX is not
 wanted, install it alone with `pip install flexpyctt`.
 
-[flexpyequate](https://pypi.org/project/flexpyequate/), a third package from the same repository,
-equates score distributions (linear, equipercentile and kernel equating). It is independent of
-flexpyirt and is not installed with it: `pip install flexpyequate`
-([documentation](https://takuizum.github.io/flexpyirt/equating/)).
+[flexpyequate](https://pypi.org/project/flexpyequate/), a separate package, equates score
+distributions (linear, equipercentile and kernel equating). It is independent of flexpyirt and is
+not installed with it: `pip install flexpyequate`
+([repository](https://github.com/takuizum/flexpyequate)).
 
 For polars input, install `flexpyirt[polars]`; for the plots (`flexpyirt.plotting`), `flexpyirt[plot]`. For GPUs, install a CUDA build of `jax` first
 (see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)).
