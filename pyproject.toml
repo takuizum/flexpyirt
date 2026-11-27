@@ -27,7 +27,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "flexpyctt",
+    # flexpyctt is released from its own repository. Before 1.0 its minor version is the unit of
+    # compatibility: a patch release keeps the public API (DESIGN.md §16.24).
+    "flexpyctt>=0.1,<0.2",
     "jax>=0.4.30",
     "numpy>=1.26",
     "scipy>=1.11",
@@ -55,23 +57,14 @@ dev = [
     "pandas-stubs>=2.1",
     "pytest-xdist>=3.8.0",
     "matplotlib>=3.8",
-    # Workspace member, for development only: `uv sync` installs it (editable) so that its tests
-    # and type checks run from the root environment. flexpyirt itself does not depend on it.
-    "flexpyequate",
+    # For development only: tests/test_equating.py checks the equipercentile kernel against it.
+    # flexpyirt itself does not depend on it.
+    "flexpyequate>=0.1,<0.2",
 ]
 docs = [
     "mkdocs-material>=9.5",
     "mkdocs-static-i18n>=1.2",
 ]
-
-# uv workspace: flexpyirt (this file, src/flexpyirt) and the JAX-free distributions under
-# packages/ (flexpyctt, flexpyequate) share one lockfile and one version tag (DESIGN.md §16.18).
-[tool.uv.workspace]
-members = ["packages/*"]
-
-[tool.uv.sources]
-flexpyctt = { workspace = true }
-flexpyequate = { workspace = true }
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -90,24 +83,18 @@ packages = ["src/flexpyirt"]
 # The sdist carries the sources, tests (with the mirt reference values), R validation scripts,
 # benchmarks and documentation; repository tooling stays out.
 [tool.hatch.build.targets.sdist]
-# packages/flexpyctt is included: flexpyirt's tests read reference values from
-# packages/flexpyctt/tests/reference. packages/flexpyequate is independent of flexpyirt and has
-# its own sdist.
 exclude = [
     "/.github",
     "/.python-version",
     "/CLAUDE.md",
     "/uv.lock",
     "/site",
-    "/packages/flexpyequate",
 ]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "packages/flexpyctt/src", "packages/flexpyctt/tests"]
-# packages/flexpyequate has its own [tool.ruff] (the same rules); `ruff check .` from the root
-# applies it to that directory.
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF", "D"]
@@ -121,20 +108,11 @@ convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
-"packages/*/tests/**" = ["D"]
 
-# packages/flexpyequate is checked with its own [tool.mypy], from its directory (its tests are a
-# package named `tests`, like the root's, so one mypy run cannot hold both).
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = [
-    "src/flexpyirt",
-    "tests",
-    "scripts",
-    "packages/flexpyctt/src/flexpyctt",
-    "packages/flexpyctt/tests",
-]
+files = ["src/flexpyirt", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
 module = ["scipy.*"]

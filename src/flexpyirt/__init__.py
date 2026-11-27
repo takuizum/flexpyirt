@@ -26,6 +26,7 @@ from flexpyctt.item_analysis import (
     item_analysis,
     score_responses,
 )
+
 from flexpyirt import errors
 from flexpyirt.classification import ClassificationResult, classification_accuracy
 from flexpyirt.comparison import compare_fits

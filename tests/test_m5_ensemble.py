@@ -17,8 +17,8 @@ import jax
 import numpy as np
 import pandas as pd
 import pytest
-
 from flexpyctt import hull, polychoric
+
 from flexpyirt import (
     BAEM,
     DimensionalityResult,
@@ -126,6 +126,7 @@ def test_rng_from_key_is_deterministic_and_accepts_both_key_kinds() -> None:
 def test_moved_tools_are_reexported_from_flexpyctt() -> None:
     """flexpyirt re-exports flexpyctt's functions and classes; polychoric stays the JAX version."""
     import flexpyctt
+
     import flexpyirt
 
     moved = [n for n in flexpyctt.__all__ if n not in ("__version__", "errors", "polychoric")]

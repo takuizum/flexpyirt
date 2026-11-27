@@ -18,7 +18,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-
 from flexpyctt import polychoric
 from flexpyctt.correlation import _coerce_ordinal
 from flexpyctt.dimensionality import (
@@ -44,6 +43,7 @@ from flexpyctt.dimensionality import (
     parallel_analysis,
     velicer_map,
 )
+
 from flexpyirt._compile import coerce_responses
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import FlexpyirtWarning, SpecificationError
