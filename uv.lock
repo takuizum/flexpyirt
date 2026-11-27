@@ -16,13 +16,6 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
-[manifest]
-members = [
-    "flexpyctt",
-    "flexpyequate",
-    "flexpyirt",
-]
-
 [[package]]
 name = "ast-serialize"
 version = "0.13.1"
@@ -368,64 +361,30 @@ wheels = [
 
 [[package]]
 name = "flexpyctt"
-source = { editable = "packages/flexpyctt" }
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "scipy" },
 ]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-xdist" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "pandas", specifier = ">=2.1" },
-    { name = "scipy", specifier = ">=1.11" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-xdist", specifier = ">=3.8.0" },
+sdist = { url = "https://files.pythonhosted.org/packages/fd/74/2ce742edfeafd97cacb2dddfc9f7e83de33f07a2cfe5679238d015018f80/flexpyctt-0.1.0.tar.gz", hash = "sha256:61bcb4150c43927e7ff78527a0f3f93747f29cfd8f8e60aaf61262dac2ba8e6f", size = 478070, upload-time = "2026-11-27T05:20:45.608Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/a4/7de5d4b6a30d43dbb5ba5d0e10d1890ff009ebfffa6550e1b3816dbe1eb9/flexpyctt-0.1.0-py3-none-any.whl", hash = "sha256:eb93f2b5df9d7c9db0cc01b2557a5c99cf726534910e97fdd6194afd5b967a31", size = 64924, upload-time = "2026-11-27T05:20:40.2Z" },
 ]
 
 [[package]]
 name = "flexpyequate"
-source = { editable = "packages/flexpyequate" }
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "scipy" },
 ]
-
-[package.dev-dependencies]
-dev = [
-    { name = "hypothesis" },
-    { name = "mypy" },
-    { name = "pandas-stubs" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "pandas", specifier = ">=2.1" },
-    { name = "scipy", specifier = ">=1.11" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "hypothesis", specifier = ">=6.100" },
-    { name = "mypy", specifier = ">=1.11" },
-    { name = "pandas-stubs", specifier = ">=2.1" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "ruff", specifier = ">=0.6" },
+sdist = { url = "https://files.pythonhosted.org/packages/cc/da/d179c501e8fd9202f372674daeec85399e0e893d14845bf549b47d0ddeaf/flexpyequate-0.1.0.tar.gz", hash = "sha256:bd15c26d1085fd0d3d19b50952079e41b89d7a3f9cca7158d5d62f428b6d7023", size = 357514, upload-time = "2026-11-27T05:20:14.006Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d1/53/0a2f0c89cac37918185b472eb15004feb088e0547c39f93523e8ec831ff6/flexpyequate-0.1.0-py3-none-any.whl", hash = "sha256:6cdcbda0607b288b02583b3a7cd9c6e5be7429142ef146d555aa6a0d2ac73e65", size = 52061, upload-time = "2026-11-27T05:20:12.685Z" },
 ]
 
 [[package]]
@@ -465,7 +424,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "flexpyctt", editable = "packages/flexpyctt" },
+    { name = "flexpyctt", specifier = ">=0.1,<0.2" },
     { name = "jax", specifier = ">=0.4.30" },
     { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.8" },
     { name = "numpy", specifier = ">=1.26" },
@@ -477,7 +436,7 @@ provides-extras = ["plot", "polars"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "flexpyequate", editable = "packages/flexpyequate" },
+    { name = "flexpyequate", specifier = ">=0.1,<0.2" },
     { name = "hypothesis", specifier = ">=6.100" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "mypy", specifier = ">=1.11" },
