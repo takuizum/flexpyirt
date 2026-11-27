@@ -65,12 +65,13 @@ releasing means tagging. Untagged development commits get versions like `0.0.2.d
    - Merge it with a **merge commit** (the `main` ruleset allows merge commits only).
 2. The merge runs `.github/workflows/release.yml`:
    1. `plan` job: computes the next version from the PR title and the latest `vX.Y.Z` tag.
-   2. `publish` job: **waits for approval in the `release` environment**. Once the owner approves
-      it on the Actions page, it tags `main` with `vX.Y.Z`, builds (`uv build`) and creates a
-      GitHub Release (wheel and sdist attached, release notes generated). It then closes the
-      issues that fix PRs in this release `Closes`d.
-   3. `pypi` job: **publishes the same wheel and sdist to PyPI** (`pypi` environment, Trusted
-      Publishing; no API token).
+   2. `publish` job: runs **without waiting for approval** (`release` environment, which deploys
+      from `main` only). It tags `main` with `vX.Y.Z`, builds (`uv build`) and creates a GitHub
+      Release (wheel and sdist attached, release notes generated). It then closes the issues
+      that fix PRs in this release `Closes`d.
+   3. `pypi` job: **waits for approval in the `pypi` environment**. Once the owner approves it on
+      the Actions page, it publishes the same wheel and sdist to PyPI (Trusted Publishing; no
+      API token).
    4. The same push to `main` runs `.github/workflows/docs.yml`, which deploys the documentation
       site to GitHub Pages.
 3. **The first release** (no `v*` tag yet) is **v0.0.1**, whatever bump the title asks for.
@@ -89,9 +90,11 @@ Versions follow [Semantic Versioning](https://semver.org/). The public API may c
 - **Only repository admins can update `main`** (ruleset `main-release-gate`). The PR and CI
   requirements (ruleset `main`) apply to admins too. Only an admin who can merge develop into main
   can start a release.
-- **The `publish` job runs in the `release` environment and needs the designated reviewer's (the
-  owner's) approval.** The environment deploys from `main` only, so other branches and forks cannot
-  create tags or Releases.
+- **The `publish` job runs in the `release` environment**, which deploys from `main` only, so
+  other branches and forks cannot create tags or Releases. It has no required reviewer: merging
+  the release PR is the decision to tag.
+- **The `pypi` job needs the designated reviewer's (the owner's) approval** in the `pypi`
+  environment. Nothing reaches PyPI without it.
 - **PyPI uploads use Trusted Publishing** (OIDC). The PyPI project `flexpyirt`
   trusts only the publisher "repository `takuizum/flexpyirt`, workflow `release.yml`, environment
   `pypi`", so no API token lives in the repository. Restrict the `pypi` environment to deployments from `main` as well. A version
