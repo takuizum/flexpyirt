@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import warnings
 from typing import Any, Literal
 
@@ -313,9 +312,9 @@ def _sandwich_meat(problem: _core.CompiledProblem, eta: jax.Array, prep: Prepare
     if prep.weights is None and prep.cluster is None:
         return np.asarray(_information["crossprod"](problem, eta))
     rows = meat_patterns(prep.y, prep.group, prep.weights, prep.cluster, prep.n_clusters)
-    meat_problem = dataclasses.replace(
+    meat_problem = _core.with_responses(
         problem,
-        y=jnp.asarray(rows.y, dtype=jnp.int32),
+        jnp.asarray(rows.y, dtype=jnp.int32),
         group=jnp.asarray(rows.group, dtype=jnp.int32),
         counts=jnp.asarray(rows.counts, dtype=jnp.float64),
         blocks=None,

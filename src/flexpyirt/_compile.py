@@ -1664,6 +1664,11 @@ def _bifactor_block(
     )
 
 
+def _family_complete(real_patterns: np.ndarray, columns: Sequence[int]) -> bool:
+    """Whether no real pattern row has a missing response to ``columns`` (DESIGN.md §4.2)."""
+    return bool(np.all(real_patterns[:, list(columns)] >= 0))
+
+
 def compile_problem(
     model: Model,
     y: np.ndarray,
@@ -1770,6 +1775,7 @@ def compile_problem(
                 slot_lower=jnp.asarray(slot_lo, dtype=jnp.float64),
                 slot_upper=jnp.asarray(slot_hi, dtype=jnp.float64),
                 kernel=k,
+                complete=_family_complete(patterns[:n_patterns], cols),
             )
         )
 

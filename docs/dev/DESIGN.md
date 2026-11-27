@@ -71,8 +71,13 @@ pytrees only (nested `jax.Array`s and our own frozen dataclasses registered with
 ### 4.1 Preprocessing: response-pattern compression
 - Make each group's response matrix (missing as `-1`) unique to get frequencies $c_p$. With
   sampling weights, $c_p$ is the sum of the weights of the rows with pattern $p$ (§17.4).
-- To limit jit recompilation, **pad the number of patterns to a power-of-two bucket** (rows with
-  frequency 0).
+- To limit jit recompilation, **pad the number of patterns to a bucket** (rows with frequency 0).
+  The buckets are $\{1, 1.5\}\times 2^k$ with at least 8 rows (8, 12, 16, 24, 32, 48, ...;
+  `pattern_bucket`, #152): the padded size is at most 1.5 (on average about 1.2) times the number
+  of patterns, against 2 (about 1.4) with powers of two, at the cost of twice as many possible
+  compiled shapes. Padding rows have count 0 and add exactly nothing to the likelihood, the
+  expected counts or their derivatives. Chunked consumers (Oakes cross term, scores of the
+  sandwich) pad to their own chunk sizes and do not assume a power of two.
 - Groups have different numbers of patterns, so all groups are concatenated into one array plus
   a `group_index` (no per-group Python loop inside jit).
 
@@ -87,6 +92,42 @@ Marginal log-likelihood: $\ell(\eta)=\sum_p c_p\operatorname{logsumexp}_q(\ell_{
 Implementation note: $\bar r$ is an einsum of `one_hot(y)` and $c_p h_{pq}$. To avoid
 $P\times J\times K\times Q$ memory, contract the `(P,Q)` weights with the `(P,J,K)` one-hot to get
 `(G,J,K,Q)` directly.
+
+**Fast paths (#152).** None changes the result beyond summation order (the tests compare each with
+the generic path to $10^{-12}$ at fixed parameters), and none changes the `ItemKernel` protocol.
+
+- *Complete families.* `compile_problem` marks a family `complete` (a static flag of
+  `FamilyBlock`) when no real pattern row has a missing response to its items. Every item is then
+  observed, so with category 0 as the reference
+  $$\ell_{pq}=\sum_j\log P_{j0}(\theta_q)+\sum_j\sum_{k\ge1}\mathbf 1[y_{pj}=k]\,\Delta_{jkq},\qquad
+  \Delta_{jkq}=\log P_{jk}(\theta_q)-\log P_{j0}(\theta_q),$$
+  $$\bar r_{gj0q}=\bar n_{gq}-\sum_{k\ge1}\bar r_{gjkq}.$$
+  The first sum is one `(G,Q)` offset; the contractions with the patterns run over $K_f-1$
+  categories instead of $K_f$, which halves them for dichotomous items. The flag is computed
+  from the compiled responses; code that replaces `y` afterwards (`_jsi.without_item`, the
+  sandwich's middle matrix) goes through `_core.with_responses`, which resets every flag to
+  `False`, the always-correct generic path. With missing responses the same split needs an
+  observed-mask product as wide as the one-hot it replaces, so it is not used.
+  $\bar r_{gj0q}$ is a difference, so a cell whose true value is far below
+  $\bar n_{gq}$ carries an absolute error of order $\epsilon\,\bar n_{gq}$ (and may be
+  $-10^{-12}$ instead of 0); the M-step objective weights it by $\log P_{j0}$ and is unaffected
+  at that level.
+- *Rank-$D$ contrasts.* For the exact built-in `DichotomousKernel` (2PL, Rasch) and `GPCMKernel`
+  (GPCM, PCM) types, $\Delta_{jkq}=k\,\mathbf a_j^\top\boldsymbol\theta_q+d_{jk}$
+  ($\log\sigma(z)-\log\sigma(-z)=z$ for the 2PL). A complete family then contracts the patterns
+  with the `(J_f, K_f-1, D+1)` coefficients $(k\mathbf a_j, d_{jk})$ and multiplies the `(P, D+1)`
+  result once by $(\boldsymbol\theta_q, 1)$: $O(PJ_fK_fD+PDQ)$ instead of $O(PJ_fK_fQ)$ for the
+  log joint (the expected counts still need the full $O(PJ_fK_fQ)$ product). The dispatch is
+  internal (`_core._is_rank_d`, an exact `type` check), so subclasses and user kernels keep the
+  generic path. The offset still comes from the kernel's own $\log P_{j0}$.
+- *One group.* Without groups the expected counts are a plain `(J_f K_f, P) × (P, Q)` product,
+  without the `(P, G)` group one-hot of the multi-group einsum (which XLA did not reduce to a
+  matrix product: about 2.7× slower at `P = 24576`, `J = 40`, `Q = 61`).
+- *One exponential.* $h_{pq}$ and $\log\sum_q e^{\lambda_{pq}}$ share
+  $e_{pq}=\exp(\lambda_{pq}-\max_q\lambda_{pq})$ instead of a `logsumexp` followed by a second
+  `exp`.
+
+The bifactor / two-tier E-step (§17.1) keeps the generic one-hot path.
 
 ### 4.3 M-step (items)
 The expected complete-data log-likelihood of item $j$ over groups, plus the log prior:
@@ -394,7 +435,7 @@ the Jacobian (§15.18).
   respondent with any missing response; unidimensional `Normal` models only (§18.2).
 
 Missing responses are dropped from the likelihood (and from $I(\theta)$ in WLE) for every method
-except EAPsum. All other methods compress unique patterns with power-of-two bucket padding and run inside `jit` with
+except EAPsum. All other methods compress unique patterns with bucket padding (§4.1) and run inside `jit` with
 data-independent shapes (§15.21).
 
 ## 9. Performance
@@ -723,7 +764,7 @@ data-independent shapes (§15.21).
       previous implementation to $8.5\times10^{-16}$ (relative to the largest entry).
 21. **Scoring API and shared Core structure (M4, §8)**: `FitResult.score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5)` supports `Literal["EAP", "MAP", "ML", "WLE", "PV"]`.
     EAP (`_core.eap`) is unchanged. The new scoring kernels live in `_scoring.py` (pure JAX Core
-    layer), compress unique `(group, pattern)` pairs and pad to power-of-two buckets as for EAP,
+    layer), compress unique `(group, pattern)` pairs and pad to buckets (§4.1) as for EAP,
     drop missing responses (`y == -1`) via masking, and run inside `jit` with shapes independent of
     the data values. Passing `key` to a non-PV method, omitting or passing a non-PRNG `key` for PV,
     or passing an invalid `method` or `n_draws` raises `SpecificationError`.
@@ -780,7 +821,7 @@ data-independent shapes (§15.21).
     per respondent from the posterior $p(\theta\mid y_i;\mu_{g(i)},\sigma_{g(i)}^2)$, returned as a
     DataFrame with columns `pv1..pvM`. To produce continuous draws without quadrature quantization
     while keeping shapes static and fast inside `jit`, the posterior density is evaluated per unique
-    (compressed, power-of-two-padded) pattern on a fine equispaced grid of `501` nodes spanning the
+    (compressed, bucket-padded) pattern on a fine equispaced grid of `501` nodes spanning the
     fitted model's quadrature interval `[quad.lower, quad.upper]`, integrated via the trapezoidal
     rule to a piecewise-linear CDF on $[0, 1]$, and inverted via branch-free `searchsorted(..., side="right")`
     linear interpolation against `jax.random.uniform(key, (N_pad, n_draws))` (padded to a
