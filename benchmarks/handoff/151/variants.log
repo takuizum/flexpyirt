@@ -1,0 +1,21 @@
+base {"case": "2pl_n20000_j40", "src": "atchpad/base", "oakes": {"cold": 4.98, "warm": 0.7437, "med": 0.9375}, "crossprod": {"cold": 2.251, "warm": 0.6195, "med": 0.7616}}
+tri {"case": "2pl_n20000_j40", "src": "hpad/var_tri", "oakes": {"cold": 5.278, "warm": 0.7611, "med": 1.0076}}
+drop {"case": "2pl_n20000_j40", "src": "pad/var_drop", "oakes": {"cold": 5.356, "warm": 0.5837, "med": 0.7071}}
+both {"case": "2pl_n20000_j40", "src": "pad/var_both", "oakes": {"cold": 6.807, "warm": 0.3538, "med": 0.4566}, "fused": {"cold": 6.394, "warm": 0.3922, "med": 0.5004}}
+base {"case": "2pl_n5000_j40", "src": "atchpad/base", "oakes": {"cold": 5.458, "warm": 0.3361, "med": 0.4047}, "crossprod": {"cold": 2.112, "warm": 0.1973, "med": 0.2265}}
+tri {"case": "2pl_n5000_j40", "src": "hpad/var_tri", "oakes": {"cold": 4.927, "warm": 0.1613, "med": 0.2491}}
+drop {"case": "2pl_n5000_j40", "src": "pad/var_drop", "oakes": {"cold": 5.545, "warm": 0.0934, "med": 0.175}}
+both {"case": "2pl_n5000_j40", "src": "pad/var_both", "oakes": {"cold": 4.792, "warm": 0.0463, "med": 0.0957}, "fused": {"cold": 4.207, "warm": 0.0598, "med": 0.084}}
+base {"case": "3pl_n5000_j30", "src": "atchpad/base", "oakes": {"cold": 3.718, "warm": 0.1573, "med": 0.1691}, "crossprod": {"cold": 2.839, "warm": 0.1875, "med": 0.2655}}
+tri {"case": "3pl_n5000_j30", "src": "hpad/var_tri", "oakes": {"cold": 3.795, "warm": 0.0732, "med": 0.1098}}
+drop {"case": "3pl_n5000_j30", "src": "pad/var_drop", "oakes": {"cold": 1.97, "warm": 0.059, "med": 0.0741}}
+both {"case": "3pl_n5000_j30", "src": "pad/var_both", "oakes": {"cold": 2.084, "warm": 0.031, "med": 0.0438}, "fused": {"cold": 2.752, "warm": 0.0262, "med": 0.0326}}
+base {"case": "grm4_n2000_j20", "src": "atchpad/base", "oakes": {"cold": 2.288, "warm": 0.0374, "med": 0.0409}, "crossprod": {"cold": 1.079, "warm": 0.0429, "med": 0.0454}}
+tri {"case": "grm4_n2000_j20", "src": "hpad/var_tri", "oakes": {"cold": 1.187, "warm": 0.0245, "med": 0.0262}}
+drop {"case": "grm4_n2000_j20", "src": "pad/var_drop", "oakes": {"cold": 1.665, "warm": 0.0465, "med": 0.0518}}
+both {"case": "grm4_n2000_j20", "src": "pad/var_both", "oakes": {"cold": 1.991, "warm": 0.0318, "med": 0.0365}, "fused": {"cold": 1.241, "warm": 0.0195, "med": 0.0208}}
+base {"case": "twogroup_2pl_n6000_j30", "src": "atchpad/base", "oakes": {"cold": 1.459, "warm": 0.0832, "med": 0.0872}, "crossprod": {"cold": 0.646, "warm": 0.0827, "med": 0.0847}}
+tri {"case": "twogroup_2pl_n6000_j30", "src": "hpad/var_tri", "oakes": {"cold": 1.154, "warm": 0.0445, "med": 0.0452}}
+drop {"case": "twogroup_2pl_n6000_j30", "src": "pad/var_drop", "oakes": {"cold": 0.631, "warm": 0.0196, "med": 0.0207}}
+both {"case": "twogroup_2pl_n6000_j30", "src": "pad/var_both", "oakes": {"cold": 0.691, "warm": 0.0132, "med": 0.03}, "fused": {"cold": 0.898, "warm": 0.0151, "med": 0.0156}}
+base {"case": "manygroups_2pl_g200", "src": "atchpad/base", "oakes": {"cold": 3.845, "warm": 2.3711, "med": 2.7337}, "crossprod": {"cold": 8.841, "warm": 9.7424, "med": 35.4477}}

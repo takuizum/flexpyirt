@@ -326,3 +326,162 @@ def test_oakes_many_chunks_two_groups_and_padding(monkeypatch: pytest.MonkeyPatc
     ref = np.asarray(jax.jit(_reference_information_oakes)(prob, eta))
     scale = max(float(np.max(np.abs(ref))), 1.0)
     np.testing.assert_allclose(got, ref, rtol=1e-10, atol=1e-12 * scale)
+
+
+def _mixed_data(n: int, *, seed: int, missing_grm: bool) -> tuple[pd.DataFrame, np.ndarray]:
+    """Two groups, 2PL + 3PL items without missing responses and GRM items (optionally missing)."""
+    rng = np.random.default_rng(seed)
+    theta = np.concatenate([rng.normal(0.0, 1.0, n), rng.normal(0.5, 1.2, n)])
+    a = rng.uniform(0.8, 1.8, 8)
+    b = rng.normal(0.0, 0.8, 8)
+    p = 1.0 / (1.0 + np.exp(-(a * (theta[:, None] - b))))
+    y = (rng.random(p.shape) < p).astype(float)
+    y[:, 6:] += (rng.random((theta.size, 2)) < p[:, 6:]).astype(float)  # 3 categories
+    y[:, 7] += (rng.random(theta.size) < p[:, 7]).astype(float)  # 4 categories
+    if missing_grm:
+        y[:, 6:][rng.random((theta.size, 2)) < 0.1] = np.nan
+    df = pd.DataFrame(y, columns=[f"i{j}" for j in range(8)])
+    return df, np.repeat(["ref", "focal"], n)
+
+
+def _mixed_spec() -> Model:
+    return (
+        Model.from_items(
+            {
+                **{f"i{j}": TwoPL() for j in range(4)},
+                "i4": ThreePL(),
+                "i5": ThreePL(),
+                "i6": GRM(n_categories=3),
+                "i7": GRM(n_categories=4),
+            }
+        )
+        .with_groups(ref=Normal.standard(), focal=Normal.free())
+        .equal_across_groups(items=["i0", "i1", "i6"])
+        .prior(param="g", dist=BetaPrior(5.0, 17.0), items=["i4", "i5"])
+    )
+
+
+def _completeness(prob: _core.CompiledProblem) -> list[tuple[int, bool]]:
+    return [(fam.kernel.n_categories, fam.complete) for fam in prob.families]
+
+
+@pytest.mark.parametrize("missing_grm", [False, True])
+def test_oakes_complete_families_match_full_columns(missing_grm: bool) -> None:
+    """Dropping the category-0 columns of complete families is exact (DESIGN.md §15.20).
+
+    Mixed families and two groups: the complete-family Oakes cross term equals the one with every
+    family forced onto the full-column path, the reference ``jacfwd`` Oakes, and the Hessian.
+    """
+    df, group = _mixed_data(300, seed=151, missing_grm=missing_grm)
+    prob, eta = _compile_case(_mixed_spec(), df, group=group)
+    flags = dict(_completeness(prob))
+    assert flags[2] is True  # the 2PL and 3PL families have no missing responses
+    assert flags[3] is not missing_grm and flags[4] is not missing_grm
+    eta = eta + 0.03 * jnp.cos(jnp.arange(eta.shape[0]))
+    full = _core.with_responses(prob)
+    assert not any(fam.complete for fam in full.families)
+    got = np.asarray(jax.jit(_core.information_oakes)(prob, eta))
+    ref = np.asarray(jax.jit(_core.information_oakes)(full, eta))
+    scale = max(float(np.max(np.abs(ref))), 1.0)
+    np.testing.assert_allclose(got, ref, rtol=1e-11, atol=1e-13 * scale)
+    _assert_matches_reference(prob, eta)
+
+
+def test_oakes_complete_many_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reduced columns across several chunks per group, other-group chunks and padding chunks.
+
+    Two groups on the flat (unblocked) path, which skips chunks of the other group.
+    """
+    import flexpyirt._compile as compile_mod
+
+    monkeypatch.setattr(compile_mod, "GROUP_BLOCK_MIN_GROUPS", 10**9)
+    df, group = _mixed_data(120, seed=7, missing_grm=False)
+    prob, eta = _compile_case(_mixed_spec(), df, group=group)
+    assert prob.blocks is None
+    assert all(fam.complete for fam in prob.families)
+    assert int(prob.y.shape[0]) // 8 >= 4
+    eta = eta + 0.05
+    monkeypatch.setattr(_core, "_OAKES_MAX_CHUNK", 8)
+    got = np.asarray(_core.information_oakes(prob, eta))
+    ref = np.asarray(jax.jit(_reference_information_oakes)(prob, eta))
+    scale = max(float(np.max(np.abs(ref))), 1.0)
+    np.testing.assert_allclose(got, ref, rtol=1e-10, atol=1e-12 * scale)
+
+
+@pytest.mark.parametrize("missing_grm", [False, True])
+def test_oakes_complete_blocked_groups(monkeypatch: pytest.MonkeyPatch, missing_grm: bool) -> None:
+    """The group-blocked path (DESIGN.md §26) with complete and incomplete families."""
+    import flexpyirt._compile as compile_mod
+
+    rng = np.random.default_rng(26)
+    n_groups = 4
+    frames, labels = [], []
+    for g in range(n_groups):
+        df_g, _ = _mixed_data(40 + 15 * g, seed=100 + g, missing_grm=missing_grm)
+        frames.append(df_g)
+        labels += [f"g{g}"] * len(df_g)
+    df = pd.concat(frames, ignore_index=True)
+    spec = (
+        Model.from_items({**{f"i{j}": TwoPL() for j in range(6)}, "i6": GRM(n_categories=3)})
+        .with_groups({"g0": Normal.standard()} | {f"g{g}": Normal.free() for g in range(1, 4)})
+        .equal_across_groups(items=["i0", "i1", "i2"])
+    )
+    df = df[[f"i{j}" for j in range(7)]]
+    df.loc[:, "i6"] = df["i6"].clip(upper=2.0)
+    group = np.array(labels)
+    del rng
+
+    def compiled(blocked: bool) -> _core.CompiledProblem:
+        monkeypatch.setattr(compile_mod, "GROUP_BLOCK_MIN_GROUPS", 2 if blocked else 10**9)
+        prob, _ = _compile_case(spec, df, group=group)
+        assert (prob.blocks is not None) == blocked
+        return prob
+
+    flat, blocked = compiled(False), compiled(True)
+    assert blocked.families[0].complete is True
+    assert blocked.families[1].complete is not missing_grm
+    _, eta = _compile_case(spec, df, group=group)
+    eta = eta + 0.04 * jnp.sin(jnp.arange(eta.shape[0]) + 1.0)
+    got = np.asarray(jax.jit(_core.information_oakes)(blocked, eta))
+    ref_flat = np.asarray(jax.jit(_core.information_oakes)(flat, eta))
+    ref_full = np.asarray(jax.jit(_core.information_oakes)(_core.with_responses(blocked), eta))
+    ref_hess = np.asarray(jax.jit(_core.information_hessian)(flat, eta))
+    scale = max(float(np.max(np.abs(ref_hess))), 1.0)
+    np.testing.assert_allclose(got, ref_full, rtol=0.0, atol=1e-11 * scale)
+    np.testing.assert_allclose(got, ref_flat, rtol=0.0, atol=1e-10 * scale)
+    np.testing.assert_allclose(got, ref_hess, rtol=0.0, atol=1e-9 * scale)
+
+
+def test_with_responses_resets_completeness() -> None:
+    """Replacing responses (jackknife item removal, sandwich meat rows) drops the static flag."""
+    from flexpyirt import _jsi
+
+    df, group = _mixed_data(60, seed=3, missing_grm=False)
+    prob, eta = _compile_case(_mixed_spec(), df, group=group)
+    assert all(fam.complete for fam in prob.families)
+    removed = _jsi.without_item(prob, jnp.asarray(0))
+    assert not any(fam.complete for fam in removed.families)
+    # Oakes on the item-removed problem still equals the Hessian (item 0 now all missing).
+    got = np.asarray(jax.jit(_core.information_oakes)(removed, eta))
+    ref = np.asarray(jax.jit(_core.information_hessian)(removed, eta))
+    scale = max(float(np.max(np.abs(ref))), 1.0)
+    np.testing.assert_allclose(got, ref, rtol=1e-9, atol=1e-11 * scale)
+
+
+@pytest.mark.parametrize("case", ["complete", "missing", "blocked"])
+def test_oakes_and_cross_product_one_pass(monkeypatch: pytest.MonkeyPatch, case: str) -> None:
+    """The fused pass gives the same bread and meat as the two separate passes (§17.5)."""
+    import flexpyirt._compile as compile_mod
+    from flexpyirt import _robust_se
+
+    monkeypatch.setattr(compile_mod, "GROUP_BLOCK_MIN_GROUPS", 2 if case == "blocked" else 10**9)
+    df, group = _mixed_data(150, seed=17, missing_grm=case == "missing")
+    prob, eta = _compile_case(_mixed_spec(), df, group=group)
+    assert (prob.blocks is not None) == (case == "blocked")
+    eta = eta + 0.02 * jnp.sin(jnp.arange(eta.shape[0]))
+    info, cross = jax.jit(_core.information_oakes_and_cross_product)(prob, eta)
+    ref_info = np.asarray(jax.jit(_core.information_oakes)(prob, eta))
+    ref_cross = np.asarray(jax.jit(_robust_se.information_cross_product)(prob, eta))
+    for got, ref in ((info, ref_info), (cross, ref_cross)):
+        scale = max(float(np.max(np.abs(ref))), 1.0)
+        np.testing.assert_allclose(np.asarray(got), ref, rtol=1e-10, atol=1e-12 * scale)

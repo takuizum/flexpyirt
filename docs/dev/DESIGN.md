@@ -3547,7 +3547,7 @@ data-independent shapes (§15.21).
    The sums run in a different order than the flat path, so results agree to rounding
    ($\sim10^{-12}$ relative), not bit for bit (regression test in `tests/test_many_groups.py`).
 4. **Oakes' cross term** (§15.20) becomes one `lax.scan` over the blocks: each block adds its
-   category co-occurrences to the running group's $C_{q}$ `(Q, D, D)` and its
+   category co-occurrences to the running group's $C_{q}$ (upper triangle, `(Q, D(D+1)/2)`; §15.20) and its
    $\bar s_p\bar s_p^\top$ term to $T_2$; on the last block of a group (`last`) a `lax.cond`
    adds $\sum_q L_{gq}^\top C_q L_{gq}$ to $T_1$ and resets $C$. The group's score tables are
    gathered with the dynamic block group once per block (sub-chunks of a block reuse them, and
