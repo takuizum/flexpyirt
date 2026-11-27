@@ -90,8 +90,11 @@ def test_science_fit_matches_mirt() -> None:
     assert res.loglik == pytest.approx(ref["loglik"], rel=1e-9)
     assert res.loglik > ref["loglik"]
     latent = res.latent.set_index("group")
-    assert latent.loc["focal", "mean"] == pytest.approx(ref["estimates"]["focal"]["mean"], abs=1e-5)
-    assert latent.loc["focal", "var"] == pytest.approx(ref["estimates"]["focal"]["var"], abs=1e-5)
+    # mirt stops on a flat ridge short of the MLE (see the module docstring), and where it stops
+    # depends on the mirt version: the focal mean is 8.2e-6 from flexpyirt's on mirt 1.48 and
+    # 1.9e-5 on 1.48.5 (#143). 5e-5 covers that; the log-likelihood checks above stay strict.
+    assert latent.loc["focal", "mean"] == pytest.approx(ref["estimates"]["focal"]["mean"], abs=5e-5)
+    assert latent.loc["focal", "var"] == pytest.approx(ref["estimates"]["focal"]["var"], abs=5e-5)
 
 
 @pytest.mark.slow

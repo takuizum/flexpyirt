@@ -64,14 +64,18 @@ English | [日本語](VALIDATION.ja.md)
     status, not by value, so no tolerance changed.
   - **V15 multiple-group S-X2 (`v15_sx2_multigroup`) and V42 (`v42_m2_groups_missing_map`)**:
     multiple-group estimates moved by up to 1.1e-5 (focal mean of `science_grm_2g`) and 2e-5,
-    below the 1e-4 parameter tolerance; S-X2 by up to 1.3e-5 relative.
+    below the 1e-4 parameter tolerance; S-X2 by up to 1.3e-5 relative. One tolerance changed
+    (#143): mirt stops short of the MLE on a flat ridge in `science_grm_2g`, and on 1.48.5 its
+    focal mean is 1.9e-5 from flexpyirt's (8.2e-6 on 1.48), so the focal mean / variance check of
+    that refit goes from 1e-5 to 5e-5. The log-likelihood checks (rel. 1e-9, flexpyirt's higher)
+    are unchanged.
   - **Run diagnostics**: EM iteration counts and timings of the V22 mixture fits, `nlm`
     convergence codes of V20 and the R-side optimizer iterations of V19, and one random-start
     row of V23 (`alt_starts`: mirt HEAD's random starting values differ; the default-start NR
     still stops at the saddle, #20 item 21a). Not compared since #74.
   - JSON layout only: matrices in `v6_twogroup_fipc_eh` are written one row per line (same content).
 
-  No test tolerance was changed. The #20 issues were re-checked on 1.48.5: items 1, 14 and 15
+  No other test tolerance was changed. The #20 issues were re-checked on 1.48.5: items 1, 14 and 15
   are fixed upstream; all the others behave as on 1.48 (re-check posted on #20).
 
 ## Tolerances (initial values, revised as needed)
