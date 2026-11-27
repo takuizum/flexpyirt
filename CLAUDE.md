@@ -79,8 +79,8 @@
 ## 開発フロー（CONTRIBUTING.md）
 
 - `feature/<slug>` と `fix/<issue番号>-<slug>` を `develop` から切り、`develop` へ PR。fix は issue 必須（`Closes #N`）。
-- リリースは `develop` → `main` の PR。タイトル `release(major|minor|patch): ...` で上げ方を決め、マージ後にオーナーが `release` 環境を承認するとタグ `vX.Y.Z` と GitHub Release ができる。バージョンは git タグから（hatch-vcs、`pyproject.toml` に書かない）。
-  同じワークフローの `pypi` ジョブが PyPI に公開し（Trusted Publishing）、`docs.yml` がドキュメントサイト（`docs/` から MkDocs、英日）を GitHub Pages に公開する。
+- リリースは `develop` → `main` の PR。タイトル `release(major|minor|patch): ...` で上げ方を決め、マージするとすぐにタグ `vX.Y.Z` と GitHub Release ができる（承認なし）。バージョンは git タグから（hatch-vcs、`pyproject.toml` に書かない）。
+  同じワークフローの `pypi` ジョブが、オーナーが `pypi` 環境を承認したあとに PyPI に公開し（Trusted Publishing）、`docs.yml` がドキュメントサイト（`docs/` から MkDocs、英日）を GitHub Pages に公開する。
   リリースの前に、依存の範囲に入る flexpyctt が PyPI にあること。
 - `README*.md` は PyPI にも表示されるのでリンクは絶対 URL。**README には開発関連の情報（開発手順・テスト/CI・ブランチ運用・マイルストーン・CONTRIBUTING や docs/dev へのリンク）を置かない。**`docs/` 内は相対リンク。
   サイト（`docs/*.md`）は利用者向け（使い方・理論・精度）。開発者向け文書は `docs/dev/`（サイトから除外）。

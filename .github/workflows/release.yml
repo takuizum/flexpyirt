@@ -8,9 +8,10 @@ name: Release
 # A flexpyctt version inside the required range must be on PyPI before flexpyirt is released.
 #
 # Security (CONTRIBUTING.md): only repository admins can update main (ruleset
-# "main-release-gate"), and the publish job runs in the "release" environment, which needs the
-# owner's approval and only deploys from main. The pypi job uploads the same files to PyPI with
-# Trusted Publishing (OIDC, no API token) from the "pypi" environment.
+# "main-release-gate"), and the publish job runs in the "release" environment, which only deploys
+# from main (no approval: the tag and the GitHub Release follow the merge at once). The pypi job
+# uploads the same files to PyPI with Trusted Publishing (OIDC, no API token) from the "pypi"
+# environment, which waits for the owner's approval.
 on:
   push:
     branches: [main]

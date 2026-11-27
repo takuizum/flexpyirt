@@ -57,11 +57,11 @@
    - PR は**マージコミット**でマージする（`main` のルールセットはマージコミットだけを許可）。
 2. マージされると `.github/workflows/release.yml` が動く:
    1. `plan` ジョブ: PR タイトルと最新の `vX.Y.Z` タグから次のバージョンを決める。
-   2. `publish` ジョブ: **`release` 環境の承認待ちになる**。オーナーが Actions 画面で承認すると、
-      `main` にタグ `vX.Y.Z` を打ってビルドし（`uv build`）、GitHub Release を作成する（wheel / sdist 添付、
+   2. `publish` ジョブ: **承認を待たずに動く**（`release` 環境。`main` からしかデプロイしない）。`main` に
+      タグ `vX.Y.Z` を打ってビルドし（`uv build`）、GitHub Release を作成する（wheel / sdist 添付、
       リリースノート自動生成）。このリリースに含まれる fix PR が `Closes` していた issue を閉じる。
-   3. `pypi` ジョブ: 同じ wheel / sdist を **PyPI に公開する**（`pypi` 環境、Trusted Publishing。API トークンは
-      使わない）。
+   3. `pypi` ジョブ: **`pypi` 環境の承認待ちになる**。オーナーが Actions 画面で承認すると、同じ wheel / sdist を
+      PyPI に公開する（Trusted Publishing。API トークンは使わない）。
    4. 同じ `main` への push で `.github/workflows/docs.yml` がドキュメントサイトを GitHub Pages に公開する。
 3. **最初のリリース**（`v*` タグがまだない）は、タイトルの上げ方に関係なく **v0.0.1**。
 4. 手動実行（`workflow_dispatch`）は dry run 専用で、次のバージョンの計算とビルドだけを行う。
@@ -78,8 +78,11 @@
 - **`main` を更新できるのはリポジトリ管理者だけ**（ルールセット `main-release-gate`）。PR と CI の要件
   （ルールセット `main`）は管理者にも適用される。リリースを起こせるのは develop → main を
   マージできる管理者だけ。
-- **`publish` ジョブは `release` 環境で動き、指定レビュアー（オーナー）の承認が必要**。環境は `main` からしか
-  デプロイできないので、他のブランチやフォークからはタグも Release も作れない。
+- **`publish` ジョブは `release` 環境で動く**。環境は `main` からしかデプロイできないので、他のブランチや
+  フォークからはタグも Release も作れない。必須レビュアーは付けていない。リリース PR のマージが、タグを打つ
+  判断である。
+- **`pypi` ジョブは `pypi` 環境で動き、指定レビュアー（オーナー）の承認が必要**。承認なしに PyPI に出る
+  ことはない。
 - **PyPI への公開は Trusted Publishing**（OIDC）。PyPI のプロジェクト `flexpyirt` は
   「リポジトリ `takuizum/flexpyirt`、ワークフロー `release.yml`、環境 `pypi`」という publisher だけを信頼するので、
   API トークンはリポジトリに置かない。`pypi` 環境もデプロイ元を `main` に限定しておく。PyPI に一度上げた番号は
