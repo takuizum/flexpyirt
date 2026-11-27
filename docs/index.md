@@ -22,9 +22,9 @@ fitted model (polychoric correlations, number of dimensions, DETECT, DIMTEST, cl
 analysis, observed-score DIF). flexpyctt depends on NumPy, SciPy and pandas only; install it alone
 with `pip install flexpyctt` where JAX is not wanted.
 
-**flexpyequate**, a third package from the same repository, equates score distributions (linear,
-equipercentile and kernel equating). It is independent of flexpyirt and is not installed with it:
-`pip install flexpyequate`. See [Score equating](equating.md).
+[flexpyequate](https://github.com/takuizum/flexpyequate), a separate package, equates score
+distributions (linear, equipercentile and kernel equating). It is independent of flexpyirt and is
+not installed with it: `pip install flexpyequate`.
 
 For polars input, install `flexpyirt[polars]`; for the plots (`flexpyirt.plotting`), `flexpyirt[plot]`. For GPUs, install a CUDA build of `jax` first
 (see the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)).

@@ -1190,7 +1190,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    同じ（最小固有値がマシンイプシロン未満なら、$10^{-12}$ 未満の固有値を $10^{-10}$ にし、和を $p$ にそろえ、行列を
    組み直し、対角を 1 にそろえる）。`errors` に新設した `NotPositiveDefiniteWarning` を出す。$\hat\rho$ の標準誤差は
    返さない（照合しておらず、次元性の手法も使わない）。
-   **照合（V24）**: `packages/flexpyctt/validation/r/m5_polychoric_reference.R`（lavaan 0.7-3、psych 2.6.9）。シミュレーションの
+   **照合（V24）**: `flexpyctt/validation/r/m5_polychoric_reference.R`（lavaan 0.7-3、psych 2.6.9）。シミュレーションの
    テトラコリック（8 項目）、2 因子で 2〜5 カテゴリの混在、その 10% MCAR（pairwise）、空のセルが 1 つの 2 x 2 表を
    含む極端な 2 値項目、LSAT7、Science。lavaan と $3.1\times10^{-8}$ 以内（その `nlminb` の許容誤差。flexpyirt の
    ペアごとの勾配は $10^{-7}n$ まで 0）、閾値は $10^{-12}$ 以内、psych とは補正したペアを除く欠測のないデータで
@@ -1214,7 +1214,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     統計量は行列のべき乗である（記録するが従わない）。**EKC**: EFAtools と同じ Braeken & van Assen (2017)（残りの
     分散の項に観測固有値を使う）。`PolychoricResult` を渡して `n_obs` を省くと、ペアごとの $n$ の最小値を使う
     （欠測があるときに保守的）。
-    **照合（V25）**: `packages/flexpyctt/validation/r/m5_dimensionality_reference.R` は V24 の lavaan のポリコリック行列 6 つを EFAtools
+    **照合（V25）**: `flexpyctt/validation/r/m5_dimensionality_reference.R` は V24 の lavaan のポリコリック行列 6 つを EFAtools
     1.1.0（`EKC`）、psych 2.6.9（`vss()$map`）、EFA.dimensions 0.1.9.3（`MAP`）、両方の MAP のべきの R による独立な
     実装、PCA・SMC の固有値には `eigen()` に与える。選ばれる因子数も含めすべて $10^{-11}$ 以内で一致する。正規の
     参照固有値（3 つの大きさ x PCA・SMC、各 20000 データセット）は EFAtools の `PARALLEL` と Monte Carlo 誤差の範囲で
@@ -1308,7 +1308,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     （Jang & Roussos, 2007; Zhang, 2007。§16.8 の 0.1 / 0.5 / 1 はここで訂正した）。**アンサンブル**:
     `dimensionality()` は選んだ分割の検証用の半分での DETECT を問い (B) の行として加える（`detect_threshold` $=0.2$
     未満なら支持）。`fit` がなくても使える。キーは 3 つ（平行分析、モデルに基づく平行分析、DETECT）に分ける。
-    **照合（V27）**: `packages/flexpyctt/validation/r/m5_detect_reference.R`（sirt 4.2.133）。シミュレーションの 2 次元（正しい分割と
+    **照合（V27）**: `flexpyctt/validation/r/m5_detect_reference.R`（sirt 4.2.133）。シミュレーションの 2 次元（正しい分割と
     誤った分割）、1 次元、Science（多値）のデータで `conf.detect(use_sum_score = TRUE, bias_corr = TRUE, smooth = FALSE)`、
     3 クラスタのデータで `expl.detect(use_sum_score = TRUE, estsample = )`。条件付き共分散、5 つの指標（両方の
     重み付け）、分割、両方の半分での指標は $10^{-12}$（実測 $10^{-14}$）で、Ward の併合の高さは $10^{-12}$ で一致する。
@@ -1338,7 +1338,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     `heywood` と `converged` を記録し、選ばれた解が不適切なら EFAtools と同じく `HeywoodWarning` を出す。
     **アンサンブル**: 項目が 6 つ以上なら、`dimensionality()` は問い (A) に Hull（CAF、ULS、キーの 4 つ目の分割による
     既定の $J$）を加える。
-    **照合（V28）**: `packages/flexpyctt/validation/r/m5_efa_hull_reference.R`（EFAtools 1.1.0、psych 2.6.9）。V24 のポリコリック行列のうち
+    **照合（V28）**: `flexpyctt/validation/r/m5_efa_hull_reference.R`（EFAtools 1.1.0、psych 2.6.9）。V24 のポリコリック行列のうち
     変数が 6 つ以上のものと、シミュレーションの Pearson 行列 2 つ（3 因子、$N=500$。弱い 2 因子、$N=300$）。
     $k\le J$ のすべてで ULS と ML について、含意する $\Lambda\Lambda^\top$ と共通性は $10^{-4}$（実測 $7\times10^{-5}$
     以下で、最大は Heywood の解）、CAF / CFI / RMSEA は $2\times10^{-4}$、$\chi^2$ は相対 $10^{-4}$、$df$ は厳密に一致。
@@ -1360,7 +1360,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     残し、最後に残した $k$ を結果とする。Pearson 相関のみ（Ruscio & Roche、EFAtools と同じ）、欠測のないデータ。
     主因子法の負荷量は列の和が非負になるよう符号をそろえる。EFAtools は LAPACK の符号をそのまま使うが、効くのは
     $k\ge2$ のときだけで、母集団の分布は変わらない。**アンサンブル**: 欠測がなければ `dimensionality()` は問い (A) に
-    CD を加える（キーの 5 つ目の分割）。**照合（V29）**: `packages/flexpyctt/validation/r/m5_comparison_data_reference.R`（EFAtools 1.1.0）。
+    CD を加える（キーの 5 つ目の分割）。**照合（V29）**: `flexpyctt/validation/r/m5_comparison_data_reference.R`（EFAtools 1.1.0）。
     $k=1..3$ の主因子法の負荷量は $\Lambda\Lambda^\top$ で $10^{-12}$、EFAtools 自身の乱数（同じシードで再現して
     書き出す）による 1 因子の母集団は完全に同じ、EFAtools の RMSE の列に対する順位和の $p$ 値は相対 $10^{-10}$ で
     一致する。3 因子、2 因子の順序、1 因子の 2 値のデータでの `CD()` とは、それぞれ 2 つのキーで同じ提案、平均 RMSE は
@@ -1381,7 +1381,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     最大のもの。Froelich & Habing の条件付き共分散による AT の選択の考え方に沿うが、彼らの ATFIND そのものではなく、
     そう明記する。**アンサンブル**: 欠測のない 2 値データなら `dimensionality()` は問い (B) に DIMTEST（$p\ge\alpha$）を
     加える（キーの 6 つ目の分割）。そうでなければ使えない行とする。**照合（V30）**: 単独のプログラム DIMPACK 以外に
-    実装がないので、`packages/flexpyctt/validation/simulation/dimtest_study.py`（結果は `dimtest_study.json`）のシミュレーション研究で
+    実装がないので、`flexpyctt/validation/simulation/dimtest_study.py`（結果は `dimtest_study.json`）のシミュレーション研究で
     受け入れる。2PL のデータ（傾き $U(0.8,1.8)$、切片 $N(0,0.8)$、項目を半分ずつ相関 $\rho$ の次元に置く）、各条件
     200 反復、すべて既定値:
 
@@ -1401,7 +1401,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     偏差は 1 ではなく 0.72 程度なので、第 1 種の誤りは名目水準を下回る。相関 0.7〜0.8 の 2 次元に対する検出力は 0.99〜1。
     したがって小さい $p$ は多次元性の強い証拠であり、大きい $p$ は一次元性の弱い証拠にとどまる（docstring とガイドに
     書く）。$T_G$ のブートストラップ SD で標準化し直せば較正できるが、公表された統計量から離れるので行わない。各部分は
-    直接の計算と単体テストで比べ、`packages/flexpyctt/tests/test_dimtest.py` で研究の小さい版（帰無 20 反復、対立 10 反復）を実行する。
+    直接の計算と単体テストで比べ、`flexpyctt/tests/test_dimtest.py` で研究の小さい版（帰無 20 反復、対立 10 反復）を実行する。
 17. **ジャックナイフ傾き指標（`FitResult.jsi()`、V31）**: `_jsi.py`。**定義**（Edwards, Houts & Cai, 2018。mirt の
     `residuals(type = "JSI")` と同じ）: ジャックナイフは回答者ではなく項目について行う（11 項の以前の版は「部分群」と
     書いていたので直した）。各項目 $j$ について項目 $j$ を除いてモデルを推定し直し、他のすべての項目 $i$ について
@@ -1448,6 +1448,10 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     実装しない。`jsi()` は多母集団・多次元・`Normal` 以外の潜在分布のモデルで、理由を示す `SpecificationError` を出す。
 18. **パッケージの分割: `flexpyctt` と `flexpyequate`（2026-11-25 決定、issue #87）**: 推定済みの IRT モデルを使わない道具を、JAX に依存
     しない別の配布物としてこのリポジトリから公開する。flexpyirt は BA-EM による推定と、その結果を使う道具に絞る。
+
+    > **一部を置き換えた（2026-11-27、§16.24）。** 2 つのパッケージは、いまは自分のリポジトリとバージョンを持つ。
+    > 配置、単一のバージョン、ツールの設定、ドキュメントサイト、テストと参照値の場所についての段落は、それより前の
+    > 状態の記述である。それ以外はいまも成り立つ。
 
     | 配布物 | 範囲 | 依存 |
     |---|---|---|
@@ -1691,7 +1695,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     各選択肢の統計量はその項目に答えた回答者で計算し、誰も選ばなくても正答は行に含める。得点群は R の
     `cut(T, quantile(T, 0:G/G), include.lowest = TRUE)`（type 7 の分位点。同点は分けない）。分位点が重なったら、
     黙って群を併合せずにエラーにする。
-    **照合（V46）**: `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R`。VALIDATION.md を参照。
+    **照合（V46）**: `flexpyctt/validation/r/ctt_item_analysis_reference.R`。VALIDATION.md を参照。
     **範囲外**（issue と同じ）: 階層 $\omega$、折半法、Guttman の $\lambda$、glb、上位下位 27% の識別指数、図（#103）、
     ウェイト。
 22. **DIF の分析手順: アンカーの純化つきスクリーニング、Wald 検定、効果量（#104、V49）**: Result 層での推定後の
@@ -1817,6 +1821,57 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     **照合（V42）**: mirt 1.46.1 の `M2()` を mirt の推定値で、大きさの異なる 2 群とアンカー項目の 2PL、2 群の GRM、
     2 群の 2 因子 2PL、MCAR の欠測を含む単一群・2 群の 2PL、2PL の MAP 推定で照合する。`_mirt_convention=True` は
     mirt の生の出力を再現し、既定の値は上の式を R で独立に計算した値と比べる（VALIDATION.md を参照）。
+
+24. **パッケージごとに 1 つのリポジトリ（2026-11-27 決定。§16.18 のうち、配置・バージョン・リリースの部分を置き換える）**:
+    flexpyctt と flexpyequate を、このリポジトリから `takuizum/flexpyctt` と `takuizum/flexpyequate` に移す
+    （`packages/<name>/` の履歴は保つ）。各パッケージの範囲、2 つのポリコリックの実装、`rng`、共有するエラークラス、
+    再公開は §16.18 のまま変えない。
+
+    **理由。** 3 つの配布物を 1 つのタグで公開していたので、リリースのたびに、変更の有無にかかわらず 3 つすべての
+    バージョンが上がり、どれか 1 つだけをリリースすることもできなかった。また、他の 2 つとコードを共有しない
+    flexpyequate が、別のパッケージの名前のリポジトリにあった。分けることの代償は、flexpyctt と flexpyirt にまたがる
+    変更が 2 段階になることである。道具の移動が終わったいま、そのような変更は少ないので受け入れる。
+
+    **バージョン。** 各リポジトリが自分の `vX.Y.Z` タグを打つ（hatch-vcs）。flexpyctt と flexpyequate は 0.1.0 から
+    始める。バージョンどうしに対応関係はない（flexpyirt 0.3 と flexpyctt 0.3 を組にする必要はない）。
+
+    **依存。** flexpyirt は、完全に固定したバージョンではなく、範囲 `flexpyctt>=0.X,<0.(X+1)`（現在は
+    `>=0.1,<0.2`）を要求する。完全に固定すると、flexpyctt のバグ修正のたびに flexpyirt のリリースが必要になり、
+    利用者が自分で指定した flexpyctt の要件とも衝突するためである。1.0 より前は、flexpyctt のマイナーバージョンを
+    互換性の単位とする:
+    - flexpyctt のパッチリリース（`0.x.Y`）は公開 API を変えない。`flexpyirt.dimensionality` が import している
+      非公開のヘルパー 4 つ（`_coerce_ordinal`、`_observed_correlation`、`_eigenvalues`、
+      `_descending_eigenvalues`）も変えない。flexpyctt のテストがそのシグネチャを確認する。これで §16.18 の未決事項
+      （ビルドフックで同じバージョンに固定する）は閉じる。
+    - flexpyctt のマイナーリリースはそれらを変えてよい。そのとき flexpyirt は、範囲を上げる PR を別に作り、
+      その CI で 2 つが合うことを確かめる。
+    - `tests/test_packaging.py` が、範囲に下限があり 1 つのマイナーバージョンに収まっていること、flexpyctt を
+      ワークスペースやローカルのパスから取っていないことを確認する。
+
+    **再公開。** `flexpyirt/__init__.py` は再公開する名前を明示しているので、flexpyctt のパッチリリースで増えた名前は、
+    ここに足すまで flexpyirt には現れない。flexpyctt が公開していて flexpyirt が再公開していない名前があると
+    `tests/test_m5_ensemble.py` が失敗するので、足し忘れに気づける。
+
+    **両方にまたがる変更の順序。** 先に flexpyctt のリポジトリで変更してリリースし、そのあと flexpyirt を変える
+    （マイナーバージョンが上がったなら範囲も上げる）。flexpyirt をリリースするには、範囲に入る flexpyctt が PyPI に
+    なければならない。`publish` ジョブは、ビルドした wheel を PyPI の flexpyctt と一緒にインストールする。
+
+    **参照値。** flexpyirt のテストは flexpyctt の参照値を 2 つ使う（JAX 版ポリコリックのテストと 2 つの実装の一致の
+    テストに V24、アンサンブルのテスト 1 つに V27）。これらを変更せずに `tests/reference/v24_polychoric.json` と
+    `v27_detect.json` にコピーする。書き出すスクリプトは flexpyctt の `validation/r/` にある。flexpyctt で
+    再生成したら、ここにもコピーする。この文書と VALIDATION.md で `flexpyctt/` から始まるパスは、flexpyctt の
+    リポジトリの中のパスである。
+
+    **文書。** flexpyctt の道具の設計の記録はこの文書（§16.8〜§16.16、§16.18、§16.20、§16.21）に、照合ケースは
+    VALIDATION.md に残し、flexpyctt のリポジトリからここにリンクする。移すのは見送る。flexpyequate は自分の
+    リポジトリに設計文書を持つ。ドキュメントサイトでは、flexpyctt の道具はユーザーガイドと API リファレンスに
+    残す（flexpyirt が再公開しているため）。flexpyequate のページは削除し、ホームからそのリポジトリにリンクする。
+
+    **このリポジトリの CI とリリース。** ワークスペースはやめる。`uv build` は flexpyirt だけをビルドし、
+    リリースのワークフローの `pypi` ジョブは 1 つになる。他の 2 つを JAX なしでテストしていた CI のジョブは、
+    それぞれのリポジトリに移した。flexpyequate は開発用の依存（`dev` グループ、`flexpyequate>=0.1,<0.2`、
+    PyPI から）に残す。`tests/test_equating.py` が等パーセンタイルのカーネルをそれと照合するためである。
+    実行時の依存ではない。
 
 ## 17. 実装上の決定（M7）
 

@@ -5,6 +5,9 @@ English | [日本語](VALIDATION.ja.md)
 ## Approach
 - Reference values come from R `mirt` and are committed as JSON in `tests/reference/`. CI does not
   run R.
+- A path that starts with `flexpyctt/` is in the flexpyctt repository
+  ([takuizum/flexpyctt](https://github.com/takuizum/flexpyctt)), where the tools without a fitted
+  model and their reference values live (DESIGN.md §16.24).
 - Generator scripts are `validation/r/<case>.R`. Each writes the R version, the mirt version and
   mirt's commit SHA into the JSON's `meta` (see "R and mirt versions" below).
 - Comparisons use **the same conditions**: the same quadrature (e.g. 61 equally spaced points on
@@ -137,7 +140,7 @@ English | [日本語](VALIDATION.ja.md)
 | V27 | DETECT: confirmatory (simulated 2D with true / wrong partitions, 1D, Science) and exploratory (simulated 3 clusters, given split) | sirt `conf.detect(use_sum_score = TRUE, smooth = FALSE)`, `expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
 | V28 | EFA (ULS, ML; every $k$ up to Hull's bound) and the Hull method (CAF, CFI, RMSEA) on the V24 matrices with $\ge 6$ variables and two simulated matrices | EFAtools `EFA(method = , rotation = "none")`, `HULL(method = , gof = )`; psych `fa(fm = "minres" / "ml", rotate = "none")` | M5 |
 | V29 | Comparison data: PAF, the one-factor population generator from exported draws, rank-sum tests, `CD()` on 3-factor continuous, 2-factor ordinal and 1-factor binary data | EFAtools `.paf_iter`, `.simulate_cfm_empirical`, `CD()`; `wilcox.test(x, y, "less")` | M5 |
-| V30 | DIMTEST: type I error and power (2PL; $N$ 1000–2000, $J$ 20–30; unidimensional and two dimensions correlated 0.7–0.8; 200 replications each) | none (no implementation outside DIMPACK): `packages/flexpyctt/validation/simulation/dimtest_study.py` | M5 |
+| V30 | DIMTEST: type I error and power (2PL; $N$ 1000–2000, $J$ 20–30; unidimensional and two dimensions correlated 0.7–0.8; 200 replications each) | none (no implementation outside DIMPACK): `flexpyctt/validation/simulation/dimtest_study.py` | M5 |
 | V31 | Jackknife slope index (LSAT7 2PL, Science GRM, simulated 2PL with two dependent pairs and 5% MCAR, simulated GPCM with a dependent pair); the Newton and one-step approximations against the refit | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | Bifactor models with dimension reduction (2PL with three specific factors and three general-only items; GRM $K=4$ with three testlets) | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | Two-tier models with dimension reduction (2PL with two correlated primary factors and three specific factors, one spanning both; GRM $K=4$ with a cross-loading item and two testlets) | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
@@ -152,7 +155,7 @@ English | [日本語](VALIDATION.ja.md)
 | V43 | Information matrix, directional information and expected scores of multidimensional models at chosen parameters (two correlated factors with 2PL, 3PL, 4PL, GRM, GPCM and nominal items and four cross-loadings; three factors with 2PL, 3PL, GRM and GPCM and two cross-loadings; bifactor 2PL + GRM with three specific factors; two-tier 2PL + GRM with two correlated primary factors and two specific factors) | `iteminfo(item, Theta, multidim_matrix = TRUE)`, `iteminfo(item, Theta, degrees = )`, `testinfo(m, Theta, degrees = )`, `expected.item()`, `expected.test()` on `mirt()` / `bfactor()` objects built with `pars =` and `TOL = NaN` | M7 |
 | V45 | Optional unconstrained M-step scale (`BAEM(m_step_scale="unconstrained")`) on the V3, V4, V5, V7, V9, V11 and V14 cases; `LogitNormalPrior` (`"natural"`: no mirt equivalent, independent numerical check; `mode_scale="logit"`: mirt `norm` on `g`) | the existing references of those cases; SciPy (`stats.norm`, `integrate.quad`) and a stationarity condition written from the formula; `v45_3pl_logit_norm_map.json` (mirt) and the flexMIRT logit-metric mode computed in the test | #15 |
 | V46 | Classical item analysis (flexpyctt): keyed scoring, alpha (pairwise and listwise), item statistics, point-biserial / biserial / polyserial correlations, omega total (Pearson and polychoric), option analysis; simulated 10-item multiple-choice (complete, 5% MCAR) and 6-item 0–4 data (complete, 6% MCAR) | none (not mirt): psych `alpha()`, `score.multiple.choice()`, `responseFrequency()`, `polyserial()`, `biserial()`, `fa()`, `omega(nfactors = 1)`; ltm `cronbach.alpha()`, `biserial.cor()`; polycor `polyserial(ML = FALSE)`; lavaan `lavCor()`; base R for option statistics | flexpyctt |
-| V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `packages/flexpyctt/validation/r/ctt_dif_reference.R`; the worked example of Liu & Agresti (1996, Table 1) | — |
+| V47 | Observed-score DIF (flexpyctt, #102): Mantel–Haenszel with and without continuity correction, Holm / BH, purification, user anchors, an external matching variable (`difR::verbal`, simulated 2PL with uniform and non-uniform DIF); generalized MH for three groups and for nominal categories (simulated graded responses); Mantel's test and the Liu–Agresti odds ratio; logistic regression (both / uniform / non-uniform, LRT / Wald, purification, anchors, matching) | difR 6.1.0 `difMH()`, `difGMH()`, `difLogistic()`, `difMantel.poly()`, `liu_agresti_ccor()`; `stats::mantelhaen.test()`; direct R implementations: `flexpyctt/validation/r/ctt_dif_reference.R`; the worked example of Liu & Agresti (1996, Table 1) | — |
 | V48 | The numbers behind the plots at mirt's estimates (2PL $J=10$, $N=1003$; 2PL with 10% missing; GRM $K=4$, $J=6$; mixed 2PL + 3PL + GPCM + nominal, $J=10$; two groups, 2PL + GRM, focal mean and variance free; TAM's GPCM $K=4$, $J=6$): empirical item curves, trace lines, Thurstonian thresholds | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))` (per group via `extract.group()`), `probtrace()`, `uniroot()` on `probtrace()`, `coef(IRTpars = TRUE)`; TAM `tam.threshold()` | #103 |
 | V49 | DIF screening with anchor purification (all others as anchors, sequential freeing, sequential constraining; two groups, 8 2PL + 4 GRM $K=3$; three groups 2PL), Wald DIF tests, signed / unsigned expected-score differences, DTF, ESSD / ETSSD and RMSD at mirt's estimates | `DIF(scheme = "drop" / "drop_sequential" / "add_sequential", seq_stat = 0.05, p.adjust = "BH", max_run = )`, `DIF(Wald = TRUE)`, `mirt:::calc_DRFs(best_fitting = TRUE)` (behind `DRF()`), `empirical_ES()`, `RMSD_DIF(probfun = FALSE)` | M5 |
 | V50 | Common-item screening for linking (#105): robust z (Huynh & Meyer, 2010), displacement and RMSD of expected item score curves; removal order, linking constants at every purification step and the final item table (2PL; mixed 2PL + GRM + GPCM) | separate `mirt()` calibrations + base-R recomputation (`median()`, `quantile(type = 7)`, `expected.item()`, V20 linking); `equateIRT::dif.test` as a cross-check of the drifted items | field |
@@ -1669,12 +1672,12 @@ English | [日本語](VALIDATION.ja.md)
 - **DIMTEST (V30, M5)**: accepted on a simulation study instead of a reference
   comparison (DESIGN §16.16 has the table): with 200 replications the type I error at .05 is
   0.5–1.0% (conservative; the bootstrap removes the bias but $T$'s SD under the null is about 0.72)
-  and the power 0.99–1.00. Rerun with `uv run python packages/flexpyctt/validation/simulation/dimtest_study.py`
+  and the power 0.99–1.00. Rerun with `uv run python flexpyctt/validation/simulation/dimtest_study.py`
   (about 4 minutes); the tests run 20 null and 10 alternative replications.
 - **Classical item analysis (V46, flexpyctt, #101)**:
-  `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R` (R 4.6.2, psych 2.6.9, ltm
-  1.2.0, polycor 0.8.2, lavaan 0.7.3) writes `packages/flexpyctt/tests/reference/v46_item_analysis.json`;
-  `packages/flexpyctt/tests/test_item_analysis.py` compares. Four simulated cases: 10
+  `flexpyctt/validation/r/ctt_item_analysis_reference.R` (R 4.6.2, psych 2.6.9, ltm
+  1.2.0, polycor 0.8.2, lavaan 0.7.3) writes `flexpyctt/tests/reference/v46_item_analysis.json`;
+  `flexpyctt/tests/test_item_analysis.py` compares. Four simulated cases: 10
   multiple-choice items ($N=500$, keys and distractors of varying pull, one item with five
   options) complete and with 5% MCAR, and 6 items scored 0–4 ($N=300$, graded model) complete and
   with 6% MCAR; plus three items for a just-identified omega and the complete 0–4 data with one
@@ -1701,7 +1704,7 @@ English | [日本語](VALIDATION.ja.md)
   `responseFrequency()`. lavaan's one-factor CFA, listed in the issue, was not used (ML on the
   covariance matrix is another estimator and scale).
 - **Observed-score DIF (V47, flexpyctt, #102)**: references from difR 6.1.0 and base R,
-  committed in `packages/flexpyctt/tests/reference/v47_dif.json`. Measured agreement: MH
+  committed in `flexpyctt/tests/reference/v47_dif.json`. Measured agreement: MH
   $\chi^2$, $\hat\alpha_{MH}$ and Phillips–Holland variance, GMH statistics (difGMH and
   `mantelhaen.test()` on groups x categories x strata tables), Mantel statistics and odds ratios
   to $10^{-10}$ relative (the computations are closed form); purification paths (`difPur`),

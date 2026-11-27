@@ -1694,7 +1694,7 @@ data-independent shapes (§15.21).
    rescaled to sum to $p$, rebuilt, rescaled to unit diagonal), `NotPositiveDefiniteWarning`
    (new in `errors`). Not reported: standard errors of $\hat\rho$ (not validated; the
    dimensionality methods do not use them).
-   **Validation (V24)**: `packages/flexpyctt/validation/r/m5_polychoric_reference.R` (lavaan 0.7-3, psych 2.6.9):
+   **Validation (V24)**: `flexpyctt/validation/r/m5_polychoric_reference.R` (lavaan 0.7-3, psych 2.6.9):
    simulated tetrachoric (8 items), mixed 2–5 categories with two factors, the same with 10% MCAR
    (pairwise), extreme binary items with one-empty-cell 2 x 2 tables, LSAT7 and Science. lavaan
    agrees to $\le 3.1\times10^{-8}$ (its `nlminb` tolerance; flexpyirt's pair gradients vanish to
@@ -1727,7 +1727,7 @@ data-independent shapes (§15.21).
     followed). **EKC**: Braeken & van Assen (2017) as in EFAtools (observed eigenvalues in the
     remaining-variance term); with a `PolychoricResult` and no `n_obs`, the smallest pairwise
     $n$ is used (conservative under missing data).
-    **Validation (V25)**: `packages/flexpyctt/validation/r/m5_dimensionality_reference.R` feeds the six lavaan
+    **Validation (V25)**: `flexpyctt/validation/r/m5_dimensionality_reference.R` feeds the six lavaan
     polychoric matrices of V24 to EFAtools 1.1.0 (`EKC`), psych 2.6.9 (`vss()$map`),
     EFA.dimensions 0.1.9.3 (`MAP`) and an independent R implementation of both MAP powers, plus
     `eigen()` for PCA / SMC eigenvalues: all agree to $10^{-11}$, including the selected numbers of
@@ -1850,7 +1850,7 @@ data-independent shapes (§15.21).
     corrected here). **Ensemble**: `dimensionality()` adds the validation-half DETECT of the selected
     partition as a question-(B) row (supports when $<$ `detect_threshold` $=0.2$), available
     without `fit`; the key is split three ways (parallel analysis, model-based PA, DETECT).
-    **Validation (V27)**: `packages/flexpyctt/validation/r/m5_detect_reference.R` (sirt 4.2.133): simulated
+    **Validation (V27)**: `flexpyctt/validation/r/m5_detect_reference.R` (sirt 4.2.133): simulated
     two-dimensional (true and wrong partitions), unidimensional and Science (polytomous) data with
     `conf.detect(use_sum_score = TRUE, bias_corr = TRUE, smooth = FALSE)`, and a three-cluster data
     set with `expl.detect(use_sum_score = TRUE, estsample = )`: conditional covariances,
@@ -1887,7 +1887,7 @@ data-independent shapes (§15.21).
     `converged` per solution, and a `HeywoodWarning` is emitted when the selected one is
     inadmissible (as EFAtools). **Ensemble**: `dimensionality()` adds Hull (CAF, ULS, default $J$ from a
     fourth split of the key) to question (A) when there are at least 6 items.
-    **Validation (V28)**: `packages/flexpyctt/validation/r/m5_efa_hull_reference.R` (EFAtools 1.1.0, psych 2.6.9) on the
+    **Validation (V28)**: `flexpyctt/validation/r/m5_efa_hull_reference.R` (EFAtools 1.1.0, psych 2.6.9) on the
     V24 polychoric matrices with $\ge6$ variables and two simulated Pearson matrices (3 factors,
     $N=500$; 2 weak factors, $N=300$): every $k\le J$ with ULS and ML — implied
     $\Lambda\Lambda^\top$ and communalities to $10^{-4}$ (observed $\le7\times10^{-5}$, the largest at
@@ -1918,7 +1918,7 @@ data-independent shapes (§15.21).
     and EFAtools); complete data. PAF loadings are signed to non-negative column sums: EFAtools
     takes LAPACK's signs, which only matter for $k\ge2$ and do not change the population's
     distribution. **Ensemble**: `dimensionality()` adds CD to question (A) with complete data
-    (fifth split of the key). **Validation (V29)**: `packages/flexpyctt/validation/r/m5_comparison_data_reference.R`
+    (fifth split of the key). **Validation (V29)**: `flexpyctt/validation/r/m5_comparison_data_reference.R`
     (EFAtools 1.1.0): PAF loadings for $k=1..3$ to $10^{-12}$ in $\Lambda\Lambda^\top$; the one-factor
     population from EFAtools' own random draws (reproduced with the same seed and exported)
     identical; the rank-sum $p$-values on EFAtools' RMSE columns to $10^{-10}$ relative; `CD()` on a
@@ -1944,7 +1944,7 @@ data-independent shapes (§15.21).
     their exact ATFIND, and is documented as such. **Ensemble**: `dimensionality()` adds DIMTEST
     ($p\ge\alpha$) to question (B) for complete binary data (sixth split of the key), otherwise an
     unavailable row. **Validation (V30)**: no implementation outside the stand-alone DIMPACK, so the
-    test is accepted on `packages/flexpyctt/validation/simulation/dimtest_study.py` (results in
+    test is accepted on `flexpyctt/validation/simulation/dimtest_study.py` (results in
     `dimtest_study.json`): 2PL data, slopes $U(0.8,1.8)$, intercepts $N(0,0.8)$, items in two halves
     on dimensions correlated $\rho$, 200 replications per condition, defaults throughout:
 
@@ -1966,7 +1966,7 @@ data-independent shapes (§15.21).
     therefore strong evidence of multidimensionality, a large $p$ weak evidence for unidimensionality
     (stated in the docstring and the guide). Standardizing by the bootstrap SD of $T_G$ instead would
     recalibrate it but departs from the published statistic; not done. The pieces are unit-tested
-    against direct computations, and `packages/flexpyctt/tests/test_dimtest.py` reruns a small version of the
+    against direct computations, and `flexpyctt/tests/test_dimtest.py` reruns a small version of the
     study (20 null and 10 alternative replications).
 17. **Jackknife slope index (`FitResult.jsi()`, V31)**: `_jsi.py`. **Definition** (Edwards, Houts
     & Cai, 2018, as mirt's `residuals(type = "JSI")`): the jackknife is over items, not
@@ -2027,6 +2027,11 @@ data-independent shapes (§15.21).
 18. **Package split: `flexpyctt` and `flexpyequate` (decided 2026-11-25, issue #87)**: tools that need no fitted IRT
     model are released as separate, JAX-free distributions from this repository. flexpyirt keeps
     BA-EM estimation and everything that uses its result.
+
+    > **Superseded in part (2026-11-27, §16.24).** The two packages now have their own
+    > repositories and versions. The paragraphs on layout, the single version, tooling, the
+    > documentation site and where tests and references are describe the state before that;
+    > the rest still holds.
 
     | Distribution | Scope | Depends on |
     |---|---|---|
@@ -2330,7 +2335,7 @@ data-independent shapes (§15.21).
     item's respondents; the key is listed even if nobody chose it. Score groups follow R's
     `cut(T, quantile(T, 0:G/G), include.lowest = TRUE)` (type-7 quantiles, ties never split); equal
     quantiles raise instead of silently merging groups.
-    **Validation (V46)**: `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R`, see
+    **Validation (V46)**: `flexpyctt/validation/r/ctt_item_analysis_reference.R`, see
     VALIDATION.md. **Left out** (as in the issue): hierarchical $\omega$, split-half, Guttman
     $\lambda$, glb, the upper–lower 27% index, plots (#103), weights.
 22. **DIF workflow: screening with anchor purification, Wald tests, effect sizes (#104, V49)**:
@@ -2499,6 +2504,65 @@ data-independent shapes (§15.21).
     two-group 2PL with MCAR missing values, and 2PL MAP fits; `_mirt_convention=True`
     reproduces mirt's raw output, and the default is compared with an independent R computation
     of the formulas above (see VALIDATION.md).
+
+24. **One repository per package (decided 2026-11-27; replaces the layout, versioning and release
+    parts of §16.18)**: flexpyctt and flexpyequate move out of this repository into
+    `takuizum/flexpyctt` and `takuizum/flexpyequate` (history of `packages/<name>/` kept). The
+    scope of each package, the two polychoric implementations, `rng`, the shared error classes
+    and the re-exports of §16.18 are unchanged.
+
+    **Why.** With one tag for three distributions, every release gave all three a new version
+    whether they changed or not, none could be released on its own, and flexpyequate (which
+    shares no code with the other two) lived in a repository named after another package. The
+    cost of splitting is that a change spanning flexpyctt and flexpyirt takes two steps; it is
+    accepted because such changes are rare now that the tools have moved.
+
+    **Versions.** Each repository tags its own `vX.Y.Z` (hatch-vcs); flexpyctt and flexpyequate
+    start at 0.1.0. The versions are unrelated: nothing requires flexpyirt 0.3 to go with
+    flexpyctt 0.3.
+
+    **The dependency.** flexpyirt requires a range, `flexpyctt>=0.X,<0.(X+1)` (now
+    `>=0.1,<0.2`), not an exact version: an exact pin would force a flexpyirt release for every
+    flexpyctt bug fix and would conflict with a user's own requirement on flexpyctt. Before 1.0
+    the minor version of flexpyctt is the unit of compatibility:
+    - a flexpyctt patch release (`0.x.Y`) keeps the public API, and also the four private helpers
+      that `flexpyirt.dimensionality` imports (`_coerce_ordinal`, `_observed_correlation`,
+      `_eigenvalues`, `_descending_eigenvalues`); a test in flexpyctt checks their signatures.
+      This closes the open point of §16.18 (pinning the same version with a build hook);
+    - a flexpyctt minor release may change them. flexpyirt then raises the range in a PR of its
+      own, and its CI is the check that the two fit;
+    - `tests/test_packaging.py` checks that the range has a lower bound and stays inside one
+      minor version, and that flexpyctt is not taken from a workspace or a local path.
+
+    **Re-exports.** `flexpyirt/__init__.py` lists the re-exported names explicitly, so a name
+    added in a flexpyctt patch release does not appear in flexpyirt until it is added here.
+    `tests/test_m5_ensemble.py` fails when flexpyctt exports a name that flexpyirt does not
+    re-export, which is the reminder to add it.
+
+    **Order of work for a change in both.** Change flexpyctt in its repository and release it;
+    then change flexpyirt (and raise the range if the minor version went up). A flexpyirt release
+    needs a flexpyctt version inside the range on PyPI: the `publish` job installs the built
+    wheel with flexpyctt from PyPI.
+
+    **Reference values.** flexpyirt's tests use two of flexpyctt's reference files (V24 for the
+    JAX polychoric tests and the two-version agreement test, V27 for one ensemble test). They are
+    copied unchanged to `tests/reference/v24_polychoric.json` and `v27_detect.json`; the scripts
+    that write them are in flexpyctt's `validation/r/`. Copy them again when they are regenerated
+    there. In this document and in VALIDATION.md, a path that starts with `flexpyctt/` is a path
+    in the flexpyctt repository.
+
+    **Documents.** The design notes of flexpyctt's tools stay in this document (§16.8–§16.16,
+    §16.18, §16.20, §16.21) and their validation cases in VALIDATION.md, and flexpyctt's
+    repository links here; moving them is postponed. flexpyequate has its own design document
+    in its repository. On the documentation site flexpyctt's tools stay in the user guide and
+    the API reference (flexpyirt re-exports them); the page for flexpyequate is removed, and the
+    home page links to its repository.
+
+    **CI and release here.** No workspace: `uv build` builds flexpyirt only, the release workflow
+    has one `pypi` job, and the CI jobs that tested the other two without JAX moved to their
+    repositories. flexpyequate stays in the `dev` dependency group (`flexpyequate>=0.1,<0.2`,
+    from PyPI), because `tests/test_equating.py` compares the equipercentile kernel with it;
+    it is not a runtime dependency.
 
 ## 17. Implementation decisions (M7)
 

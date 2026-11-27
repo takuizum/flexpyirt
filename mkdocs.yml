@@ -27,8 +27,8 @@ theme:
         name: Switch to light mode
 
 # The site is built from the same Markdown files that GitHub renders (X.md / X.ja.md).
-# scripts/mkdocs_hooks.py drops the in-page language links, points links outside docs/ to GitHub
-# and puts the flexpyequate README (its PyPI page) into equating.md.
+# scripts/mkdocs_hooks.py drops the in-page language links and points links outside docs/ to
+# GitHub.
 hooks:
   - scripts/mkdocs_hooks.py
 
@@ -42,7 +42,6 @@ nav:
   - User guide: guide.md
   - Theory: theory.md
   - API reference: reference.md
-  - Score equating (flexpyequate): equating.md
   - Accuracy and validation: accuracy.md
 
 plugins:
@@ -68,7 +67,6 @@ plugins:
             User guide: ユーザーガイド
             Theory: 理論
             API reference: API リファレンス
-            Score equating (flexpyequate): 得点の等化（flexpyequate）
             Accuracy and validation: 精度と検証
 
 markdown_extensions:

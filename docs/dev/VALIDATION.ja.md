@@ -4,6 +4,7 @@
 
 ## 方針
 - 照合の参照値は R `mirt` で生成し、JSON で `tests/reference/` にコミットする。CI では R を実行しない。
+- `flexpyctt/` から始まるパスは、flexpyctt のリポジトリ（[takuizum/flexpyctt](https://github.com/takuizum/flexpyctt)）の中のパスである。推定済みのモデルを使わない道具と、その参照値はそこにある（DESIGN.md §16.24）。
 - 生成スクリプトは `validation/r/<case>.R`。各スクリプトは R の版・mirt の版・mirt のコミット SHA を JSON の `meta` に書く（下の「R と mirt の版」）。
 - 照合は**同じ条件**で行う: 同じ求積（等間隔 61 点・$[-6,6]$ など）、同じ収束基準（mirt 側は `TOL` を厳しく、例: 1e-8）、加速なし、同じ事前分布。
 - データはシミュレーション（固定シード）と公開データ（例: mirt 同梱の `LSAT7`, `Science`, `SAT12`）の両方。
@@ -83,7 +84,7 @@
 | V27 | DETECT: 確認的（シミュレーションの 2 次元で正しい・誤った分割、1 次元、Science）と探索的（3 クラスタのシミュレーション、分割を指定） | sirt の `conf.detect(use_sum_score = TRUE, smooth = FALSE)`、`expl.detect(use_sum_score = TRUE, estsample = )` | M5 |
 | V28 | EFA（ULS、ML。Hull の上限までのすべての $k$）と Hull 法（CAF、CFI、RMSEA）。V24 の行列のうち変数が 6 つ以上のものとシミュレーションの行列 2 つ | EFAtools の `EFA(method = , rotation = "none")`、`HULL(method = , gof = )`、psych の `fa(fm = "minres" / "ml", rotate = "none")` | M5 |
 | V29 | 比較データ法: 主因子法、書き出した乱数による 1 因子の母集団の生成、順位和検定、3 因子の連続・2 因子の順序・1 因子の 2 値のデータでの `CD()` | EFAtools の `.paf_iter`、`.simulate_cfm_empirical`、`CD()`、`wilcox.test(x, y, "less")` | M5 |
-| V30 | DIMTEST: 第 1 種の誤りと検出力（2PL。$N$ 1000〜2000、$J$ 20〜30。1 次元と相関 0.7〜0.8 の 2 次元。各 200 反復） | なし（DIMPACK 以外に実装がない）。`packages/flexpyctt/validation/simulation/dimtest_study.py` | M5 |
+| V30 | DIMTEST: 第 1 種の誤りと検出力（2PL。$N$ 1000〜2000、$J$ 20〜30。1 次元と相関 0.7〜0.8 の 2 次元。各 200 反復） | なし（DIMPACK 以外に実装がない）。`flexpyctt/validation/simulation/dimtest_study.py` | M5 |
 | V31 | ジャックナイフ傾き指標（LSAT7 の 2PL、Science の GRM、依存するペア 2 組と 5% の MCAR を含むシミュレーションの 2PL、依存するペア 1 組を含むシミュレーションの GPCM）。Newton 法と 1 ステップの近似は推定し直した値と比べる | `residuals(m, type = "JSI", fold = FALSE, TOL = 1e-10)` | M5 |
 | V32 | 次元縮約による双因子モデル（特殊因子 3 つと一般因子のみの項目 3 つを含む 2PL、テストレット 3 つの GRM $K=4$） | `bfactor(data, model, itemtype = , SE = TRUE, SE.type = "Oakes", quadpts = 31)`; `fscores(method = "EAP", quadpts = 15)` | M7 |
 | V33 | 次元縮約による two-tier モデル（相関する主因子 2 つと特殊因子 3 つ（1 つは両方の主因子にまたがる）の 2PL、交差負荷項目 1 つとテストレット 2 つの GRM $K=4$） | `bfactor(data, model, model2 = mirt.model("F1 = ...\nF2 = ...\nCOV = F1*F2"), SE = TRUE, SE.type = "Oakes", quadpts = 15)`; `fscores(method = "EAP")` | M7 |
@@ -98,7 +99,7 @@
 | V43 | 指定したパラメタでの多次元モデルの情報行列・方向別の情報量・期待得点（相関する 2 因子で 2PL・3PL・4PL・GRM・GPCM・名義の項目と交差負荷 4 項目。3 因子で 2PL・3PL・GRM・GPCM と交差負荷 2 項目。特殊因子 3 の双因子 2PL + GRM。相関する主因子 2 と特殊因子 2 の two-tier 2PL + GRM） | `pars =` と `TOL = NaN` で作った `mirt()` / `bfactor()` のオブジェクトでの `iteminfo(item, Theta, multidim_matrix = TRUE)`、`iteminfo(item, Theta, degrees = )`、`testinfo(m, Theta, degrees = )`、`expected.item()`、`expected.test()` | M7 |
 | V45 | M-step の非拘束尺度（任意、`BAEM(m_step_scale="unconstrained")`）を V3・V4・V5・V7・V9・V11・V14 のケースで照合。`LogitNormalPrior`（`"natural"` は mirt に同等なものがないため独立な数値検証。`mode_scale="logit"` は mirt の `g` への `norm`） | 各ケースの既存の参照値。SciPy（`stats.norm`、`integrate.quad`）と式から書いた停留条件。`v45_3pl_logit_norm_map.json`（mirt）とテスト内で計算した flexMIRT の logit 尺度のモード | #15 |
 | V46 | 古典的項目分析（flexpyctt）: キーによる採点、α（ペアワイズとリストワイズ）、項目統計量、点双列・双列・多分系列相関、ω total（Pearson とポリコリック）、選択肢分析。シミュレーションによる 10 項目の多肢選択データ（欠測なし、5% MCAR）と 6 項目の 0〜4 のデータ（欠測なし、6% MCAR） | なし（mirt ではない）: psych `alpha()`、`score.multiple.choice()`、`responseFrequency()`、`polyserial()`、`biserial()`、`fa()`、`omega(nfactors = 1)`。ltm `cronbach.alpha()`、`biserial.cor()`。polycor `polyserial(ML = FALSE)`。lavaan `lavCor()`。選択肢の統計量は素の R | flexpyctt |
-| V47 | 観測得点による DIF（flexpyctt、#102）: 連続修正の有無、Holm / BH、純化、利用者のアンカー、外部のマッチング変数を含む Mantel–Haenszel（`difR::verbal`、均一・不均一 DIF を入れたシミュレーションの 2PL）。3 群と名義カテゴリの一般化 MH（シミュレーションの段階反応）。Mantel 検定と Liu–Agresti のオッズ比。ロジスティック回帰（both / uniform / non-uniform、尤度比 / Wald、純化、アンカー、マッチング） | difR 6.1.0 の `difMH()`、`difGMH()`、`difLogistic()`、`difMantel.poly()`、`liu_agresti_ccor()`。`stats::mantelhaen.test()`。R での直接の実装: `packages/flexpyctt/validation/r/ctt_dif_reference.R`。Liu & Agresti（1996、表 1）の計算例 | — |
+| V47 | 観測得点による DIF（flexpyctt、#102）: 連続修正の有無、Holm / BH、純化、利用者のアンカー、外部のマッチング変数を含む Mantel–Haenszel（`difR::verbal`、均一・不均一 DIF を入れたシミュレーションの 2PL）。3 群と名義カテゴリの一般化 MH（シミュレーションの段階反応）。Mantel 検定と Liu–Agresti のオッズ比。ロジスティック回帰（both / uniform / non-uniform、尤度比 / Wald、純化、アンカー、マッチング） | difR 6.1.0 の `difMH()`、`difGMH()`、`difLogistic()`、`difMantel.poly()`、`liu_agresti_ccor()`。`stats::mantelhaen.test()`。R での直接の実装: `flexpyctt/validation/r/ctt_dif_reference.R`。Liu & Agresti（1996、表 1）の計算例 | — |
 | V48 | mirt の推定値での図の数値（2PL $J=10$、$N=1003$。欠測 10% の 2PL。GRM $K=4$、$J=6$。2PL + 3PL + GPCM + 名義の混合 $J=10$。2 群の 2PL + GRM で焦点群の平均・分散を推定。TAM の GPCM $K=4$、$J=6$）: 経験的項目曲線、トレースライン、サーストン閾値 | `itemfit(fit_stats = "X2", return.tables = TRUE, group.bins = 10, mincell.X2 = 0, Theta = fscores(method = "EAP"))`（群ごとは `extract.group()`）、`probtrace()`、`probtrace()` に対する `uniroot()`、`coef(IRTpars = TRUE)`。TAM `tam.threshold()` | #103 |
 | V49 | アンカーを純化する DIF のスクリーニング（他の全項目をアンカー、逐次的に自由化、逐次的に制約。2 群・2PL 8 項目 + GRM $K=3$ 4 項目、3 群 2PL）、Wald 検定による DIF、mirt の推定値での期待得点の符号つき・符号なしの差、DTF、ESSD / ETSSD、RMSD | `DIF(scheme = "drop" / "drop_sequential" / "add_sequential", seq_stat = 0.05, p.adjust = "BH", max_run = )`、`DIF(Wald = TRUE)`、`mirt:::calc_DRFs(best_fitting = TRUE)`（`DRF()` の内部）、`empirical_ES()`、`RMSD_DIF(probfun = FALSE)` | M5 |
 | V50 | リンキングの共通項目の点検（#105）: 頑健 z（Huynh & Meyer, 2010）・変位・期待項目得点曲線の RMSD。除外の順序、純化の各段階のリンキング係数、最終の項目表（2PL、2PL + GRM + GPCM 混在） | 個別の `mirt()` 推定 + 素の R による再計算（`median()`、`quantile(type = 7)`、`expected.item()`、V20 のリンキング）。ドリフト項目の照合に `equateIRT::dif.test` | 現場向け |
@@ -884,7 +885,7 @@
   `as.list()` で書く。
 - **DIMTEST（V30、M5）**: 参照値との照合ではなくシミュレーション研究で受け入れる（表は DESIGN §16.16）。200 反復で
   .05 での第 1 種の誤りは 0.5〜1.0%（保守的。ブートストラップは偏りを除くが、帰無仮説の下での $T$ の SD は 0.72 程度）、
-  検出力は 0.99〜1.00。`uv run python packages/flexpyctt/validation/simulation/dimtest_study.py`（約 4 分）で再実行できる。テストは帰無
+  検出力は 0.99〜1.00。`uv run python flexpyctt/validation/simulation/dimtest_study.py`（約 4 分）で再実行できる。テストは帰無
   20 反復と対立 10 反復を実行する。
 - **双因子モデル（V32、M7）**: シミュレーション 2 例を `tests/test_mirt_m7_bifactor.py` で照合する（通常の EM と
   SQUAREM。生成スクリプト `validation/r/m7_bifactor_reference.R` → `tests/reference/v32_bifactor.json`、mirt 1.46.1 の
@@ -1295,9 +1296,9 @@
 
 ## 照合以外の検証
 - **古典的項目分析（V46、flexpyctt、#101）**:
-  `packages/flexpyctt/validation/r/ctt_item_analysis_reference.R`（R 4.6.2、psych 2.6.9、ltm 1.2.0、
-  polycor 0.8.2、lavaan 0.7.3）が `packages/flexpyctt/tests/reference/v46_item_analysis.json` を書き、
-  `packages/flexpyctt/tests/test_item_analysis.py` で照合する。シミュレーションの 4 例: 多肢選択 10 項目（$N=500$、
+  `flexpyctt/validation/r/ctt_item_analysis_reference.R`（R 4.6.2、psych 2.6.9、ltm 1.2.0、
+  polycor 0.8.2、lavaan 0.7.3）が `flexpyctt/tests/reference/v46_item_analysis.json` を書き、
+  `flexpyctt/tests/test_item_analysis.py` で照合する。シミュレーションの 4 例: 多肢選択 10 項目（$N=500$、
   正答と誤答の引きつけ方を変え、1 項目は 5 選択肢）の欠測なしと 5% MCAR、0〜4 で採点する 6 項目（$N=300$、
   段階反応モデル）の欠測なしと 6% MCAR。ほかに丁度識別の ω を見る 3 項目と、0〜4 の欠測なしデータの 1 項目を逆転採点したもの（psych の既定の
   `flip = TRUE` がその項目を反転する。`flip = FALSE` の値も記録し、0.18 低く、反転しない式と一致する）。観測された差: 閉じた式（α、標準化 α、
@@ -1317,7 +1318,7 @@
   スクリプトが定義どおり素の R で計算し、選択肢の割合は psych の `responseFrequency()` とも一致する。issue に挙げた
   lavaan の 1 因子 CFA は使わなかった（共分散行列への ML は推定量も尺度も違う）。
 - **観測得点による DIF（V47、flexpyctt、#102）**: 参照値は difR 6.1.0 と base R によるもので、
-  `packages/flexpyctt/tests/reference/v47_dif.json` にコミットする。一致の程度: MH の $\chi^2$、$\hat\alpha_{MH}$ と
+  `flexpyctt/tests/reference/v47_dif.json` にコミットする。一致の程度: MH の $\chi^2$、$\hat\alpha_{MH}$ と
   Phillips–Holland の分散、一般化 MH の統計量（difGMH と、群 x カテゴリ x 層の表への `mantelhaen.test()`）、Mantel の
   統計量とオッズ比は相対 $10^{-10}$ まで（どれも閉じた式）。純化の経過（`difPur`）、反復回数、収束の判定、最終的な
   検出結果は一致。ロジスティック回帰: `difLogistic()` は既定の `epsilon = 1e-8` で `glm()` を呼ぶので、このデータでは

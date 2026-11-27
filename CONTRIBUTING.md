@@ -2,34 +2,34 @@
 
 English | [日本語](CONTRIBUTING.ja.md)
 
-## Packages
+## Related packages
 
-The repository is a uv workspace that releases three distributions with one version
-(DESIGN.md §16.18):
+Three related packages each have their own repository and version (DESIGN.md §16.18, §16.24).
+This repository holds flexpyirt only.
 
-| Distribution | Where | Contents |
+| Package | Repository | Contents |
 |---|---|---|
-| `flexpyirt` | repository root (`pyproject.toml`, `src/flexpyirt/`, `tests/`, `validation/`) | Estimation and everything that uses a fitted model. Depends on JAX and on flexpyctt |
-| `flexpyctt` | `packages/flexpyctt/` (its own `pyproject.toml`, `README.md`, `src/`, `tests/`, `validation/`) | Item and test analysis that needs no fitted model. NumPy, SciPy and pandas only |
-| `flexpyequate` | `packages/flexpyequate/` (its own `pyproject.toml`, `README.md`, `docs/DESIGN.md`, `src/`, `tests/`; reference scripts in `validation/r/equate_*.R`) | Equating of score distributions. NumPy, SciPy and pandas only; independent of the other two |
+| `flexpyirt` | [takuizum/flexpyirt](https://github.com/takuizum/flexpyirt) (here) | Estimation and everything that uses a fitted model. Depends on JAX and on flexpyctt |
+| `flexpyctt` | [takuizum/flexpyctt](https://github.com/takuizum/flexpyctt) | Item and test analysis that needs no fitted model. NumPy, SciPy and pandas only |
+| `flexpyequate` | [takuizum/flexpyequate](https://github.com/takuizum/flexpyequate) | Equating of score distributions. NumPy, SciPy and pandas only; independent of the other two |
 
-- **flexpyctt never imports JAX or flexpyirt.** A CI job installs it alone and runs its tests
-  without JAX. Its functions take `rng` (a seed or `numpy.random.Generator`), not a JAX key.
+- **flexpyirt requires `flexpyctt>=0.X,<0.(X+1)`** (`pyproject.toml`). Before 1.0, flexpyctt's
+  minor version is the unit of compatibility: a flexpyctt patch release keeps the public API. When
+  flexpyctt's minor version goes up, open a PR here that raises the range and check that CI passes
+  (`tests/test_packaging.py` checks the form of the range).
 - A tool that needs a `FitResult` belongs in flexpyirt; one that needs only data belongs in
-  flexpyctt. flexpyirt re-exports flexpyctt's public names.
-- **flexpyequate never imports JAX, flexpyirt or flexpyctt**, and neither of them depends on it
-  (it is a development dependency of the root only, so that `uv sync` installs it). A CI job
-  installs it alone and runs its tests. Equating that needs item parameters belongs in flexpyirt;
-  flexpyequate's design is in
-  [packages/flexpyequate/docs/DESIGN.md](packages/flexpyequate/docs/DESIGN.md).
-- `packages/flexpyctt/README.md` and `packages/flexpyequate/README.md` are the PyPI pages of
-  those packages: absolute links, no development information. The documentation site shows the
-  flexpyequate README on its "Score equating" page (`docs/equating.md`,
-  `scripts/mkdocs_hooks.py`).
-- Lint and type checks of flexpyirt and flexpyctt are configured once, in the root
-  `pyproject.toml`. flexpyequate has its own `[tool.ruff]` and `[tool.mypy]` (the same rules):
-  `ruff check .` from the root applies them to its directory, and mypy runs from
-  `packages/flexpyequate/`. Each package has its own pytest configuration and test directory.
+  flexpyctt. flexpyirt re-exports flexpyctt's public names (listed explicitly in
+  `src/flexpyirt/__init__.py`).
+- flexpyirt imports four private helpers of flexpyctt (`_coerce_ordinal`,
+  `_observed_correlation`, `_eigenvalues`, `_descending_eigenvalues`). A test in flexpyctt guards
+  their signatures.
+- **A change that spans both**: change and release flexpyctt in its repository first, then raise
+  the range here.
+- `tests/reference/v24_polychoric.json` and `v27_detect.json` are copies of flexpyctt's reference
+  values. Copy them again when they are regenerated in flexpyctt.
+- Equating that needs item parameters belongs in flexpyirt. flexpyirt does not depend on
+  flexpyequate (it is in the `dev` dependency group only: `tests/test_equating.py` uses it as
+  an independent implementation to compare with).
 
 ## Branches
 
@@ -50,16 +50,15 @@ The repository is a uv workspace that releases three distributions with one vers
 ## PRs and reviews
 
 - Every change goes in through a PR. `main` and `develop` are protected by rulesets and cannot be
-  merged into until CI (`test (3.12/3.13)`) and `pr-rules` pass. CI also runs
-  `flexpyctt without JAX (3.12/3.13)` and `flexpyequate without JAX (3.12/3.13)`.
+  merged into until CI (`test (3.12/3.13)`) and `pr-rules` pass.
 - The repository owner reviews PRs before merging them (no automatic merging).
 - Changes to numerical code must pass the agreement tests against R mirt
   ([docs/dev/VALIDATION.md](docs/dev/VALIDATION.md)).
 
 ## Releases
 
-The version comes from **git tags** (`vX.Y.Z`, via hatch-vcs). No `pyproject.toml` holds a version;
-releasing means tagging, and flexpyirt, flexpyctt and flexpyequate always get the same version. Untagged development commits get versions like `0.0.2.dev3+g1a2b3c4`.
+The version comes from **git tags** (`vX.Y.Z`, via hatch-vcs). `pyproject.toml` holds no version;
+releasing means tagging. Untagged development commits get versions like `0.0.2.dev3+g1a2b3c4`.
 
 1. Open a PR from `develop` into `main`. **Its title decides the version bump**:
    - `release(major): ...` / `release(minor): ...` / `release(patch): ...`
@@ -67,21 +66,17 @@ releasing means tagging, and flexpyirt, flexpyctt and flexpyequate always get th
 2. The merge runs `.github/workflows/release.yml`:
    1. `plan` job: computes the next version from the PR title and the latest `vX.Y.Z` tag.
    2. `publish` job: **waits for approval in the `release` environment**. Once the owner approves
-      it on the Actions page, it tags `main` with `vX.Y.Z`, builds the three distributions
-      (`uv build --package flexpyctt`, `uv build --package flexpyequate`,
-      `uv build --package flexpyirt`) and creates a GitHub
-      Release (wheels and sdists attached, release notes generated). It then closes the issues that
-      fix PRs in this release `Closes`d.
-   3. `pypi-flexpyctt` job, then `pypi` job, and `pypi-flexpyequate` job beside them: **publish
-      the same wheels and sdists to PyPI** (`pypi` environment, Trusted Publishing; no API
-      token), one job per PyPI project. flexpyctt goes first because flexpyirt depends on it;
-      flexpyequate depends on neither, so its job waits only for the `publish` job and a failure
-      in it does not hold back the other two (rerun the failed job).
+      it on the Actions page, it tags `main` with `vX.Y.Z`, builds (`uv build`) and creates a
+      GitHub Release (wheel and sdist attached, release notes generated). It then closes the
+      issues that fix PRs in this release `Closes`d.
+   3. `pypi` job: **publishes the same wheel and sdist to PyPI** (`pypi` environment, Trusted
+      Publishing; no API token).
    4. The same push to `main` runs `.github/workflows/docs.yml`, which deploys the documentation
       site to GitHub Pages.
 3. **The first release** (no `v*` tag yet) is **v0.0.1**, whatever bump the title asks for.
-4. Manual runs (`workflow_dispatch`) are dry runs only: they compute the next version and build
-   the three distributions.
+4. Manual runs (`workflow_dispatch`) are dry runs only: they compute the next version and build.
+5. **Before a release, a flexpyctt version inside the required range must be on PyPI** (the
+   `publish` job installs the built wheel together with flexpyctt from PyPI to check it).
 
 Merge commits on `main` are not merged back into `develop` (`develop` is protected and the bot
 cannot push to it). So development version numbers on `develop` may not refer to the latest release
@@ -97,10 +92,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The public API may c
 - **The `publish` job runs in the `release` environment and needs the designated reviewer's (the
   owner's) approval.** The environment deploys from `main` only, so other branches and forks cannot
   create tags or Releases.
-- **PyPI uploads use Trusted Publishing** (OIDC). Each PyPI project (`flexpyirt`, `flexpyctt`, `flexpyequate`)
+- **PyPI uploads use Trusted Publishing** (OIDC). The PyPI project `flexpyirt`
   trusts only the publisher "repository `takuizum/flexpyirt`, workflow `release.yml`, environment
-  `pypi`", so no API token lives in the repository. A new project needs a pending publisher
-  registered on PyPI before its first release. Restrict the `pypi` environment to deployments from `main` as well. A version
+  `pypi`", so no API token lives in the repository. Restrict the `pypi` environment to deployments from `main` as well. A version
   number uploaded to PyPI can never be reused, even after deleting it.
 - Workflow `GITHUB_TOKEN`s are read-only by default (`permissions: contents: read`); only the
   `publish` job writes. PRs from forks get a read-only token and run only CI and PR rules.
@@ -114,15 +108,7 @@ Manage Python environments with `uv` only (no pip).
 ```bash
 uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
-uv run pytest packages/flexpyctt
-uv run pytest packages/flexpyequate
-(cd packages/flexpyequate && uv run mypy)
 ```
-
-`uv sync` installs the three packages in editable mode. Ruff covers all of them from the root
-and mypy flexpyirt and flexpyctt; flexpyequate's mypy run is the last line. `uv run pytest` runs
-flexpyirt's tests, `uv run pytest packages/flexpyctt` flexpyctt's and
-`uv run pytest packages/flexpyequate` flexpyequate's.
 
 ### Tests
 
@@ -151,7 +137,7 @@ release PR); check the nightly run before ticking a ROADMAP item.
   `uv run pytest -m "not slow" -n 4 --write-durations tests/durations-fast.json` (or merge the
   `durations-*` artifacts of a CI run). A module missing from a file counts as 1 s per test.
 - On CI the required checks `test (3.12)` and `test (3.13)` pass when the `checks` job (ruff,
-  mypy, flexpyctt's and flexpyequate's suites) and every `fast` shard passed.
+  mypy) and every `fast` shard passed.
 
 Run `uv run pytest -m "not slow"` locally for a quick check, and `uv run pytest --shard 2/4` to
 run one full-tier shard as CI does
@@ -170,9 +156,8 @@ validation/r/run_references.sh
 `validation/r/run_references.sh m1 m2` reruns single scripts; a new script that uses mirt sources
 `validation/r/setup.R` and is added to the stage lists of `run_references.sh`.
 
-flexpyctt's reference scripts are in `packages/flexpyctt/validation/r/` and write to
-`packages/flexpyctt/tests/reference/`; run them from the repository root too. flexpyequate's are
-`validation/r/equate_*.R` and write to `packages/flexpyequate/tests/reference/`.
+The reference scripts of flexpyctt and flexpyequate are in `validation/r/` of their own
+repositories.
 
 To rerun the wall-time benchmarks against R `mirt` (see [benchmarks/README.md](benchmarks/README.md)
 for details and `--quick` mode):
