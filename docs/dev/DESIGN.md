@@ -454,9 +454,15 @@ data-independent shapes (§15.21).
    line search) is our own: Newton masked to the free coordinates. Fixed coordinates get Hessian
    $-I$ and gradient 0 so they do not move. If the Newton direction is not an ascent direction
    (the Hessian is not negative definite), switch to the gradient. Step sizes
-   $2^{-k}\ (k=0,\dots,29)$ are evaluated together with `vmap`, and the largest one that does not
-   decrease the objective and stays within bounds is taken (none: do not move). This shape keeps
-   Python branches out of jit.
+   $2^{-k}\ (k=0,1,\dots,29)$ are tried in order in a `lax.while_loop`, and the first (largest)
+   one that does not decrease the objective and stays within bounds is taken (none: do not move).
+   This shape keeps Python branches out of jit. Under the item `vmap` the loop runs until every
+   item has stopped (usually after $k=0$ or $1$), instead of evaluating all 30 candidates (#150;
+   the candidates and the acceptance rule are those of the earlier `vmap`-over-30 form, so the
+   chosen step is the same). The value, gradient and Hessian come from one forward-over-reverse
+   pass (`jacfwd` of `value_and_grad`, with the value and gradient as auxiliary outputs). An
+   unrolled $LDL^\top$ solve for $n\le4$ local parameters in place of `jnp.linalg.solve` was
+   measured and not adopted: no warm gain on 2PL/3PL/GRM and about 0.3 s more compile time.
 2. **FreeMap**: per family, `free_index (J_f, P_f)` (-1 if fixed) and `fixed_values`.
    $\xi=\text{where}(\text{free\_index}\ge0,\ \eta[\text{free\_index}],\ \text{fixed})$.
    After the M-step, write back with `eta.at[free_index].set(xi, mode="drop")`. In M1, sharing a

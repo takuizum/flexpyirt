@@ -356,8 +356,12 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 1. **M-step の Newton**: 勾配・Hessian はすべて JAX の自動微分（`jax.grad` / `jax.hessian`）で得て、手書きの解析微分は持たない。
    ループ（ステップ更新と line search）だけ自前で書く: 自由座標のマスク付き Newton。固定座標は Hessian を $-I$・勾配 0 に置き換えて動かさない。
    Newton 方向が上昇方向でない（Hessian が負定値でない）ときは勾配方向に切り替える。ステップ幅は
-   $2^{-k}\ (k=0,\dots,29)$ を `vmap` で一括評価し、目的関数が減らず範囲内に収まる最大のものを採る
-   （該当なしなら動かない）。jit 内に Python 分岐を持ち込まないための形。
+   $2^{-k}\ (k=0,1,\dots,29)$ を `lax.while_loop` で順に試し、目的関数が減らず範囲内に収まる最初の（最大の）ものを採る
+   （該当なしなら動かない）。jit 内に Python 分岐を持ち込まないための形。項目の `vmap` の下では全項目が止まるまで
+   （通常 $k=0$ か $1$ で）回り、30 候補をすべて評価することはない（#150。候補点と受理条件は以前の 30 候補一括評価と
+   同じなので、選ばれるステップも同じ）。値・勾配・Hessian は 1 回の forward-over-reverse（`value_and_grad` の
+   `jacfwd`、値と勾配は補助出力）で得る。局所パラメタ $n\le4$ で `jnp.linalg.solve` の代わりに展開した $LDL^\top$ を
+   使う案は計測して採らなかった（2PL/3PL/GRM で warm の改善がなく、コンパイルが約 0.3 秒延びる）。
 2. **FreeMap**: family ごとに `free_index (J_f, P_f)`（固定は -1）と `fixed_values`。
    $\xi=\text{where}(\text{free\_index}\ge0,\ \eta[\text{free\_index}],\ \text{fixed})$。
    M-step 後は `eta.at[free_index].set(xi, mode="drop")` で戻す。M1 では `free_id` を異なる項目間で共有すると
