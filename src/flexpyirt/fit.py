@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import warnings
 from typing import Any, Literal
 
@@ -56,6 +55,7 @@ _information = {
     "hessian": jax.jit(_core.information_hessian),
     "crossprod": jax.jit(_robust_se.information_cross_product),
 }
+_oakes_and_cross_product = jax.jit(_core.information_oakes_and_cross_product)
 _score_cross_product = jax.jit(_robust_se.score_cross_product)
 _score_cluster_cross_product = jax.jit(
     _robust_se.score_cluster_cross_product, static_argnames=("n_clusters",)
@@ -240,7 +240,14 @@ def fit(
     if eh_weights is not None:
         _check_eh_reference_moments(problem, eh_weights[0])
     if se is not None and eta.shape[0] > 0:
-        if se == "sandwich":
+        if se == "sandwich" and prep.weights is None and prep.cluster is None:
+            # One pattern pass gives the Oakes bread and the cross-product meat (§15.20, §17.5).
+            info, cross = _oakes_and_cross_product(problem_fin, out.eta)
+            bread = _invert_information(np.asarray(info))
+            meat = np.asarray(cross)
+            vcov = bread @ (0.5 * (meat + meat.T)) @ bread
+            vcov = 0.5 * (vcov + vcov.T)
+        elif se == "sandwich":
             bread = _invert_information(np.asarray(_information["oakes"](problem_fin, out.eta)))
             meat = _sandwich_meat(problem_fin, out.eta, prep)
             vcov = bread @ (0.5 * (meat + meat.T)) @ bread
@@ -357,7 +364,7 @@ def _sandwich_meat(problem: _core.CompiledProblem, eta: jax.Array, prep: Prepare
     if prep.weights is None and prep.cluster is None:
         return np.asarray(_information["crossprod"](problem, eta))
     rows = meat_patterns(prep.y, prep.group, prep.weights, prep.cluster, prep.n_clusters)
-    meat_problem = dataclasses.replace(
+    meat_problem = _core.with_responses(
         problem,
         y=jnp.asarray(rows.y, dtype=jnp.int32),
         group=jnp.asarray(rows.group, dtype=jnp.int32),

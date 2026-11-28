@@ -64,7 +64,11 @@
 ### 4.1 前処理: 反応パターン圧縮
 - 群ごとに反応行列（欠測は `-1`）をユニーク化し、度数 $c_p$ を得る。標本ウェイトがあるとき、$c_p$ は
   パターン $p$ を持つ行のウェイトの和（§17.4）。
-- jit の再コンパイルを抑えるため、パターン数を **2 のべき乗のバケットにパディング**（度数 0 の行で埋める）。
+- jit の再コンパイルを抑えるため、パターン数を **バケットにパディング**（度数 0 の行で埋める）。バケットは 8 以上の
+  $\{1, 1.5\}\times 2^k$（8, 12, 16, 24, 32, 48, ...、`pattern_bucket`、#152）。パディング後の行数はパターン数の
+  高々 1.5 倍（平均約 1.2 倍）で、2 のべき乗の 2 倍（約 1.4 倍）より少ない。代わりにコンパイルされうる形状は 2 倍になる。
+  パディング行は度数 0 なので、尤度・期待度数・それらの微分に厳密に何も足さない。チャンクに分けて処理するもの（Oakes の
+  交差項、サンドイッチのスコア）は自分のチャンク長に合わせてパディングし、2 のべき乗を仮定しない。
 - 群ごとにパターン数が違うので、全群を連結した 1 本の配列 + `group_index` で持つ（群ごとの Python ループを jit 内に持ち込まない）。
 
 ### 4.2 E-step
@@ -77,6 +81,40 @@ $$\bar n_{gq}=\sum_{p\in g}c_p h_{pq},\qquad \bar r_{gjkq}=\sum_{p\in g}c_p h_{p
 
 実装メモ: $\bar r$ は `one_hot(y)` と $c_p h_{pq}$ の einsum。メモリは $P\times J\times K\times Q$ を避け、
 `(P,Q)` の重みと `(P,J,K)` の one-hot を einsum で縮約して `(G,J,K,Q)` を直接得る。
+
+**高速経路（#152）。** どれも結果を加算順序の違い以上には変えない（テストは固定したパラメタで汎用経路と
+$10^{-12}$ で比べる）。`ItemKernel` プロトコルも変えない。
+
+- *欠測のない family。* `compile_problem` は、実際のパターン行（度数 0 でない行）に family の項目への欠測反応が
+  1 つもないとき、その family に `complete`（`FamilyBlock` の静的フラグ）を立てる。このとき全項目が観測されているので、
+  カテゴリ 0 を基準にして
+  $$\ell_{pq}=\sum_j\log P_{j0}(\theta_q)+\sum_j\sum_{k\ge1}\mathbf 1[y_{pj}=k]\,\Delta_{jkq},\qquad
+  \Delta_{jkq}=\log P_{jk}(\theta_q)-\log P_{j0}(\theta_q),$$
+  $$\bar r_{gj0q}=\bar n_{gq}-\sum_{k\ge1}\bar r_{gjkq}$$
+  と書ける。第 1 項は `(G,Q)` のオフセット 1 つで、パターンとの縮約は $K_f$ でなく $K_f-1$ カテゴリになる（2 値項目では
+  半分）。フラグはコンパイル時の反応から計算する。あとで `y` を差し替える処理（`_jsi.without_item`、サンドイッチの中央の
+  行列）は `_core.with_responses` を通し、全フラグを `False`（常に正しい汎用経路）に戻す。欠測があると、同じ分解には
+  置き換える one-hot と同じ幅の観測マスクの積が要るので使わない。$\bar r_{gj0q}$ は差なので、真の値が $\bar n_{gq}$
+  よりずっと小さいセルは $\epsilon\,\bar n_{gq}$ 程度の絶対誤差を持つ（0 の代わりに $-10^{-12}$ になりうる）。M-step の
+  目的関数ではこれに $\log P_{j0}$ が掛かるだけで、その水準では影響しない。
+- *ランク $D$ の対比。* 組み込みの `DichotomousKernel`（2PL、Rasch）と `GPCMKernel`（GPCM、PCM）そのものの型では
+  $\Delta_{jkq}=k\,\mathbf a_j^\top\boldsymbol\theta_q+d_{jk}$（2PL では $\log\sigma(z)-\log\sigma(-z)=z$）。欠測のない
+  family は、パターンを `(J_f, K_f-1, D+1)` の係数 $(k\mathbf a_j, d_{jk})$ と縮約し、得た `(P, D+1)` に
+  $(\boldsymbol\theta_q, 1)$ を 1 回掛ける。対数同時確率は $O(PJ_fK_fQ)$ から $O(PJ_fK_fD+PDQ)$ になる（期待度数には
+  $O(PJ_fK_fQ)$ の積が引き続き要る）。振り分けは内部（`_core._is_rank_d`、`type` の完全一致）なので、サブクラスと
+  ユーザー定義カーネルは汎用経路のまま。オフセットはカーネル自身の $\log P_{j0}$ から計算する。
+- *1 群。* 群がないとき、期待度数は `(J_f K_f, P) × (P, Q)` の単純な行列積で、多群の einsum の `(P, G)` 群 one-hot を
+  使わない（XLA はこれを行列積にまとめず、`P = 24576`、`J = 40`、`Q = 61` で約 2.7 倍遅かった）。
+- *指数関数 1 回。* $h_{pq}$ と $\log\sum_q e^{\lambda_{pq}}$ は $e_{pq}=\exp(\lambda_{pq}-\max_q\lambda_{pq})$ を共有し、
+  `logsumexp` のあとにもう一度 `exp` を計算しない。
+
+bifactor / two-tier の E-step（§17.1）は汎用の one-hot 経路のまま。
+
+*計測（#152）。* `fit()` の 2 回目以降の時間（通常の EM、`se=None`、CPU 8 コアに固定して交互に 2 回走らせた最小値、
+#152 直前のコードとの比較、秒）: 2PL 20000×40 0.922 → 0.612、2PL 5000×40 0.298 → 0.235、3PL 5000×30
+0.504 → 0.337、GRM(4) 0.178 → 0.187、GPCM(4) 0.335 → 0.303、2 次元 MIRT 5000×20 0.850 → 0.649、2 群
+1.028 → 0.629。GRM には rank-$D$ の経路がなく、オフセットの処理のぶん約 5% 遅くなる。ほかはすべて 10〜40% 速い。
+収束した対数尤度の相対差は $2\times10^{-14}$ 以下。
 
 ### 4.3 M-step（項目）
 群 $g$・項目 $j$ の期待完全データ対数尤度に対数事前分布を足したもの:
@@ -211,7 +249,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 ### 4.9 求積
 - **決定**: 1 次元の既定は等間隔 61 点、$[-6,6]$（EH と同じ格子を共有でき、Normal でも重みを密度から作る）。
 - Normal 潜在分布では Gauss–Hermite も選べる（`Quadrature.gauss_hermite(n)`、§15.44）。
-- **多次元直積格子（M4, §15.30）**: 2・3 次元モデルは 1 次元等間隔格子の直積（`Quadrature.grid(n_factors)` → `(Q, D)`）を使う。次元あたりの既定節点数は `Quadrature.default(n_factors)` により mirt の `select_quadpts` に合わせ、1 次元で 61 点、2 次元で 31 点（$31^2 = 961$）、3 次元で 15 点（$15^3 = 3{,}375$）、区間 $[-6, 6]$ とする。直積格子での 4 次元以上は対象外（非目的）。双因子モデルは特殊因子がいくつあっても $(1+1)$ 次元の格子に縮約する（§17.1）。
+- **多次元直積格子（M4, §15.30）**: 2・3 次元モデルは 1 次元等間隔格子の直積（`Quadrature.grid(n_factors)` → `(Q, D)`）を使う。次元あたりの既定節点数は `Quadrature.default(n_factors)` により mirt の `select_quadpts` に合わせ、1 次元で 61 点、2 次元で 31 点（$31^2 = 961$）、3 次元で 15 点（$15^3 = 3{,}375$）、区間 $[-6, 6]$ とする。直積格子での 4 次元以上は対象外（非目的）。双因子モデルは特殊因子がいくつあっても $(1+1)$ 次元の格子に縮約する（§17.1）。Smolyak 疎格子は検討したうえで BA-EM には採用しない（符号付きの重み。§12 の 6）。
 
 ### 4.10 初期値
 - $d_j$: 正答率の logit、$a_j$: 項目−合計の点双列相関から変換（mirt と同様の古典的初期値）。GRM の閾値はカテゴリ累積比率の logit。
@@ -309,7 +347,7 @@ class ItemKernel(Protocol):
 - **PV**（Mislevy, 1991）: 細かい等間隔格子上の事後分布から区分線形逆 CDF 補間により回答者ごとに独立に `n_draws` 個を抽出し、`pv1..pvM` 列の DataFrame を返す。明示的な `key: jax.Array` が必須（未指定は `SpecificationError`）で、`key` に対して決定的（§15.25）。
 - **EAPsum**（Thissen, Pommerich, Billeaud & Williams, 1995）: 合計得点を与えたときの事後平均と事後 SD。回答者の群の合計得点の表を引く。欠測が 1 つでもある回答者は NaN。1 次元で潜在分布が `Normal` のモデルのみ（§18.2）。
 
-EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)$）から除く。EAPsum 以外のすべての手法がユニークパターン圧縮と 2 のべき乗パディングを用いてデータ値に依存しない形状で `jit` 実行される（§15.21）。
+EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)$）から除く。EAPsum 以外のすべての手法がユニークパターン圧縮とバケットへのパディング（§4.1）を用いてデータ値に依存しない形状で `jit` 実行される（§15.21）。
 
 ## 9. 性能方針
 - パターン圧縮 + バケットパディングで再コンパイルを抑える。
@@ -354,6 +392,142 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 3. ~~欠測の設計~~ → MAR 前提の除外のみ（§14.8、2026-11-20）。
 4. ~~パッケージ名~~ → `flexpyirt` に決定（2026-11-20）。
 5. ~~項目をまたぐ等値制約の M-step（§4.3）の実装方式~~ → 項目の連結成分ごとの同時 Newton（§16.1、2026-11-21）。
+6. ~~4 次元以上のモデルのための Smolyak 疎格子（#152「将来の拡張」）~~ →
+   **決定（2026-11-28）: BA-EM では採用しない。$D\ge4$ の直積格子は非目的のまま（§4.9）。この問題を再開するときの
+   候補は、重要度の再重み付けをする固定節点の準モンテカルロ（mirt の `QMCEM` と照合）で、次が適応的求積。**
+   検討用のコードはパッケージに入れない。生成器は `benchmarks/sparse_grid.py`（R `SparseGrid` との照合は
+   `tests/test_sparse_grid.py`）、以下の表は `benchmarks/sparse_grid_study.py`、KPN 則は
+   `validation/r/sparse_grid_reference.R` から作る。
+
+   **構成。** $N(0,1)$ に対する 1 次元則の列 $U^i$（水準 $i\ge1$）から、$D$ 次元・水準 $L$ の Smolyak 則を
+   $$A_{L,D}=\sum_{L\le|\mathbf i|\le L+D-1}(-1)^{L+D-1-|\mathbf i|}\binom{D-1}{L+D-1-|\mathbf i|}
+   \,U^{i_1}\otimes\cdots\otimes U^{i_D}$$
+   の組み合わせで作る（Smolyak, 1963; Gerstner & Griebel, 1998; Heiss & Winschel, 2008）。複数のテンソル項に
+   共通する節点はまとめて重みを足し、$N(\boldsymbol\mu,\Sigma)$ の節点は $\Sigma=\mathbf L\mathbf L^\top$ として
+   $\boldsymbol\mu+\mathbf L\mathbf z_q$ とする。1 次元則の列は 2 つを比べた。$i$ 点の Gauss–Hermite（入れ子でない
+   「GQN」。全次数 $2L-1$ まで厳密）と、入れ子の Genz–Keister（Kronrod–Patterson）拡張で 1, 3, 9, 19, 35 点の
+   もの（「KPN」; Genz & Keister, 1996）。後者は水準をまたいで節点を使い回すので、同じ次数に必要な点が少ない。
+   箱の上の Gauss–Legendre・Clenshaw–Curtis 則は考えない（潜在密度は正規で、M-step には裾が効く）。GQN の生成器は
+   R `SparseGrid` 0.8.2 の節点と重みを $10^{-13}$ で再現し、全次数 $2L-1$ 以下のすべての MVN モーメントを
+   $10^{-11}$ で積分する（Cholesky 変換後の相関のあるモーメントも含む）。
+
+   **点数。** $D\ge4$ では、同じ多項式次数の直積則よりずっと少ない点で済む。ただし重みのかなりの割合が負で、
+   $\sum_q|w_q|$（丸め誤差と被積分関数の誤差を増幅する倍率）が急に大きくなる。
+
+   | $D$ | GQN $L=4$（次数 7） | KPN $L=4$ | 直積 $4^D$ | GQN $L=5$（次数 9） | KPN $L=5$ | 直積 $5^D$ | GQN $L=5$: $w<0$ の割合、$\sum\lvert w\rvert$ | mirt EM の既定 |
+   |---|---|---|---|---|---|---|---|---|
+   | 2 | 29 | 17 | 16 | 53 | 37 | 25 | 0.38, 9 | $31^2=961$ |
+   | 3 | 69 | 39 | 64 | 165 | 93 | 125 | 0.30, 41 | $15^3=3{,}375$ |
+   | 4 | 137 | 81 | 256 | 385 | 201 | 625 | 0.27, 129 | $9^4=6{,}561$ |
+   | 5 | 241 | 151 | 1,024 | 781 | 401 | 3,125 | 0.24, 321 | $7^5=16{,}807$ |
+   | 6 | 389 | 257 | 4,096 | 1,433 | 749 | 15,625 | 0.22, 681 | $3^6=729$ |
+   | 8 | 849 | 609 | 65,536 | 3,905 | 2,193 | 390,625 | 0.18, 2,241 | $3^8$ |
+   | 10 | 1,581 | 1,201 | 1,048,576 | 8,761 | 5,301 | 9,765,625 | 0.16, 5,641 | $3^{10}$ |
+
+   KPN の重みがすべて正になるのは最小の則だけ（$D=2$ で $L\le4$、$D=3$ で $L\le3$）。$D=4$ 以上では 0.7–24% が負で、
+   $\sum|w|$ は $D=10$ で 37 に達する。同じ次数で重みが正の則は存在する（Tchakaloff, 1957。次数 $m$ に対して高々
+   $\binom{D+m}{m}$ 点、例えば $D=5$, $m=9$ で 2,002 点）が、多項式に対して厳密という同じ基準に立っており、それが
+   次に述べる問題である。
+
+   **負の重みと BA-EM。** §4.2–§4.8 はどこも $w_q\ge0$ を前提にしている。
+   - *周辺尤度。* $\tilde L_p=\sum_q w_qL_p(\boldsymbol\theta_q)$ が $\le0$ になることがあり、そのとき $\log\tilde L_p$ は
+     存在しない。例外的な場合ではない。下の精度の検討では、シミュレーションしたパターンのうち GQN で 2–50%、
+     5 次元の KPN で 0.2–13% が $\tilde L_p\le0$ になり、5 次元で GQN $L\ge4$ の直接当てはめは対数尤度が定義できずに止まる。
+   - *E-step。* $h_{pq}=w_qL_p(\boldsymbol\theta_q)/\tilde L_p$ に符号が付くので、$h_{p\cdot}$ は分布ではなく、
+     $\bar n_{gq}$, $\bar r_{gjkq}$ が負になりうる。コアは対数空間で計算しており
+     （$\log w_q=b_q+\log\phi-\operatorname{logsumexp}$、§15.44）、符号を持たせる場所がない。節点にわたるすべての
+     `logsumexp` に符号の引数が要り、パターンの和が $\le0$ になった時点で失敗する。
+   - *項目の M-step。* $\bar r_{jkq}<0$ だと、$\bar r_{jkq}\log P_{jk}(\boldsymbol\theta_q)$ はその節点で $P_{jk}\to0$
+     に報いる。2PL・GPCM でも $Q_j$ は凹でなくなり、上に有界でないこともあるので、マスク付き Newton と直線探索
+     （§13.1）の前提が崩れる。
+   - *単調性。* EM の上昇性は $h_{p\cdot}$ を確率分布とみなした Jensen の不等式に拠る。$h$ に符号が付くと成り立たず、
+     SQUAREM の安全装置（§4.6）も一緒に失われる。Fisher の恒等式
+     $\nabla\tilde\ell=\sum_pc_p\sum_qh_{pq}\nabla\log L_p$ は $\tilde L_p>0$ の範囲では代数的に成り立つので、
+     不動点は $\tilde\ell$ の停留点だが、反復がそこへ向かう保証はない。
+   - *潜在分布の厳密な M-step。* $Q^{\text{lat}}=\sum_q\bar n_q\log w_q(\boldsymbol\mu,\Sigma)$ には $w_q>0$ が要る。
+     固定節点を $\phi(\cdot;\boldsymbol\mu,\Sigma)/\phi(\cdot;0,I)$ で再重み付けする方法（Gauss–Hermite と同じ、§15.44）
+     なら符号は保たれるが、正規化定数 $\sum_q w_q$ が 0 に近づきうる。節点を動かす方法（$\boldsymbol\mu+\mathbf L\mathbf z_q$、
+     mirt の `QMCEM` と同じ）では潜在パラメタがすべての項目の尤度に入るので、潜在分布の M-step は分離できず、厳密でもない。
+   - *Oakes。* Oakes の恒等式は微分の恒等式なので、$\tilde L_p>0$ の範囲では符号付きの重みでも成り立つ。ただし得られるのは
+     不正確な $\tilde\ell$ のヘッセ行列である。
+   - *採点。* EAP $\sum_qh_{pq}\boldsymbol\theta_q$ は定義できるが、事後分散が負になりうる（半正定値でない）。推算値は
+     符号付きの事後分布から抽出できない。ML・WLE・MAP は格子を使わない。合計得点の漸化式（S-X2、§18）は符号付きの
+     確率を出す。
+   - *他の潜在分布。* EH は等間隔格子の上の自由な重みで、疎格子の上では意味がない。Davidian 曲線と正規混合は 1 次元
+     だけで、1 次元の Smolyak は Gauss–Hermite そのものである。
+
+   **定義できるときの精度。** Smolyak 則は*全*次数の低い多項式に厳密で、混合微分が有界な被積分関数に対して精度が高い。
+   反応パターンの尤度はどちらでもない。因子ごとの尖った関数（事後 SD はおよそ $1/\sqrt{\text{情報量}}$）の積であり、
+   組み合わせ法は低い水準での 1 次元誤差が 1 のオーダーの大きなテンソル項を足し引きする。$\log\int L_p\phi$ の
+   パターンごとの誤差（2PL のパターン 500 個、単純構造、因子は独立なので真値は 1 次元積分の積に分かれる。「割合」は
+   $\tilde L_p\le0$ のパターンで、誤差からは除く）:
+
+   | $D$、因子あたり項目数 | 則 | $Q$ | 平均 / 最大誤差 | $\tilde L\le0$ の割合 |
+   |---|---|---|---|---|
+   | 3, 5 | GQN $L=7$ | 681 | 0.32 / 4.9 | 2.6% |
+   | 3, 5 | KPN $L=8$ | 381 | 0.015 / 0.083 | 0 |
+   | 3, 5 | 直積 GH $7^3$ | 343 | 0.025 / 0.094 | 0 |
+   | 3, 5 | 直積等間隔 $15^3$（現在の既定） | 3,375 | 0.0021 / 0.0076 | 0 |
+   | 3, 5 | Halton QMC | 5,000 | 0.0026 / 0.030 | 0 |
+   | 5, 5 | GQN $L=6$ | 2,203 | 0.92 / 4.2 | 30% |
+   | 5, 5 | KPN $L=7$ | 2,033 | 0.072 / 0.77 | 0.2% |
+   | 5, 5 | 直積 GH $5^5$ | 3,125 | 0.12 / 0.41 | 0 |
+   | 5, 5 | Halton QMC | 1,000 / 5,000 | 0.066 / 0.85; 0.019 / 0.24 | 0 |
+   | 5, 5 | パターンごとの適応的 GH $3^5$ | 243 | 0.024 / 0.044 | 0 |
+   | 5, 10 | KPN $L=7$ | 2,033 | 0.28 / 2.7 | 3.8% |
+   | 5, 10 | Halton QMC | 5,000 | 0.047 / 0.80 | 0 |
+   | 5, 10 | パターンごとの適応的 GH $3^5$ | 243 | 0.021 / 0.049 | 0 |
+
+   GQN は水準を上げてもまったく収束しない（5 次元では $L=3$ から $L=6$ まで誤差が 1 前後のまま）。KPN は収束するが、
+   同じ点数の Halton QMC より良くはなく、テストが長いほど悪くなり、$\tilde L_p\le0$ もなくならない。
+
+   **当てはめ。** 相関のある確認的 2PL（因子あたり 5 項目、$N=2{,}000$）の周辺最尤の直接当てはめ。L-BFGS と JAX の
+   勾配で $\sum_pc_p\log\tilde L_p$ を最大化し、節点は相関行列の Cholesky 因子で動かす（符号付きの重みは EM コアを
+   通せない）。細かい直積 Gauss–Hermite の参照値との差の最大絶対値（3 次元は $21^3$ で、$15^3$ との差は
+   $8\times10^{-4}$ 以内。5 次元は $7^5$ で、$5^5$ との差が 0.12 あるので、参照値自体に数 $10^{-2}$ の不確かさがある）:
+
+   | $D$（$\rho$） | 則 | $Q$ | $\max\lvert\Delta a\rvert$ | $\max\lvert\Delta d\rvert$ | $\max\lvert\Delta\rho\rvert$ | $\Delta\log L$ |
+   |---|---|---|---|---|---|---|
+   | 3 (0.5) | GQN $L=8$ | 1,233 | 0.50 | 0.080 | 0.079 | −92 |
+   | 3 (0.5) | KPN $L=8$ | 381 | 0.027 | 0.014 | 0.0034 | −1.0 |
+   | 3 (0.5) | 直積 GH $7^3$ | 343 | 0.027 | 0.011 | 0.0017 | +0.47 |
+   | 3 (0.5) | Halton QMC | 5,000 | 0.0048 | 0.0044 | 0.0002 | +0.29 |
+   | 3 (0.5) | mirt 1.48 EM、等間隔 $15^3$ | 3,375 | 0.0026 | 0.0009 | 0.0001 | −0.03 |
+   | 3 (0.5) | mirt 1.48 `QMCEM`（既定） | 5,000 | 0.0023 | 0.0012 | 0.0020 | −0.06 |
+   | 5 (0.4) | GQN $L=4,6,7$ | 241–5,593 | 失敗（$\tilde L_p\le0$） | | | |
+   | 5 (0.4) | KPN $L=7$ | 2,033 | 0.069 | 0.047 | 0.023 | +0.32 |
+   | 5 (0.4) | 直積 GH $5^5$ | 3,125 | 0.12 | 0.075 | 0.0084 | −6.7 |
+   | 5 (0.4) | Halton QMC | 1,000 / 5,000 | 0.055 / 0.050 | 0.033 / 0.021 | 0.016 / 0.0072 | +1.6 / +1.7 |
+
+   時間は問題ではない。ここのどの則も 2 コアで 1 回の当てはめが数秒である（同じ 2 コアで mirt の 3 次元 EM は 76 秒、
+   `QMCEM` は 43 秒）。QMC と同じ精度の疎格子にはほぼ同じ点数が要るので、時間の節約にもならない。
+
+   **API への収まり方（採用した場合）。** `Quadrature.sparse(n_factors, level, rule="kpn")` が節点 `(Q, D)` と基底重みを
+   データとして返す形になる。`Quadrature.gauss_hermite`（§15.44）と同じく `CompiledProblem.nodes` と `node_log_base` に入り、
+   MVN 潜在分布は、標準の固定節点を再重み付けする（EM の厳密な構造が保たれるが、$\Sigma$ が $I$ から離れるほど精度が落ちる）か、
+   Cholesky 因子で節点を動かす（mirt と同じ）。どちらもコア全体に `node_sign` 配列と符号付きの `logsumexp` が要り、どちらも
+   上の問題は解決しない。
+
+   **代替案。**
+   - *双因子・二層モデルの縮約*（§17.1、§17.2）: 厳密で、実装済み。高次元の確認的構造で最もよく使われるものを
+     $(1+1)$ 次元または $(P+1)$ 次元の格子で扱える。
+   - *準モンテカルロ*（Halton, 1960）: 重みが正で等しいので、E-step、項目の M-step、単調性、Oakes がそのまま使える。
+     固定点 $\Phi^{-1}(\mathbf u_q)$ に §15.44 の $\phi(\cdot;\boldsymbol\mu,\Sigma)/\phi(\cdot;0,I)$ の再重み付けを
+     組み合わせれば、潜在分布の厳密な M-step も保たれる。誤差はおよそ $O((\log Q)^D/Q)$。5,000 点の E-step は現在の
+     3 次元格子の 1.5 倍で、#152 のランク $D$ 分解が入れば安くなる。mirt の `QMCEM` が参照になるが、mirt は毎サイクル
+     節点を動かすので、両者の一致は QMC の誤差まで（上の 3 次元の当てはめで約 $2\times10^{-3}$）。
+   - *適応的 Gauss–Hermite*（Schilling & Bock, 2005）: 点あたりの精度は最も高い（5 次元でパターンごとに 243 節点が
+     5,000 点の QMC に勝つ）。しかし節点がパターンごとなので、共有節点の表 $\bar n_q$, $\bar r_{jkq}$ とそれを使う
+     項目ごとの M-step がなくなり、Oakes は適応の部分も微分しなければならず、mirt には EM の参照値がない。
+   - *MH-RM*（Cai, 2010, *Psychometrika* 75(1)）と MCEM: 確率的。mirt にはどちらもあるが、決定論的な BA-EM の
+     設計の外（§1 の非目的）。
+
+   **mirt と R の参照値。** mirt 1.48 には `method = "QMCEM"`（`sfsmisc::QUnif` の `leap = 409` の Halton 点を `qnorm`
+   に通し、毎サイクル $\boldsymbol\mu$ と $\operatorname{chol}(\Sigma)$ で動かす。重みは等しく、既定は 5,000 点。Oakes の
+   SE は使える）、`"MCEM"`、`"MHRM"` があり、$D\ge4$ の EM では QMCEM か MCEM を勧めるメッセージを出す。疎格子はない。
+   `technical = list(customTheta = ...)` は利用者の節点を受け取るが、重みは密度から作るので、符号付きの基底重みは
+   渡せない。R の `SparseGrid`（Heiss–Winschel の GQN・KPN の表）と `mvQuad` は則を作るだけで、IRT モデルは当てはめない。
+   `SparseGrid` は生成器の参照値に使う。
 
 ## 13. 実装上の決定（M1）
 1. **M-step の Newton**: 勾配・Hessian はすべて JAX の自動微分（`jax.grad` / `jax.hessian`）で得て、手書きの解析微分は持たない。
@@ -569,12 +743,55 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     - **他の処理がない状態での計測**（メンテナー、同じ 2PL $20{,}000\times40$ データ、EM 約 0.41 s を含む
       ウォーム 5 回の中央値）: `fit(..., se="oakes")` 3.39 s → **0.50 s**（Oakes 部分は約 2.98 s → 約 0.09 s）、
       `se="hessian"` 1.16 s → 1.07 s。共分散行列は従来の実装と最大要素比 $8.5\times10^{-16}$ で一致。
+    - **交差項の縮小と 1 回のパスでのサンドイッチ（#151）**: 交差項に 3 つの変更を入れる。どれも同じ和の
+      厳密な書き換えである。
+      (1) *完全なファミリーではカテゴリ 0 の列を落とす。* ファミリーのどの項目にも欠測のあるパターンが
+      なければ $\mathbb 1[y_{pj}=0]=1-\sum_{k>0}\mathbb 1[y_{pj}=k]$ なので、
+      $d_{j,y_{pj},q}=d_{j0q}+\sum_{k>0}\mathbb 1[y_{pj}=k](d_{jkq}-d_{j0q})$ となる。$d_{j0q}$ は
+      $L_q$ の定数行（行 0）に移し、残りの列は $d_{jkq}-d_{j0q}$ にする。2PL では $D$ が半分
+      （$1+2J$ から $1+J$）になる。`FamilyBlock.complete` は静的なフラグで、`compile_problem` で実際の
+      パターン行から 1 回だけ決める（パディング行はカテゴリ 0・度数 0 なので除く）。`y` を置き換える
+      コード（`_jsi.without_item`、`fit` のウェイト・クラスタ付きサンドイッチの meat）はすべて
+      `_core.with_responses` を通り、ここでフラグを `False` に戻す。そのときは列を落とす形を使わない
+      だけである。フラグが静的なので、完全な問題と欠測のある問題は別々にコンパイルされる。この費用は
+      ファミリー構成ごとに 1 回で、項目ごとではない（ジャックナイフは除いた項目すべてで 1 回のコンパイル
+      を使い回す）。
+      (2) *$C_q$ の上三角。* $C_q$ は対称なので、各チャンクでは上三角だけを 1 回の GEMM
+      `w.T @ (x[:, iu] * x[:, ju])`（形 `(Q, D(D+1)/2)`）で作る。`_oakes_t1` が群ごとに 1 回だけ
+      対称行列に戻してから $\sum_q L_q^\top C_q L_q$ を計算する。チャンクの大きさは 1 行あたり
+      `D(D+1)/2 + Q` 要素で見積もる。
+      (3) *サンドイッチの一体化。* `information_oakes_and_cross_product` は Oakes の情報行列と
+      スコアの外積和 $\sum_p c_p s_ps_p^\top$ を同じパターンのパスで返す。生のスコア $s_p$ は中心化した
+      $\bar s_p$ に、パターンのカテゴリで集めた $q$ に依存しない中心化の量を足したもの
+      （$\sum_q h_{pq}=1$ なので厳密）。事前分布の対角は §17.5 と同じく引く。`fit()` はウェイトも
+      クラスタもない `se="sandwich"` でこれを使う（あるときは従来どおり別々に呼ぶ）。次元縮約のある
+      モデル（双因子、two-tier。§17.1–§17.2）と $n_{\text{free}}=0$ は関数の中で別々の呼び出しに戻る。
+      計測（他の処理がない 16 コアの Linux、jit した関数のウォーム 7 回の最小、秒。「tri」と「drop」は
+      それぞれの変更だけ。base は #150）:
+
+      | ケース | base Oakes | tri | drop | 採用（両方） | base Oakes + 外積和 | 一体化 |
+      |---|---|---|---|---|---|---|
+      | 2PL 20000×40 | 0.177 | 0.123 | 0.110 | **0.077** | 0.514 | **0.090** |
+      | 2PL 5000×40 | 0.049 | 0.042 | 0.026 | **0.021** | 0.146 | **0.023** |
+      | 3PL 5000×30 | 0.046 | 0.028 | 0.023 | **0.021** | 0.134 | **0.024** |
+      | GRM(4) 2000×20 | 0.022 | 0.024 | 0.023 | **0.014** | 0.075 | **0.014** |
+      | 2 群 6000×30 | 0.059 | 0.034 | 0.034 | **0.026** | 0.158 | **0.028** |
+      | 200 群（ブロック化）† | 5.22 | – | 3.76 / 3.96 | 3.84 / 3.82 | 23.1 | 3.44 / 3.94 |
+
+      † 8 コアに固定し、残りのコアでは他の処理が動いていた。各変種 2 回。
+
+      単群・2 群のすべてのケースで、両方を入れたものがどちらか片方だけより速い。200 群では列を落とす効果が大半で、上三角の効果は測れないが損もない（負荷の高いマシンでの
+      以前の計測では GRM で tri だけのほうが速かったが、再現しなかった）。コールドの時間は目に見えては
+      変わらない。Oakes の情報行列と外積和は、これらのケースで base と
+      $\max|\Delta|/\max|I|\le 8\times10^{-16}$ で一致する（200 群では Oakes が $3\times10^{-16}$、外積和が $5\times10^{-15}$）。`tests/test_oakes.py` は、完全な形と欠測の
+      ある形、多数のチャンク、4 群のブロック化、ジャックナイフでのリセット、一体化した形と別々の呼び出し
+      を比べる。
 21. **スコアリング API と共通の Core 構成（M4, §8）**: `FitResult.score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5)` は `Literal["EAP", "MAP", "ML", "WLE", "PV"]` に対応する。
-    EAP（`_core.eap`）の挙動と結果は変更しない。新規スコアリングカーネルは純粋 JAX の Core モジュール `_scoring.py` に置き、EAP と同じくユニークな `(group, pattern)` 圧縮と 2 のべき乗バケットパディングを行い、欠測反応（`y == -1`）をマスクで除外し、データ値に依存しない静的形状で `jit` 実行する。PV 以外に `key` を渡した場合、PV で `key` が未指定または不正な場合、不正な `method` や `n_draws` の場合は `SpecificationError` を送出する。
+    EAP（`_core.eap`）の挙動と結果は変更しない。新規スコアリングカーネルは純粋 JAX の Core モジュール `_scoring.py` に置き、EAP と同じくユニークな `(group, pattern)` 圧縮とバケットへのパディング（§4.1）を行い、欠測反応（`y == -1`）をマスクで除外し、データ値に依存しない静的形状で `jit` 実行する。PV 以外に `key` を渡した場合、PV で `key` が未指定または不正な場合、不正な `method` や `n_draws` の場合は `SpecificationError` を送出する。
 22. **MAP スコアリング（`method="MAP"`、M4, §8）**: 回答者の群の推定済み正規潜在分布 $(\mu_g, \sigma_g^2)$ を（求積格子ではなく）**連続**事前分布として $f_{\mathrm{MAP}}(\theta)=\log L(\theta\mid y) - (\theta-\mu_g)^2/(2\sigma_g^2)$ を最大化し、最頻値で $\mathrm{SE}=(-f''_{\mathrm{MAP}}(\hat\theta))^{-1/2}$ を計算する。最適化はユニークパターンに `vmap` した安全装置つき 1 次元 Newton 上昇法（`_newton_1d`、初期値は EAP）で行う: 微分 $f', f''$ はすべて JAX 自動微分から求め、$f''\ge -10^{-12}$（3PL / 4PL の非凹領域など）では勾配上昇方向へフォールバックし、ステップ幅 $2^{-k}\delta$（$k=0..29$、ステップ長上限 `10.0`）を `vmap` で一括評価して目的関数が減少することを防ぐ。全項目欠測の行は $\log L\equiv 0$ となるため連続事前分布の最頻値 $\mu_g$ と標準偏差 $\sigma_g$ を返す（全欠測で事前分布の平均・SD を返す既存の EAP と整合。mirt は全手法で全欠測行を `NA` に落とす点が異なる）。
 23. **ML スコアリング（`method="ML"`、M4, §8）**: 同じ `vmap` 済み安全装置つき 1 次元 Newton（初期値 EAP）で $[-20, 20]$ 上（mirt の既定 `max_theta = 20` に対応）において $f_{\mathrm{ML}}(\theta)=\log L(\theta\mid y)$ を最大化し、観測情報量から $\mathrm{SE}=(-f''_{\mathrm{ML}}(\hat\theta))^{-1/2}$ を求める（mirt 既定の `expected.info = FALSE` に一致）。極端パターンの規約: 全欠測は `(NaN, NaN)`、全観測項目が低 $\theta$ 側の端カテゴリ（$a_j>0$ なら `0`、$a_j<0$ なら `K_j-1`）のときは `(-inf, NaN)`、高 $\theta$ 側の端カテゴリのときは `(+inf, NaN)`。非凹モデル（3PL / 4PL）で全端カテゴリ以外でも有限の内部最大値を持たないパターン（当て推量により低得点パターンで $\log L(\theta)$ が $\theta\to -\infty$ へ単調増加する場合など）も検出し、$|\hat\theta|$ が `±20` の上限に達した・$f''(\hat\theta)\ge 0$・$\mathrm{SE}>30$（`mirt:::ML` の閾値）・$f(\pm 20) > f(\hat\theta)$ のいずれかで `±inf` と SE NaN を返す。`±inf` の符号は、$f(\pm 20) > f(\hat\theta)$ が成り立つときにのみ優越する端点から決め、それ以外は $\operatorname{sign}(\hat\theta)$ に従う（`mirt:::ML` の `Inf * sign(est)` に一致）。特に、3PL の二峰性対数尤度で $-\infty$ の下側漸近線が厳密に凹な内部の局所最頻値を上回る場合、flexpyirt は真の大域上限である `(-inf, NaN)`（本来の最尤推定）を意図的に返すのに対し、mirt 1.46.1 の EAP 出発の局所 `nlm` 探索は内部の局所最頻値で停止するため両者は異なる（`v11_3pl` の 3,790 ユニークパターン中 25 件。この判定により、`nlm` 有限差分 Hessian が `SEest > 30` 判定をすり抜ける境界ケースもあわせて正しく扱える。VALIDATION.ja.md V13 参照）。
 24. **WLE スコアリング（`method="WLE"`、M4, §8）**: Warm (1989) の重み付き最尤推定を、Jeffreys / Firth (1993) の罰則付き対数尤度 $f_{\mathrm{WLE}}(\theta)=\log L(\theta\mid y)+\tfrac{1}{2}\log I(\theta)$ の $[-20, 20]$ 上での最大化として同じ `vmap` 済み安全装置つき 1 次元 Newton（初期値 EAP）で解く。ここで $I(\theta)=\sum_{j:\,y_j\ge 0}\sum_k P_{jk}(\theta)\,(\partial\log P_{jk}/\partial\theta)^2$ は観測項目にわたる Fisher テスト情報量であり、各カーネルの `log_prob` に対する `jax.jacfwd` のみで計算する（手書き微分なし、全項目ファミリーで動作）。停留条件は $\partial\log L/\partial\theta + J(\theta)/(2I(\theta)) = 0$（$J(\theta)=\partial I/\partial\theta$）と恒等的に一致し、2PL・Rasch・GRM・GPCM・PCM・3PL・4PL のすべてで `mirt:::WLE.mirt` と一致する（指数型分布族では $J=\partial I/\partial\theta$ が Warm の $\sum P'P''/P$ と恒等的に一致し、3PL / 4PL / GRM では Firth の Jeffreys 事前分布バイアス補正および mirt と一致する）。極端パターン（全最低・全最高）でも有限の推定値を与え、全欠測パターンは $I(\theta)=0$ のため `(NaN, NaN)` を返す。SE は JAX 自動微分による $(-f''_{\mathrm{WLE}}(\hat\theta))^{-1/2}$ であり、mirt の既定 `fscores(..., method="WLE", full.scores.SE=TRUE)` と一致する（Warm の漸近式 $I(\hat\theta)^{-1/2}$ は mirt の `expected.info=TRUE` に対応し、短いテストや極端パターンで差が出る。VALIDATION.ja.md V13 参照）。
-25. **Plausible values（`method="PV"`、M4, §8）**: 回答者ごとに事後分布 $p(\theta\mid y_i;\mu_{g(i)},\sigma_{g(i)}^2)$ から独立な `n_draws` 個（既定 `5`）の標本を抽出し、`pv1..pvM` 列の DataFrame を返す。求積格子による離散化を避けて連続な標本を得つつ `jit` 内で静的形状・高速動作を保つため、圧縮・2 のべき乗パディングしたユニークパターンごとに推定済みモデルの求積区間 `[quad.lower, quad.upper]` 上の細かい等間隔格子（`501` 点）で事後密度を評価し、台形則で $[0, 1]$ 上の区分線形 CDF を構成したうえで、`jax.random.uniform(key, (N_pad, n_draws))`（回答者数 `N` も 2 のべき乗 `N_pad` へパディングして `N` にスライス）に対し分岐なしの `searchsorted(..., side="right")` 線形補間で逆 CDF 抽出を行う。同じ反応パターンの回答者は事後 CDF を共有しつつ独立な一様乱数を用いるため独立な標本となり、全欠測行は群の事前分布から抽出される。明示的な JAX PRNG の `key`（`jax.random.key` または `jax.random.PRNGKey`、未指定・不正は `SpecificationError`）が必須で、`key` に対して完全に決定的。
+25. **Plausible values（`method="PV"`、M4, §8）**: 回答者ごとに事後分布 $p(\theta\mid y_i;\mu_{g(i)},\sigma_{g(i)}^2)$ から独立な `n_draws` 個（既定 `5`）の標本を抽出し、`pv1..pvM` 列の DataFrame を返す。求積格子による離散化を避けて連続な標本を得つつ `jit` 内で静的形状・高速動作を保つため、圧縮・バケットへパディングしたユニークパターンごとに推定済みモデルの求積区間 `[quad.lower, quad.upper]` 上の細かい等間隔格子（`501` 点）で事後密度を評価し、台形則で $[0, 1]$ 上の区分線形 CDF を構成したうえで、`jax.random.uniform(key, (N_pad, n_draws))`（回答者数 `N` も 2 のべき乗 `N_pad` へパディングして `N` にスライス）に対し分岐なしの `searchsorted(..., side="right")` 線形補間で逆 CDF 抽出を行う。同じ反応パターンの回答者は事後 CDF を共有しつつ独立な一様乱数を用いるため独立な標本となり、全欠測行は群の事前分布から抽出される。明示的な JAX PRNG の `key`（`jax.random.key` または `jax.random.PRNGKey`、未指定・不正は `SpecificationError`）が必須で、`key` に対して完全に決定的。
 26. **`FitResult` の JSON 入出力 API とバージョン付き形式（M4, API §7）**: `FitResult.to_json(path=None, *, indent=2) -> str` は推定結果を厳格な JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定された場合は UTF-8 ファイルにも書き出す。`FitResult.from_json(source) -> FitResult` はファイルパスまたは JSON 文字列から再推定なしで復元する。素の JSON のみを使い、`pickle` や `eval` は一切使わない。最上位オブジェクトには `"format": "flexpyirt.FitResult"`、`"schema_version"`（§15.46 の命名リファクタから 4、双因子モデル（§17.1）から 5、two-tier モデル（§17.2）から 6、標本ウェイト（§17.4）から 7。それより前の version のファイルも読める）、および書き出した版を記録する `"flexpyirt_version": flexpyirt.__version__` を持たせる。`FitResult` は `_model`・`_quadrature` とあわせて推定設定 `_method: BAEM` も保持し、メタデータ全体が往復保存できるようにする。`from_json` は入口で `check_x64()` を呼ぶ（スコアリングに float64 が必要なため、無効なら `PrecisionError`）。
 27. **厳格な JSON と正確な float64 往復保存（M4）**: 書き出しは `json.dumps(..., allow_nan=False)` で厳格な RFC 8259 JSON のみを出力し、読み込みは `json.loads` に `parse_constant` を渡して生の `NaN`/`Infinity` リテラルを `SpecificationError` で拒否する。有限な IEEE-754 float64 値は通常の JSON 数値（Python の `repr` 厳密な最短 10 進表現）として書き出し、`-0.0` を含むすべての有限 float64 をビット単位で正確に往復保存する。浮動小数点型のフィールド（無制約の `lower`/`upper`、固定または未計算の `se`、非正定値の `vcov` など）に現れる非有限値（`NaN`, `+Inf`, `-Inf`）は明示的に文字列 `"NaN"`, `"Infinity"`, `"-Infinity"` として符号化する。これらを浮動小数点へ復号するのはスキーマ上 float 型のスロットのみであるため、項目名や群名などの文字列フィールドとは衝突しない。
 28. **明示的レジストリと完全な状態保存（M4）**: 項目モデル（`"2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"GRM"`, `"GPCM"`, `"PCM"`、多値モデルでは `n_categories` を含む）、潜在分布（`"Normal"`）、事前分布（`"NormalPrior"`, `"LogNormalPrior"`, `"BetaPrior"`）、求積（`"equispaced"`）、推定手法（`"BAEM"`）は `_json.py` の明示的な名前レジストリで（逆）直列化する。未知の `format` タグ・スキーマ版・レジストリ名・不正な JSON・整合しない表や行列形状は明確なメッセージつきで `SpecificationError` を送出する。完全な `Model` 仕様（項目名と順序、項目モデル、`fixed`, `latent`, `groups`, `equal`, `priors`）と、`estimate`・`se` を含む検証済み `ParameterTable`（ユーザーによる `table=` 編集もそのまま保持）、`vcov`、`loglik`/`log_posterior`、収束情報と `history`、`quadrature`、`method`、`se_method`、`n_obs` をすべて保存する。`_eta` は `parameters` の検証済み自由行から直接復元し（`free_id` が `0..n_free-1` に連続であること、共有 `free_id` の `estimate` が一致すること、`vcov` 形状が整合することを検証）、推定値の重複を持たせない。復元後の `FitResult` はすべての公開属性・`items`・`latent`・`summary()`・`_repr_html_()`・`aic`/`bic`・全 5 手法の `score()` で完全に同一の結果を返す。
@@ -2698,7 +2915,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    和の順序が平坦な経路と異なるので、結果は丸め誤差（相対 $\sim10^{-12}$）の範囲で一致し、ビット単位では一致しない
    （回帰テストは `tests/test_many_groups.py`）。
 4. **Oakes の交差項**（§15.20）はブロック上の 1 つの `lax.scan` になる。各ブロックはカテゴリの共起を
-   現在の群の $C_{q}$ `(Q, D, D)` に、$\bar s_p\bar s_p^\top$ の項を $T_2$ に加える。群の最後のブロック（`last`）
+   現在の群の $C_{q}$（上三角、`(Q, D(D+1)/2)`。§15.20）に、$\bar s_p\bar s_p^\top$ の項を $T_2$ に加える。群の最後のブロック（`last`）
    では `lax.cond` で $\sum_q L_{gq}^\top C_q L_{gq}$ を $T_1$ に足して $C$ を 0 に戻す。群のスコア表は
    ブロックの群（動的な添字）でブロックごとに 1 回取り出し（ブロック内のサブチャンクはそれを使い回し、パディング行だけの
    サブチャンクは `lax.cond` で飛ばす）、トレースされるプログラムは $G$ に依存しない（コンパイル時間は $G$ によらず一定）。
@@ -2860,6 +3077,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
 - Braun, H. I., & Holland, P. W. (1982). Observed-score test equating: A mathematical analysis of some ETS equating procedures. In P. W. Holland & D. B. Rubin (Eds.), *Test Equating* (pp. 9–49). Academic Press.
 - Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
+- Cai, L. (2010). High-dimensional exploratory item factor analysis by a Metropolis–Hastings Robbins–Monro algorithm. *Psychometrika*, 75(1), 33–57.
 - Candell, G. L., & Drasgow, F. (1988). An iterative procedure for linking metrics and assessing item bias in item response theory. *Applied Psychological Measurement*, 12(3), 253–260.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
@@ -2877,6 +3095,8 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Froelich, A. G., & Habing, B. (2008). Conditional covariance-based subtest selection for DIMTEST. *Applied Psychological Measurement*, 32(2), 138–155.
 - Garrido, L. E., Abad, F. J., & Ponsoda, V. (2013). A new look at Horn's parallel analysis with ordinal variables. *Psychological Methods*, 18(4), 454–474.
 - Genz, A. (2004). Numerical computation of rectangular bivariate and trivariate normal and t probabilities. *Statistics and Computing*, 14(3), 251–260.
+- Genz, A., & Keister, B. D. (1996). Fully symmetric interpolatory rules for multiple integrals over infinite regions with Gaussian weight. *Journal of Computational and Applied Mathematics*, 71(2), 299–309.
+- Gerstner, T., & Griebel, M. (1998). Numerical integration using sparse grids. *Numerical Algorithms*, 18(3–4), 209–232.
 - Gibbons, R. D., & Hedeker, D. R. (1992). Full-information item bi-factor analysis. *Psychometrika*, 57(3), 423–436.
 - Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
 - Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
@@ -2885,9 +3105,11 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Goretzko, D., & Bühner, M. (2020). One model to rule them all? Using machine learning algorithms to determine the number of factors in exploratory factor analysis. *Psychological Methods*, 25(6), 776–786.
 - Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
+- Halton, J. H. (1960). On the efficiency of certain quasi-random sequences of points in evaluating multi-dimensional integrals. *Numerische Mathematik*, 2, 84–90.
 - Hannan, E. J., & Quinn, B. G. (1979). The determination of the order of an autoregression. *JRSS B*, 41(2), 190–195.
 - Hanson, B. A., & Brennan, R. L. (1990). An investigation of classification consistency indexes estimated under alternative strong true score models. *Journal of Educational Measurement*, 27(4), 345–359.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
+- Heiss, F., & Winschel, V. (2008). Likelihood approximation by numerical integration on sparse grids. *Journal of Econometrics*, 144(1), 62–80.
 - Holland, P. W., & Thayer, D. T. (1988). Differential item performance and the Mantel–Haenszel procedure. In H. Wainer & H. I. Braun (Eds.), *Test Validity* (pp. 129–145). Erlbaum.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
@@ -2957,10 +3179,12 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Schilling, S., & Bock, R. D. (2005). High-dimensional maximum marginal likelihood item factor analysis by adaptive quadrature. *Psychometrika*, 70(3), 533–555.
 - Schwarz, G. (1978). Estimating the dimension of a model. *The Annals of Statistics*, 6(2), 461–464.
 - Sclove, S. L. (1987). Application of model-selection criteria to some problems in multivariate analysis. *Psychometrika*, 52(3), 333–343.
 - Sinharay, S. (2016). Asymptotically correct standardization of person-fit statistics beyond dichotomous items. *Psychometrika*, 81(4), 992–1013.
 - Skinner, C. J. (1989). Domain means, regression and multivariate analysis. In C. J. Skinner, D. Holt & T. M. F. Smith (Eds.), *Analysis of Complex Surveys* (pp. 59–87). Wiley.
+- Smolyak, S. A. (1963). Quadrature and interpolation formulas for tensor products of certain classes of functions. *Soviet Mathematics Doklady*, 4, 240–243.
 - Snijders, T. A. B. (2001). Asymptotic null distribution of person fit statistics with estimated person parameter. *Psychometrika*, 66(3), 331–342.
 - Somes, G. W. (1986). The generalized Mantel–Haenszel statistic. *The American Statistician*, 40(2), 106–108.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
@@ -2969,6 +3193,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Swaminathan, H., & Rogers, H. J. (1990). Detecting differential item functioning using logistic regression procedures. *Journal of Educational Measurement*, 27(4), 361–370.
+- Tchakaloff, V. (1957). Formules de cubatures mécaniques à coefficients non négatifs. *Bulletin des Sciences Mathématiques*, 81, 123–134.
 - Thissen, D., & Wainer, H. (Eds.). (2001). *Test Scoring*. Lawrence Erlbaum Associates.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.

@@ -3,7 +3,7 @@
 Pure JAX functions on :class:`~flexpyirt._core.CompiledProblem` pytrees. Every derivative (score,
 observed information, Fisher test information, and its derivative for WLE) comes from JAX
 automatic differentiation — no hand-written item-family derivatives. All shapes are static so
-every kernel runs inside ``jit`` with compressed, power-of-two-padded response patterns.
+every kernel runs inside ``jit`` with compressed, bucket-padded response patterns (DESIGN.md §4.1).
 """
 
 from __future__ import annotations
