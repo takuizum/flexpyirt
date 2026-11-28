@@ -210,6 +210,7 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - **決定**: 1 次元の既定は等間隔 61 点、$[-6,6]$（EH と同じ格子を共有でき、Normal でも重みを密度から作る）。
 - Normal 潜在分布では Gauss–Hermite も選べる（`Quadrature.gauss_hermite(n)`、§15.44）。
 - **多次元直積格子（M4, §15.30）**: 2・3 次元モデルは 1 次元等間隔格子の直積（`Quadrature.grid(n_factors)` → `(Q, D)`）を使う。次元あたりの既定節点数は `Quadrature.default(n_factors)` により mirt の `select_quadpts` に合わせ、1 次元で 61 点、2 次元で 31 点（$31^2 = 961$）、3 次元で 15 点（$15^3 = 3{,}375$）、区間 $[-6, 6]$ とする。直積格子での 4 次元以上は対象外（非目的）。双因子モデルは特殊因子がいくつあっても $(1+1)$ 次元の格子に縮約する（§17.1）。Smolyak 疎格子は検討したうえで BA-EM には採用しない（符号付きの重み。§12 の 6）。
+- **準モンテカルロ（§28）**: `Quadrature.qmc(n)` は正規潜在分布に再重み付けした固定の Halton 節点で、2〜5 因子の多次元モデル用（4〜5 因子ではこれだけ）。
 
 ### 4.10 初期値
 - $d_j$: 正答率の logit、$a_j$: 項目−合計の点双列相関から変換（mirt と同様の古典的初期値）。GRM の閾値はカテゴリ累積比率の logit。
@@ -353,7 +354,8 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 5. ~~項目をまたぐ等値制約の M-step（§4.3）の実装方式~~ → 項目の連結成分ごとの同時 Newton（§16.1、2026-11-21）。
 6. ~~4 次元以上のモデルのための Smolyak 疎格子（#152「将来の拡張」）~~ →
    **決定（2026-11-28）: BA-EM では採用しない。$D\ge4$ の直積格子は非目的のまま（§4.9）。この問題を再開するときの
-   候補は、重要度の再重み付けをする固定節点の準モンテカルロ（mirt の `QMCEM` と照合）で、次が適応的求積。**
+   候補は、重要度の再重み付けをする固定節点の準モンテカルロ（mirt の `QMCEM` と照合）で、次が適応的求積。**その後（#164）、
+   この QMC を 2〜5 因子向けに実装した（§28）。直積格子は $D\le3$ のまま。
    検討用のコードはパッケージに入れない。生成器は `benchmarks/sparse_grid.py`（R `SparseGrid` との照合は
    `tests/test_sparse_grid.py`）、以下の表は `benchmarks/sparse_grid_study.py`、KPN 則は
    `validation/r/sparse_grid_reference.R` から作る。
@@ -2884,6 +2886,72 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    `multipleGroup(customGroup = createGroup(...))` に与えて厳密な離散化モデルを mirt で推定し、mirt の解を独立な R の周辺対数尤度
    上の Newton ステップで磨き、R の Richardson Hessian による SE、mirt の Oakes SE、`probtrace()` から R で計算した EAP、
    群の推定値で固定した同じ `customGroup` の 1 群 mirt オブジェクトでの `itemfit()` による群ごとの S-X2 を記録する。
+
+## 28. 準モンテカルロ求積と 4〜5 因子のモデル（#164）
+
+1. **範囲。** `Quadrature.qmc(n_points=5000, *, mean=None, cov=None)` は、等間隔と Gauss–Hermite の直積格子に並ぶ
+   3 つ目の求積で、$D=2,\dots,5$ 因子の多次元 `Normal` モデル用（`MAX_QMC_FACTORS = 5`）。`with_factors()` は 5 因子まで
+   受け付ける。直積格子は $D\le3$ のままで、$D\ge4$ で求積を指定せずに `fit()` すると `Quadrature.qmc()` を案内する
+   `SpecificationError` になる。1 因子（したがって 1 次元専用の EH・Davidian 曲線・混合）と、E-step が低次元の直積格子を
+   使う双因子・二層モデル（§17.1、§17.2）では QMC を受け付けない。Smolyak の検討（§12 の 6）で、3 次元を超える道として
+   重みが正の QMC を選んだことを受けたもの。
+2. **節点。** Halton 点（Halton, 1960）。点 $q=1,\dots,Q$ の成分 $m$ は、$m$ 番目の素数（2, 3, 5, 7, 11）での $q$ の基数逆数。
+   $q=0$（立方体の原点）は $-\infty$ に写るので除く。標準節点は $\mathbf z_q=\Phi^{-1}(\mathbf u_q)$（`scipy.special.ndtri`）で、
+   固定・決定論的。Sobol ではなく Halton にしたのは、点数が 2 のべきに縛られず、構成が数行でテストで厳密に検査できるから。
+   素の Halton 点は高次元で質が落ちる（大きな基数で座標が相関する）ので、それも上限を 5 にした理由の一つ。
+3. **重み。** 提案分布 $N(\mathbf m,\mathbf C)$、$\mathbf C=\mathbf L\mathbf L^\top$ のもとで、節点は
+   $\boldsymbol\theta_q=\mathbf m+\mathbf L\mathbf z_q$、固定の対数基底重みは
+   $$b_q=-\log Q+\tfrac12\lVert\mathbf z_q\rVert^2+\log|\mathbf L|
+   =-\log Q-\log\phi(\boldsymbol\theta_q;\mathbf m,\mathbf C)+\text{定数}$$
+   で、群 $g$ の潜在重みは
+   $w_{gq}=\operatorname{softmax}_q\big(b_q+\log\phi(\boldsymbol\theta_q;\boldsymbol\mu_g,\Sigma_g)\big)$、つまり
+   $N(\boldsymbol\mu_g,\Sigma_g)$ に対する重要度再重み付きの QMC である。§15.44 の Gauss–Hermite の構成で直積則を QMC 点に
+   置き換えたもので、同じ `CompiledProblem.node_log_base` を通る。重みは正なので、E-step、潜在分布の厳密な M-step、
+   EM の単調性、SQUAREM、Oakes の恒等式は変わらず、コアには手を入れない。提案分布がなければ $\mathbf m=\mathbf 0$、
+   $\mathbf C=\mathbf I$。
+4. **2 段階（決定）。** 重要度比 $\phi(\cdot;\boldsymbol\mu,\Sigma)/\phi(\cdot;\mathbf m,\mathbf C)$ の分散が有限なのは、
+   $\mathbf C^{-1}\Sigma$ の固有値がすべて 2 未満のときだけである。標準の提案分布で因子が等相関なら最大固有値は
+   $1+(D-1)\rho$ で、$\rho=0.5$ では 3 次元でちょうど 2、4 次元で 2.5 になる。実測（3 次元、$\rho=0.5$）: $N(\mathbf 0,\mathbf I)$
+   の節点での 1 段階では、5,000 点で項目パラメタが $5.3\times10^{-2}$、20,000 点でも $3.4\times10^{-2}$ ずれる。そこで、
+   提案分布のない qmc 求積で `fit()` すると、標準節点で EM を 1 回回し、提案分布を推定された潜在分布の平均と共分散
+   （群の平均）にして再コンパイルし、1 段目の推定値から EM をもう一度回す。各段階の中では節点が固定なので、
+   各段階はそれ自身の離散化尤度に対する厳密な EM である。報告する推定値・SE・対数尤度・反復履歴は 2 段目のもの。
+   `FitResult` は移した求積を保持するので、採点と JSON
+   （`{"type": "qmc", "sequence": "halton", "n_points": Q, "mean": [...], "cov": [[...]]}`）は同じ節点を使う。利用者が
+   提案分布を与える（`mean=`・`cov=`、または `with_proposal()`）と 1 段目は省く。mirt の `QMCEM` は毎サイクル節点を
+   $\boldsymbol\mu+\operatorname{chol}(\Sigma)\mathbf z_q$ に動かす。比は 1 に保たれるが、EM が上っていく固定の離散化尤度が
+   なくなる。共分散が平均から大きく離れた群が複数あると、外れた群の精度が落ちる。
+5. **$D\ge4$ の正規潜在分布。** `latent_param_names` は 5 因子まで（パラメタ数は $2D+D(D-1)/2$、$D=4$ で 14、$D=5$ で 20）。
+   正定値性は相関行列の Cholesky 分解で調べる（Compile 層では NumPy。`mvn_log_weights` では勾配を止めた行列の分解で判定し、
+   二重の `where` で正定値でない側を単位行列に置き換えるので、微分は有限で、正定値でない候補は NaN を返す。$D=2,3$ と同じ）。
+   $D=2,3$ の経路は変えていない。
+6. **$D=4,5$ での機能。** Oakes・ヘッセ行列・サンドイッチの SE つきの当てはめ、EAP・MAP・ML・WLE の採点、`item_fit()`
+   （S-X2）、`m2()`、`local_dependence()`、`link()`、`information_matrix()`、`test_information(direction=)`、
+   `simulate_responses()`、JSON は QMC 節点の上で動く（4 因子の当てはめで動くことを確認。参照値との一致を確かめたのは
+   $D\le3$ だけ）。推算値は $D>3$ で `SpecificationError`（パターンごとの格子が $n^D$ で増える。推算値の格子の範囲は
+   節点の最小値と最大値を使うようにした。直積格子では最初と最後の節点に等しい）。1 次元専用だった機能は引き続き例外を出す。
+7. **精度（実測）。** 2PL、因子あたり 5 項目、$N=2{,}000$、`BAEM(tol=1e-8)`、2 コア。項目パラメタ（と相関）の差の最大絶対値:
+
+   | ケース | 参照値 | 求積 | max\|Δ 項目\| | max\|Δ 相関\| | 時間 |
+   |---|---|---|---|---|---|
+   | 3 次元、$\rho=0.5$ | Gauss–Hermite $21^3$（64 秒） | QMC 1,000 | 0.021 | 0.0065 | 32 秒 |
+   | | | QMC 5,000 | 0.0051 | 0.0012 | 58 秒 |
+   | | | QMC 5,000、1 段階 | 0.053 | 0.027 | 41 秒 |
+   | | | 等間隔 $15^3$（既定） | 0.0036 | 0.0002 | 36 秒 |
+   | 4 次元、$\rho=0$ | 1 次元の個別の当てはめ（厳密な分解） | QMC 1,000 | 0.013 | – | 11 秒 |
+   | | | QMC 2,000 | 0.015 | – | 15 秒 |
+   | | | QMC 5,000 | 0.0070 | – | 47 秒 |
+   | | | QMC 10,000 | 0.0023 | – | 79 秒 |
+
+   この大きさでは QMC の誤差は $Q$ について単調ではない。既定の 5,000 点（mirt の `QMCEM` と同じ）で参照値との差は
+   およそ $10^{-2}$ 以内で、3 次元の既定の直積格子と同程度。
+8. **検証の状況。** 厳密な恒等式、細かい直積格子、厳密に分解した尤度と照合し（`tests/test_quadrature_qmc.py`）、mirt とも
+   照合した（V58）。`Quadrature.qmc(10_000)` で当てはめた 4 因子の確認的 2PL は、$13^4$ の直積格子での mirt の通常の EM と、
+   項目パラメタで 5.3e-3、相関で 2.0e-3、対数尤度で 0.48、Oakes の SE で 0.55% 以内で一致する。参照値に予定していた mirt
+   自身の `QMCEM` はこのケースで失敗する（相関が 0.91〜0.97 へずれ、対数尤度が下がる。VALIDATION.md V58）。これも節点を
+   固定する理由の一つ。V58 が夜間の CI で通るまで、QMC は README と利用者ガイドに載せない（ROADMAP）。
+9. **コスト。** EM の 1 反復は直積格子と同じく $O(PJKQ)$。5,000 点の E-step は 3 次元の既定格子の 1.5 倍で、1 段目でおよそ
+   倍の仕事になる。E-step のランク $D$ 分解（#152）が入れば、$Q$ を大きくしても安くなる。
 
 ## 参考文献
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.

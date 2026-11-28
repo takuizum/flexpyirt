@@ -120,7 +120,7 @@ res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
 - `fit(spec, data, *, group=None, table=None, item_names=None, method=None, quadrature=None, se="oakes")`。
   `se` は `"oakes" | "hessian" | None`。`group=` は M2 まで `NotImplementedError`。
 - `BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3)`（`squarem` は M3）。
-  `Quadrature.equispaced(n_points=61, bounds=(-6, 6))`。Gauss–Hermite は `Quadrature.gauss_hermite(n)`（DESIGN §15.44）。
+  `Quadrature.equispaced(n_points=61, bounds=(-6, 6))`。Gauss–Hermite は `Quadrature.gauss_hermite(n)`（DESIGN §15.44）。準モンテカルロは 2〜5 因子用の `Quadrature.qmc(n_points=5000)`（DESIGN §28。4〜5 因子では必須。mirt との照合はまだ）。
 - `Model.uniform`, `Model.from_items`, `.fix(item=..., a=..., d=...)`, `.with_latent(...)`, `.parameter_table(data)`。
 - `FitResult`: `items`, `latent`, `parameters`（表 + `estimate`, `se`）, `vcov`, `loglik`, `aic`, `bic`,
   `converged`, `n_iter`, `history`, `score(data, method="EAP")`。

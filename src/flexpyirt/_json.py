@@ -742,13 +742,45 @@ def _deserialize_gauss_hermite_quadrature(obj: dict[str, Any], field_name: str) 
     )
 
 
+def _serialize_qmc_quadrature(quad: Quadrature) -> dict[str, Any]:
+    out: dict[str, Any] = {"type": "qmc", "sequence": "halton", "n_points": int(quad.n_points)}
+    if quad.proposal_mean is not None and quad.proposal_cov is not None:
+        out["mean"] = [_encode_float(m) for m in quad.proposal_mean]
+        out["cov"] = [[_encode_float(c) for c in row] for row in quad.proposal_cov]
+    return out
+
+
+def _deserialize_qmc_quadrature(obj: dict[str, Any], field_name: str) -> Quadrature:
+    has_proposal = "mean" in obj or "cov" in obj
+    required = {"type", "sequence", "n_points"} | ({"mean", "cov"} if has_proposal else set())
+    _check_keys(obj, required=required, field_name=field_name)
+    if obj["sequence"] != "halton":
+        raise SpecificationError(
+            f"{field_name}.sequence must be 'halton', got {obj['sequence']!r}."
+        )
+    n_points = _require_int(obj["n_points"], field_name=f"{field_name}.n_points", max_value=200_000)
+    if not has_proposal:
+        return Quadrature.qmc(n_points)
+    if not isinstance(obj["mean"], list) or not isinstance(obj["cov"], list):
+        raise SpecificationError(f"{field_name}.mean and .cov must be lists.")
+    mean = [_decode_float(m, field_name=f"{field_name}.mean", finite=True) for m in obj["mean"]]
+    cov = []
+    for row in obj["cov"]:
+        if not isinstance(row, list):
+            raise SpecificationError(f"{field_name}.cov must be a list of lists.")
+        cov.append([_decode_float(c, field_name=f"{field_name}.cov", finite=True) for c in row])
+    return Quadrature.qmc(n_points, mean=mean, cov=cov)
+
+
 _QUADRATURE_SERIALIZERS: dict[str, Callable[[Any], dict[str, Any]]] = {
     "equispaced": _serialize_equispaced_quadrature,
     "gauss_hermite": _serialize_gauss_hermite_quadrature,
+    "qmc": _serialize_qmc_quadrature,
 }
 _QUADRATURE_DESERIALIZERS: dict[str, Callable[[dict[str, Any], str], Quadrature]] = {
     "equispaced": _deserialize_equispaced_quadrature,
     "gauss_hermite": _deserialize_gauss_hermite_quadrature,
+    "qmc": _deserialize_qmc_quadrature,
 }
 
 

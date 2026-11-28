@@ -548,10 +548,11 @@ def test_mirt_specification_errors() -> None:
     items = [f"q{i}" for i in range(1, 7)]
     base = Model.uniform(TwoPL(), items=items)
 
-    with pytest.raises(SpecificationError, match="2 to 3"):
+    with pytest.raises(SpecificationError, match="2 to 5"):
         base.with_factors({"F1": items})
-    with pytest.raises(SpecificationError, match="2 to 3"):
-        base.with_factors({"F1": items[:2], "F2": items[2:3], "F3": items[3:4], "F4": items[4:]})
+    # 4-5 factors are accepted (they need Quadrature.qmc(), DESIGN.md §28); 6 are not.
+    with pytest.raises(SpecificationError, match="2 to 5"):
+        base.with_factors({f"F{i}": [item] for i, item in enumerate(items, start=1)})
     with pytest.raises(SpecificationError, match="non-empty"):
         base.with_factors({"": items[:3], "F2": items[3:]})
     with pytest.raises(SpecificationError, match="single string"):

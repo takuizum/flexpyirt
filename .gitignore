@@ -9,6 +9,8 @@ build/
 .ipynb_checkpoints/
 validation/r/.Rhistory
 validation/r/logs/
+# Local R library for the GitHub mirt (FLEXPYIRT_R_LIB=validation/r/lib); never committed
+validation/r/lib/
 .hypothesis/
 benchmarks/data/
 site/

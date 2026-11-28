@@ -124,7 +124,7 @@ res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
 - `fit(spec, data, *, group=None, table=None, item_names=None, method=None, quadrature=None, se="oakes")`.
   `se` is `"oakes" | "hessian" | None`. `group=` raised `NotImplementedError` until M2.
 - `BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3)` (`squarem` comes in M3).
-  `Quadrature.equispaced(n_points=61, bounds=(-6, 6))`; Gauss–Hermite is `Quadrature.gauss_hermite(n)` (DESIGN §15.44).
+  `Quadrature.equispaced(n_points=61, bounds=(-6, 6))`; Gauss–Hermite is `Quadrature.gauss_hermite(n)` (DESIGN §15.44). Quasi-Monte Carlo is `Quadrature.qmc(n_points=5000)` for 2–5 factors (DESIGN §28; required for 4–5 factors; not yet validated against mirt).
 - `Model.uniform`, `Model.from_items`, `.fix(item=..., a=..., d=...)`, `.with_latent(...)`,
   `.parameter_table(data)`.
 - `FitResult`: `items`, `latent`, `parameters` (table + `estimate`, `se`), `vcov`, `loglik`, `aic`,

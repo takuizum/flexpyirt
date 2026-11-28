@@ -1105,7 +1105,7 @@ def mirt_payload() -> dict[str, Any]:
     [
         (lambda m: m["factors"][0].update(items=["nope"]), "unknown items"),
         (lambda m: m["factors"][1].update(name=m["factors"][0]["name"]), "Duplicated factor"),
-        (lambda m: m["factors"].pop(), "2 to 3 factors"),
+        (lambda m: m["factors"].pop(), "2 to 5 factors"),
         (lambda m: m["factors"][1]["items"].pop(), "not assigned to any factor"),
         (lambda m: m.update(factors=m["factors"] * 2), "Duplicated factor"),
         (lambda m: m.update(correlated_factors="yes"), "correlated_factors"),

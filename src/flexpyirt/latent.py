@@ -12,6 +12,7 @@ import numpy as np
 from jax import Array
 
 from flexpyirt.errors import SpecificationError
+from flexpyirt.quadrature import MAX_QMC_FACTORS
 
 __all__ = [
     "MAX_DAVIDIAN_DEGREE",
@@ -863,7 +864,7 @@ def eh_moments(nodes: np.ndarray, weights: np.ndarray) -> tuple[float, float, fl
 
 
 def latent_param_names(n_factors: int) -> tuple[str, ...]:
-    """Return the latent parameter names for ``n_factors`` in ``{1, 2, 3}``.
+    """Return the latent parameter names for ``n_factors`` from 1 to ``MAX_QMC_FACTORS``.
 
     For ``n_factors == 1``, returns ``("mean", "var")``. For ``n_factors > 1``, returns
     ``("mean_1", ..., "mean_D", "var_1", ..., "var_D", "cor_12", ...)`` with correlation pairs in
@@ -871,8 +872,10 @@ def latent_param_names(n_factors: int) -> tuple[str, ...]:
     """
     if n_factors == 1:
         return ("mean", "var")
-    if n_factors not in (2, 3):
-        raise SpecificationError(f"Multivariate normal supports 1 to 3 factors, got {n_factors}.")
+    if not 2 <= n_factors <= MAX_QMC_FACTORS:
+        raise SpecificationError(
+            f"Multivariate normal supports 1 to {MAX_QMC_FACTORS} factors, got {n_factors}."
+        )
     means = tuple(f"mean_{i}" for i in range(1, n_factors + 1))
     vars_ = tuple(f"var_{i}" for i in range(1, n_factors + 1))
     cors = tuple(
@@ -895,7 +898,27 @@ def correlation_matrix_is_positive_definite(cors: Sequence[float], n_factors: in
         m2 = 1.0 - r12 * r12
         det = 1.0 - r12 * r12 - r13 * r13 - r23 * r23 + 2.0 * r12 * r13 * r23
         return m2 > 0.0 and det > 0.0
-    raise SpecificationError(f"Multivariate normal supports 1 to 3 factors, got {n_factors}.")
+    corr = _correlation_matrix_np(cors, n_factors)
+    if not np.all(np.isfinite(corr)):
+        return False
+    try:
+        np.linalg.cholesky(corr)
+    except np.linalg.LinAlgError:
+        return False
+    return True
+
+
+def _correlation_matrix_np(cors: Sequence[float], n_factors: int) -> np.ndarray:
+    """Return the correlation matrix from ``cor_ij`` in lexicographic ``i < j`` order."""
+    if not 2 <= n_factors <= MAX_QMC_FACTORS:
+        raise SpecificationError(
+            f"Multivariate normal supports 1 to {MAX_QMC_FACTORS} factors, got {n_factors}."
+        )
+    corr = np.eye(n_factors)
+    rows, cols = np.triu_indices(n_factors, 1)
+    corr[rows, cols] = np.asarray(cors, dtype=float)
+    corr[cols, rows] = corr[rows, cols]
+    return corr
 
 
 def mvn_log_weights(nodes: Array, params: Array) -> Array:
@@ -913,7 +936,9 @@ def mvn_log_weights(nodes: Array, params: Array) -> Array:
     correlation matrix is checked by Sylvester's criterion (leading principal minors :math:`> 0`)
     with double-``where`` guards so derivatives at valid interior points never see NaN, while
     non-positive-definite candidates return NaN and are rejected by the Newton line search and
-    SQUAREM safeguard (DESIGN.md §4.4, §15.30).
+    SQUAREM safeguard (DESIGN.md §4.4, §15.30). For :math:`D \ge 4` (quasi-Monte Carlo nodes only,
+    §28) the check is a Cholesky factorization of the correlation matrix (finite factor with a
+    positive diagonal), with the same double-``where`` guard.
 
     Parameters
     ----------
@@ -960,4 +985,18 @@ def mvn_log_weights(nodes: Array, params: Array) -> Array:
         logw = jax.nn.log_softmax(-0.5 * quad)
         return jnp.where(is_pd, logw, jnp.nan)
 
-    raise SpecificationError(f"Multivariate normal supports 1 to 3 factors, got {n_factors}.")
+    if n_factors > MAX_QMC_FACTORS:
+        raise SpecificationError(
+            f"Multivariate normal supports 1 to {MAX_QMC_FACTORS} factors, got {n_factors}."
+        )
+    rows, cols = np.triu_indices(n_factors, 1)
+    cors = params[2 * n_factors :]
+    corr = jnp.eye(n_factors, dtype=params.dtype).at[rows, cols].set(cors).at[cols, rows].set(cors)
+    trial = jnp.linalg.cholesky(jax.lax.stop_gradient(corr))
+    is_pd = ok_var & jnp.all(jnp.isfinite(trial)) & jnp.all(jnp.diagonal(trial) > 0.0)
+    safe_corr = jnp.where(is_pd, corr, jnp.eye(n_factors, dtype=params.dtype))
+    chol = jnp.linalg.cholesky(safe_corr)
+    y = jax.scipy.linalg.solve_triangular(chol, z.T, lower=True)
+    quad = jnp.sum(y * y, axis=0)
+    logw = jax.nn.log_softmax(-0.5 * quad)
+    return jnp.where(is_pd, logw, jnp.nan)

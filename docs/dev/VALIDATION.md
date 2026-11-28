@@ -25,7 +25,9 @@ English | [日本語](VALIDATION.ja.md)
   without a commit SHA, a script that does not load mirt through `validation/r/setup.R`, and a
   script missing from `validation/r/run_references.sh`.
 - **Regenerating**: `Rscript validation/r/install_mirt.R [ref]` installs mirt from GitHub into the
-  user library (or `FLEXPYIRT_R_LIB`); `validation/r/run_references.sh` reruns every script that
+  user library (or `FLEXPYIRT_R_LIB`; to keep it inside the checkout, use
+  `FLEXPYIRT_R_LIB=validation/r/lib`, which is git-ignored, so the installed library is never
+  committed); `validation/r/run_references.sh` reruns every script that
   uses mirt, in two stages (the second reads JSON written by the first; `JOBS` sets the
   parallelism). `validation/r/setup.R` stops if the mirt it would load has no `RemoteSha`.
 - **Scheduled check**: `.github/workflows/mirt-head.yml` (weekly and on demand, separate from the
@@ -166,6 +168,7 @@ English | [日本語](VALIDATION.ja.md)
 | V55 | Many groups with the group-blocked E-step: 2PL, 10 groups of unequal size (200–470), 15 items, anchors q01–q06 invariant, q07–q15 free per group, focal means and variances free, 5% MCAR missing; regression of the blocked against the flat E-step | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`, `fscores(extract.group(m, g), method = "EAP")`; the flat path for the regression | #79 |
 | V56 | `DavidianCurve` and `NormalMixture` per group: (a) 2PL, three groups (bimodal, right-, left-skewed), `DavidianCurve(2)`, anchors q01–q06, 3% missing; (b) 2PL $J=15$, two groups, `NormalMixture(2)`, every item invariant; (c) FIPC, two groups, `DavidianCurve(2)`, every latent free. Estimates, R Hessian SEs, EAP, S-X2 per group | `multipleGroup(customGroup = createGroup(...))` with the standardized densities normalized on the grid (`dcurver::ddc`), Newton-polished on an independent R marginal log-likelihood; R Richardson-Hessian SEs; EAP in R; `itemfit(use_dentype_estimate = TRUE)` on single-group objects fixed at each group's estimates | #75 |
 | V57 | Weighted and cluster-robust sandwich SEs: (a) 2PL $J=10$, 40 schools of 25 with a school effect in $\theta$, unequal weights, 3% missing; (b) 2PL $J=8$, ref/focal with anchors q01–q05, focal mean and variance free, 30 schools spanning the groups. Middle matrices (weighted, cluster, unweighted cluster, singleton clusters) at mirt's estimates, `se="crossprod"` with weights, mirt's weighted sandwich reproduced, SEs end to end | `mirt()` / `multipleGroup()` with `survey.weights`, `SE.type = "Oakes"` (bread), `"crossprod"`, `"sandwich"`; per-person scores by `numDeriv::jacobian` on mirt's grid (checked against `estfun.AllModelClass`); $H^{-1}BH^{-1}$ computed in R | #84, #85 |
+| V58 | Fixed-node QMC quadrature (DESIGN §28): 4-factor confirmatory 2PL, 5 items per factor, $N=2{,}000$, correlations 0.3–0.5; flexpyirt `Quadrature.qmc(10_000)` (two stages) against a fine product grid. Estimates within 1.5e-2 (measured 5.3e-3), correlations 5e-3 (2.0e-3), log-likelihood 1.0 (0.48), Oakes SEs 2% relative (0.55%) | `mirt()` EM, `quadpts = 13`, `theta_lim = c(-4.8, 4.8)` (13^4 = 28,561 nodes, `MAXQUAD` raised), `TOL = 1e-6`, `SE.type = "Oakes"`; `method = "QMCEM"` recorded but not used (it fails on this case, below) | #164 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -1436,6 +1439,19 @@ English | [日本語](VALIDATION.ja.md)
   (schema 9, `n_clusters`).
 
 ## Validation beyond agreement
+- **Quasi-Monte Carlo quadrature (V58, #164, DESIGN §28)**: the reference is mirt's ordinary EM
+  on a 13^4 product grid, not mirt's `QMCEM`. On the V58 data, `QMCEM` (mirt 1.48.5 `2b342bb`, at
+  its default 10,000 points and at 20,000) drifts to slopes about 1.6 times too large and factor
+  correlations of 0.91–0.97 (simulated 0.3–0.5), and its own log-likelihood decreases over the
+  last cycles (mirt warns "Log-likelihood was decreasing near the ML solution"), ending at
+  −24571.6 against −24319.8 for EM. mirt's EM on 9^4 and 13^4 grids and flexpyirt agree with each
+  other and with the truth. With `SE = TRUE`, `QMCEM`'s Oakes information matrix could not be
+  inverted. The tolerances cover the quadrature error of both fits (flexpyirt QMC and mirt's
+  grid), not the 1e-4 of product-grid cases. `tests/test_quadrature_qmc.py` also checks exact
+  identities (Halton radical inverses; equal weights when the proposal equals the latent normal;
+  general-$D$ MVN log weights against `scipy.stats.multivariate_normal`), a 3-factor 2PL against
+  Gauss–Hermite $21^3$ and a 4-factor 2PL with independent factors against separate
+  unidimensional fits.
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)
   uses mirt's class parameterization for the shape and standardizes the mixture analytically, so
   on the grid $\theta_q$ it is exactly mirt's `multipleGroup(dat, 1, itemtype = ..., dentype =
