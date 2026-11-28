@@ -64,7 +64,11 @@
 ### 4.1 前処理: 反応パターン圧縮
 - 群ごとに反応行列（欠測は `-1`）をユニーク化し、度数 $c_p$ を得る。標本ウェイトがあるとき、$c_p$ は
   パターン $p$ を持つ行のウェイトの和（§17.4）。
-- jit の再コンパイルを抑えるため、パターン数を **2 のべき乗のバケットにパディング**（度数 0 の行で埋める）。
+- jit の再コンパイルを抑えるため、パターン数を **バケットにパディング**（度数 0 の行で埋める）。バケットは 8 以上の
+  $\{1, 1.5\}\times 2^k$（8, 12, 16, 24, 32, 48, ...、`pattern_bucket`、#152）。パディング後の行数はパターン数の
+  高々 1.5 倍（平均約 1.2 倍）で、2 のべき乗の 2 倍（約 1.4 倍）より少ない。代わりにコンパイルされうる形状は 2 倍になる。
+  パディング行は度数 0 なので、尤度・期待度数・それらの微分に厳密に何も足さない。チャンクに分けて処理するもの（Oakes の
+  交差項、サンドイッチのスコア）は自分のチャンク長に合わせてパディングし、2 のべき乗を仮定しない。
 - 群ごとにパターン数が違うので、全群を連結した 1 本の配列 + `group_index` で持つ（群ごとの Python ループを jit 内に持ち込まない）。
 
 ### 4.2 E-step
@@ -77,6 +81,40 @@ $$\bar n_{gq}=\sum_{p\in g}c_p h_{pq},\qquad \bar r_{gjkq}=\sum_{p\in g}c_p h_{p
 
 実装メモ: $\bar r$ は `one_hot(y)` と $c_p h_{pq}$ の einsum。メモリは $P\times J\times K\times Q$ を避け、
 `(P,Q)` の重みと `(P,J,K)` の one-hot を einsum で縮約して `(G,J,K,Q)` を直接得る。
+
+**高速経路（#152）。** どれも結果を加算順序の違い以上には変えない（テストは固定したパラメタで汎用経路と
+$10^{-12}$ で比べる）。`ItemKernel` プロトコルも変えない。
+
+- *欠測のない family。* `compile_problem` は、実際のパターン行（度数 0 でない行）に family の項目への欠測反応が
+  1 つもないとき、その family に `complete`（`FamilyBlock` の静的フラグ）を立てる。このとき全項目が観測されているので、
+  カテゴリ 0 を基準にして
+  $$\ell_{pq}=\sum_j\log P_{j0}(\theta_q)+\sum_j\sum_{k\ge1}\mathbf 1[y_{pj}=k]\,\Delta_{jkq},\qquad
+  \Delta_{jkq}=\log P_{jk}(\theta_q)-\log P_{j0}(\theta_q),$$
+  $$\bar r_{gj0q}=\bar n_{gq}-\sum_{k\ge1}\bar r_{gjkq}$$
+  と書ける。第 1 項は `(G,Q)` のオフセット 1 つで、パターンとの縮約は $K_f$ でなく $K_f-1$ カテゴリになる（2 値項目では
+  半分）。フラグはコンパイル時の反応から計算する。あとで `y` を差し替える処理（`_jsi.without_item`、サンドイッチの中央の
+  行列）は `_core.with_responses` を通し、全フラグを `False`（常に正しい汎用経路）に戻す。欠測があると、同じ分解には
+  置き換える one-hot と同じ幅の観測マスクの積が要るので使わない。$\bar r_{gj0q}$ は差なので、真の値が $\bar n_{gq}$
+  よりずっと小さいセルは $\epsilon\,\bar n_{gq}$ 程度の絶対誤差を持つ（0 の代わりに $-10^{-12}$ になりうる）。M-step の
+  目的関数ではこれに $\log P_{j0}$ が掛かるだけで、その水準では影響しない。
+- *ランク $D$ の対比。* 組み込みの `DichotomousKernel`（2PL、Rasch）と `GPCMKernel`（GPCM、PCM）そのものの型では
+  $\Delta_{jkq}=k\,\mathbf a_j^\top\boldsymbol\theta_q+d_{jk}$（2PL では $\log\sigma(z)-\log\sigma(-z)=z$）。欠測のない
+  family は、パターンを `(J_f, K_f-1, D+1)` の係数 $(k\mathbf a_j, d_{jk})$ と縮約し、得た `(P, D+1)` に
+  $(\boldsymbol\theta_q, 1)$ を 1 回掛ける。対数同時確率は $O(PJ_fK_fQ)$ から $O(PJ_fK_fD+PDQ)$ になる（期待度数には
+  $O(PJ_fK_fQ)$ の積が引き続き要る）。振り分けは内部（`_core._is_rank_d`、`type` の完全一致）なので、サブクラスと
+  ユーザー定義カーネルは汎用経路のまま。オフセットはカーネル自身の $\log P_{j0}$ から計算する。
+- *1 群。* 群がないとき、期待度数は `(J_f K_f, P) × (P, Q)` の単純な行列積で、多群の einsum の `(P, G)` 群 one-hot を
+  使わない（XLA はこれを行列積にまとめず、`P = 24576`、`J = 40`、`Q = 61` で約 2.7 倍遅かった）。
+- *指数関数 1 回。* $h_{pq}$ と $\log\sum_q e^{\lambda_{pq}}$ は $e_{pq}=\exp(\lambda_{pq}-\max_q\lambda_{pq})$ を共有し、
+  `logsumexp` のあとにもう一度 `exp` を計算しない。
+
+bifactor / two-tier の E-step（§17.1）は汎用の one-hot 経路のまま。
+
+*計測（#152）。* `fit()` の 2 回目以降の時間（通常の EM、`se=None`、CPU 8 コアに固定して交互に 2 回走らせた最小値、
+#152 直前のコードとの比較、秒）: 2PL 20000×40 0.922 → 0.612、2PL 5000×40 0.298 → 0.235、3PL 5000×30
+0.504 → 0.337、GRM(4) 0.178 → 0.187、GPCM(4) 0.335 → 0.303、2 次元 MIRT 5000×20 0.850 → 0.649、2 群
+1.028 → 0.629。GRM には rank-$D$ の経路がなく、オフセットの処理のぶん約 5% 遅くなる。ほかはすべて 10〜40% 速い。
+収束した対数尤度の相対差は $2\times10^{-14}$ 以下。
 
 ### 4.3 M-step（項目）
 群 $g$・項目 $j$ の期待完全データ対数尤度に対数事前分布を足したもの:
@@ -307,7 +345,7 @@ class ItemKernel(Protocol):
 - **PV**（Mislevy, 1991）: 細かい等間隔格子上の事後分布から区分線形逆 CDF 補間により回答者ごとに独立に `n_draws` 個を抽出し、`pv1..pvM` 列の DataFrame を返す。明示的な `key: jax.Array` が必須（未指定は `SpecificationError`）で、`key` に対して決定的（§15.25）。
 - **EAPsum**（Thissen, Pommerich, Billeaud & Williams, 1995）: 合計得点を与えたときの事後平均と事後 SD。回答者の群の合計得点の表を引く。欠測が 1 つでもある回答者は NaN。1 次元で潜在分布が `Normal` のモデルのみ（§18.2）。
 
-EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)$）から除く。EAPsum 以外のすべての手法がユニークパターン圧縮と 2 のべき乗パディングを用いてデータ値に依存しない形状で `jit` 実行される（§15.21）。
+EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)$）から除く。EAPsum 以外のすべての手法がユニークパターン圧縮とバケットへのパディング（§4.1）を用いてデータ値に依存しない形状で `jit` 実行される（§15.21）。
 
 ## 9. 性能方針
 - パターン圧縮 + バケットパディングで再コンパイルを抑える。
@@ -566,12 +604,55 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     - **他の処理がない状態での計測**（メンテナー、同じ 2PL $20{,}000\times40$ データ、EM 約 0.41 s を含む
       ウォーム 5 回の中央値）: `fit(..., se="oakes")` 3.39 s → **0.50 s**（Oakes 部分は約 2.98 s → 約 0.09 s）、
       `se="hessian"` 1.16 s → 1.07 s。共分散行列は従来の実装と最大要素比 $8.5\times10^{-16}$ で一致。
+    - **交差項の縮小と 1 回のパスでのサンドイッチ（#151）**: 交差項に 3 つの変更を入れる。どれも同じ和の
+      厳密な書き換えである。
+      (1) *完全なファミリーではカテゴリ 0 の列を落とす。* ファミリーのどの項目にも欠測のあるパターンが
+      なければ $\mathbb 1[y_{pj}=0]=1-\sum_{k>0}\mathbb 1[y_{pj}=k]$ なので、
+      $d_{j,y_{pj},q}=d_{j0q}+\sum_{k>0}\mathbb 1[y_{pj}=k](d_{jkq}-d_{j0q})$ となる。$d_{j0q}$ は
+      $L_q$ の定数行（行 0）に移し、残りの列は $d_{jkq}-d_{j0q}$ にする。2PL では $D$ が半分
+      （$1+2J$ から $1+J$）になる。`FamilyBlock.complete` は静的なフラグで、`compile_problem` で実際の
+      パターン行から 1 回だけ決める（パディング行はカテゴリ 0・度数 0 なので除く）。`y` を置き換える
+      コード（`_jsi.without_item`、`fit` のウェイト・クラスタ付きサンドイッチの meat）はすべて
+      `_core.with_responses` を通り、ここでフラグを `False` に戻す。そのときは列を落とす形を使わない
+      だけである。フラグが静的なので、完全な問題と欠測のある問題は別々にコンパイルされる。この費用は
+      ファミリー構成ごとに 1 回で、項目ごとではない（ジャックナイフは除いた項目すべてで 1 回のコンパイル
+      を使い回す）。
+      (2) *$C_q$ の上三角。* $C_q$ は対称なので、各チャンクでは上三角だけを 1 回の GEMM
+      `w.T @ (x[:, iu] * x[:, ju])`（形 `(Q, D(D+1)/2)`）で作る。`_oakes_t1` が群ごとに 1 回だけ
+      対称行列に戻してから $\sum_q L_q^\top C_q L_q$ を計算する。チャンクの大きさは 1 行あたり
+      `D(D+1)/2 + Q` 要素で見積もる。
+      (3) *サンドイッチの一体化。* `information_oakes_and_cross_product` は Oakes の情報行列と
+      スコアの外積和 $\sum_p c_p s_ps_p^\top$ を同じパターンのパスで返す。生のスコア $s_p$ は中心化した
+      $\bar s_p$ に、パターンのカテゴリで集めた $q$ に依存しない中心化の量を足したもの
+      （$\sum_q h_{pq}=1$ なので厳密）。事前分布の対角は §17.5 と同じく引く。`fit()` はウェイトも
+      クラスタもない `se="sandwich"` でこれを使う（あるときは従来どおり別々に呼ぶ）。次元縮約のある
+      モデル（双因子、two-tier。§17.1–§17.2）と $n_{\text{free}}=0$ は関数の中で別々の呼び出しに戻る。
+      計測（他の処理がない 16 コアの Linux、jit した関数のウォーム 7 回の最小、秒。「tri」と「drop」は
+      それぞれの変更だけ。base は #150）:
+
+      | ケース | base Oakes | tri | drop | 採用（両方） | base Oakes + 外積和 | 一体化 |
+      |---|---|---|---|---|---|---|
+      | 2PL 20000×40 | 0.177 | 0.123 | 0.110 | **0.077** | 0.514 | **0.090** |
+      | 2PL 5000×40 | 0.049 | 0.042 | 0.026 | **0.021** | 0.146 | **0.023** |
+      | 3PL 5000×30 | 0.046 | 0.028 | 0.023 | **0.021** | 0.134 | **0.024** |
+      | GRM(4) 2000×20 | 0.022 | 0.024 | 0.023 | **0.014** | 0.075 | **0.014** |
+      | 2 群 6000×30 | 0.059 | 0.034 | 0.034 | **0.026** | 0.158 | **0.028** |
+      | 200 群（ブロック化）† | 5.22 | – | 3.76 / 3.96 | 3.84 / 3.82 | 23.1 | 3.44 / 3.94 |
+
+      † 8 コアに固定し、残りのコアでは他の処理が動いていた。各変種 2 回。
+
+      単群・2 群のすべてのケースで、両方を入れたものがどちらか片方だけより速い。200 群では列を落とす効果が大半で、上三角の効果は測れないが損もない（負荷の高いマシンでの
+      以前の計測では GRM で tri だけのほうが速かったが、再現しなかった）。コールドの時間は目に見えては
+      変わらない。Oakes の情報行列と外積和は、これらのケースで base と
+      $\max|\Delta|/\max|I|\le 8\times10^{-16}$ で一致する（200 群では Oakes が $3\times10^{-16}$、外積和が $5\times10^{-15}$）。`tests/test_oakes.py` は、完全な形と欠測の
+      ある形、多数のチャンク、4 群のブロック化、ジャックナイフでのリセット、一体化した形と別々の呼び出し
+      を比べる。
 21. **スコアリング API と共通の Core 構成（M4, §8）**: `FitResult.score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5)` は `Literal["EAP", "MAP", "ML", "WLE", "PV"]` に対応する。
-    EAP（`_core.eap`）の挙動と結果は変更しない。新規スコアリングカーネルは純粋 JAX の Core モジュール `_scoring.py` に置き、EAP と同じくユニークな `(group, pattern)` 圧縮と 2 のべき乗バケットパディングを行い、欠測反応（`y == -1`）をマスクで除外し、データ値に依存しない静的形状で `jit` 実行する。PV 以外に `key` を渡した場合、PV で `key` が未指定または不正な場合、不正な `method` や `n_draws` の場合は `SpecificationError` を送出する。
+    EAP（`_core.eap`）の挙動と結果は変更しない。新規スコアリングカーネルは純粋 JAX の Core モジュール `_scoring.py` に置き、EAP と同じくユニークな `(group, pattern)` 圧縮とバケットへのパディング（§4.1）を行い、欠測反応（`y == -1`）をマスクで除外し、データ値に依存しない静的形状で `jit` 実行する。PV 以外に `key` を渡した場合、PV で `key` が未指定または不正な場合、不正な `method` や `n_draws` の場合は `SpecificationError` を送出する。
 22. **MAP スコアリング（`method="MAP"`、M4, §8）**: 回答者の群の推定済み正規潜在分布 $(\mu_g, \sigma_g^2)$ を（求積格子ではなく）**連続**事前分布として $f_{\mathrm{MAP}}(\theta)=\log L(\theta\mid y) - (\theta-\mu_g)^2/(2\sigma_g^2)$ を最大化し、最頻値で $\mathrm{SE}=(-f''_{\mathrm{MAP}}(\hat\theta))^{-1/2}$ を計算する。最適化はユニークパターンに `vmap` した安全装置つき 1 次元 Newton 上昇法（`_newton_1d`、初期値は EAP）で行う: 微分 $f', f''$ はすべて JAX 自動微分から求め、$f''\ge -10^{-12}$（3PL / 4PL の非凹領域など）では勾配上昇方向へフォールバックし、ステップ幅 $2^{-k}\delta$（$k=0..29$、ステップ長上限 `10.0`）を `vmap` で一括評価して目的関数が減少することを防ぐ。全項目欠測の行は $\log L\equiv 0$ となるため連続事前分布の最頻値 $\mu_g$ と標準偏差 $\sigma_g$ を返す（全欠測で事前分布の平均・SD を返す既存の EAP と整合。mirt は全手法で全欠測行を `NA` に落とす点が異なる）。
 23. **ML スコアリング（`method="ML"`、M4, §8）**: 同じ `vmap` 済み安全装置つき 1 次元 Newton（初期値 EAP）で $[-20, 20]$ 上（mirt の既定 `max_theta = 20` に対応）において $f_{\mathrm{ML}}(\theta)=\log L(\theta\mid y)$ を最大化し、観測情報量から $\mathrm{SE}=(-f''_{\mathrm{ML}}(\hat\theta))^{-1/2}$ を求める（mirt 既定の `expected.info = FALSE` に一致）。極端パターンの規約: 全欠測は `(NaN, NaN)`、全観測項目が低 $\theta$ 側の端カテゴリ（$a_j>0$ なら `0`、$a_j<0$ なら `K_j-1`）のときは `(-inf, NaN)`、高 $\theta$ 側の端カテゴリのときは `(+inf, NaN)`。非凹モデル（3PL / 4PL）で全端カテゴリ以外でも有限の内部最大値を持たないパターン（当て推量により低得点パターンで $\log L(\theta)$ が $\theta\to -\infty$ へ単調増加する場合など）も検出し、$|\hat\theta|$ が `±20` の上限に達した・$f''(\hat\theta)\ge 0$・$\mathrm{SE}>30$（`mirt:::ML` の閾値）・$f(\pm 20) > f(\hat\theta)$ のいずれかで `±inf` と SE NaN を返す。`±inf` の符号は、$f(\pm 20) > f(\hat\theta)$ が成り立つときにのみ優越する端点から決め、それ以外は $\operatorname{sign}(\hat\theta)$ に従う（`mirt:::ML` の `Inf * sign(est)` に一致）。特に、3PL の二峰性対数尤度で $-\infty$ の下側漸近線が厳密に凹な内部の局所最頻値を上回る場合、flexpyirt は真の大域上限である `(-inf, NaN)`（本来の最尤推定）を意図的に返すのに対し、mirt 1.46.1 の EAP 出発の局所 `nlm` 探索は内部の局所最頻値で停止するため両者は異なる（`v11_3pl` の 3,790 ユニークパターン中 25 件。この判定により、`nlm` 有限差分 Hessian が `SEest > 30` 判定をすり抜ける境界ケースもあわせて正しく扱える。VALIDATION.ja.md V13 参照）。
 24. **WLE スコアリング（`method="WLE"`、M4, §8）**: Warm (1989) の重み付き最尤推定を、Jeffreys / Firth (1993) の罰則付き対数尤度 $f_{\mathrm{WLE}}(\theta)=\log L(\theta\mid y)+\tfrac{1}{2}\log I(\theta)$ の $[-20, 20]$ 上での最大化として同じ `vmap` 済み安全装置つき 1 次元 Newton（初期値 EAP）で解く。ここで $I(\theta)=\sum_{j:\,y_j\ge 0}\sum_k P_{jk}(\theta)\,(\partial\log P_{jk}/\partial\theta)^2$ は観測項目にわたる Fisher テスト情報量であり、各カーネルの `log_prob` に対する `jax.jacfwd` のみで計算する（手書き微分なし、全項目ファミリーで動作）。停留条件は $\partial\log L/\partial\theta + J(\theta)/(2I(\theta)) = 0$（$J(\theta)=\partial I/\partial\theta$）と恒等的に一致し、2PL・Rasch・GRM・GPCM・PCM・3PL・4PL のすべてで `mirt:::WLE.mirt` と一致する（指数型分布族では $J=\partial I/\partial\theta$ が Warm の $\sum P'P''/P$ と恒等的に一致し、3PL / 4PL / GRM では Firth の Jeffreys 事前分布バイアス補正および mirt と一致する）。極端パターン（全最低・全最高）でも有限の推定値を与え、全欠測パターンは $I(\theta)=0$ のため `(NaN, NaN)` を返す。SE は JAX 自動微分による $(-f''_{\mathrm{WLE}}(\hat\theta))^{-1/2}$ であり、mirt の既定 `fscores(..., method="WLE", full.scores.SE=TRUE)` と一致する（Warm の漸近式 $I(\hat\theta)^{-1/2}$ は mirt の `expected.info=TRUE` に対応し、短いテストや極端パターンで差が出る。VALIDATION.ja.md V13 参照）。
-25. **Plausible values（`method="PV"`、M4, §8）**: 回答者ごとに事後分布 $p(\theta\mid y_i;\mu_{g(i)},\sigma_{g(i)}^2)$ から独立な `n_draws` 個（既定 `5`）の標本を抽出し、`pv1..pvM` 列の DataFrame を返す。求積格子による離散化を避けて連続な標本を得つつ `jit` 内で静的形状・高速動作を保つため、圧縮・2 のべき乗パディングしたユニークパターンごとに推定済みモデルの求積区間 `[quad.lower, quad.upper]` 上の細かい等間隔格子（`501` 点）で事後密度を評価し、台形則で $[0, 1]$ 上の区分線形 CDF を構成したうえで、`jax.random.uniform(key, (N_pad, n_draws))`（回答者数 `N` も 2 のべき乗 `N_pad` へパディングして `N` にスライス）に対し分岐なしの `searchsorted(..., side="right")` 線形補間で逆 CDF 抽出を行う。同じ反応パターンの回答者は事後 CDF を共有しつつ独立な一様乱数を用いるため独立な標本となり、全欠測行は群の事前分布から抽出される。明示的な JAX PRNG の `key`（`jax.random.key` または `jax.random.PRNGKey`、未指定・不正は `SpecificationError`）が必須で、`key` に対して完全に決定的。
+25. **Plausible values（`method="PV"`、M4, §8）**: 回答者ごとに事後分布 $p(\theta\mid y_i;\mu_{g(i)},\sigma_{g(i)}^2)$ から独立な `n_draws` 個（既定 `5`）の標本を抽出し、`pv1..pvM` 列の DataFrame を返す。求積格子による離散化を避けて連続な標本を得つつ `jit` 内で静的形状・高速動作を保つため、圧縮・バケットへパディングしたユニークパターンごとに推定済みモデルの求積区間 `[quad.lower, quad.upper]` 上の細かい等間隔格子（`501` 点）で事後密度を評価し、台形則で $[0, 1]$ 上の区分線形 CDF を構成したうえで、`jax.random.uniform(key, (N_pad, n_draws))`（回答者数 `N` も 2 のべき乗 `N_pad` へパディングして `N` にスライス）に対し分岐なしの `searchsorted(..., side="right")` 線形補間で逆 CDF 抽出を行う。同じ反応パターンの回答者は事後 CDF を共有しつつ独立な一様乱数を用いるため独立な標本となり、全欠測行は群の事前分布から抽出される。明示的な JAX PRNG の `key`（`jax.random.key` または `jax.random.PRNGKey`、未指定・不正は `SpecificationError`）が必須で、`key` に対して完全に決定的。
 26. **`FitResult` の JSON 入出力 API とバージョン付き形式（M4, API §7）**: `FitResult.to_json(path=None, *, indent=2) -> str` は推定結果を厳格な JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定された場合は UTF-8 ファイルにも書き出す。`FitResult.from_json(source) -> FitResult` はファイルパスまたは JSON 文字列から再推定なしで復元する。素の JSON のみを使い、`pickle` や `eval` は一切使わない。最上位オブジェクトには `"format": "flexpyirt.FitResult"`、`"schema_version"`（§15.46 の命名リファクタから 4、双因子モデル（§17.1）から 5、two-tier モデル（§17.2）から 6、標本ウェイト（§17.4）から 7。それより前の version のファイルも読める）、および書き出した版を記録する `"flexpyirt_version": flexpyirt.__version__` を持たせる。`FitResult` は `_model`・`_quadrature` とあわせて推定設定 `_method: BAEM` も保持し、メタデータ全体が往復保存できるようにする。`from_json` は入口で `check_x64()` を呼ぶ（スコアリングに float64 が必要なため、無効なら `PrecisionError`）。
 27. **厳格な JSON と正確な float64 往復保存（M4）**: 書き出しは `json.dumps(..., allow_nan=False)` で厳格な RFC 8259 JSON のみを出力し、読み込みは `json.loads` に `parse_constant` を渡して生の `NaN`/`Infinity` リテラルを `SpecificationError` で拒否する。有限な IEEE-754 float64 値は通常の JSON 数値（Python の `repr` 厳密な最短 10 進表現）として書き出し、`-0.0` を含むすべての有限 float64 をビット単位で正確に往復保存する。浮動小数点型のフィールド（無制約の `lower`/`upper`、固定または未計算の `se`、非正定値の `vcov` など）に現れる非有限値（`NaN`, `+Inf`, `-Inf`）は明示的に文字列 `"NaN"`, `"Infinity"`, `"-Infinity"` として符号化する。これらを浮動小数点へ復号するのはスキーマ上 float 型のスロットのみであるため、項目名や群名などの文字列フィールドとは衝突しない。
 28. **明示的レジストリと完全な状態保存（M4）**: 項目モデル（`"2PL"`, `"Rasch"`, `"3PL"`, `"4PL"`, `"GRM"`, `"GPCM"`, `"PCM"`、多値モデルでは `n_categories` を含む）、潜在分布（`"Normal"`）、事前分布（`"NormalPrior"`, `"LogNormalPrior"`, `"BetaPrior"`）、求積（`"equispaced"`）、推定手法（`"BAEM"`）は `_json.py` の明示的な名前レジストリで（逆）直列化する。未知の `format` タグ・スキーマ版・レジストリ名・不正な JSON・整合しない表や行列形状は明確なメッセージつきで `SpecificationError` を送出する。完全な `Model` 仕様（項目名と順序、項目モデル、`fixed`, `latent`, `groups`, `equal`, `priors`）と、`estimate`・`se` を含む検証済み `ParameterTable`（ユーザーによる `table=` 編集もそのまま保持）、`vcov`、`loglik`/`log_posterior`、収束情報と `history`、`quadrature`、`method`、`se_method`、`n_obs` をすべて保存する。`_eta` は `parameters` の検証済み自由行から直接復元し（`free_id` が `0..n_free-1` に連続であること、共有 `free_id` の `estimate` が一致すること、`vcov` 形状が整合することを検証）、推定値の重複を持たせない。復元後の `FitResult` はすべての公開属性・`items`・`latent`・`summary()`・`_repr_html_()`・`aic`/`bic`・全 5 手法の `score()` で完全に同一の結果を返す。
@@ -2695,7 +2776,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    和の順序が平坦な経路と異なるので、結果は丸め誤差（相対 $\sim10^{-12}$）の範囲で一致し、ビット単位では一致しない
    （回帰テストは `tests/test_many_groups.py`）。
 4. **Oakes の交差項**（§15.20）はブロック上の 1 つの `lax.scan` になる。各ブロックはカテゴリの共起を
-   現在の群の $C_{q}$ `(Q, D, D)` に、$\bar s_p\bar s_p^\top$ の項を $T_2$ に加える。群の最後のブロック（`last`）
+   現在の群の $C_{q}$（上三角、`(Q, D(D+1)/2)`。§15.20）に、$\bar s_p\bar s_p^\top$ の項を $T_2$ に加える。群の最後のブロック（`last`）
    では `lax.cond` で $\sum_q L_{gq}^\top C_q L_{gq}$ を $T_1$ に足して $C$ を 0 に戻す。群のスコア表は
    ブロックの群（動的な添字）でブロックごとに 1 回取り出し（ブロック内のサブチャンクはそれを使い回し、パディング行だけの
    サブチャンクは `lax.cond` で飛ばす）、トレースされるプログラムは $G$ に依存しない（コンパイル時間は $G$ によらず一定）。
