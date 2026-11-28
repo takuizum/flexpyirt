@@ -280,12 +280,25 @@ def compress_patterns(
     return uniq[:, 1:], uniq[:, 0], counts, inverse
 
 
+def pattern_bucket(n: int) -> int:
+    """Smallest bucket ``{1, 1.5} * 2**k`` (at least 8) holding ``n`` rows (DESIGN.md §4.1).
+
+    The buckets are 8, 12, 16, 24, 32, 48, ...: a padded size is at most 1.5 times (and on
+    average about 1.2 times) the number of rows, against 2 (about 1.4) with powers of two.
+    """
+    if n <= 8:
+        return 8
+    power = 1 << (n - 1).bit_length()
+    three_quarters = 3 * power // 4
+    return three_quarters if n <= three_quarters else power
+
+
 def pad_patterns(
     patterns: np.ndarray, groups: np.ndarray, counts: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Pad to the next power-of-two bucket (at least 8) with zero-count rows (DESIGN.md §4.1)."""
+    """Pad to the next bucket of :func:`pattern_bucket` with zero-count rows (DESIGN.md §4.1)."""
     n = patterns.shape[0]
-    bucket = max(8, 1 << (n - 1).bit_length())
+    bucket = pattern_bucket(n)
     pad = bucket - n
     return (
         np.vstack([patterns, np.zeros((pad, patterns.shape[1]), dtype=patterns.dtype)]),
@@ -1666,6 +1679,11 @@ def _bifactor_block(
     )
 
 
+def _family_complete(real_patterns: np.ndarray, columns: Sequence[int]) -> bool:
+    """Whether no real pattern row has a missing response to ``columns`` (DESIGN.md §4.2)."""
+    return bool(np.all(real_patterns[:, list(columns)] >= 0))
+
+
 def compile_problem(
     model: Model,
     y: np.ndarray,
@@ -1773,6 +1791,8 @@ def compile_problem(
                 slot_upper=jnp.asarray(slot_hi, dtype=jnp.float64),
                 kernel=k,
                 invariant=invariant_items(local_index, fixed),
+                # Real pattern rows only: padding rows are category 0 with count 0.
+                complete=_family_complete(patterns[:n_patterns], cols),
             )
         )
 
