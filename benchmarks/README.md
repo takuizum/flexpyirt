@@ -98,6 +98,21 @@ memory below 1 GiB at 200 groups. For comparison, the E-step before #79 (every p
 group) took 86 s warm for a 50-group plain-EM fit that the group-blocked E-step ran in 23 s on the
 same machine at the time (DESIGN §26).
 
+## Mixture (EMM) M-step for 3PL / 4PL (#165)
+
+`benchmarks/emm_3pl.py` compares `BAEM(asymptote_m_step="mixture")` with the default `"joint"`
+M-step (flexpyirt only, no R):
+
+```bash
+uv run python benchmarks/emm_3pl.py speed
+uv run python benchmarks/emm_3pl.py small --n-persons 500 --n-items 10 --reps 25 [--squarem]
+uv run python benchmarks/emm_3pl.py report
+```
+
+Results: [results/2026-11-28-emm-3pl.md](results/2026-11-28-emm-3pl.md). The mixture M-step
+reaches the same maximum but needs 4–60× the iterations and 3–40× the wall time, and it does not
+converge more often in small samples (DESIGN §15.49).
+
 ## Caveats
 
 - **Compile time vs. warm time**: JAX compiles each `(model family, padded pattern bucket, se)`

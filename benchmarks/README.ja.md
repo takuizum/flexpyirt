@@ -94,6 +94,20 @@ flexpyirt のウォーム時間は 10・50・200 群で 0.5 秒・7 秒・91 秒
 1〜5 秒のまま、200 群でもピークメモリは 1 GiB 未満。比較として、#79 以前の E-step（すべてのパターンをすべての群で評価）は、
 同じマシンで当時、群ブロック化した E-step が 23 秒で終えた 50 群の通常 EM の推定に 86 秒かかった（DESIGN §26）。
 
+## 3PL / 4PL の混合（EMM）M-step（#165）
+
+`benchmarks/emm_3pl.py` は `BAEM(asymptote_m_step="mixture")` と既定の `"joint"` を比べる（flexpyirt だけで、R は
+使わない）:
+
+```bash
+uv run python benchmarks/emm_3pl.py speed
+uv run python benchmarks/emm_3pl.py small --n-persons 500 --n-items 10 --reps 25 [--squarem]
+uv run python benchmarks/emm_3pl.py report
+```
+
+結果: [results/2026-11-28-emm-3pl.md](results/2026-11-28-emm-3pl.md)。混合 M-step は同じ最大値に着くが、反復回数は
+4〜60 倍、実行時間は 3〜40 倍かかり、小標本でも収束しやすくはならない（DESIGN §15.49）。
+
 ## 注意点
 
 - **コンパイル時間と warm 時間の差**: JAX は `(項目 family, パディング後のパターンバケット, se)` ごとに
