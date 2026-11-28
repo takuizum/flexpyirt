@@ -1,8 +1,0 @@
-1687c1687
-<         if False:
----
->         if fam.complete:
-1782c1782
-<         if False:
----
->         if fam.complete:
