@@ -19,7 +19,7 @@ from flexpyirt import _core
 
 def without_item(prob: _core.CompiledProblem, item: Array) -> _core.CompiledProblem:
     """Return ``prob`` with every response to column ``item`` set to missing."""
-    return _core.with_responses(prob, prob.y.at[:, item].set(-1))
+    return _core.with_responses(prob, y=prob.y.at[:, item].set(-1))
 
 
 @jax.jit

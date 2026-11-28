@@ -121,7 +121,7 @@ def test_complete_flags() -> None:
     prob, _ = _problem(_spec(1), df, None)
     assert [f.complete for f in prob.families] == [True, True]
     # Replacing the responses resets every flag.
-    reset = _core.with_responses(prob, prob.y)
+    reset = _core.with_responses(prob)
     assert not any(f.complete for f in reset.families)
     assert not any(f.complete for f in without_item(prob, jnp.asarray(0)).families)
 
