@@ -273,6 +273,8 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   More than 3 dimensions is out of scope (non-goal) for product grids; bifactor models reduce
   any number of specific factors to $(1+1)$-dimensional grids (§17.1). Smolyak sparse grids were
   studied and rejected for BA-EM (signed weights; §12, item 6).
+- **Quasi-Monte Carlo (§28)**: `Quadrature.qmc(n)` gives fixed Halton nodes reweighted to the normal
+  latent, for multidimensional models with 2–5 factors (the only grid for 4–5 factors).
 
 ### 4.10 Starting values
 - $d_j$: logit of the proportion correct; $a_j$: converted from the item–total point-biserial
@@ -451,7 +453,8 @@ data-independent shapes (§15.21).
 6. ~~Smolyak sparse grids for models with 4 or more dimensions (#152, "future extensions")~~ →
    **Decision (2026-11-28): rejected for BA-EM. $D\ge4$ product grids stay a non-goal (§4.9). If
    the question is reopened, the candidate is fixed-node quasi-Monte Carlo with importance
-   reweighting, validated against mirt's `QMCEM`, with adaptive quadrature second.** The study
+   reweighting, validated against mirt's `QMCEM`, with adaptive quadrature second.** Follow-up (#164): that QMC route is implemented for 2–5 factors (§28); product
+   grids stay at $D\le3$. The study
    code is not part of the package: the generator is `benchmarks/sparse_grid.py` (tested against
    R `SparseGrid` in `tests/test_sparse_grid.py`), the tables below come from
    `benchmarks/sparse_grid_study.py`, and the KPN rules from `validation/r/sparse_grid_reference.R`.
@@ -3788,6 +3791,91 @@ data-independent shapes (§15.21).
    independent R marginal log-likelihood, and records the R Richardson-Hessian SEs, mirt's Oakes
    SEs, EAPs computed in R from `probtrace()`, and S-X2 per group from `itemfit()` on single-group
    mirt objects with the same `customGroup` fixed at the group's estimates.
+
+## 28. Quasi-Monte Carlo quadrature and models with 4–5 factors (#164)
+
+1. **Scope.** `Quadrature.qmc(n_points=5000, *, mean=None, cov=None)` is a third kind of
+   quadrature beside the equispaced and Gauss–Hermite product grids, for multidimensional `Normal`
+   models with $D=2,\dots,5$ factors (`MAX_QMC_FACTORS = 5`). `with_factors()` now accepts up to 5
+   factors; product grids stay at $D\le3$, and `fit()` without a quadrature for $D\ge4$ raises
+   `SpecificationError` pointing to `Quadrature.qmc()`. QMC is refused for one factor (and
+   therefore for EH, Davidian curves and mixtures, which are unidimensional) and for bifactor and
+   two-tier models, whose E-step uses low-dimensional product grids (§17.1, §17.2). It follows the
+   Smolyak study (§12, item 6), which found positive-weight QMC the viable route beyond 3
+   dimensions.
+2. **Nodes.** Halton points (Halton, 1960): component $m$ of point $q=1,\dots,Q$ is the radical
+   inverse of $q$ in the $m$-th prime (2, 3, 5, 7, 11); $q=0$, the origin of the cube, is skipped
+   because it maps to $-\infty$. The standard nodes are $\mathbf z_q=\Phi^{-1}(\mathbf u_q)$
+   (`scipy.special.ndtri`), fixed and deterministic. Halton rather than Sobol: no power-of-two
+   sample sizes, and a construction that is a few lines and checked exactly by the tests. Plain
+   Halton points degrade in high dimensions (correlated coordinates for large bases), one reason
+   for the cap at 5.
+3. **Weights.** With a proposal $N(\mathbf m,\mathbf C)$, $\mathbf C=\mathbf L\mathbf L^\top$, the
+   nodes are $\boldsymbol\theta_q=\mathbf m+\mathbf L\mathbf z_q$ and the fixed base log weight is
+   $$b_q=-\log Q+\tfrac12\lVert\mathbf z_q\rVert^2+\log|\mathbf L|
+   =-\log Q-\log\phi(\boldsymbol\theta_q;\mathbf m,\mathbf C)+\text{const},$$
+   so group $g$'s latent weights are
+   $w_{gq}=\operatorname{softmax}_q\big(b_q+\log\phi(\boldsymbol\theta_q;\boldsymbol\mu_g,\Sigma_g)\big)$:
+   importance-reweighted QMC for $N(\boldsymbol\mu_g,\Sigma_g)$. This is the Gauss–Hermite
+   construction of §15.44 with QMC points in place of the product rule, through the same
+   `CompiledProblem.node_log_base`. The weights are positive, so the E-step, the exact latent
+   M-step, EM monotonicity, SQUAREM and Oakes' identity are unchanged, and the Core is not
+   touched. Without a proposal, $\mathbf m=\mathbf 0$ and $\mathbf C=\mathbf I$.
+4. **Two stages (decision).** The importance ratio $\phi(\cdot;\boldsymbol\mu,\Sigma)/\phi(\cdot;
+   \mathbf m,\mathbf C)$ has finite variance only when every eigenvalue of $\mathbf C^{-1}\Sigma$ is
+   below 2. With the standard proposal and equicorrelated factors the largest eigenvalue is
+   $1+(D-1)\rho$: exactly 2 for $\rho=0.5$ in 3-D, 2.5 in 4-D. Measured (3-D, $\rho=0.5$): a
+   single stage on $N(\mathbf 0,\mathbf I)$ nodes is off by $5.3\times10^{-2}$ in the item
+   parameters with 5,000 points and still $3.4\times10^{-2}$ with 20,000. So `fit()` with a qmc
+   quadrature that has no proposal runs EM once on the standard nodes, sets the proposal to the
+   fitted latent mean and covariance (the average over groups), recompiles and runs EM again from
+   the first-stage estimates. Within each stage the nodes are fixed, so each stage is an exact EM
+   for its own discretized likelihood; the reported estimates, SEs, log-likelihood and iteration
+   history are those of the second stage. `FitResult` keeps the moved quadrature, so scoring and
+   JSON (`{"type": "qmc", "sequence": "halton", "n_points": Q, "mean": [...], "cov": [[...]]}`)
+   reuse the same nodes. A user proposal (`mean=`, `cov=`, or `with_proposal()`) skips the first
+   stage. mirt's `QMCEM` instead moves its nodes to $\boldsymbol\mu+\operatorname{chol}(\Sigma)\mathbf z_q$
+   every cycle, which keeps the ratio at 1 but leaves no fixed discretized likelihood for EM to
+   ascend. With several groups whose covariances differ much from their average, accuracy drops
+   for the outlying groups.
+5. **Normal latents for $D\ge4$.** `latent_param_names` goes up to 5 factors ($2D+D(D-1)/2$
+   parameters: 14 for $D=4$, 20 for $D=5$). Positive definiteness is checked by a Cholesky
+   factorization of the correlation matrix (NumPy in the Compile layer; in `mvn_log_weights` a
+   factorization of the stop-gradient matrix decides, and a double `where` substitutes the
+   identity outside the PD set so derivatives stay finite and non-PD candidates return NaN, as for
+   $D=2,3$). The $D=2,3$ code paths are unchanged.
+6. **Features at $D=4,5$.** Fitting with Oakes / Hessian / sandwich SEs, EAP / MAP / ML / WLE
+   scoring, `item_fit()` (S-X2), `m2()`, `local_dependence()`, `link()`, `information_matrix()`,
+   `test_information(direction=)`, `simulate_responses()` and JSON run on the QMC nodes (checked
+   to run on a 4-factor fit; their agreement with references is established for $D\le3$ only).
+   Plausible values raise `SpecificationError` for $D>3$ (their per-pattern lattice grows as
+   $n^D$; the PV grid range now uses the minimum and maximum node, which equals the first and last
+   node on product grids). Features that were unidimensional only still raise.
+7. **Accuracy (measured).** 2PL, 5 items per factor, $N=2{,}000$, `BAEM(tol=1e-8)`, 2 cores;
+   maximum absolute differences in the item parameters (and correlations):
+
+   | Case | Reference | Quadrature | max\|Δ item\| | max\|Δ cor\| | Time |
+   |---|---|---|---|---|---|
+   | 3-D, $\rho=0.5$ | Gauss–Hermite $21^3$ (64 s) | QMC 1,000 | 0.021 | 0.0065 | 32 s |
+   | | | QMC 5,000 | 0.0051 | 0.0012 | 58 s |
+   | | | QMC 5,000, one stage | 0.053 | 0.027 | 41 s |
+   | | | equispaced $15^3$ (default) | 0.0036 | 0.0002 | 36 s |
+   | 4-D, $\rho=0$ | separate 1-D fits (exact factorization) | QMC 1,000 | 0.013 | – | 11 s |
+   | | | QMC 2,000 | 0.015 | – | 15 s |
+   | | | QMC 5,000 | 0.0070 | – | 47 s |
+   | | | QMC 10,000 | 0.0023 | – | 79 s |
+
+   QMC error is not monotone in $Q$ at these sizes. The default of 5,000 points (as mirt's
+   `QMCEM`) is within about $10^{-2}$ of the reference, comparable to the default 3-D product grid.
+8. **Validation status.** Checked against exact identities, a fine product grid and the exact
+   factorized likelihood (`tests/test_quadrature_qmc.py`). **Not yet validated against mirt**:
+   the reference is mirt's `QMCEM` with many points on a 4–5 factor model, generated with the
+   GitHub mirt (VALIDATION.md), and agreement is expected only to QMC error (about $2\times10^{-3}$
+   in the 3-D comparison of §12, item 6). Until that case passes, QMC is not in the README or the
+   user guide and the ROADMAP item stays open.
+9. **Cost.** Each EM iteration is $O(PJKQ)$ as for product grids; 5,000 points cost 1.5× the
+   default 3-D grid per E-step, and the first stage roughly doubles the work. The rank-$D$
+   factorization of the E-step (#152) would make larger $Q$ cheap.
 
 ## References
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.

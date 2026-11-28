@@ -1436,6 +1436,15 @@ English | [日本語](VALIDATION.ja.md)
   (schema 9, `n_clusters`).
 
 ## Validation beyond agreement
+- **Quasi-Monte Carlo quadrature (#164, DESIGN §28)**: mirt's `QMCEM` moves its nodes every cycle,
+  while flexpyirt fixes them, so the two agree only up to QMC error and mirt is not a tight
+  reference. `tests/test_quadrature_qmc.py` checks exact identities (Halton radical inverses;
+  equal weights when the proposal equals the latent normal; general-$D$ MVN log weights against
+  `scipy.stats.multivariate_normal`), a 3-factor 2PL with 5,000 points against Gauss–Hermite $21^3$
+  (measured 5.1e-3 in the item parameters, tolerance 1e-2; correlations 1.2e-3, tolerance 3e-3),
+  and a 4-factor 2PL with independent factors against separate unidimensional fits, whose
+  likelihood is exactly the product (measured 7.0e-3, tolerance 1.5e-2 for slopes, 1e-2 for
+  intercepts). Still to do: a 4–5 factor reference from mirt `QMCEM` with many points (GitHub mirt).
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)
   uses mirt's class parameterization for the shape and standardizes the mixture analytically, so
   on the grid $\theta_q$ it is exactly mirt's `multipleGroup(dat, 1, itemtype = ..., dentype =

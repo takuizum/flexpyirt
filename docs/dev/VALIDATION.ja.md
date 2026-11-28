@@ -1273,6 +1273,12 @@
   エラー、summary、JSON（スキーマ 9、`n_clusters`）。
 
 ## 照合以外の検証
+- **準モンテカルロ求積（#164、DESIGN §28）**: mirt の `QMCEM` は毎サイクル節点を動かし、flexpyirt は固定するので、両者の
+  一致は QMC の誤差までで、mirt は厳しい参照値にならない。`tests/test_quadrature_qmc.py` は、厳密な恒等式（Halton の基数逆数、
+  提案分布が潜在正規分布に等しいときの等しい重み、一般の $D$ の MVN 対数重みと `scipy.stats.multivariate_normal` の一致）、
+  5,000 点の 3 因子 2PL と Gauss–Hermite $21^3$ の一致（実測で項目パラメタ 5.1e-3、許容 1e-2。相関 1.2e-3、許容 3e-3）、独立な
+  因子の 4 因子 2PL と、尤度がちょうど積になる 1 次元の個別の当てはめとの一致（実測 7.0e-3、傾きの許容 1.5e-2、切片 1e-2）を
+  検査する。残り: 点数を多くした mirt `QMCEM` による 4〜5 因子の参照値（GitHub 版 mirt）。
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **M-step の非拘束尺度と `LogitNormalPrior`（V45、#15）**: DESIGN §15.47–§15.48。
   1. *両方の M-step 尺度での内点解*: V3・V4・V5・V9（`tests/test_mirt_m2.py`: 対数尤度、項目と潜在分布のパラメタ。
