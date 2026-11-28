@@ -13,6 +13,7 @@ import pandas as pd
 
 from flexpyirt import _core, _robust_se
 from flexpyirt._compile import LATENT_ITEM, Prepared, compile_problem, meat_patterns, prepare
+from flexpyirt._core import _expand
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import (
     ConvergenceWarning,
@@ -197,14 +198,28 @@ def fit(
     problem = compiled.problem
 
     runner = _squarem if method.squarem else _em
-    out = runner(
-        problem,
-        jnp.asarray(compiled.eta0),
-        tol=method.tol,
-        max_iter=method.max_iter,
-        n_newton=method.m_step_newton_steps,
-        unconstrained=method.m_step_scale == "unconstrained",
-    )
+
+    def run_em(prob: _core.CompiledProblem, start: Any) -> Any:
+        return runner(
+            prob,
+            jnp.asarray(start),
+            tol=method.tol,
+            max_iter=method.max_iter,
+            n_newton=method.m_step_newton_steps,
+            unconstrained=method.m_step_scale == "unconstrained",
+        )
+
+    out = run_em(problem, compiled.eta0)
+    if quadrature.kind == "qmc" and quadrature.proposal_mean is None:
+        # Second stage (DESIGN.md §28): move the fixed nodes to the first stage's latent
+        # distribution so the reweighting stays close to 1, and refit from its estimates.
+        mean, cov = _qmc_proposal(problem, out.eta)
+        quadrature = quadrature.with_proposal(mean, cov)
+        compiled = compile_problem(
+            spec, prep.y, prep.group, final_table, quadrature, weights=prep.weights
+        )
+        problem = compiled.problem
+        out = run_em(problem, out.eta)
     eta = np.asarray(out.eta)
     converged = bool(out.converged)
     n_iter = int(out.n_iter)
@@ -416,6 +431,27 @@ def _warn_nominal_degenerate(
             HeywoodWarning,
             stacklevel=4,
         )
+
+
+def _qmc_proposal(prob: _core.CompiledProblem, eta: Any) -> tuple[np.ndarray, np.ndarray]:
+    r"""Return the mean and covariance of the fitted MVN latent, averaged over groups (§28).
+
+    From the natural-scale ``(mean_1..D, var_1..D, cor_ij)`` of each group,
+    :math:`\Sigma_{ii}=v_i` and :math:`\Sigma_{ij}=\rho_{ij}\sqrt{v_iv_j}`; with several groups the
+    proposal is the average of the group means and covariances, which is positive definite.
+    """
+    n_factors = int(prob.nodes.shape[1])
+    lat = np.asarray(_expand(eta, prob.latent.fixed_values, prob.latent.free_index))  # (G, L)
+    means = lat[:, :n_factors]
+    sds = np.sqrt(lat[:, n_factors : 2 * n_factors])
+    covs = np.empty((lat.shape[0], n_factors, n_factors))
+    pairs = [(i, j) for i in range(n_factors) for j in range(i + 1, n_factors)]
+    for g in range(lat.shape[0]):
+        corr = np.eye(n_factors)
+        for k, (i, j) in enumerate(pairs):
+            corr[i, j] = corr[j, i] = lat[g, 2 * n_factors + k]
+        covs[g] = corr * np.outer(sds[g], sds[g])
+    return means.mean(axis=0), covs.mean(axis=0)
 
 
 def _warn_mixture_degenerate(params: pd.DataFrame, spec: Model, quadrature: Quadrature) -> None:

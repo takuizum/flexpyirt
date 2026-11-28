@@ -65,7 +65,7 @@ from flexpyirt.priors import (
     Prior,
     encode_prior,
 )
-from flexpyirt.quadrature import Quadrature
+from flexpyirt.quadrature import MAX_QMC_FACTORS, Quadrature
 
 if TYPE_CHECKING:
     from jax import Array
@@ -1760,6 +1760,23 @@ def compile_problem(
             )
         )
 
+    if quad.kind == "qmc":
+        if model.is_reduced:
+            raise SpecificationError(
+                "Quasi-Monte Carlo quadrature is not available for bifactor and two-tier models "
+                "(their E-step uses low-dimensional product grids); use Quadrature.equispaced() or "
+                "Quadrature.gauss_hermite()."
+            )
+        if model.n_factors < 2:
+            raise SpecificationError(
+                "Quasi-Monte Carlo quadrature is for multidimensional models (with_factors()); "
+                "use Quadrature.equispaced() or Quadrature.gauss_hermite() for one factor."
+            )
+        if model.n_factors > MAX_QMC_FACTORS:
+            raise SpecificationError(
+                f"Quasi-Monte Carlo quadrature supports up to {MAX_QMC_FACTORS} factors, "
+                f"got {model.n_factors}."
+            )
     if model.is_reduced:
         reduction, nodes, node_log_base = _bifactor_block(model, quad, families)
     else:

@@ -43,7 +43,7 @@ from flexpyirt.latent import (
     mixture_param_names,
 )
 from flexpyirt.method import BAEM
-from flexpyirt.quadrature import Quadrature
+from flexpyirt.quadrature import MAX_FACTORS, Quadrature
 
 if TYPE_CHECKING:
     from flexpyirt._dif import DIFScheme, DIFTest, PAdjust
@@ -689,6 +689,12 @@ class FitResult:
                 "distributions only."
             )
         if method == "PV":
+            if self._model.n_factors > MAX_FACTORS and not self._model.is_reduced:
+                raise SpecificationError(
+                    f"method='PV' supports up to {MAX_FACTORS} factors, got "
+                    f"{self._model.n_factors} (its per-pattern lattice grows as n**D; "
+                    "DESIGN.md §28)."
+                )
             if key is None:
                 raise SpecificationError(
                     "method='PV' requires an explicit JAX PRNG key (e.g. key=jax.random.key(0))."
@@ -1844,6 +1850,8 @@ class FitResult:
                 f"{quad.n_points}^{dim} = {quad.n_points**dim} {kind} nodes per specific factor "
                 f"on [{quad.lower:g}, {quad.upper:g}]^{dim} ({label} dimension reduction)"
             )
+        if quad.kind == "qmc":
+            return f"{quad.n_points} quasi-Monte Carlo (Halton) nodes in {d} dimensions"
         if d == 1:
             return f"{quad.n_points} equispaced nodes on [{quad.lower:g}, {quad.upper:g}]"
         total = quad.n_points**d

@@ -745,8 +745,8 @@ def _plausible_values_multidim(
     """
     n_factors = int(prob.nodes.shape[1])
     n_pts = _PV_LATTICE_POINTS[n_factors]
-    lo = prob.nodes[0, 0]
-    hi = prob.nodes[-1, 0]
+    lo = jnp.min(prob.nodes)  # = nodes[0, 0] on product grids; QMC nodes are not sorted
+    hi = jnp.max(prob.nodes)
     m_eap, sd_eap = eap(prob, eta)  # (P, D)
     a = jnp.clip(m_eap - _PV_SPAN_SD * sd_eap, lo, hi)
     b = jnp.clip(m_eap + _PV_SPAN_SD * sd_eap, lo, hi)
