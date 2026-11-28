@@ -1276,9 +1276,6 @@ def _squarem_eh(
     two = jnp.asarray(2, dtype=jnp.int32)
     three = jnp.asarray(3, dtype=jnp.int32)
 
-    def _eval_lp_pair(eta: Array, eh_w: Array) -> Array:
-        return log_posterior(_with_eh_weights(prob, eh_w), eta)
-
     def _em_once(eta: Array, eh_w: Array) -> tuple[Array, Array, Array, Array]:
         prob_t = _with_eh_weights(prob, eh_w)
         counts, ll = e_step(prob_t, eta)
@@ -1286,20 +1283,11 @@ def _squarem_eh(
         new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton, unconstrained)
         return new_eta, new_w, ll, lp
 
-    def _is_acceptable(cand: Array, lp_ref: Array) -> Array:
+    def _in_bounds(cand: Array) -> Array:
         eta_c = cand[:n_free]
         z_c = cand[n_free:]
         items_ok = jnp.all(jnp.isfinite(eta_c) & (eta_c > lower) & (eta_c < upper))
-        z_ok = jnp.all(jnp.isfinite(z_c)) & jnp.any(z_c != 0.0)
-        in_bounds = items_ok & z_ok
-
-        def _eval_lp(c: Array) -> Array:
-            e_c, w_c = _eh_unpack(prob, c, n_free, n_groups, n_nodes)
-            lp_c = _eval_lp_pair(e_c, w_c)
-            return jnp.isfinite(lp_c) & (lp_c >= lp_ref)
-
-        accepted: Array = jax.lax.cond(in_bounds, _eval_lp, lambda _: jnp.asarray(False), cand)
-        return accepted
+        return items_ok & jnp.all(jnp.isfinite(z_c)) & jnp.any(z_c != 0.0)
 
     def cond(
         state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
@@ -1314,7 +1302,10 @@ def _squarem_eh(
         v0 = _eh_pack(eta, eh_w)
         eta1, w1, ll0, lp0 = _em_once(eta, eh_w)
         v1 = _eh_pack(eta1, w1)
-        eta2, w2, _, _ = _em_once(eta1, w1)
+        prob_1 = _with_eh_weights(prob, w1)
+        counts1, ll1 = e_step(prob_1, eta1)
+        lp1 = ll1 + log_prior(prob_1, eta1)
+        eta2, w2 = _m_step_eh(prob_1, eta1, counts1, n_newton, unconstrained)
         v2 = _eh_pack(eta2, w2)
 
         r = v1 - v0
@@ -1326,46 +1317,52 @@ def _squarem_eh(
         raw_alpha = jnp.where(has_v, -r_norm / jnp.where(has_v, v_norm, 1.0), -1.0)
         alpha = jnp.where(jnp.isfinite(raw_alpha), jnp.minimum(raw_alpha, -1.0), -1.0)
 
-        def _extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            lp2 = _eval_lp_pair(eta2, w2)
-            lp_ref = jnp.maximum(lp2, lp0)
+        def _trial(cand: Array, delta: Array) -> tuple[Array, Array, Array, ExpectedCounts]:
+            """E-step at a candidate (``delta == 0`` is the EM image ``v2``, always accepted)."""
+            e_c, w_c = _eh_unpack(prob, cand, n_free, n_groups, n_nodes)
+            ok_bounds = _in_bounds(cand) & jnp.all(jnp.isfinite(w_c))
 
-            def backtrack_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
-                k, _, ok, _ = bt
-                return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
+            def _evaluate(ew: tuple[Array, Array]) -> tuple[Array, ExpectedCounts]:
+                prob_c = _with_eh_weights(prob, ew[1])
+                counts_c, ll_c = e_step(prob_c, ew[0])
+                lp_c = ll_c + log_prior(prob_c, ew[0])
+                return jnp.isfinite(lp_c) & (lp_c >= lp1), counts_c
 
-            def backtrack_body(
-                bt: tuple[Array, Array, Array, Array],
-            ) -> tuple[Array, Array, Array, Array]:
-                k, delta, _, _ = bt
-                cand = v2 - 2.0 * delta * s + (delta * delta) * v
-                ok = _is_acceptable(cand, lp_ref)
-                next_delta = jnp.where(ok, delta, 0.5 * delta)
-                next_k = jnp.where(ok, k, k + one)
-                return next_k, next_delta, ok, cand
+            def _out_of_bounds(_ew: tuple[Array, Array]) -> tuple[Array, ExpectedCounts]:
+                return jnp.asarray(False), counts1
 
-            init_bt = (zero, alpha + 1.0, jnp.asarray(False), v2)
-            k_out, _, ok, cand = jax.lax.while_loop(backtrack_cond, backtrack_body, init_bt)
-            fired = k_out > zero
-            v_p = jnp.where(ok, cand, v2)
-            return v_p, ok, fired
+            ok, counts_c = jax.lax.cond(ok_bounds, _evaluate, _out_of_bounds, (e_c, w_c))
+            return (delta == 0.0) | ok, e_c, w_c, counts_c
 
-        def _no_extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            return v2, jnp.asarray(True), jnp.asarray(False)
+        def backtrack_cond(
+            bt: tuple[Array, Array, Array, Array, Array, ExpectedCounts],
+        ) -> Array:
+            k, _, ok, _, _, _ = bt
+            return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
 
-        v_prime, do_stabilize, fired = jax.lax.cond(
-            alpha < -1.0, _extrapolate, _no_extrapolate, None
+        def backtrack_body(
+            bt: tuple[Array, Array, Array, Array, Array, ExpectedCounts],
+        ) -> tuple[Array, Array, Array, Array, Array, ExpectedCounts]:
+            k, delta, _, _, _, _ = bt
+            cand = v2 - 2.0 * delta * s + (delta * delta) * v
+            ok, e_c, w_c, counts_c = _trial(cand, delta)
+            next_delta = jnp.where(ok, delta, 0.5 * delta)
+            next_k = jnp.where(ok, k, k + one)
+            return next_k, next_delta, ok, e_c, w_c, counts_c
+
+        init_bt = (zero, alpha + 1.0, jnp.asarray(False), eta2, w2, counts1)
+        k_out, _, accepted, eta_p, w_p, counts_p = jax.lax.while_loop(
+            backtrack_cond, backtrack_body, init_bt
         )
-
-        def _stabilize(vp: Array) -> tuple[Array, Array, Array]:
-            e_p, w_p = _eh_unpack(prob, vp, n_free, n_groups, n_nodes)
-            e_n, w_n, _, _ = _em_once(e_p, w_p)
-            return e_n, w_n, three
-
-        def _fallback(_unused: Array) -> tuple[Array, Array, Array]:
-            return eta2, w2, two
-
-        new_eta, new_w, evals_added = jax.lax.cond(do_stabilize, _stabilize, _fallback, v_prime)
+        fired = k_out > zero
+        eta_p = jnp.where(accepted, eta_p, eta2)
+        w_p = jnp.where(accepted, w_p, w2)
+        stab_eta, stab_w = _m_step_eh(
+            _with_eh_weights(prob, w_p), eta_p, counts_p, n_newton, unconstrained
+        )
+        new_eta = jnp.where(accepted, stab_eta, eta2)
+        new_w = jnp.where(accepted, stab_w, w2)
+        evals_added = jnp.where(accepted, three, two)
         change = jnp.maximum(
             jnp.max(jnp.abs(new_eta - eta), initial=0.0),
             jnp.max(jnp.abs(new_w - eh_w), initial=0.0),
@@ -1447,11 +1444,13 @@ def squarem(
     (DESIGN.md §15.36).
     Monotonicity and feasibility safeguard: if :math:`\theta'(\alpha)` leaves the strict parameter
     bounds ``(lower, upper)`` or gives a non-finite or lower log posterior than
-    :math:`\max(\ell_{\mathrm{post}}(\theta_2),\ell_{\mathrm{post}}(\theta_0))`, :math:`\alpha` is
+    :math:`\ell_{\mathrm{post}}(\theta_1)` (known from the E-step at :math:`\theta_1`; it is
+    :math:`\ge\ell_{\mathrm{post}}(\theta_0)` because EM is monotone), :math:`\alpha` is
     stepped back towards :math:`-1` via :math:`\alpha\leftarrow(\alpha-1)/2` (i.e.
-    :math:`\delta\leftarrow\delta/2`) up to ``_SQUAREM_MAX_BACKTRACK`` times. An accepted
-    :math:`\theta'` is followed by one stabilizing EM step :math:`\theta_{\text{new}}=F(\theta')`
-    (3 EM map evaluations); if no backtracked candidate is acceptable,
+    :math:`\delta\leftarrow\delta/2`) up to ``_SQUAREM_MAX_BACKTRACK`` times. The log posterior of
+    a candidate comes from a full E-step, whose expected counts are reused by the stabilizing EM
+    step :math:`\theta_{\text{new}}=F(\theta')` of an accepted candidate (3 EM map evaluations;
+    DESIGN.md §15.12, #155); if no backtracked candidate is acceptable,
     :math:`\theta_{\text{new}}=\theta_2` is used directly (2 EM map evaluations). Runs entirely
     inside ``lax.while_loop``.
     """
@@ -1473,16 +1472,6 @@ def squarem(
     two = jnp.asarray(2, dtype=jnp.int32)
     three = jnp.asarray(3, dtype=jnp.int32)
 
-    def _is_acceptable(cand: Array, lp_ref: Array) -> Array:
-        in_bounds = jnp.all(jnp.isfinite(cand) & (cand > lower) & (cand < upper))
-
-        def _eval_lp(c: Array) -> Array:
-            lp_c = log_posterior(prob, c)
-            return jnp.isfinite(lp_c) & (lp_c >= lp_ref)
-
-        accepted: Array = jax.lax.cond(in_bounds, _eval_lp, lambda _: jnp.asarray(False), cand)
-        return accepted
-
     def cond(
         state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
     ) -> Array:
@@ -1496,7 +1485,8 @@ def squarem(
         counts0, ll0 = e_step(prob, eta)
         lp0 = ll0 + log_prior(prob, eta)
         theta1 = m_step(prob, eta, counts0, n_newton, unconstrained)
-        counts1, _ = e_step(prob, theta1)
+        counts1, ll1 = e_step(prob, theta1)
+        lp1 = ll1 + log_prior(prob, theta1)
         theta2 = m_step(prob, theta1, counts1, n_newton, unconstrained)
 
         r = theta1 - eta
@@ -1508,45 +1498,50 @@ def squarem(
         raw_alpha = jnp.where(has_v, -r_norm / jnp.where(has_v, v_norm, 1.0), -1.0)
         alpha = jnp.where(jnp.isfinite(raw_alpha), jnp.minimum(raw_alpha, -1.0), -1.0)
 
-        def _extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            lp2 = log_posterior(prob, theta2)
-            lp_ref = jnp.maximum(lp2, lp0)
+        def _trial(cand: Array, delta: Array) -> tuple[Array, ExpectedCounts]:
+            r"""E-step at a candidate; its log posterior decides acceptance (§15.12).
 
-            def backtrack_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
-                k, _, ok, _ = bt
-                return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
+            ``delta == 0`` is :math:`\theta_2` itself, an EM image of :math:`\theta_1`, which is
+            accepted without the comparison (so rounding cannot reject it).
+            """
+            in_bounds = jnp.all(jnp.isfinite(cand) & (cand > lower) & (cand < upper))
 
-            def backtrack_body(
-                bt: tuple[Array, Array, Array, Array],
-            ) -> tuple[Array, Array, Array, Array]:
-                k, delta, _, _ = bt
-                cand = theta2 - 2.0 * delta * s + (delta * delta) * v
-                ok = _is_acceptable(cand, lp_ref)
-                next_delta = jnp.where(ok, delta, 0.5 * delta)
-                next_k = jnp.where(ok, k, k + one)
-                return next_k, next_delta, ok, cand
+            def _evaluate(c: Array) -> tuple[Array, ExpectedCounts]:
+                counts_c, ll_c = e_step(prob, c)
+                lp_c = ll_c + log_prior(prob, c)
+                return jnp.isfinite(lp_c) & (lp_c >= lp1), counts_c
 
-            init_bt = (zero, alpha + 1.0, jnp.asarray(False), theta2)
-            k_out, _, ok, cand = jax.lax.while_loop(backtrack_cond, backtrack_body, init_bt)
-            fired = k_out > zero
-            theta_p = jnp.where(ok, cand, theta2)
-            return theta_p, ok, fired
+            def _out_of_bounds(_c: Array) -> tuple[Array, ExpectedCounts]:
+                return jnp.asarray(False), counts1
 
-        def _no_extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            return theta2, jnp.asarray(True), jnp.asarray(False)
+            ok, counts_c = jax.lax.cond(in_bounds, _evaluate, _out_of_bounds, cand)
+            return (delta == 0.0) | ok, counts_c
 
-        theta_prime, do_stabilize, fired = jax.lax.cond(
-            alpha < -1.0, _extrapolate, _no_extrapolate, None
+        def backtrack_cond(bt: tuple[Array, Array, Array, Array, ExpectedCounts]) -> Array:
+            k, _, ok, _, _ = bt
+            return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
+
+        def backtrack_body(
+            bt: tuple[Array, Array, Array, Array, ExpectedCounts],
+        ) -> tuple[Array, Array, Array, Array, ExpectedCounts]:
+            k, delta, _, _, _ = bt
+            cand = theta2 - 2.0 * delta * s + (delta * delta) * v
+            ok, counts_c = _trial(cand, delta)
+            next_delta = jnp.where(ok, delta, 0.5 * delta)
+            next_k = jnp.where(ok, k, k + one)
+            return next_k, next_delta, ok, cand, counts_c
+
+        init_bt = (zero, alpha + 1.0, jnp.asarray(False), theta2, counts1)
+        k_out, _, accepted, theta_prime, counts_p = jax.lax.while_loop(
+            backtrack_cond, backtrack_body, init_bt
         )
-
-        def _stabilize(t: Array) -> tuple[Array, Array]:
-            c, _ = e_step(prob, t)
-            return m_step(prob, t, c, n_newton, unconstrained), three
-
-        def _fallback(_unused: Array) -> tuple[Array, Array]:
-            return theta2, two
-
-        new, evals_added = jax.lax.cond(do_stabilize, _stabilize, _fallback, theta_prime)
+        fired = k_out > zero
+        # Stabilizing EM step F(theta') from the counts of the accepting E-step; if every halving
+        # was rejected, theta_2 is used directly.
+        theta_prime = jnp.where(accepted, theta_prime, theta2)
+        stabilized = m_step(prob, theta_prime, counts_p, n_newton, unconstrained)
+        new = jnp.where(accepted, stabilized, theta2)
+        evals_added = jnp.where(accepted, three, two)
         change = jnp.max(jnp.abs(new - eta), initial=0.0)
         next_evals = n_evals + evals_added
         next_safe = n_safe + fired.astype(jnp.int32)
