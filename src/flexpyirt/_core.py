@@ -19,7 +19,7 @@ import numpy as np
 from jax import Array
 
 from flexpyirt._newton import newton_ascent
-from flexpyirt.items import ItemKernel
+from flexpyirt.items import DichotomousKernel, GPCMKernel, ItemKernel
 from flexpyirt.latent import (
     davidian_log_weights,
     eh_constrained_weights,
@@ -73,9 +73,11 @@ class FamilyBlock:
     kernel : ItemKernel
         Static log-probability kernel.
     complete : bool
-        Static: ``True`` only if no response pattern has a missing response on any item of the
-        family. Lets :func:`information_oakes` drop the category-0 indicator columns
-        (DESIGN.md §15.20). Code that replaces ``y`` must reset it (:func:`with_responses`).
+        Static: ``True`` only if no real (nonzero-count) pattern row has a missing response to
+        an item of the family. The E-step then drops category 0 from the pattern contraction
+        (DESIGN.md §4.2), and :func:`information_oakes` drops the category-0 indicator columns
+        (§15.20). ``False`` is always safe; code that replaces ``y`` after compilation resets it
+        with :func:`with_responses`.
     """
 
     columns: Array
@@ -355,6 +357,161 @@ def _one_hots(prob: CompiledProblem) -> list[Array]:
     ]
 
 
+def with_responses(prob: CompiledProblem, **changes: Any) -> CompiledProblem:
+    """Return ``prob`` with response arrays replaced (``y``, ``group``, ``counts``, ``blocks``).
+
+    Every family's static ``complete`` flag is reset to ``False``; with no ``changes`` this gives
+    the same problem in its general (not complete) form.
+
+    The ``complete`` flags were computed from the compiled responses; new responses may have
+    missing values, so the E-step and Oakes' cross term fall back to the full one-hot form
+    (DESIGN.md §4.2, §15.20). Use this instead of ``replace(prob, y=...)``.
+    """
+    families = tuple(replace(fam, complete=False) for fam in prob.families)
+    return replace(prob, families=families, **changes)
+
+
+def _encode(fam: FamilyBlock, y_f: Array, dtype: Any) -> Array:
+    r"""Responses of one family as the E-step's contraction operand (DESIGN.md §4.2).
+
+    The one-hot :math:`\mathbf 1[y_{pj}=k]`, ``(..., J_f, K_f)``; for a complete family the
+    categories :math:`k\ge 1` only, ``(..., J_f, K_f - 1)`` (category 0 is implied).
+    """
+    oh = jax.nn.one_hot(y_f, fam.kernel.n_categories, dtype=dtype)
+    return oh[..., 1:] if fam.complete else oh
+
+
+class _ItemTables(NamedTuple):
+    r"""Item tables of the pattern contraction at one ``eta`` (DESIGN.md §4.2).
+
+    ``log_probs``: per family, ``(G, J_f, Q, K_f)`` :math:`\log P_{gjqk}`; ``offset``: ``(G, Q)``
+    :math:`\sum_j\log P_{gj0q}` over the items of complete families; ``coefficients``: per
+    family, ``(G, J_f, K_f - 1, D + 1)`` coefficients of the rank-``D`` split, or ``None``.
+    """
+
+    log_probs: list[Array]
+    offset: Array
+    coefficients: list[Array | None]
+
+
+_RANK_D_KERNELS: tuple[type, ...] = (DichotomousKernel, GPCMKernel)
+"""Kernels whose category contrasts are linear in the node (DESIGN.md §4.2)."""
+
+
+def _is_rank_d(prob: CompiledProblem, fam: FamilyBlock) -> bool:
+    """Whether family ``fam`` uses the rank-``D`` split (static; exact built-in types only)."""
+    return (
+        fam.complete
+        and prob.reduction is None
+        and type(fam.kernel) in _RANK_D_KERNELS
+        and fam.kernel.n_factors == prob.nodes.shape[1]
+    )
+
+
+def _rank_d_coefficients(fam: FamilyBlock, xi: Array) -> Array:
+    r"""``(..., J_f, K_f - 1, D + 1)`` coefficients :math:`(k\,\mathbf a_j, d_{jk})`.
+
+    For the 2PL (Birnbaum, 1968) and the GPCM (Muraki, 1992) in slope–intercept form,
+
+    .. math::
+        \log P_{jk}(\boldsymbol\theta)-\log P_{j0}(\boldsymbol\theta)
+        =k\,\mathbf a_j^\top\boldsymbol\theta+d_{jk},\qquad k=1..K-1
+
+    (for the 2PL :math:`\log\sigma(z)-\log\sigma(-z)=z`), so the contrast is the coefficients
+    times :math:`(\boldsymbol\theta_q, 1)`. ``xi`` is ``(..., J_f, P_f)`` with the slopes first.
+    """
+    n_factors = fam.kernel.n_factors
+    k = jnp.arange(1, fam.kernel.n_categories, dtype=xi.dtype)
+    slopes = k[:, None] * xi[..., None, :n_factors]
+    return jnp.concatenate([slopes, xi[..., n_factors:, None]], axis=-1)
+
+
+def _item_tables(prob: CompiledProblem, eta: Array) -> _ItemTables:
+    """Evaluate the :class:`_ItemTables` of every family at ``eta``."""
+    log_probs = _item_log_probs(prob, eta)
+    offset = jnp.zeros((prob.n_groups, prob.nodes.shape[0]), dtype=prob.nodes.dtype)
+    coefficients: list[Array | None] = []
+    for fam, logp in zip(prob.families, log_probs, strict=True):
+        if fam.complete:
+            offset = offset + jnp.sum(logp[..., 0], axis=1)
+        if _is_rank_d(prob, fam):
+            xi = _expand(eta, fam.fixed_values, fam.free_index)
+            coefficients.append(_rank_d_coefficients(fam, xi))
+        else:
+            coefficients.append(None)
+    return _ItemTables(log_probs, offset, coefficients)
+
+
+def _item_part(
+    prob: CompiledProblem, tables: _ItemTables, y: Array, g: Array | None
+) -> tuple[Array, list[Array]]:
+    r"""Item part of the log joint of response rows ``y`` and their per-family encodings.
+
+    ``(P, G, Q)`` under every group when ``g`` is ``None``, else ``(P, Q)`` under group ``g``:
+
+    .. math::
+        \sum_j\log P_{jy_{pj}}(\theta_q)
+        =\sum_{j\in\text{complete}}\log P_{j0}(\theta_q)+\sum_j\sum_k e_{pjk}\,C_{jkq}
+
+    with :math:`e` the encoding of :func:`_encode` and :math:`C` the log-probabilities of an
+    incomplete family or the contrasts :math:`\log P_{jk}-\log P_{j0}` (:math:`k\ge1`) of a
+    complete one, which every item observes (DESIGN.md §4.2). For a rank-``D`` family
+    (:func:`_rank_d_coefficients` :math:`B`),
+    :math:`\sum_{jk}e_{pjk}C_{jkq}=\sum_{jk}e_{pjk}B_{jk}(\boldsymbol\theta_q,1)^\top`
+    costs :math:`O(J_fK_fD)` per pattern plus one :math:`O(DQ)` product for all of them.
+    """
+    dtype = tables.offset.dtype
+    grp = "g" if g is None else ""
+
+    def at_group(a: Array) -> Array:
+        return a if g is None else a[g]
+
+    out = at_group(tables.offset)
+    linear: Array | None = None
+    encodings = []
+    for fam, logp, coef in zip(prob.families, tables.log_probs, tables.coefficients, strict=True):
+        enc = _encode(fam, y[:, fam.columns], dtype)
+        encodings.append(enc)
+        if coef is not None:
+            term = jnp.einsum(f"pjk,{grp}jkd->p{grp}d", enc, at_group(coef))
+            linear = term if linear is None else linear + term
+        else:
+            lp = at_group(logp)
+            table = lp[..., 1:] - lp[..., :1] if fam.complete else lp
+            out = out + jnp.einsum(f"pjk,{grp}jqk->p{grp}q", enc, table)
+    if linear is not None:
+        nodes = prob.nodes
+        design = jnp.concatenate([nodes, jnp.ones((nodes.shape[0], 1), dtype=dtype)], axis=1)
+        out = out + jnp.einsum(f"p{grp}d,qd->p{grp}q", linear, design)
+    return out, encodings
+
+
+def _softmax_lse(log_joint: Array) -> tuple[Array, Array]:
+    r"""Return the posterior :math:`h_{pq}=\mathrm{softmax}_q\lambda_{pq}` and its log normalizer.
+
+    One exponential per entry: :math:`e_{pq}=\exp(\lambda_{pq}-m_p)` with
+    :math:`m_p=\max_q\lambda_{pq}` gives both :math:`h=e/\sum_qe` and
+    :math:`m_p+\log\sum_qe_{pq}` (DESIGN.md §4.2).
+    """
+    peak = jax.lax.stop_gradient(jnp.max(log_joint, axis=1, keepdims=True))
+    peak = jnp.where(jnp.isfinite(peak), peak, 0.0)
+    scaled = jnp.exp(log_joint - peak)
+    total = jnp.sum(scaled, axis=1, keepdims=True)
+    return scaled / total, (peak + jnp.log(total))[:, 0]
+
+
+def _with_reference(fam: FamilyBlock, r_enc: Array, n: Array) -> Array:
+    r"""Return the ``(..., J_f, K_f, Q)`` expected counts from those of the encoded categories.
+
+    For a complete family :math:`\bar r_{j0q}=\bar n_q-\sum_{k\ge1}\bar r_{jkq}`, with
+    ``n`` the ``(..., Q)`` expected counts at the nodes (DESIGN.md §4.2).
+    """
+    if not fam.complete:
+        return r_enc
+    r0 = n[..., None, :] - jnp.sum(r_enc, axis=-2)
+    return jnp.concatenate([r0[..., None, :], r_enc], axis=-2)
+
+
 LatentKind = tuple[int, int]
 """Static ``(davidian_degree, mixture_components)`` of a parametric latent block."""
 
@@ -484,10 +641,9 @@ def _log_joint(prob: CompiledProblem, eta: Array) -> Array:
         return _bifactor_parts(prob, eta)[0]
     if prob.blocks is not None:
         return _blocked_log_joint(prob, eta)
-    n_pat, n_nodes = prob.y.shape[0], prob.nodes.shape[0]
-    ell = jnp.zeros((n_pat, prob.n_groups, n_nodes), dtype=prob.nodes.dtype)
-    for oh, logp in zip(_one_hots(prob), _item_log_probs(prob, eta), strict=True):
-        ell = ell + jnp.einsum("pjk,gjqk->pgq", oh, logp)
+    ell, _ = _item_part(prob, _item_tables(prob, eta), prob.y, None)
+    if prob.n_groups == 1:
+        return ell[:, 0, :] + _latent_log_weights(prob, eta)[0]
     own = jnp.take_along_axis(ell, prob.group[:, None, None], axis=1)[:, 0, :]
     return own + _latent_log_weights(prob, eta)[prob.group]
 
@@ -505,22 +661,19 @@ def _padded_rows(prob: CompiledProblem) -> tuple[Array, Array]:
 
 def _block_log_joint(
     prob: CompiledProblem,
-    log_probs: list[Array],
+    tables: _ItemTables,
     log_w: Array,
     y_block: Array,
     g: Array,
 ) -> tuple[Array, list[Array]]:
-    r"""``(B, Q)`` log joint of one single-group block and its per-family one-hots (§26).
+    r"""``(B, Q)`` log joint of one single-group block and its per-family encodings (§26).
 
     .. math:: \lambda_{pq}=\log w_{gq}+\sum_f\sum_{j,k}\mathbf 1[y_{pj}=k]\log P^{(g)}_{jkq}
+
+    evaluated by :func:`_item_part` (§4.2).
     """
-    out = jnp.broadcast_to(log_w[g], (y_block.shape[0], log_w.shape[1]))
-    one_hots = []
-    for fam, lp in zip(prob.families, log_probs, strict=True):
-        oh = jax.nn.one_hot(y_block[:, fam.columns], fam.kernel.n_categories, dtype=log_w.dtype)
-        out = out + jnp.einsum("pjk,jqk->pq", oh, lp[g])
-        one_hots.append(oh)
-    return out, one_hots
+    item, encodings = _item_part(prob, tables, y_block, g)
+    return item + log_w[g], encodings
 
 
 def _unblock(prob: CompiledProblem, per_block: Array) -> Array:
@@ -543,13 +696,13 @@ def _blocked_log_joint(prob: CompiledProblem, eta: Array) -> Array:
     """
     blk = prob.blocks
     assert blk is not None
-    log_probs = _item_log_probs(prob, eta)
+    tables = _item_tables(prob, eta)
     log_w = _latent_log_weights(prob, eta)
     y_pad, _ = _padded_rows(prob)
 
     def one(xs: tuple[Array, Array]) -> Array:
         rows, g = xs
-        return _block_log_joint(prob, log_probs, log_w, y_pad[rows], g)[0]
+        return _block_log_joint(prob, tables, log_w, y_pad[rows], g)[0]
 
     batch = max(1, _BLOCK_MAP_ROWS // blk.rows.shape[1])
     per_block = jax.lax.map(one, (blk.rows, blk.group), batch_size=batch)
@@ -649,16 +802,22 @@ def _e_step_details(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, 
         return _bifactor_e_step(prob, eta)
     if prob.blocks is not None:
         return _blocked_e_step(prob, eta)
-    log_joint = _log_joint(prob, eta)
-    lse = jax.scipy.special.logsumexp(log_joint, axis=1, keepdims=True)
-    h = jnp.exp(log_joint - lse)  # softmax_q(log_joint), (P, Q)
+    h, lse = _softmax_lse(_log_joint(prob, eta))  # softmax_q(log_joint), (P, Q)
     weighted = prob.counts[:, None] * h  # c_p h_pq, (P, Q)
-    group_one_hot = jax.nn.one_hot(prob.group, prob.n_groups, dtype=weighted.dtype)
-    n_bar = jnp.einsum("pg,pq->gq", group_one_hot, weighted)
+    dtype = weighted.dtype
+    encodings = [_encode(fam, prob.y[:, fam.columns], dtype) for fam in prob.families]
+    if prob.n_groups == 1:
+        # One group: a plain (J_f K_f, P) x (P, Q) product, without the group one-hot.
+        n_bar = jnp.sum(weighted, axis=0)[None]
+        r_enc = [jnp.einsum("pjk,pq->jkq", enc, weighted)[None] for enc in encodings]
+    else:
+        group_one_hot = jax.nn.one_hot(prob.group, prob.n_groups, dtype=dtype)
+        n_bar = jnp.einsum("pg,pq->gq", group_one_hot, weighted)
+        r_enc = [jnp.einsum("pg,pjk,pq->gjkq", group_one_hot, enc, weighted) for enc in encodings]
     r_bar = tuple(
-        jnp.einsum("pg,pjk,pq->gjkq", group_one_hot, oh, weighted) for oh in _one_hots(prob)
+        _with_reference(fam, r, n_bar) for fam, r in zip(prob.families, r_enc, strict=True)
     )
-    loglik = jnp.sum(prob.counts * lse[:, 0])
+    loglik = jnp.sum(prob.counts * lse)
     return ExpectedCounts(r_bar, n_bar), loglik, h
 
 
@@ -674,7 +833,7 @@ def _blocked_e_step(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, 
     """
     blk = prob.blocks
     assert blk is not None
-    log_probs = _item_log_probs(prob, eta)
+    tables = _item_tables(prob, eta)
     log_w = _latent_log_weights(prob, eta)
     y_pad, c_pad = _padded_rows(prob)
     dtype = log_w.dtype
@@ -693,15 +852,15 @@ def _blocked_e_step(prob: CompiledProblem, eta: Array) -> tuple[ExpectedCounts, 
     ) -> tuple[tuple[Array, tuple[Array, ...], Array], Array]:
         n_acc, r_acc, ll = carry
         rows, g = xs
-        lam, one_hots = _block_log_joint(prob, log_probs, log_w, y_pad[rows], g)
+        lam, encodings = _block_log_joint(prob, tables, log_w, y_pad[rows], g)
         c_b = c_pad[rows]
-        lse = jax.scipy.special.logsumexp(lam, axis=1)
-        h = jnp.exp(lam - lse[:, None])
+        h, lse = _softmax_lse(lam)
         weighted = c_b[:, None] * h
-        n_acc = n_acc.at[g].add(jnp.sum(weighted, axis=0))
+        n_b = jnp.sum(weighted, axis=0)
+        n_acc = n_acc.at[g].add(n_b)
         r_acc = tuple(
-            r.at[g].add(jnp.einsum("pjk,pq->jkq", oh, weighted))
-            for r, oh in zip(r_acc, one_hots, strict=True)
+            r.at[g].add(_with_reference(fam, jnp.einsum("pjk,pq->jkq", enc, weighted), n_b))
+            for r, fam, enc in zip(r_acc, prob.families, encodings, strict=True)
         )
         return (n_acc, r_acc, ll + jnp.sum(c_b * lse)), h
 
@@ -1062,16 +1221,6 @@ def _eta_bounds(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
 def _with_eh_weights(prob: CompiledProblem, eh_weights: Array) -> CompiledProblem:
     """Return ``prob`` with ``latent.eh_weights`` replaced (static fields unchanged)."""
     return replace(prob, latent=replace(prob.latent, eh_weights=eh_weights))
-
-
-def with_responses(prob: CompiledProblem, **changes: Any) -> CompiledProblem:
-    """Return ``prob`` with response arrays replaced (``y``, ``group``, ``counts``, ``blocks``).
-
-    Every family's static ``complete`` flag is reset to ``False``, since the new responses may
-    have missing entries (DESIGN.md §15.20). Use this instead of ``replace(prob, y=...)``.
-    """
-    families = tuple(replace(fam, complete=False) for fam in prob.families)
-    return replace(prob, families=families, **changes)
 
 
 def em(
