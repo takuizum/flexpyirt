@@ -2928,6 +2928,80 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    上の Newton ステップで磨き、R の Richardson Hessian による SE、mirt の Oakes SE、`probtrace()` から R で計算した EAP、
    群の推定値で固定した同じ `customGroup` の 1 群 mirt オブジェクトでの `itemfit()` による群ごとの S-X2 を記録する。
 
+## 28. 射影 IRT（`project()`）
+
+1. **概要.** 射影 IRT（Ip, 2010）は、多次元モデルの項目を 1 つの因子の上で記述する。各項目の反応関数から局外因子
+   $\boldsymbol\theta_{-f}$ を積分で消し、
+   $$\bar P_j(y\mid\theta_f)=\int P_j(y\mid\theta_f,\boldsymbol\theta_{-f})\,
+   g(\boldsymbol\theta_{-f}\mid\theta_f)\,d\boldsymbol\theta_{-f},$$
+   その周辺トレースを同じ型の 1 次元項目モデル $P_j(y\mid\theta_f;\xi^*_j)$ で近似する。射影したパラメタ $\xi^*_j$ は
+   射影先の因子（双因子モデルでは一般因子）の尺度のままで、局外因子による局所依存を取り込むので、多次元モデルを使わずに
+   1 次元モデルで $\theta_f$ を推定できる（短縮版、リンキング、CAT の項目バンク。Stucky, Thissen & Edelen, 2013）。
+2. **API.** `flexpyirt.projection` の `project(result, data, *, method="MML", factor=None, item_names=None,
+   se="oakes") -> FitResult`。`flexpyirt` から再公開する。`method` は `"MML"`（Chalmers, Falk & Reise, 2026。mirt
+   `pirt(estimator = "MML")`）、`"logistic_kernel"`（Ip, 2010。mirt `"LKA"`）、`"normal_ogive"`（Stucky et al., 2013。
+   mirt `"FA"`）。`factor` は射影先の因子名（mirt `project`。既定は最初の因子）。戻り値は通常の 1 次元 `FitResult`
+   （$N(0,1)$、親モデルの 1 次元 `Quadrature`）なので、得点推定、情報量、図、`to_json()` がそのまま使える。`data` はすべての
+   方法で必須: `"MML"` は E-step に必要で、射影後の表は `prepare()` で作る（閉じた式は本来データなしで計算できるが、
+   シグネチャを 1 つにし、どの方法でも射影モデルの対数尤度を報告するため）。
+   **親モデル.** `Normal` 潜在分布の 1 群の多次元モデル: 双因子・2 層モデル（射影先は主因子。特殊因子は §17.1 の
+   ブロックグリッドが自分の項目にしかその座標を持たないので拒否）と、積グリッドの確認的モデル（`with_factors()`、任意の
+   因子）。射影先の因子は平均 0・分散 1（射影後の尺度）でなければならない。1 次元、多群、EH・Davidian・混合、ウェイト付きの
+   推定（ウェイトは `FitResult` に保存されない）は `SpecificationError`。
+   **射影後の表.** 項目と項目モデルは同じで、`Normal()` は $N(0,1)$ に固定。漸近線 `g` と `u` は親モデルの値と自由・固定を
+   そのまま使う（射影で変わらない）。それ以外のパラメタは、親で固定されていても、射影モデルの既定の表と同じ自由・固定にする:
+   すべてのパラメタを固定した親モデル（項目バンクの双因子較正を `fit(..., table=)` で読み込んだもの）も射影でき、射影先の因子に
+   負荷しない項目も傾きは自由になる（相関を通じて射影先とつながるため）。項目間でパラメタを共有せず、事前分布は外す。`loglik` は
+   射影モデルでのデータの周辺対数尤度で、最大化した値ではないので、親モデルとの尤度比検定には使えない（Chalmers et al., 2026、
+   注 3）。`se_method` は `"projection_oakes"`、`"projection_complete"`、`"projection_hessian"`（MML）、`"projection_delta"`
+   （閉じた式）。JSON で有効な値として追加した（保存される名前は変えていないのでスキーマは変えない）。`se` は `"oakes"`（既定）、
+   `"complete"`、`"hessian"`、`None`。閉じた式では `None` 以外はデルタ法を意味する。
+3. **MML-PIRT**（Chalmers, Falk & Reise, 2026）. 親モデルの推定値 $\hat\eta$ での E-step（§4.2、§17.1）が各項目の
+   グリッド（共有の積グリッド、または縮約モデルでは項目のブロックグリッド）上の $\bar r_{jk}(\boldsymbol\theta_m;\hat\eta)$ を
+   与える。射影先の座標が $\theta_q$ のノードについて合計すると、1 次元グリッド上の周辺期待度数表
+   $$\bar r_{jk}(\theta_q)=\sum_{m:\ \theta_{mf}=\theta_q}\bar r_{jk}(\boldsymbol\theta_m;\hat\eta)$$
+   になり（双因子モデルでは項目のブロックの特殊ノード $t$ についての和）、各項目は
+   $$Q^*_j(\xi^*_j)=\sum_q\sum_k\bar r_{jk}(\theta_q)\log P_{jk}(\theta_q;\xi^*_j)$$
+   を 1 回だけ最大化する。表は 1 回計算するだけで更新しない。これは度数を固定した §4.3 の項目 M-step なので、
+   `_core._m_step_items` をそのまま使い（親モデルの型ごとの表は、項目の列番号で射影モデルの型の並びに並べ替える）、最大変化が
+   $10^{-10}$ 未満になるまで繰り返す（1 回に 5 ニュートンステップ、最大 500 回）。初期値: 2PL・3PL・4PL・GRM はロジスティック核の
+   閉じた式、それ以外は親モデルの射影先の傾きと切片。ノードの射影先座標は最も近い 1 次元ノードに対応させる
+   （`_projection.node_map`）。ブロックグリッドも積グリッドもその 1 次元グリッドから作るので、この対応は正確。
+   **推定値での E-table.** mirt は最後の E-step の表、つまり最後の反復に入るときのパラメタで計算した表を保持する。ここでは
+   $\hat\eta$ で E-step を実行する。両者の差は収束判定の許容誤差の程度（V58 は `TOL = 1e-10`）。
+   **共分散**（`se=`）. $I_{\bar r}=-\nabla^2\sum_jQ^*_j$（$\hat\xi^*$ で、周辺表を固定。項目間でブロック対角）、
+   $I_c=-\nabla^2Q(\xi\mid\xi)$（射影モデル自身の E-step で同じもの）、$I_o$ を射影モデルの観測情報量（Oakes, 1999;
+   `_core.information_oakes`）とする。`"complete"` は $I_{\bar r}$ の逆行列（mirt `SE.type = "complete"`）で、表を既知の
+   データとして扱うので最も小さい。`"hessian"` は $I_o$ の逆行列（mirt `"Richardson"`）。`"oakes"`（既定）は
+   $I_{\bar r}-(I_c-I_o)$ の逆行列: Oakes の恒等式 $-\partial^2Q/\partial\xi^2-\partial^2Q/\partial\xi\,\partial\xi'$ で、第 1 項を
+   周辺表から、交差項（欠測情報量 $I_c-I_o$）を射影モデルの E-step から取ったもの。これが mirt の `pirt()` の既定の計算:
+   その `mirt()` 呼び出しは 2 階微分の項では表を固定する（`technical = list(fixedEtable = )`）が、Oakes の交差項では 1 次元
+   モデルの E-step を計算し直す（`"Louis"` も同じ値）。双因子 2PL で mirt の `"complete"`、`"Richardson"`、`"Oakes"` の SE を
+   相対 $10^{-6}$ で再現して確かめた。論文は $\Sigma=I^{-1}(\hat\xi^*)$ とだけ書いている。射影モデルが周辺表に完全に当てはまる
+   ときは $I_{\bar r}=I_c$ で、`"oakes"` は `"hessian"` に一致する。どれも親モデルの共分散を使わないので、表そのものの不確かさは
+   伝播しない。
+4. **閉じた式**（Ip, 2010; Stucky et al., 2013）. $\boldsymbol\theta\sim N(\mathbf 0,\boldsymbol\Phi)$、$\Phi_{ff}=1$ のとき、
+   $\theta_f$ を与えた線形予測子は正規分布: $\mathbf a^\top\boldsymbol\theta\mid\theta_f\sim
+   N\big((\mathbf a^\top\boldsymbol\Phi_{\cdot f})\theta_f,\ v\big)$、$v=\mathbf a^\top\boldsymbol\Phi\mathbf a-(\mathbf a^\top
+   \boldsymbol\Phi_{\cdot f})^2$。ロジスティックを $\Phi(c\,x)$ で近似して積分すると
+   $$a^*=s\,\mathbf a^\top\boldsymbol\Phi_{\cdot f},\qquad d^*_k=s\,d_k,\qquad s=(1+c^2v)^{-1/2}$$
+   で、$c=16\sqrt3/(15\pi)$（Ip のロジスティック核）または $c=1/1.702$（Stucky et al. の正規オージャイブ: 標準化負荷
+   $\lambda=(\mathbf a/1.702)/\sqrt{1+\lVert\mathbf a/1.702\rVert^2}$ による $a^*=1.702\,\lambda_f/\sqrt{1-\lambda_f^2}$ と
+   $d^*=d\,a^*/a_f$ は、直交因子でのこの式）。3PL・4PL の漸近線は変わらない（$g+(u-g)\,\mathrm{logistic}$ の周辺は
+   $g+(u-g)$ × ロジスティックの周辺）。それ以外の項目の型には閉じた式がなく `SpecificationError`。**相関のある因子.**
+   mirt の `"LKA"`（`Ip2010`）は $\rho=0$ と射影先以外の傾きの和を、`"FA"` は `summary()` のパターン負荷を使う。どちらも
+   双因子モデル（項目ごとに局外因子 1 つ、直交）では上の式に一致し、因子が相関すると異なる。そのときは上の条件付き分散が
+   正しい。**共分散.** デルタ法 $J\,\widehat{\mathrm{Cov}}(\hat\eta)\,J^\top$、$J=\partial\xi^*/\partial\eta$ は閉じた式を
+   通した `jax.jacfwd`（潜在相関も含む）。親モデルに共分散がなければ `None`（mirt `FA.projection_SE`）。
+5. **（まだ）含めないもの.** 別の型への射影（mirt `itemtype`）、複数因子への射影（mirt の `model` > 1 と長さ 2 以上の
+   `project`）、多群（mirt `invariance`）、`shortform` オプション（代わりに `project()` の結果から一部の項目を使う）。
+6. **検証（V58）.** `bfactor()` の推定に対する mirt `pirt()`: `"MML"` の推定値と 3 種類の SE、`"LKA"`・`"FA"` の推定値
+   （と `FA` のデルタ法 SE）。双因子 2PL（Ip, 2010 の表 3 の設計、3% 欠測）と一般因子だけの項目を含む双因子 GRM で、mirt の
+   親モデル推定値での比較と、推定から通しの比較の両方。単体テスト: 特殊因子 1 つの双因子モデルと、同じモデルを直交 2 因子の
+   確認的モデルとして推定したものが同じ射影を与える（ブロックグリッドと積グリッド）、周辺表の合計が観測したカテゴリ度数に
+   一致する、相関のある因子で閉じた式が正規オージャイブ核に対して厳密（数値積分）、Ip の数値例（$a=2.63$、$a_s=3.07$、
+   $d=-1.49$ から $a^*=1.274$、$d^*=-0.721$）、2 層モデルの各主因子への射影、固定した 3PL の漸近線、エラー。
+
 ## 参考文献
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
@@ -2954,6 +3028,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chalmers, R. P. (2018). Model-based measures for detecting and quantifying response bias. *Psychometrika*, 83(3), 696–732.
+- Chalmers, R. P., Falk, C. F., & Reise, S. P. (2026). A general approach for estimating projective IRT models. *Applied Psychological Measurement*. https://doi.org/10.1177/01466216261474955
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
 - Cohen, J. (1960). A coefficient of agreement for nominal scales. *Educational and Psychological Measurement*, 20(1), 37–46.
@@ -2990,6 +3065,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Huynh, H., & Meyer, P. (2010). Use of robust z in detecting unstable items in item response theory models. *Practical Assessment, Research & Evaluation*, 15(2).
+- Ip, E. H. (2010). Empirically indistinguishable multidimensional IRT and locally dependent unidimensional item response models. *British Journal of Mathematical and Statistical Psychology*, 63(2), 395–416.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Jodoin, M. G., & Gierl, M. J. (2001). Evaluating type I error and power rates using an effect size measure with the logistic regression procedure for DIF detection. *Applied Measurement in Education*, 14(4), 329–349.
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
@@ -3063,6 +3139,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
 - Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
+- Stucky, B. D., Thissen, D., & Edelen, M. O. (2013). Using logistic approximations of marginal trace lines to develop short assessments. *Applied Psychological Measurement*, 37(1), 41–57.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Swaminathan, H., & Rogers, H. J. (1990). Detecting differential item functioning using logistic regression procedures. *Journal of Educational Measurement*, 27(4), 361–370.
 - Tchakaloff, V. (1957). Formules de cubatures mécaniques à coefficients non négatifs. *Bulletin des Sciences Mathématiques*, 81, 123–134.

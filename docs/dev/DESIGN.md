@@ -3835,6 +3835,117 @@ data-independent shapes (§15.21).
    SEs, EAPs computed in R from `probtrace()`, and S-X2 per group from `itemfit()` on single-group
    mirt objects with the same `customGroup` fixed at the group's estimates.
 
+## 28. Projective IRT (`project()`)
+
+1. **What it is.** Projective IRT (Ip, 2010) describes the items of a multidimensional model on one
+   of its factors: the nuisance factors $\boldsymbol\theta_{-f}$ are integrated out of each item's
+   response function,
+   $$\bar P_j(y\mid\theta_f)=\int P_j(y\mid\theta_f,\boldsymbol\theta_{-f})\,
+   g(\boldsymbol\theta_{-f}\mid\theta_f)\,d\boldsymbol\theta_{-f},$$
+   and the marginal trace is approximated by a unidimensional item model of the same family,
+   $P_j(y\mid\theta_f;\xi^*_j)$. The projected parameters $\xi^*_j$ stay on the metric of the
+   target factor (for a bifactor model, the general factor) and absorb the local dependence the
+   nuisance factors cause, so a unidimensional model with them scores $\theta_f$ without the
+   multidimensional model (short forms, linking, CAT banks; Stucky, Thissen & Edelen, 2013).
+2. **API.** `project(result, data, *, method="MML", factor=None, item_names=None, se="oakes") ->
+   FitResult` in `flexpyirt.projection`, re-exported from `flexpyirt`. `method` is `"MML"`
+   (Chalmers, Falk & Reise, 2026; mirt `pirt(estimator = "MML")`), `"logistic_kernel"` (Ip, 2010;
+   mirt `"LKA"`) or `"normal_ogive"` (Stucky et al., 2013; mirt `"FA"`); `factor` is the target
+   factor's name (mirt `project`; default the first factor). The result is an ordinary
+   unidimensional `FitResult` ($N(0,1)$, the parent's one-dimensional `Quadrature`), so scoring,
+   information, plots and `to_json()` work on it. `data` is required by every method: `"MML"`
+   needs the E-step, and the projected table is laid out by `prepare()` (the closed forms could do
+   without, but one signature is simpler and the log-likelihood of the projected model is reported
+   for every method).
+   **Parents.** Single-group multidimensional fits with a `Normal` latent: bifactor and two-tier
+   models (target: a primary factor; a specific factor is rejected because the block grids of
+   §17.1 hold it only for its own items) and confirmatory models on product grids
+   (`with_factors()`, any factor). The target factor's mean must be 0 and its variance 1 (they are
+   the projected metric). Rejected with `SpecificationError`: unidimensional, multiple-group,
+   EH / Davidian / mixture and weighted fits (the weights are not stored in the `FitResult`).
+   **Projected table.** Same items and item models, `Normal()` fixed at $N(0,1)$. The asymptotes
+   `g` and `u` keep the parent's value and free / fixed status (the projection does not change
+   them). Every other parameter has the status of the projected model's default table, whether
+   or not the parent fixed it: a parent whose parameters are all fixed (an item bank's bifactor
+   calibration loaded with `fit(..., table=)`) is projected too, and an item without a loading
+   on the target factor still gets a free slope (it relates to the target through a
+   correlation). Parameters are not shared across items and priors are dropped. `loglik` is the
+   marginal log-likelihood of the data under the projected model; it is not maximized, so
+   likelihood-ratio tests against the parent do not apply (Chalmers et al., 2026, note 3). `se_method` is `"projection_oakes"`, `"projection_complete"`,
+   `"projection_hessian"` (MML) or `"projection_delta"` (closed forms); these are new valid values
+   in JSON (no schema change: no stored name is renamed). `se` takes `"oakes"` (default),
+   `"complete"`, `"hessian"` or `None`; for the closed forms any value but `None` means the delta
+   method.
+3. **MML-PIRT** (Chalmers, Falk & Reise, 2026). The E-step of the parent at its estimates
+   $\hat\eta$ (§4.2, §17.1) gives $\bar r_{jk}(\boldsymbol\theta_m;\hat\eta)$ on each item's
+   grid (the shared product grid, or the item's block grid in a reduced model). Summing over the
+   nodes whose target coordinate is $\theta_q$ gives the marginal expected table on the
+   one-dimensional grid,
+   $$\bar r_{jk}(\theta_q)=\sum_{m:\ \theta_{mf}=\theta_q}\bar r_{jk}(\boldsymbol\theta_m;\hat\eta)$$
+   (in a bifactor model: the sum over the specific node $t$ of the item's block), and every item
+   maximizes
+   $$Q^*_j(\xi^*_j)=\sum_q\sum_k\bar r_{jk}(\theta_q)\log P_{jk}(\theta_q;\xi^*_j)$$
+   once; the table is computed once and not updated. This is the item M-step of §4.3 with fixed
+   counts, so `_core._m_step_items` is reused unchanged (the parent's per-family tables are
+   reordered to the projected problem's families by item column) and repeated until the largest
+   change is below $10^{-10}$ (5 Newton steps per call, at most 500 calls). Starting values: the
+   logistic-kernel closed form for 2PL / 3PL / 4PL / GRM items, otherwise the parent's target slope
+   and intercepts. The target coordinate of a node is matched to the one-dimensional grid by the
+   nearest node (`_projection.node_map`), which is exact because the block and product grids are
+   built from that grid. **E-table at the estimates.** mirt keeps the table of its last E-step,
+   computed at the parameters entering the last iteration; here the E-step is run at
+   $\hat\eta$. The two differ by the convergence tolerance only (V58 uses `TOL = 1e-10`).
+   **Covariance** (`se=`). Let $I_{\bar r}=-\nabla^2\sum_jQ^*_j$ at $\hat\xi^*$ (the marginal
+   table held fixed; block diagonal across items), $I_c=-\nabla^2Q(\xi\mid\xi)$ the same on the
+   projected model's own E-step, and $I_o$ the projected model's observed information (Oakes,
+   1999; `_core.information_oakes`). `"complete"` inverts $I_{\bar r}$ (mirt
+   `SE.type = "complete"`): it treats the table as known data and is the smallest. `"hessian"`
+   inverts $I_o$ (mirt `"Richardson"`). `"oakes"` (default) inverts
+   $I_{\bar r}-(I_c-I_o)$: Oakes' identity
+   $-\partial^2Q/\partial\xi^2-\partial^2Q/\partial\xi\,\partial\xi'$ with the first term from the
+   marginal table and the cross term (the missing information $I_c-I_o$) from the projected
+   model's E-step. This is what mirt's `pirt()` computes by default: its `mirt()` call holds
+   the table fixed (`technical = list(fixedEtable = )`) for the second-derivative term, while its
+   Oakes cross term re-runs the E-step of the unidimensional model (and `"Louis"` gives the same
+   value). Found by reproducing mirt's `"complete"`, `"Richardson"` and `"Oakes"` SEs to
+   $10^{-6}$ relative on a bifactor 2PL; the paper states only $\Sigma=I^{-1}(\hat\xi^*)$. When
+   the projected model fits the marginal table exactly, $I_{\bar r}=I_c$ and `"oakes"` equals
+   `"hessian"`. None of them uses the parent's covariance, so the uncertainty of the table
+   itself is not propagated.
+4. **Closed forms** (Ip, 2010; Stucky et al., 2013). For
+   $\boldsymbol\theta\sim N(\mathbf 0,\boldsymbol\Phi)$ with $\Phi_{ff}=1$, the nuisance part of
+   the linear predictor given $\theta_f$ is normal:
+   $\mathbf a^\top\boldsymbol\theta\mid\theta_f\sim N\big((\mathbf a^\top\boldsymbol\Phi_{\cdot f})
+   \theta_f,\ v\big)$ with $v=\mathbf a^\top\boldsymbol\Phi\mathbf a-(\mathbf a^\top
+   \boldsymbol\Phi_{\cdot f})^2$. Approximating the logistic by $\Phi(c\,x)$ and integrating gives
+   $$a^*=s\,\mathbf a^\top\boldsymbol\Phi_{\cdot f},\qquad d^*_k=s\,d_k,\qquad s=(1+c^2v)^{-1/2},$$
+   with $c=16\sqrt3/(15\pi)$ (Ip's logistic kernel) or $c=1/1.702$ (Stucky et al.'s normal ogive:
+   their $a^*=1.702\,\lambda_f/\sqrt{1-\lambda_f^2}$ with the standardized loadings
+   $\lambda=(\mathbf a/1.702)/\sqrt{1+\lVert\mathbf a/1.702\rVert^2}$ is this formula for
+   orthogonal factors, and $d^*=d\,a^*/a_f$). The 3PL / 4PL asymptotes are unchanged (the
+   marginal of $g+(u-g)\,\mathrm{logistic}$ is $g+(u-g)$ times the marginal logistic). Other item
+   families have no closed form and raise `SpecificationError`. **Correlated factors.** mirt's
+   `"LKA"` (`Ip2010`) uses $\rho=0$ and the sum of the non-target slopes, and its `"FA"` the
+   pattern loadings of `summary()`; both equal the formula above for bifactor models (one nuisance
+   factor per item, orthogonal) and differ when factors correlate, where the conditional variance
+   above is the correct one. **Covariance.** Delta method,
+   $J\,\widehat{\mathrm{Cov}}(\hat\eta)\,J^\top$ with $J=\partial\xi^*/\partial\eta$ by
+   `jax.jacfwd` through the closed form (the latent correlations included); `None` when the parent
+   has no covariance (mirt `FA.projection_SE`).
+5. **Not included (yet).** Projected item models of another family (mirt `itemtype`), projection
+   onto several factors (mirt `model` > 1 with `project` of length > 1), multiple groups
+   (mirt `invariance`), and the `shortform` option (fit `project()` and keep a subset of the
+   items' rows instead).
+6. **Validation (V58).** mirt `pirt()` on `bfactor()` fits: estimates and the three SE types of
+   `"MML"`, and the `"LKA"` / `"FA"` estimates (and `FA` delta-method SEs), for a bifactor 2PL
+   (Ip's 2010 Table 3 design, 3% missing) and a bifactor GRM with general-only items, both at
+   mirt's parent estimates and end to end. Unit tests: a one-specific-factor bifactor model and the
+   same model as an orthogonal two-factor confirmatory model give the same projection (block grid
+   against product grid), the marginal table sums to the observed category counts, the closed
+   forms are exact for a normal-ogive kernel with correlated factors (numerical integration),
+   Ip's worked example ($a=2.63$, $a_s=3.07$, $d=-1.49$ gives $a^*=1.274$, $d^*=-0.721$), the
+   two-tier path onto each primary factor, fixed 3PL asymptotes, and the errors.
+
 ## References
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.
@@ -3861,6 +3972,7 @@ data-independent shapes (§15.21).
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chalmers, R. P. (2018). Model-based measures for detecting and quantifying response bias. *Psychometrika*, 83(3), 696–732.
+- Chalmers, R. P., Falk, C. F., & Reise, S. P. (2026). A general approach for estimating projective IRT models. *Applied Psychological Measurement*. https://doi.org/10.1177/01466216261474955
 - Chen, W.-H., & Thissen, D. (1997). Local dependence indexes for item pairs using item response theory. *Journal of Educational and Behavioral Statistics*, 22(3), 265–289.
 - Christensen, K. B., Makransky, G., & Horton, M. (2017). Critical values for Yen's Q3: Identification of local dependence in the Rasch model using residual correlations. *Applied Psychological Measurement*, 41(3), 178–194.
 - Cohen, J. (1960). A coefficient of agreement for nominal scales. *Educational and Psychological Measurement*, 20(1), 37–46.
@@ -3897,6 +4009,7 @@ data-independent shapes (§15.21).
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
 - Humphreys, L. G., & Ilgen, D. R. (1969). Note on a criterion for the number of common factors. *Educational and Psychological Measurement*, 29(3), 571–578.
 - Huynh, H., & Meyer, P. (2010). Use of robust z in detecting unstable items in item response theory models. *Practical Assessment, Research & Evaluation*, 15(2).
+- Ip, E. H. (2010). Empirically indistinguishable multidimensional IRT and locally dependent unidimensional item response models. *British Journal of Mathematical and Statistical Psychology*, 63(2), 395–416.
 - Jang, E. E., & Roussos, L. (2007). An investigation into the dimensionality of TOEFL using conditional covariance-based nonparametric approach. *Journal of Educational Measurement*, 44(1), 1–21.
 - Jodoin, M. G., & Gierl, M. J. (2001). Evaluating type I error and power rates using an effect size measure with the logistic regression procedure for DIF detection. *Applied Measurement in Education*, 14(4), 329–349.
 - Jöreskog, K. G. (1967). Some contributions to maximum likelihood factor analysis. *Psychometrika*, 32(4), 443–482.
@@ -3970,6 +4083,7 @@ data-independent shapes (§15.21).
 - Stout, W. (1987). A nonparametric approach for assessing latent trait unidimensionality. *Psychometrika*, 52(4), 589–617.
 - Stout, W. (1990). A new item response theory modeling approach with applications to unidimensionality assessment and ability estimation. *Psychometrika*, 55(2), 293–325.
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
+- Stucky, B. D., Thissen, D., & Edelen, M. O. (2013). Using logistic approximations of marginal trace lines to develop short assessments. *Applied Psychological Measurement*, 37(1), 41–57.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Swaminathan, H., & Rogers, H. J. (1990). Detecting differential item functioning using logistic regression procedures. *Journal of Educational Measurement*, 27(4), 361–370.
 - Tchakaloff, V. (1957). Formules de cubatures mécaniques à coefficients non négatifs. *Bulletin des Sciences Mathématiques*, 81, 123–134.

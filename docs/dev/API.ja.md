@@ -164,6 +164,7 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `fit` | 関数 | 推定。`FitResult` を返す |
 | `FitResult` | クラス | 結果（`items`, `latent`, `parameters`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `person_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`） |
 | `dif_screen`, `dif_effect_sizes` | 関数 | 1 次元の多母集団モデルの DIF の分析手順: アンカーの純化つきの全項目のスクリーニング（`strategy="all_others"` / `"sequential_free"` / `"sequential_constrain"`、尤度比検定または Wald 検定。`table`・`history`・`flagged_items`・`anchor_items`・最終モデル `fit` を持つ `DIFScreenResult` を返す）と効果量（期待得点の符号つき・符号なしの差、ESSD、RMSD、テストの行）。`FitResult.dif(..., test="wald")` で Wald 検定（DESIGN §16.22） |
+| `project` | 関数 | 射影 IRT: 双因子・2 層・確認的モデルの 1 つの因子への 1 次元 `FitResult`（`method="MML"`、`"logistic_kernel"`、`"normal_ogive"`。DESIGN.md §28） |
 | `link` | 関数 | 微分可能な IRT 尺度リンキング（Haebara・Stocking–Lord の非対称・対称版。多次元モデルでは `transformation=` で対角・直交・斜交の $\mathbf A$ を選ぶ）。`LinkResult` を返す |
 | `LinkResult` | クラス | 尺度リンキング結果（`A`, `B`, `A_se`, `B_se`, `vcov`, `criterion`, `transformation`, `items`, `transform_theta`, `summary`） |
 | `screen_common_items` | 関数 | リンキングの共通項目の点検と項目パラメータドリフト（頑健 z・変位・期待得点の RMSD。`link()` による反復的な純化）。`CommonItemScreeningResult` を返す |
