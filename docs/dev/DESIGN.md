@@ -3862,6 +3862,14 @@ data-independent shapes (§15.21).
     block list is padded to a multiple of $M$ with blocks of sentinel rows (count 0). Peak memory
     stays bounded independent of $N_B$. Results again differ from the sequential fold only in
     summation order. The blocked log joint (`lax.map` with a batch size) already worked this way.
+11. **Measured (#153).** Warm `fit()` time (s), `benchmarks/run_flexpyirt.py --quick`, against
+    develop with #151/#152, back to back on 8 pinned cores of a shared machine (load 4–50, so
+    indicative), plain EM / SQUAREM with `se=None`: `manygroups_2pl_g10` 1.78 → 0.83 / 0.40 → 0.26;
+    `manygroups_2pl_g50` 15.0 → 4.96 / 4.01 → 1.92; `manygroups_2pl_g200` 142 → 35.8 / 42.4 → 14.6.
+    With `se="oakes"` the G = 200 plain fit goes from 136 to 38.1 s. Single-group 2PL (5000×40) is
+    unchanged (0.29 → 0.33 s plain, within the noise; no item is pooled and one block per step).
+    Iteration counts are the same for plain EM; SQUAREM stops one to eight iterations apart on the
+    flat G = 50 / 200 optima (log-likelihood within 1e-3).
 
 ## 27. Davidian curves and normal mixtures per group (#75)
 
