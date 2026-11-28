@@ -87,14 +87,17 @@ def _pad_last(values: Array, size: int, fill: float | int) -> Array:
     return jnp.pad(values, widths, constant_values=fill)
 
 
-def _harmonize_family(fam: FamilyBlock, n_slots: int, invariant: tuple[bool, ...]) -> FamilyBlock:
-    """Pad ``fam``'s local slots to ``n_slots`` (unused slots) and set its pooled items."""
+def _harmonize_family(
+    fam: FamilyBlock, n_slots: int, invariant: tuple[bool, ...], complete: bool
+) -> FamilyBlock:
+    """Pad ``fam``'s local slots to ``n_slots`` (unused slots) and set its static flags."""
     return replace(
         fam,
         slot_free_index=_pad_last(fam.slot_free_index, n_slots, -1),
         slot_lower=_pad_last(fam.slot_lower, n_slots, -jnp.inf),
         slot_upper=_pad_last(fam.slot_upper, n_slots, jnp.inf),
         invariant=invariant,
+        complete=complete,
     )
 
 
@@ -134,6 +137,8 @@ def stack_problems(
       fixed (DESIGN.md §14.2).
     - An item is pooled over groups (``FamilyBlock.invariant``, §26.9) only if it is invariant in
       every model; the per-group path gives the same M-step up to summation order.
+    - A family uses the complete-data E-step form (``FamilyBlock.complete``, §4.2) only if it is
+      complete in every model; the general one-hot form gives the same values.
 
     Models whose tree structures still differ (for example different components of equality
     constraints across items) return ``None``; the caller fits them one by one.
@@ -155,8 +160,9 @@ def stack_problems(
             invariant: tuple[bool, ...] = ()
         else:
             invariant = tuple(bool(all(col)) for col in zip(*flags, strict=True))
+        complete = all(fam.complete for fam in fams)
         for m, fam in enumerate(fams):
-            new_families_per_model[m].append(_harmonize_family(fam, n_slots, invariant))
+            new_families_per_model[m].append(_harmonize_family(fam, n_slots, invariant, complete))
     for m, prob in enumerate(problems):
         harmonized.append(
             replace(

@@ -93,6 +93,20 @@ def test_stack_pads_eta_and_slots_and_shares_identical_leaves() -> None:
     assert prob.families[0].invariant == (False, False, True, True, True)
 
 
+def test_stack_uses_the_complete_form_only_if_every_model_does() -> None:
+    from flexpyirt._core import with_responses
+
+    spec, df, grp, tables = _design()
+    prob, eta0 = _compiled(spec, df, grp, tables[0])
+    assert prob.families[0].complete  # no missing responses
+    for probs, expected in (([prob, prob], True), ([prob, with_responses(prob)], False)):
+        stack = stack_problems(probs, [eta0, eta0])
+        assert stack is not None
+        for m in range(2):
+            got = jax.tree_util.tree_unflatten(stack.treedef, _leaves(stack, m))
+            assert got.families[0].complete is expected
+
+
 def _leaves(stack: object, m: int) -> list[object]:
     it_shared = iter(stack.shared)  # type: ignore[attr-defined]
     it_stacked = iter(stack.stacked)  # type: ignore[attr-defined]
