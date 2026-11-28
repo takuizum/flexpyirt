@@ -166,6 +166,7 @@ English | [日本語](VALIDATION.ja.md)
 | V55 | Many groups with the group-blocked E-step: 2PL, 10 groups of unequal size (200–470), 15 items, anchors q01–q06 invariant, q07–q15 free per group, focal means and variances free, 5% MCAR missing; regression of the blocked against the flat E-step | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`, `fscores(extract.group(m, g), method = "EAP")`; the flat path for the regression | #79 |
 | V56 | `DavidianCurve` and `NormalMixture` per group: (a) 2PL, three groups (bimodal, right-, left-skewed), `DavidianCurve(2)`, anchors q01–q06, 3% missing; (b) 2PL $J=15$, two groups, `NormalMixture(2)`, every item invariant; (c) FIPC, two groups, `DavidianCurve(2)`, every latent free. Estimates, R Hessian SEs, EAP, S-X2 per group | `multipleGroup(customGroup = createGroup(...))` with the standardized densities normalized on the grid (`dcurver::ddc`), Newton-polished on an independent R marginal log-likelihood; R Richardson-Hessian SEs; EAP in R; `itemfit(use_dentype_estimate = TRUE)` on single-group objects fixed at each group's estimates | #75 |
 | V57 | Weighted and cluster-robust sandwich SEs: (a) 2PL $J=10$, 40 schools of 25 with a school effect in $\theta$, unequal weights, 3% missing; (b) 2PL $J=8$, ref/focal with anchors q01–q05, focal mean and variance free, 30 schools spanning the groups. Middle matrices (weighted, cluster, unweighted cluster, singleton clusters) at mirt's estimates, `se="crossprod"` with weights, mirt's weighted sandwich reproduced, SEs end to end | `mirt()` / `multipleGroup()` with `survey.weights`, `SE.type = "Oakes"` (bread), `"crossprod"`, `"sandwich"`; per-person scores by `numDeriv::jacobian` on mirt's grid (checked against `estfun.AllModelClass`); $H^{-1}BH^{-1}$ computed in R | #84, #85 |
+| V58 | Optional mixture (EMM) M-step for 3PL / 4PL items (`BAEM(asymptote_m_step="mixture")`) on the V11 3PL and 4PL cases, with SQUAREM | the existing V11 references (`v11_3pl.json`, `v11_4pl.json`) | #165 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -1699,6 +1700,17 @@ English | [日本語](VALIDATION.ja.md)
      0.037 in $g$. Unit tests check `log_pdf` against `scipy.stats.norm.logpdf` of
      $\operatorname{logit}x$ (1e-13), the Core code `PRIOR_LOGITNORMAL_LOGIT = 5` and its
      gradient, validation of `mode_scale`, and the JSON key (round trip; absent → `"natural"`).
+- **Mixture (EMM) M-step for 3PL / 4PL (V58, #165)**: DESIGN §15.49. `tests/test_mirt_m3.py`
+  fits V11 3PL and 4PL with `BAEM(asymptote_m_step="mixture", squarem=True, tol=1e-9)` and checks
+  the log-likelihood (1e-6 relative), $a$, $d$, $g$, $u$ (1e-4) and Oakes SEs (1e-3 relative)
+  against mirt, plus a monotone history; both pass. `tests/test_asymptote_mixture.py` checks
+  that the mixture objective has the gradient of the usual $Q$ at the previous iterate (3PL, 4PL,
+  $g=0$, $u=1$; 1e-10), that $Q^{\mathrm{mix}}-Q$ is maximal there, and that the closed-form
+  asymptotes zero their gradient. It also checks that simulated 3PL, mixed 2PL/3PL/4PL (with a
+  fixed $g$) and two-group 3PL fits with a `BetaPrior` on $g$ reach the maximum of `"joint"`
+  (log posterior 5e-5, parameters 2e-3: the mixture M-step converges slowly, so at `tol=1e-8`
+  it stops farther from the maximum), and the JSON round trip.
+  `benchmarks/results/2026-11-28-emm-3pl.md` has the speed and small-sample comparison.
 - **EM monotonicity**: in every validation case, the log-likelihood (posterior with MAP) is
   non-decreasing across iterations.
 - **Internal SE consistency**: Oakes SEs agree with SEs from the direct `jax.hessian` of the

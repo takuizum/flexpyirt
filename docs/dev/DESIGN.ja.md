@@ -798,6 +798,42 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
     - 超パラメタは `LogNormalPrior` と同じく検証する（`mean_logit` は有限、`sd_logit` は正で有限）。JSON では
       キー `mean_logit`・`sd_logit` を持つ `"LogitNormalPrior"` として登録する（スキーマ版 8）。
 
+49. **3PL / 4PL 項目の混合（EMM）M-step（任意、`BAEM(asymptote_m_step="mixture")`、#165、V58）**:
+    Zheng, Meng, Guo & Liu (2018) は 3PL を混合モデルとして書き直した。回答は、推測（確率 1 で正答）か、
+    能力による回答（$P^*=\sigma(z)$、$z=\mathbf a^\top\boldsymbol\theta+d$）のどちらかである。3 つ目の状態として
+    うっかりミス（確率 1 で誤答）を加えると 4PL にも使える。状態は $\boldsymbol\theta$ と独立に
+    確率 $g$、$1-u$、$u-g$ で選ばれるので、§15.1 と同じ $P(y=1\mid\boldsymbol\theta)=g+(u-g)P^*$ になる。
+    - **E-step。** 状態を 2 つ目の欠測変数とする。回答と前の反復 $\xi'$ を与えたときの、求積点 $q$ での状態の
+      事後確率は、正答では $\omega^G_q=g'/P'_{1q}$、誤答では $\omega^S_q=(1-u')/P'_{0q}$ である。通常の期待度数
+      $\bar r_{kq}$（§4.3）から、状態の期待度数 $n_G=\sum_q\bar r_{1q}\omega^G_q$、
+      $n_S=\sum_q\bar r_{0q}\omega^S_q$、$s_{1q}=\bar r_{1q}(1-\omega^G_q)$、$s_{0q}=\bar r_{0q}(1-\omega^S_q)$、
+      $n_A=\sum_q(s_{1q}+s_{0q})$ を作る。どれも今の期待度数と $\xi'$ から計算できるので、E-step は変えず、
+      項目の M-step の目的関数だけを替える。
+    - **M-step の目的関数。**
+      $$Q^{\mathrm{mix}}(\xi\mid\xi')=n_G\log g+n_S\log(1-u)+n_A\log(u-g)+\sum_q\big[s_{1q}\log\sigma(z_q)+s_{0q}\log\sigma(-z_q)\big].$$
+      漸近線の部分と重み付き 2PL の部分は分かれていて、どちらも凹である。$\xi=\xi'$ での勾配は通常の $Q$ と
+      同じなので（Fisher の恒等式）、不動点・最大値・事前分布・標準誤差（常に観測データの尤度から計算する。
+      §4.8）は変わらない。
+    - **漸近線の閉形式のあとに Newton。** 群の間で共有されるスロットでは、状態の度数をそれらの群について合計
+      する。両方の漸近線が自由なら $\hat g=n_G/N$、$\hat u=1-n_S/N$（$N=n_G+n_S+n_A$）。$u$ が固定なら
+      $\hat g=u\,n_G/(n_G+n_A)$、$g$ が固定なら $\hat u=(n_A+g\,n_S)/(n_A+n_S)$。スロットを共有する群で、もう一方の
+      漸近線の固定値が違うときは平均を使う。閉形式は範囲の内側にクリップし、$Q^{\mathrm{mix}}$ と項目の事前分布の
+      和に対する今のマスク付き Newton（§15.2）の開始点にする。ただし、その目的関数を下げない場合に限る。
+      事前分布がなければ、Newton は漸近線を動かさずに（ヘッセ行列はブロック対角で、漸近線の勾配は 0）
+      $(\mathbf a,d)$ を推定する。$g$ や $u$ に事前分布があれば、Newton が更新を仕上げる。したがってどの M-step も
+      $Q^{\mathrm{mix}}$ を下げず、EM は単調のまま（一般化 EM）。
+    - **適用範囲。** `FourPLKernel` の項目の、項目ごとの M-step だけ。項目間で結ばれた項目（§16.1）とほかの
+      項目モデルは通常の目的関数のまま。2 つの補完は 1 つの完全データモデルにまとまるので、混在しても EM は
+      単調。`m_step_scale` と `squarem` はこれまでどおり使える。
+    - **速さ（benchmarks/results/2026-11-28-emm-3pl.md）。** 欠測変数が増えるので、EM の収束率が 1 に近づく。
+      `"joint"` と比べて、SQUAREM の有無にかかわらず反復回数は 4〜60 倍、実行時間は 3〜40 倍になった。同じ `tol`
+      では最大値から遠い点で止まる。小標本の 3PL の複製シミュレーション（$N\in\{500,1000\}$、$J\in\{10,20\}$）でも、
+      `"joint"` より多く収束することはなかった。Zheng et al. (2018) が報告する安定性は MMLE/EM のソフトウェアと
+      比べたもので、§15.2 のアクティブセット Newton がすでにそれを満たしている。そのため既定は `"joint"` のまま
+      とし、`"mixture"` は比較・研究用の選択肢として残す。
+    - **JSON。** スキーマ版 10 でメソッドのキー `asymptote_m_step` を加える。`"mixture"` のときだけ書き、
+      ないときは `"joint"` として読む。
+
 ## 16. 実装上の決定（M5）
 1. **項目をまたぐ等値制約（`Model.equal_across_items`、`free_id` の共有）**:
    `Model.equal_across_items(*, items, params)` は、選んだ項目（2 つ以上）の `params` の各パラメタを各群の中で等値にする。
@@ -2903,6 +2939,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.
 - Zhang, J., & Stout, W. (1999). The theoretical DETECT index of dimensionality and its application to approximate simple structure. *Psychometrika*, 64(2), 213–249.
+- Zheng, C., Meng, X., Guo, S., & Liu, Z. (2018). Expectation-maximization-maximization: A feasible MLE algorithm for the three-parameter logistic model based on a mixture modeling reformulation. *Frontiers in Psychology*, 8, 2302. https://doi.org/10.3389/fpsyg.2017.02302
 - Zieky, M. (1993). Practical questions in the use of DIF statistics in test development. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 337–347). Erlbaum.
 - Zumbo, B. D. (1999). *A Handbook on the Theory and Methods of Differential Item Functioning (DIF): Logistic Regression Modeling as a Unitary Framework for Binary and Likert-Type (Ordinal) Item Scores*. Directorate of Human Resources Research and Evaluation, Department of National Defense (Canada).
 - Zumbo, B. D., & Thomas, D. R. (1997). *A Measure of Effect Size for a Model-Based Approach for Studying DIF*. Edgeworth Laboratory for Quantitative Behavioral Science, University of Northern British Columbia.

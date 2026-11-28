@@ -202,6 +202,12 @@ res = fit(
   内点解は既定と同じで、推定値・パラメタ表・事前分布・標準誤差は自然尺度のまま。違いは境界にある: 既定は境界上
   （例: $g=0$）でちょうど止まるが、非拘束尺度は境界に近づくだけで、かなり多くの反復を要することがある。どちらも
   パラメタが境界から `1e-4` 以内になると `HeywoodWarning` を出す。
+- **`asymptote_m_step="mixture"`**（既定は `"joint"`）: 3PL・4PL 項目の M-step を、Zheng, Meng, Guo & Liu (2018)
+  の混合モデルによる書き直し（EMM と呼ばれる）に替える。各回答を、推測・うっかりミス・能力による回答の
+  どれかとみなす。すると漸近線は閉形式で更新でき、傾きと切片は重み付き 2PL として推定できる。最大値・事前分布・
+  標準誤差は既定と同じ。ただし反復回数がずっと多く（ベンチマークで 4〜60 倍程度）、同じ `tol` では最大値から
+  遠い点で止まる。小標本で収束しやすくなるわけでもない。2 つのアルゴリズムを比べたいとき以外は既定のままに
+  する。使うときは `squarem=True` にし、`tol` を小さくする。
 - **`quadrature`**: 潜在変数の求積格子。既定は等間隔 61 点・$[-6, 6]$（mirt の既定と同じ）。
   広げるべき場合は [13 節](#13-求積格子の選び方)。
 - **`se`**: `"oakes"`（既定）、`"hessian"`、`"sandwich"`、`"crossprod"`、`None`（計算しない）。
@@ -1864,3 +1870,4 @@ except SpecificationError as e:
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
+- Zheng, C., Meng, X., Guo, S., & Liu, Z. (2018). Expectation-maximization-maximization: A feasible MLE algorithm for the three-parameter logistic model based on a mixture modeling reformulation. *Frontiers in Psychology*, 8, 2302. https://doi.org/10.3389/fpsyg.2017.02302

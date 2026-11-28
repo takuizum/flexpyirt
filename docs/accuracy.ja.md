@@ -65,6 +65,7 @@ $10^{-8}$ 程度）。
 | 標本ウェイト・クラスタのもとでのロバスト標準誤差 | mirt には標本設計に基づく重み付きサンドイッチもクラスタロバスト版もないので、mirt の重み付き Oakes 共分散と、数値微分（`numDeriv`。mirt の `estfun()` と照合）で求めた個人ごとのスコアから R で参照値を計算する。クラスタ版は学校ごとに合計する（40 校の単一群 2PL、アンカーつき 2 群で学校が群をまたぐもの）。ウェイトつきの `se="crossprod"` は `mirt(..., survey.weights = w, SE.type = "crossprod")` と照合 |
 | SQUAREM | 上のすべての照合を `BAEM(squarem=True)` でも行う |
 | M-step の非拘束尺度 | 3PL・4PL、事前分布と MAP、欠測、多母集団、項目パラメタ固定の較正、2–3 因子の確認的モデルの照合を `BAEM(m_step_scale="unconstrained")` でも同じ許容誤差で行う |
+| 3PL / 4PL の混合 M-step | 3PL・4PL の照合を `BAEM(asymptote_m_step="mixture")`（SQUAREM あり）でも行う。対数尤度・推定値・Oakes SE を同じ許容誤差で比べる |
 | `LogitNormalPrior` | 既定の `mode_scale="natural"` は mirt に同等のものがないため独立に検証する: 密度を SciPy と照合し（積分が 1、logit $X$ の平均と分散が指定どおり）、MAP 推定値が式から書いた対数事後の停留点であることを $10^{-6}$ で確かめる。`mode_scale="logit"` は mirt の `g` への `norm` 事前分布に一致し（対数尤度と対数事後は相対 $10^{-9}$、$a$・$d$・$g$ は $10^{-6}$、Oakes の SE は相対 $10^{-5}$）、独立に計算した flexMIRT の logit 尺度のモードにも一致する |
 | ポリコリック相関 | 順序変数に対する lavaan の `lavCor()` と $10^{-6}$ まで、psych の `polychoric()` と $10^{-3}$ まで（その最適化の許容誤差による）、平滑化は psych の `cor.smooth()` |
 | 平行分析、MAP、経験的カイザー基準 | 同じ相関行列に対する EFAtools の `EKC()`・`PARALLEL()`、psych の `vss()`、EFA.dimensions の `MAP()`、4 乗版 MAP の R による独立な実装と $10^{-11}$ まで。正規データの参照固有値は Monte Carlo 誤差の範囲で |
