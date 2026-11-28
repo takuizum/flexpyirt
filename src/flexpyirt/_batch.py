@@ -167,7 +167,7 @@ def stack_problems(
         )
     flat = [jax.tree_util.tree_flatten(p) for p in harmonized]
     treedef = flat[0][1]
-    if any(td != treedef for _, td in flat):
+    if any(td != treedef for _, td in flat):  # type: ignore[operator]
         return None
     leaves_per_model = [lv for lv, _ in flat]
     shared: list[Array] = []
@@ -200,10 +200,10 @@ def stack_problems(
 
 
 def chunk_size(problem: CompiledProblem, n_models: int, budget: int = BATCH_BYTES) -> int:
-    """Number of models run together so a chunk's E-step working set stays near ``budget``.
+    r"""Return how many models run together so a chunk's E-step working set stays near ``budget``.
 
     Per model: the log joint and posterior ``(P, Q)`` twice plus the expected item counts
-    :math:`G\\sum_f J_fK_fQ` (flat E-step), or the blocked E-step's own budget (§26.10).
+    :math:`G\sum_f J_fK_fQ` (flat E-step), or the blocked E-step's own budget (§26.10).
     The chunk is then balanced so every chunk has (nearly) the same size.
     """
     n_rows = int(problem.y.shape[0])
@@ -223,7 +223,7 @@ def _batched_runner(
     shared: tuple[Array, ...],
     stacked: tuple[Array, ...],
     eta0: Array,
-    tol: Array,
+    tol: Any,
     *,
     treedef: Any,
     batched: tuple[bool, ...],
@@ -250,9 +250,12 @@ def _batched_runner(
             prob, start, tol=tol, max_iter=max_iter, n_newton=n_newton, unconstrained=unconstrained
         )
 
+    out: EMResult
     if parallel:
-        return jax.vmap(one)(stacked, eta0)
-    return jax.lax.map(lambda xs: one(*xs), (stacked, eta0))
+        out = jax.vmap(one)(stacked, eta0)
+    else:
+        out = jax.lax.map(lambda xs: one(*xs), (stacked, eta0))
+    return out
 
 
 _run_chunk = jax.jit(
@@ -337,7 +340,7 @@ def run_batch(
 def perturbed_starts(
     problem: CompiledProblem, eta0: np.ndarray, *, n_starts: int, scale: float, key: Array
 ) -> np.ndarray:
-    r"""Starting values for multi-start estimation, ``(n_starts, n_free)``.
+    r"""Return starting values for multi-start estimation, ``(n_starts, n_free)``.
 
     Row 0 is ``eta0`` itself. Row :math:`m\ge1` perturbs every free parameter on the scale on
     which its bounds vanish (DESIGN.md §15.47: identity if unbounded,

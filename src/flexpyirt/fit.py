@@ -328,6 +328,7 @@ def _fit_tables(
     quadrature: Quadrature | None,
     se: SEMethod | None,
     batch_size: int | None = None,
+    parallel: bool | None = None,
 ) -> list[FitResult]:
     """Fit ``spec`` to ``data`` once per parameter table, all estimated in one batch (§28).
 
@@ -345,16 +346,10 @@ def _fit_tables(
     method = BAEM() if method is None else method
     if quadrature is None:
         quadrature = Quadrature.default(spec.quadrature_dimension)
-    preps = [
-        prepare(spec, data, group=group, item_names=item_names, table=t) for t in tables
-    ]
-    compiled = [
-        compile_problem(spec, p.y, p.group, p.table, quadrature) for p in preps
-    ]
+    preps = [prepare(spec, data, group=group, item_names=item_names, table=t) for t in tables]
+    compiled = [compile_problem(spec, p.y, p.group, p.table, quadrature) for p in preps]
     problems = [c.problem for c in compiled]
-    stack = (
-        _batch.stack_problems(problems, [c.eta0 for c in compiled]) if len(tables) > 1 else None
-    )
+    stack = _batch.stack_problems(problems, [c.eta0 for c in compiled]) if len(tables) > 1 else None
     if stack is None:
         return [
             fit(
@@ -370,7 +365,11 @@ def _fit_tables(
             for t in tables
         ]
     runs = _batch.run_batch(
-        stack, problem=problems[0], batch_size=batch_size, **_run_options(method)
+        stack,
+        problem=problems[0],
+        batch_size=batch_size,
+        parallel=parallel,
+        **_run_options(method),
     )
     return [
         _finish(spec, p, prob, out, method=method, quadrature=quadrature, se=se, stacklevel=3)

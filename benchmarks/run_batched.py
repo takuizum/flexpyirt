@@ -7,7 +7,8 @@ compilation; warm times are the median of ``--repeats`` further calls in the sam
   two-group 2PL (2000 respondents per group, focal mean and variance free): 30 refits.
 - ``mix16``: 16 starts of a 2PL with a two-component ``NormalMixture`` latent density
   (2000 respondents, 20 items): ``fit(table=...)`` once per start (``loop``) vs. the same 16
-  starts in one batch (``batched``, via the parameter tables, so both use identical starts).
+  starts in one batch (``batched``: the default, a sequential ``lax.map`` on CPU;
+  ``batched_vmap``: ``vmap``), via the parameter tables, so all variants use identical starts.
 
 Works on revisions without the batched code (then only the ``loop`` variants run), so the same
 script measures a base checkout. Run from the repository root::
@@ -125,8 +126,7 @@ def _child(workload: str, variant: str, repeats: int) -> dict[str, Any]:
 
             def run() -> None:
                 fits = [
-                    fit(spec, df, table=t, method=method, quadrature=quad, se=None)
-                    for t in tables
+                    fit(spec, df, table=t, method=method, quadrature=quad, se=None) for t in tables
                 ]
                 extra["loglik"] = [f.loglik for f in fits]
                 extra["n_iter"] = [f.n_iter for f in fits]
@@ -144,6 +144,7 @@ def _child(workload: str, variant: str, repeats: int) -> dict[str, Any]:
                     method=method,
                     quadrature=quad,
                     se=None,
+                    **({"parallel": True} if variant == "batched_vmap" else {}),
                 )
                 extra["loglik"] = [f.loglik for f in fits]
                 extra["n_iter"] = [f.n_iter for f in fits]
@@ -153,6 +154,7 @@ def _child(workload: str, variant: str, repeats: int) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run every workload in its own subprocess and print / save the timings."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=False)
     parser.add_argument("--repeats", type=int, default=2)
@@ -169,12 +171,13 @@ def main(argv: list[str] | None = None) -> int:
         has_batch = False
     jobs = [("dif30", "dif"), ("mix16", "loop")]
     if has_batch:
-        jobs.append(("mix16", "batched"))
+        jobs += [("mix16", "batched"), ("mix16", "batched_vmap")]
     results = []
     env = {**os.environ, "JAX_PLATFORMS": "cpu"}
     for workload, variant in jobs:
+        cmd = [sys.executable, __file__, "--child", workload, variant]
         out = subprocess.check_output(
-            [sys.executable, __file__, "--child", workload, variant, "--repeats", str(args.repeats)],
+            [*cmd, "--repeats", str(args.repeats)],
             env=env,
             text=True,
         )

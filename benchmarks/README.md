@@ -98,6 +98,19 @@ memory below 1 GiB at 200 groups. For comparison, the E-step before #79 (every p
 group) took 86 s warm for a 50-group plain-EM fit that the group-blocked E-step ran in 23 s on the
 same machine at the time (DESIGN §26).
 
+### Batched fits (DIF refits, multi-start)
+
+`run_batched.py` compares fitting many models of one design one by one with fitting them in one
+batch (DESIGN §28): the 30 likelihood-ratio refits of `FitResult.dif(scheme="drop")` on a
+two-group 2PL, and 16 starts of a `NormalMixture(2)` 2PL. Each workload runs in a fresh process
+(cold includes compilation; warm is the median of `--repeats` further calls). On a revision
+without the batch code only the one-by-one variants run, so the same script measures a base
+checkout:
+
+```bash
+uv run python benchmarks/run_batched.py --out batched.json
+```
+
 ## Caveats
 
 - **Compile time vs. warm time**: JAX compiles each `(model family, padded pattern bucket, se)`

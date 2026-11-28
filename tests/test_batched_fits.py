@@ -66,9 +66,7 @@ def _compiled(
 
 def _single(prob: CompiledProblem, eta0: np.ndarray, method: BAEM = METHOD) -> object:
     runner = _squarem if method.squarem else _em
-    return runner(
-        prob, jnp.asarray(eta0), tol=method.tol, max_iter=method.max_iter, n_newton=3
-    )
+    return runner(prob, jnp.asarray(eta0), tol=method.tol, max_iter=method.max_iter, n_newton=3)
 
 
 # --------------------------------------------------------------------------------------------
@@ -281,7 +279,7 @@ def test_fit_tables_rejects_robust_se() -> None:
 
 @pytest.mark.slow
 def test_dif_lrt_equals_one_by_one_refits() -> None:
-    spec, df, grp, tables = _design()
+    spec, df, grp, _ = _design()
     res = fit(spec, df, group=grp, method=METHOD, quadrature=QUAD, se=None)
     model = (
         Model.uniform(TwoPL(), items=df.columns)
@@ -324,12 +322,11 @@ def test_perturbed_starts_stay_inside_bounds() -> None:
 def test_multi_start_picks_the_best_start() -> None:
     spec, df, grp, tables = _design()
     key = jax.random.key(7)
-    res = fit(
-        spec, df, group=grp, method=METHOD, quadrature=QUAD, se="oakes", n_starts=4, key=key
-    )
+    res = fit(spec, df, group=grp, method=METHOD, quadrature=QUAD, se="oakes", n_starts=4, key=key)
     starts = res.starts
     assert starts is not None
-    assert list(starts.columns) == ["start", "loglik", "log_posterior", "converged", "n_iter", "best"]
+    columns = ["start", "loglik", "log_posterior", "converged", "n_iter", "best"]
+    assert list(starts.columns) == columns
     assert starts["best"].sum() == 1
     best = starts[starts["best"]].iloc[0]
     assert res.loglik == pytest.approx(best["loglik"], abs=1e-12)

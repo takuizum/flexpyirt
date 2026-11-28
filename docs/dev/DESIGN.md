@@ -3658,6 +3658,112 @@ data-independent shapes (§15.21).
    SEs, EAPs computed in R from `probtrace()`, and S-X2 per group from `itemfit()` on single-group
    mirt objects with the same `customGroup` fixed at the group's estimates.
 
+## 28. Batched estimation of many models (#157)
+
+1. **Scope.** Workflows that fit many models of one design (same data, items, kernels and grid;
+   different constraints, starting values or pattern counts) run them in one compiled kernel:
+   the likelihood-ratio refits of `FitResult.dif()` and of each `dif_screen()` round, and
+   multi-start estimation (`fit(n_starts=...)`). Resampled pattern counts (parametric or
+   nonparametric bootstrap) are supported by the kernel (stacked `counts`, tested) but have no
+   public API yet: a bootstrap SE would need its own validation (item 9).
+2. **Core (`_batch.py`).** `stack_problems` takes the `CompiledProblem`s and starting values of
+   $M$ models and makes their shapes common without changing any model's objective:
+   (a) $\eta$ is zero-padded to the longest $n_{\max}$; no `free_index` reads the padding, so no
+   M-step writes it, it adds 0 to the parameter change and to SQUAREM's norms, and the prior
+   block is padded with "no prior"; (b) each family's local slots are padded to the largest slot
+   count with unused slots (`slot_free_index = -1`, bounds $\pm\infty$), which the masked Newton
+   step keeps fixed (§14.2); (c) an item is pooled over groups (§26.9, a static flag) only if it
+   is invariant in every model, which changes the M-step only in summation order. Leaves equal in
+   every model (responses, nodes, groups, blocks; all but the indices for DIF, all for
+   multi-start) stay shared, unstacked (memory $1\times$); the others get a leading model axis.
+   Models whose tree structures still differ (e.g. different components of equality constraints
+   across items, §16.1) return `None` and the shell fits them one by one. `run_batch` runs
+   `em` / `squarem` over the models inside one `jit`, keyed by the tree structure and the
+   static settings, so a whole DIF analysis compiles once instead of once per item (each item
+   has its own static `invariant` tuple, so the per-item `fit()` loop recompiled for every item).
+3. **Per-model freeze (vmap).** `jax.vmap` of a `lax.while_loop` whose predicate depends on the
+   batched carry runs the body while *any* model is unconverged and keeps each finished model's
+   carry by a `select` on its own predicate. A finished model therefore keeps its parameters,
+   iteration count and histories exactly as its own loop left them (test: a model started at
+   its fixed point stops after its own 1–2 iterations while the other runs >10). Two costs come
+   with it: every model is stepped until the slowest converges ($M\max_m T_m$ model-iterations
+   instead of $\sum_m T_m$), and every `lax.cond` inside the body (SQUAREM's safeguard branches)
+   becomes a `select` that evaluates both branches.
+4. **CPU vs accelerators (decision).** `run_batch(parallel=None)` uses `vmap` on GPU / TPU,
+   in chunks whose E-step working set stays near `BATCH_BYTES` (256 MiB; per model the flat
+   $2PQ$ log joint and posterior plus $G\sum_fJ_fK_fQ$ counts, or the blocked E-step's own
+   32 MiB, §26.10), balanced and with the last chunk padded by repeating a model so every chunk
+   reuses the kernel. On CPU it uses `lax.map` over all models in the same kernel: one compile,
+   and each model runs its own `while_loop` to its own convergence (no frozen work, no
+   both-branch conds). The CPU has no idle lanes for `vmap` to fill (the cores already serve one
+   model's matrix products), so lockstep stepping only adds work: measured below, `vmap` took
+   0.94–1.28× the warm time of the per-model loop on CPU (1.28× for DIF), while `lax.map` keeps the loop's warm
+   time (1.00–1.02×) and the single compile.
+5. **Agreement with single fits.** Each model of a batch reaches the fixed point of its own
+   `fit()` within the convergence tolerance, not bitwise: batched (or scanned) kernels round
+   differently, and an item unpooled in the batch (2c) takes the per-group M-step path, whose
+   converged Newton steps agree only to about $\sqrt\varepsilon$ (§26.9). EM amplifies these
+   differences (by roughly $10^{10}$ over 25 iterations), so the stopping change can cross
+   `tol` one iteration earlier or later (plain EM: $|\Delta T|\le1$ in the tests), and
+   SQUAREM's safeguard, which compares log posteriors that differ by $\sim10^{-12}$ near
+   convergence, can fire on different iterations (21 vs 17 iterations seen, $\eta$ equal to
+   $10^{-8}$). Measured on six DIF refits (two-group 2PL, `tol=1e-6`): identical iteration counts,
+   $\max|\Delta\eta|\le3\times10^{-10}$ and $|\Delta\ell|\le2\times10^{-12}$ for EM, and
+   $\max|\Delta\eta|\le3\times10^{-7}$ for SQUAREM; Oakes SEs of a batched fit agree to
+   $10^{-10}$ (EM). The issue's "$10^{-14}$ in every slice" is therefore not a property of the
+   implementation; the tests check convergence-tolerance agreement (`tests/test_batched_fits.py`)
+   and the existing mirt agreement tests of `dif()` / `dif_screen()` / mixtures still pass.
+6. **Shell.** `fit._fit_tables(spec, data, tables=..., se=...)` is `[fit(..., table=t) ...]`
+   with the estimation batched: each table is prepared and compiled as by `fit()`, and each run
+   goes through the same `_finish` (warnings, SEs per model, tables) as `fit()`. Only
+   `se in {"oakes", "hessian", None}` (the batch callers' needs). `dif_tests` (LRT) builds all
+   tables first, then fits them in one batch; `dif_screen` prefetches every fit a round needs
+   (`_Screen.prefetch`: $F\cup\{i\}$ and $F\setminus\{i\}$ for the LRT, $F\cup\{i\}$ with
+   SEs for Wald) into its cache before the per-item tests, with the same tables and starting
+   values as before.
+7. **Multi-start API (decision).** `fit(..., n_starts=1, start_scale=0.5, key=None)`.
+   Start 1 is the usual starting value; starts $m\ge2$ perturb every free parameter on the scale
+   on which its bounds vanish (the transforms of §15.47: identity, $\log(x-l)$, $\log(u-x)$,
+   $\operatorname{logit}((x-l)/(u-l))$), $z^{(m)}=z(\eta^{(0)})+s\,\varepsilon^{(m)}$ with
+   $\varepsilon\sim N(0,I)$, so every start is strictly inside the bounds (EH weights are not
+   perturbed). `key` (a JAX PRNG key) is required for $n_{\text{starts}}>1$, as for plausible
+   values (§8), so results are reproducible by construction. The reported solution is the
+   converged start with the largest log posterior (all starts if none converged); starts within
+   $\max(10^{-6}, 10^{-10}|\ell|)$ of the best are ties and the earliest wins, so start 1 is kept
+   unless another start is really better. SEs are computed for that start only.
+   `FitResult.starts` (start, loglik, log_posterior, converged, n_iter, best) is not saved in
+   JSON, so the format is unchanged (`schema_version` stays). Rejected: options in `BAEM` (it is
+   serialized; starting values are not EM settings) and a separate function (`fit()` already
+   owns validation, compilation and the result).
+8. **Measurements** (16-core Linux, `taskset -c 14,15`, CPU, `benchmarks/run_batched.py`; cold =
+   fresh process including compilation, warm = median of 2 further calls; the machine was shared,
+   so warm differences under ~10 % are noise):
+
+   | workload | base (one by one) cold / warm | `vmap` batch cold / warm | `lax.map` batch (adopted on CPU) cold / warm |
+   |---|---|---|---|
+   | `dif30`: `dif(scheme="drop")`, 30 items, 2×2000, 2PL | 199.1 / 7.63 s | 16.7 / 9.74 s | 13.3 / 7.63 s |
+   | `mix16`: 16 starts, `NormalMixture(2)` 2PL, 2000×20 | 12.9 / 4.53 s | 15.1 / 5.41 s | 13.2 / 4.59 s |
+
+   A second run of `vmap` on `mix16` took 4.23 s warm: its warm time depends on the spread of the
+   iteration counts and on the load, while `lax.map` always matches the loop. Single fits
+   (`benchmarks/run_flexpyirt.py`, base vs this branch) are unchanged within noise:
+   `twogroup_2pl_n6000_j30` warm 0.98 / 0.91 s (base, two runs) vs 0.91 / 0.90 s (new) for plain EM
+   without SEs, `grm4_n2000_j20` 0.34 / 0.23 s vs 0.24 / 0.26 s; the other cases of the full suite
+   differ by -29 % to +31 % in both directions with identical iteration counts and log-likelihoods,
+   on a machine with load average 30–45 (the single-fit path itself is unchanged: `fit()` calls the
+   same jitted `em` / `squarem`, then the result code moved into `_finish`).
+   9. **Rejected or deferred.** (a) `vmap` on CPU (item 4). (b) Compacting the batch (dropping
+   converged models and re-batching the rest): it changes shapes during the run, so it needs a
+   host round trip and a recompile per size, against the one-compile goal; `lax.map` already
+   avoids the frozen work on CPU. (c) A dynamic pooling mask instead of the static `invariant`
+   tuple: pooling is a static split of the items (§26.9); a dynamic mask would evaluate both
+   paths. With two groups the unpooled M-step costs about twice the pooled one for the items
+   freed in some model only. (d) A public bootstrap (resampled `counts`): the kernel supports it
+   (test), but the SE estimator, the number of replications and the treatment of
+   non-converged replications need a design and a validation target first. (e) Batching
+   `se="sandwich"` / `"crossprod"`: the per-pattern score paths are not part of the batch; the
+   callers that batch never use them.
+
 ## References
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
 - Aitchison, J., & Shen, S. M. (1980). Logistic-normal distributions: Some properties and uses. *Biometrika*, 67(2), 261–272.

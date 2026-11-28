@@ -968,9 +968,9 @@ rounding), the earliest one is kept, so start 1 is reported unless another start
 Standard errors are computed for that solution only. `key` (a JAX PRNG key) is required and makes
 the starts reproducible. `starts` is `None` for a single start and is not saved by `to_json`.
 
-All starts are estimated together in one compiled computation: the starts that have converged
-stop changing while the others continue. On a GPU this runs the starts in parallel. On a CPU the
-starts share the cores, so the time is about that of fitting them one after another.
+All starts are estimated in one compiled computation, so the model is compiled once. On a GPU the
+starts run in parallel (a start that has converged stops changing while the others continue); on
+a CPU they run one after another, so the time is that of fitting them one by one.
 
 ## 9. Multiple groups
 
