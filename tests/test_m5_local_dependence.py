@@ -83,8 +83,10 @@ def test_local_dependence_matches_mirt(name: str) -> None:
     names = case["items"]
     assert list(ld.pairs["item_i"]) == [names[i] for i in ref["i"]]
     assert list(ld.pairs["item_j"]) == [names[j] for j in ref["j"]]
-    np.testing.assert_allclose(ld.pairs["x2"], ref["x2"], rtol=1e-5)
-    np.testing.assert_allclose(ld.pairs["g2"], ref["g2"], rtol=1e-5)
+    # atol: a pair with X2 near 1e-5 moves by about 2e-10 with the stopping point of the
+    # 1e-9-tolerance EM, which is more than 1e-5 relative (VALIDATION.md, tolerances).
+    np.testing.assert_allclose(ld.pairs["x2"], ref["x2"], rtol=1e-5, atol=1e-8)
+    np.testing.assert_allclose(ld.pairs["g2"], ref["g2"], rtol=1e-5, atol=1e-8)
     np.testing.assert_allclose(ld.pairs["cramer_v"], ref["cramer_v"], rtol=0, atol=1e-6)
     np.testing.assert_allclose(ld.pairs["q3"], ref["q3"], rtol=0, atol=1e-6)
     np.testing.assert_allclose(ld.q3.to_numpy()[np.triu_indices(len(names), 1)], ld.pairs["q3"])
