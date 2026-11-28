@@ -110,6 +110,7 @@
 | V55 | 群ブロック化した E-step での多数の群: 2PL、大きさの異なる 10 群（200–470）、15 項目、q01–q06 を不変なアンカー、q07–q15 は群ごとに自由、焦点群の平均・分散は自由、5% MCAR 欠測。ブロック化した E-step と平坦な E-step の回帰 | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`、`fscores(extract.group(m, g), method = "EAP")`。回帰は平坦な経路 | #79 |
 | V56 | 群ごとの `DavidianCurve` と `NormalMixture`: (a) 2PL、3 群（二峰・右に歪む・左に歪む）、`DavidianCurve(2)`、q01–q06 がアンカー、3% 欠測。(b) 2PL $J=15$、2 群、`NormalMixture(2)`、全項目不変。(c) FIPC、2 群、`DavidianCurve(2)`、全潜在パラメタ自由。推定値、R の Hessian による SE、EAP、群ごとの S-X2 | 格子上で正規化した標準化密度（`dcurver::ddc`）による `multipleGroup(customGroup = createGroup(...))` を独立な R の周辺対数尤度上の Newton で磨く。R の Richardson Hessian による SE、R で計算した EAP、各群の推定値で固定した 1 群オブジェクトでの `itemfit(use_dentype_estimate = TRUE)` | #75 |
 | V57 | 重み付き・クラスタロバストなサンドイッチ SE: (a) 2PL $J=10$、25 人 × 40 校で $\theta$ に学校効果、不均等なウェイト、3% 欠測、(b) 2PL $J=8$、アンカー q01–q05 の参照群 / 焦点群で焦点群の平均・分散は自由、群をまたぐ 30 校。mirt の推定値での中央の行列（重み付き、クラスタ、ウェイトなしのクラスタ、1 人 1 クラスタ）、ウェイトつきの `se="crossprod"`、mirt の重み付きサンドイッチの再現、通しの SE | `survey.weights` つきの `mirt()` / `multipleGroup()`、`SE.type = "Oakes"`（ブレッド）・`"crossprod"`・`"sandwich"`。mirt のグリッド上で `numDeriv::jacobian` による個人ごとのスコア（`estfun.AllModelClass` と照合）。$H^{-1}BH^{-1}$ は R で計算 | #84, #85 |
+| V58 | 3PL / 4PL 項目の混合（EMM）M-step（任意、`BAEM(asymptote_m_step="mixture")`）を V11 の 3PL・4PL で SQUAREM ありで照合 | V11 の既存の参照値（`v11_3pl.json`、`v11_4pl.json`） | #165 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -1316,6 +1317,19 @@
      違うことを確かめる。単体テストでは、`log_pdf` を $\operatorname{logit}x$ の `scipy.stats.norm.logpdf` と照合し
      （1e-13）、Core のコード `PRIOR_LOGITNORMAL_LOGIT = 5` とその勾配、`mode_scale` の検証、JSON のキー（往復と、
      ないときは `"natural"`）を確かめる。
+- **3PL / 4PL の混合（EMM）M-step（V58、#165）**: DESIGN §15.49。`tests/test_mirt_m3.py` で V11 の 3PL・4PL を
+  `BAEM(asymptote_m_step="mixture", squarem=True, tol=1e-9)` で推定し、mirt と比べる。比べるのは対数尤度
+  （相対 1e-6）、$a$・$d$・$g$・$u$（1e-4）、Oakes SE（相対 1e-3）と、対数尤度の履歴が単調であること。どちらのケースも
+  通る。`tests/test_asymptote_mixture.py` では次を確かめる。
+  - 前の反復の点で、混合の目的関数の勾配が通常の $Q$ と一致する（3PL、4PL、$g=0$、$u=1$。1e-10）。
+  - $Q^{\mathrm{mix}}-Q$ がその点で最大になる。
+  - 閉形式の漸近線で、漸近線の勾配が 0 になる。
+  - シミュレーションの 3PL、混在モデル（2PL/3PL/4PL、$g$ を 1 つ固定）、$g$ に `BetaPrior` を置いた 2 群の 3PL が、
+    `"joint"` と同じ最大値に着く。許容誤差は対数事後確率 5e-5、パラメタ 2e-3。混合 M-step は収束が遅く、
+    `tol=1e-8` では最大値から遠い点で止まるため。
+  - JSON の読み書き。
+
+  速さと小標本での比較は `benchmarks/results/2026-11-28-emm-3pl.md` にある。
 - **EM の単調性**: すべての照合ケースで、反復ごとの（MAP 時は事後）対数尤度が非減少であることをテストで確認。
 - **SE の内部整合**: Oakes の SE と、収束点での周辺対数尤度の直接 `jax.hessian` による SE が一致すること（小規模ケース）。
 - **不変性**: 項目の並べ替え、群ラベルの付け替え、パターン圧縮の有無で結果が変わらないこと。

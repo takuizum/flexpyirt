@@ -213,6 +213,14 @@ res = fit(
   scale. The difference is at a bound: the default stops exactly on it (e.g. $g=0$), while the
   unconstrained scale only approaches it, sometimes after many more iterations. Both raise
   `HeywoodWarning` once a parameter is within `1e-4` of its bound.
+- **`asymptote_m_step="mixture"`** (default `"joint"`): changes the M-step of 3PL and 4PL items to
+  the mixture reformulation of Zheng, Meng, Guo & Liu (2018), often called EMM. Each response is
+  treated as a guess, a slip or an ability-based response. The asymptotes then have a
+  closed-form update, and the slope and intercept are fitted as a weighted 2PL. The maximum,
+  priors and standard errors are the same as with the default. It needs many more iterations
+  (about 4–60× in our benchmarks), so with the same `tol` it stops farther from the maximum. It
+  does not make small-sample fits converge more often. Keep the default unless you want to
+  compare the two algorithms; if you use it, turn on `squarem=True` and tighten `tol`.
 - **`quadrature`**: the latent-variable grid. The default is 61 equally spaced points on
   $[-6, 6]$ (mirt's default). See [section 13](#13-choosing-the-quadrature-grid) for when to
   widen it.
@@ -2070,3 +2078,4 @@ except SpecificationError as e:
 - Woods, C. M. (2007). Empirical histograms in item response theory with ordinal data. *Educational and Psychological Measurement*, 67, 73–87.
 - Woods, C. M., & Lin, N. (2009). Item response theory with estimation of the latent density using Davidian curves. *Applied Psychological Measurement*, 33, 102–117.
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
+- Zheng, C., Meng, X., Guo, S., & Liu, Z. (2018). Expectation-maximization-maximization: A feasible MLE algorithm for the three-parameter logistic model based on a mixture modeling reformulation. *Frontiers in Psychology*, 8, 2302. https://doi.org/10.3389/fpsyg.2017.02302

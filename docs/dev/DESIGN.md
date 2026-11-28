@@ -1428,6 +1428,49 @@ data-independent shapes (§15.21).
       positive and finite). JSON registers it as `"LogitNormalPrior"` with keys `mean_logit` and
       `sd_logit` (schema version 8).
 
+49. **Optional mixture (EMM) M-step for 3PL / 4PL items (`BAEM(asymptote_m_step="mixture")`, #165, V58)**:
+    Zheng, Meng, Guo & Liu (2018) write the 3PL as a mixture: a response is a guess (correct with
+    probability 1) or an ability-based response ($P^*=\sigma(z)$, $z=\mathbf a^\top\boldsymbol\theta+d$).
+    A third state, a slip (incorrect with probability 1), extends this to the 4PL. The
+    states are chosen independently of $\boldsymbol\theta$ with probabilities $g$, $1-u$ and $u-g$, so
+    $P(y=1\mid\boldsymbol\theta)=g+(u-g)P^*$ as in §15.1.
+    - **E-step.** The state is a second missing variable. Its posterior at node $q$, given the response
+      and the previous iterate $\xi'$, is $\omega^G_q=g'/P'_{1q}$ (correct responses) and
+      $\omega^S_q=(1-u')/P'_{0q}$ (incorrect responses). With the usual expected counts
+      $\bar r_{kq}$ (§4.3), the expected state counts are $n_G=\sum_q\bar r_{1q}\omega^G_q$,
+      $n_S=\sum_q\bar r_{0q}\omega^S_q$, $s_{1q}=\bar r_{1q}(1-\omega^G_q)$,
+      $s_{0q}=\bar r_{0q}(1-\omega^S_q)$ and $n_A=\sum_q(s_{1q}+s_{0q})$. They come from the existing
+      counts and $\xi'$, so the E-step does not change; only the item's M-step objective does.
+    - **M-step objective.**
+      $$Q^{\mathrm{mix}}(\xi\mid\xi')=n_G\log g+n_S\log(1-u)+n_A\log(u-g)+\sum_q\big[s_{1q}\log\sigma(z_q)+s_{0q}\log\sigma(-z_q)\big].$$
+      The asymptote part and the weighted 2PL part are separate, and both are concave. Its gradient
+      at $\xi=\xi'$ equals that of the usual $Q$ (Fisher's identity), so the fixed points, the
+      maximum, the priors and the standard errors (always from the observed-data likelihood, §4.8)
+      are unchanged.
+    - **Closed-form asymptotes, then Newton.** For slots shared across groups, the state counts are
+      summed over those groups. With both asymptotes free, $\hat g=n_G/N$ and $\hat u=1-n_S/N$
+      ($N=n_G+n_S+n_A$). With $u$ fixed, $\hat g=u\,n_G/(n_G+n_A)$; with $g$ fixed,
+      $\hat u=(n_A+g\,n_S)/(n_A+n_S)$. If the groups sharing a slot have different fixed values of the
+      other asymptote, their mean is used. The closed form, clipped strictly inside the bounds, is
+      the start of the existing masked Newton (§15.2) on $Q^{\mathrm{mix}}$ plus the item's priors,
+      and is kept only if it does not lower that objective. Without priors the Newton steps then
+      leave the asymptotes in place (the Hessian is block diagonal and their gradient is zero) and
+      fit $(\mathbf a,d)$. A prior on $g$ or $u$ makes the Newton steps finish the update. Each
+      M-step therefore never lowers $Q^{\mathrm{mix}}$, which keeps EM monotone (generalized EM).
+    - **Scope.** Only the item-wise M-step of `FourPLKernel` items. Items linked across items
+      (§16.1) keep the usual objective, and so do other item models. The two augmentations combine
+      into one complete-data model, so mixing them keeps EM monotone. `m_step_scale` and
+      `squarem` work as before.
+    - **Speed (benchmarks/results/2026-11-28-emm-3pl.md).** The extra missing variable makes the EM
+      rate closer to 1: 4–60× more iterations and 3–40× the wall time of `"joint"`, with or without
+      SQUAREM. At the same `tol` the fit stops farther from the maximum. In replicated small-sample
+      3PL simulations ($N\in\{500,1000\}$, $J\in\{10,20\}$) it did not converge more often than
+      `"joint"`. The stability reported by Zheng et al. (2018) is relative to MMLE/EM software, and
+      the active-set Newton of §15.2 already provides it. Hence `"joint"` stays the default, and
+      `"mixture"` is kept as an option for comparison and research.
+    - **JSON.** Schema version 10 adds the method key `asymptote_m_step`. It is written only when it
+      is `"mixture"`; when absent it reads as `"joint"`.
+
 ## 16. Implementation decisions (M5)
 1. **Equality constraints across items (`Model.equal_across_items`, shared `free_id`s)**:
    `Model.equal_across_items(*, items, params)` makes each parameter in `params` of the selected
@@ -4084,6 +4127,7 @@ data-independent shapes (§15.21).
 - Zhang, D., & Davidian, M. (2001). Linear mixed models with flexible distributions of random effects for longitudinal data. *Biometrics*, 57, 795–802.
 - Zhang, J. (2007). Conditional covariance theory and DETECT for polytomous items. *Psychometrika*, 72(1), 69–91.
 - Zhang, J., & Stout, W. (1999). The theoretical DETECT index of dimensionality and its application to approximate simple structure. *Psychometrika*, 64(2), 213–249.
+- Zheng, C., Meng, X., Guo, S., & Liu, Z. (2018). Expectation-maximization-maximization: A feasible MLE algorithm for the three-parameter logistic model based on a mixture modeling reformulation. *Frontiers in Psychology*, 8, 2302. https://doi.org/10.3389/fpsyg.2017.02302
 - Zieky, M. (1993). Practical questions in the use of DIF statistics in test development. In P. W. Holland & H. Wainer (Eds.), *Differential Item Functioning* (pp. 337–347). Erlbaum.
 - Zumbo, B. D. (1999). *A Handbook on the Theory and Methods of Differential Item Functioning (DIF): Logistic Regression Modeling as a Unitary Framework for Binary and Likert-Type (Ordinal) Item Scores*. Directorate of Human Resources Research and Evaluation, Department of National Defense (Canada).
 - Zumbo, B. D., & Thomas, D. R. (1997). *A Measure of Effect Size for a Model-Based Approach for Studying DIF*. Edgeworth Laboratory for Quantitative Behavioral Science, University of Northern British Columbia.

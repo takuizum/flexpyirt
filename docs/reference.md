@@ -420,7 +420,7 @@ to_json(path=None, *, indent=2) -> str
 
 Serialize the fitted result to a strict RFC 8259 JSON string, and also write it (UTF-8) to `path`
 (`str` or `os.PathLike`) when `path` is given. Uses plain, versioned JSON (no `pickle`) with
-top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 9` (files with versions 1–8 are
+top-level `"format": "flexpyirt.FitResult"`, `"schema_version": 10` (files with versions 1–9 are
 still read), and `"flexpyirt_version"`. Multidimensional results store their factor structure.
 Finite float64 values are written as `repr`-exact JSON numbers and non-finite values (`NaN`,
 `+inf`, `-inf`) are encoded explicitly as `"NaN"`, `"Infinity"`, and `"-Infinity"` in float-typed
@@ -2392,7 +2392,8 @@ multiple-group result every DataFrame has a leading `group` column (the two tabl
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural")
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural",
+     asymptote_m_step="joint")
 ```
 
 | Argument | Description |
@@ -2402,6 +2403,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale
 | `m_step_newton_steps` | Newton steps per M-step; no step decreases the expected log-likelihood |
 | `squarem` | Enable SQUAREM scheme S3 acceleration (Varadhan & Roland, 2008) with a monotonicity/feasibility safeguard (default `False`) |
 | `m_step_scale` | `"natural"` (default): M-step Newton on the natural scale with bounds, reaching boundary solutions exactly. `"unconstrained"`: Newton on $\operatorname{logit}$ / $\log$ scales of the parameters with a bound ($g$, $u$, latent variances, factor correlations, slopes bounded by a prior or an edited bound); unbounded parameters are not transformed. Same objective and interior solution; estimates, table, priors and SEs stay on the natural scale; a boundary solution is only approached ([guide section 4](guide.md#4-fitting)) |
+| `asymptote_m_step` | M-step of 3PL / 4PL items. `"joint"` (default): Newton on $(a, d, g, u)$ jointly. `"mixture"`: the mixture reformulation (EMM; Zheng, Meng, Guo & Liu, 2018), with closed-form asymptotes and a weighted 2PL fit of $(a, d)$. Same maximum, priors and SEs, but many more iterations ([guide section 4](guide.md#4-fitting)) |
 
 ### `Quadrature`
 

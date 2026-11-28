@@ -19,7 +19,13 @@ import numpy as np
 from jax import Array
 
 from flexpyirt._newton import newton_ascent
-from flexpyirt.items import DichotomousKernel, GPCMKernel, ItemKernel
+from flexpyirt.items import (
+    DichotomousKernel,
+    FourPLKernel,
+    GPCMKernel,
+    ItemKernel,
+    _linear_predictor,
+)
 from flexpyirt.latent import (
     davidian_log_weights,
     eh_constrained_weights,
@@ -985,6 +991,125 @@ def expected_complete_loglik(prob: CompiledProblem, eta: Array, counts: Expected
     return total + jnp.sum(q_lat)
 
 
+def _n_log(n: Array, x: Array) -> Array:
+    r""":math:`n\log x` with :math:`0\log x=0` and a NaN-free gradient where :math:`n=0`."""
+    pos = n > 0
+    return jnp.where(pos, n * jnp.log(jnp.where(pos, x, 1.0)), 0.0)
+
+
+def _mixture_counts(
+    kernel: FourPLKernel, nodes: Array, r: Array, old: Array
+) -> tuple[Array, Array, Array, Array, Array]:
+    r"""E-step of the mixture reformulation of a 3PL / 4PL item for one group (DESIGN.md §15.49).
+
+    Each response comes from one of three latent states, chosen independently of
+    :math:`\boldsymbol\theta`: a guess (correct, probability :math:`g`), a slip (incorrect,
+    probability :math:`1-u`), or an ability-based response (probability :math:`u-g`, correct with
+    probability :math:`P^*=\sigma(\mathbf a^\top\boldsymbol\theta+d)`). At the previous iterate
+    :math:`\xi'`, the posterior state probabilities at node :math:`q` are
+
+    .. math::
+        \omega^{G}_q=\frac{g'}{P'_{1q}},\qquad \omega^{S}_q=\frac{1-u'}{P'_{0q}},
+
+    and the expected state counts are :math:`n_G=\sum_q\bar r_{1q}\omega^G_q`,
+    :math:`n_S=\sum_q\bar r_{0q}\omega^S_q`, :math:`s_{1q}=\bar r_{1q}(1-\omega^G_q)` and
+    :math:`s_{0q}=\bar r_{0q}(1-\omega^S_q)` (correct / incorrect ability-based responses),
+    :math:`n_A=\sum_q(s_{1q}+s_{0q})`. Zheng, Meng, Guo & Liu (2018) for the 3PL; the slip state
+    extends it to the 4PL.
+
+    Returns ``(n_G, n_S, n_A, s_1, s_0)``.
+    """
+    nf = kernel.n_factors
+    g_old, u_old = old[nf + 1], old[nf + 2]
+    log_p = kernel.log_prob(nodes, old)  # (Q, 2)
+    has_g = g_old > 0
+    has_s = u_old < 1
+    w_guess = jnp.where(has_g, jnp.exp(jnp.log(jnp.where(has_g, g_old, 1.0)) - log_p[:, 1]), 0.0)
+    w_slip = jnp.where(
+        has_s, jnp.exp(jnp.log(jnp.where(has_s, 1.0 - u_old, 1.0)) - log_p[:, 0]), 0.0
+    )
+    s1 = r[1] * (1.0 - w_guess)
+    s0 = r[0] * (1.0 - w_slip)
+    n_g = jnp.sum(r[1] * w_guess)
+    n_s = jnp.sum(r[0] * w_slip)
+    return n_g, n_s, jnp.sum(s1 + s0), s1, s0
+
+
+def _mixture_item_q(
+    kernel: FourPLKernel, nodes: Array, r: Array, params: Array, old: Array
+) -> Array:
+    r"""Return the expected complete-data log-likelihood of the mixture reformulation (§15.49).
+
+    .. math::
+        Q^{\mathrm{mix}}(\xi\mid\xi') = n_G\log g + n_S\log(1-u) + n_A\log(u-g)
+        + \sum_q\big[s_{1q}\log\sigma(z_q)+s_{0q}\log\sigma(-z_q)\big],
+        \qquad z_q=\mathbf a^\top\boldsymbol\theta_q+d,
+
+    with the counts of :func:`_mixture_counts` at :math:`\xi'`. The asymptote part and the
+    weighted 2PL part are separate, and both are concave. At :math:`\xi=\xi'` its gradient equals
+    that of :func:`_item_q`, so both M-steps have the same fixed points (Zheng et al., 2018).
+    """
+    n_g, n_s, n_a, s1, s0 = _mixture_counts(kernel, nodes, r, jax.lax.stop_gradient(old))
+    nf = kernel.n_factors
+    d, g, u = params[nf], params[nf + 1], params[nf + 2]
+    z = _linear_predictor(nodes, params[:nf], nf) + d
+    asym = _n_log(n_g, g) + _n_log(n_s, 1.0 - u) + _n_log(n_a, u - g)
+    valid = (g >= 0) & (u <= 1) & (u > g)
+    q = asym + jnp.sum(s1 * jax.nn.log_sigmoid(z) + s0 * jax.nn.log_sigmoid(-z))
+    return jnp.where(valid, q, jnp.nan)
+
+
+def _mixture_asymptote_start(
+    kernel: FourPLKernel,
+    nodes: Array,
+    r: Array,
+    xi_old: Array,
+    loc: Array,
+    u0: Array,
+    free: Array,
+    lo: Array,
+    hi: Array,
+) -> Array:
+    r"""Closed-form asymptote update of the mixture M-step for one item (DESIGN.md §15.49).
+
+    With the state counts summed over the groups that share a slot,
+    :math:`\hat g=n_G/N` and :math:`\hat u=1-n_S/N` (:math:`N=n_G+n_S+n_A`) when both asymptotes
+    are free; with :math:`u` fixed, :math:`\hat g=u\,n_G/(n_G+n_A)`; with :math:`g` fixed,
+    :math:`\hat u=(n_A+g\,n_S)/(n_A+n_S)` (Zheng et al., 2018). Slopes and intercepts keep their
+    previous values. When the groups sharing a slot have different fixed values of the other
+    asymptote, their mean is used; the caller keeps this start only if it does not lower the
+    item objective, and the Newton steps that follow finish the update.
+    """
+    nf = kernel.n_factors
+    gi, ui = nf + 1, nf + 2
+    counts = jax.vmap(lambda rg, pg: jnp.stack(_mixture_counts(kernel, nodes, rg, pg)[:3]))(
+        r, xi_old
+    )  # (G, 3): n_G, n_S, n_A
+    n_slots = u0.shape[0]
+    slots = jnp.arange(n_slots)
+
+    def per_slot(col: int) -> tuple[Array, Array]:
+        member = (loc[:, col][:, None] == slots[None, :]) & (loc[:, col] >= 0)[:, None]  # (G, S)
+        return member.astype(counts.dtype).T @ counts, member.any(axis=0)
+
+    tot_g, is_g = per_slot(gi)
+    tot_u, is_u = per_slot(ui)
+    g_free_any = jnp.any(loc[:, gi] >= 0)
+    u_free_any = jnp.any(loc[:, ui] >= 0)
+    # Mean over groups of the other asymptote, for slots whose partner is fixed.
+    mean_u = jnp.mean(xi_old[:, ui])
+    mean_g = jnp.mean(xi_old[:, gi])
+    ng, ns, na = tot_g[:, 0], tot_g[:, 1], tot_g[:, 2]
+    g_new = jnp.where(u_free_any, ng / (ng + ns + na), mean_u * ng / (ng + na))
+    ng, ns, na = tot_u[:, 0], tot_u[:, 1], tot_u[:, 2]
+    u_new = jnp.where(g_free_any, 1.0 - ns / (ng + ns + na), (na + mean_g * ns) / (na + ns))
+    # Strictly inside the box so that the Newton steps (and their logit transform) are defined.
+    margin = 1e-10 * (hi - lo)
+    out = jnp.where(is_g & free, jnp.clip(g_new, lo + margin, hi - margin), u0)
+    out = jnp.where(is_u & free, jnp.clip(u_new, lo + margin, hi - margin), out)
+    return jnp.where(jnp.isfinite(out), out, u0)
+
+
 ItemSubset = tuple[np.ndarray | None, bool]
 """Static ``(positions, pooled)`` of a family's items; ``None`` positions mean every item."""
 
@@ -1094,11 +1219,15 @@ def _m_step_items(
     counts: ExpectedCounts,
     n_steps: int,
     unconstrained: bool = False,
+    mixture: bool = False,
 ) -> Array:
     """Item-wise masked Newton M-step, then the coupled components (DESIGN.md §4.3, §14.2, §16.1).
 
     Items in a :class:`CoupledBlock` are held in the item-wise ``vmap`` and solved jointly by
-    :func:`_m_step_coupled`.
+    :func:`_m_step_coupled`. With ``mixture=True`` (``BAEM(asymptote_m_step="mixture")``), the
+    item-wise step of 3PL / 4PL items maximizes the mixture objective of :func:`_mixture_item_q`
+    instead, starting from the closed-form asymptotes (DESIGN.md §15.49); coupled items keep
+    the usual objective.
     """
     new_eta = eta
     coupled_masks = _coupled_masks(prob)
@@ -1115,6 +1244,7 @@ def _m_step_items(
             slot_kind = jnp.where(slot_free, prob.priors.kind[safe_fid], PRIOR_NONE)
             slot_p1 = jnp.where(slot_free, prob.priors.param1[safe_fid], 0.0)
             slot_p2 = jnp.where(slot_free, prob.priors.param2[safe_fid], 1.0)
+        use_mixture = mixture and isinstance(fam.kernel, FourPLKernel)
         r_items = jnp.swapaxes(r, 0, 1)  # (J_f, G, K, Q)
         local = jnp.swapaxes(fam.local_index, 0, 1)  # (J_f, G, P_f)
         fixed = jnp.swapaxes(fam.fixed_values, 0, 1)
@@ -1132,13 +1262,37 @@ def _m_step_items(
             sp2: Array,
             x: Array,
             k: ItemKernel = fam.kernel,
+            use_mixture: bool = use_mixture,
         ) -> Array:
-            def q_item(v: Array) -> Array:
-                xi = _local_to_xi(v, loc, fix)  # (G, P_f)
-                q_lik = jnp.sum(jax.vmap(lambda rg, pg: _item_q(k, x, rg, pg))(rj, xi))
+            if not use_mixture:
+
+                def q_item(v: Array) -> Array:
+                    xi = _local_to_xi(v, loc, fix)  # (G, P_f)
+                    q_lik = jnp.sum(jax.vmap(lambda rg, pg: _item_q(k, x, rg, pg))(rj, xi))
+                    return q_lik + jnp.sum(eval_log_prior(v, sk, sp1, sp2))
+
+                return newton_ascent(q_item, u, free, lo, hi, n_steps, unconstrained=unconstrained)
+
+            # Mixture reformulation (DESIGN.md §15.49): closed-form asymptotes, then Newton on the
+            # separable objective, which leaves an exact closed-form asymptote where it is.
+            assert isinstance(k, FourPLKernel)
+            kern: FourPLKernel = k
+            xi_old = _local_to_xi(u, loc, fix)
+
+            def q_mix(v: Array) -> Array:
+                xi = _local_to_xi(v, loc, fix)
+                q_lik = jnp.sum(
+                    jax.vmap(lambda rg, pg, og: _mixture_item_q(kern, x, rg, pg, og))(
+                        rj, xi, xi_old
+                    )
+                )
                 return q_lik + jnp.sum(eval_log_prior(v, sk, sp1, sp2))
 
-            return newton_ascent(q_item, u, free, lo, hi, n_steps, unconstrained=unconstrained)
+            start = _mixture_asymptote_start(kern, x, rj, xi_old, loc, u, free, lo, hi)
+            # Keep the closed form only if it does not lower the objective (priors, unequal fixed
+            # partners), so that the M-step stays a generalized EM step.
+            start = jnp.where(q_mix(start) >= q_mix(u), start, u)
+            return newton_ascent(q_mix, start, free, lo, hi, n_steps, unconstrained=unconstrained)
 
         item_args = (
             r_items,
@@ -1196,9 +1350,10 @@ def _m_step_eh(
     counts: ExpectedCounts,
     n_steps: int,
     unconstrained: bool = False,
+    mixture: bool = False,
 ) -> tuple[Array, Array]:
     """Item Newton M-step + exact (moment-constrained) EH M-step (DESIGN.md §4.4, §15.34)."""
-    new_eta = _m_step_items(prob, eta, counts, n_steps, unconstrained)
+    new_eta = _m_step_items(prob, eta, counts, n_steps, unconstrained, mixture)
     return new_eta, _eh_weights_update(prob, counts.n)
 
 
@@ -1208,6 +1363,7 @@ def m_step(
     counts: ExpectedCounts,
     n_steps: int,
     unconstrained: bool = False,
+    mixture: bool = False,
 ) -> Array:
     """M-step: item-wise and group-wise masked Newton, ``vmap``-ed (DESIGN.md §4.3, §4.4, §14.2).
 
@@ -1216,7 +1372,7 @@ def m_step(
     directly to each item's local objective so the item-wise decomposition is preserved and every
     shared parameter's prior is counted once.
     """
-    new_eta = _m_step_items(prob, eta, counts, n_steps, unconstrained)
+    new_eta = _m_step_items(prob, eta, counts, n_steps, unconstrained, mixture)
     red = prob.reduction
     if prob.latent.is_eh or (red is not None and red.n_primary < 2):
         # Bifactor latent parameters are all fixed (compile_problem checks; DESIGN.md §17.1).
@@ -1311,6 +1467,7 @@ def em(
     max_iter: int,
     n_newton: int,
     unconstrained: bool = False,
+    mixture: bool = False,
 ) -> EMResult:
     """Bock–Aitkin EM in a ``lax.while_loop`` (DESIGN.md §4.6, §4.7).
 
@@ -1337,13 +1494,13 @@ def em(
         counts, ll = e_step(prob_t, eta)
         lp = ll + log_prior(prob_t, eta)
         if is_eh:
-            new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton, unconstrained)
+            new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton, unconstrained, mixture)
             change = jnp.maximum(
                 jnp.max(jnp.abs(new_eta - eta), initial=0.0),
                 jnp.max(jnp.abs(new_w - eh_w), initial=0.0),
             )
         else:
-            new_eta = m_step(prob, eta, counts, n_newton, unconstrained)
+            new_eta = m_step(prob, eta, counts, n_newton, unconstrained, mixture)
             new_w = eh_w
             change = jnp.max(jnp.abs(new_eta - eta), initial=0.0)
         next_it = it + one
@@ -1428,6 +1585,7 @@ def _squarem_eh(
     max_iter: int,
     n_newton: int,
     unconstrained: bool = False,
+    mixture: bool = False,
 ) -> EMResult:
     """SQUAREM scheme S3 on ``(eta, sqrt(w))`` for EH models (DESIGN.md §15.36)."""
     lower, upper = _eta_bounds(prob, eta0)
@@ -1450,7 +1608,7 @@ def _squarem_eh(
         prob_t = _with_eh_weights(prob, eh_w)
         counts, ll = e_step(prob_t, eta)
         lp = ll + log_prior(prob_t, eta)
-        new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton, unconstrained)
+        new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton, unconstrained, mixture)
         return new_eta, new_w, ll, lp
 
     def _is_acceptable(cand: Array, lp_ref: Array) -> Array:
@@ -1596,6 +1754,7 @@ def squarem(
     max_iter: int,
     n_newton: int,
     unconstrained: bool = False,
+    mixture: bool = False,
 ) -> EMResult:
     r"""SQUAREM-accelerated Bock–Aitkin EM (Varadhan & Roland, 2008, scheme S3; DESIGN §4.6, §4.7).
 
@@ -1630,6 +1789,7 @@ def squarem(
             max_iter=max_iter,
             n_newton=n_newton,
             unconstrained=unconstrained,
+            mixture=mixture,
         )
     lower, upper = _eta_bounds(prob, eta0)
     nan_hist = jnp.full((max_iter,), jnp.nan, dtype=eta0.dtype)
@@ -1662,9 +1822,9 @@ def squarem(
         eta, it, _, n_evals, n_safe, ll_hist, lp_hist, ch_hist, ev_hist, sf_hist = state
         counts0, ll0 = e_step(prob, eta)
         lp0 = ll0 + log_prior(prob, eta)
-        theta1 = m_step(prob, eta, counts0, n_newton, unconstrained)
+        theta1 = m_step(prob, eta, counts0, n_newton, unconstrained, mixture)
         counts1, _ = e_step(prob, theta1)
-        theta2 = m_step(prob, theta1, counts1, n_newton, unconstrained)
+        theta2 = m_step(prob, theta1, counts1, n_newton, unconstrained, mixture)
 
         r = theta1 - eta
         s = theta2 - theta1
@@ -1708,7 +1868,7 @@ def squarem(
 
         def _stabilize(t: Array) -> tuple[Array, Array]:
             c, _ = e_step(prob, t)
-            return m_step(prob, t, c, n_newton, unconstrained), three
+            return m_step(prob, t, c, n_newton, unconstrained, mixture), three
 
         def _fallback(_unused: Array) -> tuple[Array, Array]:
             return theta2, two

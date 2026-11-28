@@ -178,3 +178,37 @@ def test_oakes_equals_hessian(name: str, squarem: bool) -> None:
     oakes, hess = _fit(name, "oakes", squarem), _fit(name, "hessian", squarem)
     assert oakes.vcov is not None and hess.vcov is not None
     np.testing.assert_allclose(oakes.vcov, hess.vcov, rtol=1e-6, atol=1e-12)
+
+
+@cache
+def _fit_mixture(name: str) -> FitResult:
+    """The mixture (EMM) M-step of DESIGN §15.49; SQUAREM because it converges slowly."""
+    case = load(name)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", HeywoodWarning)
+        return fit(
+            case.spec,
+            case.data,
+            method=BAEM(tol=1e-9, max_iter=20000, squarem=True, asymptote_m_step="mixture"),
+            quadrature=case.quadrature,
+            se="oakes",
+        )
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_mixture_m_step(name: str) -> None:
+    """V58: the mixture M-step reaches mirt's maximum (log-likelihood, estimates, Oakes SEs)."""
+    case, res = load(name), _fit_mixture(name)
+    assert res.converged
+    ref_ll = float(case.raw["loglik"])
+    assert abs(res.loglik - ref_ll) <= TOL_LOGLIK_REL * abs(ref_ll)
+    ref = case.params()
+    ours = res.items.set_index("item").loc[ref.index]
+    for p in ("a", "d", "g", "u"):
+        np.testing.assert_allclose(ours[p], ref[p].astype(float), rtol=0, atol=TOL_PARAM)
+    for col in ("a_se", "d_se", "g_se", "u_se"):
+        expected = ref[col].astype(float).to_numpy()
+        free = np.isfinite(expected)
+        np.testing.assert_allclose(ours[col].to_numpy()[free], expected[free], rtol=TOL_SE_REL)
+    ll = res.history["loglik"].to_numpy()
+    assert np.all(np.diff(ll) >= -1e-9 * np.abs(ll[1:]))

@@ -372,7 +372,7 @@ to_json(path=None, *, indent=2) -> str
 
 推定結果を厳格な RFC 8259 JSON 文字列に直列化し、`path`（`str` または `os.PathLike`）が指定されたときは
 UTF-8 ファイルにも書き出す。`pickle` を使わないバージョン付き JSON 形式で、最上位に
-`"format": "flexpyirt.FitResult"`、`"schema_version": 9`（version 1–8 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
+`"format": "flexpyirt.FitResult"`、`"schema_version": 10`（version 1–9 のファイルも読める）、`"flexpyirt_version"` を記録する。多次元の結果は因子構造も保存する。有限な
 float64 値は `repr` 厳密な JSON 数値として、非有限値（`NaN`, `+inf`, `-inf`）は浮動小数点型フィールドに
 `"NaN"`, `"Infinity"`, `"-Infinity"` として明示的に符号化するため、すべての属性がビット単位で正確に往復する。
 
@@ -2172,7 +2172,8 @@ DataFrame にも先頭に `group` 列がつく（2 つの表は `(group, categor
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural")
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural",
+     asymptote_m_step="joint")
 ```
 
 | 引数 | 説明 |
@@ -2182,6 +2183,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale
 | `m_step_newton_steps` | 1 回の M-step で進める Newton 法のステップ数。各ステップで期待対数尤度は減らない |
 | `squarem` | SQUAREM スキーム S3 加速（Varadhan & Roland, 2008）と単調性・実行可能性の安全装置を有効にする（既定 `False`） |
 | `m_step_scale` | `"natural"`（既定）: M-step の Newton 法を範囲つきの自然尺度で行い、境界解にちょうど到達する。`"unconstrained"`: 範囲のあるパラメタ（$g$、$u$、潜在分散、因子間相関、事前分布や編集した範囲で制限された傾き）を $\operatorname{logit}$ / $\log$ 尺度で動かす。範囲のないパラメタは変換しない。目的関数と内点解は同じで、推定値・表・事前分布・SE は自然尺度のまま。境界解には近づくだけ（[ガイド 4 節](guide.ja.md#4-推定する)） |
+| `asymptote_m_step` | 3PL / 4PL 項目の M-step。`"joint"`（既定）: $(a, d, g, u)$ をまとめて Newton 法で更新する。`"mixture"`: 混合モデルによる書き直し（EMM。Zheng, Meng, Guo & Liu, 2018）で、漸近線を閉形式で、$(a, d)$ を重み付き 2PL で更新する。最大値・事前分布・SE は同じだが、反復回数がずっと多い（[ガイド 4 節](guide.ja.md#4-推定する)） |
 
 ### `Quadrature`
 
