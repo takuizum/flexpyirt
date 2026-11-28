@@ -5,9 +5,10 @@ likelihood-ratio refits of DIF tests, multi-start estimation and (internally) re
 counts. The models are :class:`~flexpyirt._core.CompiledProblem` instances with one tree
 structure; :func:`stack_problems` pads the per-model shapes that can differ (the free-parameter
 vector ``eta`` and the local slots of each family) and keeps every leaf that is identical across
-the models (responses, nodes, ...) shared, unstacked. :func:`run_batch` then ``vmap``-s
+the models (responses, nodes, ...) shared, unstacked. :func:`run_batch` then runs
 :func:`~flexpyirt._core.em` or :func:`~flexpyirt._core.squarem` over the stacked leaves and
-the starting values.
+the starting values in one compiled kernel: ``vmap``-ed on GPU / TPU, a sequential ``lax.map``
+on CPU (DESIGN.md §28.4).
 
 Per-model convergence freeze: ``jax.vmap`` of a ``lax.while_loop`` whose predicate depends on
 the batched state runs the body while *any* model is unconverged and keeps every finished
@@ -230,8 +231,14 @@ def _batched_runner(
     max_iter: int,
     n_newton: int,
     unconstrained: bool,
+    parallel: bool,
 ) -> EMResult:
-    """``vmap`` of :func:`_core.em` / :func:`_core.squarem` over the stacked leaves and starts."""
+    """:func:`_core.em` / :func:`_core.squarem` over the stacked leaves and starts.
+
+    ``parallel=True``: ``vmap`` (all models step together; finished ones are frozen).
+    ``parallel=False``: ``lax.map`` (one model after another, each to its own convergence,
+    all in the same compiled kernel).
+    """
     runner = _core.squarem if accelerate else _core.em
 
     def one(stacked_leaves: tuple[Array, ...], start: Array) -> EMResult:
@@ -243,12 +250,22 @@ def _batched_runner(
             prob, start, tol=tol, max_iter=max_iter, n_newton=n_newton, unconstrained=unconstrained
         )
 
-    return jax.vmap(one)(stacked, eta0)
+    if parallel:
+        return jax.vmap(one)(stacked, eta0)
+    return jax.lax.map(lambda xs: one(*xs), (stacked, eta0))
 
 
 _run_chunk = jax.jit(
     _batched_runner,
-    static_argnames=("treedef", "batched", "accelerate", "max_iter", "n_newton", "unconstrained"),
+    static_argnames=(
+        "treedef",
+        "batched",
+        "accelerate",
+        "max_iter",
+        "n_newton",
+        "unconstrained",
+        "parallel",
+    ),
 )
 
 
@@ -268,15 +285,24 @@ def run_batch(
     unconstrained: bool = False,
     batch_size: int | None = None,
     problem: CompiledProblem | None = None,
+    parallel: bool | None = None,
 ) -> list[EMResult]:
     """Run EM (or SQUAREM) for every stacked model; returns one NumPy :class:`EMResult` each.
 
-    Models run in chunks of a common size (``batch_size``, or :func:`chunk_size` of
-    ``problem``); the last chunk is padded by repeating its last model, so every chunk reuses
-    one compiled kernel. Each returned ``eta`` is cut back to its model's own length.
+    ``parallel`` (default: ``True`` on GPU / TPU, ``False`` on CPU) chooses between ``vmap``
+    over the models of a chunk (they step together; DESIGN.md §28.4) and a sequential
+    ``lax.map`` inside the same compiled kernel (each model stops at its own convergence, so no
+    work is spent on frozen models; the whole set is one chunk). Parallel chunks have a common
+    size (``batch_size``, or :func:`chunk_size` of ``problem``); the last chunk is padded by
+    repeating its last model, so every chunk reuses one compiled kernel. Each returned ``eta``
+    is cut back to its model's own length.
     """
     n_models = stack.n_models
-    if batch_size is None:
+    if parallel is None:
+        parallel = jax.default_backend() != "cpu"
+    if not parallel:
+        batch_size = n_models
+    elif batch_size is None:
         batch_size = n_models if problem is None else chunk_size(problem, n_models)
     batch_size = max(1, min(batch_size, n_models))
     results: list[EMResult] = []
@@ -298,6 +324,7 @@ def run_batch(
             max_iter=max_iter,
             n_newton=n_newton,
             unconstrained=unconstrained,
+            parallel=parallel,
         )
         host = jax.tree_util.tree_map(np.asarray, out)
         for k in range(n_real):

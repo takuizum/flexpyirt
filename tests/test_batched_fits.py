@@ -135,14 +135,21 @@ def test_chunk_size_is_balanced_and_bounded() -> None:
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("squarem", [False, True])
-def test_batched_runs_equal_single_runs(squarem: bool) -> None:
+@pytest.mark.parametrize(("squarem", "parallel"), [(False, True), (True, True), (False, False)])
+def test_batched_runs_equal_single_runs(squarem: bool, parallel: bool) -> None:
     spec, df, grp, tables = _design()
     method = BAEM(tol=1e-7, max_iter=3000, squarem=squarem)
     comps = [_compiled(spec, df, grp, t) for t in tables]
     stack = stack_problems([p for p, _ in comps], [e for _, e in comps])
     assert stack is not None
-    runs = run_batch(stack, tol=method.tol, max_iter=method.max_iter, n_newton=3, accelerate=squarem)
+    runs = run_batch(
+        stack,
+        tol=method.tol,
+        max_iter=method.max_iter,
+        n_newton=3,
+        accelerate=squarem,
+        parallel=parallel,
+    )
     for (prob, eta0), got in zip(comps, runs, strict=True):
         ref = _single(prob, eta0, method)
         assert got.eta.shape == eta0.shape
@@ -173,7 +180,14 @@ def test_converged_slice_is_frozen() -> None:
     at_solution = np.asarray(ref.eta)  # type: ignore[attr-defined]
     stack = stack_problems([prob, prob], [at_solution, eta0])
     assert stack is not None
-    runs = run_batch(stack, tol=METHOD.tol, max_iter=METHOD.max_iter, n_newton=3, accelerate=False)
+    runs = run_batch(
+        stack,
+        tol=METHOD.tol,
+        max_iter=METHOD.max_iter,
+        n_newton=3,
+        accelerate=False,
+        parallel=True,
+    )
     frozen = _single(prob, at_solution)
     assert int(runs[0].n_iter) == int(frozen.n_iter) <= 2  # type: ignore[attr-defined]
     assert int(runs[1].n_iter) == int(ref.n_iter) > 10  # type: ignore[attr-defined]
@@ -186,7 +200,13 @@ def test_uneven_chunks_reuse_one_kernel() -> None:
     comps = [_compiled(spec, df, grp, t) for t in tables]
     stack = stack_problems([p for p, _ in comps], [e for _, e in comps])
     assert stack is not None
-    opts = {"tol": METHOD.tol, "max_iter": METHOD.max_iter, "n_newton": 3, "accelerate": False}
+    opts = {
+        "tol": METHOD.tol,
+        "max_iter": METHOD.max_iter,
+        "n_newton": 3,
+        "accelerate": False,
+        "parallel": True,
+    }
     whole = run_batch(stack, **opts)  # type: ignore[arg-type]
     chunked = run_batch(stack, batch_size=4, **opts)  # type: ignore[arg-type]
     for a, b in zip(whole, chunked, strict=True):
@@ -355,7 +375,9 @@ def test_small_batch_matches_single_runs() -> None:
     starts = perturbed_starts(prob, eta0, n_starts=2, scale=0.5, key=jax.random.key(1))
     stack = stack_problems([prob, prob], list(starts))
     assert stack is not None and not any(stack.batched)
-    runs = run_batch(stack, tol=method.tol, max_iter=method.max_iter, n_newton=3, accelerate=False)
+    runs = run_batch(
+        stack, tol=method.tol, max_iter=method.max_iter, n_newton=3, accelerate=False, parallel=True
+    )
     for start, got in zip(starts, runs, strict=True):
         ref = _single(prob, start, method)
         assert abs(int(got.n_iter) - int(ref.n_iter)) <= 1  # type: ignore[attr-defined]
