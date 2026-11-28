@@ -226,6 +226,18 @@ print(res_sq.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeg
 ```
 
 The first fit includes JAX compilation time. Later fits of data with the same shape are faster.
+That speed-up ends with the Python process. For scripts that run once per process (command-line
+tools, batch jobs), keep the compiled programs on disk with one call before the first fit:
+
+```python
+import flexpyirt as fp
+
+fp.enable_compilation_cache()  # or fp.enable_compilation_cache("path/to/cache")
+```
+
+A later process that fits a model of the same shapes then loads the programs instead of compiling
+them, with identical results. This changes JAX's global configuration for the process, so
+flexpyirt never does it on import.
 
 ### Sampling weights
 

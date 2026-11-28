@@ -409,6 +409,30 @@ FitResult.from_json(source) -> FitResult
 
 ---
 
+### `enable_compilation_cache`
+
+```text
+enable_compilation_cache(path=None, *, min_compile_time=0.0) -> pathlib.Path
+```
+
+このプロセスで JAX の永続コンパイルキャッシュを有効にする（明示的に呼んだときだけ。flexpyirt の import は JAX の
+設定を変えない）。コンパイルした推定のプログラムを `path` に書き、あとのプロセスが同じ `path` でこの関数を呼んで
+同じ形のモデル（項目の種類、項目数・群の数・求積点の数、パディング後の反応パターン数）を推定すると、コンパイルせずに
+読み込む。結果は同じである。プロセス全体の JAX の設定 `jax_compilation_cache_dir` と
+`jax_persistent_cache_min_compile_time_secs` を変えるので、最初の推定の前に 1 回呼ぶ。キャッシュのディレクトリに書き込める人は
+このプロセスに任意のコードを実行させられるので、信頼できない人と共有しないこと。
+
+| 引数 | 型 | 説明 |
+|---|---|---|
+| `path` | `str` / `os.PathLike` / `None` | キャッシュのディレクトリ（なければ作る）。既定は OS のユーザーキャッシュのディレクトリの下の `flexpyirt/jax`（Linux は `$XDG_CACHE_HOME` か `~/.cache`、macOS は `~/Library/Caches`、Windows は `%LOCALAPPDATA%`） |
+| `min_compile_time` | `float` | コンパイルにこの秒数以上かかったプログラムだけを書く（既定 `0.0`。JAX 自身の既定の 1 秒では flexpyirt のプログラムの多くが書かれない） |
+
+**戻り値**: `pathlib.Path`。使っているキャッシュのディレクトリ。
+
+**例外**: `min_compile_time` が負なら `SpecificationError`。
+
+---
+
 ## モデル
 
 ### `Model`

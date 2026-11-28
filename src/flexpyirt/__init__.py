@@ -28,6 +28,7 @@ from flexpyctt.item_analysis import (
 )
 
 from flexpyirt import errors
+from flexpyirt.cache import enable_compilation_cache
 from flexpyirt.classification import ClassificationResult, classification_accuracy
 from flexpyirt.comparison import compare_fits
 from flexpyirt.correlation import PolychoricResult, polychoric
@@ -155,6 +156,7 @@ __all__ = [
     "efa",
     "empirical_item_curve",
     "empirical_kaiser",
+    "enable_compilation_cache",
     "errors",
     "expected_score",
     "exploratory_detect",
