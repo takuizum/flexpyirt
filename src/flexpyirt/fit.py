@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from flexpyirt import _core, _robust_se
+from flexpyirt import _batch, _core, _robust_se
 from flexpyirt._compile import LATENT_ITEM, Prepared, compile_problem, meat_patterns, prepare
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import (
@@ -24,7 +24,7 @@ from flexpyirt.latent import mixture_components, mixture_param_names
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
 from flexpyirt.quadrature import Quadrature
-from flexpyirt.result import FitResult
+from flexpyirt.result import FitResult, _is_prng_key
 
 __all__ = ["fit"]
 
@@ -47,6 +47,11 @@ SQUAREM_FALLBACK_WARN_MIN = 5
 """Minimum full fallbacks to ``theta_2`` before warning about frequent SQUAREM fallbacks."""
 SQUAREM_FALLBACK_WARN_RATE = 0.5
 """Fallback fraction above which a ``ConvergenceWarning`` is emitted on a converged fit."""
+
+START_TIE_TOL = 1e-6
+"""Absolute log-posterior difference below which two multi-start solutions are ties."""
+START_TIE_RTOL = 1e-10
+"""Relative log-posterior difference below which two multi-start solutions are ties."""
 
 _em = jax.jit(_core.em, static_argnames=("max_iter", "n_newton", "unconstrained"))
 _squarem = jax.jit(_core.squarem, static_argnames=("max_iter", "n_newton", "unconstrained"))
@@ -75,6 +80,9 @@ def fit(
     se: SEMethod | None = "oakes",
     weights: Any = None,
     cluster: Any = None,
+    n_starts: int = 1,
+    start_scale: float = 0.5,
+    key: jax.Array | None = None,
 ) -> FitResult:
     r"""Estimate an IRT model by MMLE or MAP with Bock–Aitkin EM.
 
@@ -136,6 +144,21 @@ def fit(
         the middle matrix is :math:`\frac{G}{G-1}\sum_c u_c u_c^\top` over the :math:`G`
         clusters (Binder, 1983; Williams, 2000). At least two clusters are required. Clusters
         may span the groups of a multiple-group model.
+    n_starts : int, default 1
+        Number of starting values for multi-start estimation. With ``n_starts > 1``, start 1 is
+        the usual starting value and starts :math:`2,\dots,M` perturb every free parameter by
+        :math:`N(0, s^2)` noise (``s = start_scale``) on its unconstrained scale (identity for
+        unbounded parameters, :math:`\log` or :math:`\operatorname{logit}` of the distance to
+        its bounds). All starts are estimated together in one batched computation and the
+        result is the solution with the largest log posterior among the converged starts (among
+        all starts if none converged); ``FitResult.starts`` lists every start. Useful for
+        models with local maxima, such as ``NormalMixture`` latent distributions, 3PL/4PL and
+        nominal items.
+    start_scale : float, default 0.5
+        Standard deviation :math:`s` of the start perturbations (unconstrained scale).
+    key : jax.Array, optional
+        JAX PRNG key (e.g. ``jax.random.key(0)``) for the start perturbations; required when
+        ``n_starts > 1``. The perturbations are deterministic given ``key``.
 
     Returns
     -------
@@ -164,6 +187,7 @@ def fit(
             f"se={se!r} is not available for bifactor and two-tier models; "
             "use se='oakes' or se='hessian'."
         )
+    _check_starts(n_starts, start_scale, key)
     method = BAEM() if method is None else method
     if quadrature is None:
         quadrature = Quadrature.default(spec.quadrature_dimension)
@@ -196,15 +220,177 @@ def fit(
     )
     problem = compiled.problem
 
-    runner = _squarem if method.squarem else _em
-    out = runner(
+    starts = None
+    if n_starts == 1:
+        runner = _squarem if method.squarem else _em
+        out: _core.EMResult = runner(
+            problem,
+            jnp.asarray(compiled.eta0),
+            tol=method.tol,
+            max_iter=method.max_iter,
+            n_newton=method.m_step_newton_steps,
+            unconstrained=method.m_step_scale == "unconstrained",
+        )
+    else:
+        assert key is not None
+        out, starts = _multi_start(problem, compiled.eta0, method, n_starts, start_scale, key)
+    return _finish(
+        spec,
+        prep,
         problem,
-        jnp.asarray(compiled.eta0),
-        tol=method.tol,
-        max_iter=method.max_iter,
-        n_newton=method.m_step_newton_steps,
-        unconstrained=method.m_step_scale == "unconstrained",
+        out,
+        method=method,
+        quadrature=quadrature,
+        se=se,
+        stacklevel=3,
+        starts=starts,
     )
+
+
+def _check_starts(n_starts: Any, start_scale: Any, key: Any) -> None:
+    """Validate the multi-start arguments of :func:`fit`."""
+    if isinstance(n_starts, bool) or not isinstance(n_starts, (int, np.integer)) or n_starts < 1:
+        raise SpecificationError(f"n_starts must be a positive integer, got {n_starts!r}.")
+    if (
+        isinstance(start_scale, bool)
+        or not isinstance(start_scale, (int, float))
+        or not np.isfinite(start_scale)
+        or start_scale <= 0
+    ):
+        raise SpecificationError(f"start_scale must be a positive number, got {start_scale!r}.")
+    if n_starts > 1 and not _is_prng_key(key):
+        raise SpecificationError(
+            "fit(n_starts > 1) needs a JAX PRNG key for the start perturbations "
+            "(e.g. key=jax.random.key(0))."
+        )
+
+
+def _run_options(method: BAEM) -> dict[str, Any]:
+    """Keyword arguments of :func:`_batch.run_batch` for ``method``."""
+    return {
+        "tol": method.tol,
+        "max_iter": method.max_iter,
+        "n_newton": method.m_step_newton_steps,
+        "accelerate": method.squarem,
+        "unconstrained": method.m_step_scale == "unconstrained",
+    }
+
+
+def _multi_start(
+    problem: _core.CompiledProblem,
+    eta0: np.ndarray,
+    method: BAEM,
+    n_starts: int,
+    start_scale: float,
+    key: jax.Array,
+) -> tuple[_core.EMResult, pd.DataFrame]:
+    """Estimate from ``n_starts`` starts in one batch; the best run and the table of starts."""
+    starts = _batch.perturbed_starts(
+        problem, eta0, n_starts=n_starts, scale=float(start_scale), key=key
+    )
+    stack = _batch.stack_problems([problem] * n_starts, list(starts))
+    assert stack is not None  # one problem: every leaf is shared
+    runs = _batch.run_batch(stack, problem=problem, **_run_options(method))
+    lp = np.array([float(r.log_posterior) for r in runs])
+    conv = np.array([bool(r.converged) for r in runs])
+    pool = np.flatnonzero(conv & np.isfinite(lp))
+    if pool.size == 0:
+        pool = np.flatnonzero(np.isfinite(lp))
+    if pool.size == 0:
+        pool = np.arange(n_starts)
+    score = np.where(np.isfinite(lp[pool]), lp[pool], -np.inf)
+    top = float(np.max(score))
+    # Starts within rounding of the best are ties; the earliest wins, so a start that is no
+    # better than the usual starting value (start 1) never replaces it.
+    tie = max(START_TIE_TOL, START_TIE_RTOL * abs(top)) if np.isfinite(top) else 0.0
+    best = int(pool[np.flatnonzero(score >= top - tie)[0]])
+    table = pd.DataFrame(
+        {
+            "start": np.arange(1, n_starts + 1),
+            "loglik": [float(r.loglik) for r in runs],
+            "log_posterior": lp,
+            "converged": conv,
+            "n_iter": [int(r.n_iter) for r in runs],
+            "best": np.arange(n_starts) == best,
+        }
+    )
+    return runs[best], table
+
+
+def _fit_tables(
+    spec: Model,
+    data: Any,
+    *,
+    tables: list[pd.DataFrame],
+    group: Any,
+    item_names: list[str] | None,
+    method: BAEM | None,
+    quadrature: Quadrature | None,
+    se: SEMethod | None,
+    batch_size: int | None = None,
+    parallel: bool | None = None,
+) -> list[FitResult]:
+    """Fit ``spec`` to ``data`` once per parameter table, all estimated in one batch (§28).
+
+    Equivalent to ``[fit(spec, data, table=t, ...) for t in tables]`` up to rounding and the
+    convergence tolerance: each table is prepared and compiled as by :func:`fit`, the problems
+    are stacked (:func:`_batch.stack_problems`) and run together, and each run is turned into a
+    :class:`FitResult` (standard errors per model) by the same code as :func:`fit`. Problems
+    that cannot be stacked are fitted one by one.
+    """
+    check_x64()
+    if not tables:
+        return []
+    if se is not None and se not in ("oakes", "hessian"):
+        raise SpecificationError(f"batched fits support se='oakes', 'hessian' or None, not {se!r}.")
+    method = BAEM() if method is None else method
+    if quadrature is None:
+        quadrature = Quadrature.default(spec.quadrature_dimension)
+    preps = [prepare(spec, data, group=group, item_names=item_names, table=t) for t in tables]
+    compiled = [compile_problem(spec, p.y, p.group, p.table, quadrature) for p in preps]
+    problems = [c.problem for c in compiled]
+    stack = _batch.stack_problems(problems, [c.eta0 for c in compiled]) if len(tables) > 1 else None
+    if stack is None:
+        return [
+            fit(
+                spec,
+                data,
+                group=group,
+                table=t,
+                item_names=item_names,
+                method=method,
+                quadrature=quadrature,
+                se=se,
+            )
+            for t in tables
+        ]
+    runs = _batch.run_batch(
+        stack,
+        problem=problems[0],
+        batch_size=batch_size,
+        parallel=parallel,
+        **_run_options(method),
+    )
+    return [
+        _finish(spec, p, prob, out, method=method, quadrature=quadrature, se=se, stacklevel=3)
+        for p, prob, out in zip(preps, problems, runs, strict=True)
+    ]
+
+
+def _finish(
+    spec: Model,
+    prep: Prepared,
+    problem: _core.CompiledProblem,
+    out: _core.EMResult,
+    *,
+    method: BAEM,
+    quadrature: Quadrature,
+    se: SEMethod | None,
+    stacklevel: int,
+    starts: pd.DataFrame | None = None,
+) -> FitResult:
+    """Turn one EM run into a :class:`FitResult`: warnings, standard errors and the tables."""
+    final_table = prep.table
     eta = np.asarray(out.eta)
     converged = bool(out.converged)
     n_iter = int(out.n_iter)
@@ -221,7 +407,7 @@ def fit(
         warnings.warn(
             f"EM did not converge in {method.max_iter} iterations (tol={method.tol}{extra}).",
             ConvergenceWarning,
-            stacklevel=2,
+            stacklevel=stacklevel,
         )
     elif (
         method.squarem
@@ -234,7 +420,7 @@ def fit(
             f"safeguard intervened {n_safeguards} times); consider plain EM "
             "(BAEM(squarem=False)).",
             ConvergenceWarning,
-            stacklevel=2,
+            stacklevel=stacklevel,
         )
 
     vcov = None
@@ -243,25 +429,28 @@ def fit(
         np.asarray(out.eh_weights, dtype=np.float64) if spec.is_empirical_histogram else None
     )
     problem_fin = (
-        _core._with_eh_weights(problem, out.eh_weights) if spec.is_empirical_histogram else problem
+        _core._with_eh_weights(problem, jnp.asarray(out.eh_weights))
+        if spec.is_empirical_histogram
+        else problem
     )
+    eta_j = jnp.asarray(eta)
     if eh_weights is not None:
         _check_eh_reference_moments(problem, eh_weights[0])
     if se is not None and eta.shape[0] > 0:
         if se == "sandwich" and prep.weights is None and prep.cluster is None:
             # One pattern pass gives the Oakes bread and the cross-product meat (§15.20, §17.5).
-            info, cross = _oakes_and_cross_product(problem_fin, out.eta)
+            info, cross = _oakes_and_cross_product(problem_fin, eta_j)
             bread = _invert_information(np.asarray(info))
             meat = np.asarray(cross)
             vcov = bread @ (0.5 * (meat + meat.T)) @ bread
             vcov = 0.5 * (vcov + vcov.T)
         elif se == "sandwich":
-            bread = _invert_information(np.asarray(_information["oakes"](problem_fin, out.eta)))
-            meat = _sandwich_meat(problem_fin, out.eta, prep)
+            bread = _invert_information(np.asarray(_information["oakes"](problem_fin, eta_j)))
+            meat = _sandwich_meat(problem_fin, eta_j, prep)
             vcov = bread @ (0.5 * (meat + meat.T)) @ bread
             vcov = 0.5 * (vcov + vcov.T)
         else:
-            vcov = _invert_information(np.asarray(_information[se](problem_fin, out.eta)))
+            vcov = _invert_information(np.asarray(_information[se](problem_fin, eta_j)))
         se_values = np.sqrt(np.clip(np.diag(vcov), 0.0, None))
 
     params = final_table.copy()
@@ -306,6 +495,7 @@ def fit(
         _eh_weights=eh_weights,
         _sum_weights=None if prep.weights is None else float(prep.weights.sum()),
         _n_clusters=prep.n_clusters if se == "sandwich" else None,
+        _starts=starts,
     )
 
 

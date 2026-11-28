@@ -48,7 +48,8 @@ Apart from the first one or two, arguments of public functions are keyword-only 
 
 ```text
 fit(spec, data, *, group=None, table=None, item_names=None, method=None,
-    quadrature=None, se="oakes", weights=None, cluster=None) -> FitResult
+    quadrature=None, se="oakes", weights=None, cluster=None, n_starts=1,
+    start_scale=0.5, key=None) -> FitResult
 ```
 
 Marginal maximum likelihood (or Bayes modal / MAP when priors are attached) estimation with the
@@ -66,6 +67,9 @@ Bock–Aitkin EM algorithm (Bock & Aitkin, 1981).
 | `se` | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / `None` | Standard-error method: the inverse observed information (`"oakes"`, `"hessian"`), the inverse cross-product of the per-pattern scores (`"crossprod"`, mirt `SE.type = "crossprod"`) or the robust sandwich covariance (`"sandwich"`, mirt `SE.type = "sandwich"`). All include the prior Hessian under MAP. With `weights`, `"sandwich"` is the design-based covariance $H^{-1}(\sum_i w_i^2 s_i s_i^\top)H^{-1}$ and `"crossprod"` uses $\sum_i w_i s_i s_i^\top$ (as mirt). `"sandwich"` and `"crossprod"` raise `SpecificationError` with `DavidianCurve` or `NormalMixture` and for bifactor and two-tier models. `None` skips it |
 | `weights` | array (one number per row), optional | Sampling (survey) weights, finite and non-negative (mirt's `survey.weights`). The estimates maximize $\sum_i w_i\log L_i$. Weights are used as given (not rescaled); rows with weight 0 are ignored; integer weights are the same as repeating rows. `se="oakes"` / `"hessian"` / `"crossprod"` then estimate the inverse weighted information, which is valid for frequency weights only, not for sampling weights (a `FlexpyirtWarning` says so); use `se="sandwich"` |
 | `cluster` | array (one label per row), optional | Cluster label of each row (for example the school), any hashable values, for the cluster-robust sandwich (`se="sandwich"` only, else `SpecificationError`). The weighted scores are summed within clusters and the middle matrix is $\frac{G}{G-1}\sum_c u_c u_c^\top$; at least two clusters are required |
+| `n_starts` | int, default 1 | Number of starting values. Start 1 is the usual one; starts $2..M$ add $N(0, s^2)$ noise to every free parameter on its unconstrained scale (identity if unbounded, $\log$ of the distance to a single bound, $\operatorname{logit}$ between two bounds). All starts are estimated together; the result is the converged start with the highest log posterior (ties within rounding go to the earliest start), and `FitResult.starts` lists them |
+| `start_scale` | float, default 0.5 | Standard deviation $s$ of the start perturbations |
+| `key` | JAX PRNG key, optional | Key of the start perturbations (e.g. `jax.random.key(0)`); required when `n_starts > 1` |
 
 **Returns**: [`FitResult`](#fitresult)
 
@@ -98,6 +102,7 @@ Returned by `fit()`. Immutable.
 | `n_em_evaluations` | int | Total number of EM map evaluations (E-step + M-step); equals `n_iter` for plain EM, and 2 or 3 per accepted iterate for SQUAREM |
 | `n_safeguards` | int | Number of SQUAREM iterations on which the monotonicity/feasibility safeguard intervened (0 for plain EM) |
 | `history` | DataFrame | `iter`, `loglik`, `log_posterior` (at the parameters entering the iteration; non-decreasing across iterations), `max_change`, `em_evaluations` (cumulative EM map evaluations), `safeguard` (whether the SQUAREM safeguard fired) |
+| `starts` | DataFrame / None | Multi-start fits (`fit(n_starts > 1)`): `start`, `loglik`, `log_posterior`, `converged`, `n_iter`, `best` (the start reported); `None` for one start. Not saved by `to_json` |
 | `vcov` | ndarray / None | Covariance matrix of the free parameters (in `free_id` order); None if `se=None` |
 | `se_method` | str / None | `"oakes"` / `"hessian"` / `"sandwich"` / `"crossprod"` / None |
 

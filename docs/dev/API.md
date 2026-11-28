@@ -110,6 +110,8 @@ res = fit(
 )
 # Sampling weights and clustered samples (students within schools): design-based sandwich SEs.
 res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
+# Several starting values estimated together (one batched computation); the best is kept.
+res_ms = fit(spec, df, n_starts=8, key=jax.random.key(0))  # res_ms.starts lists them
 (
     res.converged,
     res.n_iter,
@@ -172,7 +174,7 @@ one (DESIGN.md §16.18).
 | `Normal`, `EmpiricalHistogram`, `DavidianCurve`, `NormalMixture` | frozen dataclass (satisfies `LatentDist`) | Latent distributions. `Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)`, `NormalMixture(n_components)` |
 | `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `LogitNormalPrior`, `TruncNormal` (not implemented) | frozen dataclass | Priors (with `log_pdf`). The prior is called `NormalPrior` to avoid clashing with the latent `Normal` |
 | `BAEM`, `Quadrature` | frozen dataclass | Estimation settings |
-| `fit` | function | Estimation; returns a `FitResult` |
+| `fit` | function | Estimation; returns a `FitResult`. `n_starts` / `start_scale` / `key` estimate several starting values in one batch and keep the best (DESIGN §28) |
 | `FitResult` | class | Result (`items`, `latent`, `parameters`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `person_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`) |
 | `dif_screen`, `dif_effect_sizes` | function | DIF workflow for unidimensional multiple-group models: screening every item with anchor purification (`strategy="all_others"` / `"sequential_free"` / `"sequential_constrain"`, likelihood-ratio or Wald tests; returns a `DIFScreenResult` with `table`, `history`, `flagged_items`, `anchor_items` and the final `fit`) and effect sizes (signed / unsigned expected-score differences, ESSD, RMSD, a test row). `FitResult.dif(..., test="wald")` adds Wald tests (DESIGN §16.22) |
 | `link` | function | Differentiable IRT scale linking (Haebara / Stocking–Lord, non-symmetric & symmetric; `transformation=` for a diagonal, orthogonal or oblique $\mathbf A$ in multidimensional models); returns a `LinkResult` |

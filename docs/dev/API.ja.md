@@ -107,6 +107,8 @@ res = fit(
 )
 # 標本ウェイトとクラスタ抽出（学校の中の生徒）: 標本設計に基づくサンドイッチ SE。
 res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
+# 複数の初期値をまとめて推定し（1 つのバッチ計算）、最もよい解を採る。
+res_ms = fit(spec, df, n_starts=8, key=jax.random.key(0))  # res_ms.starts に一覧
 (
     res.converged,
     res.n_iter,
@@ -161,7 +163,7 @@ NumPy / SciPy 版（DESIGN.md §16.18）。
 | `Normal`, `EmpiricalHistogram`, `DavidianCurve`, `NormalMixture` | frozen dataclass（`LatentDist` を満たす） | 潜在分布。`Normal.standard()`, `Normal.free()`, `DavidianCurve(degree)`, `NormalMixture(n_components)` |
 | `LogNormalPrior`, `NormalPrior`, `BetaPrior`, `LogitNormalPrior`, `TruncNormal`（未実装） | frozen dataclass | 事前分布（`log_pdf` を持つ）。潜在分布の `Normal` と名前がぶつからないよう事前分布側は `NormalPrior` |
 | `BAEM`, `Quadrature` | frozen dataclass | 推定設定 |
-| `fit` | 関数 | 推定。`FitResult` を返す |
+| `fit` | 関数 | 推定。`FitResult` を返す。`n_starts` / `start_scale` / `key` で複数の初期値を 1 つのバッチで推定し、最もよい解を採る（DESIGN §28） |
 | `FitResult` | クラス | 結果（`items`, `latent`, `parameters`, `vcov`, `loglik`, `score`, `summary`, `item_fit`, `person_fit`, `local_dependence`, `jsi`, `dif`, `m2`, `to_json` / `from_json`） |
 | `dif_screen`, `dif_effect_sizes` | 関数 | 1 次元の多母集団モデルの DIF の分析手順: アンカーの純化つきの全項目のスクリーニング（`strategy="all_others"` / `"sequential_free"` / `"sequential_constrain"`、尤度比検定または Wald 検定。`table`・`history`・`flagged_items`・`anchor_items`・最終モデル `fit` を持つ `DIFScreenResult` を返す）と効果量（期待得点の符号つき・符号なしの差、ESSD、RMSD、テストの行）。`FitResult.dif(..., test="wald")` で Wald 検定（DESIGN §16.22） |
 | `link` | 関数 | 微分可能な IRT 尺度リンキング（Haebara・Stocking–Lord の非対称・対称版。多次元モデルでは `transformation=` で対角・直交・斜交の $\mathbf A$ を選ぶ）。`LinkResult` を返す |

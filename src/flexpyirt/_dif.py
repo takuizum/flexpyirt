@@ -209,7 +209,7 @@ def dif_tests(
     item_names: list[str] | None,
 ) -> pd.DataFrame:
     """Run the likelihood-ratio or Wald DIF tests of :meth:`FitResult.dif` (see there)."""
-    from flexpyirt.fit import fit
+    from flexpyirt.fit import _fit_tables
 
     result._require_unweighted("dif()")
     model = result._model
@@ -251,31 +251,38 @@ def dif_tests(
     base_crit = information_criteria(result.loglik, k_base, n)
     lookup = dict(model.items)
 
-    rows_out = []
+    tables = []
+    chosen_of: dict[str, tuple[str, ...]] = {}
     for item in tested:
         names = model.item_kernel(lookup[item]).param_names
         chosen = names if params is None else tuple(params)
         bad = [p for p in chosen if p not in names]
         if bad:
             raise SpecificationError(f"Item {item!r} has no parameters {bad}.")
+        chosen_of[item] = chosen
         mask = ((base["item"] == item) & base["param"].isin(list(chosen)) & base["free"]).to_numpy()
         rows = np.flatnonzero(mask)
-        table = set_shared(base, rows, shared=(scheme == "add"))
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always", ConvergenceWarning)
-            new = fit(
-                model,
-                data,
-                group=group,
-                table=table,
-                item_names=item_names,
-                method=result._method,
-                quadrature=result._quadrature,
-                se=None,
-            )
-        for w in caught:
-            if not issubclass(w.category, ConvergenceWarning):
-                warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
+        tables.append(set_shared(base, rows, shared=(scheme == "add")))
+    # Every refit in one batched estimation (DESIGN.md §28): one compiled kernel for all items.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ConvergenceWarning)
+        refits = _fit_tables(
+            model,
+            data,
+            tables=tables,
+            group=group,
+            item_names=item_names,
+            method=result._method,
+            quadrature=result._quadrature,
+            se=None,
+        )
+    for w in caught:
+        if not issubclass(w.category, ConvergenceWarning):
+            warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
+
+    rows_out = []
+    for item, new in zip(tested, refits, strict=True):
+        chosen = chosen_of[item]
         k_new = new.n_params
         df = abs(k_base - k_new)
         if df == 0:
