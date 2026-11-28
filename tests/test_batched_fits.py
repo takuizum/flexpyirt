@@ -12,9 +12,9 @@ import pytest
 
 from flexpyirt import BAEM, Model, Normal, TwoPL, fit
 from flexpyirt._batch import chunk_size, perturbed_starts, run_batch, stack_problems
-from flexpyirt._compile import compile_problem, prepare
+from flexpyirt._compile import TABLE_COLUMNS, compile_problem, prepare
 from flexpyirt._core import CompiledProblem, _eta_bounds
-from flexpyirt._dif import TABLE_COLUMNS, set_shared
+from flexpyirt._dif import set_shared
 from flexpyirt.errors import SpecificationError
 from flexpyirt.fit import _em, _fit_tables, _squarem
 from flexpyirt.quadrature import Quadrature
@@ -357,7 +357,7 @@ def test_multi_start_argument_errors() -> None:
     with pytest.raises(SpecificationError, match="n_starts"):
         fit(spec, df, group=grp, n_starts=0)
     with pytest.raises(SpecificationError, match="n_starts"):
-        fit(spec, df, group=grp, n_starts=True)  # type: ignore[arg-type]
+        fit(spec, df, group=grp, n_starts=True)
     with pytest.raises(SpecificationError, match="start_scale"):
         fit(spec, df, group=grp, n_starts=2, start_scale=0.0, key=jax.random.key(0))
 
