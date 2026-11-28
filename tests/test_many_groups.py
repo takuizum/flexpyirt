@@ -7,6 +7,7 @@ information and EAP at a fixed parameter vector, and fitted estimates and SEs.
 
 from __future__ import annotations
 
+import dataclasses
 from functools import cache
 
 import jax
@@ -18,7 +19,7 @@ import pytest
 import flexpyirt._compile as compile_mod
 import flexpyirt._core as core
 from flexpyirt import BAEM, GRM, Model, Normal, Quadrature, TwoPL, fit
-from flexpyirt._compile import build_group_blocks, compile_problem, prepare
+from flexpyirt._compile import build_group_blocks, compile_problem, invariant_items, prepare
 from flexpyirt.errors import SpecificationError
 
 QUAD = Quadrature.equispaced(41, bounds=(-6, 6))
@@ -45,19 +46,21 @@ def _data(n_groups: int) -> tuple[pd.DataFrame, np.ndarray]:
     return df, np.array(labels)
 
 
-def _spec(n_groups: int) -> Model:
+def _spec(n_groups: int, n_anchors: int = 4) -> Model:
     items = [f"i{j}" for j in range(8)]
     latents = {"g0": Normal.standard()} | {f"g{g}": Normal.free() for g in range(1, n_groups)}
     return (
         Model.from_items({**{i: TwoPL() for i in items[:-1]}, items[-1]: GRM(n_categories=3)})
         .with_groups(latents)
-        .equal_across_groups(items=items[:4])
+        .equal_across_groups(items=items[:n_anchors])
     )
 
 
-def _compiled(n_groups: int, *, blocked: bool) -> tuple[core.CompiledProblem, jax.Array]:
+def _compiled(
+    n_groups: int, *, blocked: bool, n_anchors: int = 4
+) -> tuple[core.CompiledProblem, jax.Array]:
     df, labels = _data(n_groups)
-    spec = _spec(n_groups)
+    spec = _spec(n_groups, n_anchors)
     prep = prepare(spec, df, group=labels, item_names=None, table=None)
     old = compile_mod.GROUP_BLOCK_MIN_GROUPS
     compile_mod.GROUP_BLOCK_MIN_GROUPS = 2 if blocked else 10**9
@@ -158,3 +161,62 @@ def test_with_groups_accepts_mapping() -> None:
     assert spec.with_groups(groups) == spec.with_groups(**groups)
     with pytest.raises(SpecificationError, match="mapping or keywords"):
         Model.uniform(TwoPL(), items=items).with_groups(groups, extra=Normal.free())
+
+
+def _unpooled(prob: core.CompiledProblem) -> core.CompiledProblem:
+    """The same problem with no item flagged invariant (every item evaluated per group)."""
+    families = tuple(dataclasses.replace(fam, invariant=()) for fam in prob.families)
+    return dataclasses.replace(prob, families=families)
+
+
+def test_invariant_items_flags() -> None:
+    prob, _ = _compiled(3, blocked=True)
+    assert prob.families[0].invariant == (True,) * 4 + (False,) * 3  # 2PL items i0..i6
+    assert prob.families[1].invariant == (False,)  # GRM item i7, group-specific
+    local = np.zeros((2, 3, 2), dtype=np.int32)
+    fixed = np.zeros((2, 3, 2))
+    local[1, 1, 0] = 1  # item 1: group 1 uses another slot
+    local[:, 2, 1] = -1  # item 2: a fixed parameter ...
+    fixed[1, 2, 1] = 0.5  # ... with a different value in group 1
+    assert invariant_items(local, fixed) == (True, False, False)
+    assert invariant_items(local[:1], fixed[:1]) == ()
+
+
+@pytest.mark.parametrize(("n_groups", "n_anchors"), [(2, 4), (3, 4), (3, 8)])
+def test_pooled_items_match_per_group(n_groups: int, n_anchors: int) -> None:
+    """Pooling invariant items' counts over groups changes only the summation order (§26.9)."""
+    prob, eta = _compiled(n_groups, blocked=True, n_anchors=n_anchors)
+    if n_anchors == 8:
+        assert all(all(fam.invariant) for fam in prob.families)
+    ref = _unpooled(prob)
+    counts, _ = jax.jit(core.e_step)(prob, eta)
+    m_step = jax.jit(core.m_step, static_argnums=3)
+    # One Newton step agrees to rounding; at convergence the line search accepts a step only if
+    # the objective does not drop, so iterates on the flat optimum differ at ~sqrt(eps).
+    _close(m_step(prob, eta, counts, 1), m_step(ref, eta, counts, 1))
+    _close(m_step(prob, eta, counts, 20), m_step(ref, eta, counts, 20), 1e-7)
+    own = jax.jit(core._oakes_own_hessian)
+    _close(own(prob, eta, counts), own(ref, eta, counts))
+
+
+@pytest.mark.parametrize("batch", [1, 2])
+def test_blocked_e_step_super_batches(monkeypatch: pytest.MonkeyPatch, batch: int) -> None:
+    """Super-batches of M blocks (with padding blocks) give the same counts (§26.10)."""
+    flat, eta = _compiled(3, blocked=False)
+    blocked, _ = _compiled(3, blocked=True)
+    assert blocked.blocks is not None
+    n_blocks = blocked.blocks.rows.shape[0]
+    assert n_blocks == 3  # M = 2 needs one padding block
+    assert core._super_batch_size(blocked, blocked.nodes.shape[0], 8) == n_blocks
+    monkeypatch.setattr(core, "_E_STEP_BATCH_BYTES", 1)
+    assert core._super_batch_size(blocked, blocked.nodes.shape[0], 8) == 1
+    monkeypatch.setattr(core, "_super_batch_size", lambda *_: batch)
+    counts_f, ll_f = jax.jit(core.e_step)(flat, eta)
+    counts_b, ll_b = jax.jit(core.e_step)(blocked, eta)
+    _close(ll_f, ll_b)
+    _close(counts_f.n, counts_b.n)
+    for r_f, r_b in zip(counts_f.r, counts_b.r, strict=True):
+        _close(r_f, r_b)
+    n_real = int(np.sum(np.asarray(flat.counts) > 0))
+    for a, b in zip(core.eap(flat, eta), core.eap(blocked, eta), strict=True):
+        _close(a[:n_real], b[:n_real])

@@ -350,6 +350,21 @@ def meat_patterns(
     )
 
 
+def invariant_items(local_index: np.ndarray, fixed_values: np.ndarray) -> tuple[bool, ...]:
+    """Flag the items whose parameters are the same in every group (DESIGN.md §26.9).
+
+    ``local_index`` and ``fixed_values`` are ``(G, J_f, P_f)``. An item is invariant when every
+    group maps each parameter to the same local slot and, where the parameter is fixed, to the
+    same value. With one group nothing is flagged (pooling would change nothing).
+    """
+    if local_index.shape[0] < 2:
+        return ()
+    same_slot = np.all(local_index == local_index[:1], axis=(0, 2))
+    fixed = local_index < 0
+    same_fixed = np.all(~fixed | (fixed_values == fixed_values[:1]), axis=(0, 2))
+    return tuple(bool(v) for v in same_slot & same_fixed)
+
+
 GROUP_BLOCK_MIN_GROUPS = 2
 """Smallest number of groups that uses the group-blocked E-step (DESIGN.md §26)."""
 _BLOCK_SIZES = tuple(1 << k for k in range(3, 11))
@@ -1775,6 +1790,7 @@ def compile_problem(
                 slot_lower=jnp.asarray(slot_lo, dtype=jnp.float64),
                 slot_upper=jnp.asarray(slot_hi, dtype=jnp.float64),
                 kernel=k,
+                invariant=invariant_items(local_index, fixed),
                 # Real pattern rows only: padding rows are category 0 with count 0.
                 complete=_family_complete(patterns[:n_patterns], cols),
             )

@@ -3836,9 +3836,10 @@ data-independent shapes (§15.21).
    \bar r_{gjkq}=\sum_{b:g(b)=g}\sum_{p\in b}c_p h_{pq}\mathbf 1[y_{pj}=k].$$
    The item tables $\log P^{(g)}_{jkq}$ `(G, J_f, Q, K_f)` and latent log weights `(G, Q)` are
    computed once per E-step (unchanged); each block gathers its own group's slice and does one
-   `(B, J_f K_f) x (J_f K_f, Q)` product per family. The blocks are folded with `lax.scan`,
-   accumulating $\bar n$ and $\bar r$ in place at the block's group (`.at[g].add`), so peak
-   memory is $O(G J K Q + B J K Q)$ independent of $N_B$; the per-block posteriors
+   `(B, J_f K_f) x (J_f K_f, Q)` product per family. The blocks are folded with `lax.scan`
+   ($M$ blocks per step under `vmap`, §26.10), accumulating $\bar n$ and $\bar r$ in place at
+   the block's group (`.at[g].add`), so peak memory is $O(G J K Q + M B J K Q)$ independent of
+   $N_B$; the per-block posteriors
    $h$ `(N_B, B, Q)` are scattered back to the flat `(P, Q)` rows (padding rows of the flat
    layout, which are in no block, get $\lambda_{pq}=0$ and count 0). The marginal
    log-likelihood, EAP, plausible values, the Hessian SE (autodiff through the scan) and the
@@ -3867,11 +3868,50 @@ data-independent shapes (§15.21).
    (§14.2), so fully non-invariant items scale as $O(G^2)$ per item; anchored designs with
    invariant items are unaffected. (b) `se="crossprod"` / `"sandwich"` differentiate each
    pattern with respect to every group's tables (§17.5), so their chunk size shrinks as $1/G$.
-   (c) Bifactor / two-tier multiple-group models keep the $G$-fold flat E-step.
+   (c) Bifactor / two-tier multiple-group models keep the $G$-fold flat E-step. #153 left this
+   out: both the factorized log joint (`_bifactor_parts`) and the count accumulation
+   (`_bifactor_e_step`, an `einsum` over the group one-hot) are $G$-fold, so blocking them means
+   a blocked rewrite of both plus the EAP and Oakes paths of reduced models, for designs that
+   rarely have more than a few groups.
 8. **Validation.** Regression: the blocked and flat paths agree on small $G$ (estimates,
    log-likelihood, Oakes and Hessian SEs, EAP) to $10^{-10}$. V55: a 2PL with $G=10$ groups and
    anchored invariant items against mirt `multipleGroup` (VALIDATION.md). Benchmarks for
    $G=10,50,200$ in `benchmarks/` (compile time, warm time, peak memory) against mirt.
+9. **Invariant items are evaluated once (#153).** An item whose parameters are the same in every
+   group (every group maps each parameter to the same local slot, and fixed parameters have the
+   same value; anchors and fully invariant items) is flagged in `FamilyBlock.invariant` (a
+   static tuple built by `compile_problem` for $G\ge2$; empty for one group). By the
+   distributive law
+   $$\sum_g\sum_{q,k}\bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j)
+   =\sum_{q,k}\Big(\sum_g\bar r_{gjkq}\Big)\log P_{jk}(\theta_q;\xi_j),$$
+   the item M-step (§4.3, §14.2) and Oakes' own Hessian (§15.20) of such an item sum its expected
+   counts over groups first and evaluate the item once, as one group (group axis of length 1),
+   instead of $G$ times. A family with both kinds is split into two static subsets (invariant
+   pooled, the rest per group), each `vmap`ped over its items. The E-step item tables, the
+   Oakes score tables (which are centered per group) and $Q(\eta\mid\eta')$ are unchanged; they
+   cost $O(GJKQ)$, small next to the Newton solves. Only the summation order changes: one Newton
+   step agrees to rounding, and converged M-steps agree to about $\sqrt{\varepsilon}$, the
+   resolution of the non-decreasing line search on a flat optimum (regression tests in
+   `tests/test_many_groups.py`). At $G=200$ (`manygroups_2pl_g200`) one M-step drops from about
+   340 ms to 30 ms.
+10. **Super-batched blocked E-step (#153).** A sequential `lax.scan` over $N_B$ small blocks
+    leaves each step a small matmul. The blocked E-step now takes $M$ blocks per scan step and
+    evaluates them together with `vmap`; each block returns its $\bar n$ `(Q,)` and $\bar r$
+    `(J_f, K_f, Q)` contributions, added at the blocks' groups with one scatter-add per step
+    (repeated groups add). $M$ is the largest number of blocks whose working set (one-hots
+    $B\sum_fJ_fK_f$, log joint and posterior $2BQ$, gathered tables and count contributions
+    $2Q\sum_fJ_fK_f$, in floats) fits in `_E_STEP_BATCH_BYTES` (32 MiB), at most $N_B$; the
+    block list is padded to a multiple of $M$ with blocks of sentinel rows (count 0). Peak memory
+    stays bounded independent of $N_B$. Results again differ from the sequential fold only in
+    summation order. The blocked log joint (`lax.map` with a batch size) already worked this way.
+11. **Measured (#153).** Warm `fit()` time (s), `benchmarks/run_flexpyirt.py --quick`, against
+    develop with #151/#152, back to back on 8 pinned cores of a shared machine (load 4–50, so
+    indicative), plain EM / SQUAREM with `se=None`: `manygroups_2pl_g10` 1.78 → 0.83 / 0.40 → 0.26;
+    `manygroups_2pl_g50` 15.0 → 4.96 / 4.01 → 1.92; `manygroups_2pl_g200` 142 → 35.8 / 42.4 → 14.6.
+    With `se="oakes"` the G = 200 plain fit goes from 136 to 38.1 s. Single-group 2PL (5000×40) is
+    unchanged (0.29 → 0.33 s plain, within the noise; no item is pooled and one block per step).
+    Iteration counts are the same for plain EM; SQUAREM stops one to eight iterations apart on the
+    flat G = 50 / 200 optima (log-likelihood within 1e-3).
 
 ## 27. Davidian curves and normal mixtures per group (#75)
 
