@@ -147,6 +147,7 @@ def _run_worker(
     squarem: bool,
     se_arg: SEArg,
     warm_repeats: int,
+    anderson: bool = False,
     tol: float,
     max_iter: int,
     quadpts: int,
@@ -173,7 +174,11 @@ def _run_worker(
         resp = df
 
     spec = _build_spec(case)
-    method = BAEM(tol=tol, max_iter=max_iter, squarem=squarem)
+    method = (
+        BAEM(tol=tol, max_iter=max_iter, anderson=True)
+        if anderson
+        else BAEM(tol=tol, max_iter=max_iter, squarem=squarem)
+    )
     quad = Quadrature.equispaced(quadpts, bounds=theta_lim)
     se_opt: Literal["oakes"] | None = None if se_arg == "none" else "oakes"
 
@@ -207,6 +212,7 @@ def _run_worker(
     return {
         "case": case_name,
         "squarem": squarem,
+        "anderson": anderson,
         "se": se_arg,
         "cold_s": cold_s,
         "warm_s": statistics.median(warm_runs_s),
@@ -284,6 +290,8 @@ def run_benchmark(
     theta_lim: tuple[float, float] = DEFAULT_THETA_LIM,
     quick: bool = False,
     verbose: bool = True,
+    modes: Sequence[str] = ("plain", "squarem"),
+    se_list: Sequence[SEArg] = ("none", "oakes"),
 ) -> dict[str, Any]:
     """Run all flexpyirt benchmark configurations and write raw JSON output."""
     manifest_path = data_dir / "manifest.json"
@@ -299,8 +307,9 @@ def run_benchmark(
     jax_devices: list[str] = []
 
     for case in cases:
-        for se_arg in ("none", "oakes"):
-            for squarem in (False, True):
+        for se_arg in se_list:
+            for mode in modes:
+                squarem = mode == "squarem"
                 cmd = [
                     sys.executable,
                     str(script_path),
@@ -311,6 +320,7 @@ def run_benchmark(
                     str(data_dir),
                     "--squarem",
                     "true" if squarem else "false",
+                    *(["--anderson"] if mode == "anderson" else []),
                     "--se",
                     se_arg,
                     "--repeats",
@@ -339,10 +349,9 @@ def run_benchmark(
                     jax_devices = list(rec["jax_devices"])
                 records.append(rec)
                 if verbose:
-                    mode = "SQUAREM" if squarem else "plain  "
                     warn_tag = f" [warnings={len(rec['warnings'])}]" if rec["warnings"] else ""
                     print(
-                        f"{case.name:24s} se={se_arg:5s} {mode} "
+                        f"{case.name:24s} se={se_arg:5s} {mode:8s} "
                         f"cold={rec['cold_s']:6.3f}s warm={rec['warm_s']:6.3f}s "
                         f"iter={rec['n_iter']:4d} em_evals={rec['n_em_evaluations']:4d} "
                         f"ll={rec['loglik']:.4f} conv={rec['converged']} "
@@ -404,6 +413,20 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=list(DEFAULT_THETA_LIM),
         metavar=("LOW", "HIGH"),
     )
+    parser.add_argument(
+        "--modes",
+        nargs="+",
+        choices=("plain", "squarem", "anderson"),
+        default=["plain", "squarem"],
+        help="EM accelerations to run (default: plain squarem; anderson is BAEM(anderson=True)).",
+    )
+    parser.add_argument(
+        "--se-list",
+        nargs="+",
+        choices=("none", "oakes"),
+        default=["none", "oakes"],
+        help="Standard-error settings to run (default: none oakes).",
+    )
     # Internal worker flags
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--case", type=str, default=None, help=argparse.SUPPRESS)
@@ -411,6 +434,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--squarem", choices=("true", "false"), default=None, help=argparse.SUPPRESS
     )
     parser.add_argument("--se", choices=("none", "oakes"), default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--anderson", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -425,6 +449,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             args.case,
             data_dir=args.data_dir,
             squarem=(args.squarem == "true"),
+            anderson=args.anderson,
             se_arg=args.se,
             warm_repeats=1 if args.repeats is None else args.repeats,
             tol=args.tol,
@@ -449,6 +474,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         quadpts=args.quadpts,
         theta_lim=theta_lim,
         quick=args.quick,
+        modes=args.modes,
+        se_list=args.se_list,
     )
 
 
