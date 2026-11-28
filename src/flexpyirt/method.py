@@ -38,6 +38,19 @@ class BAEM:
         not transformed. The objective, the estimates at an interior solution, the parameter
         table, the priors, the standard errors and SQUAREM are unchanged; a boundary solution is
         only approached and may need many more iterations.
+    anderson : bool
+        If ``True``, accelerate the EM map :math:`F` with Anderson acceleration (Anderson, 1965;
+        Henderson & Varadhan, 2019) on the unconstrained coordinates :math:`z=T(\eta)` of
+        ``m_step_scale="unconstrained"`` (logit/log of the bounded parameters). With residual
+        :math:`g_k=T(F(\eta_k))-z_k` and the last :math:`m=5` differences
+        :math:`\Delta Z, \Delta G` of :math:`z` and :math:`g`,
+        :math:`z_{k+1}=z_k+g_k-(\Delta Z+\Delta G)\gamma_k` with
+        :math:`\gamma_k=\arg\min_\gamma\lVert g_k-\Delta G\gamma\rVert_2`. Each iteration
+        costs one EM map evaluation (SQUAREM costs three plus the candidate checks). A candidate
+        that leaves the bounds or lowers the log posterior is discarded and EM restarts from the
+        last EM step, so the log posterior never decreases. Convergence needs the change of the
+        accepted iterate and of the EM step from it below ``tol`` on two consecutive iterations
+        (DESIGN.md §15.49). Cannot be combined with ``squarem``. Defaults to ``False``.
     """
 
     tol: float = 1e-4
@@ -45,6 +58,7 @@ class BAEM:
     m_step_newton_steps: int = 3
     squarem: bool = False
     m_step_scale: Literal["natural", "unconstrained"] = "natural"
+    anderson: bool = False
 
     def __post_init__(self) -> None:
         """Validate settings."""
@@ -58,6 +72,14 @@ class BAEM:
             )
         if not isinstance(self.squarem, bool):
             raise SpecificationError(f"squarem must be a bool, got {type(self.squarem).__name__}.")
+        if not isinstance(self.anderson, bool):
+            raise SpecificationError(
+                f"anderson must be a bool, got {type(self.anderson).__name__}."
+            )
+        if self.anderson and self.squarem:
+            raise SpecificationError(
+                "squarem and anderson are alternative accelerations; set at most one to True."
+            )
         if self.m_step_scale not in ("natural", "unconstrained"):
             raise SpecificationError(
                 f"m_step_scale must be 'natural' or 'unconstrained', got {self.m_step_scale!r}."

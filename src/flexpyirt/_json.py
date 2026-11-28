@@ -2,13 +2,14 @@
 
 Implements the versioned plain-JSON format specified in DESIGN.md §15.26–§15.28:
 
-- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 9`` (versions 1
+- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 10`` (versions 1
   and 2, written before multidimensional models and across-item equalities were stored,
   version 3, written before the naming refactor of §15.46, version 4, written before bifactor
   models (§17.1), version 5, written before two-tier models (§17.2), and version 6, written
   before sampling weights (§17.4), and version 7, written before ``BAEM.m_step_scale`` and
   ``LogitNormalPrior`` (§15.47–§15.48), and version 8, written before the cluster-robust
-  sandwich (§17.6), are still read), and
+  sandwich (§17.6), and version 9, written before ``BAEM.anderson`` (§15.49), are still
+  read), and
   ``"flexpyirt_version"``.
 - Strict RFC 8259 JSON (``allow_nan=False`` on write; rejecting ``parse_constant`` on read).
   Finite IEEE-754 float64 values use standard ``repr``-exact JSON numbers; non-finite values in
@@ -77,7 +78,7 @@ __all__ = [
 ]
 
 FORMAT_TAG = "flexpyirt.FitResult"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 """Schema version written by :func:`dump_fit_result`.
 
 2 adds the confirmatory factor structure, 3 across-item equalities, 4 renames the item-model
@@ -90,9 +91,9 @@ older files read as ``"natural"``) and the prior ``LogitNormalPrior`` with keys 
 ``sd_logit`` and ``mode_scale`` (DESIGN.md §15.48; ``mode_scale`` is optional on read, absent
 meaning ``"natural"``), and 9 the optional top-level key ``n_clusters`` (the number of clusters of
 a cluster-robust sandwich; present only for ``fit(..., cluster=..., se="sandwich")``, DESIGN.md
-§17.6).
+§17.6), and 10 the method key ``anderson`` (DESIGN.md §15.49; older files read as ``false``).
 """
-SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9})
+SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
 """Schema versions accepted by :func:`load_fit_result`; version 1 has no factor keys."""
 
 _LEGACY_PRIOR_TYPES = {"LogNormal": "LogNormalPrior", "Beta": "BetaPrior"}
@@ -785,6 +786,7 @@ def _serialize_baem(method: BAEM) -> dict[str, Any]:
         "m_step_newton_steps": int(method.m_step_newton_steps),
         "squarem": bool(method.squarem),
         "m_step_scale": method.m_step_scale,
+        "anderson": bool(method.anderson),
     }
 
 
@@ -794,6 +796,8 @@ def _deserialize_baem(
     required = {"type", "tol", "max_iter", "m_step_newton_steps", "squarem"}
     if schema_version >= 8:
         required = required | {"m_step_scale"}
+    if schema_version >= 10:
+        required = required | {"anderson"}
     _check_keys(obj, required=required, field_name=field_name)
     scale = "natural"
     if schema_version >= 8:
@@ -810,6 +814,11 @@ def _deserialize_baem(
         ),
         squarem=_require_bool(obj["squarem"], field_name=f"{field_name}.squarem"),
         m_step_scale=scale,  # type: ignore[arg-type]  # validated by BAEM
+        anderson=(
+            _require_bool(obj["anderson"], field_name=f"{field_name}.anderson")
+            if schema_version >= 10
+            else False
+        ),
     )
 
 
