@@ -80,6 +80,7 @@ from flexpyirt.linking import LinkResult, link
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
 from flexpyirt.priors import BetaPrior, LogitNormalPrior, LogNormalPrior, NormalPrior
+from flexpyirt.projection import project
 from flexpyirt.quadrature import Quadrature
 from flexpyirt.result import FitResult
 from flexpyirt.screening import (
@@ -173,6 +174,7 @@ __all__ = [
     "model_parallel_analysis",
     "parallel_analysis",
     "polychoric",
+    "project",
     "reliability",
     "scale_table",
     "score_distribution",

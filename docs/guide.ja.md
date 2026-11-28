@@ -1352,6 +1352,38 @@ print(res_tt.score(tt_df.iloc[:3]).round(3))  # theta_math, theta_reading, theta
 
 対応している機能・していない機能は双因子モデルと同じ。主因子が 3 つ以上のモデルは `SpecificationError`。
 
+### 射影 IRT
+
+双因子モデルは項目を 2 つの傾きで表すが、テストの得点は一般因子だけで出すことが多い。射影 IRT（Ip, 2010）は、
+各項目の反応関数から特殊因子を積分で消し、その結果を同じ型の 1 次元の項目で近似する。射影したパラメタは一般因子の尺度のままで、
+テストレット内の局所依存を取り込むので、双因子モデルを使わずに 1 次元モデルで一般因子を推定できる（短縮版、項目バンク、
+リンキング、適応型テスト）。`project(result, data)` はそのモデルを通常の 1 次元 `FitResult` として返す。
+
+```python
+from flexpyirt import project
+
+proj = project(res_bif, bif_df)  # MML-PIRT、一般因子 G への射影
+print(proj.items[["item", "a", "d", "a_se", "d_se"]].round(3))
+print(proj.score(bif_df.iloc[:3]).round(3))  # 一般因子だけの θ
+
+proj_lka = project(res_bif, bif_df, method="logistic_kernel")  # Ip (2010)
+print(proj_lka.items[["item", "a", "d"]].round(3))
+```
+
+- `method="MML"`（既定。Chalmers, Falk & Reise, 2026）は、双因子モデルの期待度数を特殊因子について合計し、
+  一般因子のグリッド上のその表に各項目を 1 回だけ当てはめる。`se="oakes"`（既定）は mirt の
+  `pirt()` と一致する。`"complete"` は表を既知として扱い、`"hessian"` は射影モデルの観測情報量を使う。
+- `method="logistic_kernel"`（Ip, 2010）と `"normal_ogive"`（Stucky, Thissen & Edelen, 2013）は閉じた式で、
+  傾きと切片に $(1+c^2v)^{-1/2}$ を掛ける（$v$ は一般因子を与えたときの項目の特殊因子部分の分散）。
+  標準誤差は双因子モデルの共分散からデルタ法で求める。3 つの方法はほぼ同じ値になる。大標本では閉じた式がわずかに上に偏る
+  （Chalmers et al., 2026）。
+- `factor=` で別の因子を選べる。2 層モデルの主因子、または確認的モデル（`with_factors()`）の任意の因子。
+  その因子の平均は 0、分散は 1 でなければならない。
+- どの方法も 2PL と GRM の項目だけを受け付ける。射影はこれらのロジスティック核について導かれ、確かめられている。
+  それ以外の項目モデル（3PL、4PL、GPCM、名義）は `SpecificationError`。
+- 射影モデルの `loglik` は最大化した値ではないので、双因子モデルとの尤度比検定には使わない。
+  多群、標本ウェイト、`Normal` 以外の潜在分布には対応していない。
+
 ## 15. 尺度リンキング
 
 共通項目を含む 2 つのフォームを別々の標本で推定したあと、`flexpyirt.link(source, target)` を使うと、
@@ -1838,9 +1870,11 @@ except SpecificationError as e:
 - Bock, R. D., & Mislevy, R. J. (1982). Adaptive EAP estimation of ability in a microcomputer environment. *Applied Psychological Measurement*, 6(4), 431–444.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
 - Chalmers, R. P. (2018). Model-based measures for detecting and quantifying response bias. *Psychometrika*, 83(3), 696–732.
+- Chalmers, R. P., Falk, C. F., & Reise, S. P. (2026). A general approach for estimating projective IRT models. *Applied Psychological Measurement*. https://doi.org/10.1177/01466216261474955
 - Firth, D. (1993). Bias reduction of maximum likelihood estimates. *Biometrika*, 80(1), 27–38.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
 - Huber, P. J. (1967). The behavior of maximum likelihood estimates under nonstandard conditions. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 221–233). University of California Press.
+- Ip, E. H. (2010). Empirically indistinguishable multidimensional IRT and locally dependent unidimensional item response models. *British Journal of Mathematical and Statistical Psychology*, 63(2), 395–416.
 - Kim, S. (2006). A comparative study of IRT fixed parameter calibration methods. *Journal of Educational Measurement*, 43, 355–381.
 - Kim, S., & Lee, W.-C. (2006). An extension of four IRT linking methods for mixed-format tests. *Journal of Educational Measurement*, 43(3), 193–213.
 - Kolen, M. J., & Brennan, R. L. (2014). *Test Equating, Scaling, and Linking: Methods and Practices* (3rd ed.). Springer.
@@ -1856,6 +1890,7 @@ except SpecificationError as e:
 - Reckase, M. D., & McKinley, R. L. (1991). The discriminating power of items that measure more than one dimension. *Applied Psychological Measurement*, 15(4), 361–373.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
+- Stucky, B. D., Thissen, D., & Edelen, M. O. (2013). Using logistic approximations of marginal trace lines to develop short assessments. *Applied Psychological Measurement*, 37(1), 41–57.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods for accelerating the convergence of any EM algorithm. *Scand. J. Statist.*, 35, 335–353.
