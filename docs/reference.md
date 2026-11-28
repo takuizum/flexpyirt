@@ -1126,23 +1126,22 @@ mirt's `pirt()` for bifactor 2PL and GRM models (every method, estimates and sta
 
 | Argument | Type | Description |
 |---|---|---|
-| `result` | `FitResult` | Single-group multidimensional fit with a `Normal` latent distribution: bifactor, two-tier or confirmatory (`with_factors()`) |
+| `result` | `FitResult` | Single-group multidimensional fit with 2PL and GRM items and a `Normal` latent distribution: bifactor, two-tier or confirmatory (`with_factors()`) |
 | `data` | DataFrame / array-like | The responses `result` was fitted to |
-| `method` | `"MML"` / `"logistic_kernel"` / `"normal_ogive"` | `"MML"` (default; Chalmers, Falk & Reise, 2026; mirt `estimator = "MML"`): fit each item once to the parent's expected table summed over the other factors; any item model. `"logistic_kernel"` (Ip, 2010; mirt `"LKA"`) and `"normal_ogive"` (Stucky, Thissen & Edelen, 2013; mirt `"FA"`): closed forms $a^*=s\,\mathbf a^\top\boldsymbol\Phi_{\cdot f}$, $d^*_k=s\,d_k$, $s=(1+c^2v)^{-1/2}$ with $c=16\sqrt3/(15\pi)$ or $1/1.702$ and $v$ the variance of the other factors' part given $\theta_f$; 2PL, 3PL, 4PL and GRM items (asymptotes unchanged) |
+| `method` | `"MML"` / `"logistic_kernel"` / `"normal_ogive"` | `"MML"` (default; Chalmers, Falk & Reise, 2026; mirt `estimator = "MML"`): fit each item once to the parent's expected table summed over the other factors. `"logistic_kernel"` (Ip, 2010; mirt `"LKA"`) and `"normal_ogive"` (Stucky, Thissen & Edelen, 2013; mirt `"FA"`): closed forms $a^*=s\,\mathbf a^\top\boldsymbol\Phi_{\cdot f}$, $d^*_k=s\,d_k$, $s=(1+c^2v)^{-1/2}$ with $c=16\sqrt3/(15\pi)$ or $1/1.702$ and $v$ the variance of the other factors' part given $\theta_f$ |
 | `factor` | str, optional | Factor to project onto (mirt `project`); default the first (the general factor of a bifactor model). A primary factor of a bifactor or two-tier model, any factor of a confirmatory model; its mean must be 0 and its variance 1 |
 | `item_names` | list[str], optional | Column names when `data` is an array |
 | `se` | `"oakes"` / `"complete"` / `"hessian"` / `None` | `"MML"`: inverse of Oakes' identity with the cross term from the projected model (default, mirt's `pirt()` default), of the information with the expected table held fixed (`"complete"`), or of the projected model's observed information (`"hessian"`, mirt `"Richardson"`). Closed forms: any value but `None` is the delta method on the parent's covariance (none if the parent has none). `None` skips it |
 
 **Returns**: a unidimensional [`FitResult`](#fitresult) with $N(0,1)$ on the parent's
-one-dimensional grid, usable for scoring, information, plots and JSON. The asymptotes `g` and `u`
-keep the parent's values and free / fixed status; every other parameter is free as in a default
-unidimensional model, also when the parent fixed it. `loglik` is the projected model's marginal
+one-dimensional grid, usable for scoring, information, plots and JSON. Every parameter is free or
+fixed as in a default unidimensional model, also when the parent fixed it. `loglik` is the projected model's marginal
 log-likelihood of `data` (not maximized). `se_method` is `"projection_oakes"`,
 `"projection_complete"`, `"projection_hessian"` or `"projection_delta"`; `n_iter` is 0.
 
 **Raises**: `PrecisionError` (JAX 64-bit disabled), `SpecificationError` (unidimensional,
 multiple-group, weighted or non-`Normal` parent; a specific factor or unknown factor; a target
-factor without mean 0 and variance 1; closed forms with other item models; unknown `method` or
+factor without mean 0 and variance 1; item models other than 2PL and GRM; unknown `method` or
 `se`).
 
 **Warns**: `ConvergenceWarning` if the `"MML"` Newton iterations do not converge.

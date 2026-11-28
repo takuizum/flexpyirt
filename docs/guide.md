@@ -1523,17 +1523,19 @@ print(proj_lka.items[["item", "a", "d"]].round(3))
 
 - `method="MML"` (default; Chalmers, Falk & Reise, 2026) sums the bifactor model's expected
   counts over the specific factors and fits each item to the resulting table on the general
-  factor's grid, once. It works for every item model. `se="oakes"` (default) matches mirt's
+  factor's grid, once. `se="oakes"` (default) matches mirt's
   `pirt()`; `"complete"` treats the table as known and `"hessian"` uses the projected model's
   observed information.
 - `method="logistic_kernel"` (Ip, 2010) and `"normal_ogive"` (Stucky, Thissen & Edelen, 2013) are
-  closed forms for 2PL, 3PL, 4PL and GRM items: the slope and the intercepts are multiplied by
+  closed forms: the slope and the intercepts are multiplied by
   $(1+c^2v)^{-1/2}$, with $v$ the variance of the specific part of the item given the general
   factor, and the standard errors come from the delta method on the bifactor model's covariance.
   The three methods give nearly the same values; the closed forms are slightly biased upward in
   large samples (Chalmers et al., 2026).
 - `factor=` chooses another factor: a primary factor of a two-tier model or any factor of a
   confirmatory model (`with_factors()`). Its mean must be 0 and its variance 1.
+- Every method takes 2PL and GRM items only: the projection was derived and checked for these
+  logistic kernels. Other item models (3PL, 4PL, GPCM, nominal) raise `SpecificationError`.
 - The projected model's `loglik` is not maximized, so do not compare it with the bifactor model in
   a likelihood-ratio test. Not supported: multiple groups, sampling weights and non-`Normal` latent
   distributions.

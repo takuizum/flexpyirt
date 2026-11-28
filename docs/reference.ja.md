@@ -1011,20 +1011,20 @@ $\bar P_j(y\mid\theta_f)=\int P_j(y\mid\theta_f,\boldsymbol\theta_{-f})\,g(\bold
 
 | 引数 | 型 | 説明 |
 |---|---|---|
-| `result` | `FitResult` | `Normal` 潜在分布の 1 群の多次元モデル。双因子、2 層、確認的（`with_factors()`） |
+| `result` | `FitResult` | 2PL と GRM の項目、`Normal` 潜在分布の 1 群の多次元モデル。双因子、2 層、確認的（`with_factors()`） |
 | `data` | DataFrame / array-like | `result` を推定したときの反応 |
-| `method` | `"MML"` / `"logistic_kernel"` / `"normal_ogive"` | `"MML"`（既定。Chalmers, Falk & Reise, 2026。mirt `estimator = "MML"`）: 親モデルの期待度数表を他の因子について合計し、各項目をその表に 1 回当てはめる。どの項目モデルにも使える。`"logistic_kernel"`（Ip, 2010。mirt `"LKA"`）と `"normal_ogive"`（Stucky, Thissen & Edelen, 2013。mirt `"FA"`）: 閉じた式 $a^*=s\,\mathbf a^\top\boldsymbol\Phi_{\cdot f}$、$d^*_k=s\,d_k$、$s=(1+c^2v)^{-1/2}$（$c=16\sqrt3/(15\pi)$ または $1/1.702$、$v$ は $\theta_f$ を与えたときの他の因子の部分の分散）。2PL、3PL、4PL、GRM の項目（漸近線は変わらない） |
+| `method` | `"MML"` / `"logistic_kernel"` / `"normal_ogive"` | `"MML"`（既定。Chalmers, Falk & Reise, 2026。mirt `estimator = "MML"`）: 親モデルの期待度数表を他の因子について合計し、各項目をその表に 1 回当てはめる。`"logistic_kernel"`（Ip, 2010。mirt `"LKA"`）と `"normal_ogive"`（Stucky, Thissen & Edelen, 2013。mirt `"FA"`）: 閉じた式 $a^*=s\,\mathbf a^\top\boldsymbol\Phi_{\cdot f}$、$d^*_k=s\,d_k$、$s=(1+c^2v)^{-1/2}$（$c=16\sqrt3/(15\pi)$ または $1/1.702$、$v$ は $\theta_f$ を与えたときの他の因子の部分の分散） |
 | `factor` | str, 任意 | 射影先の因子（mirt `project`）。既定は最初の因子（双因子モデルの一般因子）。双因子・2 層モデルでは主因子、確認的モデルでは任意の因子。平均 0、分散 1 であること |
 | `item_names` | list[str], 任意 | `data` が配列のときの列名 |
 | `se` | `"oakes"` / `"complete"` / `"hessian"` / `None` | `"MML"`: Oakes の恒等式（交差項は射影モデルから。既定、mirt の `pirt()` の既定）、期待度数表を固定した情報量（`"complete"`）、射影モデルの観測情報量（`"hessian"`、mirt `"Richardson"`）の逆行列。閉じた式: `None` 以外は親モデルの共分散からのデルタ法（親に共分散がなければなし）。`None` で計算しない |
 
 **戻り値**: 親モデルの 1 次元グリッド上で $N(0,1)$ の 1 次元 [`FitResult`](#fitresult)。得点推定、情報量、図、JSON に使える。
-漸近線 `g` と `u` は親モデルの値と自由・固定をそのまま使い、それ以外のパラメタは（親で固定されていても）既定の 1 次元モデルと同じく自由。
+すべてのパラメタは（親で固定されていても）既定の 1 次元モデルと同じ自由・固定になる。
 `loglik` は射影モデルでの `data` の周辺対数尤度（最大化した値ではない）。`se_method` は `"projection_oakes"`、
 `"projection_complete"`、`"projection_hessian"`、`"projection_delta"` のいずれか。`n_iter` は 0。
 
 **例外**: `PrecisionError`（JAX の 64 ビットが無効）、`SpecificationError`（1 次元、多群、ウェイト付き、`Normal` 以外の親モデル。
-特殊因子や存在しない因子。平均 0・分散 1 でない射影先。閉じた式で対象外の項目モデル。不明な `method` や `se`）。
+特殊因子や存在しない因子。平均 0・分散 1 でない射影先。2PL と GRM 以外の項目モデル。不明な `method` や `se`）。
 
 **警告**: `"MML"` のニュートン反復が収束しなければ `ConvergenceWarning`。
 

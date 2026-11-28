@@ -34,6 +34,7 @@ from flexpyirt._projection import (
     kernel_scale,
 )
 from flexpyirt.errors import SpecificationError
+from flexpyirt.items import ItemModel
 
 QUAD = Quadrature.equispaced(21, bounds=(-6.0, 6.0))
 ITEMS = [f"i{k}" for k in range(8)]
@@ -234,25 +235,6 @@ def test_projected_result_is_a_working_unidimensional_fit(tmp_path: Path) -> Non
     assert no_se.vcov is None and no_se.se_method is None
 
 
-@pytest.mark.slow
-def test_three_pl_asymptote_is_unchanged() -> None:
-    slopes = np.zeros((8, 2))
-    slopes[:, 0] = 1.4
-    slopes[:4, 1] = 1.0
-    data = _simulate(slopes, np.zeros(8), 500, 9)
-    models = {i: ThreePL() if i == "i0" else TwoPL() for i in ITEMS}
-    spec = Model.from_items(models).with_bifactor(specific={"s": ITEMS[:4]})
-    table = spec.parameter_table(data)
-    table.loc[(table["item"] == "i0") & (table["param"] == "g"), ["value", "free"]] = (0.15, False)
-    table["free_id"] = -1
-    table.loc[table["free"], "free_id"] = np.arange(int(table["free"].sum()))
-    parent = fit(spec, data, table=table, quadrature=QUAD)
-    for method in ("MML", "normal_ogive"):
-        rows = _item_rows(project(parent, data, method=method))
-        assert _value(rows, "i0", "g") == pytest.approx(0.15)
-        assert not bool(rows["free"].to_dict()[("i0", "g")])
-
-
 # ---- errors ---------------------------------------------------------------------------------
 
 
@@ -265,7 +247,10 @@ def _small_fit(item_model: str) -> tuple[pd.DataFrame, FitResult]:
     items = ITEMS[:6]
     if item_model == "gpcm":
         data["i5"] = data["i5"] + (data["i4"] == 1) * data["i5"]
-        models = {i: TwoPL() for i in items[:5]} | {"i5": GPCM(3)}
+        models: dict[str, ItemModel] = {i: TwoPL() for i in items[:5]} | {"i5": GPCM(3)}
+        spec = Model.from_items(models).with_bifactor(specific={"s": items[:3]})
+    elif item_model == "3pl":
+        models = {i: TwoPL() for i in items[1:]} | {"i0": ThreePL()}
         spec = Model.from_items(models).with_bifactor(specific={"s": items[:3]})
     elif item_model == "unidimensional":
         spec = Model.uniform(TwoPL(), items=items)
@@ -293,13 +278,15 @@ def test_rejects_specific_factor_and_unknown_names() -> None:
 
 
 @pytest.mark.slow
-def test_closed_forms_reject_other_item_models_and_mml_accepts_them() -> None:
-    data, result = _small_fit("gpcm")
-    with pytest.raises(SpecificationError, match="GPCM"):
-        project(result, data, method="logistic_kernel")
-    projected = project(result, data)
-    rows = _item_rows(projected)
-    assert np.isfinite(rows["estimate"]).all()
+@pytest.mark.parametrize(("item_model", "name"), [("3pl", "3PL"), ("gpcm", "GPCM")])
+@pytest.mark.parametrize("method", ["MML", "logistic_kernel", "normal_ogive"])
+def test_rejects_item_models_other_than_2pl_and_grm(
+    item_model: str, name: str, method: str
+) -> None:
+    """Projection is defined for the logistic kernels (2PL, GRM) only, whatever the method."""
+    data, result = _small_fit(item_model)
+    with pytest.raises(SpecificationError, match=name):
+        project(result, data, method=method)  # type: ignore[arg-type]
 
 
 @pytest.mark.slow

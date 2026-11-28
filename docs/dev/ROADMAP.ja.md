@@ -147,7 +147,7 @@
   カットの Lee, 2010 と $\theta$ 上のカットの Rudner, 2001, 2005、D 法と P 法、κ、カットごとの偽陽性・偽陰性率。
   1 次元モデル、単一群と多母集団。V52 で cacIRT と mirt からの再計算と照合）。
 - [ ] 射影 IRT（`project()`）: 双因子・2 層・確認的モデルの 1 つの因子への 1 次元モデル。MML-PIRT（Chalmers, Falk &
-  Reise, 2026。どの項目モデルにも使える。Oakes・complete・Hessian の SE）または Ip (2010) と Stucky et al. (2013) の閉じた式
+  Reise, 2026。2PL と GRM の項目。Oakes・complete・Hessian の SE）または Ip (2010) と Stucky et al. (2013) の閉じた式
   （デルタ法の SE）。V58 で mirt `pirt()` と照合。照合が夜間 CI で通ったらチェックを付ける。
 
 ## 継続的な作業

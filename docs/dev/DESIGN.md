@@ -3847,6 +3847,14 @@ data-independent shapes (§15.21).
    target factor (for a bifactor model, the general factor) and absorb the local dependence the
    nuisance factors cause, so a unidimensional model with them scores $\theta_f$ without the
    multidimensional model (short forms, linking, CAT banks; Stucky, Thissen & Edelen, 2013).
+   **Item models: 2PL and GRM only, for every method (decision).** The projection approximates
+   the marginal trace of a logistic kernel by the same kernel; Ip (2010), Stucky et al. (2013)
+   and Chalmers et al. (2026) derive and demonstrate it for M2PL to 2PL and MGRM to GRM only.
+   Whether a 3PL / 4PL (with asymptotes) or a GPCM / nominal / user-defined item has a valid
+   projection is not established, even though the MML objective could be maximized for any item
+   model (the paper and mirt's `pirt()` call MML-PIRT general). Those items raise
+   `SpecificationError`; extending to them is a separate decision (#173), to be made with a
+   justification and a mirt check.
 2. **API.** `project(result, data, *, method="MML", factor=None, item_names=None, se="oakes") ->
    FitResult` in `flexpyirt.projection`, re-exported from `flexpyirt`. `method` is `"MML"`
    (Chalmers, Falk & Reise, 2026; mirt `pirt(estimator = "MML")`), `"logistic_kernel"` (Ip, 2010;
@@ -3862,11 +3870,11 @@ data-independent shapes (§15.21).
    §17.1 hold it only for its own items) and confirmatory models on product grids
    (`with_factors()`, any factor). The target factor's mean must be 0 and its variance 1 (they are
    the projected metric). Rejected with `SpecificationError`: unidimensional, multiple-group,
-   EH / Davidian / mixture and weighted fits (the weights are not stored in the `FitResult`).
-   **Projected table.** Same items and item models, `Normal()` fixed at $N(0,1)$. The asymptotes
-   `g` and `u` keep the parent's value and free / fixed status (the projection does not change
-   them). Every other parameter has the status of the projected model's default table, whether
-   or not the parent fixed it: a parent whose parameters are all fixed (an item bank's bifactor
+   EH / Davidian / mixture and weighted fits (the weights are not stored in the `FitResult`),
+   and item models other than 2PL and GRM (item 1).
+   **Projected table.** Same items and item models, `Normal()` fixed at $N(0,1)$. Every
+   parameter has the status of the projected model's default table, whether or not the parent
+   fixed it: a parent whose parameters are all fixed (an item bank's bifactor
    calibration loaded with `fit(..., table=)`) is projected too, and an item without a loading
    on the target factor still gets a free slope (it relates to the target through a
    correlation). Parameters are not shared across items and priors are dropped. `loglik` is the
@@ -3889,8 +3897,7 @@ data-independent shapes (§15.21).
    counts, so `_core._m_step_items` is reused unchanged (the parent's per-family tables are
    reordered to the projected problem's families by item column) and repeated until the largest
    change is below $10^{-10}$ (5 Newton steps per call, at most 500 calls). Starting values: the
-   logistic-kernel closed form for 2PL / 3PL / 4PL / GRM items, otherwise the parent's target slope
-   and intercepts. The target coordinate of a node is matched to the one-dimensional grid by the
+   logistic-kernel closed form. The target coordinate of a node is matched to the one-dimensional grid by the
    nearest node (`_projection.node_map`), which is exact because the block and product grids are
    built from that grid. **E-table at the estimates.** mirt keeps the table of its last E-step,
    computed at the parameters entering the last iteration; here the E-step is run at
@@ -3922,9 +3929,7 @@ data-independent shapes (§15.21).
    with $c=16\sqrt3/(15\pi)$ (Ip's logistic kernel) or $c=1/1.702$ (Stucky et al.'s normal ogive:
    their $a^*=1.702\,\lambda_f/\sqrt{1-\lambda_f^2}$ with the standardized loadings
    $\lambda=(\mathbf a/1.702)/\sqrt{1+\lVert\mathbf a/1.702\rVert^2}$ is this formula for
-   orthogonal factors, and $d^*=d\,a^*/a_f$). The 3PL / 4PL asymptotes are unchanged (the
-   marginal of $g+(u-g)\,\mathrm{logistic}$ is $g+(u-g)$ times the marginal logistic). Other item
-   families have no closed form and raise `SpecificationError`. **Correlated factors.** mirt's
+   orthogonal factors, and $d^*=d\,a^*/a_f$). **Correlated factors.** mirt's
    `"LKA"` (`Ip2010`) uses $\rho=0$ and the sum of the non-target slopes, and its `"FA"` the
    pattern loadings of `summary()`; both equal the formula above for bifactor models (one nuisance
    factor per item, orthogonal) and differ when factors correlate, where the conditional variance
@@ -3932,7 +3937,8 @@ data-independent shapes (§15.21).
    $J\,\widehat{\mathrm{Cov}}(\hat\eta)\,J^\top$ with $J=\partial\xi^*/\partial\eta$ by
    `jax.jacfwd` through the closed form (the latent correlations included); `None` when the parent
    has no covariance (mirt `FA.projection_SE`).
-5. **Not included (yet).** Projected item models of another family (mirt `itemtype`), projection
+5. **Not included (yet).** Item models other than 2PL and GRM (item 1), projected item models of
+   another family (mirt `itemtype`), projection
    onto several factors (mirt `model` > 1 with `project` of length > 1), multiple groups
    (mirt `invariance`), and the `shortform` option (fit `project()` and keep a subset of the
    items' rows instead).
@@ -3944,7 +3950,8 @@ data-independent shapes (§15.21).
    against product grid), the marginal table sums to the observed category counts, the closed
    forms are exact for a normal-ogive kernel with correlated factors (numerical integration),
    Ip's worked example ($a=2.63$, $a_s=3.07$, $d=-1.49$ gives $a^*=1.274$, $d^*=-0.721$), the
-   two-tier path onto each primary factor, fixed 3PL asymptotes, and the errors.
+   two-tier path onto each primary factor, and the errors (3PL and GPCM items are rejected by
+   every method).
 
 ## References
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.

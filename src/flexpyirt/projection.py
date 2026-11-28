@@ -4,11 +4,12 @@ A multidimensional model (typically a bifactor model) is projected onto one of i
 integrating the other factors out of every item response function (Ip, 2010). The projected
 item parameters describe each item on the target factor alone, with the local dependence
 caused by the nuisance factors absorbed into the item parameters. :func:`project` estimates
-them in three ways:
+them in three ways, for 2PL and GRM items (the logistic kernels the methods were derived and
+checked for):
 
 * ``"MML"``: maximum marginal likelihood on the marginal expected table of the parent model
-  (MML-PIRT; Chalmers, Falk & Reise, 2026). Works for every item model and gives standard
-  errors from the information of the projected objective.
+  (MML-PIRT; Chalmers, Falk & Reise, 2026), with standard errors from the information of the
+  projected objective.
 * ``"logistic_kernel"``: the closed-form logistic kernel approximation (Ip, 2010).
 * ``"normal_ogive"``: the closed-form approximation through the normal-ogive (factor-analytic)
   loadings with :math:`D=1.702` (Stucky, Thissen & Edelen, 2013).
@@ -30,7 +31,7 @@ from flexpyirt import _core, _projection
 from flexpyirt._compile import TABLE_COLUMNS, compile_problem, prepare
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import ConvergenceWarning, SpecificationError
-from flexpyirt.items import DichotomousKernel, FourPLKernel, GradedKernel, ItemKernel
+from flexpyirt.items import ItemKernel
 from flexpyirt.latent import Normal
 from flexpyirt.model import LATENT_ITEM, Model
 from flexpyirt.result import FitResult
@@ -45,8 +46,9 @@ _CONSTANTS = {
     "logistic_kernel": _projection.LOGISTIC_KERNEL_CONSTANT,
     "normal_ogive": _projection.NORMAL_OGIVE_CONSTANT,
 }
-_ASYMPTOTES = ("g", "u")
-"""Lower and upper asymptotes of 3PL / 4PL items, unchanged by the projection."""
+_ITEM_MODELS = ("2PL", "GRM")
+"""Item models that can be projected: the logistic kernels of Ip (2010), Stucky et al. (2013)
+and Chalmers et al. (2026) (M2PL to 2PL, MGRM to GRM)."""
 _INTERCEPT = re.compile(r"d[0-9]*")
 """Intercepts rescaled by the closed-form projections (``d`` and the GRM's ``d1..d{K-1}``)."""
 
@@ -100,21 +102,21 @@ def project(
       :math:`\bar r_{jk}(\theta_q)=\sum_{\boldsymbol\theta_m:\theta_{mf}=\theta_q}
       \bar r_{jk}(\boldsymbol\theta_m;\hat\eta)`, and each item maximizes
       :math:`\sum_q\sum_k\bar r_{jk}(\theta_q)\log P_{jk}(\theta_q;\xi^*_j)` once (the table is
-      not updated). Any item model.
+      not updated).
     * ``method="logistic_kernel"`` (Ip, 2010) and ``method="normal_ogive"`` (Stucky, Thissen &
-      Edelen, 2013): closed forms for 2PL, 3PL, 4PL and GRM items,
+      Edelen, 2013): closed forms
       :math:`a^*=s\,\mathbf a^\top\boldsymbol\Phi_{\cdot f}` and :math:`d^*_k=s\,d_k` with
       :math:`s=(1+c^2v)^{-1/2}`,
       :math:`v=\mathbf a^\top\boldsymbol\Phi\mathbf a-(\mathbf a^\top\boldsymbol\Phi_{\cdot f})^2`
       (the variance of the nuisance part given :math:`\theta_f`), and :math:`c=16\sqrt3/(15\pi)`
-      or :math:`c=1/1.702`. The lower and upper asymptotes of 3PL and 4PL items are unchanged.
+      or :math:`c=1/1.702`.
 
     Parameters
     ----------
     result : FitResult
-        A single-group multidimensional fit with a ``Normal`` latent distribution: a bifactor
-        or two-tier model (:meth:`Model.with_bifactor`, :meth:`Model.with_two_tier`) or a
-        confirmatory model (:meth:`Model.with_factors`).
+        A single-group multidimensional fit with 2PL and GRM items and a ``Normal`` latent
+        distribution: a bifactor or two-tier model (:meth:`Model.with_bifactor`,
+        :meth:`Model.with_two_tier`) or a confirmatory model (:meth:`Model.with_factors`).
     data : DataFrame or array-like
         The responses ``result`` was fitted to. ``"MML"`` needs them for the E-step; every method
         uses them to lay out the projected model and for its log-likelihood.
@@ -142,10 +144,9 @@ def project(
     -------
     FitResult
         The projected unidimensional model with :math:`N(0,1)` on the target factor, on the
-        parent's one-dimensional grid. The asymptotes ``g`` and ``u`` keep the parent's values
-        and free / fixed status; every other parameter is free as in a default unidimensional
-        model (also when the parent fixed it, so a parent fixed at an item bank's values can
-        be projected); priors are dropped.
+        parent's one-dimensional grid. Every parameter is free or fixed as in a default
+        unidimensional model (also when the parent fixed it, so a parent fixed at an item
+        bank's values can be projected); priors are dropped.
         ``loglik`` is the marginal log-likelihood of ``data`` under the projected model; it is
         not maximized, so likelihood-ratio tests against the parent do not apply. ``se_method``
         is ``"projection_oakes"``, ``"projection_complete"``, ``"projection_hessian"`` (MML) or
@@ -157,7 +158,7 @@ def project(
     ------
     SpecificationError
         For a unidimensional, multiple-group, weighted or non-Normal parent, a factor that cannot
-        be projected onto, or (closed forms) an item model other than 2PL, 3PL, 4PL or GRM.
+        be projected onto, or an item model other than 2PL or GRM.
 
     Notes
     -----
@@ -189,7 +190,7 @@ def project(
         raise SpecificationError(
             f"Unknown method={method!r}; use 'MML', 'logistic_kernel' or 'normal_ogive'."
         )
-    parent = _check_parent(result, method)
+    parent = _check_parent(result)
     target = _target_factor(parent, factor)
     _check_target_scale(result, target)
 
@@ -275,7 +276,7 @@ def project(
 # ---- checks -----------------------------------------------------------------------------------
 
 
-def _check_parent(result: FitResult, method: str) -> Model:
+def _check_parent(result: FitResult) -> Model:
     """Return the parent's specification after checking that it can be projected."""
     if not isinstance(result, FitResult):
         raise SpecificationError(f"project() needs a FitResult, got {type(result).__name__}.")
@@ -290,21 +291,12 @@ def _check_parent(result: FitResult, method: str) -> Model:
         raise SpecificationError(
             "project() does not support models fitted with sampling weights (weights=)."
         )
-    if method != "MML":
-        unsupported = sorted(
-            {
-                m.name
-                for _, m in model.items
-                if not isinstance(
-                    model.item_kernel(m), (DichotomousKernel, FourPLKernel, GradedKernel)
-                )
-            }
+    unsupported = sorted({m.name for _, m in model.items if m.name not in _ITEM_MODELS})
+    if unsupported:
+        raise SpecificationError(
+            f"project() supports 2PL and GRM items only, not {unsupported}: projective IRT "
+            "approximates the marginal trace of a logistic kernel (DESIGN.md §28.1)."
         )
-        if unsupported:
-            raise SpecificationError(
-                f"method={method!r} supports 2PL, 3PL, 4PL and GRM items only, not "
-                f"{unsupported}; use method='MML'."
-            )
     return model
 
 
@@ -352,18 +344,13 @@ def _parent_name(kernel: ItemKernel, proj_kernel: ItemKernel, param: str, target
 def _projected_layout(result: FitResult, table: pd.DataFrame, target: int) -> pd.DataFrame:
     """Set ``value``, ``free`` and ``free_id`` of the projected table (DESIGN.md §28.2).
 
-    The lower and upper asymptotes (``g``, ``u``), which the projection does not change, keep the
-    parent's value and free / fixed status. Every other parameter has the projected model's
-    default status (``table`` is that model's default table), whether or not it was fixed in the
-    parent, so a parent fixed at an item bank's values is projected too. Parameters are not
-    shared across items and priors are dropped.
+    Every parameter has the projected model's default status (``table`` is that model's default
+    table), whether or not it was fixed in the parent, so a parent fixed at an item bank's values
+    is projected too; the parent's estimates are the starting values. Parameters are not shared
+    across items and priors are dropped.
     """
     parent = result._model
     rows = result.parameters
-    parent_free = {
-        (str(i), str(p)): bool(f)
-        for i, p, f in zip(rows["item"], rows["param"], rows["free"], strict=True)
-    }
     parent_value = {
         (str(i), str(p)): float(v)
         for i, p, v in zip(rows["item"], rows["param"], rows["estimate"], strict=True)
@@ -376,8 +363,6 @@ def _projected_layout(result: FitResult, table: pd.DataFrame, target: int) -> pd
             continue
         kernel = parent.item_kernel(models[item])
         proj_kernel = models[item].kernel
-        if param in _ASYMPTOTES:
-            free[pos] = parent_free[(item, param)]
         values[pos] = parent_value[(item, _parent_name(kernel, proj_kernel, param, target))]
     out = table.copy()
     out["free"] = free
@@ -394,8 +379,7 @@ def _closed_form_values(
     r"""Return ``eta_parent -> values of the projected rows keys`` from the closed forms.
 
     ``keys`` are the ``(item, param)`` rows of the projected table; latent rows get mean 0 and
-    variance 1. Items whose family has no closed form keep their parent values (target slope and
-    the other parameters); those are only used as starting values for ``"MML"``.
+    variance 1. The slope is :math:`a^*` and the intercepts are scaled by :math:`s`.
     """
     parent = result._model
     rows = result.parameters
@@ -436,12 +420,11 @@ def _closed_form_values(
                 out.append(jnp.asarray(0.0 if param == "mean" else 1.0))
                 continue
             kernel = kernels[item]
-            closed = isinstance(kernel, (DichotomousKernel, FourPLKernel, GradedKernel))
             source = full[index[(item, _parent_name(kernel, models[item].kernel, param, target))]]
             a_star, scale = projected[item]
-            if closed and param in models[item].kernel.slope_params:
+            if param in models[item].kernel.slope_params:
                 out.append(a_star)
-            elif closed and _INTERCEPT.fullmatch(param):
+            elif _INTERCEPT.fullmatch(param):
                 out.append(scale * source)
             else:
                 out.append(source)
