@@ -360,6 +360,17 @@ class FitResult:
     _eh_weights: np.ndarray | None = field(default=None, repr=False)
     _sum_weights: float | None = field(default=None, repr=False)
     _n_clusters: int | None = field(default=None, repr=False)
+    _starts: pd.DataFrame | None = field(default=None, repr=False)
+
+    @property
+    def starts(self) -> pd.DataFrame | None:
+        """Every start of a multi-start fit (``fit(n_starts=...)``), or ``None`` for one start.
+
+        Columns ``start`` (1 is the usual starting value), ``loglik``, ``log_posterior``,
+        ``converged``, ``n_iter`` and ``best`` (the start this result reports). Not saved by
+        :meth:`to_json`.
+        """
+        return None if self._starts is None else self._starts.copy()
 
     # ---- summaries ---------------------------------------------------------------------------
 

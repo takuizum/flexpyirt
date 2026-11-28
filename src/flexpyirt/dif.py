@@ -23,7 +23,7 @@ from flexpyirt._compile import TABLE_COLUMNS, coerce_groups, coerce_responses, c
 from flexpyirt._dif import DIFTest, PAdjust, adjust_p, item_rows, set_shared, wald_statistic
 from flexpyirt._precision import check_x64
 from flexpyirt.errors import ConvergenceWarning, SpecificationError
-from flexpyirt.fit import SEMethod, fit
+from flexpyirt.fit import SEMethod, _fit_tables, fit
 from flexpyirt.method import BAEM
 from flexpyirt.model import Model
 from flexpyirt.quadrature import Quadrature
@@ -158,6 +158,40 @@ class _Screen:
                     warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
             self.cache[key] = res
         return self.cache[key]
+
+    def prefetch(self, items: Iterable[str], free: frozenset[str]) -> None:
+        """Fit every model that :meth:`run` needs for ``items`` in one batch (DESIGN.md §28).
+
+        The fits are those :meth:`fit_for` would make one by one (same tables and starting
+        values); they are estimated together and cached.
+        """
+        if self.test == "wald":
+            se = self.se_test
+            frees = [free | {item} for item in items]
+        else:
+            se = None
+            frees = [f for item in items for f in (free | {item}, free - {item})]
+        if se not in (None, "oakes", "hessian"):
+            return
+        keys = list(dict.fromkeys((f, se) for f in frees if (f, se) not in self.cache))
+        if len(keys) < 2:
+            return
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ConvergenceWarning)
+            fits = _fit_tables(
+                self.spec,
+                self.data,
+                tables=[self.table_for(f) for f, _ in keys],
+                group=self.group,
+                item_names=self.item_names,
+                method=self.method,
+                quadrature=self.quadrature,
+                se=se,
+            )
+        for w in caught:
+            if not issubclass(w.category, ConvergenceWarning):
+                warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
+        self.cache.update(zip(keys, fits, strict=True))
 
     def run(self, item: str, free: frozenset[str]) -> dict[str, Any]:
         """Test ``item`` with every other tested item free or constrained as in ``free``."""
@@ -367,6 +401,7 @@ def dif_screen(
             candidates = [i for i in tested if i not in free]
         else:
             candidates = [i for i in tested if i in free]
+        screen.prefetch(candidates, free)
         for item in candidates:
             latest[item] = screen.run(item, free)
         adj = adjust_p(np.array([latest[i]["p"] for i in tested]), p_adjust)
@@ -402,6 +437,7 @@ def dif_screen(
         rows_out = [{"item": i, **latest[i]} for i in tested]
     else:
         screen.start = screen.fit_for(flags, se_test if test == "wald" else None)
+        screen.prefetch(tested, flags)
         rows_out = [{"item": i, **screen.run(i, flags)} for i in tested]
     table = pd.DataFrame(rows_out)
     table["adj_p"] = adjust_p(table["p"].to_numpy(), p_adjust)
