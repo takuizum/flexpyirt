@@ -129,6 +129,12 @@ the generic path to $10^{-12}$ at fixed parameters), and none changes the `ItemK
 
 The bifactor / two-tier E-step (§17.1) keeps the generic one-hot path.
 
+*Measured (#152).* Warm `fit()` time, plain EM, `se=None`, minimum of two back-to-back runs on 8
+pinned CPU cores, against the code just before #152 (s): 2PL 20000×40 0.922 → 0.612; 2PL 5000×40
+0.298 → 0.235; 3PL 5000×30 0.504 → 0.337; GRM(4) 0.178 → 0.187; GPCM(4) 0.335 → 0.303; 2D MIRT
+5000×20 0.850 → 0.649; two groups 1.028 → 0.629. GRM has no rank-$D$ path and is about 5% slower
+from the offset bookkeeping; every other case is 10–40% faster. The converged log-likelihoods agree to $2\times10^{-14}$ relative.
+
 ### 4.3 M-step (items)
 The expected complete-data log-likelihood of item $j$ over groups, plus the log prior:
 $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;+\;\log\pi(\xi_j)$$
