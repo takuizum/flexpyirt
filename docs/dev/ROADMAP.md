@@ -118,8 +118,8 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
   parameters, and `with_groups()` takes a mapping. Validated against mirt `multipleGroup` with 10
   groups (V55); benchmarks for 10, 50 and 200 groups in `benchmarks/`.
 - [ ] Confirmatory models with 4–5 factors through fixed-node quasi-Monte Carlo quadrature (#164;
-  `Quadrature.qmc()`, DESIGN §28). Implemented and checked against a fine product grid (3-D) and the
-  exact factorized likelihood (4-D); open until a 4–5 factor case passes against mirt `QMCEM`.
+  `Quadrature.qmc()`, DESIGN §28). Validated in V58 against mirt EM on a $13^4$ grid (mirt's own
+  `QMCEM` fails on that case); to be checked once V58 passes in the nightly CI.
 - **Acceptance**: each item validated against mirt (or an independent R implementation) within the
   VALIDATION.md tolerances.
 

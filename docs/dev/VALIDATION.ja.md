@@ -11,7 +11,7 @@
 
 ## R と mirt の版
 - **方針（#74）**: 参照値は CRAN の固定版ではなく、GitHub 上の最新の R mirt（`philchalmers/mirt` の既定ブランチ）で作る。mirt の修正や退行が CRAN に出る前にここで分かる。参照値の JSON は `meta` に `mirt_version` と `mirt_sha`（コミット、`packageDescription("mirt")$RemoteSha`）を必ず記録する。`tests/test_reference_meta.py` と `tests/test_reference_provenance.py` が、コミット SHA のない参照値、`validation/r/setup.R` を通さずに mirt を読むスクリプト、`validation/r/run_references.sh` に載っていないスクリプトを検出する。
-- **作り直し方**: `Rscript validation/r/install_mirt.R [ref]` で GitHub の mirt をユーザーライブラリ（または `FLEXPYIRT_R_LIB`）に入れ、`validation/r/run_references.sh` で mirt を使う全スクリプトを 2 段に分けて実行する（2 段目は 1 段目が書いた JSON を読む。並列度は `JOBS`）。読み込む mirt に `RemoteSha` がなければ `validation/r/setup.R` が止める。
+- **作り直し方**: `Rscript validation/r/install_mirt.R [ref]` で GitHub の mirt をユーザーライブラリ（または `FLEXPYIRT_R_LIB`。チェックアウトの中に置くなら `FLEXPYIRT_R_LIB=validation/r/lib`。このフォルダは git に無視されるので、入れたライブラリはコミットされない）に入れ、`validation/r/run_references.sh` で mirt を使う全スクリプトを 2 段に分けて実行する（2 段目は 1 段目が書いた JSON を読む。並列度は `JOBS`）。読み込む mirt に `RemoteSha` がなければ `validation/r/setup.R` が止める。
 - **定期チェック**: `.github/workflows/mirt-head.yml`（週 1 回と手動。R を走らせないテスト CI とは別）が R と mirt HEAD を入れてスクリプトを再実行し、新しい JSON をコミット済みの JSON と比べ（`scripts/compare_references.py`: SE は相対 1e-3、対数尤度と適合度統計量は相対 1e-6、その他は絶対 1e-5 + 相対 1e-6。許容誤差表の種類ごとに最も厳しい値）、作り直した参照値でテスト全体を走らせる。ずれや失敗があれば issue を立てる（開いているものがあればコメント）。参照値は自動では更新しない。ずれが mirt の退行か、既知の mirt の問題（#20）の修正か、取り込むべき変更かを人が判断し、手元で作り直して PR にする。取り込んだずれは下に記録し、テストの許容誤差は理由を書いたときだけ変える。
 - **現在の参照値**: R 4.6.2、mirt 1.48.5（`2b342bb`、philchalmers/mirt、2026-11-23）。#74 以前は CRAN の mirt 1.46.1（V1–V13、`v14_mirt2d`、V16–V20、V22、V23、`v26_local_dependence`、V31、V32、V43）と 1.48（それ以外）で作っていた。flexpyctt の参照値 V24（`v24_polychoric`）と V27（`v27_detect`）は mirt を同梱データ（LSAT7・Science）のためだけに読み込み、値は lavaan・psych・sirt から作るので、mirt HEAD では作り直さず `mirt_sha` も記録しない。
 - **mirt 1.48.5（`2b342bb`）で作り直したときのずれ（#74）**: 全参照値を作り直し、コミット済みのものと比べた（`scripts/compare_references.py`）。全ケースの項目パラメタ・潜在分布パラメタ・SE・対数尤度・EAP・適合度統計量のずれは上の閾値未満。例外は次のとおり。
@@ -110,6 +110,7 @@
 | V55 | 群ブロック化した E-step での多数の群: 2PL、大きさの異なる 10 群（200–470）、15 項目、q01–q06 を不変なアンカー、q07–q15 は群ごとに自由、焦点群の平均・分散は自由、5% MCAR 欠測。ブロック化した E-step と平坦な E-step の回帰 | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`、`fscores(extract.group(m, g), method = "EAP")`。回帰は平坦な経路 | #79 |
 | V56 | 群ごとの `DavidianCurve` と `NormalMixture`: (a) 2PL、3 群（二峰・右に歪む・左に歪む）、`DavidianCurve(2)`、q01–q06 がアンカー、3% 欠測。(b) 2PL $J=15$、2 群、`NormalMixture(2)`、全項目不変。(c) FIPC、2 群、`DavidianCurve(2)`、全潜在パラメタ自由。推定値、R の Hessian による SE、EAP、群ごとの S-X2 | 格子上で正規化した標準化密度（`dcurver::ddc`）による `multipleGroup(customGroup = createGroup(...))` を独立な R の周辺対数尤度上の Newton で磨く。R の Richardson Hessian による SE、R で計算した EAP、各群の推定値で固定した 1 群オブジェクトでの `itemfit(use_dentype_estimate = TRUE)` | #75 |
 | V57 | 重み付き・クラスタロバストなサンドイッチ SE: (a) 2PL $J=10$、25 人 × 40 校で $\theta$ に学校効果、不均等なウェイト、3% 欠測、(b) 2PL $J=8$、アンカー q01–q05 の参照群 / 焦点群で焦点群の平均・分散は自由、群をまたぐ 30 校。mirt の推定値での中央の行列（重み付き、クラスタ、ウェイトなしのクラスタ、1 人 1 クラスタ）、ウェイトつきの `se="crossprod"`、mirt の重み付きサンドイッチの再現、通しの SE | `survey.weights` つきの `mirt()` / `multipleGroup()`、`SE.type = "Oakes"`（ブレッド）・`"crossprod"`・`"sandwich"`。mirt のグリッド上で `numDeriv::jacobian` による個人ごとのスコア（`estfun.AllModelClass` と照合）。$H^{-1}BH^{-1}$ は R で計算 | #84, #85 |
+| V58 | 固定節点の QMC 求積（DESIGN §28）: 4 因子の確認的 2PL（因子あたり 5 項目、$N=2{,}000$、相関 0.3〜0.5）。flexpyirt の `Quadrature.qmc(10_000)`（2 段階）を細かい直積格子と比べる。推定値 1.5e-2（実測 5.3e-3）、相関 5e-3（2.0e-3）、対数尤度 1.0（0.48）、Oakes の SE 相対 2%（0.55%） | `mirt()` の EM、`quadpts = 13`、`theta_lim = c(-4.8, 4.8)`（13^4 = 28,561 節点、`MAXQUAD` を上げる）、`TOL = 1e-6`、`SE.type = "Oakes"`。`method = "QMCEM"` は記録するが使わない（このケースで失敗する。下記） | #164 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -1273,12 +1274,15 @@
   エラー、summary、JSON（スキーマ 9、`n_clusters`）。
 
 ## 照合以外の検証
-- **準モンテカルロ求積（#164、DESIGN §28）**: mirt の `QMCEM` は毎サイクル節点を動かし、flexpyirt は固定するので、両者の
-  一致は QMC の誤差までで、mirt は厳しい参照値にならない。`tests/test_quadrature_qmc.py` は、厳密な恒等式（Halton の基数逆数、
-  提案分布が潜在正規分布に等しいときの等しい重み、一般の $D$ の MVN 対数重みと `scipy.stats.multivariate_normal` の一致）、
-  5,000 点の 3 因子 2PL と Gauss–Hermite $21^3$ の一致（実測で項目パラメタ 5.1e-3、許容 1e-2。相関 1.2e-3、許容 3e-3）、独立な
-  因子の 4 因子 2PL と、尤度がちょうど積になる 1 次元の個別の当てはめとの一致（実測 7.0e-3、傾きの許容 1.5e-2、切片 1e-2）を
-  検査する。残り: 点数を多くした mirt `QMCEM` による 4〜5 因子の参照値（GitHub 版 mirt）。
+- **準モンテカルロ求積（V58、#164、DESIGN §28）**: 参照値は mirt の `QMCEM` ではなく、13^4 の直積格子での mirt の通常の
+  EM。V58 のデータでは、`QMCEM`（mirt 1.48.5 `2b342bb`、既定の 10,000 点でも 20,000 点でも）は傾きが約 1.6 倍、因子間相関が
+  0.91〜0.97（シミュレーションは 0.3〜0.5）の解へずれていき、最後の数サイクルで自身の対数尤度が下がる（mirt は
+  「Log-likelihood was decreasing near the ML solution」と警告する）。最終値は −24571.6 で、EM の −24319.8 より低い。9^4 と
+  13^4 の格子での mirt の EM と flexpyirt は互いに、また真値と一致する。`SE = TRUE` では `QMCEM` の Oakes の情報行列が
+  逆行列にならなかった。許容誤差は両方の当てはめ（flexpyirt の QMC と mirt の格子）の求積誤差を見込んだもので、直積格子の
+  ケースの 1e-4 ではない。`tests/test_quadrature_qmc.py` は、厳密な恒等式（Halton の基数逆数、提案分布が潜在正規分布に等しい
+  ときの等しい重み、一般の $D$ の MVN 対数重みと `scipy.stats.multivariate_normal` の一致）、3 因子 2PL と Gauss–Hermite
+  $21^3$ の一致、独立な因子の 4 因子 2PL と 1 次元の個別の当てはめとの一致も検査する。
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。
 - **M-step の非拘束尺度と `LogitNormalPrior`（V45、#15）**: DESIGN §15.47–§15.48。
   1. *両方の M-step 尺度での内点解*: V3・V4・V5・V9（`tests/test_mirt_m2.py`: 対数尤度、項目と潜在分布のパラメタ。

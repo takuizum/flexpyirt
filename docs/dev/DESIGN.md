@@ -3868,11 +3868,13 @@ data-independent shapes (§15.21).
    QMC error is not monotone in $Q$ at these sizes. The default of 5,000 points (as mirt's
    `QMCEM`) is within about $10^{-2}$ of the reference, comparable to the default 3-D product grid.
 8. **Validation status.** Checked against exact identities, a fine product grid and the exact
-   factorized likelihood (`tests/test_quadrature_qmc.py`). **Not yet validated against mirt**:
-   the reference is mirt's `QMCEM` with many points on a 4–5 factor model, generated with the
-   GitHub mirt (VALIDATION.md), and agreement is expected only to QMC error (about $2\times10^{-3}$
-   in the 3-D comparison of §12, item 6). Until that case passes, QMC is not in the README or the
-   user guide and the ROADMAP item stays open.
+   factorized likelihood (`tests/test_quadrature_qmc.py`), and against mirt (V58): a 4-factor
+   confirmatory 2PL fitted with `Quadrature.qmc(10_000)` agrees with mirt's ordinary EM on a
+   $13^4$ product grid within 5.3e-3 in the item parameters, 2.0e-3 in the correlations, 0.48 in
+   the log-likelihood and 0.55% in the Oakes SEs. mirt's own `QMCEM` was the planned reference
+   but fails on that case (it drifts to correlations of 0.91–0.97 with a decreasing
+   log-likelihood; VALIDATION.md V58), which is one more reason for fixed nodes. QMC stays out of
+   the README and the user guide until V58 has passed in the nightly CI (ROADMAP).
 9. **Cost.** Each EM iteration is $O(PJKQ)$ as for product grids; 5,000 points cost 1.5× the
    default 3-D grid per E-step, and the first stage roughly doubles the work. The rank-$D$
    factorization of the E-step (#152) would make larger $Q$ cheap.
