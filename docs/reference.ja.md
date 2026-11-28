@@ -2172,7 +2172,8 @@ DataFrame にも先頭に `group` 列がつく（2 つの表は `(group, categor
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural")
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural",
+     anderson=False)
 ```
 
 | 引数 | 説明 |
@@ -2182,6 +2183,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale
 | `m_step_newton_steps` | 1 回の M-step で進める Newton 法のステップ数。各ステップで期待対数尤度は減らない |
 | `squarem` | SQUAREM スキーム S3 加速（Varadhan & Roland, 2008）と単調性・実行可能性の安全装置を有効にする（既定 `False`） |
 | `m_step_scale` | `"natural"`（既定）: M-step の Newton 法を範囲つきの自然尺度で行い、境界解にちょうど到達する。`"unconstrained"`: 範囲のあるパラメタ（$g$、$u$、潜在分散、因子間相関、事前分布や編集した範囲で制限された傾き）を $\operatorname{logit}$ / $\log$ 尺度で動かす。範囲のないパラメタは変換しない。目的関数と内点解は同じで、推定値・表・事前分布・SE は自然尺度のまま。境界解には近づくだけ（[ガイド 4 節](guide.ja.md#4-推定する)） |
+| `anderson` | EM の Anderson 加速（Anderson, 1965; Henderson & Varadhan, 2019）を有効にする。範囲のあるパラメタは $\operatorname{logit}$ / $\log$ 尺度で直近 5 回の EM ステップを組み合わせ、1 反復あたり EM 評価 1 回。提案が範囲を出るか対数事後確率を下げたら EM ステップからやり直す。`squarem` とは同時に指定できない（既定 `False`、[ガイド 4 節](guide.ja.md#4-推定する)） |
 
 ### `Quadrature`
 

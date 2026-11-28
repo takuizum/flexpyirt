@@ -72,7 +72,9 @@ def merge_results(
 ) -> dict[str, Any]:
     """Merge flexpyirt and optional mirt raw benchmark payloads into one structured dict."""
     flex_by_key: dict[tuple[str, str, bool], dict[str, Any]] = {
-        (r["case"], r["se"], bool(r["squarem"])): r for r in flex_raw["runs"]
+        (r["case"], r["se"], bool(r["squarem"])): r
+        for r in flex_raw["runs"]
+        if not r.get("anderson", False)
     }
     mirt_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
     if mirt_raw is not None:

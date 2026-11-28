@@ -18,7 +18,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
-from flexpyirt._newton import newton_ascent
+from flexpyirt._newton import _to_natural, _to_unconstrained, _transform_kind, newton_ascent
 from flexpyirt.items import DichotomousKernel, GPCMKernel, ItemKernel
 from flexpyirt.latent import (
     davidian_log_weights,
@@ -39,6 +39,7 @@ __all__ = [
     "GroupBlocks",
     "LatentBlock",
     "PriorBlock",
+    "anderson",
     "eap",
     "em",
     "information_hessian",
@@ -1443,9 +1444,6 @@ def _squarem_eh(
     two = jnp.asarray(2, dtype=jnp.int32)
     three = jnp.asarray(3, dtype=jnp.int32)
 
-    def _eval_lp_pair(eta: Array, eh_w: Array) -> Array:
-        return log_posterior(_with_eh_weights(prob, eh_w), eta)
-
     def _em_once(eta: Array, eh_w: Array) -> tuple[Array, Array, Array, Array]:
         prob_t = _with_eh_weights(prob, eh_w)
         counts, ll = e_step(prob_t, eta)
@@ -1453,20 +1451,11 @@ def _squarem_eh(
         new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton, unconstrained)
         return new_eta, new_w, ll, lp
 
-    def _is_acceptable(cand: Array, lp_ref: Array) -> Array:
+    def _in_bounds(cand: Array) -> Array:
         eta_c = cand[:n_free]
         z_c = cand[n_free:]
         items_ok = jnp.all(jnp.isfinite(eta_c) & (eta_c > lower) & (eta_c < upper))
-        z_ok = jnp.all(jnp.isfinite(z_c)) & jnp.any(z_c != 0.0)
-        in_bounds = items_ok & z_ok
-
-        def _eval_lp(c: Array) -> Array:
-            e_c, w_c = _eh_unpack(prob, c, n_free, n_groups, n_nodes)
-            lp_c = _eval_lp_pair(e_c, w_c)
-            return jnp.isfinite(lp_c) & (lp_c >= lp_ref)
-
-        accepted: Array = jax.lax.cond(in_bounds, _eval_lp, lambda _: jnp.asarray(False), cand)
-        return accepted
+        return items_ok & jnp.all(jnp.isfinite(z_c)) & jnp.any(z_c != 0.0)
 
     def cond(
         state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
@@ -1481,7 +1470,10 @@ def _squarem_eh(
         v0 = _eh_pack(eta, eh_w)
         eta1, w1, ll0, lp0 = _em_once(eta, eh_w)
         v1 = _eh_pack(eta1, w1)
-        eta2, w2, _, _ = _em_once(eta1, w1)
+        prob_1 = _with_eh_weights(prob, w1)
+        counts1, ll1 = e_step(prob_1, eta1)
+        lp1 = ll1 + log_prior(prob_1, eta1)
+        eta2, w2 = _m_step_eh(prob_1, eta1, counts1, n_newton, unconstrained)
         v2 = _eh_pack(eta2, w2)
 
         r = v1 - v0
@@ -1493,46 +1485,52 @@ def _squarem_eh(
         raw_alpha = jnp.where(has_v, -r_norm / jnp.where(has_v, v_norm, 1.0), -1.0)
         alpha = jnp.where(jnp.isfinite(raw_alpha), jnp.minimum(raw_alpha, -1.0), -1.0)
 
-        def _extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            lp2 = _eval_lp_pair(eta2, w2)
-            lp_ref = jnp.maximum(lp2, lp0)
+        def _trial(cand: Array, delta: Array) -> tuple[Array, Array, Array, ExpectedCounts]:
+            """E-step at a candidate (``delta == 0`` is the EM image ``v2``, always accepted)."""
+            e_c, w_c = _eh_unpack(prob, cand, n_free, n_groups, n_nodes)
+            ok_bounds = _in_bounds(cand) & jnp.all(jnp.isfinite(w_c))
 
-            def backtrack_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
-                k, _, ok, _ = bt
-                return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
+            def _evaluate(ew: tuple[Array, Array]) -> tuple[Array, ExpectedCounts]:
+                prob_c = _with_eh_weights(prob, ew[1])
+                counts_c, ll_c = e_step(prob_c, ew[0])
+                lp_c = ll_c + log_prior(prob_c, ew[0])
+                return jnp.isfinite(lp_c) & (lp_c >= lp1), counts_c
 
-            def backtrack_body(
-                bt: tuple[Array, Array, Array, Array],
-            ) -> tuple[Array, Array, Array, Array]:
-                k, delta, _, _ = bt
-                cand = v2 - 2.0 * delta * s + (delta * delta) * v
-                ok = _is_acceptable(cand, lp_ref)
-                next_delta = jnp.where(ok, delta, 0.5 * delta)
-                next_k = jnp.where(ok, k, k + one)
-                return next_k, next_delta, ok, cand
+            def _out_of_bounds(_ew: tuple[Array, Array]) -> tuple[Array, ExpectedCounts]:
+                return jnp.asarray(False), counts1
 
-            init_bt = (zero, alpha + 1.0, jnp.asarray(False), v2)
-            k_out, _, ok, cand = jax.lax.while_loop(backtrack_cond, backtrack_body, init_bt)
-            fired = k_out > zero
-            v_p = jnp.where(ok, cand, v2)
-            return v_p, ok, fired
+            ok, counts_c = jax.lax.cond(ok_bounds, _evaluate, _out_of_bounds, (e_c, w_c))
+            return (delta == 0.0) | ok, e_c, w_c, counts_c
 
-        def _no_extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            return v2, jnp.asarray(True), jnp.asarray(False)
+        def backtrack_cond(
+            bt: tuple[Array, Array, Array, Array, Array, ExpectedCounts],
+        ) -> Array:
+            k, _, ok, _, _, _ = bt
+            return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
 
-        v_prime, do_stabilize, fired = jax.lax.cond(
-            alpha < -1.0, _extrapolate, _no_extrapolate, None
+        def backtrack_body(
+            bt: tuple[Array, Array, Array, Array, Array, ExpectedCounts],
+        ) -> tuple[Array, Array, Array, Array, Array, ExpectedCounts]:
+            k, delta, _, _, _, _ = bt
+            cand = v2 - 2.0 * delta * s + (delta * delta) * v
+            ok, e_c, w_c, counts_c = _trial(cand, delta)
+            next_delta = jnp.where(ok, delta, 0.5 * delta)
+            next_k = jnp.where(ok, k, k + one)
+            return next_k, next_delta, ok, e_c, w_c, counts_c
+
+        init_bt = (zero, alpha + 1.0, jnp.asarray(False), eta2, w2, counts1)
+        k_out, _, accepted, eta_p, w_p, counts_p = jax.lax.while_loop(
+            backtrack_cond, backtrack_body, init_bt
         )
-
-        def _stabilize(vp: Array) -> tuple[Array, Array, Array]:
-            e_p, w_p = _eh_unpack(prob, vp, n_free, n_groups, n_nodes)
-            e_n, w_n, _, _ = _em_once(e_p, w_p)
-            return e_n, w_n, three
-
-        def _fallback(_unused: Array) -> tuple[Array, Array, Array]:
-            return eta2, w2, two
-
-        new_eta, new_w, evals_added = jax.lax.cond(do_stabilize, _stabilize, _fallback, v_prime)
+        fired = k_out > zero
+        eta_p = jnp.where(accepted, eta_p, eta2)
+        w_p = jnp.where(accepted, w_p, w2)
+        stab_eta, stab_w = _m_step_eh(
+            _with_eh_weights(prob, w_p), eta_p, counts_p, n_newton, unconstrained
+        )
+        new_eta = jnp.where(accepted, stab_eta, eta2)
+        new_w = jnp.where(accepted, stab_w, w2)
+        evals_added = jnp.where(accepted, three, two)
         change = jnp.maximum(
             jnp.max(jnp.abs(new_eta - eta), initial=0.0),
             jnp.max(jnp.abs(new_w - eh_w), initial=0.0),
@@ -1614,11 +1612,13 @@ def squarem(
     (DESIGN.md §15.36).
     Monotonicity and feasibility safeguard: if :math:`\theta'(\alpha)` leaves the strict parameter
     bounds ``(lower, upper)`` or gives a non-finite or lower log posterior than
-    :math:`\max(\ell_{\mathrm{post}}(\theta_2),\ell_{\mathrm{post}}(\theta_0))`, :math:`\alpha` is
+    :math:`\ell_{\mathrm{post}}(\theta_1)` (known from the E-step at :math:`\theta_1`; it is
+    :math:`\ge\ell_{\mathrm{post}}(\theta_0)` because EM is monotone), :math:`\alpha` is
     stepped back towards :math:`-1` via :math:`\alpha\leftarrow(\alpha-1)/2` (i.e.
-    :math:`\delta\leftarrow\delta/2`) up to ``_SQUAREM_MAX_BACKTRACK`` times. An accepted
-    :math:`\theta'` is followed by one stabilizing EM step :math:`\theta_{\text{new}}=F(\theta')`
-    (3 EM map evaluations); if no backtracked candidate is acceptable,
+    :math:`\delta\leftarrow\delta/2`) up to ``_SQUAREM_MAX_BACKTRACK`` times. The log posterior of
+    a candidate comes from a full E-step, whose expected counts are reused by the stabilizing EM
+    step :math:`\theta_{\text{new}}=F(\theta')` of an accepted candidate (3 EM map evaluations;
+    DESIGN.md §15.12, #155); if no backtracked candidate is acceptable,
     :math:`\theta_{\text{new}}=\theta_2` is used directly (2 EM map evaluations). Runs entirely
     inside ``lax.while_loop``.
     """
@@ -1640,16 +1640,6 @@ def squarem(
     two = jnp.asarray(2, dtype=jnp.int32)
     three = jnp.asarray(3, dtype=jnp.int32)
 
-    def _is_acceptable(cand: Array, lp_ref: Array) -> Array:
-        in_bounds = jnp.all(jnp.isfinite(cand) & (cand > lower) & (cand < upper))
-
-        def _eval_lp(c: Array) -> Array:
-            lp_c = log_posterior(prob, c)
-            return jnp.isfinite(lp_c) & (lp_c >= lp_ref)
-
-        accepted: Array = jax.lax.cond(in_bounds, _eval_lp, lambda _: jnp.asarray(False), cand)
-        return accepted
-
     def cond(
         state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
     ) -> Array:
@@ -1663,7 +1653,8 @@ def squarem(
         counts0, ll0 = e_step(prob, eta)
         lp0 = ll0 + log_prior(prob, eta)
         theta1 = m_step(prob, eta, counts0, n_newton, unconstrained)
-        counts1, _ = e_step(prob, theta1)
+        counts1, ll1 = e_step(prob, theta1)
+        lp1 = ll1 + log_prior(prob, theta1)
         theta2 = m_step(prob, theta1, counts1, n_newton, unconstrained)
 
         r = theta1 - eta
@@ -1675,45 +1666,50 @@ def squarem(
         raw_alpha = jnp.where(has_v, -r_norm / jnp.where(has_v, v_norm, 1.0), -1.0)
         alpha = jnp.where(jnp.isfinite(raw_alpha), jnp.minimum(raw_alpha, -1.0), -1.0)
 
-        def _extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            lp2 = log_posterior(prob, theta2)
-            lp_ref = jnp.maximum(lp2, lp0)
+        def _trial(cand: Array, delta: Array) -> tuple[Array, ExpectedCounts]:
+            r"""E-step at a candidate; its log posterior decides acceptance (§15.12).
 
-            def backtrack_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
-                k, _, ok, _ = bt
-                return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
+            ``delta == 0`` is :math:`\theta_2` itself, an EM image of :math:`\theta_1`, which is
+            accepted without the comparison (so rounding cannot reject it).
+            """
+            in_bounds = jnp.all(jnp.isfinite(cand) & (cand > lower) & (cand < upper))
 
-            def backtrack_body(
-                bt: tuple[Array, Array, Array, Array],
-            ) -> tuple[Array, Array, Array, Array]:
-                k, delta, _, _ = bt
-                cand = theta2 - 2.0 * delta * s + (delta * delta) * v
-                ok = _is_acceptable(cand, lp_ref)
-                next_delta = jnp.where(ok, delta, 0.5 * delta)
-                next_k = jnp.where(ok, k, k + one)
-                return next_k, next_delta, ok, cand
+            def _evaluate(c: Array) -> tuple[Array, ExpectedCounts]:
+                counts_c, ll_c = e_step(prob, c)
+                lp_c = ll_c + log_prior(prob, c)
+                return jnp.isfinite(lp_c) & (lp_c >= lp1), counts_c
 
-            init_bt = (zero, alpha + 1.0, jnp.asarray(False), theta2)
-            k_out, _, ok, cand = jax.lax.while_loop(backtrack_cond, backtrack_body, init_bt)
-            fired = k_out > zero
-            theta_p = jnp.where(ok, cand, theta2)
-            return theta_p, ok, fired
+            def _out_of_bounds(_c: Array) -> tuple[Array, ExpectedCounts]:
+                return jnp.asarray(False), counts1
 
-        def _no_extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            return theta2, jnp.asarray(True), jnp.asarray(False)
+            ok, counts_c = jax.lax.cond(in_bounds, _evaluate, _out_of_bounds, cand)
+            return (delta == 0.0) | ok, counts_c
 
-        theta_prime, do_stabilize, fired = jax.lax.cond(
-            alpha < -1.0, _extrapolate, _no_extrapolate, None
+        def backtrack_cond(bt: tuple[Array, Array, Array, Array, ExpectedCounts]) -> Array:
+            k, _, ok, _, _ = bt
+            return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
+
+        def backtrack_body(
+            bt: tuple[Array, Array, Array, Array, ExpectedCounts],
+        ) -> tuple[Array, Array, Array, Array, ExpectedCounts]:
+            k, delta, _, _, _ = bt
+            cand = theta2 - 2.0 * delta * s + (delta * delta) * v
+            ok, counts_c = _trial(cand, delta)
+            next_delta = jnp.where(ok, delta, 0.5 * delta)
+            next_k = jnp.where(ok, k, k + one)
+            return next_k, next_delta, ok, cand, counts_c
+
+        init_bt = (zero, alpha + 1.0, jnp.asarray(False), theta2, counts1)
+        k_out, _, accepted, theta_prime, counts_p = jax.lax.while_loop(
+            backtrack_cond, backtrack_body, init_bt
         )
-
-        def _stabilize(t: Array) -> tuple[Array, Array]:
-            c, _ = e_step(prob, t)
-            return m_step(prob, t, c, n_newton, unconstrained), three
-
-        def _fallback(_unused: Array) -> tuple[Array, Array]:
-            return theta2, two
-
-        new, evals_added = jax.lax.cond(do_stabilize, _stabilize, _fallback, theta_prime)
+        fired = k_out > zero
+        # Stabilizing EM step F(theta') from the counts of the accepting E-step; if every halving
+        # was rejected, theta_2 is used directly.
+        theta_prime = jnp.where(accepted, theta_prime, theta2)
+        stabilized = m_step(prob, theta_prime, counts_p, n_newton, unconstrained)
+        new = jnp.where(accepted, stabilized, theta2)
+        evals_added = jnp.where(accepted, three, two)
         change = jnp.max(jnp.abs(new - eta), initial=0.0)
         next_evals = n_evals + evals_added
         next_safe = n_safe + fired.astype(jnp.int32)
@@ -1760,6 +1756,257 @@ def squarem(
         em_eval_history=ev_hist,
         safeguard_history=sf_hist,
         n_safeguards=n_safe,
+    )
+
+
+ANDERSON_MEMORY = 5
+"""Number of secant pairs :math:`m` kept by :func:`anderson` (DESIGN.md §15.49)."""
+_ANDERSON_STOP_RUN = 2
+"""Anderson iterates below ``tol``, with no larger change in between, needed to stop (§15.49)."""
+_ANDERSON_LP_SLACK = 1e-13
+"""Relative rounding slack of the log-posterior comparison in :func:`anderson` (§15.49)."""
+
+
+def anderson(
+    prob: CompiledProblem,
+    eta0: Array,
+    *,
+    tol: float,
+    max_iter: int,
+    n_newton: int,
+    unconstrained: bool = False,
+) -> EMResult:
+    r"""Anderson-accelerated Bock–Aitkin EM with a monotone restart safeguard (DESIGN.md §15.49).
+
+    Anderson acceleration (Anderson, 1965; type II in the notation of Fang & Saad, 2009; for EM,
+    Henderson & Varadhan, 2019) of the EM map :math:`F`, on the unconstrained coordinates
+    :math:`z=T(\eta)` of DESIGN.md §15.47 (logit/log for bounded parameters, identity
+    otherwise; for ``EmpiricalHistogram`` the weights enter as :math:`\sqrt w`, §15.36). With
+    residual :math:`g_k=T(F(\eta_k))-z_k` and the last :math:`m_k\le m` differences
+    :math:`\Delta Z=[z_{i+1}-z_i]`, :math:`\Delta G=[g_{i+1}-g_i]`,
+
+    .. math::
+        \gamma_k=\arg\min_\gamma\lVert g_k-\Delta G\,\gamma\rVert_2,\qquad
+        z_{k+1}=z_k+g_k-(\Delta Z+\Delta G)\,\gamma_k,\qquad \eta_{k+1}=T^{-1}(z_{k+1}).
+
+    Each iteration costs one EM map evaluation (one E-step and one M-step). Safeguards: a
+    candidate that is not finite or not strictly inside ``(lower, upper)`` is replaced by
+    :math:`F(\eta_k)` and the history is cleared; a candidate whose log posterior (from the
+    E-step of the next iteration) is below that of the last accepted iterate (less a relative
+    rounding slack ``_ANDERSON_LP_SLACK``) is rejected, the history is cleared, and the iteration
+    restarts from :math:`F(\eta_k)`, which is accepted without a check because EM is monotone.
+    Hence the log posterior of the accepted iterates never decreases beyond rounding.
+    Convergence: the largest absolute change of the accepted iterate and of the EM step from it,
+    :math:`\max(\lVert\eta_k-\eta_{k-1}\rVert_\infty,\lVert F(\eta_k)-\eta_k\rVert_\infty)<`
+    ``tol``, on ``_ANDERSON_STOP_RUN`` accepted Anderson iterates with no accepted iterate
+    above ``tol`` in between (plain EM steps after a restart neither count nor reset); the
+    estimate returned is :math:`F(\eta_k)`.
+    ``n_em_evaluations`` counts every E-step, rejected candidates included; ``n_safeguards``
+    counts accepted iterations preceded by a rejection or an infeasible candidate.
+    """
+    is_eh = prob.latent.is_eh
+    n_free = eta0.shape[0]
+    if n_free == 0 and not is_eh:
+        return em(
+            prob, eta0, tol=tol, max_iter=max_iter, n_newton=n_newton, unconstrained=unconstrained
+        )
+    lower, upper = _eta_bounds(prob, eta0)
+    kind = _transform_kind(jnp.ones_like(eta0, dtype=jnp.bool_), lower, upper)
+    n_groups = prob.n_groups
+    n_nodes = prob.nodes.shape[0]
+    w0 = prob.latent.eh_weights
+    n_z = n_free + (n_groups * n_nodes if is_eh else 0)
+    memory = ANDERSON_MEMORY
+    dtype = eta0.dtype
+
+    def pack(eta: Array, eh_w: Array) -> Array:
+        z = _to_unconstrained(eta, kind, lower, upper)
+        return jnp.concatenate([z, jnp.sqrt(eh_w).ravel()]) if is_eh else z
+
+    def unpack(z: Array) -> tuple[Array, Array]:
+        eta = _to_natural(z[:n_free], kind, lower, upper)
+        if not is_eh:
+            return eta, w0
+        return _eh_unpack(prob, jnp.concatenate([eta, z[n_free:]]), n_free, n_groups, n_nodes)
+
+    def feasible(eta: Array, eh_w: Array, z: Array) -> Array:
+        ok = jnp.all(jnp.isfinite(eta) & (eta > lower) & (eta < upper))
+        if is_eh:
+            z_w = z[n_free:]
+            ok = ok & jnp.all(jnp.isfinite(eh_w)) & jnp.any(z_w != 0.0)
+        return ok
+
+    def max_abs(a: Array, b: Array) -> Array:
+        return jnp.max(jnp.abs(a - b), initial=0.0)
+
+    nan_hist = jnp.full((max_iter,), jnp.nan, dtype=dtype)
+    zero = jnp.asarray(0, dtype=jnp.int32)
+    one = jnp.asarray(1, dtype=jnp.int32)
+    false = jnp.asarray(False)
+    inf = jnp.asarray(jnp.inf, dtype=dtype)
+
+    class _State(NamedTuple):
+        eta: Array
+        w: Array
+        is_aa: Array
+        eta_acc: Array
+        w_acc: Array
+        f_eta_acc: Array
+        f_w_acc: Array
+        lp_acc: Array
+        d_z: Array
+        d_g: Array
+        n_hist: Array
+        head: Array
+        prev_z: Array
+        prev_g: Array
+        has_prev: Array
+        n_ok: Array
+        pending: Array
+        it: Array
+        n_evals: Array
+        n_safe: Array
+        converged: Array
+        ll_hist: Array
+        lp_hist: Array
+        ch_hist: Array
+        ev_hist: Array
+        sf_hist: Array
+
+    def cond(st: _State) -> Array:
+        return (~st.converged) & (st.it < max_iter) & (st.n_evals < 2 * max_iter)
+
+    def body(st: _State) -> _State:
+        prob_t = _with_eh_weights(prob, st.w) if is_eh else prob
+        counts, ll = e_step(prob_t, st.eta)
+        lp = ll + log_prior(prob_t, st.eta)
+        if is_eh:
+            f_eta, f_w = _m_step_eh(prob_t, st.eta, counts, n_newton, unconstrained)
+        else:
+            f_eta, f_w = m_step(prob, st.eta, counts, n_newton, unconstrained), st.w
+        n_evals = st.n_evals + one
+        slack = _ANDERSON_LP_SLACK * jnp.abs(st.lp_acc)
+        accept = (~st.is_aa) | (jnp.isfinite(lp) & (lp >= st.lp_acc - slack))
+
+        def rejected(_unused: None) -> _State:
+            # Restart from F(eta_acc), already computed; it is an EM image, accepted unchecked.
+            return st._replace(
+                eta=st.f_eta_acc,
+                w=st.f_w_acc,
+                is_aa=false,
+                n_hist=zero,
+                head=zero,
+                has_prev=false,
+                pending=jnp.asarray(True),
+                n_evals=n_evals,
+            )
+
+        def accepted(_unused: None) -> _State:
+            step = jnp.where(
+                st.it > 0,
+                jnp.maximum(max_abs(st.eta, st.eta_acc), max_abs(st.w, st.w_acc)),
+                inf,
+            )
+            stat = jnp.maximum(jnp.maximum(max_abs(f_eta, st.eta), max_abs(f_w, st.w)), step)
+            # Only Anderson iterates count towards the stopping run, and only a large change resets
+            # it: plain EM steps right after a restart are often tiny far from the optimum.
+            n_ok = jnp.where(stat < tol, st.n_ok + st.is_aa.astype(jnp.int32), zero)
+            z = pack(st.eta, st.w)
+            g = pack(f_eta, f_w) - z
+            push = st.has_prev
+            d_z = jnp.where(push, st.d_z.at[st.head].set(z - st.prev_z), st.d_z)
+            d_g = jnp.where(push, st.d_g.at[st.head].set(g - st.prev_g), st.d_g)
+            head = jnp.where(push, (st.head + one) % memory, st.head)
+            n_hist = jnp.where(push, jnp.minimum(st.n_hist + one, memory), st.n_hist)
+            valid = (jnp.arange(memory) < n_hist).astype(dtype)[:, None]
+            mat_g = (d_g * valid).T
+            mat_z = (d_z * valid).T
+            gamma = jnp.linalg.lstsq(mat_g, g)[0]
+            z_new = z + g - (mat_z + mat_g) @ gamma
+            cand_eta, cand_w = unpack(z_new)
+            use_aa = n_hist > 0
+            ok = feasible(cand_eta, cand_w, z_new)
+            next_aa = use_aa & ok
+            reset = use_aa & ~ok
+            it = st.it
+            return _State(
+                eta=jnp.where(next_aa, cand_eta, f_eta),
+                w=jnp.where(next_aa, cand_w, f_w),
+                is_aa=next_aa,
+                eta_acc=st.eta,
+                w_acc=st.w,
+                f_eta_acc=f_eta,
+                f_w_acc=f_w,
+                lp_acc=lp,
+                d_z=d_z,
+                d_g=d_g,
+                n_hist=jnp.where(reset, zero, n_hist),
+                head=jnp.where(reset, zero, head),
+                prev_z=z,
+                prev_g=g,
+                has_prev=~reset,
+                n_ok=n_ok,
+                pending=reset,
+                it=it + one,
+                n_evals=n_evals,
+                n_safe=st.n_safe + st.pending.astype(jnp.int32),
+                converged=n_ok >= _ANDERSON_STOP_RUN,
+                ll_hist=st.ll_hist.at[it].set(ll),
+                lp_hist=st.lp_hist.at[it].set(lp),
+                ch_hist=st.ch_hist.at[it].set(stat),
+                ev_hist=st.ev_hist.at[it].set(n_evals),
+                sf_hist=st.sf_hist.at[it].set(st.pending),
+            )
+
+        out: _State = jax.lax.cond(accept, accepted, rejected, None)
+        return out
+
+    init = _State(
+        eta=eta0,
+        w=w0,
+        is_aa=false,
+        eta_acc=eta0,
+        w_acc=w0,
+        f_eta_acc=eta0,
+        f_w_acc=w0,
+        lp_acc=-inf,
+        d_z=jnp.zeros((memory, n_z), dtype=dtype),
+        d_g=jnp.zeros((memory, n_z), dtype=dtype),
+        n_hist=zero,
+        head=zero,
+        prev_z=jnp.zeros((n_z,), dtype=dtype),
+        prev_g=jnp.zeros((n_z,), dtype=dtype),
+        has_prev=false,
+        n_ok=zero,
+        pending=false,
+        it=zero,
+        n_evals=zero,
+        n_safe=zero,
+        converged=false,
+        ll_hist=nan_hist,
+        lp_hist=nan_hist,
+        ch_hist=nan_hist,
+        ev_hist=jnp.zeros((max_iter,), dtype=jnp.int32),
+        sf_hist=jnp.zeros((max_iter,), dtype=jnp.bool_),
+    )
+    fin = jax.lax.while_loop(cond, body, init)
+    eta, eh_w = fin.f_eta_acc, fin.f_w_acc
+    prob_fin = _with_eh_weights(prob, eh_w) if is_eh else prob
+    final_ll = marginal_loglik(prob_fin, eta)
+    return EMResult(
+        eta=eta,
+        eh_weights=eh_w,
+        n_iter=fin.it,
+        converged=fin.converged,
+        loglik=final_ll,
+        log_posterior=final_ll + log_prior(prob_fin, eta),
+        loglik_history=fin.ll_hist,
+        log_posterior_history=fin.lp_hist,
+        change_history=fin.ch_hist,
+        n_em_evaluations=fin.n_evals,
+        em_eval_history=fin.ev_hist,
+        safeguard_history=fin.sf_hist,
+        n_safeguards=fin.n_safe,
     )
 
 

@@ -263,11 +263,16 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
 - **SQUAREM** (Varadhan & Roland, 2008, scheme S3) via `BAEM(squarem=True)` (default `False` in M3
   until wall-time benchmarks against mirt are run; §15.13). If an extrapolated candidate leaves the
   parameter bounds (intersected with any active prior support) or yields a non-finite or lower log
-  posterior than $\theta_2$, $\alpha$ is stepped back towards $-1$ up to a fixed number of halvings;
+  posterior than $\theta_1$, $\alpha$ is stepped back towards $-1$ up to a fixed number of halvings;
   if still unacceptable, $\theta_2$ is used directly, guaranteeing monotone log posterior
-  (§15.11–§15.12, §15.17).
+  (§15.11–§15.12, §15.17). The candidate's log posterior comes from its own E-step, which the
+  stabilizing EM step reuses (#155, §15.49).
   SQUAREM always works on the natural scale, whatever `m_step_scale` is (§15.47).
-- Both plain EM and SQUAREM run entirely on device in `lax.while_loop` (no Python iteration loop or
+- **Anderson acceleration** via `BAEM(anderson=True)` (#155, §15.49; default `False`, exclusive
+  with `squarem`): memory 5 on the unconstrained scale of §15.47, one EM map evaluation per
+  iteration, a restart from the plain EM step when a candidate leaves the bounds or lowers the log
+  posterior, and a stopping rule that needs two accelerated iterates below `tol`.
+- Plain EM, SQUAREM and Anderson acceleration run entirely on device in `lax.while_loop` (no Python iteration loop or
   host callbacks). Optional progress output with `jax.debug.callback` is left for later.
 
 ### 4.7 MAP (Bayes modal)
@@ -807,14 +812,24 @@ data-independent shapes (§15.21).
     checked against strict per-coordinate bounds `(lower, upper)` extracted once before the loop
     from `FamilyBlock.slot_lower/upper` and `LatentBlock.lower/upper` (`_core._eta_bounds`), so
     feasibility uses the exact same bounds as the M-step (including latent variance $>0$,
-    $0<g,u<1$, and any user-edited table bounds). If strictly inside bounds, `marginal_loglik` is
-    evaluated via `lax.cond` (skipped when out of bounds) and accepted iff finite and
-    $\ge\max(\ell(\theta_2),\ell(\theta_0))$ — this also rejects GRM disordered thresholds and
-    4PL $g\ge u$ because their kernels return NaN. On rejection, an inner `lax.while_loop` halves
-    $\delta$ up to 10 times. An accepted $\theta'$ takes one stabilizing EM step
-    $\theta_{\text{new}}=F(\theta')$ (3 EM map evaluations for the iteration); if all halvings
-    fail, $\theta_{\text{new}}=\theta_2$ is used directly (2 EM map evaluations). Because $F$ is
-    monotone, every accepted iterate satisfies $\ell(\theta_{\text{new}})\ge\ell(\theta_0)$.
+    $0<g,u<1$, and any user-edited table bounds). If strictly inside bounds, a full E-step at
+    $\theta'$ is run via `lax.cond` (skipped when out of bounds) and the candidate is accepted iff
+    its log posterior is finite and $\ge\ell(\theta_1)$ — this also rejects GRM disordered
+    thresholds and 4PL $g\ge u$ because their kernels return NaN. On rejection, an inner
+    `lax.while_loop` halves $\delta$ up to 10 times. An accepted $\theta'$ takes one stabilizing
+    EM step $\theta_{\text{new}}=F(\theta')$ whose M-step uses the expected counts of that
+    accepting E-step (3 EM map evaluations for the iteration); $\delta=0$ (i.e. $\alpha=-1$, the
+    EM image $\theta_2$) is accepted without the comparison. If all halvings fail,
+    $\theta_{\text{new}}=\theta_2$ is used directly (2 EM map evaluations). Because $F$ is
+    monotone, $\ell(\theta_1)\ge\ell(\theta_0)$ and every accepted iterate satisfies
+    $\ell(\theta_{\text{new}})\ge\ell(\theta_0)$.
+    **Change (#155)**: the reference was $\max(\ell(\theta_2),\ell(\theta_0))$, evaluated with
+    `marginal_loglik` at $\theta_2$ and again at the candidate, before a separate E-step at
+    $\theta'$ for the stabilizing step: two marginal log-likelihood evaluations per iteration that
+    the new rule does not need. The reference $\ell(\theta_1)$ is free (the E-step at
+    $\theta_1$ computes it) and still at least $\ell(\theta_0)$, so monotonicity is unchanged. On
+    the single-group benchmark cases and $G=10$ the accepted steps were the same as before (one
+    fewer safeguard on `3pl_n5000_j30`); on $G=50$ and $G=200$ the paths differ (§15.49).
 13. **SQUAREM API default, history, and warnings**: `BAEM(squarem: bool = False)` keeps plain EM
     as the default in M3 because wall-time benchmarks against mirt (including JIT overhead and
     small- vs. large-problem trade-offs) are scheduled later in M3. The stopping rule stays
@@ -1427,6 +1442,108 @@ data-independent shapes (§15.21).
     - The hyperparameters are validated like `LogNormalPrior` (`mean_logit` finite, `sd_logit`
       positive and finite). JSON registers it as `"LogitNormalPrior"` with keys `mean_logit` and
       `sd_logit` (schema version 8).
+
+49. **EM acceleration study and Anderson-accelerated EM (`BAEM(anderson=True)`, #155)**:
+    #155 proposed three ways to cut EM map evaluations on slowly converging models. Each was
+    prototyped and counted on the benchmark cases (61 points on $[-6,6]$, `tol = 1e-4`; the
+    many-group cases of §26). Accuracy is measured against a SQUAREM fit at `tol = 1e-8`
+    ("ref"); "E-equivalents" counts E-steps plus marginal log-likelihood evaluations, which cost
+    about the same.
+    - **Adopted: SQUAREM reuses the candidate's E-step (§15.12).** The old safeguard spent two
+      marginal log-likelihood evaluations per iteration (at $\theta_2$ and at the candidate) and
+      then an E-step at the accepted candidate. Checking the candidate against $\ell(\theta_1)$
+      with a full E-step whose counts feed the stabilizing M-step removes both. E-equivalents per
+      fit: 2PL 5000×40 30 → 18, 3PL 41 → 24, 2-group 56 → 34, $G=10$ 98 → 62, $G=50$ 284 → 180,
+      in the prototype. In the jitted fits the accepted steps are those of the old rule on the
+      single-group cases and $G=10$ (one fewer safeguard on 3PL); on $G=50$ and $G=200$ the
+      weaker reference accepts a few different candidates and the paths diverge (50 → 54 and
+      137 → 126 iterations, table below), ending at the same `tol`.
+    - **Adopted (opt-in): Anderson acceleration.** Anderson (1965) mixing, type II (Fang & Saad,
+      2009), of the EM map with memory $m=5$, as used for EM by Henderson & Varadhan (2019).
+      `_core.anderson`, inside one `lax.while_loop`; the formula is in its docstring.
+      - *Scale.* Residuals and differences are taken on $z=T(\eta)$ of §15.47 (logit/log for
+        bounded coordinates), so a candidate is inside the box unless $T^{-1}$ saturates; EH
+        weights enter as $\sqrt w$ and go back through the EH projection (§15.36). On the natural
+        scale the prototype (memory 3) needed 97 instead of 39 evaluations on $G=50$, where the
+        latent variances move multiplicatively.
+      - *Safeguards.* One E-step per iteration evaluates the candidate's log posterior. A
+        candidate below the last accepted log posterior (less a $10^{-13}$ relative rounding
+        slack, without which rounding-level rejections near convergence prevented stopping) is
+        rejected: the history is cleared and the next iterate is $F(\eta_{\text{acc}})$, already
+        computed and accepted without a check because EM is monotone. A non-finite or
+        out-of-box candidate is replaced by $F(\eta_k)$ before any E-step. `n_iter` counts
+        accepted iterates, `n_em_evaluations` every E-step, and `n_safeguards` the accepted
+        iterates that follow a rejection or an infeasible candidate. `history["loglik"]` is
+        monotone.
+      - *Stopping.* The plain-EM rule $\lVert F(\eta)-\eta\rVert_\infty<$ `tol` applied after a
+        restart stopped $G=50$ at $|\Delta\ell|=1.1\times10^{-2}$ from ref (as plain EM does, at
+        a point where EM moves slowly). The rule kept is: the larger of the accepted change
+        $\lVert\eta_k-\eta_{k-1}\rVert_\infty$ and the EM step $\lVert F(\eta_k)-\eta_k\rVert_\infty$
+        is below `tol` on two Anderson iterates with no accepted iterate above `tol` in between
+        (plain steps after a restart neither count nor reset); the estimate returned is
+        $F(\eta_k)$. With one Anderson iterate instead of two (prototype, memory 3), $G=10$ stopped at
+        $|\Delta\ell|=2.4\times10^{-4}$.
+      - *Memory.* $m=3$ needed fewer evaluations on $G=50$ but ended further from ref
+        ($9\times10^{-4}$ vs $1.2\times10^{-4}$ in the estimates); $m=5$ was better or equal on
+        the other cases. $m$ is a constant (`ANDERSON_MEMORY`), not an option.
+      - *API.* `BAEM.anderson: bool = False`; `squarem=True` together with it is a
+        `SpecificationError`. JSON schema version 10 adds the method key `anderson` (older files
+        read as `false`). Tests: `tests/test_anderson.py` (monotone on random 2PL / Rasch / GRM /
+        3PL / GPCM problems, the plain-EM fixed point at `tol = 1e-9` with less than half the
+        evaluations on four slow V cases, and V11 3PL/4PL and V6 EH against mirt at those
+        modules' tolerances).
+      - *Default.* Plain EM stays the default (§15.13). Anderson changes every default fit at the
+        `tol` level and only the V cases above are run with it against mirt. Against ref (SQUAREM
+        at `tol = 1e-8`) its estimates were closer than SQUAREM's on six of seven cases
+        ($G=50$: $6\times10^{-5}$ vs $7\times10^{-3}$; $G=10$: $6\times10^{-6}$ vs
+        $5\times10^{-4}$), but on 2PL 20000×40 it stopped $4\times10^{-4}$ away
+        ($|\Delta\ell|=5.6\times10^{-4}$), as far as plain EM ($2.9\times10^{-4}$), while SQUAREM
+        was at $9\times10^{-6}$: the stopping rule bounds the change, not the distance to the
+        maximum. Switching the default is left to a later decision with the full V suite
+        run under `anderson=True`.
+    - **Rejected: SQUAREM extrapolated on the unconstrained scale (#155 (a)).** The premise was
+      that the safeguard fires because candidates leave the box (e.g. $\sigma_g^2\le0$). Counting
+      the rejected trials showed none out of the box: all rejections ($G=10$: 8, $G=50$: 24,
+      $G=200$: 46) were lower log posteriors, which the scale of the extrapolation does not
+      remove. Extrapolating $T(\eta)$ instead of $\eta$ gave
+      iterations 6/8/5/14/18/64/153 against 6/8/5/11/18/52/107 (2PL, 3PL, GRM, 2-group,
+      $G=10,50,200$): no gain, and worse on many groups, where the latent variances move on a
+      log scale whose curvature the scalar step length does not fit.
+    - **Rejected: adaptive M-step Newton schedule (#155 (c)).** One Newton step per M-step instead
+      of three gave the same EM iteration counts (GRM 24/24, 3PL 47/51, 2PL 20000×40 28/28), so a
+      schedule that uses one step early and three late cannot do better than
+      `m_step_newton_steps=1`, which users can already set. The M-step is 7–15% of an EM
+      iteration on these cases (about 45% on GRM) since #150, which bounds the gain; the default
+      stays 3 (the mirt agreement tests use it).
+    - **Rejected: coarse-to-fine quadrature warm start (#155 (c)).** A 2-D (31², 30 items,
+      $N=4000$) and a 3-D (15³) 2PL were first fitted on 15² / 9³ points to `tol = 1e-2` and the
+      estimates used as the start on the full grid. 2-D: plain EM 1.28 s → 1.03 s, SQUAREM
+      1.36 s → 1.21 s; 3-D: plain 5.13 s → 5.75 s, SQUAREM 5.52 s → 6.43 s. The fine fit still
+      needs most of its iterations (the coarse start only removes the first few, which are the
+      fast ones), so it is not implemented.
+    - **Measurements** (`benchmarks/run_flexpyirt.py`, base = the #153 tip, back to back on two
+      cores of a shared 16-core Xeon at load average about 30, warm median of 3 (many groups:
+      1), `se=None`; the Oakes runs show the same pattern). EM evaluations are deterministic.
+      Wall times are noisy on this machine: plain EM, whose code did not change, ran up to 2×
+      faster in the later "new" run of the single-group suite (2-group 1.06 → 0.56 s), so the
+      SQUAREM base → new ratio there mixes load and code; the many-group runs were steadier
+      (plain EM $G=50$ 6.44 / 6.35 s).
+
+    | Case | plain EM evals | SQUAREM base evals (iter, sg) | SQUAREM new | Anderson evals (iter, sg) | warm s: SQUAREM base / new / Anderson | cold s: SQUAREM base / new / Anderson |
+    |---|---:|---|---|---|---|---|
+    | 2PL 1000×20 | 18 | 12 (4, 0) | 12 (4, 0) | 9 (9, 0) | 0.105 / 0.113 / 0.119 | 8.9 / 11.2 / 7.0 |
+    | 2PL 5000×40 | 32 | 18 (6, 0) | 18 (6, 0) | 11 (11, 0) | 0.403 / 0.348 / 0.250 | 8.9 / 8.0 / 5.5 |
+    | 2PL 20000×40 | 28 | 15 (5, 0) | 15 (5, 0) | 8 (8, 0) | 1.177 / 0.979 / 0.678 | 9.1 / 8.0 / 5.1 |
+    | GRM 2000×20 | 24 | 15 (5, 0) | 15 (5, 0) | 11 (11, 0) | 0.252 / 0.120 / 0.108 | 9.9 / 5.7 / 4.2 |
+    | 3PL 5000×30 | 51 | 24 (8, 1) | 24 (8, 0) | 16 (16, 0) | 0.470 / 0.286 / 0.219 | 12.8 / 7.7 / 4.9 |
+    | 2-group 2PL | 105 | 33 (11, 1) | 33 (11, 1) | 18 (18, 0) | 0.573 / 0.257 / 0.180 | 14.2 / 7.7 / 5.8 |
+    | $G=10$ | 200 | 54 (18, 8) | 54 (18, 8) | 22 (22, 0) | 0.240 / 0.221 / 0.212 | 5.4 / 6.8 / 5.1 |
+    | $G=50$ | 777 | 150 (50, 18) | 162 (54, 21) | 53 (45, 8) | 2.323 / 1.744 / 0.632 | 7.8 / 7.0 / 4.7 |
+    | $G=200$ | — | 411 (137, 46) | 378 (126, 43) | 94 (75, 19) | 26.703 / 20.525 / 5.542 | 31.8 / 25.5 / 9.3 |
+
+    Anderson is the fastest warm on every case except 2PL 1000×20 (all ≈ 0.1 s), 3.7× faster
+    than the new SQUAREM on $G=200$ and 2.8× on $G=50$, and its cold time is the lowest
+    because the loop body traces one E-step and one M-step (SQUAREM traces several).
 
 ## 16. Implementation decisions (M5)
 1. **Equality constraints across items (`Model.equal_across_items`, shared `free_id`s)**:

@@ -203,6 +203,16 @@ res = fit(
   variance, multiple groups, 3PL/4PL, or tight `tol`). It converges to the same fixed point with
   monotone `history["loglik"]` and far fewer EM evaluations. Plain EM (`squarem=False`) is the
   default.
+- **`anderson=True`**: enables Anderson acceleration of EM (Anderson, 1965; Henderson & Varadhan,
+  2019), an alternative to `squarem=True` (set at most one). It combines the last five EM steps
+  into the next iterate, on the $\operatorname{logit}$ / $\log$ scales of the bounded parameters,
+  and costs one EM evaluation per iteration. A proposed iterate that leaves the bounds or lowers
+  the log-likelihood (log posterior with priors) is discarded and EM restarts from the last plain
+  EM step, so `history["loglik"]` never decreases (`n_safeguards` counts the restarts). It stops
+  when the change of the iterate and of the EM step from it are both below `tol` on two
+  accelerated iterations. On slowly converging models (many groups, 3PL, tight `tol`) it needs
+  fewer EM evaluations than SQUAREM. Like every `tol`-based rule, it bounds the change per
+  iteration, not the distance to the maximum; lower `tol` if you need the estimates closer.
 - **`m_step_scale="unconstrained"`** (default `"natural"`): runs the M-step's Newton steps on
   $\operatorname{logit}$ / $\log$ scales of the parameters that have a bound — $g$ and $u$ on
   $\operatorname{logit}$, latent variances on $\log$, factor correlations on

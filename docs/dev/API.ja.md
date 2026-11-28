@@ -140,6 +140,8 @@ res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
 - 項目モデル: `ThreePL`, `FourPL`, `GPCM(n_categories=K)`, `PCM(n_categories=K)`（境界解で `HeywoodWarning`）。
 - SQUAREM 加速: `BAEM(squarem=True)`（スキーム S3 と単調性・実行可能性の安全装置。
   `FitResult.n_em_evaluations`, `FitResult.n_safeguards`）。
+- Anderson 加速: `BAEM(anderson=True)`（#155。非拘束尺度で履歴 5、1 反復あたり EM 評価 1 回、やり直しの安全装置。
+  `squarem` とは排他。DESIGN.md §15.49）。
 - 事前分布と MAP 推定: `log_pdf` を持つ `NormalPrior(mean, sd)`, `LogNormalPrior(mean_log, sd_log)`,
   `BetaPrior(a, b)` を `Model.prior(*, param, dist, items=None)` または ParameterTable の `prior` 列で指定。
   `FitResult.log_posterior`（事前分布なしでは `loglik` と同値）、`history["log_posterior"]`、

@@ -149,6 +149,8 @@ res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
   solutions).
 - SQUAREM acceleration: `BAEM(squarem=True)` (scheme S3 with monotonicity/feasibility safeguard;
   `FitResult.n_em_evaluations`, `FitResult.n_safeguards`).
+- Anderson acceleration: `BAEM(anderson=True)` (#155; memory 5 on the unconstrained scale, one EM
+  evaluation per iteration, restart safeguard; exclusive with `squarem`; DESIGN.md §15.49).
 - Priors and MAP estimation: `NormalPrior(mean, sd)`, `LogNormalPrior(mean_log, sd_log)`, `BetaPrior(a, b)`
   with `log_pdf`, attached via `Model.prior(*, param, dist, items=None)` or the `prior` column of
   `ParameterTable`. `FitResult.log_posterior` (equal to `loglik` without priors),

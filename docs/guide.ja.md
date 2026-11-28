@@ -195,6 +195,14 @@ res = fit(
   単調性・実行可能性の安全装置が $\theta_2$ に戻した場合は 2 回）。収束の遅いモデル（分散を推定する Rasch / PCM、
   多母集団、3PL / 4PL、厳しい `tol`）で有効にする。同じ不動点に収束し、`history["loglik"]` は単調で、
   EM の評価回数が大きく減る。既定は通常の EM（`squarem=False`）。
+- **`anderson=True`**: EM の Anderson 加速（Anderson, 1965; Henderson & Varadhan, 2019）を有効にする。
+  `squarem=True` の代わりに使う（同時には指定できない）。直近 5 回の EM ステップを組み合わせて次の反復点を作り
+  （範囲のあるパラメタは $\operatorname{logit}$ / $\log$ 尺度で）、1 反復あたり EM 評価は 1 回。範囲を出るか
+  対数尤度（事前分布があれば対数事後確率）を下げる提案は捨て、直前の通常の EM ステップからやり直すので、
+  `history["loglik"]` は減らない（やり直しの回数は `n_safeguards`）。加速した反復 2 回で、反復点の変化と
+  そこからの EM ステップの両方が `tol` 未満になったら止まる。収束の遅いモデル（多母集団、3PL、厳しい `tol`）では
+  SQUAREM より EM の評価回数が少ない。`tol` による停止規則はどれもそうだが、抑えるのは 1 反復の変化量で、
+  最大値までの距離ではない。推定値をより近づけたいときは `tol` を小さくする。
 - **`m_step_scale="unconstrained"`**（既定は `"natural"`）: 範囲のあるパラメタについて、M-step の Newton 法を
   $\operatorname{logit}$ / $\log$ 尺度で進める。$g$・$u$ は $\operatorname{logit}$、潜在分散は $\log$、因子間相関は
   $2\operatorname{atanh}\rho$ で、傾きは `LogNormalPrior` や編集した範囲で $(0, \infty)$ に制限されているときだけ

@@ -50,6 +50,7 @@ SQUAREM_FALLBACK_WARN_RATE = 0.5
 
 _em = jax.jit(_core.em, static_argnames=("max_iter", "n_newton", "unconstrained"))
 _squarem = jax.jit(_core.squarem, static_argnames=("max_iter", "n_newton", "unconstrained"))
+_anderson = jax.jit(_core.anderson, static_argnames=("max_iter", "n_newton", "unconstrained"))
 _information = {
     "oakes": jax.jit(_core.information_oakes),
     "hessian": jax.jit(_core.information_hessian),
@@ -196,7 +197,7 @@ def fit(
     )
     problem = compiled.problem
 
-    runner = _squarem if method.squarem else _em
+    runner = _squarem if method.squarem else (_anderson if method.anderson else _em)
     out = runner(
         problem,
         jnp.asarray(compiled.eta0),
@@ -216,7 +217,11 @@ def fit(
             f"; SQUAREM safeguard fired {n_safeguards}/{n_iter} times "
             f"({n_fallbacks} fallbacks to EM)"
             if method.squarem and n_safeguards > 0
-            else ""
+            else (
+                f"; Anderson safeguard restarted {n_safeguards}/{n_iter} times"
+                if method.anderson and n_safeguards > 0
+                else ""
+            )
         )
         warnings.warn(
             f"EM did not converge in {method.max_iter} iterations (tol={method.tol}{extra}).",
