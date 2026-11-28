@@ -147,7 +147,7 @@ def test_cast_floats_keeps_integer_leaves() -> None:
         else:
             assert jnp.asarray(after).dtype == before_dtype
             np.testing.assert_array_equal(np.asarray(after), np.asarray(before))
-    assert jax.tree_util.tree_structure(cast) == jax.tree_util.tree_structure(problem)
+    assert str(jax.tree_util.tree_structure(cast)) == str(jax.tree_util.tree_structure(problem))
 
 
 # ---- agreement with pure float64 --------------------------------------------------------------
