@@ -721,6 +721,52 @@ data-independent shapes (§15.21).
       fits including EM ≈ 0.41 s): `fit(..., se="oakes")` 3.39 s → **0.50 s** (the Oakes part
       ≈ 2.98 s → ≈ 0.09 s); `se="hessian"` 1.16 s → 1.07 s; covariance matrices agree with the
       previous implementation to $8.5\times10^{-16}$ (relative to the largest entry).
+    - **Smaller cross term and a one-pass sandwich (#151)**: three changes to the cross term, all
+      exact rewrites of the same sums.
+      (1) *Category-0 column dropped for complete families.* When no pattern has a missing
+      response on any item of a family, $\mathbb 1[y_{pj}=0]=1-\sum_{k>0}\mathbb 1[y_{pj}=k]$, so
+      $d_{j,y_{pj},q}=d_{j0q}+\sum_{k>0}\mathbb 1[y_{pj}=k](d_{jkq}-d_{j0q})$: $d_{j0q}$ moves to
+      the constant row 0 of $L_q$ and the remaining columns become $d_{jkq}-d_{j0q}$. For a 2PL
+      this halves $D$ (from $1+2J$ to $1+J$). `FamilyBlock.complete` is a static flag set once
+      in `compile_problem` from the real pattern rows (padding rows are category 0 with count 0
+      and are excluded). Every code path that replaces `y` (`_jsi.without_item`, the weighted or
+      clustered sandwich meat in `fit`) goes through `_core.with_responses`, which resets the
+      flag to `False`; the column-dropping form is then simply not used. Since the flag is
+      static, a complete and an incomplete problem compile separately; this costs one compile per
+      family layout, not per item, and the jackknife reuses one compile for every removed item.
+      (2) *Upper triangle of $C_q$.* $C_q$ is symmetric, so each chunk forms only its upper
+      triangle, as one GEMM `w.T @ (x[:, iu] * x[:, ju])` of shape `(Q, D(D+1)/2)`; `_oakes_t1`
+      rebuilds the full matrix once per group before $\sum_q L_q^\top C_q L_q$. The chunk size
+      budgets `D(D+1)/2 + Q` elements per row.
+      (3) *Fused sandwich.* `information_oakes_and_cross_product` returns Oakes' information and
+      the score cross product $\sum_p c_p s_ps_p^\top$ from the same pattern pass. The raw score
+      $s_p$ is the centered $\bar s_p$ plus the $q$-independent centering gathered at the
+      pattern's categories (exact, since $\sum_q h_{pq}=1$); the prior's diagonal is subtracted as
+      in §17.5. `fit()` uses it for `se="sandwich"` without weights or clusters (with them the
+      separate calls remain); models with a dimension reduction (bifactor, two-tier, §17.1–§17.2)
+      and $n_{\text{free}}=0$ fall back to the separate calls inside the function.
+      Measurements (idle 16-core Linux machine, warm minimum of 7 jitted calls, s; "tri" and
+      "drop" are each change alone; base = #150):
+
+      | case | base Oakes | tri | drop | kept (both) | base Oakes + cross product | fused |
+      |---|---|---|---|---|---|---|
+      | 2PL 20000×40 | 0.177 | 0.123 | 0.110 | **0.077** | 0.514 | **0.090** |
+      | 2PL 5000×40 | 0.049 | 0.042 | 0.026 | **0.021** | 0.146 | **0.023** |
+      | 3PL 5000×30 | 0.046 | 0.028 | 0.023 | **0.021** | 0.134 | **0.024** |
+      | GRM(4) 2000×20 | 0.022 | 0.024 | 0.023 | **0.014** | 0.075 | **0.014** |
+      | two groups 6000×30 | 0.059 | 0.034 | 0.034 | **0.026** | 0.158 | **0.028** |
+      | 200 groups (blocked)† | 5.22 | – | 3.76 / 3.96 | 3.84 / 3.82 | 23.1 | 3.44 / 3.94 |
+
+      † Pinned to 8 cores while other jobs ran on the remaining cores; two runs of each variant.
+
+      Both changes together beat either one alone on every single- and two-group case; with 200
+      groups the drop dominates and the triangle adds nothing measurable, but costs nothing either (an earlier
+      measurement on a loaded machine showed tri alone ahead for GRM; it did not reproduce).
+      Cold times do not change measurably. Oakes' information and the cross product agree with the
+      base to $\max|\Delta|/\max|I|\le 8\times10^{-16}$ on these cases (200 groups: $3\times10^{-16}$ for Oakes,
+      $5\times10^{-15}$ for the cross product). `tests/test_oakes.py`
+      compares the complete and missing forms, many chunks, four blocked groups, the jackknife
+      reset, and the fused form against the separate calls.
 21. **Scoring API and shared Core structure (M4, §8)**: `FitResult.score(data, *, method="EAP", group=None, item_names=None, key=None, n_draws=5)` supports `Literal["EAP", "MAP", "ML", "WLE", "PV"]`.
     EAP (`_core.eap`) is unchanged. The new scoring kernels live in `_scoring.py` (pure JAX Core
     layer), compress unique `(group, pattern)` pairs and pad to power-of-two buckets as for EAP,
@@ -3547,7 +3593,7 @@ data-independent shapes (§15.21).
    The sums run in a different order than the flat path, so results agree to rounding
    ($\sim10^{-12}$ relative), not bit for bit (regression test in `tests/test_many_groups.py`).
 4. **Oakes' cross term** (§15.20) becomes one `lax.scan` over the blocks: each block adds its
-   category co-occurrences to the running group's $C_{q}$ `(Q, D, D)` and its
+   category co-occurrences to the running group's $C_{q}$ (upper triangle, `(Q, D(D+1)/2)`; §15.20) and its
    $\bar s_p\bar s_p^\top$ term to $T_2$; on the last block of a group (`last`) a `lax.cond`
    adds $\sum_q L_{gq}^\top C_q L_{gq}$ to $T_1$ and resets $C$. The group's score tables are
    gathered with the dynamic block group once per block (sub-chunks of a block reuse them, and

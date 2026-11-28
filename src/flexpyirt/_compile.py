@@ -1757,6 +1757,8 @@ def compile_problem(
                 slot_lower=jnp.asarray(slot_lo, dtype=jnp.float64),
                 slot_upper=jnp.asarray(slot_hi, dtype=jnp.float64),
                 kernel=k,
+                # Real pattern rows only: padding rows are category 0 with count 0 (§15.20).
+                complete=bool(np.all(patterns[:n_patterns][:, cols] >= 0)),
             )
         )
 
