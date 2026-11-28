@@ -2392,7 +2392,8 @@ multiple-group result every DataFrame has a leading `group` column (the two tabl
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural")
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural",
+     anderson=False)
 ```
 
 | Argument | Description |
@@ -2402,6 +2403,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale
 | `m_step_newton_steps` | Newton steps per M-step; no step decreases the expected log-likelihood |
 | `squarem` | Enable SQUAREM scheme S3 acceleration (Varadhan & Roland, 2008) with a monotonicity/feasibility safeguard (default `False`) |
 | `m_step_scale` | `"natural"` (default): M-step Newton on the natural scale with bounds, reaching boundary solutions exactly. `"unconstrained"`: Newton on $\operatorname{logit}$ / $\log$ scales of the parameters with a bound ($g$, $u$, latent variances, factor correlations, slopes bounded by a prior or an edited bound); unbounded parameters are not transformed. Same objective and interior solution; estimates, table, priors and SEs stay on the natural scale; a boundary solution is only approached ([guide section 4](guide.md#4-fitting)) |
+| `anderson` | Enable Anderson acceleration of EM (Anderson, 1965; Henderson & Varadhan, 2019): the last five EM steps on the $\operatorname{logit}$ / $\log$ scales of the bounded parameters, one EM evaluation per iteration, restarting from the EM step whenever a proposal leaves the bounds or lowers the log posterior. Cannot be combined with `squarem` (default `False`; [guide section 4](guide.md#4-fitting)) |
 
 ### `Quadrature`
 
