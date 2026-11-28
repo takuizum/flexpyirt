@@ -37,7 +37,7 @@ from flexpyirt.latent import (
     mixture_param_names,
 )
 from flexpyirt.model import Model
-from flexpyirt.quadrature import Quadrature
+from flexpyirt.quadrature import MAX_FACTORS, Quadrature
 from flexpyirt.result import FitResult, _is_prng_key
 
 __all__ = ["SimulatedData", "simulate_responses"]
@@ -135,7 +135,11 @@ def _source_from_model(spec: Model, parameters: pd.DataFrame) -> _Source:
         model=model,
         table=table,
         eta=eta,
-        quadrature=Quadrature.default(model.quadrature_dimension),
+        quadrature=(
+            Quadrature.default(model.quadrature_dimension)
+            if model.quadrature_dimension <= MAX_FACTORS
+            else Quadrature.qmc()
+        ),
         eh_weights=None,
     )
 

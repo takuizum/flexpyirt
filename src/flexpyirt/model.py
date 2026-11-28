@@ -29,7 +29,7 @@ from flexpyirt.latent import (
     latent_param_names,
 )
 from flexpyirt.priors import PRIOR_TYPES, Prior
-from flexpyirt.quadrature import MAX_FACTORS, MAX_KERNEL_FACTORS
+from flexpyirt.quadrature import MAX_FACTORS, MAX_KERNEL_FACTORS, MAX_QMC_FACTORS
 
 __all__ = ["LATENT_ITEM", "SINGLE_GROUP", "Model"]
 
@@ -479,9 +479,10 @@ class Model:
         if not isinstance(factors, Mapping):
             raise SpecificationError("with_factors() requires a mapping of factor name -> items.")
         n_factors = len(factors)
-        if not (2 <= n_factors <= MAX_FACTORS):
+        if not (2 <= n_factors <= MAX_QMC_FACTORS):
             raise SpecificationError(
-                f"with_factors() supports 2 to {MAX_FACTORS} factors, got {n_factors}."
+                f"with_factors() supports 2 to {MAX_QMC_FACTORS} factors, got {n_factors} "
+                f"(product grids up to {MAX_FACTORS}; more need Quadrature.qmc())."
             )
         resolved: list[tuple[str, tuple[str, ...]]] = []
         seen_factors: set[str] = set()
