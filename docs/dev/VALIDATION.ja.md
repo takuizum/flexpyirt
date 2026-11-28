@@ -110,6 +110,7 @@
 | V55 | 群ブロック化した E-step での多数の群: 2PL、大きさの異なる 10 群（200–470）、15 項目、q01–q06 を不変なアンカー、q07–q15 は群ごとに自由、焦点群の平均・分散は自由、5% MCAR 欠測。ブロック化した E-step と平坦な E-step の回帰 | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`、`fscores(extract.group(m, g), method = "EAP")`。回帰は平坦な経路 | #79 |
 | V56 | 群ごとの `DavidianCurve` と `NormalMixture`: (a) 2PL、3 群（二峰・右に歪む・左に歪む）、`DavidianCurve(2)`、q01–q06 がアンカー、3% 欠測。(b) 2PL $J=15$、2 群、`NormalMixture(2)`、全項目不変。(c) FIPC、2 群、`DavidianCurve(2)`、全潜在パラメタ自由。推定値、R の Hessian による SE、EAP、群ごとの S-X2 | 格子上で正規化した標準化密度（`dcurver::ddc`）による `multipleGroup(customGroup = createGroup(...))` を独立な R の周辺対数尤度上の Newton で磨く。R の Richardson Hessian による SE、R で計算した EAP、各群の推定値で固定した 1 群オブジェクトでの `itemfit(use_dentype_estimate = TRUE)` | #75 |
 | V57 | 重み付き・クラスタロバストなサンドイッチ SE: (a) 2PL $J=10$、25 人 × 40 校で $\theta$ に学校効果、不均等なウェイト、3% 欠測、(b) 2PL $J=8$、アンカー q01–q05 の参照群 / 焦点群で焦点群の平均・分散は自由、群をまたぐ 30 校。mirt の推定値での中央の行列（重み付き、クラスタ、ウェイトなしのクラスタ、1 人 1 クラスタ）、ウェイトつきの `se="crossprod"`、mirt の重み付きサンドイッチの再現、通しの SE | `survey.weights` つきの `mirt()` / `multipleGroup()`、`SE.type = "Oakes"`（ブレッド）・`"crossprod"`・`"sandwich"`。mirt のグリッド上で `numDeriv::jacobian` による個人ごとのスコア（`estfun.AllModelClass` と照合）。$H^{-1}BH^{-1}$ は R で計算 | #84, #85 |
+| V58 | 任意の `float32` ウォームアップ（`BAEM(warmup_dtype="float32")`）。V11（3PL/4PL）と V14（2–3 因子）のケース。2PL、GRM $K=4$、アンカーつき 2 母集団、経験ヒストグラム、MAP（シミュレーション）はウォームアップなしの推定と比べる | それらのケースの既存の参照値。flexpyirt 自身の純粋な `float64` の推定 | #156 |
 
 ## mirt 側の設定と既知の差（M1 で判明）
 - **M-step 最適化**: 参照値は `optimizer = "NR"` で生成する。mirt 既定の M-step 最適化（Rasch は `nlminb`、
@@ -1271,6 +1272,24 @@
   ありも）、ウェイトの定数倍への不変性、ウェイト 0 の行はクラスタごと除く、クラスタのラベルの付け替え、
   クラスタの中央の行列への事前分布の曲率の加算、ウェイトつき `crossprod` $=(\sum_iw_is_is_i^\top)^{-1}$、警告、
   エラー、summary、JSON（スキーマ 9、`n_clusters`）。
+
+- **`float32` ウォームアップ（V58、#156。DESIGN §28）**: ウォームアップが変えるのは `float64` の EM の初期値だけで、
+  その EM は同じ `tol` で止まる。そこで (1) mirt との照合がそのまま通ること、(2) 純粋な `float64` の推定と `tol` 程度で
+  一致することを確かめる。
+  1. *mirt。* `tests/test_mirt_m3.py`（V11: 3PL/4PL の対数尤度、$a,d,g,u$、Oakes と Hessian の SE）と
+     `tests/test_mirt_m4_mirt.py`（V14: 2–3 因子の対数尤度、項目パラメタ、潜在相関）の照合を、ウォームアップありで
+     `tol=1e-9`、ウォームアップなしと同じ許容誤差で繰り返す。20 件すべて通る。
+  2. *純粋な `float64` との比較*（`tests/test_mixed_precision.py`。通常の EM と SQUAREM、Oakes SE）: 2PL $J=12$、
+     GRM $K=4$ $J=8$、アンカー 6 項目で焦点群の平均・分散が自由な 2 母集団（群ブロックの E-step）、傾きに
+     `LogNormalPrior` をつけた 2PL（MAP）を `tol=1e-7` で: 推定値 $10^{-5}$ 以内、対数尤度と対数事後密度 相対
+     $10^{-8}$ 以内、Oakes SE 相対 $10^{-4}$ 以内。`EmpiricalHistogram` は `tol=1e-4`（通常の EM はウォームアップの
+     有無によらず 2000 回で $10^{-5}$ に届かない）で、通常の EM では推定値 $10^{-3}$ 以内。SQUAREM では EH の最適点の
+     まわりが非常に平らで、純粋な EM と純粋な SQUAREM が同じ `tol` で 0.19 離れて止まる。ウォームアップで SQUAREM の
+     停止点は 0.018 動き、テストはそれが EM と SQUAREM の差以下であることを求める。そのほかの単体テスト:
+     `float64` の段階は `tol` 未満で止まり、対数事後密度は単調で、`float64` の反復はウォームアップなしより少ない。
+     対数尤度が有限でないウォームアップは警告つきで捨てられ、その推定は純粋な `float64` の推定とビット単位で一致する。
+     `cast_floats` は整数の葉と pytree の構造を変えない。JSON（スキーマ 10、`warmup_dtype`、`n_warmup_iter`）。
+     既定（`warmup_dtype=None`）は `float32` のコードを通らないので、ほかのすべてのテストが既定の不変を確かめる。
 
 ## 照合以外の検証
 - **パラメタ回復シミュレーション**: 条件（N, J, 群数, アンカー数）× 反復 100 で bias / RMSE を出し、`validation/recovery/` に結果と図を置く。

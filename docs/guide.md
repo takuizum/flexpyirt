@@ -213,6 +213,17 @@ res = fit(
   scale. The difference is at a bound: the default stops exactly on it (e.g. $g=0$), while the
   unconstrained scale only approaches it, sometimes after many more iterations. Both raise
   `HeywoodWarning` once a parameter is within `1e-4` of its bound.
+- **`warmup_dtype="float32"`** (default `None`): first runs EM in single precision until the
+  largest change is below $\max(10\,\mathtt{tol}, 10^{-3})$, then continues in double precision
+  from there until it is below `tol`. Only the starting values come from the `float32` stage: the
+  estimates, log-likelihood and standard errors come from the `float64` stage and meet the same
+  stopping rule, so they agree with a fit without warmup to about `tol` (not bit for bit: the two
+  runs stop at different points of the same EM path). `res.n_warmup_iter` counts the `float32`
+  iterations; `n_iter` and `history` describe the `float64` stage. It pays off on hardware with
+  slow double precision (most GPUs). On a CPU it saves little and compiles a
+  second program, so leave it off there. If the `float32` stage returns non-finite values, it is
+  discarded with a `FlexpyirtWarning`. With a likelihood that has several maxima (`NormalMixture`,
+  3PL) the warm start may end at a different maximum.
 - **`quadrature`**: the latent-variable grid. The default is 61 equally spaced points on
   $[-6, 6]$ (mirt's default). See [section 13](#13-choosing-the-quadrature-grid) for when to
   widen it.

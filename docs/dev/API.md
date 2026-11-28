@@ -110,6 +110,8 @@ res = fit(
 )
 # Sampling weights and clustered samples (students within schools): design-based sandwich SEs.
 res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
+# float32 warmup, then float64 to tol (GPUs; DESIGN §28). res_w.n_warmup_iter counts the warmup.
+res_w = fit(spec, df, method=BAEM(warmup_dtype="float32"))
 (
     res.converged,
     res.n_iter,

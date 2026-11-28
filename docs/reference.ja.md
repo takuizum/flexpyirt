@@ -2172,7 +2172,8 @@ DataFrame にも先頭に `group` 列がつく（2 つの表は `(group, categor
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural")
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural",
+     warmup_dtype=None)
 ```
 
 | 引数 | 説明 |
@@ -2182,6 +2183,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale
 | `m_step_newton_steps` | 1 回の M-step で進める Newton 法のステップ数。各ステップで期待対数尤度は減らない |
 | `squarem` | SQUAREM スキーム S3 加速（Varadhan & Roland, 2008）と単調性・実行可能性の安全装置を有効にする（既定 `False`） |
 | `m_step_scale` | `"natural"`（既定）: M-step の Newton 法を範囲つきの自然尺度で行い、境界解にちょうど到達する。`"unconstrained"`: 範囲のあるパラメタ（$g$、$u$、潜在分散、因子間相関、事前分布や編集した範囲で制限された傾き）を $\operatorname{logit}$ / $\log$ 尺度で動かす。範囲のないパラメタは変換しない。目的関数と内点解は同じで、推定値・表・事前分布・SE は自然尺度のまま。境界解には近づくだけ（[ガイド 4 節](guide.ja.md#4-推定する)） |
+| `warmup_dtype` | `None`（既定）または `"float32"`: 最大変化が `warmup_tol` $=\max(10\,\mathtt{tol},10^{-3})$ 未満になるまで `float32` で EM を回し、そこから元の問題で `float64` により `tol` 未満まで回す。推定値・対数尤度・SE は `float64` の段階から得られ、ウォームアップなしの推定と `tol` 程度で一致する。`FitResult.n_warmup_iter` は `float32` の反復回数。`float64` が遅いハードウェア（GPU）向けで、CPU では効果が小さい（[ガイド 4 節](guide.ja.md#4-推定する)） |
 
 ### `Quadrature`
 
