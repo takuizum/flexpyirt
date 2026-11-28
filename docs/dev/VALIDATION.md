@@ -97,7 +97,7 @@ English | [日本語](VALIDATION.ja.md)
 | Polychoric correlation vs lavaan / psych; thresholds; smoothing vs `cor.smooth` (both implementations) | 1e-6 / 1e-3; 1e-12; 1e-12 |
 | flexpyctt (NumPy) vs flexpyirt (JAX) polychoric correlation on the V24 cases; $\Phi_2$ by Owen's $T$ vs Plackett's integral | 1e-9, equal flags; 1e-14 |
 | EKC, MAP, observed eigenvalues on the same matrix; normal reference mean / 95th percentile | 1e-11; $\lvert z\rvert\le4.5$ / 6e-3 |
-| LD $X^2$ / $G^2$; signed $V$, Q3 (refitted models); model-based PA observed / simulated mean / 95th percentile | 1e-5 (relative); 1e-6; 2e-4 / $\lvert z\rvert\le4.5$ / 0.02 |
+| LD $X^2$ / $G^2$; signed $V$, Q3 (refitted models); model-based PA observed / simulated mean / 95th percentile | 1e-5 (relative) and 1e-8 absolute (#152: an LSAT7 pair with $X^2\approx10^{-5}$ moves by 2e-10 with the EM stopping point); 1e-6; 2e-4 / $\lvert z\rvert\le4.5$ / 0.02 |
 | DETECT conditional covariances, indices (both halves), Ward heights | 1e-12 |
 | EFA implied $\Lambda\Lambda^\top$ / communalities; CAF, CFI, RMSEA; $\chi^2$; Hull fit / $st$ | 1e-4; 2e-4; 1e-4 (relative); 1e-5 / 1e-2 (relative) |
 | CD: PAF $\Lambda\Lambda^\top$; one-factor population from the same draws; rank-sum $p$; mean RMSE (retained $k$ / the rejected extra $k$) | 1e-12; exact; 1e-10 (relative); 15% / 60% (relative) |
