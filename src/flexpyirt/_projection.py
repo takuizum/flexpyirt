@@ -1,4 +1,4 @@
-r"""Kernels of projective IRT (DESIGN.md §28).
+r"""Kernels of projective IRT (DESIGN.md §32).
 
 Pure functions on arrays; the checks, names and tables live in :mod:`flexpyirt.projection`.
 

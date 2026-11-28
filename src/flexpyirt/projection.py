@@ -1,4 +1,4 @@
-r"""Projective IRT: a unidimensional model on one factor of a multidimensional fit (DESIGN.md §28).
+r"""Projective IRT: a unidimensional model on one factor of a multidimensional fit (DESIGN.md §32).
 
 A multidimensional model (typically a bifactor model) is projected onto one of its factors by
 integrating the other factors out of every item response function (Ip, 2010). The projected
@@ -295,7 +295,7 @@ def _check_parent(result: FitResult) -> Model:
     if unsupported:
         raise SpecificationError(
             f"project() supports 2PL and GRM items only, not {unsupported}: projective IRT "
-            "approximates the marginal trace of a logistic kernel (DESIGN.md §28.1)."
+            "approximates the marginal trace of a logistic kernel (DESIGN.md §32.1)."
         )
     return model
 
@@ -342,7 +342,7 @@ def _parent_name(kernel: ItemKernel, proj_kernel: ItemKernel, param: str, target
 
 
 def _projected_layout(result: FitResult, table: pd.DataFrame, target: int) -> pd.DataFrame:
-    """Set ``value``, ``free`` and ``free_id`` of the projected table (DESIGN.md §28.2).
+    """Set ``value``, ``free`` and ``free_id`` of the projected table (DESIGN.md §32.2).
 
     Every parameter has the projected model's default status (``table`` is that model's default
     table), whether or not it was fixed in the parent, so a parent fixed at an item bank's values
@@ -504,7 +504,7 @@ def _mml_information(
     counts: _core.ExpectedCounts,
     se: str,
 ) -> np.ndarray:
-    r"""Information of the MML-PIRT estimates (DESIGN.md §28.3).
+    r"""Information of the MML-PIRT estimates (DESIGN.md §32.3).
 
     With :math:`I_{\bar r}=-\nabla^2Q^*` on the parent's marginal table,
     :math:`I_c=-\nabla^2Q(\eta\mid\eta)` on the projected model's own E-step and

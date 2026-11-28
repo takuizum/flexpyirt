@@ -210,7 +210,7 @@ Each item is accepted when its mirt (or independent) comparison passes; the issu
 - [ ] Projective IRT (`project()`): a unidimensional model on one factor of a bifactor, two-tier or
   confirmatory fit by MML-PIRT (Chalmers, Falk & Reise, 2026; 2PL and GRM items; Oakes, complete and
   Hessian SEs) or the closed forms of Ip (2010) and Stucky et al. (2013) with delta-method SEs.
-  Validated in V58 against mirt `pirt()`; checked once the comparison passes the nightly CI.
+  Validated in V61 against mirt `pirt()`; checked once the comparison passes the nightly CI.
 
 ## Ongoing
 - [ ] Validate against the latest R mirt on GitHub, with a scheduled reference check (#74).

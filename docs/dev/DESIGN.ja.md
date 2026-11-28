@@ -2928,7 +2928,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    上の Newton ステップで磨き、R の Richardson Hessian による SE、mirt の Oakes SE、`probtrace()` から R で計算した EAP、
    群の推定値で固定した同じ `customGroup` の 1 群 mirt オブジェクトでの `itemfit()` による群ごとの S-X2 を記録する。
 
-## 28. 射影 IRT（`project()`）
+## 32. 射影 IRT（`project()`）
 
 1. **概要.** 射影 IRT（Ip, 2010）は、多次元モデルの項目を 1 つの因子の上で記述する。各項目の反応関数から局外因子
    $\boldsymbol\theta_{-f}$ を積分で消し、
@@ -2973,7 +2973,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    閉じた式。ノードの射影先座標は最も近い 1 次元ノードに対応させる
    （`_projection.node_map`）。ブロックグリッドも積グリッドもその 1 次元グリッドから作るので、この対応は正確。
    **推定値での E-table.** mirt は最後の E-step の表、つまり最後の反復に入るときのパラメタで計算した表を保持する。ここでは
-   $\hat\eta$ で E-step を実行する。両者の差は収束判定の許容誤差の程度（V58 は `TOL = 1e-10`）。
+   $\hat\eta$ で E-step を実行する。両者の差は収束判定の許容誤差の程度（V61 は `TOL = 1e-10`）。
    **共分散**（`se=`）. $I_{\bar r}=-\nabla^2\sum_jQ^*_j$（$\hat\xi^*$ で、周辺表を固定。項目間でブロック対角）、
    $I_c=-\nabla^2Q(\xi\mid\xi)$（射影モデル自身の E-step で同じもの）、$I_o$ を射影モデルの観測情報量（Oakes, 1999;
    `_core.information_oakes`）とする。`"complete"` は $I_{\bar r}$ の逆行列（mirt `SE.type = "complete"`）で、表を既知の
@@ -2999,7 +2999,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    通した `jax.jacfwd`（潜在相関も含む）。親モデルに共分散がなければ `None`（mirt `FA.projection_SE`）。
 5. **（まだ）含めないもの.** 2PL と GRM 以外の項目モデル（1 項）、別の型への射影（mirt `itemtype`）、複数因子への射影（mirt の `model` > 1 と長さ 2 以上の
    `project`）、多群（mirt `invariance`）、`shortform` オプション（代わりに `project()` の結果から一部の項目を使う）。
-6. **検証（V58）.** `bfactor()` の推定に対する mirt `pirt()`: `"MML"` の推定値と 3 種類の SE、`"LKA"`・`"FA"` の推定値
+6. **検証（V61）.** `bfactor()` の推定に対する mirt `pirt()`: `"MML"` の推定値と 3 種類の SE、`"LKA"`・`"FA"` の推定値
    （と `FA` のデルタ法 SE）。双因子 2PL（Ip, 2010 の表 3 の設計、3% 欠測）と一般因子だけの項目を含む双因子 GRM で、mirt の
    親モデル推定値での比較と、推定から通しの比較の両方。単体テスト: 特殊因子 1 つの双因子モデルと、同じモデルを直交 2 因子の
    確認的モデルとして推定したものが同じ射影を与える（ブロックグリッドと積グリッド）、周辺表の合計が観測したカテゴリ度数に

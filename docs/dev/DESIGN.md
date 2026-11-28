@@ -3835,7 +3835,7 @@ data-independent shapes (§15.21).
    SEs, EAPs computed in R from `probtrace()`, and S-X2 per group from `itemfit()` on single-group
    mirt objects with the same `customGroup` fixed at the group's estimates.
 
-## 28. Projective IRT (`project()`)
+## 32. Projective IRT (`project()`)
 
 1. **What it is.** Projective IRT (Ip, 2010) describes the items of a multidimensional model on one
    of its factors: the nuisance factors $\boldsymbol\theta_{-f}$ are integrated out of each item's
@@ -3901,7 +3901,7 @@ data-independent shapes (§15.21).
    nearest node (`_projection.node_map`), which is exact because the block and product grids are
    built from that grid. **E-table at the estimates.** mirt keeps the table of its last E-step,
    computed at the parameters entering the last iteration; here the E-step is run at
-   $\hat\eta$. The two differ by the convergence tolerance only (V58 uses `TOL = 1e-10`).
+   $\hat\eta$. The two differ by the convergence tolerance only (V61 uses `TOL = 1e-10`).
    **Covariance** (`se=`). Let $I_{\bar r}=-\nabla^2\sum_jQ^*_j$ at $\hat\xi^*$ (the marginal
    table held fixed; block diagonal across items), $I_c=-\nabla^2Q(\xi\mid\xi)$ the same on the
    projected model's own E-step, and $I_o$ the projected model's observed information (Oakes,
@@ -3942,7 +3942,7 @@ data-independent shapes (§15.21).
    onto several factors (mirt `model` > 1 with `project` of length > 1), multiple groups
    (mirt `invariance`), and the `shortform` option (fit `project()` and keep a subset of the
    items' rows instead).
-6. **Validation (V58).** mirt `pirt()` on `bfactor()` fits: estimates and the three SE types of
+6. **Validation (V61).** mirt `pirt()` on `bfactor()` fits: estimates and the three SE types of
    `"MML"`, and the `"LKA"` / `"FA"` estimates (and `FA` delta-method SEs), for a bifactor 2PL
    (Ip's 2010 Table 3 design, 3% missing) and a bifactor GRM with general-only items, both at
    mirt's parent estimates and end to end. Unit tests: a one-specific-factor bifactor model and the

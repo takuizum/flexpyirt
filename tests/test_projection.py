@@ -1,6 +1,6 @@
-"""Unit tests for projective IRT (``project()``, DESIGN.md §28).
+"""Unit tests for projective IRT (``project()``, DESIGN.md §32).
 
-The mirt comparison (V58) is in ``test_mirt_v58_projection.py``. Here: the closed forms against
+The mirt comparison (V61) is in ``test_mirt_v61_projection.py``. Here: the closed forms against
 numerical integration and Ip's (2010) worked example, the marginal table against the confirmatory
 path, the two-tier path, the result object, and the errors.
 """

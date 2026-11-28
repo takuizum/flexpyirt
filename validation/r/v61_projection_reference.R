@@ -1,6 +1,6 @@
-# Projective IRT reference values (VALIDATION.md V58, DESIGN.md §28) from R mirt's pirt().
-# Run from the repository root:  Rscript validation/r/v58_projection_reference.R
-# Writes tests/reference/v58_projection.json. CI does not run R; the JSON is committed.
+# Projective IRT reference values (VALIDATION.md V61, DESIGN.md §32) from R mirt's pirt().
+# Run from the repository root:  Rscript validation/r/v61_projection_reference.R
+# Writes tests/reference/v61_projection.json. CI does not run R; the JSON is committed.
 #
 # Parent models: bfactor() with the V32 settings (Gibbons-Hedeker dimension reduction, optimizer =
 # "NR", accelerate = "none", TOL = 1e-10, SE.type = "Oakes", 31 points per dimension on [-6, 6]).
@@ -122,7 +122,7 @@ run_case <- function(case, description, dat, specific, itemtype, n_cat, quadpts 
 
 cases <- list()
 
-# ---- V58a: Ip (2010) Table 3 bifactor 2PL (the pirt() example), 3% MCAR --------------------------
+# ---- V61a: Ip (2010) Table 3 bifactor 2PL (the pirt() example), 3% MCAR --------------------------
 set.seed(20261128)
 a <- cbind(rep(c(2.63, 1.63, 1.38), each = 5), c(rep(3.07, 5), numeric(10)),
            c(numeric(5), rep(1.36, 5), numeric(5)), c(numeric(10), rep(.69, 5)))
@@ -132,13 +132,13 @@ colnames(dat) <- sprintf("q%02d", seq_len(15))
 dat[matrix(runif(prod(dim(dat))) < 0.03, nrow(dat))] <- NA
 cases$bifactor_2pl <- run_case(
   case = "bifactor_2pl",
-  description = "V58a: Ip (2010) Table 3 bifactor 2PL (s1 = q01-q05, s2 = q06-q10, s3 = q11-q15), 3% MCAR",
+  description = "V61a: Ip (2010) Table 3 bifactor 2PL (s1 = q01-q05, s2 = q06-q10, s3 = q11-q15), 3% MCAR",
   dat = dat,
   specific = list(s1 = sprintf("q%02d", 1:5), s2 = sprintf("q%02d", 6:10), s3 = sprintf("q%02d", 11:15)),
   itemtype = "2PL", n_cat = 2L
 )
 
-# ---- V58b: bifactor GRM (K = 4), two testlets of four items and two general-only items ---------
+# ---- V61b: bifactor GRM (K = 4), two testlets of four items and two general-only items ---------
 set.seed(20261129)
 J <- 10L; K <- 4L
 a <- matrix(0, nrow = J, ncol = 3L)
@@ -151,7 +151,7 @@ colnames(dat) <- sprintf("g%02d", seq_len(J))
 stopifnot(all(apply(dat, 2, function(x) length(unique(x)) == K)))
 cases$bifactor_grm <- run_case(
   case = "bifactor_grm",
-  description = "V58b: bifactor GRM (K = 4; s1 = g01-g04, s2 = g05-g08; g09, g10 general only)",
+  description = "V61b: bifactor GRM (K = 4; s1 = g01-g04, s2 = g05-g08; g09, g10 general only)",
   dat = dat,
   specific = list(s1 = sprintf("g%02d", 1:4), s2 = sprintf("g%02d", 5:8)),
   itemtype = "graded", n_cat = K
@@ -159,8 +159,8 @@ cases$bifactor_grm <- run_case(
 
 bundle <- list(
   meta = list(
-    case = "v58_projection",
-    description = "V58: projective IRT, mirt pirt() (MML, LKA, FA) on bfactor() fits",
+    case = "v61_projection",
+    description = "V61: projective IRT, mirt pirt() (MML, LKA, FA) on bfactor() fits",
     r_version = R.version.string,
     mirt_version = mirt_version_string(), mirt_sha = mirt_commit_sha(),
     TOL = 1e-10,
@@ -174,6 +174,6 @@ bundle <- list(
 )
 stopifnot(isTRUE(bundle$meta$converged))
 
-path <- file.path(out_dir, "v58_projection.json")
+path <- file.path(out_dir, "v61_projection.json")
 write_json(bundle, path, auto_unbox = TRUE, digits = NA, pretty = TRUE, na = "null")
 cat("wrote", path, "\n")

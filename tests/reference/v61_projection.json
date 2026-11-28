@@ -1,7 +1,7 @@
 {
   "meta": {
-    "case": "v58_projection",
-    "description": "V58: projective IRT, mirt pirt() (MML, LKA, FA) on bfactor() fits",
+    "case": "v61_projection",
+    "description": "V61: projective IRT, mirt pirt() (MML, LKA, FA) on bfactor() fits",
     "r_version": "R version 4.6.2 (2026-10-29)",
     "mirt_version": "1.48.5",
     "mirt_sha": "2b342bb17e773d8d97f1ffd0a8144244901dfbff",
@@ -16,7 +16,7 @@
     "bifactor_2pl": {
       "meta": {
         "case": "bifactor_2pl",
-        "description": "V58a: Ip (2010) Table 3 bifactor 2PL (s1 = q01-q05, s2 = q06-q10, s3 = q11-q15), 3% MCAR",
+        "description": "V61a: Ip (2010) Table 3 bifactor 2PL (s1 = q01-q05, s2 = q06-q10, s3 = q11-q15), 3% MCAR",
         "itemtype": "2PL",
         "n_factors": 4,
         "n_cat": 2,
@@ -2095,7 +2095,7 @@
     "bifactor_grm": {
       "meta": {
         "case": "bifactor_grm",
-        "description": "V58b: bifactor GRM (K = 4; s1 = g01-g04, s2 = g05-g08; g09, g10 general only)",
+        "description": "V61b: bifactor GRM (K = 4; s1 = g01-g04, s2 = g05-g08; g09, g10 general only)",
         "itemtype": "graded",
         "n_factors": 3,
         "n_cat": 4,
