@@ -214,6 +214,17 @@ print(res_sq.history.tail(3))  # iter, loglik, max_change, em_evaluations, safeg
 ```
 
 初回の推定には JAX のコンパイル時間がかかる。同じ形のデータを続けて推定すると 2 回目以降は速い。
+ただし速くなるのは同じ Python プロセスの中だけである。プロセスごとに 1 回だけ推定するスクリプト（コマンドラインの
+道具やバッチ処理）では、最初の推定の前に 1 行呼んで、コンパイルしたプログラムをディスクに残す。
+
+```python
+import flexpyirt as fp
+
+fp.enable_compilation_cache()  # or fp.enable_compilation_cache("path/to/cache")
+```
+
+あとのプロセスが同じ形のモデルを推定すると、コンパイルせずにプログラムを読み込む。結果は同じである。
+プロセス全体の JAX の設定を変えるので、flexpyirt が import 時にこれを行うことはない。
 
 ### 標本ウェイト
 

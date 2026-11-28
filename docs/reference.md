@@ -463,6 +463,32 @@ been registered in this session), or internal consistency checks fail;
 
 ---
 
+### `enable_compilation_cache`
+
+```text
+enable_compilation_cache(path=None, *, min_compile_time=0.0) -> pathlib.Path
+```
+
+Turn on JAX's persistent compilation cache for this process (opt-in; importing flexpyirt never
+changes the JAX configuration). Compiled fitting programs are written to `path`, and a later
+process that calls this function with the same `path` and fits a model of the same shapes (item
+types, numbers of items, groups and quadrature points, padded number of response patterns) loads
+them instead of compiling again. Results are identical. Sets JAX's `jax_compilation_cache_dir`
+and `jax_persistent_cache_min_compile_time_secs` for the whole process; call it once before the
+first fit. Anyone who can write to the cache directory can make the process run arbitrary code,
+so do not share it with untrusted users.
+
+| Argument | Type | Description |
+|---|---|---|
+| `path` | `str` / `os.PathLike` / `None` | Cache directory, created if needed. Default: the OS user cache directory plus `flexpyirt/jax` (`$XDG_CACHE_HOME` or `~/.cache` on Linux, `~/Library/Caches` on macOS, `%LOCALAPPDATA%` on Windows) |
+| `min_compile_time` | `float` | Only programs that took at least this many seconds to compile are written (default `0.0`; JAX's own default of 1 s would skip most of flexpyirt's programs) |
+
+**Returns**: `pathlib.Path`, the cache directory in use.
+
+**Raises**: `SpecificationError` if `min_compile_time` is negative.
+
+---
+
 ## Model
 
 ### `Model`

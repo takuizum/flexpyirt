@@ -1286,6 +1286,60 @@ _SQUAREM_MAX_BACKTRACK = 10
 """Maximum halvings of ``alpha`` towards ``-1`` before falling back to ``theta_2``."""
 
 
+class _SquaremEHState(NamedTuple):
+    """Loop state of :func:`_squarem_eh`: :class:`_SquaremState` plus the EH weights."""
+
+    eta: Array
+    eh_w: Array
+    x: Array
+    x_w: Array
+    phase: Array
+    theta1: Array
+    w1: Array
+    ll0: Array
+    lp0: Array
+    fired: Array
+    it: Array
+    change: Array
+    n_evals: Array
+    n_safe: Array
+    ll_hist: Array
+    lp_hist: Array
+    ch_hist: Array
+    ev_hist: Array
+    sf_hist: Array
+
+
+_PhaseOut = tuple[Array, Array, Array, Array, Array, Array, Array]
+"""EH phase outputs: next ``(x, x_w, phase)``, ``fired``, accepted ``(eta, w)``, evaluations."""
+
+
+class _SquaremState(NamedTuple):
+    r"""Loop state of :func:`squarem`: one EM map evaluation per pass (DESIGN.md §28.1).
+
+    ``phase`` 0, 1, 2 is the EM map evaluation about to run: :math:`F(\theta_0)`,
+    :math:`F(\theta_1)` or the stabilizing :math:`F(\theta')`; ``x`` is its input and ``eta``
+    the iterate :math:`\theta_0` of the current SQUAREM iteration.
+    """
+
+    eta: Array
+    x: Array
+    phase: Array
+    theta1: Array
+    ll0: Array
+    lp0: Array
+    fired: Array
+    it: Array
+    change: Array
+    n_evals: Array
+    n_safe: Array
+    ll_hist: Array
+    lp_hist: Array
+    ch_hist: Array
+    ev_hist: Array
+    sf_hist: Array
+
+
 def _eta_bounds(prob: CompiledProblem, eta: Array) -> tuple[Array, Array]:
     """Per-coordinate ``(lower, upper)`` bounds of ``eta`` from the M-step blocks (§15.12)."""
     lo = jnp.full_like(eta, -jnp.inf)
@@ -1420,6 +1474,17 @@ def _eh_unpack(
     return eta, w
 
 
+def _em_map_eh(
+    prob: CompiledProblem, eta: Array, eh_w: Array, n_newton: int, unconstrained: bool
+) -> tuple[Array, Array, Array, Array]:
+    """One EH EM map evaluation ``F(eta, w)`` plus the log-likelihood and log posterior there."""
+    prob_t = _with_eh_weights(prob, eh_w)
+    counts, ll = e_step(prob_t, eta)
+    lp = ll + log_prior(prob_t, eta)
+    new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton, unconstrained)
+    return new_eta, new_w, ll, lp
+
+
 def _squarem_eh(
     prob: CompiledProblem,
     eta0: Array,
@@ -1447,11 +1512,10 @@ def _squarem_eh(
         return log_posterior(_with_eh_weights(prob, eh_w), eta)
 
     def _em_once(eta: Array, eh_w: Array) -> tuple[Array, Array, Array, Array]:
-        prob_t = _with_eh_weights(prob, eh_w)
-        counts, ll = e_step(prob_t, eta)
-        lp = ll + log_prior(prob_t, eta)
-        new_eta, new_w = _m_step_eh(prob_t, eta, counts, n_newton, unconstrained)
-        return new_eta, new_w, ll, lp
+        mapped: tuple[Array, Array, Array, Array] = _em_map_eh(
+            prob, eta, eh_w, n_newton, unconstrained
+        )
+        return mapped
 
     def _is_acceptable(cand: Array, lp_ref: Array) -> Array:
         eta_c = cand[:n_free]
@@ -1468,124 +1532,170 @@ def _squarem_eh(
         accepted: Array = jax.lax.cond(in_bounds, _eval_lp, lambda _: jnp.asarray(False), cand)
         return accepted
 
-    def cond(
-        state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
-    ) -> Array:
-        _, _, it, change, _, _, _, _, _, _, _ = state
-        return (it < max_iter) & (change >= tol)
+    def cond(state: _SquaremEHState) -> Array:
+        return (state.phase != 0) | ((state.it < max_iter) & (state.change >= tol))
 
-    def body(
-        state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
-    ) -> tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array, Array]:
-        eta, eh_w, it, _, n_evals, n_safe, ll_hist, lp_hist, ch_hist, ev_hist, sf_hist = state
-        v0 = _eh_pack(eta, eh_w)
-        eta1, w1, ll0, lp0 = _em_once(eta, eh_w)
-        v1 = _eh_pack(eta1, w1)
-        eta2, w2, _, _ = _em_once(eta1, w1)
-        v2 = _eh_pack(eta2, w2)
+    def body(state: _SquaremEHState) -> _SquaremEHState:
+        # One EM map evaluation per pass, as in :func:`squarem` (DESIGN.md §28.1).
+        y_eta, y_w, ll, lp = _em_once(state.x, state.x_w)
+        is_first = state.phase == 0
+        eta1 = jnp.where(is_first, y_eta, state.theta1)
+        w1 = jnp.where(is_first, y_w, state.w1)
+        ll0 = jnp.where(is_first, ll, state.ll0)
+        lp0 = jnp.where(is_first, lp, state.lp0)
+        no = jnp.asarray(False)
 
-        r = v1 - v0
-        s = v2 - v1
-        v = s - r
-        r_norm = jnp.sqrt(jnp.sum(r * r))
-        v_norm = jnp.sqrt(jnp.sum(v * v))
-        has_v = v_norm > 0.0
-        raw_alpha = jnp.where(has_v, -r_norm / jnp.where(has_v, v_norm, 1.0), -1.0)
-        alpha = jnp.where(jnp.isfinite(raw_alpha), jnp.minimum(raw_alpha, -1.0), -1.0)
+        def _after_first(_unused: None) -> _PhaseOut:
+            return y_eta, y_w, one, no, state.eta, state.eh_w, zero
 
-        def _extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            lp2 = _eval_lp_pair(eta2, w2)
-            lp_ref = jnp.maximum(lp2, lp0)
+        def _after_second(_unused: None) -> _PhaseOut:
+            eta2, w2 = y_eta, y_w
+            v0 = _eh_pack(state.eta, state.eh_w)
+            v1 = _eh_pack(eta1, w1)
+            v2 = _eh_pack(eta2, w2)
+            r = v1 - v0
+            s = v2 - v1
+            v = s - r
+            r_norm = jnp.sqrt(jnp.sum(r * r))
+            v_norm = jnp.sqrt(jnp.sum(v * v))
+            has_v = v_norm > 0.0
+            raw_alpha = jnp.where(has_v, -r_norm / jnp.where(has_v, v_norm, 1.0), -1.0)
+            alpha = jnp.where(jnp.isfinite(raw_alpha), jnp.minimum(raw_alpha, -1.0), -1.0)
 
-            def backtrack_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
-                k, _, ok, _ = bt
-                return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
+            def _extrapolate(_unused: None) -> tuple[Array, Array, Array]:
+                lp2 = _eval_lp_pair(eta2, w2)
+                lp_ref = jnp.maximum(lp2, lp0)
 
-            def backtrack_body(
-                bt: tuple[Array, Array, Array, Array],
-            ) -> tuple[Array, Array, Array, Array]:
-                k, delta, _, _ = bt
-                cand = v2 - 2.0 * delta * s + (delta * delta) * v
-                ok = _is_acceptable(cand, lp_ref)
-                next_delta = jnp.where(ok, delta, 0.5 * delta)
-                next_k = jnp.where(ok, k, k + one)
-                return next_k, next_delta, ok, cand
+                def backtrack_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
+                    k, _, ok, _ = bt
+                    return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
 
-            init_bt = (zero, alpha + 1.0, jnp.asarray(False), v2)
-            k_out, _, ok, cand = jax.lax.while_loop(backtrack_cond, backtrack_body, init_bt)
-            fired = k_out > zero
-            v_p = jnp.where(ok, cand, v2)
-            return v_p, ok, fired
+                def backtrack_body(
+                    bt: tuple[Array, Array, Array, Array],
+                ) -> tuple[Array, Array, Array, Array]:
+                    k, delta, _, _ = bt
+                    cand = v2 - 2.0 * delta * s + (delta * delta) * v
+                    ok = _is_acceptable(cand, lp_ref)
+                    next_delta = jnp.where(ok, delta, 0.5 * delta)
+                    next_k = jnp.where(ok, k, k + one)
+                    return next_k, next_delta, ok, cand
 
-        def _no_extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            return v2, jnp.asarray(True), jnp.asarray(False)
+                init_bt = (zero, alpha + 1.0, jnp.asarray(False), v2)
+                k_out, _, ok, cand = jax.lax.while_loop(backtrack_cond, backtrack_body, init_bt)
+                fired = k_out > zero
+                v_p = jnp.where(ok, cand, v2)
+                return v_p, ok, fired
 
-        v_prime, do_stabilize, fired = jax.lax.cond(
-            alpha < -1.0, _extrapolate, _no_extrapolate, None
+            def _no_extrapolate(_unused: None) -> tuple[Array, Array, Array]:
+                return v2, jnp.asarray(True), jnp.asarray(False)
+
+            v_prime, do_stabilize, fired = jax.lax.cond(
+                alpha < -1.0, _extrapolate, _no_extrapolate, None
+            )
+            e_p, w_p = _eh_unpack(prob, v_prime, n_free, n_groups, n_nodes)
+            # Stabilize: evaluate F(theta') in the next pass (phase 2). Fallback: accept theta_2.
+            return (
+                jnp.where(do_stabilize, e_p, eta2),
+                jnp.where(do_stabilize, w_p, w2),
+                jnp.where(do_stabilize, two, zero),
+                fired,
+                jnp.where(do_stabilize, state.eta, eta2),
+                jnp.where(do_stabilize, state.eh_w, w2),
+                jnp.where(do_stabilize, zero, two),
+            )
+
+        def _after_third(_unused: None) -> _PhaseOut:
+            return y_eta, y_w, zero, no, y_eta, y_w, three
+
+        next_x, next_x_w, next_phase, fired_now, new_eta, new_w, evals_added = jax.lax.switch(
+            state.phase, (_after_first, _after_second, _after_third), None
+        )
+        fired = state.fired | fired_now
+        done = evals_added > zero  # this pass ends the SQUAREM iteration
+        it = state.it
+        change = jnp.where(
+            done,
+            jnp.maximum(
+                jnp.max(jnp.abs(new_eta - state.eta), initial=0.0),
+                jnp.max(jnp.abs(new_w - state.eh_w), initial=0.0),
+            ),
+            state.change,
+        )
+        next_evals = state.n_evals + evals_added
+        record = jnp.where(done, it, max_iter)  # out-of-range index: dropped
+        return _SquaremEHState(
+            eta=new_eta,
+            eh_w=new_w,
+            x=next_x,
+            x_w=next_x_w,
+            phase=next_phase,
+            theta1=eta1,
+            w1=w1,
+            ll0=ll0,
+            lp0=lp0,
+            fired=jnp.where(done, jnp.asarray(False), fired),
+            it=jnp.where(done, it + one, it),
+            change=change,
+            n_evals=next_evals,
+            n_safe=state.n_safe + (done & fired).astype(jnp.int32),
+            ll_hist=state.ll_hist.at[record].set(ll0, mode="drop"),
+            lp_hist=state.lp_hist.at[record].set(lp0, mode="drop"),
+            ch_hist=state.ch_hist.at[record].set(change, mode="drop"),
+            ev_hist=state.ev_hist.at[record].set(next_evals, mode="drop"),
+            sf_hist=state.sf_hist.at[record].set(fired, mode="drop"),
         )
 
-        def _stabilize(vp: Array) -> tuple[Array, Array, Array]:
-            e_p, w_p = _eh_unpack(prob, vp, n_free, n_groups, n_nodes)
-            e_n, w_n, _, _ = _em_once(e_p, w_p)
-            return e_n, w_n, three
-
-        def _fallback(_unused: Array) -> tuple[Array, Array, Array]:
-            return eta2, w2, two
-
-        new_eta, new_w, evals_added = jax.lax.cond(do_stabilize, _stabilize, _fallback, v_prime)
-        change = jnp.maximum(
-            jnp.max(jnp.abs(new_eta - eta), initial=0.0),
-            jnp.max(jnp.abs(new_w - eh_w), initial=0.0),
-        )
-        next_evals = n_evals + evals_added
-        next_safe = n_safe + fired.astype(jnp.int32)
-        return (
-            new_eta,
-            new_w,
-            it + one,
-            change,
-            next_evals,
-            next_safe,
-            ll_hist.at[it].set(ll0),
-            lp_hist.at[it].set(lp0),
-            ch_hist.at[it].set(change),
-            ev_hist.at[it].set(next_evals),
-            sf_hist.at[it].set(fired),
-        )
-
-    init = (
-        eta0,
-        prob.latent.eh_weights,
-        zero,
-        jnp.asarray(jnp.inf, eta0.dtype),
-        zero,
-        zero,
-        nan_hist,
-        nan_hist,
-        nan_hist,
-        eval_hist,
-        safe_hist,
+    nan_scalar = jnp.asarray(jnp.nan, eta0.dtype)
+    w0 = prob.latent.eh_weights
+    init = _SquaremEHState(
+        eta=eta0,
+        eh_w=w0,
+        x=eta0,
+        x_w=w0,
+        phase=zero,
+        theta1=eta0,
+        w1=w0,
+        ll0=nan_scalar,
+        lp0=nan_scalar,
+        fired=jnp.asarray(False),
+        it=zero,
+        change=jnp.asarray(jnp.inf, eta0.dtype),
+        n_evals=zero,
+        n_safe=zero,
+        ll_hist=nan_hist,
+        lp_hist=nan_hist,
+        ch_hist=nan_hist,
+        ev_hist=eval_hist,
+        sf_hist=safe_hist,
     )
-    eta, eh_w, n_iter, change, n_evals, n_safe, ll_hist, lp_hist, ch_hist, ev_hist, sf_hist = (
-        jax.lax.while_loop(cond, body, init)
-    )
+    out = jax.lax.while_loop(cond, body, init)
+    eta, eh_w = out.eta, out.eh_w
     prob_fin = _with_eh_weights(prob, eh_w)
     final_ll = marginal_loglik(prob_fin, eta)
     return EMResult(
         eta=eta,
         eh_weights=eh_w,
-        n_iter=n_iter,
-        converged=change < tol,
+        n_iter=out.it,
+        converged=out.change < tol,
         loglik=final_ll,
         log_posterior=final_ll + log_prior(prob_fin, eta),
-        loglik_history=ll_hist,
-        log_posterior_history=lp_hist,
-        change_history=ch_hist,
-        n_em_evaluations=n_evals,
-        em_eval_history=ev_hist,
-        safeguard_history=sf_hist,
-        n_safeguards=n_safe,
+        loglik_history=out.ll_hist,
+        log_posterior_history=out.lp_hist,
+        change_history=out.ch_hist,
+        n_em_evaluations=out.n_evals,
+        em_eval_history=out.ev_hist,
+        safeguard_history=out.sf_hist,
+        n_safeguards=out.n_safe,
     )
+
+
+def _em_map(
+    prob: CompiledProblem, eta: Array, n_newton: int, unconstrained: bool
+) -> tuple[Array, Array, Array]:
+    """One EM map evaluation ``F(eta)`` with the log-likelihood and log posterior at ``eta``."""
+    counts, ll = e_step(prob, eta)
+    lp = ll + log_prior(prob, eta)
+    return m_step(prob, eta, counts, n_newton, unconstrained), ll, lp
 
 
 def squarem(
@@ -1650,116 +1760,139 @@ def squarem(
         accepted: Array = jax.lax.cond(in_bounds, _eval_lp, lambda _: jnp.asarray(False), cand)
         return accepted
 
-    def cond(
-        state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
-    ) -> Array:
-        _, it, change, _, _, _, _, _, _, _ = state
-        return (it < max_iter) & (change >= tol)
+    def cond(state: _SquaremState) -> Array:
+        # Mid-iteration phases always continue; a new iteration starts only if not converged.
+        return (state.phase != 0) | ((state.it < max_iter) & (state.change >= tol))
 
-    def body(
-        state: tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
-    ) -> tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array]:
-        eta, it, _, n_evals, n_safe, ll_hist, lp_hist, ch_hist, ev_hist, sf_hist = state
-        counts0, ll0 = e_step(prob, eta)
-        lp0 = ll0 + log_prior(prob, eta)
-        theta1 = m_step(prob, eta, counts0, n_newton, unconstrained)
-        counts1, _ = e_step(prob, theta1)
-        theta2 = m_step(prob, theta1, counts1, n_newton, unconstrained)
+    def body(state: _SquaremState) -> _SquaremState:
+        # One EM map evaluation per pass; the phase says which one (DESIGN.md §28.1).
+        y, ll, lp = _em_map(prob, state.x, n_newton, unconstrained)
+        is_first = state.phase == 0
+        theta1 = jnp.where(is_first, y, state.theta1)
+        ll0 = jnp.where(is_first, ll, state.ll0)
+        lp0 = jnp.where(is_first, lp, state.lp0)
 
-        r = theta1 - eta
-        s = theta2 - theta1
-        v = s - r
-        r_norm = jnp.sqrt(jnp.sum(r * r))
-        v_norm = jnp.sqrt(jnp.sum(v * v))
-        has_v = v_norm > 0.0
-        raw_alpha = jnp.where(has_v, -r_norm / jnp.where(has_v, v_norm, 1.0), -1.0)
-        alpha = jnp.where(jnp.isfinite(raw_alpha), jnp.minimum(raw_alpha, -1.0), -1.0)
+        def _after_first(_unused: None) -> tuple[Array, Array, Array, Array, Array]:
+            return y, one, jnp.asarray(False), state.eta, zero
 
-        def _extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            lp2 = log_posterior(prob, theta2)
-            lp_ref = jnp.maximum(lp2, lp0)
+        def _after_second(_unused: None) -> tuple[Array, Array, Array, Array, Array]:
+            eta = state.eta
+            theta2 = y
+            r = theta1 - eta
+            s = theta2 - theta1
+            v = s - r
+            r_norm = jnp.sqrt(jnp.sum(r * r))
+            v_norm = jnp.sqrt(jnp.sum(v * v))
+            has_v = v_norm > 0.0
+            raw_alpha = jnp.where(has_v, -r_norm / jnp.where(has_v, v_norm, 1.0), -1.0)
+            alpha = jnp.where(jnp.isfinite(raw_alpha), jnp.minimum(raw_alpha, -1.0), -1.0)
 
-            def backtrack_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
-                k, _, ok, _ = bt
-                return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
+            def _extrapolate(_unused: None) -> tuple[Array, Array, Array]:
+                lp2 = log_posterior(prob, theta2)
+                lp_ref = jnp.maximum(lp2, lp0)
 
-            def backtrack_body(
-                bt: tuple[Array, Array, Array, Array],
-            ) -> tuple[Array, Array, Array, Array]:
-                k, delta, _, _ = bt
-                cand = theta2 - 2.0 * delta * s + (delta * delta) * v
-                ok = _is_acceptable(cand, lp_ref)
-                next_delta = jnp.where(ok, delta, 0.5 * delta)
-                next_k = jnp.where(ok, k, k + one)
-                return next_k, next_delta, ok, cand
+                def backtrack_cond(bt: tuple[Array, Array, Array, Array]) -> Array:
+                    k, _, ok, _ = bt
+                    return (~ok) & (k <= _SQUAREM_MAX_BACKTRACK)
 
-            init_bt = (zero, alpha + 1.0, jnp.asarray(False), theta2)
-            k_out, _, ok, cand = jax.lax.while_loop(backtrack_cond, backtrack_body, init_bt)
-            fired = k_out > zero
-            theta_p = jnp.where(ok, cand, theta2)
-            return theta_p, ok, fired
+                def backtrack_body(
+                    bt: tuple[Array, Array, Array, Array],
+                ) -> tuple[Array, Array, Array, Array]:
+                    k, delta, _, _ = bt
+                    cand = theta2 - 2.0 * delta * s + (delta * delta) * v
+                    ok = _is_acceptable(cand, lp_ref)
+                    next_delta = jnp.where(ok, delta, 0.5 * delta)
+                    next_k = jnp.where(ok, k, k + one)
+                    return next_k, next_delta, ok, cand
 
-        def _no_extrapolate(_unused: None) -> tuple[Array, Array, Array]:
-            return theta2, jnp.asarray(True), jnp.asarray(False)
+                init_bt = (zero, alpha + 1.0, jnp.asarray(False), theta2)
+                k_out, _, ok, cand = jax.lax.while_loop(backtrack_cond, backtrack_body, init_bt)
+                fired = k_out > zero
+                theta_p = jnp.where(ok, cand, theta2)
+                return theta_p, ok, fired
 
-        theta_prime, do_stabilize, fired = jax.lax.cond(
-            alpha < -1.0, _extrapolate, _no_extrapolate, None
+            def _no_extrapolate(_unused: None) -> tuple[Array, Array, Array]:
+                return theta2, jnp.asarray(True), jnp.asarray(False)
+
+            theta_prime, do_stabilize, fired = jax.lax.cond(
+                alpha < -1.0, _extrapolate, _no_extrapolate, None
+            )
+            # Stabilize: evaluate F(theta') in the next pass (phase 2). Fallback: accept theta_2.
+            return (
+                jnp.where(do_stabilize, theta_prime, theta2),
+                jnp.where(do_stabilize, two, zero),
+                fired,
+                jnp.where(do_stabilize, eta, theta2),
+                jnp.where(do_stabilize, zero, two),
+            )
+
+        def _after_third(_unused: None) -> tuple[Array, Array, Array, Array, Array]:
+            return y, zero, jnp.asarray(False), y, three
+
+        next_x, next_phase, fired_now, new, evals_added = jax.lax.switch(
+            state.phase, (_after_first, _after_second, _after_third), None
+        )
+        fired = state.fired | fired_now
+        done = evals_added > zero  # this pass ends the SQUAREM iteration
+        it = state.it
+        change = jnp.where(done, jnp.max(jnp.abs(new - state.eta), initial=0.0), state.change)
+        next_evals = state.n_evals + evals_added
+        record = jnp.where(done, it, max_iter)  # out-of-range index: dropped
+        return _SquaremState(
+            eta=new,
+            x=next_x,
+            phase=next_phase,
+            theta1=theta1,
+            ll0=ll0,
+            lp0=lp0,
+            fired=jnp.where(done, jnp.asarray(False), fired),
+            it=jnp.where(done, it + one, it),
+            change=change,
+            n_evals=next_evals,
+            n_safe=state.n_safe + (done & fired).astype(jnp.int32),
+            ll_hist=state.ll_hist.at[record].set(ll0, mode="drop"),
+            lp_hist=state.lp_hist.at[record].set(lp0, mode="drop"),
+            ch_hist=state.ch_hist.at[record].set(change, mode="drop"),
+            ev_hist=state.ev_hist.at[record].set(next_evals, mode="drop"),
+            sf_hist=state.sf_hist.at[record].set(fired, mode="drop"),
         )
 
-        def _stabilize(t: Array) -> tuple[Array, Array]:
-            c, _ = e_step(prob, t)
-            return m_step(prob, t, c, n_newton, unconstrained), three
-
-        def _fallback(_unused: Array) -> tuple[Array, Array]:
-            return theta2, two
-
-        new, evals_added = jax.lax.cond(do_stabilize, _stabilize, _fallback, theta_prime)
-        change = jnp.max(jnp.abs(new - eta), initial=0.0)
-        next_evals = n_evals + evals_added
-        next_safe = n_safe + fired.astype(jnp.int32)
-        return (
-            new,
-            it + one,
-            change,
-            next_evals,
-            next_safe,
-            ll_hist.at[it].set(ll0),
-            lp_hist.at[it].set(lp0),
-            ch_hist.at[it].set(change),
-            ev_hist.at[it].set(next_evals),
-            sf_hist.at[it].set(fired),
-        )
-
-    init = (
-        eta0,
-        zero,
-        jnp.asarray(jnp.inf, eta0.dtype),
-        zero,
-        zero,
-        nan_hist,
-        nan_hist,
-        nan_hist,
-        eval_hist,
-        safe_hist,
+    nan_scalar = jnp.asarray(jnp.nan, eta0.dtype)
+    init = _SquaremState(
+        eta=eta0,
+        x=eta0,
+        phase=zero,
+        theta1=eta0,
+        ll0=nan_scalar,
+        lp0=nan_scalar,
+        fired=jnp.asarray(False),
+        it=zero,
+        change=jnp.asarray(jnp.inf, eta0.dtype),
+        n_evals=zero,
+        n_safe=zero,
+        ll_hist=nan_hist,
+        lp_hist=nan_hist,
+        ch_hist=nan_hist,
+        ev_hist=eval_hist,
+        sf_hist=safe_hist,
     )
-    eta, n_iter, change, n_evals, n_safe, ll_hist, lp_hist, ch_hist, ev_hist, sf_hist = (
-        jax.lax.while_loop(cond, body, init)
-    )
+    out = jax.lax.while_loop(cond, body, init)
+    eta = out.eta
     final_ll = marginal_loglik(prob, eta)
     return EMResult(
         eta=eta,
         eh_weights=prob.latent.eh_weights,
-        n_iter=n_iter,
-        converged=change < tol,
+        n_iter=out.it,
+        converged=out.change < tol,
         loglik=final_ll,
         log_posterior=final_ll + log_prior(prob, eta),
-        loglik_history=ll_hist,
-        log_posterior_history=lp_hist,
-        change_history=ch_hist,
-        n_em_evaluations=n_evals,
-        em_eval_history=ev_hist,
-        safeguard_history=sf_hist,
-        n_safeguards=n_safe,
+        loglik_history=out.ll_hist,
+        log_posterior_history=out.lp_hist,
+        change_history=out.ch_hist,
+        n_em_evaluations=out.n_evals,
+        em_eval_history=out.ev_hist,
+        safeguard_history=out.sf_hist,
+        n_safeguards=out.n_safe,
     )
 
 

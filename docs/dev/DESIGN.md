@@ -466,7 +466,8 @@ data-independent shapes (§15.21).
   - **SQUAREM trade-off**: `BAEM(squarem=True)` reduces EM evaluations by 33–69% and warm EM time
     (`0.38×–0.90×` of plain EM on every case, biggest gains on 2-group 2PL and 3PL), but adds
     ~0.05–0.4 s of cold compilation overhead (more with Oakes SE on `20000 × 40`). The default (`squarem=False`) is kept unchanged pending a maintainer
-    decision on cold vs. warm/slow-model priority.
+    decision on cold vs. warm/slow-model priority. #154 made the SQUAREM loop hold one EM map and removed most of this
+    extra compile time (§28.1).
 
 ## 10. Errors and warnings
 - `SpecificationError`: inconsistent specification (fixing an unknown item, wrong number of
@@ -3921,6 +3922,76 @@ data-independent shapes (§15.21).
    independent R marginal log-likelihood, and records the R Richardson-Hessian SEs, mirt's Oakes
    SEs, EAPs computed in R from `probtrace()`, and S-X2 per group from `itemfit()` on single-group
    mirt objects with the same `customGroup` fixed at the group's estimates.
+
+## 28. Cold start: compilation and preprocessing (#154)
+
+Measured on a shared 16-core x86 Linux machine pinned to two cores (`taskset -c 8,9`), 61
+quadrature points, `TOL = 1e-4`; each number is a fresh process. Cold fits there take 4–17 s,
+almost all of it JAX tracing and XLA compilation; Python preprocessing is 0.05–0.1 s for one or
+two groups.
+
+1. **SQUAREM: one EM map per loop pass (adopted).** Before #154 the SQUAREM `while_loop` body
+   contained three copies of the EM map $F$ (E-step and M-step): $\theta_1=F(\theta_0)$,
+   $\theta_2=F(\theta_1)$ and the stabilizing $F(\theta')$, plus the log posterior of the
+   safeguard. XLA compiles each copy separately, so SQUAREM compiled 2.9–4.5 s longer than plain
+   EM. The loop now runs one EM map evaluation per pass and keeps a `phase`
+   (0, 1, 2 = which of the three evaluations is next) in its state (`_SquaremState`):
+   phase 0 stores $\theta_1$ and the log-likelihood and log posterior at $\theta_0$; phase 1 forms
+   $r,s,v$, the step length and the backtracked candidate exactly as before (§4.6) and either
+   sends $\theta'$ to phase 2 or accepts $\theta_2$ (fallback, 2 evaluations); phase 2 accepts
+   $F(\theta')$ (3 evaluations). An iteration ends only in phase 1 (fallback) or 2, and only then
+   are the iteration counter, the change and the histories updated (`mode="drop"` writes for the
+   other passes) and the stopping rule checked. The arithmetic and its order are those of the
+   three-copy body, so estimates, histories, iteration and evaluation counts are unchanged (the
+   test suite's SQUAREM tests and mirt comparisons pass unchanged). The EH variant
+   (`_squarem_eh`, §15.36) does the same on $(\eta,\sqrt w)$. Compile time (trace + lower + XLA,
+   two repetitions):
+
+   | case | plain EM | SQUAREM before | SQUAREM after |
+   |---|---|---|---|
+   | 2PL 1000 × 20 | 3.7–3.8 s | 6.6–7.0 s | 4.3–4.9 s |
+   | GRM(4) 2000 × 20 | 4.9–5.7 s | 8.4–10.0 s | 4.3–4.6 s |
+   | 2-group 2PL 6000 × 30 | 5.0–6.2 s | 8.6–10.7 s | 6.6–8.3 s |
+
+   HLO text size drops from 2.4× to 1.2–1.3× that of plain EM. Warm time is unchanged within
+   noise (the loop runs up to three times as many passes, each with a `lax.switch`).
+   - **Rejected: the EM map as a nested `jax.jit` subroutine** (the proposal in #154). JAX traces
+     and lowers the subroutine once (trace + lower 0.9–1.4 s shorter), but XLA's CPU pipeline
+     inlines every call before optimizing, so XLA time did not change (2PL 4.8–5.2 s vs 4.9–5.2 s,
+     2-group 8.0–10.6 s vs 6.2–7.8 s). Superseded by the phased loop, which needs no subroutine.
+2. **`enable_compilation_cache(path=None, *, min_compile_time=0.0)` (adopted, opt-in).** Importing
+   flexpyirt never touches the JAX configuration (CLAUDE.md principle 4); this public function is
+   the explicit call that sets `jax_compilation_cache_dir` (default: the OS user cache directory
+   plus `flexpyirt/jax`) and `jax_persistent_cache_min_compile_time_secs` (default 0, because
+   JAX's 1 s threshold skips most of flexpyirt's programs). A later process with the same shapes
+   loads the compiled executables; results are bit-identical (a test runs two processes and
+   compares). The cache key includes the shapes, so a different padded pattern count (§4.1) or
+   group count compiles again. JAX reads the directory when it first writes or reads an entry, so the
+   call also works after other JAX code has compiled (tested); programs compiled before the call
+   are not written. CI keeps its own `JAX_COMPILATION_CACHE_DIR` (CONTRIBUTING.md).
+3. **Pattern compression on packed rows (adopted).** `compress_patterns` used
+   `np.unique(np.column_stack([group, y]), axis=0)`, which sorts the $(N, J+1)$ rows as
+   structured records. Each column is now shifted by its minimum and packed as a bit field of
+   $b_c=\lceil\log_2(\max_c-\min_c+1)\rceil$ bits (at least 1) into `uint64` words, most
+   significant first (`_pack_rows`): binary items with missing values take 2 bits, 32 items per
+   word. The packing is injective and order preserving, so `np.unique` on one word (or `lexsort`
+   on several) gives exactly the old unique rows, order, counts and inverse (no hashing, so no
+   collisions to check). Hypothesis tests compare with the old implementation. The gain is
+   10–40 ms on the benchmark data (N ≤ 40 000, J ≤ 40); it grows with $N$ and $J$.
+4. **Preprocessing at many groups (adopted).** At $G=200$ (`manygroups_2pl_g200`, 40 000 rows)
+   `prepare` + `compile_problem` took 1.2 s. The two hot spots were not the ones #154 named:
+   `coerce_groups` rebuilt a set of all $N$ labels once per group (0.69 s; now one `np.unique`
+   of the labels and a lookup of the distinct ones), and `_check_identification` filtered the
+   table once per group and iterated a pandas `groupby` over the free ids (0.59 s; now NumPy
+   arrays of group codes, one `np.unique` of the (free id, group) pairs for the union-find, and a
+   `bincount` for the single-anchor warning). `build_table` now builds the item rows once and
+   repeats them per group (they depend only on the item: fixed values, priors and starting values
+   are keyed by item and parameter) as columns instead of one `dict` per row (0.16 s → 0.12 s).
+   Total 1.2 s → 0.52 s; the parameter table, every compiled array, the identification errors and
+   warnings are identical to before on 16 models (one and several groups, EH, Davidian, priors,
+   equal-across-items, two factors). `compile_problem`'s per-(group, item, parameter) loop
+   (0.1 s at $G=200$) was left as it is: the remaining costs are spread over many small checks,
+   each at most 0.16 s, next to several seconds of compilation.
 
 ## References
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.

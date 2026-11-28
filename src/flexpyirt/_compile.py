@@ -199,14 +199,18 @@ def coerce_groups(
     labels = np.asarray(group.to_numpy() if hasattr(group, "to_numpy") else group).astype(str)
     if labels.shape != (n,):
         raise SpecificationError(f"group= must have one label per row ({n}), got {labels.shape}.")
-    unknown = sorted(set(labels.tolist()) - set(names))
+    # Map the distinct labels once, then broadcast (DESIGN.md §28.4).
+    distinct, label_codes = np.unique(labels, return_inverse=True)
+    present = set(distinct.tolist())
+    unknown = sorted(present - set(names))
     if unknown:
         raise SpecificationError(f"group= has labels not declared in with_groups(): {unknown}.")
-    absent = [g for g in names if g not in set(labels.tolist())]
+    absent = [g for g in names if g not in present]
     if absent and require_all:
         raise SpecificationError(f"Groups declared but absent from the data: {absent}.")
     lookup = {g: i for i, g in enumerate(names)}
-    return np.array([lookup[v] for v in labels], dtype=np.int32), names
+    code_of = np.array([lookup[v] for v in distinct.tolist()], dtype=np.int32)
+    return code_of[label_codes.reshape(-1)], names
 
 
 def coerce_weights(weights: Any, n: int) -> np.ndarray | None:
@@ -262,6 +266,57 @@ def coerce_clusters(cluster: Any, n: int) -> tuple[np.ndarray, int] | None:
     return codes.astype(np.int32), len(uniques)
 
 
+def _pack_rows(keyed: np.ndarray) -> np.ndarray:
+    r"""Pack integer rows into ``uint64`` words whose lexicographic order is the rows' (§28.3).
+
+    Column :math:`c` is shifted to :math:`x_c-\min_c x_c\in[0,2^{b_c})` and the shifted columns
+    are concatenated as bit fields, most significant first, starting a new word when the next
+    field does not fit in 64 bits. The map is injective and order preserving, so equal rows have
+    equal words and the lexicographic order of the words is that of the rows.
+    """
+    n_rows = keyed.shape[0]
+    low = keyed.min(axis=0).astype(np.int64)
+    span = keyed.max(axis=0).astype(np.int64) - low
+    widths = [max(1, int(v).bit_length()) for v in span.tolist()]
+    words: list[np.ndarray] = []
+    word = np.zeros(n_rows, dtype=np.uint64)
+    used = 0
+    for col, width in enumerate(widths):
+        if used + width > 64:
+            words.append(word)
+            word = np.zeros(n_rows, dtype=np.uint64)
+            used = 0
+        field = (keyed[:, col].astype(np.int64) - low[col]).astype(np.uint64)
+        word = (word << np.uint64(width)) | field
+        used += width
+    words.append(word)
+    return np.stack(words, axis=1)
+
+
+def _unique_rows(keyed: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return ``np.unique(keyed, axis=0, return_inverse=True, return_counts=True)`` (§28.3).
+
+    Same output (sorted unique rows, each row's index, counts), computed on the packed words of
+    :func:`_pack_rows` instead of on the full rows.
+    """
+    packed = _pack_rows(keyed)
+    if packed.shape[1] == 1:
+        _, first, inverse, n_rows = np.unique(
+            packed[:, 0], return_index=True, return_inverse=True, return_counts=True
+        )
+        return keyed[first], inverse.reshape(-1), n_rows
+    order = np.lexsort(packed.T[::-1])
+    ordered = packed[order]
+    starts_new = np.empty(ordered.shape[0], dtype=bool)
+    starts_new[:1] = True
+    np.any(ordered[1:] != ordered[:-1], axis=1, out=starts_new[1:])
+    starts = np.flatnonzero(starts_new)
+    inverse = np.empty(ordered.shape[0], dtype=np.intp)
+    inverse[order] = np.cumsum(starts_new) - 1
+    n_rows = np.diff(np.append(starts, ordered.shape[0]))
+    return keyed[order[starts]], inverse, n_rows
+
+
 def compress_patterns(
     y: np.ndarray, group: np.ndarray, weights: np.ndarray | None = None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -270,8 +325,7 @@ def compress_patterns(
     With ``weights``, a pattern's count is the sum of its rows' weights (§17.4).
     """
     keyed = np.column_stack([group, y])
-    uniq, inverse, n_rows = np.unique(keyed, axis=0, return_inverse=True, return_counts=True)
-    inverse = inverse.reshape(-1)
+    uniq, inverse, n_rows = _unique_rows(keyed)
     counts: np.ndarray = (
         n_rows.astype(float)
         if weights is None
@@ -635,93 +689,87 @@ def _davidian_phi_starts(degree: int, y: np.ndarray) -> list[float]:
 
 def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
     """Build the default ParameterTable (DESIGN.md §5.1, §14.1) from the spec and responses."""
-    rows: list[dict[str, Any]] = []
     starts = _start_values(model, y)
     fixed = {(item, param): value for item, param, value in model.fixed}
     priors = {(item, param): dist for item, param, dist in model.priors}
     n_factors = model.n_factors
     all_fixed_slope = all(isinstance(m, (Rasch, PCM)) for _, m in model.items)
-    for group_name, latent in model.resolved_groups():
-        for name, item_model in model.items:
-            kernel = model.item_kernel(item_model)
-            base_lo, base_hi = item_model.bounds()
-            base_free = item_model.default_free()
-            lower = (base_lo[0],) * n_factors + base_lo[1:]
-            upper = (base_hi[0],) * n_factors + base_hi[1:]
-            loaded_set = set(model.item_factors(name))
-            free_default = (
-                tuple(m in loaded_set and base_free[0] for m in range(n_factors)) + base_free[1:]
+    # The item rows do not depend on the group (fixed values, priors and starting values are
+    # keyed by item and parameter): build them once and repeat them per group (§28.4).
+    item_columns: dict[str, list[Any]] = {
+        name: [] for name in ("item", "model", "param", "value", "free", "lower", "upper", "prior")
+    }
+    for name, item_model in model.items:
+        kernel = model.item_kernel(item_model)
+        base_lo, base_hi = item_model.bounds()
+        base_free = item_model.default_free()
+        lower = (base_lo[0],) * n_factors + base_lo[1:]
+        upper = (base_hi[0],) * n_factors + base_hi[1:]
+        loaded_set = set(model.item_factors(name))
+        free_default = (
+            tuple(m in loaded_set and base_free[0] for m in range(n_factors)) + base_free[1:]
+        )
+        param_names = kernel.param_names
+        item_starts = starts[name].copy()
+        is_free = [
+            free_default[k] and (name, param) not in fixed for k, param in enumerate(param_names)
+        ]
+        eff_lo = [float(v) for v in lower]
+        eff_hi = [float(v) for v in upper]
+        for k, param in enumerate(param_names):
+            if not is_free[k]:
+                item_starts[k] = fixed.get((name, param), float(item_starts[k]))
+                continue
+            pri = priors.get((name, param))
+            if pri is not None:
+                p_lo, p_hi = pri.support
+                eff_lo[k] = max(eff_lo[k], p_lo)
+                eff_hi[k] = min(eff_hi[k], p_hi)
+            lo_k, hi_k = eff_lo[k], eff_hi[k]
+            if lo_k < hi_k and not (lo_k < float(item_starts[k]) < hi_k):
+                candidate = _prior_center(pri) if pri is not None else None
+                item_starts[k] = _interior_point(lo_k, hi_k, candidate)
+        if isinstance(kernel, FourPLKernel):
+            g_idx = n_factors + 1
+            u_idx = n_factors + 2
+            g_free = is_free[g_idx]
+            u_free = is_free[u_idx]
+            if g_free and not u_free:
+                hi_g = min(eff_hi[g_idx], float(item_starts[u_idx]))
+                if eff_lo[g_idx] < hi_g and not (eff_lo[g_idx] < float(item_starts[g_idx]) < hi_g):
+                    item_starts[g_idx] = _interior_point(eff_lo[g_idx], hi_g)
+            elif u_free and not g_free:
+                lo_u = max(eff_lo[u_idx], float(item_starts[g_idx]))
+                if lo_u < eff_hi[u_idx] and not (lo_u < float(item_starts[u_idx]) < eff_hi[u_idx]):
+                    item_starts[u_idx] = _interior_point(lo_u, eff_hi[u_idx])
+            elif g_free and u_free and not (float(item_starts[g_idx]) < float(item_starts[u_idx])):
+                ov_lo = max(eff_lo[g_idx], eff_lo[u_idx])
+                ov_hi = min(eff_hi[g_idx], eff_hi[u_idx])
+                if ov_lo < ov_hi and math.isfinite(ov_lo) and math.isfinite(ov_hi):
+                    item_starts[g_idx] = ov_lo + (ov_hi - ov_lo) / 3.0
+                    item_starts[u_idx] = ov_lo + 2.0 * (ov_hi - ov_lo) / 3.0
+        elif isinstance(kernel, GradedKernel):
+            item_starts[n_factors:] = _order_grm_intercepts(
+                item_starts[n_factors:],
+                is_free[n_factors:],
+                eff_lo[n_factors:],
+                eff_hi[n_factors:],
             )
-            param_names = kernel.param_names
-            item_starts = starts[name].copy()
-            is_free = [
-                free_default[k] and (name, param) not in fixed
-                for k, param in enumerate(param_names)
-            ]
-            eff_lo = [float(v) for v in lower]
-            eff_hi = [float(v) for v in upper]
-            for k, param in enumerate(param_names):
-                if not is_free[k]:
-                    item_starts[k] = fixed.get((name, param), float(item_starts[k]))
-                    continue
-                pri = priors.get((name, param))
-                if pri is not None:
-                    p_lo, p_hi = pri.support
-                    eff_lo[k] = max(eff_lo[k], p_lo)
-                    eff_hi[k] = min(eff_hi[k], p_hi)
-                lo_k, hi_k = eff_lo[k], eff_hi[k]
-                if lo_k < hi_k and not (lo_k < float(item_starts[k]) < hi_k):
-                    candidate = _prior_center(pri) if pri is not None else None
-                    item_starts[k] = _interior_point(lo_k, hi_k, candidate)
-            if isinstance(kernel, FourPLKernel):
-                g_idx = n_factors + 1
-                u_idx = n_factors + 2
-                g_free = is_free[g_idx]
-                u_free = is_free[u_idx]
-                if g_free and not u_free:
-                    hi_g = min(eff_hi[g_idx], float(item_starts[u_idx]))
-                    if eff_lo[g_idx] < hi_g and not (
-                        eff_lo[g_idx] < float(item_starts[g_idx]) < hi_g
-                    ):
-                        item_starts[g_idx] = _interior_point(eff_lo[g_idx], hi_g)
-                elif u_free and not g_free:
-                    lo_u = max(eff_lo[u_idx], float(item_starts[g_idx]))
-                    if lo_u < eff_hi[u_idx] and not (
-                        lo_u < float(item_starts[u_idx]) < eff_hi[u_idx]
-                    ):
-                        item_starts[u_idx] = _interior_point(lo_u, eff_hi[u_idx])
-                elif (
-                    g_free
-                    and u_free
-                    and not (float(item_starts[g_idx]) < float(item_starts[u_idx]))
-                ):
-                    ov_lo = max(eff_lo[g_idx], eff_lo[u_idx])
-                    ov_hi = min(eff_hi[g_idx], eff_hi[u_idx])
-                    if ov_lo < ov_hi and math.isfinite(ov_lo) and math.isfinite(ov_hi):
-                        item_starts[g_idx] = ov_lo + (ov_hi - ov_lo) / 3.0
-                        item_starts[u_idx] = ov_lo + 2.0 * (ov_hi - ov_lo) / 3.0
-            elif isinstance(kernel, GradedKernel):
-                item_starts[n_factors:] = _order_grm_intercepts(
-                    item_starts[n_factors:],
-                    is_free[n_factors:],
-                    eff_lo[n_factors:],
-                    eff_hi[n_factors:],
-                )
-            for k, param in enumerate(param_names):
-                key = (name, param)
-                rows.append(
-                    {
-                        "group": group_name,
-                        "item": name,
-                        "model": item_model.name,
-                        "param": param,
-                        "value": float(item_starts[k]),
-                        "free": is_free[k],
-                        "lower": float(lower[k]),
-                        "upper": float(upper[k]),
-                        "prior": priors.get(key),
-                    }
-                )
+        for k, param in enumerate(param_names):
+            item_columns["item"].append(name)
+            item_columns["model"].append(item_model.name)
+            item_columns["param"].append(param)
+            item_columns["value"].append(float(item_starts[k]))
+            item_columns["free"].append(is_free[k])
+            item_columns["lower"].append(float(lower[k]))
+            item_columns["upper"].append(float(upper[k]))
+            item_columns["prior"].append(priors.get((name, param)))
+    columns: dict[str, list[Any]] = {name: [] for name in ("group", *item_columns)}
+    n_item_rows = len(item_columns["item"])
+    for group_name, latent in model.resolved_groups():
+        columns["group"].extend([group_name] * n_item_rows)
+        for name, column_values in item_columns.items():
+            columns[name].extend(column_values)
         if isinstance(latent, EmpiricalHistogram):
             continue
         if isinstance(latent, DavidianCurve):
@@ -770,20 +818,16 @@ def build_table(model: Model, y: np.ndarray) -> pd.DataFrame:
             ]
             lat_model = "MVN"
         for param, value, free, lat_lower, lat_upper in latent_rows:
-            rows.append(
-                {
-                    "group": group_name,
-                    "item": LATENT_ITEM,
-                    "model": lat_model,
-                    "param": param,
-                    "value": float(value),
-                    "free": bool(free),
-                    "lower": lat_lower,
-                    "upper": lat_upper,
-                    "prior": None,
-                }
-            )
-    table = pd.DataFrame(rows)
+            columns["group"].append(group_name)
+            columns["item"].append(LATENT_ITEM)
+            columns["model"].append(lat_model)
+            columns["param"].append(param)
+            columns["value"].append(float(value))
+            columns["free"].append(bool(free))
+            columns["lower"].append(lat_lower)
+            columns["upper"].append(lat_upper)
+            columns["prior"].append(None)
+    table = pd.DataFrame(columns)
     table["prior"] = table["prior"].astype(object)
     free_mask = table["free"].to_numpy(dtype=bool)
     item_col = table["item"].to_numpy(dtype=object)
@@ -1262,26 +1306,36 @@ def _check_identification(t: pd.DataFrame, model: Model) -> None:
             if i == LATENT_ITEM
         }
 
+    group_code = {g: k for k, g in enumerate(groups)}
+    item_group = np.array([group_code[g] for g in items["group"].tolist()], dtype=np.int64)
+    item_free = items["free"].to_numpy(dtype=bool)
+    item_fid = items["free_id"].to_numpy(dtype=np.int64)
+    item_value = items["value"].to_numpy(dtype=float)
     for latent_param, kind, what in (("var", "slope", "scale"), ("mean", "intercept", "location")):
-        rows = items[role == kind]
-        parent = {g: g for g in groups}
+        in_kind = role == kind
+        # Groups sharing a free parameter are linked (union-find over group codes; the classes,
+        # not the visiting order, decide the result).
+        parent = list(range(len(groups)))
 
-        def find(g: str, parent: dict[str, str] = parent) -> str:
-            while parent[g] != g:
-                g = parent[g]
-            return g
+        def find(k: int, parent: list[int] = parent) -> int:
+            while parent[k] != k:
+                k = parent[k]
+            return k
 
-        for _, shared in rows[rows["free"]].groupby("free_id"):
-            gs = list(shared["group"].unique())
-            for other in gs[1:]:
-                parent[find(other)] = find(gs[0])
-        fixed_rows = rows[~rows["free"]]
+        shared = in_kind & item_free
+        pairs = np.unique(np.column_stack([item_fid[shared], item_group[shared]]), axis=0)
+        same_id = pairs[1:, 0] == pairs[:-1, 0]
+        for first, other in zip(
+            pairs[:-1][same_id, 1].tolist(), pairs[1:][same_id, 1].tolist(), strict=True
+        ):
+            parent[find(other)] = find(first)
+        fixed_rows = in_kind & ~item_free
         if kind == "slope":
-            fixed_rows = fixed_rows[fixed_rows["value"] != 0]
-        anchored = {find(g) for g in fixed_rows["group"]}
-        anchored |= {find(g) for g in groups if not lat_free[(g, latent_param)]}
-        for g in groups:
-            if lat_free[(g, latent_param)] and find(g) not in anchored:
+            fixed_rows &= item_value != 0
+        anchored = {find(k) for k in np.unique(item_group[fixed_rows]).tolist()}
+        anchored |= {find(k) for k, g in enumerate(groups) if not lat_free[(g, latent_param)]}
+        for k, g in enumerate(groups):
+            if lat_free[(g, latent_param)] and find(k) not in anchored:
                 where = "" if not model.is_multigroup else f" of group {g!r}"
                 fix_hint = (
                     "fix at least one slope (e.g. Rasch or PCM items)"
@@ -1294,15 +1348,15 @@ def _check_identification(t: pd.DataFrame, model: Model) -> None:
                     "equal across groups (anchors)."
                 )
         if model.is_multigroup and latent_param == "mean":
-            n_groups_per_id = rows[rows["free"]].groupby("free_id")["group"].nunique()
-            for g in groups:
-                if not lat_free[(g, "mean")]:
-                    continue
-                own = rows[rows["group"] == g]
-                linked = own.loc[own["free"], "free_id"]
-                n_anchor = int((n_groups_per_id.reindex(linked).fillna(0) > 1).sum())
-                n_anchor += int((~own["free"]).sum())
-                if n_anchor == 1:
+            # Anchor parameters of a group: its fixed rows and its free rows whose free_id is
+            # shared with another group.
+            n_groups_per_id = np.bincount(pairs[:, 0], minlength=max(1, int(item_fid.max()) + 1))
+            linked = shared & (n_groups_per_id[np.where(shared, item_fid, 0)] > 1)
+            n_anchor = np.bincount(
+                item_group[in_kind & (linked | ~item_free)], minlength=len(groups)
+            )
+            for k, g in enumerate(groups):
+                if lat_free[(g, "mean")] and n_anchor[k] == 1:
                     warnings.warn(
                         f"The latent mean of group {g!r} is linked by a single anchor parameter; "
                         "estimates may be unstable. Consider more anchor items.",
