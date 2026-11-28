@@ -38,6 +38,14 @@ class BAEM:
         not transformed. The objective, the estimates at an interior solution, the parameter
         table, the priors, the standard errors and SQUAREM are unchanged; a boundary solution is
         only approached and may need many more iterations.
+    asymptote_m_step : {"joint", "mixture"}
+        M-step of 3PL / 4PL items (DESIGN.md §15.49). ``"joint"`` (default) maximizes the usual
+        expected complete-data log-likelihood over :math:`(a, d, g, u)` jointly by Newton.
+        ``"mixture"`` (EMM; Zheng, Meng, Guo & Liu, 2018) treats each response as a guess, a slip
+        or an ability-based response, which makes the asymptote update closed form and the
+        slope–intercept update a weighted 2PL fit; both parts are concave. The marginal
+        likelihood, its maximum, the priors and the standard errors are unchanged; the number of
+        iterations differs. Other item models, and items linked across items, are unaffected.
     """
 
     tol: float = 1e-4
@@ -45,6 +53,7 @@ class BAEM:
     m_step_newton_steps: int = 3
     squarem: bool = False
     m_step_scale: Literal["natural", "unconstrained"] = "natural"
+    asymptote_m_step: Literal["joint", "mixture"] = "joint"
 
     def __post_init__(self) -> None:
         """Validate settings."""
@@ -61,4 +70,8 @@ class BAEM:
         if self.m_step_scale not in ("natural", "unconstrained"):
             raise SpecificationError(
                 f"m_step_scale must be 'natural' or 'unconstrained', got {self.m_step_scale!r}."
+            )
+        if self.asymptote_m_step not in ("joint", "mixture"):
+            raise SpecificationError(
+                f"asymptote_m_step must be 'joint' or 'mixture', got {self.asymptote_m_step!r}."
             )
