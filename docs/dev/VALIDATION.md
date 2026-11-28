@@ -166,6 +166,7 @@ English | [日本語](VALIDATION.ja.md)
 | V55 | Many groups with the group-blocked E-step: 2PL, 10 groups of unequal size (200–470), 15 items, anchors q01–q06 invariant, q07–q15 free per group, focal means and variances free, 5% MCAR missing; regression of the blocked against the flat E-step | `multipleGroup(invariance = c(<anchors>, "free_means", "free_var"), SE.type = "Oakes")`, `fscores(extract.group(m, g), method = "EAP")`; the flat path for the regression | #79 |
 | V56 | `DavidianCurve` and `NormalMixture` per group: (a) 2PL, three groups (bimodal, right-, left-skewed), `DavidianCurve(2)`, anchors q01–q06, 3% missing; (b) 2PL $J=15$, two groups, `NormalMixture(2)`, every item invariant; (c) FIPC, two groups, `DavidianCurve(2)`, every latent free. Estimates, R Hessian SEs, EAP, S-X2 per group | `multipleGroup(customGroup = createGroup(...))` with the standardized densities normalized on the grid (`dcurver::ddc`), Newton-polished on an independent R marginal log-likelihood; R Richardson-Hessian SEs; EAP in R; `itemfit(use_dentype_estimate = TRUE)` on single-group objects fixed at each group's estimates | #75 |
 | V57 | Weighted and cluster-robust sandwich SEs: (a) 2PL $J=10$, 40 schools of 25 with a school effect in $\theta$, unequal weights, 3% missing; (b) 2PL $J=8$, ref/focal with anchors q01–q05, focal mean and variance free, 30 schools spanning the groups. Middle matrices (weighted, cluster, unweighted cluster, singleton clusters) at mirt's estimates, `se="crossprod"` with weights, mirt's weighted sandwich reproduced, SEs end to end | `mirt()` / `multipleGroup()` with `survey.weights`, `SE.type = "Oakes"` (bread), `"crossprod"`, `"sandwich"`; per-person scores by `numDeriv::jacobian` on mirt's grid (checked against `estfun.AllModelClass`); $H^{-1}BH^{-1}$ computed in R | #84, #85 |
+| V58 | Optional `float32` warmup (`BAEM(warmup_dtype="float32")`) on the V11 (3PL/4PL) and V14 (2–3 factors) cases; 2PL, GRM $K=4$, two groups with anchors, empirical histogram and MAP (simulated) against fits without warmup | the existing references of those cases; flexpyirt's own pure `float64` fits | #156 |
 
 ## mirt settings and known differences (found in M1)
 - **M-step optimizer**: references are generated with `optimizer = "NR"`. mirt's default M-step
@@ -1434,6 +1435,28 @@ English | [日本語](VALIDATION.ja.md)
   dropped with their clusters; relabelling the clusters; prior curvature added to the cluster
   meat; `crossprod` with weights $=(\sum_iw_is_is_i^\top)^{-1}$; warnings, errors, summary and JSON
   (schema 9, `n_clusters`).
+
+- **`float32` warmup (V58, #156; DESIGN §28)**: the warmup only changes the starting values of the
+  `float64` EM, which stops at the same `tol`, so the checks are that (1) the mirt comparisons
+  still pass and (2) the fit agrees with a pure `float64` fit to about `tol`.
+  1. *mirt.* `tests/test_mirt_m3.py` (V11: 3PL/4PL log-likelihood, $a,d,g,u$, Oakes and Hessian
+     SEs) and `tests/test_mirt_m4_mirt.py` (V14: 2–3 factor log-likelihood, item parameters,
+     latent correlations) repeat their comparisons with the warmup at `tol=1e-9` and the same
+     tolerances as without it; all 20 pass.
+  2. *Against pure `float64`* (`tests/test_mixed_precision.py`, plain EM and SQUAREM, Oakes SEs):
+     2PL $J=12$, GRM $K=4$ $J=8$, two groups with six anchors and a free focal mean and variance
+     (the group-blocked E-step), and a 2PL with `LogNormalPrior` slopes (MAP), at `tol=1e-7`:
+     estimates within $10^{-5}$, log-likelihood and log posterior within $10^{-8}$ relative, Oakes
+     SEs within $10^{-4}$ relative. `EmpiricalHistogram` at `tol=1e-4` (its plain EM does not
+     reach $10^{-5}$ in 2000 iterations, with or without warmup): estimates within $10^{-3}$ with
+     plain EM. With SQUAREM the EH optimum is so flat that pure EM and pure SQUAREM stop 0.19
+     apart at the same `tol`; the warmup moves SQUAREM's stopping point by 0.018, and the test
+     requires no more than the EM-vs-SQUAREM gap. Further unit tests: the `float64` stage stops
+     below `tol` with a monotone log posterior and fewer `float64` iterations than without
+     warmup; a warmup with a non-finite log-likelihood is discarded with a warning and the fit
+     then equals the pure `float64` fit bit for bit; `cast_floats` keeps integer leaves and the
+     pytree structure; JSON (schema 10, `warmup_dtype`, `n_warmup_iter`). The default
+     (`warmup_dtype=None`) runs no `float32` code, so every other test checks it unchanged.
 
 ## Validation beyond agreement
 - **Normal-mixture latent distributions (V22, M5)**: flexpyirt's `NormalMixture` (DESIGN §16.7)

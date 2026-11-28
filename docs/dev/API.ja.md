@@ -107,6 +107,8 @@ res = fit(
 )
 # 標本ウェイトとクラスタ抽出（学校の中の生徒）: 標本設計に基づくサンドイッチ SE。
 res_cl = fit(spec, df, weights=w, cluster=school, se="sandwich")
+# float32 でウォームアップしてから float64 で tol まで（GPU 向け。DESIGN §28）。res_w.n_warmup_iter が反復回数。
+res_w = fit(spec, df, method=BAEM(warmup_dtype="float32"))
 (
     res.converged,
     res.n_iter,

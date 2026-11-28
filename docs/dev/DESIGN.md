@@ -269,6 +269,8 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   SQUAREM always works on the natural scale, whatever `m_step_scale` is (§15.47).
 - Both plain EM and SQUAREM run entirely on device in `lax.while_loop` (no Python iteration loop or
   host callbacks). Optional progress output with `jax.debug.callback` is left for later.
+- `BAEM(warmup_dtype="float32")` (#156) runs EM first on a `float32` copy of the problem to
+  $\max(10\,\mathtt{tol},10^{-3})$, then in `float64` to `tol` as above (§28).
 
 ### 4.7 MAP (Bayes modal)
 - **Decision (M3, §15.14–§15.17)**: public frozen prior distributions `NormalPrior(mean, sd)`,
@@ -448,6 +450,8 @@ data-independent shapes (§15.21).
 ## 9. Performance
 - Pattern compression and bucket padding limit recompilation.
 - `vmap` per item family. Mixed item types loop only over the (static) families.
+- Opt-in `float32` warmup for hardware with slow `float64`; pattern-axis sharding was
+  prototyped and rejected (§28).
 - The default target is "fast enough on CPU". GPU should help for large problems
   (N ≥ 10^5, J ≥ 100).
 - Benchmarks: wall time against R mirt (`TOL=1e-4`, default settings and validation settings) in
@@ -3921,6 +3925,84 @@ data-independent shapes (§15.21).
    independent R marginal log-likelihood, and records the R Richardson-Hessian SEs, mirt's Oakes
    SEs, EAPs computed in R from `probtrace()`, and S-X2 per group from `itemfit()` on single-group
    mirt objects with the same `customGroup` fixed at the group's estimates.
+
+## 28. Optional float32 warmup and pattern-axis sharding (#156)
+
+1. **Problem.** Consumer GPUs run `float64` at 1/32–1/64 of their `float32` rate, and `float32`
+   halves memory traffic everywhere. The estimates and the information matrix need `float64`
+   (principle 4 of CLAUDE.md): `float32` resolves about $10^{-7}$ relative, so a log-likelihood
+   of $-4.5\times10^{5}$ is known only to about 0.03 and the Newton/SQUAREM safeguards compare
+   values at that resolution.
+2. **Decision: `BAEM(warmup_dtype="float32")`, off by default.** With the option,
+   `fit()` (`_run_em`) first runs the same jitted `em` / `squarem` on
+   `_core.cast_floats(problem, float32)` (every floating leaf of `CompiledProblem` cast; integer
+   leaves, static fields and the pytree structure unchanged) from `eta0` cast to `float32`, until
+   the largest change is below `warmup_tol` $=\max(10\,\mathtt{tol},10^{-3})$. The result is cast
+   back to `float64`, clipped to the `float64` bounds (a bound rounded to `float32` may lie
+   slightly outside), and EH weights are renormalized. Then the usual `float64` run on the
+   **original** problem starts there and stops at `tol`; `loglik`, `log_posterior`, `history`,
+   `n_iter`, the convergence warning and the SEs all come from it. If the warmup's
+   log-likelihood, log posterior, estimates or EH weights are not finite, it is discarded with a
+   `FlexpyirtWarning` and the `float64` run starts from `eta0` (then bit for bit the default).
+   `FitResult.n_warmup_iter` counts the `float32` iterations; JSON schema 10 stores
+   `method.warmup_dtype` and, when positive, `n_warmup_iter`. The `fit()` x64 check is unchanged
+   and no global config is touched; with `warmup_dtype=None` no `float32` code runs, so the
+   default is bit for bit unchanged.
+3. **Why the core needed no change.** The Core creates its arrays with the dtypes of its inputs
+   (`dtype=prob.nodes.dtype`, `eta0.dtype`, Python scalars are weakly typed), so the whole EM
+   traces in `float32` from a cast problem. One constant does not scale: the EH moment check of
+   SQUAREM (`< 1e-10`, §15.34) always fails in `float32`, so the safeguard falls back to the EM
+   step there; this only slows the warmup.
+4. **Agreement.** Both runs follow one EM path but stop at different points, so they agree to
+   about `tol` (to the distance between two stopping points of the same linear convergence), not
+   bit for bit. V58: the V11 and V14 mirt comparisons pass with the warmup at their usual
+   tolerances; against pure `float64` at `tol=1e-7` estimates agree within $10^{-5}$,
+   log-likelihood $10^{-8}$ relative, Oakes SEs $10^{-4}$ relative. Caveats (docstring): with
+   several maxima (`NormalMixture`, 3PL) a different start can reach a different maximum, and on
+   a flat ridge (EH with SQUAREM) the stopping point moves by more than `tol` (0.018 against a
+   0.19 gap between pure EM and pure SQUAREM).
+5. **Warmup tolerance.** Measured on `2pl_n20000_j40` / `3pl_n5000_j30` (prototype, warm,
+   plain EM): `warmup_tol` 1e-3 → 19+9 / 32+19 iterations, 3e-4 → 25+3 / 45+8, 1e-4 → 28+2 /
+   54+2 (warmup + `float64`). Tighter warmups did not save more time (a `float32` iteration
+   costs about 70% of a `float64` one on CPU) and stop on the `float32` noise floor; the issue's
+   $\max(10\,\mathtt{tol},10^{-3})$ is kept and not exposed as an option.
+6. **Benchmark (CPU, 2 cores of a shared 16-core Linux machine, `taskset -c 12,13`, 61 points,
+   `tol=1e-4`, warm = median of 3).** Base = #153 WIP tip `738120b`; new = this branch with the
+   default; warmup = this branch with `--warmup-dtype float32`.
+
+   | case | SQUAREM | SE | base | new | warmup | iterations new → warmup + f64 |
+   |---|---|---|---|---|---|---|
+   | 2PL 1000×20 | no | none | 0.106 | 0.096 | 0.125 | 18 → 13+5 |
+   | 2PL 5000×40 | no | none | 0.489 | 0.464 | 0.580 | 32 → 21+11 |
+   | 2PL 20000×40 | no | none | 1.468 | 1.440 | 1.227 | 28 → 19+9 |
+   | 2PL 20000×40 | yes | none | 1.219 | 1.109 | 1.101 | 5 → 4+2 |
+   | 2PL 20000×40 | no | oakes | 1.972 | 2.034 | 1.810 | 28 → 19+9 |
+   | GRM 2000×20 | no | oakes | 0.334 | 0.383 | 0.294 | 24 → 16+8 |
+   | 3PL 5000×30 | no | none | 0.693 | 0.698 | 0.661 | 51 → 32+19 |
+   | 3PL 5000×30 | yes | none | 0.533 | 0.474 | 0.513 | 8 → 7+3 |
+   | 2-group 6000×30 | no | none | 0.889 | 0.955 | 0.777 | 105 → 61+44 |
+   | 2-group 6000×30 | yes | none | 0.527 | 0.560 | 0.623 | 11 → 12+5 |
+
+   Seconds. Base and new differ only by noise (the default path is unchanged; the machine was
+   shared, run-to-run spread about ±10%). The warmup saves 15–19% warm on the largest plain-EM
+   cases, nothing with SQUAREM (it already needs few iterations, and the `float64` stage restarts
+   its acceleration), loses on small problems, and compiles a second program: cold time rose by
+   5–15 s on every case. $|\Delta\log L|\le4.5\times10^{-5}$ at `tol=1e-4`. So on CPU the default
+   stays `None`; the option is for GPUs, where it was not measured (no GPU here).
+7. **Rejected: pattern-axis SPMD sharding.** Prototype: pad $P$ to a multiple of the devices
+   (count 0, all missing) and `device_put` `y`, `counts`, `group` with
+   `NamedSharding(Mesh(devices, ("p",)), PartitionSpec("p"))`; GSPMD partitions the flat E-step's
+   einsums over $P$ and inserts the all-reduce. Correct: on 2 forced host devices
+   (`--xla_force_host_platform_device_count=2`) the EM result equals the single-device one to
+   $1.6\times10^{-15}$ relative in the log-likelihood and the Oakes information to
+   $7\times10^{-10}$ relative. But on the same 2 cores, warm EM went 1.146 → 0.969 s on
+   `2pl_n20000_j40` (−15%, near the noise) and 0.333 → 0.316 s on `2pl_n5000_j40`, while
+   `information_oakes` went 0.52 → 0.99 s: its pattern chunks (`lax.map` over a reshaped $P$)
+   force resharding. The group-blocked E-step (§26) gathers `y_pad[rows]` with arbitrary rows,
+   which would all-gather `y`, and bifactor / two-tier paths were not checked. Adopting it would
+   mean a sharding-aware chunk layout for Oakes, blocks laid out per device for many groups, and
+   multi-device tests, with no CPU benefit to justify it. Left for a follow-up on multi-GPU
+   hardware; the flat E-step needs only the padding and `device_put` above.
 
 ## References
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.

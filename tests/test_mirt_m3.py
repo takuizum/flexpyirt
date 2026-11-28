@@ -75,12 +75,20 @@ def load(name: str) -> Case:
     return Case(name, raw, Model.uniform(item_model, items=items), Quadrature.equispaced())
 
 
-# (squarem, m_step_scale): the unconstrained M-step scale must reach the same solution (V45).
-RUNS = [(False, "natural"), (True, "natural"), (False, "unconstrained")]
+# (squarem, m_step_scale, warmup_dtype): the unconstrained M-step scale (V45) and the float32
+# warmup (V58) must reach the same solution.
+RUNS = [
+    (False, "natural", None),
+    (True, "natural", None),
+    (False, "unconstrained", None),
+    (False, "natural", "float32"),
+]
 
 
 @cache
-def _fit(name: str, se: str, squarem: bool = False, scale: str = "natural") -> FitResult:
+def _fit(
+    name: str, se: str, squarem: bool = False, scale: str = "natural", warmup: str | None = None
+) -> FitResult:
     case = load(name)
     with warnings.catch_warnings():
         warnings.simplefilter("error", HeywoodWarning)
@@ -92,6 +100,7 @@ def _fit(name: str, se: str, squarem: bool = False, scale: str = "natural") -> F
                 max_iter=20000,
                 squarem=squarem,
                 m_step_scale=scale,  # type: ignore[arg-type]
+                warmup_dtype=warmup,  # type: ignore[arg-type]
             ),
             quadrature=case.quadrature,
             se=se,  # type: ignore[arg-type]
@@ -113,27 +122,27 @@ def _fixed_at_mirt(name: str) -> FitResult:
     return fit(case.spec, case.data, table=table, quadrature=case.quadrature, se=None)
 
 
-@pytest.mark.parametrize(("squarem", "scale"), RUNS)
+@pytest.mark.parametrize(("squarem", "scale", "warmup"), RUNS)
 @pytest.mark.parametrize("name", CASES)
-def test_loglik(name: str, squarem: bool, scale: str) -> None:
-    case, res = load(name), _fit(name, "oakes", squarem, scale)
+def test_loglik(name: str, squarem: bool, scale: str, warmup: str | None) -> None:
+    case, res = load(name), _fit(name, "oakes", squarem, scale, warmup)
     assert res.converged
     ref = float(case.raw["loglik"])
     assert abs(res.loglik - ref) <= TOL_LOGLIK_REL * abs(ref)
     assert res.loglik >= _fixed_at_mirt(name).loglik - 1e-8
 
 
-@pytest.mark.parametrize(("squarem", "scale"), RUNS)
+@pytest.mark.parametrize(("squarem", "scale", "warmup"), RUNS)
 @pytest.mark.parametrize("name", CASES)
-def test_parameters(name: str, squarem: bool, scale: str) -> None:
-    case, res = load(name), _fit(name, "oakes", squarem, scale)
+def test_parameters(name: str, squarem: bool, scale: str, warmup: str | None) -> None:
+    case, res = load(name), _fit(name, "oakes", squarem, scale, warmup)
     ref = case.params()
     ours = res.items.set_index("item").loc[ref.index]
     for p in ("a", "d", "g", "u"):
         np.testing.assert_allclose(ours[p], ref[p].astype(float), rtol=0, atol=TOL_PARAM)
 
 
-@pytest.mark.parametrize(("squarem", "scale"), RUNS)
+@pytest.mark.parametrize(("squarem", "scale", "warmup"), RUNS)
 @pytest.mark.parametrize(
     ("name", "se", "key"),
     [
@@ -141,9 +150,11 @@ def test_parameters(name: str, squarem: bool, scale: str) -> None:
         *[(n, "hessian", "se_richardson") for n in CASES],
     ],
 )
-def test_standard_errors(name: str, se: str, key: str, squarem: bool, scale: str) -> None:
+def test_standard_errors(
+    name: str, se: str, key: str, squarem: bool, scale: str, warmup: str | None
+) -> None:
     """V10/V11: Oakes vs mirt Oakes, direct Hessian vs mirt Richardson (natural scale)."""
-    case, res = load(name), _fit(name, se, squarem, scale)
+    case, res = load(name), _fit(name, se, squarem, scale, warmup)
     ref = case.params(key)
     ours = res.items.set_index("item").loc[ref.index]
     for col in ("a_se", "d_se", "g_se", "u_se"):

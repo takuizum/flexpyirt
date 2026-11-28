@@ -316,6 +316,21 @@ class CompiledProblem:
     blocks: GroupBlocks | None = None
 
 
+def cast_floats(prob: CompiledProblem, dtype: Any) -> CompiledProblem:
+    """Return ``prob`` with every floating-point leaf cast to ``dtype`` (DESIGN.md §28).
+
+    Integer leaves (patterns, indices, groups) and static fields are unchanged. Used to build
+    the ``float32`` copy of a problem for the warmup stage of ``BAEM(warmup_dtype=...)``.
+    """
+
+    def cast(leaf: Any) -> Any:
+        arr = jnp.asarray(leaf)
+        return arr.astype(dtype) if jnp.issubdtype(arr.dtype, jnp.floating) else leaf
+
+    out: CompiledProblem = jax.tree_util.tree_map(cast, prob)
+    return out
+
+
 def _expand(eta: Array, fixed: Array, free_index: Array) -> Array:
     """Return ``eta[free_index]`` where free and ``fixed`` elsewhere (DESIGN.md §13.2)."""
     if eta.shape[0] == 0:  # static: nothing is free

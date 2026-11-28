@@ -2392,7 +2392,8 @@ multiple-group result every DataFrame has a leading `group` column (the two tabl
 ### `BAEM`
 
 ```text
-BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural")
+BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale="natural",
+     warmup_dtype=None)
 ```
 
 | Argument | Description |
@@ -2402,6 +2403,7 @@ BAEM(tol=1e-4, max_iter=2000, m_step_newton_steps=3, squarem=False, m_step_scale
 | `m_step_newton_steps` | Newton steps per M-step; no step decreases the expected log-likelihood |
 | `squarem` | Enable SQUAREM scheme S3 acceleration (Varadhan & Roland, 2008) with a monotonicity/feasibility safeguard (default `False`) |
 | `m_step_scale` | `"natural"` (default): M-step Newton on the natural scale with bounds, reaching boundary solutions exactly. `"unconstrained"`: Newton on $\operatorname{logit}$ / $\log$ scales of the parameters with a bound ($g$, $u$, latent variances, factor correlations, slopes bounded by a prior or an edited bound); unbounded parameters are not transformed. Same objective and interior solution; estimates, table, priors and SEs stay on the natural scale; a boundary solution is only approached ([guide section 4](guide.md#4-fitting)) |
+| `warmup_dtype` | `None` (default) or `"float32"`: run EM in `float32` until the largest change is below `warmup_tol` $=\max(10\,\mathtt{tol},10^{-3})$, then in `float64` on the original problem until it is below `tol`. Estimates, log-likelihood and SEs come from the `float64` stage and agree with a fit without warmup to about `tol`; `FitResult.n_warmup_iter` counts the `float32` iterations. Pays off on hardware with slow `float64` (GPUs), not on a CPU ([guide section 4](guide.md#4-fitting)) |
 
 ### `Quadrature`
 

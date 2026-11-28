@@ -209,6 +209,8 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   SQUAREM は `m_step_scale` によらず常に自然尺度で動く（§15.47）。
 - 通常の EM・SQUAREM とも全体がデバイス上の `lax.while_loop` で走る（Python の反復ループやホストコールバックなし）。
   `jax.debug.callback` による進捗表示は後回し。
+- `BAEM(warmup_dtype="float32")`（#156）は、まず問題の `float32` の複製で $\max(10\,\mathtt{tol},10^{-3})$ まで EM を
+  回し、そこから上のとおり `float64` で `tol` まで回す（§28）。
 
 ### 4.7 MAP（Bayes modal）
 - **決定（M3, §15.14–§15.17）**: 公開の不変事前分布 `NormalPrior(mean, sd)`, `LogNormalPrior(mean_log, sd_log)`,
@@ -350,6 +352,7 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
 ## 9. 性能方針
 - パターン圧縮 + バケットパディングで再コンパイルを抑える。
 - item family ごとの `vmap`。異種項目混在でも family 数（静的）だけのループ。
+- `float64` が遅いハードウェア向けの任意の `float32` ウォームアップ。パターン軸のシャーディングは試作して不採用（§28）。
 - 既定は CPU で十分速いことを目標。GPU は大規模（N ≥ 10^5, J ≥ 100）で効けばよい。
 - ベンチマーク: R mirt（`TOL=1e-4`、既定設定および検証設定）との wall time 比較を
   [benchmarks/](../../benchmarks/README.ja.md) に置き、Apple M5 CPU での計測結果を
@@ -2995,6 +2998,69 @@ EAPsum 以外の手法では欠測反応を尤度（および WLE の $I(\theta)
    `multipleGroup(customGroup = createGroup(...))` に与えて厳密な離散化モデルを mirt で推定し、mirt の解を独立な R の周辺対数尤度
    上の Newton ステップで磨き、R の Richardson Hessian による SE、mirt の Oakes SE、`probtrace()` から R で計算した EAP、
    群の推定値で固定した同じ `customGroup` の 1 群 mirt オブジェクトでの `itemfit()` による群ごとの S-X2 を記録する。
+
+## 28. 任意の float32 ウォームアップとパターン軸のシャーディング（#156）
+
+1. **問題。** コンシューマ向け GPU の `float64` は `float32` の 1/32–1/64 の速さで、`float32` はどこでもメモリ転送量が
+   半分になる。推定値と情報行列には `float64` が要る（CLAUDE.md の原則 4）。`float32` の分解能は相対 $10^{-7}$ 程度で、
+   対数尤度 $-4.5\times10^{5}$ は 0.03 程度までしか分からず、Newton 法や SQUAREM の安全装置はその分解能で値を比べる。
+2. **決定: `BAEM(warmup_dtype="float32")`、既定はオフ。** 指定すると `fit()`（`_run_em`）はまず、同じ jit 済みの
+   `em` / `squarem` を `_core.cast_floats(problem, float32)`（`CompiledProblem` の浮動小数点の葉をすべて変換し、
+   整数の葉・静的フィールド・pytree の構造は変えない）の上で、`float32` にした `eta0` から、最大変化が `warmup_tol`
+   $=\max(10\,\mathtt{tol},10^{-3})$ 未満になるまで回す。結果を `float64` に戻し、`float64` の範囲に切り詰め（`float32`
+   に丸めた範囲は少し外にあることがある）、EH の重みは正規化し直す。そこから**元の**問題で通常の `float64` の実行を始め、
+   `tol` で止める。`loglik`、`log_posterior`、`history`、`n_iter`、収束の警告、SE はすべてこの実行から得る。
+   ウォームアップの対数尤度・対数事後密度・推定値・EH の重みのどれかが有限でなければ、`FlexpyirtWarning` を出して
+   捨て、`float64` の実行は `eta0` から始める（このとき既定とビット単位で同じ）。`FitResult.n_warmup_iter` は `float32`
+   の反復回数。JSON スキーマ 10 は `method.warmup_dtype` と、正のときだけ `n_warmup_iter` を保存する。`fit()` の x64
+   チェックはそのままで、グローバル設定には触れない。`warmup_dtype=None` では `float32` のコードを通らないので、既定は
+   ビット単位で変わらない。
+3. **コアを変えずに済んだ理由。** コアは入力の dtype で配列を作る（`dtype=prob.nodes.dtype`、`eta0.dtype`、Python の
+   スカラーは弱い型）ので、変換した問題からは EM 全体が `float32` でトレースされる。スケールしない定数が 1 つあり、
+   SQUAREM の EH モーメント検査（`< 1e-10`、§15.34）は `float32` では必ず失敗するので、そこでは安全装置が EM の
+   ステップに戻る。ウォームアップが遅くなるだけ。
+4. **一致。** 2 つの実行は同じ EM の道筋をたどるが別の点で止まるので、一致は `tol` 程度（同じ線形収束の 2 つの停止点の
+   距離）で、ビット単位ではない。V58: V11 と V14 の mirt 照合はウォームアップありでも通常の許容誤差で通る。純粋な
+   `float64` とは `tol=1e-7` で推定値 $10^{-5}$ 以内、対数尤度 相対 $10^{-8}$、Oakes SE 相対 $10^{-4}$。注意（docstring
+   に記載）: 極大が複数ある場合（`NormalMixture`、3PL）は初期値が変わると別の極大に着きうる。平らな尾根（EH と
+   SQUAREM）では停止点が `tol` より大きく動く（純粋な EM と純粋な SQUAREM の差 0.19 に対して 0.018）。
+5. **ウォームアップの許容誤差。** `2pl_n20000_j40` / `3pl_n5000_j30` での測定（試作、ウォーム、通常の EM）:
+   `warmup_tol` 1e-3 → 19+9 / 32+19 反復、3e-4 → 25+3 / 45+8、1e-4 → 28+2 / 54+2（ウォームアップ + `float64`）。
+   厳しくしても時間は減らず（CPU では `float32` の 1 反復は `float64` の約 70%）、`float32` の雑音の床で止まる。issue
+   の $\max(10\,\mathtt{tol},10^{-3})$ をそのまま使い、オプションにはしない。
+6. **ベンチマーク（CPU、共有の 16 コア Linux マシンの 2 コア、`taskset -c 12,13`、61 点、`tol=1e-4`、ウォームは 3 回の
+   中央値）。** base は #153 WIP の先端 `738120b`、new はこのブランチの既定、warmup はこのブランチで
+   `--warmup-dtype float32`。
+
+   | ケース | SQUAREM | SE | base | new | warmup | 反復 new → warmup + f64 |
+   |---|---|---|---|---|---|---|
+   | 2PL 1000×20 | なし | なし | 0.106 | 0.096 | 0.125 | 18 → 13+5 |
+   | 2PL 5000×40 | なし | なし | 0.489 | 0.464 | 0.580 | 32 → 21+11 |
+   | 2PL 20000×40 | なし | なし | 1.468 | 1.440 | 1.227 | 28 → 19+9 |
+   | 2PL 20000×40 | あり | なし | 1.219 | 1.109 | 1.101 | 5 → 4+2 |
+   | 2PL 20000×40 | なし | oakes | 1.972 | 2.034 | 1.810 | 28 → 19+9 |
+   | GRM 2000×20 | なし | oakes | 0.334 | 0.383 | 0.294 | 24 → 16+8 |
+   | 3PL 5000×30 | なし | なし | 0.693 | 0.698 | 0.661 | 51 → 32+19 |
+   | 3PL 5000×30 | あり | なし | 0.533 | 0.474 | 0.513 | 8 → 7+3 |
+   | 2 母集団 6000×30 | なし | なし | 0.889 | 0.955 | 0.777 | 105 → 61+44 |
+   | 2 母集団 6000×30 | あり | なし | 0.527 | 0.560 | 0.623 | 11 → 12+5 |
+
+   単位は秒。base と new の差は雑音だけ（既定の経路は変わらない。マシンは共有で、実行ごとのばらつきは ±10% 程度）。
+   ウォームアップは最大の通常 EM のケースでウォームを 15–19% 減らし、SQUAREM では効果がなく（もともと反復が少なく、
+   `float64` の段階で加速をやり直す）、小さな問題では遅くなり、プログラムをもう 1 つコンパイルする（コールドはどのケースも
+   5–15 秒増えた）。`tol=1e-4` で $|\Delta\log L|\le4.5\times10^{-5}$。そこで CPU では既定は `None` のまま。このオプションは
+   GPU 向けで、GPU では測っていない（このマシンにはない）。
+7. **不採用: パターン軸の SPMD シャーディング。** 試作: $P$ をデバイス数の倍数にパディング（度数 0、全欠測）し、`y`、
+   `counts`、`group` を `NamedSharding(Mesh(devices, ("p",)), PartitionSpec("p"))` で `device_put` する。GSPMD が平らな
+   E-step の einsum を $P$ で分割し、all-reduce を入れる。正しさ: 強制した 2 つのホストデバイス
+   （`--xla_force_host_platform_device_count=2`）で、EM の結果は単一デバイスと対数尤度が相対 $1.6\times10^{-15}$、Oakes の
+   情報行列が相対 $7\times10^{-10}$ で一致した。しかし同じ 2 コアで、ウォームの EM は `2pl_n20000_j40` で 1.146 → 0.969 秒
+   （−15%、雑音に近い）、`2pl_n5000_j40` で 0.333 → 0.316 秒、`information_oakes` は 0.52 → 0.99 秒になった。パターンの
+   チャンク（$P$ を形を変えて `lax.map`）が再シャーディングを強いるため。群ブロックの E-step（§26）は任意の行で
+   `y_pad[rows]` を集めるので `y` 全体を all-gather することになり、二因子・二層モデルの経路は確かめていない。採用するには
+   Oakes のチャンク配置をシャーディングに合わせ、多群のブロックをデバイスごとに並べ、複数デバイスのテストを書く必要があり、
+   CPU ではそれに見合う効果がない。複数 GPU のハードウェアでの後続に回す。平らな E-step に要るのは上のパディングと
+   `device_put` だけ。
 
 ## 参考文献
 - Ackerman, T. A. (1994). Using multidimensional item response theory to understand what items and tests are measuring. *Applied Measurement in Education*, 7(4), 255–278.
