@@ -271,7 +271,8 @@ $$Q_j(\xi_j)=\sum_g\sum_q\sum_k \bar r_{gjkq}\log P_{jk}(\theta_q;\xi_j^{(g)})\;
   dimension match mirt's `select_quadpts` via `Quadrature.default(n_factors)`: 61 for 1D, 31 per
   dimension ($31^2 = 961$) for 2D, and 15 per dimension ($15^3 = 3{,}375$) for 3D on $[-6, 6]$.
   More than 3 dimensions is out of scope (non-goal) for product grids; bifactor models reduce
-  any number of specific factors to $(1+1)$-dimensional grids (§17.1).
+  any number of specific factors to $(1+1)$-dimensional grids (§17.1). Smolyak sparse grids were
+  studied and rejected for BA-EM (signed weights; §12, item 6).
 
 ### 4.10 Starting values
 - $d_j$: logit of the proportion correct; $a_j$: converted from the item–total point-biserial
@@ -447,6 +448,168 @@ data-independent shapes (§15.21).
 4. ~~Package name~~ → `flexpyirt` (2026-11-20).
 5. ~~How to implement the M-step with equality constraints across items (§4.3)~~ → joint
    Newton per connected component of items (§16.1, 2026-11-21).
+6. ~~Smolyak sparse grids for models with 4 or more dimensions (#152, "future extensions")~~ →
+   **Decision (2026-11-28): rejected for BA-EM. $D\ge4$ product grids stay a non-goal (§4.9). If
+   the question is reopened, the candidate is fixed-node quasi-Monte Carlo with importance
+   reweighting, validated against mirt's `QMCEM`, with adaptive quadrature second.** The study
+   code is not part of the package: the generator is `benchmarks/sparse_grid.py` (tested against
+   R `SparseGrid` in `tests/test_sparse_grid.py`), the tables below come from
+   `benchmarks/sparse_grid_study.py`, and the KPN rules from `validation/r/sparse_grid_reference.R`.
+
+   **Construction.** With a sequence of 1-D rules $U^i$ for $N(0,1)$ (level $i\ge1$), the Smolyak
+   rule of level $L$ in $D$ dimensions is the combination
+   $$A_{L,D}=\sum_{L\le|\mathbf i|\le L+D-1}(-1)^{L+D-1-|\mathbf i|}\binom{D-1}{L+D-1-|\mathbf i|}
+   \,U^{i_1}\otimes\cdots\otimes U^{i_D}$$
+   (Smolyak, 1963; Gerstner & Griebel, 1998; Heiss & Winschel, 2008); nodes shared by several
+   tensor terms are merged and their weights summed, and the nodes for $N(\boldsymbol\mu,\Sigma)$ are
+   $\boldsymbol\mu+\mathbf L\mathbf z_q$ with $\Sigma=\mathbf L\mathbf L^\top$. Two 1-D sequences
+   were compared: Gauss–Hermite with $i$ points (non-nested, "GQN"; exact for total degree $2L-1$)
+   and the nested Genz–Keister (Kronrod–Patterson) extensions with 1, 3, 9, 19, 35 points
+   ("KPN"; Genz & Keister, 1996), which reuse nodes across levels and so need fewer points for the
+   same degree. Gauss–Legendre/Clenshaw–Curtis rules on a box were not considered: the latent
+   density is normal and its tails matter for the M-step. The GQN generator reproduces R
+   `SparseGrid` 0.8.2 nodes and weights to $10^{-13}$, and integrates every MVN moment of total
+   degree $\le2L-1$ to $10^{-11}$, including correlated moments after the Cholesky transform.
+
+   **Point counts.** Smolyak needs far fewer points than the product rule of the same
+   polynomial degree once $D\ge4$, but a large share of the weights are negative and
+   $\sum_q|w_q|$ (the factor by which rounding and integrand errors are amplified) grows
+   quickly:
+
+   | $D$ | GQN $L=4$ (deg. 7) | KPN $L=4$ | product $4^D$ | GQN $L=5$ (deg. 9) | KPN $L=5$ | product $5^D$ | GQN $L=5$: share $w<0$, $\sum\lvert w\rvert$ | mirt EM default |
+   |---|---|---|---|---|---|---|---|---|
+   | 2 | 29 | 17 | 16 | 53 | 37 | 25 | 0.38, 9 | $31^2=961$ |
+   | 3 | 69 | 39 | 64 | 165 | 93 | 125 | 0.30, 41 | $15^3=3{,}375$ |
+   | 4 | 137 | 81 | 256 | 385 | 201 | 625 | 0.27, 129 | $9^4=6{,}561$ |
+   | 5 | 241 | 151 | 1,024 | 781 | 401 | 3,125 | 0.24, 321 | $7^5=16{,}807$ |
+   | 6 | 389 | 257 | 4,096 | 1,433 | 749 | 15,625 | 0.22, 681 | $3^6=729$ |
+   | 8 | 849 | 609 | 65,536 | 3,905 | 2,193 | 390,625 | 0.18, 2,241 | $3^8$ |
+   | 10 | 1,581 | 1,201 | 1,048,576 | 8,761 | 5,301 | 9,765,625 | 0.16, 5,641 | $3^{10}$ |
+
+   KPN weights are all positive only for the smallest rules ($D=2$, $L\le4$; $D=3$, $L\le3$); from
+   $D=4$ on, 0.7–24% of them are negative, with $\sum|w|$ up to 37 at $D=10$. Positive-weight rules
+   of the same degree exist (Tchakaloff, 1957; at most $\binom{D+m}{m}$ nodes for degree $m$,
+   e.g. 2,002 for $D=5$, $m=9$) but rest on the same polynomial-exactness criterion, which is the
+   problem below.
+
+   **Negative weights and BA-EM.** Every piece of §4.2–§4.8 assumes $w_q\ge0$:
+   - *Marginal likelihood.* $\tilde L_p=\sum_q w_qL_p(\boldsymbol\theta_q)$ can be $\le0$, and
+     then $\log\tilde L_p$ does not exist. It is not a corner case: in the accuracy study below,
+     2–50% of simulated patterns get $\tilde L_p\le0$ under GQN and 0.2–13% under KPN in 5-D, and
+     direct fits with GQN $L\ge4$ in 5-D stop with an undefined log-likelihood.
+   - *E-step.* $h_{pq}=w_qL_p(\boldsymbol\theta_q)/\tilde L_p$ is signed, so $h_{p\cdot}$ is not a
+     distribution and $\bar n_{gq}$, $\bar r_{gjkq}$ can be negative. The core works in log
+     space ($\log w_q=b_q+\log\phi-\operatorname{logsumexp}$, §15.44), which has no place for a
+     sign; every `logsumexp` over nodes would need a sign argument and would fail as soon as a
+     pattern's sum is $\le0$.
+   - *Item M-step.* With $\bar r_{jkq}<0$, the term $\bar r_{jkq}\log P_{jk}(\boldsymbol\theta_q)$
+     rewards $P_{jk}\to0$ at that node: $Q_j$ is no longer concave for the 2PL/GPCM and can be
+     unbounded above, so the masked Newton and its line search (§13.1) lose their footing.
+   - *Monotonicity.* The EM ascent property uses Jensen's inequality with $h_{p\cdot}$ as a
+     probability distribution; with signed $h$ it fails, and with it the SQUAREM safeguard
+     (§4.6). The Fisher identity $\nabla\tilde\ell=\sum_pc_p\sum_qh_{pq}\nabla\log L_p$ still holds
+     algebraically where $\tilde L_p>0$, so a fixed point is a stationary point of $\tilde\ell$, but
+     nothing makes the iteration go there.
+   - *Exact latent M-step.* $Q^{\text{lat}}=\sum_q\bar n_q\log w_q(\boldsymbol\mu,\Sigma)$ needs
+     $w_q>0$. Reweighting fixed nodes by $\phi(\cdot;\boldsymbol\mu,\Sigma)/\phi(\cdot;0,I)$ (as for
+     Gauss–Hermite, §15.44) keeps the signs but the normalizer $\sum_q w_q$ can approach 0; moving
+     the nodes ($\boldsymbol\mu+\mathbf L\mathbf z_q$, as mirt's `QMCEM`) puts the latent
+     parameters inside every item likelihood, so the latent M-step is no longer separate or exact.
+   - *Oakes.* Oakes' identity is a differentiation identity and survives signed weights where
+     $\tilde L_p>0$, but it then gives the Hessian of an inaccurate $\tilde\ell$.
+   - *Scoring.* EAP $\sum_qh_{pq}\boldsymbol\theta_q$ is defined but the posterior variance can be
+     negative (no PSD); plausible values cannot sample from a signed posterior; ML/WLE/MAP do not
+     use the grid. Summed-score recursions (S-X2, §18) would produce signed probabilities.
+   - *Other latents.* EH stores free weights on an equispaced grid and has no meaning on a sparse
+     grid; Davidian curves and normal mixtures are unidimensional, where Smolyak is just
+     Gauss–Hermite.
+
+   **Accuracy when defined.** Smolyak rules are exact for polynomials of low *total* degree and
+   are accurate for integrands with bounded mixed derivatives. A response pattern's likelihood
+   is neither: it is a product over factors of peaked functions (posterior SD about
+   $1/\sqrt{\text{information}}$), and the combination technique adds and subtracts large tensor
+   terms whose 1-D errors at low levels are of order 1. Per-pattern error of
+   $\log\int L_p\phi$ (500 simulated 2PL patterns, simple structure, independent factors so the
+   exact value factorizes into 1-D integrals; "share" = patterns with $\tilde L_p\le0$, excluded
+   from the error):
+
+   | $D$, items per factor | rule | $Q$ | mean / max error | share $\tilde L\le0$ |
+   |---|---|---|---|---|
+   | 3, 5 | GQN $L=7$ | 681 | 0.32 / 4.9 | 2.6% |
+   | 3, 5 | KPN $L=8$ | 381 | 0.015 / 0.083 | 0 |
+   | 3, 5 | product GH $7^3$ | 343 | 0.025 / 0.094 | 0 |
+   | 3, 5 | product equispaced $15^3$ (current default) | 3,375 | 0.0021 / 0.0076 | 0 |
+   | 3, 5 | Halton QMC | 5,000 | 0.0026 / 0.030 | 0 |
+   | 5, 5 | GQN $L=6$ | 2,203 | 0.92 / 4.2 | 30% |
+   | 5, 5 | KPN $L=7$ | 2,033 | 0.072 / 0.77 | 0.2% |
+   | 5, 5 | product GH $5^5$ | 3,125 | 0.12 / 0.41 | 0 |
+   | 5, 5 | Halton QMC | 1,000 / 5,000 | 0.066 / 0.85; 0.019 / 0.24 | 0 |
+   | 5, 5 | adaptive GH $3^5$ per pattern | 243 | 0.024 / 0.044 | 0 |
+   | 5, 10 | KPN $L=7$ | 2,033 | 0.28 / 2.7 | 3.8% |
+   | 5, 10 | Halton QMC | 5,000 | 0.047 / 0.80 | 0 |
+   | 5, 10 | adaptive GH $3^5$ per pattern | 243 | 0.021 / 0.049 | 0 |
+
+   GQN does not converge with the level at all (5-D errors stay near 1 from $L=3$ to $L=6$).
+   KPN converges, but is no better than Halton QMC with the same number of points, gets worse as
+   tests lengthen, and still produces $\tilde L_p\le0$.
+
+   **Fits.** Direct marginal ML of a correlated confirmatory 2PL (5 items per factor,
+   $N=2{,}000$, L-BFGS with JAX gradients on $\sum_pc_p\log\tilde L_p$, nodes moved by the
+   correlation Cholesky factor; signed weights cannot go through the EM core). Maximum absolute
+   differences from a fine product Gauss–Hermite reference ($21^3$ in 3-D, where $15^3$ agrees with
+   it within $8\times10^{-4}$; $7^5$ in 5-D, itself uncertain by a few $10^{-2}$ since $5^5$ differs
+   from it by 0.12):
+
+   | $D$ ($\rho$) | rule | $Q$ | $\max\lvert\Delta a\rvert$ | $\max\lvert\Delta d\rvert$ | $\max\lvert\Delta\rho\rvert$ | $\Delta\log L$ |
+   |---|---|---|---|---|---|---|
+   | 3 (0.5) | GQN $L=8$ | 1,233 | 0.50 | 0.080 | 0.079 | −92 |
+   | 3 (0.5) | KPN $L=8$ | 381 | 0.027 | 0.014 | 0.0034 | −1.0 |
+   | 3 (0.5) | product GH $7^3$ | 343 | 0.027 | 0.011 | 0.0017 | +0.47 |
+   | 3 (0.5) | Halton QMC | 5,000 | 0.0048 | 0.0044 | 0.0002 | +0.29 |
+   | 3 (0.5) | mirt 1.48 EM, $15^3$ equispaced | 3,375 | 0.0026 | 0.0009 | 0.0001 | −0.03 |
+   | 3 (0.5) | mirt 1.48 `QMCEM` (default) | 5,000 | 0.0023 | 0.0012 | 0.0020 | −0.06 |
+   | 5 (0.4) | GQN $L=4,6,7$ | 241–5,593 | failed ($\tilde L_p\le0$) | | | |
+   | 5 (0.4) | KPN $L=7$ | 2,033 | 0.069 | 0.047 | 0.023 | +0.32 |
+   | 5 (0.4) | product GH $5^5$ | 3,125 | 0.12 | 0.075 | 0.0084 | −6.7 |
+   | 5 (0.4) | Halton QMC | 1,000 / 5,000 | 0.055 / 0.050 | 0.033 / 0.021 | 0.016 / 0.0072 | +1.6 / +1.7 |
+
+   Timing is not the issue: every rule here is a few seconds per fit on 2 cores (mirt's 3-D EM
+   took 76 s and its `QMCEM` 43 s on the same 2 cores). A sparse rule as accurate as QMC needs
+   about as many points, so it would save no time either.
+
+   **How it would have fit the API.** `Quadrature.sparse(n_factors, level, rule="kpn")` would
+   give nodes `(Q, D)` and base weights as data, like `Quadrature.gauss_hermite` (§15.44):
+   `CompiledProblem.nodes` plus `node_log_base`, with the MVN latent either reweighting fixed
+   standard nodes (exact EM structure, accuracy degrading as $\Sigma$ moves away from $I$) or
+   moving them by the Cholesky factor (as mirt). Both need a `node_sign` array and signed
+   `logsumexp` throughout the core, and neither solves the problems above.
+
+   **Alternatives.**
+   - *Bifactor and two-tier reduction* (§17.1, §17.2): exact, already implemented, and covers
+     the most common high-dimensional confirmatory structure with $(1+1)$- or
+     $(P+1)$-dimensional grids.
+   - *Quasi-Monte Carlo* (Halton, 1960): positive equal weights, so the E-step, item M-step,
+     monotonicity and Oakes work unchanged. With fixed points $\Phi^{-1}(\mathbf u_q)$ and the
+     §15.44 reweighting by $\phi(\cdot;\boldsymbol\mu,\Sigma)/\phi(\cdot;0,I)$, the exact latent
+     M-step is kept too. Error is about $O((\log Q)^D/Q)$; 5,000 points cost 1.5× the current
+     3-D grid per E-step and become cheap with #152's rank-$D$ factorization. mirt's `QMCEM` is a
+     reference, but it moves the nodes each cycle, so the two agree only to QMC error
+     (about $2\times10^{-3}$ in the 3-D fit above).
+   - *Adaptive Gauss–Hermite* (Schilling & Bock, 2005): the most accurate per point (243 nodes
+     per pattern in 5-D beat 5,000 QMC points), but nodes are per pattern, so the shared-node
+     tables $\bar n_q$, $\bar r_{jkq}$ and the item-wise M-step on them go away, Oakes must
+     differentiate through the adaptation, and mirt has no EM reference for it.
+   - *MH-RM* (Cai, 2010, *Psychometrika* 75(1)) and MCEM: stochastic; mirt has both; outside the
+     deterministic BA-EM design (§1 non-goals).
+
+   **mirt and R references.** mirt 1.48 offers `method = "QMCEM"` (Halton points from
+   `sfsmisc::QUnif` with `leap = 409` through `qnorm`, moved by $\boldsymbol\mu$ and
+   $\operatorname{chol}(\Sigma)$ every cycle, equal weights, 5,000 points by default; Oakes SEs
+   allowed), `"MCEM"` and `"MHRM"`, and for $D\ge4$ EM it suggests QMCEM or MCEM; it has no sparse
+   grids. `technical = list(customTheta = ...)` takes user nodes but weights them by the density,
+   so signed base weights cannot be passed. R `SparseGrid` (Heiss–Winschel GQN/KPN tables) and
+   `mvQuad` build rules only and fit no IRT models; `SparseGrid` serves as the reference for the
+   generator.
 
 ## 13. Implementation decisions (M1)
 1. **Newton in the M-step**: every gradient and Hessian comes from JAX autodiff (`jax.grad` /
@@ -3693,6 +3856,7 @@ data-independent shapes (§15.21).
 - Braeken, J., & van Assen, M. A. L. M. (2017). An empirical Kaiser criterion. *Psychological Methods*, 22(3), 450–466.
 - Braun, H. I., & Holland, P. W. (1982). Observed-score test equating: A mathematical analysis of some ETS equating procedures. In P. W. Holland & D. B. Rubin (Eds.), *Test Equating* (pp. 9–49). Academic Press.
 - Cai, L. (2010). A two-tier full-information item factor analysis model with applications. *Psychometrika*, 75(4), 581–612.
+- Cai, L. (2010). High-dimensional exploratory item factor analysis by a Metropolis–Hastings Robbins–Monro algorithm. *Psychometrika*, 75(1), 33–57.
 - Candell, G. L., & Drasgow, F. (1988). An iterative procedure for linking metrics and assessing item bias in item response theory. *Applied Psychological Measurement*, 12(3), 253–260.
 - Casella, G., & Berger, R. L. (2002). *Statistical Inference* (2nd ed.). Duxbury.
 - Chalmers, R. P. (2012). mirt: A multidimensional item response theory package for the R environment. *Journal of Statistical Software*, 48(6).
@@ -3710,6 +3874,8 @@ data-independent shapes (§15.21).
 - Froelich, A. G., & Habing, B. (2008). Conditional covariance-based subtest selection for DIMTEST. *Applied Psychological Measurement*, 32(2), 138–155.
 - Garrido, L. E., Abad, F. J., & Ponsoda, V. (2013). A new look at Horn's parallel analysis with ordinal variables. *Psychological Methods*, 18(4), 454–474.
 - Genz, A. (2004). Numerical computation of rectangular bivariate and trivariate normal and t probabilities. *Statistics and Computing*, 14(3), 251–260.
+- Genz, A., & Keister, B. D. (1996). Fully symmetric interpolatory rules for multiple integrals over infinite regions with Gaussian weight. *Journal of Computational and Applied Mathematics*, 71(2), 299–309.
+- Gerstner, T., & Griebel, M. (1998). Numerical integration using sparse grids. *Numerical Algorithms*, 18(3–4), 209–232.
 - Gibbons, R. D., & Hedeker, D. R. (1992). Full-information item bi-factor analysis. *Psychometrika*, 57(3), 423–436.
 - Glorfeld, L. W. (1995). An improvement on Horn's parallel analysis methodology for selecting the correct number of factors to retain. *Educational and Psychological Measurement*, 55(3), 377–393.
 - Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. *PLoS ONE*, 12(6), e0174035.
@@ -3718,9 +3884,11 @@ data-independent shapes (§15.21).
 - Goretzko, D., & Bühner, M. (2020). One model to rule them all? Using machine learning algorithms to determine the number of factors in exploratory factor analysis. *Psychological Methods*, 25(6), 776–786.
 - Green, B. F., Bock, R. D., Humphreys, L. G., Linn, R. L., & Reckase, M. D. (1984). Technical guidelines for assessing computerized adaptive tests. *Journal of Educational Measurement*, 21(4), 347–360.
 - Haebara, T. (1980). Equating logistic ability scales by a weighted least squares method. *Japanese Psychological Research*, 22(3), 144–149.
+- Halton, J. H. (1960). On the efficiency of certain quasi-random sequences of points in evaluating multi-dimensional integrals. *Numerische Mathematik*, 2, 84–90.
 - Hannan, E. J., & Quinn, B. G. (1979). The determination of the order of an autoregression. *JRSS B*, 41(2), 190–195.
 - Hanson, B. A., & Brennan, R. L. (1990). An investigation of classification consistency indexes estimated under alternative strong true score models. *Journal of Educational Measurement*, 27(4), 345–359.
 - Harman, H. H., & Jones, W. H. (1966). Factor analysis by minimizing residuals (minres). *Psychometrika*, 31(3), 351–368.
+- Heiss, F., & Winschel, V. (2008). Likelihood approximation by numerical integration on sparse grids. *Journal of Econometrics*, 144(1), 62–80.
 - Holland, P. W., & Thayer, D. T. (1988). Differential item performance and the Mantel–Haenszel procedure. In H. Wainer & H. I. Braun (Eds.), *Test Validity* (pp. 129–145). Erlbaum.
 - Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65–70.
 - Hong, Y. (2013). On computing the distribution function for the Poisson binomial distribution. *Computational Statistics & Data Analysis*, 59, 41–51.
@@ -3790,10 +3958,12 @@ data-independent shapes (§15.21).
 - Ruscio, J., & Kaczetow, W. (2008). Simulating multivariate nonnormal data using an iterative algorithm. *Multivariate Behavioral Research*, 43(3), 355–381.
 - Ruscio, J., & Roche, B. (2012). Determining the number of factors to retain in an exploratory factor analysis using comparison data of known factorial structure. *Psychological Assessment*, 24(2), 282–292.
 - Samejima, F. (1969). Estimation of latent ability using a response pattern of graded scores. *Psychometrika Monograph*, 17.
+- Schilling, S., & Bock, R. D. (2005). High-dimensional maximum marginal likelihood item factor analysis by adaptive quadrature. *Psychometrika*, 70(3), 533–555.
 - Schwarz, G. (1978). Estimating the dimension of a model. *The Annals of Statistics*, 6(2), 461–464.
 - Sclove, S. L. (1987). Application of model-selection criteria to some problems in multivariate analysis. *Psychometrika*, 52(3), 333–343.
 - Sinharay, S. (2016). Asymptotically correct standardization of person-fit statistics beyond dichotomous items. *Psychometrika*, 81(4), 992–1013.
 - Skinner, C. J. (1989). Domain means, regression and multivariate analysis. In C. J. Skinner, D. Holt & T. M. F. Smith (Eds.), *Analysis of Complex Surveys* (pp. 59–87). Wiley.
+- Smolyak, S. A. (1963). Quadrature and interpolation formulas for tensor products of certain classes of functions. *Soviet Mathematics Doklady*, 4, 240–243.
 - Snijders, T. A. B. (2001). Asymptotic null distribution of person fit statistics with estimated person parameter. *Psychometrika*, 66(3), 331–342.
 - Somes, G. W. (1986). The generalized Mantel–Haenszel statistic. *The American Statistician*, 40(2), 106–108.
 - Stocking, M. L., & Lord, F. M. (1983). Developing a common metric in item response theory. *Applied Psychological Measurement*, 7(2), 201–210.
@@ -3802,6 +3972,7 @@ data-independent shapes (§15.21).
 - Stout, W., Froelich, A. G., & Gao, F. (2001). Using resampling methods to produce an improved DIMTEST procedure. In A. Boomsma, M. A. J. van Duijn, & T. A. B. Snijders (Eds.), *Essays on Item Response Theory* (pp. 357–375). Springer.
 - Swaminathan, H., & Gifford, J. A. (1986). Bayesian estimation in the three-parameter logistic model. *Psychometrika*, 51, 589–601.
 - Swaminathan, H., & Rogers, H. J. (1990). Detecting differential item functioning using logistic regression procedures. *Journal of Educational Measurement*, 27(4), 361–370.
+- Tchakaloff, V. (1957). Formules de cubatures mécaniques à coefficients non négatifs. *Bulletin des Sciences Mathématiques*, 81, 123–134.
 - Thissen, D., & Wainer, H. (Eds.). (2001). *Test Scoring*. Lawrence Erlbaum Associates.
 - Thissen, D., Cai, L., & Bock, R. D. (2010). The nominal categories item response model. In M. L. Nering & R. Ostini (Eds.), *Handbook of Polytomous Item Response Theory Models* (pp. 43–75). Routledge.
 - Thissen, D., Pommerich, M., Billeaud, K., & Williams, V. S. L. (1995). Item response theory for scores on tests including polytomous items with ordered responses. *Applied Psychological Measurement*, 19(1), 39–49.
