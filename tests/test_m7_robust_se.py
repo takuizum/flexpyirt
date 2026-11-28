@@ -270,7 +270,14 @@ def test_sandwich_is_oakes_when_cross_product_is_the_information(
     data = _simulate_2pl(13, 500, 5)
     spec = Model.uniform(TwoPL(), items=data.columns).prior(param="a", dist=NormalPrior(1.0, 0.5))
     oakes = fit(spec, data, method=METHOD, se="oakes")
-    monkeypatch.setitem(fit_module._information, "crossprod", fit_module._information["oakes"])
+    oakes_info = fit_module._information["oakes"]
+    monkeypatch.setitem(fit_module._information, "crossprod", oakes_info)
+    # The unweighted sandwich takes the fused one-pass path (§15.20): force its meat to H too.
+    monkeypatch.setattr(
+        fit_module,
+        "_oakes_and_cross_product",
+        lambda prob, eta: (oakes_info(prob, eta), oakes_info(prob, eta)),
+    )
     sandwich = fit(spec, data, method=METHOD, se="sandwich")
     cross = fit(spec, data, method=METHOD, se="crossprod")
     assert oakes.vcov is not None and sandwich.vcov is not None and cross.vcov is not None
