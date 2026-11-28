@@ -48,8 +48,9 @@ class BAEM:
         If the ``float32`` stage returns non-finite values, it is discarded and the ``float64``
         stage starts from the usual starting values. ``None`` (default) runs in ``float64``
         only. The ``float32`` stage pays off on hardware with slow ``float64`` arithmetic (most
-        GPUs); on a CPU it saves about 10–30% of plain EM time on large problems and nothing
-        with ``squarem=True``, and it adds a second compilation. With a likelihood that has
+        GPUs); on a CPU it saves at most about 15–20% of warm plain-EM time on the largest
+        problems, nothing with ``squarem=True``, costs time on small problems, and adds a
+        second compilation. With a likelihood that has
         several maxima (``NormalMixture``, 3PL) the warm start may lead to a different maximum
         than the classical starting values would.
     """

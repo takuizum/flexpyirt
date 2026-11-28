@@ -9,6 +9,7 @@ Run from the repository root::
 
     uv run python benchmarks/run_flexpyirt.py
     uv run python benchmarks/run_flexpyirt.py --quick
+    uv run python benchmarks/run_flexpyirt.py --warmup-dtype float32  # BAEM(warmup_dtype=...)
 """
 
 from __future__ import annotations
@@ -151,6 +152,7 @@ def _run_worker(
     max_iter: int,
     quadpts: int,
     theta_lim: tuple[float, float],
+    warmup_dtype: str | None = None,
 ) -> dict[str, Any]:
     """Execute one cold + ``warm_repeats`` warm fits inside the current (fresh) process."""
     os.environ["JAX_PLATFORMS"] = "cpu"
@@ -173,7 +175,12 @@ def _run_worker(
         resp = df
 
     spec = _build_spec(case)
-    method = BAEM(tol=tol, max_iter=max_iter, squarem=squarem)
+    method = BAEM(
+        tol=tol,
+        max_iter=max_iter,
+        squarem=squarem,
+        warmup_dtype=warmup_dtype,  # type: ignore[arg-type]
+    )
     quad = Quadrature.equispaced(quadpts, bounds=theta_lim)
     se_opt: Literal["oakes"] | None = None if se_arg == "none" else "oakes"
 
@@ -216,6 +223,8 @@ def _run_worker(
         "compile_s": cold_s - statistics.median(warm_runs_s),
         "peak_rss_mb": _peak_rss_mb(),
         "n_iter": int(cold_res.n_iter),
+        "warmup_dtype": warmup_dtype,
+        "n_warmup_iter": int(getattr(cold_res, "n_warmup_iter", 0)),
         "n_em_evaluations": int(cold_res.n_em_evaluations),
         "n_safeguards": int(cold_res.n_safeguards),
         "converged": bool(cold_res.converged),
@@ -236,6 +245,7 @@ def _collect_meta(
     warm_repeats: int,
     quick: bool,
     jax_devices: list[str],
+    warmup_dtype: str | None = None,
 ) -> dict[str, Any]:
     os.environ["JAX_PLATFORMS"] = "cpu"
     import jax
@@ -268,6 +278,7 @@ def _collect_meta(
             "theta_lim": list(theta_lim),
             "warm_repeats": warm_repeats,
             "quick": quick,
+            "warmup_dtype": warmup_dtype,
         },
     }
 
@@ -284,6 +295,7 @@ def run_benchmark(
     theta_lim: tuple[float, float] = DEFAULT_THETA_LIM,
     quick: bool = False,
     verbose: bool = True,
+    warmup_dtype: str | None = None,
 ) -> dict[str, Any]:
     """Run all flexpyirt benchmark configurations and write raw JSON output."""
     manifest_path = data_dir / "manifest.json"
@@ -325,6 +337,8 @@ def run_benchmark(
                     str(theta_lim[0]),
                     str(theta_lim[1]),
                 ]
+                if warmup_dtype is not None:
+                    cmd += ["--warmup-dtype", warmup_dtype]
                 proc = subprocess.run(
                     cmd,
                     check=True,
@@ -359,6 +373,7 @@ def run_benchmark(
             warm_repeats=warm_repeats,
             quick=quick,
             jax_devices=jax_devices,
+            warmup_dtype=warmup_dtype,
         ),
         "cases": [manifest_by_name[c.name] for c in cases if c.name in manifest_by_name],
         "runs": records,
@@ -404,6 +419,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=list(DEFAULT_THETA_LIM),
         metavar=("LOW", "HIGH"),
     )
+    parser.add_argument(
+        "--warmup-dtype",
+        choices=("float32",),
+        default=None,
+        help="Run every fit with BAEM(warmup_dtype=...) (float32 warmup, then float64).",
+    )
     # Internal worker flags
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--case", type=str, default=None, help=argparse.SUPPRESS)
@@ -431,6 +452,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             max_iter=args.max_iter,
             quadpts=args.quadpts,
             theta_lim=theta_lim,
+            warmup_dtype=args.warmup_dtype,
         )
         print(json.dumps(rec))
         return
@@ -449,6 +471,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         quadpts=args.quadpts,
         theta_lim=theta_lim,
         quick=args.quick,
+        warmup_dtype=args.warmup_dtype,
     )
 
 
