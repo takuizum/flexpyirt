@@ -218,6 +218,8 @@ res = fit(
   widen it.
 - **`se`**: `"oakes"` (default), `"hessian"`, `"sandwich"`, `"crossprod"`, or `None` (skip); see
   [section 6](#6-standard-errors).
+- **`n_starts`**, **`start_scale`**, **`key`**: estimate from several starting values at once and
+  keep the best solution; see [Several starting values](#several-starting-values).
 
 ```python
 res_sq = fit(spec, df, method=BAEM(tol=1e-6, squarem=True), se=None)
@@ -927,9 +929,10 @@ print(mix.score(bi_df.iloc[:3], method="EAP").round(3))  # uses the fitted mixtu
 - **Starting values, label switching, degenerate fits**: the components are exchangeable, so their
   numbering is arbitrary, and the likelihood can have several local maxima. Refit from a few
   starting shapes (`NormalMixture(2, means=[0, 2], variances=[1, 0.3], weights=[0.7, 0.3])`) and
-  keep the highest `loglik`. A `HeywoodWarning` flags a component with almost no weight, one
-  narrower than the grid, one centred outside the grid, or two coinciding components: the data
-  then support fewer components.
+  keep the highest `loglik`, or let `fit(..., n_starts=8, key=jax.random.key(0))` do this for you
+  (see [Several starting values](#several-starting-values)). A `HeywoodWarning` flags a component
+  with almost no weight, one narrower than the grid, one centred outside the grid, or two
+  coinciding components: the data then support fewer components.
 - **Grid resolution**: narrow components with many informative items make the posteriors about as
   narrow as the grid spacing; then refine the grid (e.g. `Quadrature.equispaced(121)`, spacing
   0.1) and check that `loglik` no longer changes.
@@ -937,6 +940,37 @@ print(mix.score(bi_df.iloc[:3], method="EAP").round(3))  # uses the fitted mixtu
   mixture IRT model). The flexpyirt model equals mirt's with every item constrained equal across
   classes (`invariance = c(<items>, "free_means", "free_var")`), up to the scale of $\theta$
   (see [Accuracy and validation](accuracy.md)).
+
+### Several starting values
+
+Models whose likelihood can have several local maxima (normal-mixture latent densities, 3PL and
+4PL guessing parameters, nominal items) can be fitted from several starting values at once:
+
+```python
+import jax
+
+mix8 = fit(
+    Model.uniform(TwoPL(), items=items).with_latent(NormalMixture(2)),
+    bi_df,
+    n_starts=8,
+    key=jax.random.key(0),
+)
+print(mix8.starts)  # start, loglik, log_posterior, converged, n_iter, best
+```
+
+Start 1 is the usual starting value. Starts 2 to `n_starts` add normal noise with standard
+deviation `start_scale` (default 0.5) to every free parameter on a scale where its bounds
+disappear (unchanged for unbounded parameters such as slopes and intercepts, $\log$ of the
+distance to the bound for variances, $\operatorname{logit}$ for parameters between two bounds
+such as $g$), so every start is inside the bounds. The result is the start with the highest log
+posterior among the converged starts; when several starts reach the same maximum (up to
+rounding), the earliest one is kept, so start 1 is reported unless another start is really better.
+Standard errors are computed for that solution only. `key` (a JAX PRNG key) is required and makes
+the starts reproducible. `starts` is `None` for a single start and is not saved by `to_json`.
+
+All starts are estimated together in one compiled computation: the starts that have converged
+stop changing while the others continue. On a GPU this runs the starts in parallel. On a CPU the
+starts share the cores, so the time is about that of fitting them one after another.
 
 ## 9. Multiple groups
 
@@ -1018,6 +1052,8 @@ equal across groups; with `scheme="drop"` (start from a model with the items equ
 number of parameters the constraint removes, and `aic`, `sabic`, `hq`, `bic` are the model with
 the item free minus the constrained one (negative values favour DIF), as in mirt's `DIF()`.
 `adj_p` is Holm-adjusted over the tested items by default (`p_adjust="BH"` or `"none"`).
+The refits of all tested items are estimated together in one compiled computation, so testing many
+items does not compile the model once per item.
 
 ```python
 # Likelihood-ratio DIF tests: constrain each non-anchor item's parameters to be equal across
