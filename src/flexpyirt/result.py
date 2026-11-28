@@ -331,6 +331,10 @@ class FitResult:
         How ``vcov`` was computed.
     n_obs : int
         Number of respondents (with ``weights=``, the rows with a positive weight).
+    n_warmup_iter : int
+        Number of iterations of the ``float32`` warmup of ``BAEM(warmup_dtype="float32")``
+        (0 without warmup). They are not counted in ``n_iter``, ``n_em_evaluations`` or
+        ``history``, which describe the ``float64`` stage that produced the estimates.
 
     Notes
     -----
@@ -360,6 +364,7 @@ class FitResult:
     _eh_weights: np.ndarray | None = field(default=None, repr=False)
     _sum_weights: float | None = field(default=None, repr=False)
     _n_clusters: int | None = field(default=None, repr=False)
+    _n_warmup_iter: int = field(default=0, repr=False)
 
     # ---- summaries ---------------------------------------------------------------------------
 
@@ -370,6 +375,11 @@ class FitResult:
         if self._n_clusters is not None:
             return f"{self.se_method} (cluster-robust, {self._n_clusters} clusters)"
         return self.se_method
+
+    @property
+    def n_warmup_iter(self) -> int:
+        """Number of ``float32`` warmup iterations (0 without warmup; DESIGN.md §28)."""
+        return self._n_warmup_iter
 
     @property
     def _has_priors(self) -> bool:
@@ -1830,6 +1840,8 @@ class FitResult:
         evals = f"{self.n_em_evaluations} EM evaluations"
         if self.n_safeguards > 0:
             evals += f", {self.n_safeguards} SQUAREM safeguards"
+        if self._n_warmup_iter > 0:
+            evals += f", after {self._n_warmup_iter} float32 warmup iterations"
         return f"{status} ({self.n_iter} iterations, {evals})"
 
     def _quadrature_label(self) -> str:

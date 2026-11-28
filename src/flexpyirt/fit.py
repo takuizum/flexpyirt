@@ -196,15 +196,7 @@ def fit(
     )
     problem = compiled.problem
 
-    runner = _squarem if method.squarem else _em
-    out = runner(
-        problem,
-        jnp.asarray(compiled.eta0),
-        tol=method.tol,
-        max_iter=method.max_iter,
-        n_newton=method.m_step_newton_steps,
-        unconstrained=method.m_step_scale == "unconstrained",
-    )
+    out, n_warmup_iter = _run_em(problem, compiled.eta0, method)
     eta = np.asarray(out.eta)
     converged = bool(out.converged)
     n_iter = int(out.n_iter)
@@ -299,7 +291,59 @@ def fit(
         _eh_weights=eh_weights,
         _sum_weights=None if prep.weights is None else float(prep.weights.sum()),
         _n_clusters=prep.n_clusters if se == "sandwich" else None,
+        _n_warmup_iter=n_warmup_iter,
     )
+
+
+def _run_em(
+    problem: _core.CompiledProblem, eta0: np.ndarray, method: BAEM
+) -> tuple[_core.EMResult, int]:
+    """Run EM or SQUAREM, after an optional reduced-precision warmup (DESIGN.md §4.6, §28).
+
+    With ``method.warmup_dtype`` set, EM first runs on a copy of ``problem`` cast to that dtype
+    until the largest change is below ``method.warmup_tol``. Its estimates (and EH weights) are
+    cast back to ``float64``, clipped to the ``float64`` bounds, and start the ``float64`` run on
+    the original problem, which stops at ``method.tol`` as usual. A warmup with a non-finite
+    log-likelihood or estimates is discarded with a warning. Returns the ``float64`` run and the
+    number of warmup iterations (0 without warmup).
+    """
+    runner = _squarem if method.squarem else _em
+    options: dict[str, Any] = {
+        "max_iter": method.max_iter,
+        "n_newton": method.m_step_newton_steps,
+        "unconstrained": method.m_step_scale == "unconstrained",
+    }
+    start = jnp.asarray(eta0)
+    start_problem = problem
+    n_warmup_iter = 0
+    if method.warmup_dtype is not None:
+        dtype = jnp.dtype(method.warmup_dtype)
+        warm = runner(
+            _core.cast_floats(problem, dtype),
+            start.astype(dtype),
+            tol=method.warmup_tol,
+            **options,
+        )
+        n_warmup_iter = int(warm.n_iter)
+        eta_w = np.asarray(warm.eta, dtype=np.float64)
+        eh_w = np.asarray(warm.eh_weights, dtype=np.float64)
+        finite = np.isfinite(float(warm.loglik)) and np.isfinite(float(warm.log_posterior))
+        if finite and np.all(np.isfinite(eta_w)) and np.all(np.isfinite(eh_w)):
+            lower, upper = (np.asarray(b) for b in _core._eta_bounds(problem, start))
+            start = jnp.asarray(np.clip(eta_w, lower, upper))
+            if problem.latent.is_eh:
+                eh_w = eh_w / eh_w.sum(axis=1, keepdims=True)
+                start_problem = _core._with_eh_weights(problem, jnp.asarray(eh_w))
+        else:
+            warnings.warn(
+                f"The {method.warmup_dtype} warmup returned non-finite values after "
+                f"{n_warmup_iter} iterations; it was discarded and EM restarted from the "
+                "starting values in float64.",
+                FlexpyirtWarning,
+                stacklevel=3,
+            )
+    out = runner(start_problem, start, tol=method.tol, **options)
+    return out, n_warmup_iter
 
 
 def _sandwich_meat(problem: _core.CompiledProblem, eta: jax.Array, prep: Prepared) -> np.ndarray:

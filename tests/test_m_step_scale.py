@@ -267,6 +267,7 @@ def test_json_round_trip_and_old_schema(tmp_path: pytest.TempPathFactory) -> Non
     # A version-7 file has no m_step_scale key and reads as the natural scale.
     raw["schema_version"] = 7
     del raw["method"]["m_step_scale"]
+    del raw["method"]["warmup_dtype"]  # added in version 10
     old = tmp_path / "old.json"  # type: ignore[operator]
     old.write_text(json.dumps(raw))
     with warnings.catch_warnings():

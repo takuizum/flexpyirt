@@ -103,12 +103,20 @@ def load(name: str) -> Case:
     return Case(name=name, raw=raw, spec=spec, quadrature=quad)
 
 
-# (squarem, m_step_scale): the unconstrained M-step scale must reach the same solution (V45).
-RUNS = [(False, "natural"), (True, "natural"), (False, "unconstrained")]
+# (squarem, m_step_scale, warmup_dtype): the unconstrained M-step scale (V45) and the float32
+# warmup (V58) must reach the same solution.
+RUNS = [
+    (False, "natural", None),
+    (True, "natural", None),
+    (False, "unconstrained", None),
+    (False, "natural", "float32"),
+]
 
 
 @cache
-def _fit(name: str, se: str, squarem: bool = False, scale: str = "natural") -> FitResult:
+def _fit(
+    name: str, se: str, squarem: bool = False, scale: str = "natural", warmup: str | None = None
+) -> FitResult:
     case = load(name)
     with warnings.catch_warnings():
         warnings.simplefilter("error", HeywoodWarning)
@@ -120,6 +128,7 @@ def _fit(name: str, se: str, squarem: bool = False, scale: str = "natural") -> F
                 max_iter=20000,
                 squarem=squarem,
                 m_step_scale=scale,  # type: ignore[arg-type]
+                warmup_dtype=warmup,  # type: ignore[arg-type]
             ),
             quadrature=case.quadrature,
             se=se,  # type: ignore[arg-type]
@@ -142,20 +151,20 @@ def _fixed_at_mirt(name: str) -> FitResult:
     return fit(case.spec, case.data, table=table, quadrature=case.quadrature, se=None)
 
 
-@pytest.mark.parametrize(("squarem", "scale"), RUNS)
+@pytest.mark.parametrize(("squarem", "scale", "warmup"), RUNS)
 @pytest.mark.parametrize("name", CASES)
-def test_loglik(name: str, squarem: bool, scale: str) -> None:
-    case, res = load(name), _fit(name, "oakes", squarem, scale)
+def test_loglik(name: str, squarem: bool, scale: str, warmup: str | None) -> None:
+    case, res = load(name), _fit(name, "oakes", squarem, scale, warmup)
     assert res.converged
     ref = float(case.raw["loglik"])
     assert abs(res.loglik - ref) <= TOL_LOGLIK_REL * abs(ref)
     assert res.loglik >= _fixed_at_mirt(name).loglik - 1e-8
 
 
-@pytest.mark.parametrize(("squarem", "scale"), RUNS)
+@pytest.mark.parametrize(("squarem", "scale", "warmup"), RUNS)
 @pytest.mark.parametrize("name", CASES)
-def test_item_parameters(name: str, squarem: bool, scale: str) -> None:
-    case, res = load(name), _fit(name, "oakes", squarem, scale)
+def test_item_parameters(name: str, squarem: bool, scale: str, warmup: str | None) -> None:
+    case, res = load(name), _fit(name, "oakes", squarem, scale, warmup)
     ref = case.item_params
     ours = res.items.set_index("item").loc[ref.index]
     param_cols = [c for c in ref.columns if not c.endswith("_se")]
@@ -163,10 +172,10 @@ def test_item_parameters(name: str, squarem: bool, scale: str) -> None:
         np.testing.assert_allclose(ours[p].to_numpy(), ref[p].to_numpy(), rtol=0, atol=TOL_PARAM)
 
 
-@pytest.mark.parametrize(("squarem", "scale"), RUNS)
+@pytest.mark.parametrize(("squarem", "scale", "warmup"), RUNS)
 @pytest.mark.parametrize("name", CASES)
-def test_latent_correlations(name: str, squarem: bool, scale: str) -> None:
-    case, res = load(name), _fit(name, "oakes", squarem, scale)
+def test_latent_correlations(name: str, squarem: bool, scale: str, warmup: str | None) -> None:
+    case, res = load(name), _fit(name, "oakes", squarem, scale, warmup)
     ref = case.latent_params
     lat = res.latent.iloc[0]
     for p in latent_param_names(case.spec.n_factors):

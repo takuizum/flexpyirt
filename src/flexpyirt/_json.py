@@ -2,13 +2,14 @@
 
 Implements the versioned plain-JSON format specified in DESIGN.md §15.26–§15.28:
 
-- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 9`` (versions 1
+- Top-level metadata: ``"format": "flexpyirt.FitResult"``, ``"schema_version": 10`` (versions 1
   and 2, written before multidimensional models and across-item equalities were stored,
   version 3, written before the naming refactor of §15.46, version 4, written before bifactor
   models (§17.1), version 5, written before two-tier models (§17.2), and version 6, written
   before sampling weights (§17.4), and version 7, written before ``BAEM.m_step_scale`` and
   ``LogitNormalPrior`` (§15.47–§15.48), and version 8, written before the cluster-robust
-  sandwich (§17.6), are still read), and
+  sandwich (§17.6), and version 9, written before the ``float32`` warmup (§28), are still read),
+  and
   ``"flexpyirt_version"``.
 - Strict RFC 8259 JSON (``allow_nan=False`` on write; rejecting ``parse_constant`` on read).
   Finite IEEE-754 float64 values use standard ``repr``-exact JSON numbers; non-finite values in
@@ -77,7 +78,7 @@ __all__ = [
 ]
 
 FORMAT_TAG = "flexpyirt.FitResult"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 """Schema version written by :func:`dump_fit_result`.
 
 2 adds the confirmatory factor structure, 3 across-item equalities, 4 renames the item-model
@@ -90,9 +91,11 @@ older files read as ``"natural"``) and the prior ``LogitNormalPrior`` with keys 
 ``sd_logit`` and ``mode_scale`` (DESIGN.md §15.48; ``mode_scale`` is optional on read, absent
 meaning ``"natural"``), and 9 the optional top-level key ``n_clusters`` (the number of clusters of
 a cluster-robust sandwich; present only for ``fit(..., cluster=..., se="sandwich")``, DESIGN.md
-§17.6).
+§17.6), and 10 the method key ``warmup_dtype`` (``null`` or ``"float32"``; older files read as
+``null``) and the optional top-level key ``n_warmup_iter`` (present only for a fit with a
+warmup, DESIGN.md §28).
 """
-SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9})
+SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
 """Schema versions accepted by :func:`load_fit_result`; version 1 has no factor keys."""
 
 _LEGACY_PRIOR_TYPES = {"LogNormal": "LogNormalPrior", "Beta": "BetaPrior"}
@@ -785,6 +788,7 @@ def _serialize_baem(method: BAEM) -> dict[str, Any]:
         "m_step_newton_steps": int(method.m_step_newton_steps),
         "squarem": bool(method.squarem),
         "m_step_scale": method.m_step_scale,
+        "warmup_dtype": method.warmup_dtype,
     }
 
 
@@ -794,10 +798,15 @@ def _deserialize_baem(
     required = {"type", "tol", "max_iter", "m_step_newton_steps", "squarem"}
     if schema_version >= 8:
         required = required | {"m_step_scale"}
+    if schema_version >= 10:
+        required = required | {"warmup_dtype"}
     _check_keys(obj, required=required, field_name=field_name)
     scale = "natural"
     if schema_version >= 8:
         scale = _require_str(obj["m_step_scale"], field_name=f"{field_name}.m_step_scale")
+    warmup_dtype = None
+    if schema_version >= 10 and obj["warmup_dtype"] is not None:
+        warmup_dtype = _require_str(obj["warmup_dtype"], field_name=f"{field_name}.warmup_dtype")
     return BAEM(
         tol=_decode_float(obj["tol"], field_name=f"{field_name}.tol", finite=True),
         max_iter=_require_int(
@@ -810,6 +819,7 @@ def _deserialize_baem(
         ),
         squarem=_require_bool(obj["squarem"], field_name=f"{field_name}.squarem"),
         m_step_scale=scale,  # type: ignore[arg-type]  # validated by BAEM
+        warmup_dtype=warmup_dtype,  # type: ignore[arg-type]  # validated by BAEM
     )
 
 
@@ -1528,6 +1538,8 @@ def dump_fit_result(
         payload["sum_weights"] = float(result._sum_weights)
     if result._n_clusters is not None:
         payload["n_clusters"] = int(result._n_clusters)
+    if result._n_warmup_iter > 0:
+        payload["n_warmup_iter"] = int(result._n_warmup_iter)
     text = json.dumps(payload, indent=indent, allow_nan=False)
     if path is not None:
         Path(path).write_text(text, encoding="utf-8")
@@ -1604,6 +1616,8 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
         allowed_keys = allowed_keys | {"sum_weights"}
     if schema_version >= 9:
         allowed_keys = allowed_keys | {"n_clusters"}
+    if schema_version >= 10:
+        allowed_keys = allowed_keys | {"n_warmup_iter"}
     keys = set(obj.keys())
     missing_top = sorted(_TOP_LEVEL_KEYS - keys)
     if missing_top:
@@ -1655,6 +1669,13 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
             raise SpecificationError(
                 f"n_clusters is only valid with se_method 'sandwich', not {se_method!r}."
             )
+    n_warmup_iter = 0
+    if "n_warmup_iter" in obj:
+        n_warmup_iter = _require_int(
+            obj["n_warmup_iter"], field_name="n_warmup_iter", min_value=1, max_value=_INT32_MAX
+        )
+        if method.warmup_dtype is None:
+            raise SpecificationError("n_warmup_iter is only valid with a method warmup_dtype.")
     loglik = _decode_float(obj["loglik"], field_name="loglik")
     log_posterior = _decode_float(obj["log_posterior"], field_name="log_posterior")
     converged = _require_bool(obj["converged"], field_name="converged")
@@ -1711,4 +1732,5 @@ def load_fit_result(source: str | os.PathLike[str]) -> FitResult:
         _eh_weights=eh_weights,
         _sum_weights=sum_weights,
         _n_clusters=n_clusters,
+        _n_warmup_iter=n_warmup_iter,
     )

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -307,6 +307,21 @@ class CompiledProblem:
     coupled: tuple[CoupledBlock, ...] = ()
     reduction: BifactorBlock | None = None
     blocks: GroupBlocks | None = None
+
+
+def cast_floats(prob: CompiledProblem, dtype: Any) -> CompiledProblem:
+    """Return ``prob`` with every floating-point leaf cast to ``dtype`` (DESIGN.md §28).
+
+    Integer leaves (patterns, indices, groups) and static fields are unchanged. Used to build
+    the ``float32`` copy of a problem for the warmup stage of ``BAEM(warmup_dtype=...)``.
+    """
+
+    def cast(leaf: Any) -> Any:
+        arr = jnp.asarray(leaf)
+        return arr.astype(dtype) if jnp.issubdtype(arr.dtype, jnp.floating) else leaf
+
+    out: CompiledProblem = jax.tree_util.tree_map(cast, prob)
+    return out
 
 
 def _expand(eta: Array, fixed: Array, free_index: Array) -> Array:
